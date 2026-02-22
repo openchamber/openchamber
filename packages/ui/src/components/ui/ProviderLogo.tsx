@@ -30,7 +30,7 @@ export const ProviderLogo: React.FC<ProviderLogoProps> = ({
         <img
             src={src}
             alt={alt || `${providerId} logo`}
-            className={cn('dark:invert', className)}
+            className={cn('dark:invert object-contain', className)}
             onError={handleError}
         />
     );

@@ -252,7 +252,14 @@ export const ProvidersPage: React.FC = () => {
   );
 
   const unconnectedProviders = React.useMemo(
-    () => availableProviders.filter((provider) => !connectedProviderIds.has(provider.id)),
+    () =>
+      availableProviders
+        .filter((provider) => !connectedProviderIds.has(provider.id))
+        .sort((a, b) => {
+          const labelA = (a.name || a.id).toLowerCase();
+          const labelB = (b.name || b.id).toLowerCase();
+          return labelA.localeCompare(labelB);
+        }),
     [availableProviders, connectedProviderIds]
   );
 
@@ -261,13 +268,8 @@ export const ProvidersPage: React.FC = () => {
       return;
     }
 
-    if (!candidateProviderId && unconnectedProviders.length > 0) {
-      setCandidateProviderId(unconnectedProviders[0].id);
-      return;
-    }
-
     if (candidateProviderId && !unconnectedProviders.some((provider) => provider.id === candidateProviderId)) {
-      setCandidateProviderId(unconnectedProviders[0]?.id ?? '');
+      setCandidateProviderId('');
     }
   }, [selectedProviderId, candidateProviderId, unconnectedProviders]);
 
@@ -561,10 +563,13 @@ export const ProvidersPage: React.FC = () => {
                             "hover:bg-[var(--interactive-hover)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--primary-base)]"
                           )}
                         >
-                          <span className={candidateProviderId ? "text-foreground" : "text-muted-foreground"}>
-                            {candidateProviderId
-                              ? (unconnectedProviders.find(p => p.id === candidateProviderId)?.name || candidateProviderId)
-                              : "Select provider"}
+                          <span className="flex items-center gap-2 min-w-0">
+                            {candidateProviderId ? <ProviderLogo providerId={candidateProviderId} className="h-4 w-4 flex-shrink-0" /> : null}
+                            <span className={cn("truncate", candidateProviderId ? "text-foreground" : "text-muted-foreground")}>
+                              {candidateProviderId
+                                ? (unconnectedProviders.find(p => p.id === candidateProviderId)?.name || candidateProviderId)
+                                : "Select provider"}
+                            </span>
                           </span>
                           <RiArrowDownSLine className="h-4 w-4 text-muted-foreground" />
                         </button>
@@ -608,7 +613,10 @@ export const ProvidersPage: React.FC = () => {
                                 }}
                                 className="flex items-center justify-between"
                               >
-                                <span>{provider.name || provider.id}</span>
+                                <span className="flex items-center gap-2 min-w-0">
+                                  <ProviderLogo providerId={provider.id} className="h-4 w-4 flex-shrink-0" />
+                                  <span className="truncate">{provider.name || provider.id}</span>
+                                </span>
                                 {candidateProviderId === provider.id && (
                                   <RiCheckLine className="h-4 w-4 text-[var(--primary-base)]" />
                                 )}
