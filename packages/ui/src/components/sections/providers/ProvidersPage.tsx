@@ -543,7 +543,7 @@ export const ProvidersPage: React.FC = () => {
                 <div className="flex min-w-0 flex-col">
                   <span className="typography-ui-label text-foreground">Provider</span>
                 </div>
-                <div className="flex-1 max-w-xs flex justify-end">
+                <div className="flex-1 max-w-sm flex justify-end">
                   {availableLoading ? (
                     <p className="typography-meta text-muted-foreground">Loading…</p>
                   ) : availableError ? (
@@ -576,7 +576,7 @@ export const ProvidersPage: React.FC = () => {
                       </DropdownMenuTrigger>
                       <DropdownMenuContent
                         align="end"
-                        className="w-[200px] p-0"
+                        className="w-[280px] p-0"
                         onCloseAutoFocus={(e) => e.preventDefault()}
                       >
                         <div
