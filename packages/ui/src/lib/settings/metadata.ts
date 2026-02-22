@@ -7,6 +7,7 @@ export type SettingsPageSlug =
   | 'usage'
   | 'agents'
   | 'commands'
+  | 'mcp'
   | 'skills.installed'
   | 'skills.catalog'
   | 'git'
@@ -99,6 +100,13 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     keywords: ['command', 'commands', 'slash', 'macros', 'automation'],
   },
   {
+    slug: 'mcp',
+    title: 'MCP',
+    group: 'opencode',
+    kind: 'split',
+    keywords: ['mcp', 'model context protocol', 'servers', 'tools', 'remote', 'stdio'],
+  },
+  {
     slug: 'skills.installed',
     title: 'Skills',
     group: 'skills',
@@ -157,6 +165,7 @@ export const LEGACY_SIDEBAR_SECTION_TO_SETTINGS_SLUG: Record<SidebarSection, Set
   sessions: 'sessions',
   agents: 'agents',
   commands: 'commands',
+  mcp: 'mcp',
   skills: 'skills.installed',
   providers: 'providers',
   usage: 'usage',

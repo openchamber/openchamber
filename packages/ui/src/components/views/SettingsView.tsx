@@ -4,6 +4,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useAgentsStore } from '@/stores/useAgentsStore';
 import { useCommandsStore } from '@/stores/useCommandsStore';
+import { useMcpConfigStore } from '@/stores/useMcpConfigStore';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useSkillsCatalogStore } from '@/stores/useSkillsCatalogStore';
 import {
@@ -34,6 +35,8 @@ import { AgentsSidebar } from '@/components/sections/agents/AgentsSidebar';
 import { AgentsPage } from '@/components/sections/agents/AgentsPage';
 import { CommandsSidebar } from '@/components/sections/commands/CommandsSidebar';
 import { CommandsPage } from '@/components/sections/commands/CommandsPage';
+import { McpSidebar } from '@/components/sections/mcp/McpSidebar';
+import { McpPage } from '@/components/sections/mcp/McpPage';
 import { SkillsSidebar } from '@/components/sections/skills/SkillsSidebar';
 import { SkillsPage } from '@/components/sections/skills/SkillsPage';
 import { ProjectsSidebar } from '@/components/sections/projects/ProjectsSidebar';
@@ -46,6 +49,7 @@ import { GitPage } from '@/components/sections/git-identities/GitPage';
 import type { OpenChamberSection } from '@/components/sections/openchamber/types';
 import { OpenChamberPage } from '@/components/sections/openchamber/OpenChamberPage';
 import { AboutSettings } from '@/components/sections/openchamber/AboutSettings';
+import { McpIcon } from '@/components/icons/McpIcon';
 import { useDeviceInfo } from '@/lib/device';
 import { isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
 import { reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
@@ -83,6 +87,7 @@ const pageOrder: SettingsPageSlug[] = [
   'projects',
   'agents',
   'commands',
+  'mcp',
   'providers',
   'usage',
   'skills.installed',
@@ -124,6 +129,8 @@ function getSettingsNavIcon(slug: SettingsPageSlug): React.ComponentType<{ class
       return RiAiAgentLine;
     case 'commands':
       return RiSlashCommands2;
+    case 'mcp':
+      return McpIcon;
 
     case 'skills.installed':
       return RiBookOpenLine;
@@ -188,6 +195,18 @@ const SettingsHome: React.FC<{ onOpen: (slug: SettingsPageSlug) => void }> = ({ 
           >
             <div className="typography-ui-label text-foreground">Skills Catalog</div>
             <div className="typography-micro text-muted-foreground/70">Install skills from catalogs</div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onOpen('mcp')}
+            className={cn(
+              'rounded-lg border border-border bg-[var(--surface-elevated)] p-4 text-left',
+              'hover:bg-[var(--interactive-hover)] transition-colors'
+            )}
+          >
+            <div className="typography-ui-label text-foreground">MCP</div>
+            <div className="typography-micro text-muted-foreground/70">Configure MCP servers + connections</div>
           </button>
 
           <button
@@ -302,6 +321,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       setTimeout(() => void useCommandsStore.getState().loadCommands(), 0);
       return;
     }
+    if (settingsSlug === 'mcp') {
+      setTimeout(() => void useMcpConfigStore.getState().loadMcpConfigs(), 0);
+      return;
+    }
     if (settingsSlug === 'skills.installed' || settingsSlug === 'skills.catalog') {
       setTimeout(() => {
         void useSkillsStore.getState().loadSkills();
@@ -358,6 +381,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return <AgentsSidebar onItemSelect={opts.onItemSelect} />;
       case 'commands':
         return <CommandsSidebar onItemSelect={opts.onItemSelect} />;
+      case 'mcp':
+        return <McpSidebar onItemSelect={opts.onItemSelect} />;
       case 'skills.installed':
         return <SkillsSidebar onItemSelect={opts.onItemSelect} />;
       case 'providers':
@@ -384,6 +409,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return <AgentsPage />;
       case 'commands':
         return <CommandsPage />;
+      case 'mcp':
+        return <McpPage />;
       case 'skills.installed':
         return <SkillsPage view="installed" />;
       case 'skills.catalog':

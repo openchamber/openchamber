@@ -24,6 +24,7 @@ import {
   RiUser3Line,
 } from '@remixicon/react';
 import { cn } from '@/lib/utils';
+import { useDeviceInfo } from '@/lib/device';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { ButtonSmall } from '@/components/ui/button-small';
 import {
@@ -40,6 +41,7 @@ import {
   SelectItem,
   SelectTrigger,
 } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 
 // ─────────────────────────────────────────────────────────────
 // CommandTextarea  — one arg per line, paste-friendly
@@ -345,16 +347,14 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 const StatusBadge: React.FC<{ status: string | undefined; enabled: boolean }> = ({ status, enabled }) => {
-  if (!enabled) {
-    return <span className="typography-micro text-muted-foreground/50">Disabled</span>;
-  }
+  if (!enabled) return null;
   if (!status) return null;
 
   const colorMap: Record<string, string> = {
-    connected: 'text-green-600 dark:text-green-400',
-    failed: 'text-destructive',
-    needs_auth: 'text-yellow-600 dark:text-yellow-400',
-    needs_client_registration: 'text-yellow-600 dark:text-yellow-400',
+    connected: 'text-[var(--status-success)]',
+    failed: 'text-[var(--status-error)]',
+    needs_auth: 'text-[var(--status-warning)]',
+    needs_client_registration: 'text-[var(--status-warning)]',
   };
 
   return (
@@ -368,6 +368,7 @@ const StatusBadge: React.FC<{ status: string | undefined; enabled: boolean }> = 
 // McpPage
 // ─────────────────────────────────────────────────────────────
 export const McpPage: React.FC = () => {
+  const { isMobile } = useDeviceInfo();
   const {
     selectedMcpName,
     mcpServers,
@@ -523,128 +524,111 @@ export const McpPage: React.FC = () => {
 
   return (
     <ScrollableOverlay keyboardAvoid outerClassName="h-full" className="w-full">
-      <div className="mx-auto max-w-2xl space-y-5 p-6">
+      <div className="openchamber-page-body mx-auto w-full max-w-3xl space-y-6 p-3 sm:p-6">
 
-        {/* ── Header card: name + status + enabled + connect ── */}
-        <div className="rounded-xl border border-[var(--interactive-border)] bg-[var(--surface-elevated)] px-4 py-3 space-y-3">
-
-          {/* Row 1: name + connect button */}
-          <div className="flex items-center justify-between gap-3 min-w-0">
-            <div className="min-w-0">
+        {/* ── Header card: identity + controls ── */}
+        <div className="rounded-lg bg-[var(--surface-elevated)]/70 overflow-hidden flex flex-col">
+          <div className={cn('px-4 py-3 border-b border-[var(--surface-subtle)]', isMobile ? 'flex flex-col gap-3' : 'flex items-center justify-between gap-4')}>
+            <div className="min-w-0 flex-1">
               {isNewServer ? (
                 <Input
                   value={draftName}
                   onChange={(e) => setDraftName(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, '-'))}
                   placeholder="my-mcp-server"
-                  className="font-mono text-base h-8 w-64"
+                  className="font-mono text-base h-8 w-full sm:w-64"
                   autoFocus
                 />
               ) : (
-                <h1 className="typography-ui-header font-semibold truncate">{selectedMcpName}</h1>
+                <div className="flex items-center gap-2 min-w-0">
+                  <h1 className="typography-ui-header font-semibold truncate">{selectedMcpName}</h1>
+                  <StatusBadge status={runtimeStatus?.status} enabled={enabled} />
+                </div>
               )}
               {isNewServer && (
-                <p className="typography-micro text-muted-foreground mt-0.5">
-                  Lowercase, numbers, hyphens and underscores only
-                </p>
+                <p className="typography-micro text-muted-foreground mt-0.5">Lowercase, numbers, hyphens and underscores only</p>
               )}
             </div>
 
-            {isNewServer && (
-              <Select value={draftScope} onValueChange={(value) => setDraftScope(value as McpScope)}>
-                <SelectTrigger className="!h-8 w-auto gap-1.5">
-                  {draftScope === 'user' ? (
-                    <RiUser3Line className="h-4 w-4" />
-                  ) : (
-                    <RiFolderLine className="h-4 w-4" />
-                  )}
-                  <span className="capitalize">{draftScope}</span>
-                </SelectTrigger>
-                <SelectContent align="end">
-                  <SelectItem value="user" className="pr-2 [&>span:first-child]:hidden">
-                    <div className="flex flex-col gap-0.5">
-                      <div className="flex items-center gap-2">
-                        <RiUser3Line className="h-4 w-4" />
-                        <span>User</span>
+            <div className={cn('flex items-center gap-2', isMobile ? 'w-full' : 'shrink-0')}>
+              {isNewServer ? (
+                <Select value={draftScope} onValueChange={(value) => setDraftScope(value as McpScope)}>
+                  <SelectTrigger className={cn('!h-8 gap-1.5', isMobile ? 'w-full' : 'w-auto')}>
+                    {draftScope === 'user' ? <RiUser3Line className="h-4 w-4" /> : <RiFolderLine className="h-4 w-4" />}
+                    <span className="capitalize">{draftScope}</span>
+                  </SelectTrigger>
+                  <SelectContent align="end">
+                    <SelectItem value="user" className="pr-2 [&>span:first-child]:hidden">
+                      <div className="flex flex-col gap-0.5">
+                        <div className="flex items-center gap-2">
+                          <RiUser3Line className="h-4 w-4" />
+                          <span>User</span>
+                        </div>
+                        <span className="typography-micro text-muted-foreground ml-6">Available in all projects</span>
                       </div>
-                      <span className="typography-micro text-muted-foreground ml-6">Available in all projects</span>
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="project" className="pr-2 [&>span:first-child]:hidden">
-                    <div className="flex flex-col gap-0.5">
-                      <div className="flex items-center gap-2">
-                        <RiFolderLine className="h-4 w-4" />
-                        <span>Project</span>
+                    </SelectItem>
+                    <SelectItem value="project" className="pr-2 [&>span:first-child]:hidden">
+                      <div className="flex flex-col gap-0.5">
+                        <div className="flex items-center gap-2">
+                          <RiFolderLine className="h-4 w-4" />
+                          <span>Project</span>
+                        </div>
+                        <span className="typography-micro text-muted-foreground ml-6">Only in current project</span>
                       </div>
-                      <span className="typography-micro text-muted-foreground ml-6">Only in current project</span>
-                    </div>
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            )}
-
-            {!isNewServer && (
-              <Button
-                size="sm"
-                variant={isConnected ? 'outline' : 'default'}
-                onClick={handleToggleConnect}
-                disabled={isConnecting || !enabled}
-                className="h-7 shrink-0"
-              >
-                {isConnecting ? 'Working…' : isConnected ? 'Disconnect' : 'Connect'}
-              </Button>
-            )}
-          </div>
-
-          {/* Row 2: status + type badge + enabled toggle */}
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <StatusBadge status={runtimeStatus?.status} enabled={enabled} />
-              <span className="typography-micro text-muted-foreground/40">·</span>
-              <span className="typography-micro text-muted-foreground bg-muted px-1.5 py-0.5 rounded border border-border/50">
-                {mcpType === 'local' ? 'stdio' : 'remote'}
-              </span>
-            </div>
-
-            {/* Enabled toggle */}
-            <div className="flex items-center gap-2">
-              <span className={cn('typography-micro', enabled ? 'text-foreground' : 'text-muted-foreground/60')}>
-                {enabled ? 'Enabled' : 'Disabled'}
-              </span>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={enabled}
-                onClick={() => setEnabled(!enabled)}
-                className={cn(
-                  'relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-                  enabled ? 'bg-primary' : 'bg-muted',
-                )}
-              >
-                <span className={cn(
-                  'pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform',
-                  enabled ? 'translate-x-4' : 'translate-x-0',
-                )} />
-              </button>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Button
+                  size="sm"
+                  variant={isConnected ? 'outline' : 'default'}
+                  onClick={handleToggleConnect}
+                  disabled={isConnecting || !enabled}
+                  className={cn('h-8', isMobile ? 'w-full' : 'shrink-0')}
+                >
+                  {isConnecting ? 'Working…' : isConnected ? 'Disconnect' : 'Connect'}
+                </Button>
+              )}
             </div>
           </div>
 
-          {/* Row 3: type selector — always visible so user can switch type */}
-          <div className="flex gap-1 pt-1 border-t border-[var(--interactive-border)]">
+          <label className="group flex cursor-pointer items-center justify-between gap-2 px-4 py-3 transition-colors hover:bg-[var(--interactive-hover)]/30 border-b border-[var(--surface-subtle)]">
+            <div className="flex min-w-0 flex-col">
+              <span className="typography-ui-label text-foreground">Server Enabled</span>
+              <span className="typography-meta text-muted-foreground">Allow this server to be used in sessions</span>
+            </div>
+            <Switch checked={enabled} onCheckedChange={setEnabled} aria-label="Toggle MCP server enabled" />
+          </label>
+
+          <div className={cn('px-4 py-3', isMobile ? 'flex flex-col gap-3' : 'flex items-center justify-between gap-4')}>
+            <div className={cn('flex min-w-0 flex-col', isMobile ? 'w-full' : 'shrink-0')}>
+              <span className="typography-ui-label text-foreground">Transport</span>
+              <span className="typography-meta text-muted-foreground">Choose local stdio or remote SSE</span>
+            </div>
+            <div className={cn('flex gap-1 flex-wrap', isMobile ? 'w-full' : 'justify-end')}>
               <ButtonSmall
-                variant={mcpType === 'local' ? 'default' : 'outline'}
+                variant="outline"
                 onClick={() => setMcpType('local')}
-                className={cn(mcpType !== 'local' && 'text-foreground')}
+                className={cn(
+                  mcpType === 'local'
+                    ? 'border-[var(--primary-base)] text-[var(--primary-base)] bg-[var(--primary-base)]/10 hover:text-[var(--primary-base)]'
+                    : 'text-foreground'
+                )}
               >
                 Local · stdio
               </ButtonSmall>
               <ButtonSmall
-                variant={mcpType === 'remote' ? 'default' : 'outline'}
+                variant="outline"
                 onClick={() => setMcpType('remote')}
-                className={cn(mcpType !== 'remote' && 'text-foreground')}
+                className={cn(
+                  mcpType === 'remote'
+                    ? 'border-[var(--primary-base)] text-[var(--primary-base)] bg-[var(--primary-base)]/10 hover:text-[var(--primary-base)]'
+                    : 'text-foreground'
+                )}
               >
                 Remote · SSE
               </ButtonSmall>
             </div>
+          </div>
         </div>
 
         {/* ── Connection ── */}
