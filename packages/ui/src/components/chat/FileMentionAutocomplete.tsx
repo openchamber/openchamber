@@ -32,6 +32,7 @@ interface FileMentionAutocompleteProps {
   showTabs?: boolean;
   activeTab?: AutocompleteTab;
   onTabSelect?: (tab: AutocompleteTab) => void;
+  style?: React.CSSProperties;
 }
 
 export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileMentionAutocompleteProps>(({
@@ -42,6 +43,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
   showTabs,
   activeTab = 'files',
   onTabSelect,
+  style,
 }, ref) => {
   const { currentDirectory } = useDirectoryStore();
   const { addServerFile } = useSessionStore();
@@ -367,6 +369,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
       <div
         ref={containerRef}
         className="absolute z-[100] min-w-0 w-full max-w-[520px] max-h-64 bg-background border-2 border-border/60 rounded-xl shadow-md bottom-full mb-2 left-0 flex flex-col"
+        style={style}
       >
         {showTabs ? (
           <div className="px-2 pt-2 pb-1 border-b border-border/60">

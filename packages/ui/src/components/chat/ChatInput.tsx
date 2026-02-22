@@ -1,11 +1,9 @@
 import React from 'react';
-import { createPortal } from 'react-dom';
 import { Textarea } from '@/components/ui/textarea';
 import {
     RiAddCircleLine,
     RiAiAgentLine,
     RiAttachment2,
-    RiCloseLine,
     RiCommandLine,
     RiFileUploadLine,
     RiFullscreenLine,
@@ -58,6 +56,13 @@ interface ChatInputProps {
     onOpenSettings?: () => void;
     scrollToBottom?: (options?: { instant?: boolean; force?: boolean }) => void;
 }
+
+type AutocompleteOverlayPosition = {
+    top: number;
+    left: number;
+    place: 'above' | 'below';
+    maxHeight: number;
+};
 
 // Per-session draft key — preserves in-progress messages across project switches
 const getDraftKey = (sessionId: string | null): string =>
@@ -116,7 +121,6 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
     const [historyIndex, setHistoryIndex] = React.useState(-1); // -1 = not browsing, 0+ = index from most recent
     const [draftMessage, setDraftMessage] = React.useState(''); // Preserves input when entering history mode
     const textareaRef = React.useRef<HTMLTextAreaElement>(null);
-    const expandedTextareaRef = React.useRef<HTMLTextAreaElement>(null);
     const dropZoneRef = React.useRef<HTMLDivElement>(null);
     const canAcceptDropRef = React.useRef(false);
     const mentionRef = React.useRef<FileMentionHandle>(null);
@@ -149,6 +153,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
     const { working } = useAssistantStatus();
     const { currentTheme } = useThemeSystem();
     const [showAbortStatus, setShowAbortStatus] = React.useState(false);
+    const isDesktopExpanded = isExpandedInput && !isMobile;
+    const [autocompleteOverlayPosition, setAutocompleteOverlayPosition] = React.useState<AutocompleteOverlayPosition | null>(null);
     const abortTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const prevWasAbortedRef = React.useRef(false);
 
@@ -258,7 +264,6 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                 setMessage('');
             }
         }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [currentSessionId, persistChatDraft]);
 
     // Focus textarea when new session draft is opened
@@ -764,6 +769,12 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
             }
         }
 
+        if (isDesktopExpanded && e.key === 'Escape') {
+            e.preventDefault();
+            setExpandedInput(false);
+            return;
+        }
+
         if (e.key === 'Tab' && !showCommandAutocomplete && !showFileMention) {
             e.preventDefault();
             handleCycleAgent();
@@ -848,36 +859,126 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
         }
     };
 
-    // Auto-focus the expanded textarea when focus mode opens
-    React.useEffect(() => {
-        if (isExpandedInput) {
-            requestAnimationFrame(() => {
-                const ta = expandedTextareaRef.current;
-                if (ta) {
-                    ta.focus();
-                    // Place cursor at end
-                    const len = ta.value.length;
-                    ta.setSelectionRange(len, len);
-                }
-            });
-        } else {
-            // Return focus to normal textarea when closing
-            requestAnimationFrame(() => {
-                textareaRef.current?.focus();
-            });
-        }
-    }, [isExpandedInput]);
+    const measureCaretInTextarea = React.useCallback((textarea: HTMLTextAreaElement, cursorPosition: number) => {
+        const doc = textarea.ownerDocument;
+        const win = doc.defaultView;
+        if (!win) return null;
 
-    // Keydown handler for the expanded overlay textarea
-    const handleExpandedKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-        if (e.key === 'Escape') {
-            e.preventDefault();
-            setExpandedInput(false);
+        const style = win.getComputedStyle(textarea);
+        const mirror = doc.createElement('div');
+        const mirrorStyle = mirror.style;
+
+        mirrorStyle.position = 'absolute';
+        mirrorStyle.visibility = 'hidden';
+        mirrorStyle.pointerEvents = 'none';
+        mirrorStyle.whiteSpace = 'pre-wrap';
+        mirrorStyle.wordWrap = 'break-word';
+        mirrorStyle.overflow = 'hidden';
+        mirrorStyle.left = '-9999px';
+        mirrorStyle.top = '0';
+
+        mirrorStyle.width = `${textarea.clientWidth}px`;
+        mirrorStyle.font = style.font;
+        mirrorStyle.fontSize = style.fontSize;
+        mirrorStyle.fontFamily = style.fontFamily;
+        mirrorStyle.fontWeight = style.fontWeight;
+        mirrorStyle.fontStyle = style.fontStyle;
+        mirrorStyle.fontVariant = style.fontVariant;
+        mirrorStyle.letterSpacing = style.letterSpacing;
+        mirrorStyle.textTransform = style.textTransform;
+        mirrorStyle.textIndent = style.textIndent;
+        mirrorStyle.padding = style.padding;
+        mirrorStyle.border = style.border;
+        mirrorStyle.boxSizing = style.boxSizing;
+        mirrorStyle.lineHeight = style.lineHeight;
+        mirrorStyle.tabSize = style.tabSize;
+
+        mirror.textContent = textarea.value.slice(0, cursorPosition);
+        const marker = doc.createElement('span');
+        marker.textContent = textarea.value.slice(cursorPosition, cursorPosition + 1) || ' ';
+        mirror.appendChild(marker);
+
+        doc.body.appendChild(mirror);
+        const top = marker.offsetTop;
+        const left = marker.offsetLeft;
+        doc.body.removeChild(mirror);
+
+        return { top, left };
+    }, []);
+
+    const updateAutocompleteOverlayPosition = React.useCallback(() => {
+        if (!isDesktopExpanded) {
+            setAutocompleteOverlayPosition(null);
             return;
         }
-        // Reuse normal keydown for everything else (Enter to submit, arrows, etc.)
-        handleKeyDown(e);
-    };
+
+        if (!showCommandAutocomplete && !showSkillAutocomplete && !showFileMention) {
+            setAutocompleteOverlayPosition(null);
+            return;
+        }
+
+        const textarea = textareaRef.current;
+        const container = dropZoneRef.current;
+        if (!textarea || !container) return;
+
+        const cursor = textarea.selectionStart ?? message.length;
+        const caret = measureCaretInTextarea(textarea, cursor);
+        if (!caret) return;
+
+        const textareaRect = textarea.getBoundingClientRect();
+        const containerRect = container.getBoundingClientRect();
+
+        const caretY = textareaRect.top - containerRect.top + (caret.top - textarea.scrollTop);
+        const caretX = textareaRect.left - containerRect.left + (caret.left - textarea.scrollLeft);
+
+        const popupMargin = 8;
+        const estimatedPopupHeight = 260;
+        const spaceAbove = caretY - popupMargin;
+        const spaceBelow = containerRect.height - caretY - popupMargin;
+        const place: 'above' | 'below' = spaceBelow >= estimatedPopupHeight || spaceBelow >= spaceAbove ? 'below' : 'above';
+
+        const desiredWidth = showFileMention ? 520 : showCommandAutocomplete ? 450 : 360;
+        const clampedLeft = Math.max(
+            popupMargin,
+            Math.min(caretX - 24, containerRect.width - desiredWidth - popupMargin)
+        );
+
+        const maxHeight = Math.max(120, Math.min(estimatedPopupHeight, place === 'below' ? spaceBelow : spaceAbove));
+
+        setAutocompleteOverlayPosition({
+            top: place === 'below' ? caretY + 22 : caretY - 6,
+            left: clampedLeft,
+            place,
+            maxHeight,
+        });
+    }, [
+        isDesktopExpanded,
+        measureCaretInTextarea,
+        message.length,
+        showCommandAutocomplete,
+        showFileMention,
+        showSkillAutocomplete,
+    ]);
+
+    React.useLayoutEffect(() => {
+        updateAutocompleteOverlayPosition();
+    }, [
+        updateAutocompleteOverlayPosition,
+        message,
+        showCommandAutocomplete,
+        showSkillAutocomplete,
+        showFileMention,
+        isDesktopExpanded,
+    ]);
+
+    React.useEffect(() => {
+        if (!isDesktopExpanded) return;
+        const onResize = () => updateAutocompleteOverlayPosition();
+        window.addEventListener('resize', onResize);
+        return () => {
+            window.removeEventListener('resize', onResize);
+        };
+    }, [isDesktopExpanded, updateAutocompleteOverlayPosition]);
 
     const startAbortIndicator = React.useCallback(() => {
         if (abortTimeoutRef.current) {
@@ -920,6 +1021,13 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
             return;
         }
 
+        if (isDesktopExpanded) {
+            textarea.style.height = '100%';
+            textarea.style.maxHeight = 'none';
+            setTextareaSize(null);
+            return;
+        }
+
         textarea.style.height = 'auto';
 
         const view = textarea.ownerDocument?.defaultView;
@@ -946,7 +1054,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
             }
             return { height: nextHeight, maxHeight };
         });
-    }, []);
+    }, [isDesktopExpanded]);
 
     React.useLayoutEffect(() => {
         adjustTextareaHeight();
@@ -1928,6 +2036,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
             onSubmit={(e) => { e.preventDefault(); handlePrimaryAction(); }}
             className={cn(
                 "relative pt-0 pb-4",
+                isDesktopExpanded && 'flex h-full min-h-0 flex-col pt-4',
                 isMobile && isKeyboardOpen ? "ios-keyboard-safe-area" : "bottom-safe-area"
             )}
             data-keyboard-avoid="true"
@@ -1946,7 +2055,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                     showAbortStatus={showAbortStatus}
                 />
             </div>
-            <div className="chat-column relative overflow-visible">
+            <div className={cn('chat-column relative overflow-visible', isDesktopExpanded && 'flex flex-1 min-h-0 flex-col')}>
                 <AttachedFilesList />
                 <QueuedMessageChips
                     onEditMessage={(content) => {
@@ -1975,6 +2084,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                 <div
                     className={cn(
                         "flex flex-col relative overflow-visible",
+                        isDesktopExpanded && 'flex-1 min-h-0',
                         "border border-border/80",
                         "focus-within:ring-1",
                         inputMode === 'shell'
@@ -2020,6 +2130,16 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                             activeTab={autocompleteTab}
                             onTabSelect={handleAutocompleteTabSelect}
                             onClose={() => setShowCommandAutocomplete(false)}
+                            style={isDesktopExpanded && autocompleteOverlayPosition
+                                ? {
+                                    left: `${autocompleteOverlayPosition.left}px`,
+                                    top: `${autocompleteOverlayPosition.top}px`,
+                                    bottom: 'auto',
+                                    width: `min(450px, calc(100% - ${autocompleteOverlayPosition.left + 8}px))`,
+                                    maxHeight: `${autocompleteOverlayPosition.maxHeight}px`,
+                                    transform: autocompleteOverlayPosition.place === 'above' ? 'translateY(-100%)' : undefined,
+                                }
+                                : undefined}
                         />
                     )}
                     { }
@@ -2029,6 +2149,16 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                             searchQuery={skillQuery}
                             onSkillSelect={handleSkillSelect}
                             onClose={() => setShowSkillAutocomplete(false)}
+                            style={isDesktopExpanded && autocompleteOverlayPosition
+                                ? {
+                                    left: `${autocompleteOverlayPosition.left}px`,
+                                    top: `${autocompleteOverlayPosition.top}px`,
+                                    bottom: 'auto',
+                                    width: `min(360px, calc(100% - ${autocompleteOverlayPosition.left + 8}px))`,
+                                    maxHeight: `${autocompleteOverlayPosition.maxHeight}px`,
+                                    transform: autocompleteOverlayPosition.place === 'above' ? 'translateY(-100%)' : undefined,
+                                }
+                                : undefined}
                         />
                     )}
 
@@ -2043,6 +2173,16 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                             activeTab={autocompleteTab}
                             onTabSelect={handleAutocompleteTabSelect}
                             onClose={() => setShowFileMention(false)}
+                            style={isDesktopExpanded && autocompleteOverlayPosition
+                                ? {
+                                    left: `${autocompleteOverlayPosition.left}px`,
+                                    top: `${autocompleteOverlayPosition.top}px`,
+                                    bottom: 'auto',
+                                    width: `min(520px, calc(100% - ${autocompleteOverlayPosition.left + 8}px))`,
+                                    maxHeight: `${autocompleteOverlayPosition.maxHeight}px`,
+                                    transform: autocompleteOverlayPosition.place === 'above' ? 'translateY(-100%)' : undefined,
+                                }
+                                : undefined}
                         />
                     )}
                     <Textarea
@@ -2056,6 +2196,10 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                         onDragOver={handleDragOver}
                         onDrop={handleDrop}
                         onPointerDownCapture={handleTextareaPointerDownCapture}
+                        onKeyUp={updateAutocompleteOverlayPosition}
+                        onClick={updateAutocompleteOverlayPosition}
+                        onScroll={updateAutocompleteOverlayPosition}
+                        onSelect={updateAutocompleteOverlayPosition}
                         placeholder={currentSessionId || newSessionDraftOpen
                             ? inputMode === 'shell'
                                 ? "Enter shell command..."
@@ -2065,16 +2209,20 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                         autoCorrect={isMobile ? "on" : "off"}
                         autoCapitalize={isMobile ? "sentences" : "off"}
                         spellCheck={isMobile}
-                        outerClassName="focus-within:ring-0"
+                        outerClassName={cn('focus-within:ring-0', isDesktopExpanded && 'flex-1 min-h-0')}
                         className={cn(
                             'min-h-[52px] resize-none border-0 px-3 rounded-b-none appearance-none hover:border-transparent bg-transparent',
+                            isDesktopExpanded
+                                ? 'h-full min-h-0 py-4'
+                                : isMobile
+                                    ? 'py-2.5'
+                                    : 'pt-4 pb-2',
                             inputMode === 'shell' && 'font-mono',
-                            isMobile ? "py-2.5" : "pt-4 pb-2"
                         )}
                         style={{
-                            flex: 'none',
-                            height: textareaSize ? `${textareaSize.height}px` : undefined,
-                            maxHeight: textareaSize ? `${textareaSize.maxHeight}px` : undefined,
+                            flex: isDesktopExpanded ? '1 1 auto' : 'none',
+                            height: !isDesktopExpanded && textareaSize ? `${textareaSize.height}px` : undefined,
+                            maxHeight: !isDesktopExpanded && textareaSize ? `${textareaSize.maxHeight}px` : undefined,
                             borderTopLeftRadius: cornerRadius,
                             borderTopRightRadius: cornerRadius,
                         }}
@@ -2138,6 +2286,9 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                                                         ? 'text-primary'
                                                         : 'text-muted-foreground hover:bg-[var(--interactive-hover)]/40 hover:text-foreground'
                                                 )}
+                                                onMouseDown={(event) => {
+                                                    event.preventDefault();
+                                                }}
                                                 onClick={() => setExpandedInput(!isExpandedInput)}
                                                 aria-label="Toggle focus mode"
                                                 aria-pressed={isExpandedInput}
@@ -2169,124 +2320,6 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                 </div>
             </div>
         </form>
-
-        {/* Expanded input focus mode overlay */}
-        {isExpandedInput && createPortal(
-            <div
-                className="fixed inset-0 z-[9999] flex items-end sm:items-center justify-center p-4 sm:p-6"
-                style={{ backgroundColor: 'rgba(0,0,0,0.55)' }}
-                onClick={(e) => { if (e.target === e.currentTarget) setExpandedInput(false); }}
-                aria-modal="true"
-                role="dialog"
-                aria-label="Focus mode input"
-            >
-                <div
-                    className="w-full max-w-3xl flex flex-col"
-                    style={{
-                        backgroundColor: currentTheme?.colors?.surface?.elevated,
-                        borderRadius: cornerRadius,
-                        border: `1px solid ${currentTheme?.colors?.interactive?.border}`,
-                        maxHeight: '75vh',
-                        minHeight: '300px',
-                    }}
-                >
-                    {/* Header */}
-                    <div
-                        className="flex items-center justify-between px-4 py-2.5 flex-shrink-0"
-                        style={{ borderBottom: `1px solid ${currentTheme?.colors?.interactive?.border}` }}
-                    >
-                        <div className="flex items-center gap-2">
-                            <RiFullscreenLine
-                                className="h-4 w-4"
-                                style={{ color: currentTheme?.colors?.primary?.base }}
-                            />
-                            <span
-                                className="text-xs font-medium"
-                                style={{ color: currentTheme?.colors?.surface?.mutedForeground }}
-                            >
-                                Focus Mode
-                            </span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <span
-                                className="text-xs px-1.5 py-0.5 rounded font-mono hidden sm:inline-block"
-                                style={{
-                                    color: currentTheme?.colors?.surface?.mutedForeground,
-                                    backgroundColor: currentTheme?.colors?.surface?.muted,
-                                    border: `1px solid ${currentTheme?.colors?.interactive?.border}`,
-                                }}
-                            >
-                                Esc
-                            </span>
-                            <button
-                                type="button"
-                                className="flex items-center justify-center h-6 w-6 rounded-md transition-none outline-none focus:outline-none"
-                                style={{ color: currentTheme?.colors?.surface?.mutedForeground }}
-                                onClick={() => setExpandedInput(false)}
-                                aria-label="Close focus mode"
-                            >
-                                <RiCloseLine className="h-4 w-4" />
-                            </button>
-                        </div>
-                    </div>
-
-                    {/* Textarea */}
-                    <Textarea
-                        ref={expandedTextareaRef}
-                        data-chat-input="true"
-                        value={message}
-                        onChange={handleTextChange}
-                        onKeyDown={handleExpandedKeyDown}
-                        onPaste={handlePaste}
-                        placeholder={currentSessionId || newSessionDraftOpen
-                            ? inputMode === 'shell'
-                                ? "Enter shell command..."
-                                : "@ for files/agents; / for commands; ! for shell"
-                            : "Select or create a session to start chatting"}
-                        disabled={!currentSessionId && !newSessionDraftOpen}
-                        autoCorrect="off"
-                        autoCapitalize="off"
-                        spellCheck={false}
-                        outerClassName="focus-within:ring-0 flex-1 min-h-0"
-                        className={cn(
-                            'h-full min-h-[200px] resize-none border-0 px-4 py-4 bg-transparent appearance-none rounded-none',
-                            inputMode === 'shell' && 'font-mono',
-                        )}
-                        style={{ flex: '1 1 0%' }}
-                        rows={1}
-                    />
-
-                    {/* Footer */}
-                    <div
-                        className="flex items-center justify-between px-3 py-2 bg-transparent flex-shrink-0"
-                        style={{ borderTop: `1px solid ${currentTheme?.colors?.interactive?.border}` }}
-                    >
-                        <div className="flex items-center gap-x-1.5 text-xs" style={{ color: currentTheme?.colors?.surface?.mutedForeground }}>
-                            {inputMode === 'shell' && (
-                                <span className="font-mono text-xs px-1.5 py-0.5 rounded" style={{ backgroundColor: currentTheme?.colors?.surface?.muted }}>
-                                    shell
-                                </span>
-                            )}
-                        </div>
-                        <button
-                            type="button"
-                            disabled={!canSend || (!currentSessionId && !newSessionDraftOpen)}
-                            onClick={() => void handleSubmitRef.current()}
-                            className={cn(
-                                'flex items-center justify-center h-7 w-7 rounded-md transition-none outline-none focus:outline-none flex-shrink-0',
-                                canSend && (currentSessionId || newSessionDraftOpen)
-                                    ? 'text-primary hover:text-primary'
-                                    : 'opacity-30 text-muted-foreground'
-                            )}
-                            aria-label="Send message"
-                        >
-                            <RiSendPlane2Line className="h-4 w-4" />
-                        </button>
-                    </div>
-                </div>
-            </div>,
-            document.body
-        )}
         </>
     );
 };

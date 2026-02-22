@@ -20,6 +20,7 @@ export const useKeyboardShortcuts = () => {
     setRightSidebarTab,
     toggleBottomTerminal,
     setBottomTerminalExpanded,
+    isMobile,
     setSessionSwitcherOpen,
     setActiveMainTab,
     setSettingsDialogOpen,
@@ -288,6 +289,9 @@ export const useKeyboardShortcuts = () => {
       }
 
       if (eventMatchesShortcut(e, combo('expand_input'))) {
+        if (isMobile) {
+          return;
+        }
         e.preventDefault();
         toggleExpandedInput();
         return;
@@ -383,6 +387,7 @@ export const useKeyboardShortcuts = () => {
     setRightSidebarTab,
     toggleBottomTerminal,
     setBottomTerminalExpanded,
+    isMobile,
     setSessionSwitcherOpen,
     setActiveMainTab,
     setSettingsDialogOpen,
