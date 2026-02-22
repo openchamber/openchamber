@@ -1,6 +1,7 @@
 import React from 'react';
 import type { ComponentType } from 'react';
 import {
+    RiAddLine,
     RiAiAgentLine,
     RiArrowDownSLine,
     RiArrowGoBackLine,
@@ -187,6 +188,8 @@ const CURRENCY_FORMATTER = new Intl.NumberFormat('en-US', {
     minimumFractionDigits: 2,
 });
 
+const ADD_PROVIDER_ID = '__add_provider__';
+
 const formatTokens = (value?: number | null) => {
     if (typeof value !== 'number' || Number.isNaN(value)) {
         return '—';
@@ -297,6 +300,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         settingsDefaultVariant,
         settingsDefaultAgent,
         setProvider,
+        setSelectedProvider,
         setModel,
         setCurrentVariant,
         getCurrentModelVariants,
@@ -362,6 +366,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         addRecentEffort,
         isModelSelectorOpen,
         setModelSelectorOpen,
+        setSettingsDialogOpen,
+        setSettingsPage,
     } = useUIStore();
     const hiddenModels = useUIStore((state) => state.hiddenModels);
 
@@ -394,6 +400,13 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     // Use global state for model selector (allows Ctrl+M shortcut)
     const agentMenuOpen = isModelSelectorOpen;
     const setAgentMenuOpen = setModelSelectorOpen;
+    const openAddProviderSettings = React.useCallback(() => {
+        setSelectedProvider(ADD_PROVIDER_ID);
+        setSettingsPage('providers');
+        setSettingsDialogOpen(true);
+        setAgentMenuOpen(false);
+        closeMobilePanel();
+    }, [setSelectedProvider, setSettingsPage, setSettingsDialogOpen, setAgentMenuOpen, closeMobilePanel]);
     const [desktopModelQuery, setDesktopModelQuery] = React.useState('');
     const [modelSelectedIndex, setModelSelectedIndex] = React.useState(0);
     const modelItemRefs = React.useRef<(HTMLDivElement | null)[]>([]);
@@ -2234,6 +2247,26 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                             {/* Scrollable content */}
                             <ScrollableOverlay outerClassName="max-h-[min(400px,calc(100dvh-12rem))] flex-1">
                                 <div className="p-1">
+                                    <div
+                                        role="button"
+                                        tabIndex={0}
+                                        onClick={openAddProviderSettings}
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter' || e.key === ' ') {
+                                                e.preventDefault();
+                                                openAddProviderSettings();
+                                            }
+                                        }}
+                                        className="typography-meta group flex items-center gap-1 rounded-md px-2 py-1.5 cursor-pointer hover:bg-interactive-hover/50"
+                                    >
+                                        <span className="flex h-4 w-4 items-center justify-center text-muted-foreground">
+                                            <RiAddLine className="h-4 w-4 -mr-0.5" />
+                                        </span>
+                                        <span className="font-medium text-foreground">Add new provider</span>
+                                    </div>
+
+                                    <DropdownMenuSeparator />
+
                                     {!hasResults && (
                                         <div className="px-2 py-4 text-center typography-meta text-muted-foreground">
                                             No models found
