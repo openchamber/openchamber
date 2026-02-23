@@ -342,7 +342,7 @@ const SkillsInstalledPage: React.FC = () => {
   }
 
   return (
-    <ScrollableOverlay keyboardAvoid outerClassName="h-full" className="w-full bg-background">
+    <ScrollableOverlay keyboardAvoid outerClassName="h-full" className="w-full bg-background p-3 sm:p-6 sm:pt-8">
       <div className="space-y-8">
         
         {/* Header & Actions */}

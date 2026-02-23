@@ -522,7 +522,7 @@ export const ProvidersPage: React.FC = () => {
   if (isAddMode) {
     return (
       <ScrollableOverlay keyboardAvoid outerClassName="h-full" className="w-full bg-background">
-        <div className="mx-auto w-full max-w-4xl px-5 py-6">
+        <div className="mx-auto w-full max-w-4xl p-3 sm:p-6 sm:pt-8">
           <div className="mb-8">
             <h1 className="typography-ui-header font-semibold text-foreground">Connect Provider</h1>
             <p className="typography-meta text-muted-foreground mt-0.5">
@@ -808,7 +808,7 @@ export const ProvidersPage: React.FC = () => {
 
   return (
     <ScrollableOverlay keyboardAvoid outerClassName="h-full" className="w-full bg-background">
-      <div className="mx-auto w-full max-w-4xl px-5 py-6">
+      <div className="mx-auto w-full max-w-4xl p-3 sm:p-6 sm:pt-8">
         
         {/* Header */}
         <div className="mb-8 flex items-center justify-between gap-4">

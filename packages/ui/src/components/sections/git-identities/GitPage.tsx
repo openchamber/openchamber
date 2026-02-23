@@ -115,7 +115,7 @@ export const GitPage: React.FC = () => {
   return (
     <>
       <ScrollableOverlay keyboardAvoid outerClassName="h-full" className="w-full bg-background">
-        <div className="mx-auto w-full max-w-3xl space-y-6 p-3 sm:p-6">
+        <div className="mx-auto w-full max-w-3xl space-y-6 p-3 sm:p-6 sm:pt-8">
           <GitHubSettings />
 
           {/* Identities Section */}

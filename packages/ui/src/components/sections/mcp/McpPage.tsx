@@ -524,7 +524,7 @@ export const McpPage: React.FC = () => {
 
   return (
     <ScrollableOverlay keyboardAvoid outerClassName="h-full" className="w-full">
-      <div className="openchamber-page-body mx-auto w-full max-w-3xl space-y-6 p-3 sm:p-6">
+      <div className="openchamber-page-body mx-auto w-full max-w-3xl space-y-6 p-3 sm:p-6 sm:pt-8">
 
         {/* ── Header card: identity + controls ── */}
         <div className="rounded-lg bg-[var(--surface-elevated)]/70 overflow-hidden flex flex-col">
