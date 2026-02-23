@@ -56,6 +56,9 @@ export interface SessionContextUsage {
 // Background trim is derived automatically as Math.round(limit * 0.6).
 export const DEFAULT_MESSAGE_LIMIT = 200;
 
+/** Timeout after which a session stuck in 'busy' or 'retry' with no SSE events is force-reset to idle. */
+export const STUCK_SESSION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+
 export const MEMORY_CONSTANTS = {
     MAX_SESSIONS: 3,
     BACKGROUND_STREAMING_BUFFER: 120,

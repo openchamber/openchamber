@@ -45,12 +45,80 @@ function getProjectAgentPath(workingDirectory, agentName) {
 }
 
 /**
- * Get user-level agent path
+ * Create a per-request lookup cache for user-level agent path resolution.
  */
-function getUserAgentPath(agentName) {
+function createAgentLookupCache() {
+  return {
+    userAgentIndexByName: new Map(),
+    userAgentLookupByName: new Map(),
+    userAgentIndexReady: false,
+  };
+}
+
+function buildUserAgentIndex(cache) {
+  if (cache.userAgentIndexReady) return;
+  cache.userAgentIndexReady = true;
+
+  if (!fs.existsSync(AGENT_DIR)) return;
+
+  const dirsToVisit = [AGENT_DIR];
+  while (dirsToVisit.length > 0) {
+    const dir = dirsToVisit.pop();
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    entries.sort((a, b) => a.name.localeCompare(b.name));
+
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
+      const agentName = entry.name.slice(0, -3);
+      if (!cache.userAgentIndexByName.has(agentName)) {
+        cache.userAgentIndexByName.set(agentName, path.join(dir, entry.name));
+      }
+    }
+
+    for (let i = entries.length - 1; i >= 0; i -= 1) {
+      const entry = entries[i];
+      if (entry.isDirectory()) {
+        dirsToVisit.push(path.join(dir, entry.name));
+      }
+    }
+  }
+}
+
+function getIndexedUserAgentPath(agentName, cache) {
+  if (cache.userAgentLookupByName.has(agentName)) {
+    return cache.userAgentLookupByName.get(agentName);
+  }
+
+  buildUserAgentIndex(cache);
+  const found = cache.userAgentIndexByName.get(agentName) || null;
+  cache.userAgentLookupByName.set(agentName, found);
+  return found;
+}
+
+/**
+ * Get user-level agent path — walks subfolders to support grouped layouts.
+ * e.g. ~/.config/opencode/agents/business/ceo-diginno.md
+ */
+function getUserAgentPath(agentName, lookupCache = null) {
+  // 1. Check flat path first (legacy / newly created agents)
   const pluralPath = path.join(AGENT_DIR, `${agentName}.md`);
+  if (fs.existsSync(pluralPath)) return pluralPath;
+
   const legacyPath = path.join(AGENT_DIR, '..', 'agent', `${agentName}.md`);
-  if (fs.existsSync(legacyPath) && !fs.existsSync(pluralPath)) return legacyPath;
+  if (fs.existsSync(legacyPath)) return legacyPath;
+
+  // 2. Lookup subfolders for grouped layout
+  const cache = lookupCache || createAgentLookupCache();
+  const found = getIndexedUserAgentPath(agentName, cache);
+  if (found) return found;
+
+  // 3. Return expected flat path as default (for new agent creation)
   return pluralPath;
 }
 
@@ -58,7 +126,7 @@ function getUserAgentPath(agentName) {
  * Determine agent scope based on where the .md file exists
  * Priority: project level > user level > null (built-in only)
  */
-function getAgentScope(agentName, workingDirectory) {
+function getAgentScope(agentName, workingDirectory, lookupCache = null) {
   if (workingDirectory) {
     const projectPath = getProjectAgentPath(workingDirectory, agentName);
     if (fs.existsSync(projectPath)) {
@@ -66,7 +134,7 @@ function getAgentScope(agentName, workingDirectory) {
     }
   }
   
-  const userPath = getUserAgentPath(agentName);
+  const userPath = getUserAgentPath(agentName, lookupCache);
   if (fs.existsSync(userPath)) {
     return { scope: AGENT_SCOPE.USER, path: userPath };
   }
@@ -77,9 +145,9 @@ function getAgentScope(agentName, workingDirectory) {
 /**
  * Get the path where an agent should be written based on scope
  */
-function getAgentWritePath(agentName, workingDirectory, requestedScope) {
+function getAgentWritePath(agentName, workingDirectory, requestedScope, lookupCache = null) {
   // For updates: check existing location first (project takes precedence)
-  const existing = getAgentScope(agentName, workingDirectory);
+  const existing = getAgentScope(agentName, workingDirectory, lookupCache);
   if (existing.path) {
     return existing;
   }
@@ -95,7 +163,7 @@ function getAgentWritePath(agentName, workingDirectory, requestedScope) {
 
   return {
     scope: AGENT_SCOPE.USER,
-    path: getUserAgentPath(agentName)
+    path: getUserAgentPath(agentName, lookupCache)
   };
 }
 
@@ -104,7 +172,7 @@ function getAgentWritePath(agentName, workingDirectory, requestedScope) {
  * Priority: project .md > user .md > project JSON > user JSON
  * Returns: { source: 'md'|'json'|null, scope: 'project'|'user'|null, path: string|null }
  */
-function getAgentPermissionSource(agentName, workingDirectory) {
+function getAgentPermissionSource(agentName, workingDirectory, lookupCache = null) {
   // Check project-level .md first
   if (workingDirectory) {
     const projectMdPath = getProjectAgentPath(workingDirectory, agentName);
@@ -117,7 +185,7 @@ function getAgentPermissionSource(agentName, workingDirectory) {
   }
 
   // Check user-level .md
-  const userMdPath = getUserAgentPath(agentName);
+  const userMdPath = getUserAgentPath(agentName, lookupCache);
   if (fs.existsSync(userMdPath)) {
     const { frontmatter } = parseMdFile(userMdPath);
     if (frontmatter.permission !== undefined) {
@@ -215,11 +283,11 @@ function mergePermissionWithNonWildcards(newPermission, permissionSource, agentN
   return merged;
 }
 
-function getAgentSources(agentName, workingDirectory) {
+function getAgentSources(agentName, workingDirectory, lookupCache = createAgentLookupCache()) {
   const projectPath = workingDirectory ? getProjectAgentPath(workingDirectory, agentName) : null;
   const projectExists = projectPath && fs.existsSync(projectPath);
 
-  const userPath = getUserAgentPath(agentName);
+  const userPath = getUserAgentPath(agentName, lookupCache);
   const userExists = fs.existsSync(userPath);
 
   const mdPath = projectExists ? projectPath : (userExists ? userPath : null);
@@ -270,11 +338,11 @@ function getAgentSources(agentName, workingDirectory) {
   return sources;
 }
 
-function getAgentConfig(agentName, workingDirectory) {
+function getAgentConfig(agentName, workingDirectory, lookupCache = createAgentLookupCache()) {
   const projectPath = workingDirectory ? getProjectAgentPath(workingDirectory, agentName) : null;
   const projectExists = projectPath && fs.existsSync(projectPath);
 
-  const userPath = getUserAgentPath(agentName);
+  const userPath = getUserAgentPath(agentName, lookupCache);
   const userExists = fs.existsSync(userPath);
 
   if (projectExists || userExists) {
@@ -312,9 +380,10 @@ function getAgentConfig(agentName, workingDirectory) {
 
 function createAgent(agentName, config, workingDirectory, scope) {
   ensureDirs();
+  const lookupCache = createAgentLookupCache();
 
   const projectPath = workingDirectory ? getProjectAgentPath(workingDirectory, agentName) : null;
-  const userPath = getUserAgentPath(agentName);
+  const userPath = getUserAgentPath(agentName, lookupCache);
 
   if (projectPath && fs.existsSync(projectPath)) {
     throw new Error(`Agent ${agentName} already exists as project-level .md file`);
@@ -350,8 +419,9 @@ function createAgent(agentName, config, workingDirectory, scope) {
 
 function updateAgent(agentName, updates, workingDirectory) {
   ensureDirs();
+  const lookupCache = createAgentLookupCache();
 
-  const { scope, path: mdPath } = getAgentWritePath(agentName, workingDirectory);
+  const { scope, path: mdPath } = getAgentWritePath(agentName, workingDirectory, undefined, lookupCache);
   const mdExists = mdPath && fs.existsSync(mdPath);
 
   const layers = readConfigLayers(workingDirectory);
@@ -369,7 +439,7 @@ function updateAgent(agentName, updates, workingDirectory) {
   let targetScope = scope;
 
   if (!mdExists && isBuiltinOverride) {
-    targetPath = getUserAgentPath(agentName);
+    targetPath = getUserAgentPath(agentName, lookupCache);
     targetScope = AGENT_SCOPE.USER;
   }
 
@@ -412,7 +482,7 @@ function updateAgent(agentName, updates, workingDirectory) {
     }
 
     if (field === 'permission') {
-      const permissionSource = getAgentPermissionSource(agentName, workingDirectory);
+      const permissionSource = getAgentPermissionSource(agentName, workingDirectory, lookupCache);
       const newPermission = mergePermissionWithNonWildcards(value, permissionSource, agentName);
 
       if (permissionSource.source === 'md') {
@@ -510,6 +580,7 @@ function updateAgent(agentName, updates, workingDirectory) {
 }
 
 function deleteAgent(agentName, workingDirectory) {
+  const lookupCache = createAgentLookupCache();
   let deleted = false;
 
   if (workingDirectory) {
@@ -521,7 +592,7 @@ function deleteAgent(agentName, workingDirectory) {
     }
   }
 
-  const userPath = getUserAgentPath(agentName);
+  const userPath = getUserAgentPath(agentName, lookupCache);
   if (fs.existsSync(userPath)) {
     fs.unlinkSync(userPath);
     console.log(`Deleted user-level agent .md file: ${userPath}`);

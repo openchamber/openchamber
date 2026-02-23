@@ -851,6 +851,10 @@ export const useSessionStore = create<SessionStore>()(
     ),
 );
 
+// rAF debounce IDs for useMessageStore -> useSessionStore sync
+let messageStoreSyncRafId: number | null = null;
+let userSummaryTitlesRafId: ReturnType<typeof setTimeout> | null = null;
+
 useSessionManagementStore.subscribe((state, prevState) => {
 
     if (
@@ -885,7 +889,8 @@ useSessionManagementStore.subscribe((state, prevState) => {
 });
 
 useMessageStore.subscribe((state, prevState) => {
-
+    // Early-return equality check stays outside the rAF so we skip scheduling
+    // entirely when nothing relevant changed.
     if (
         state.messages === prevState.messages &&
         state.sessionMemoryState === prevState.sessionMemoryState &&
@@ -900,48 +905,72 @@ useMessageStore.subscribe((state, prevState) => {
         return;
     }
 
-    const userSummaryTitles = new Map<string, { title: string; createdAt: number | null }>();
-    state.messages.forEach((messageList, sessionId) => {
-        if (!Array.isArray(messageList) || messageList.length === 0) {
-            return;
+    // Debounce the expensive sessionStore update to at most once per animation
+    // frame. Multiple messageStore updates within the same frame (e.g. several
+    // SSE tokens arriving before the next paint) collapse into a single setState.
+    if (messageStoreSyncRafId !== null) {
+        cancelAnimationFrame(messageStoreSyncRafId);
+    }
+    messageStoreSyncRafId = requestAnimationFrame(() => {
+        messageStoreSyncRafId = null;
+
+        // Read the LATEST state at flush time, not the stale state captured by
+        // the subscription closure.
+        const latest = useMessageStore.getState();
+
+        useSessionStore.setState({
+            messages: latest.messages,
+            sessionMemoryState: latest.sessionMemoryState,
+            messageStreamStates: latest.messageStreamStates,
+            sessionCompactionUntil: latest.sessionCompactionUntil,
+            sessionAbortFlags: latest.sessionAbortFlags,
+            streamingMessageIds: latest.streamingMessageIds,
+            abortControllers: latest.abortControllers,
+            lastUsedProvider: latest.lastUsedProvider,
+            isSyncing: latest.isSyncing,
+        });
+
+        // Sidebar titles don't need real-time updates; debounce separately at
+        // 500 ms so the expensive per-message iteration doesn't happen every
+        // frame during streaming.
+        if (userSummaryTitlesRafId !== null) {
+            clearTimeout(userSummaryTitlesRafId);
         }
-        for (let index = messageList.length - 1; index >= 0; index -= 1) {
-            const entry = messageList[index];
-            if (!entry || !entry.info) {
-                continue;
-            }
-            const info = entry.info as Message & {
-                summary?: { title?: string | null } | null;
-                time?: { created?: number | null };
-            };
-            if (info.role === "user") {
-                const title = info.summary?.title;
-                if (typeof title === "string") {
-                    const trimmed = title.trim();
-                    if (trimmed.length > 0) {
-                        const createdAt =
-                            info.time && typeof info.time.created === "number"
-                                ? info.time.created
-                                : null;
-                        userSummaryTitles.set(sessionId, { title: trimmed, createdAt });
-                        break;
+        userSummaryTitlesRafId = setTimeout(() => {
+            userSummaryTitlesRafId = null;
+            const titleState = useMessageStore.getState();
+            const userSummaryTitles = new Map<string, { title: string; createdAt: number | null }>();
+            titleState.messages.forEach((messageList, sessionId) => {
+                if (!Array.isArray(messageList) || messageList.length === 0) {
+                    return;
+                }
+                for (let index = messageList.length - 1; index >= 0; index -= 1) {
+                    const entry = messageList[index];
+                    if (!entry || !entry.info) {
+                        continue;
+                    }
+                    const info = entry.info as Message & {
+                        summary?: { title?: string | null } | null;
+                        time?: { created?: number | null };
+                    };
+                    if (info.role === "user") {
+                        const title = info.summary?.title;
+                        if (typeof title === "string") {
+                            const trimmed = title.trim();
+                            if (trimmed.length > 0) {
+                                const createdAt =
+                                    info.time && typeof info.time.created === "number"
+                                        ? info.time.created
+                                        : null;
+                                userSummaryTitles.set(sessionId, { title: trimmed, createdAt });
+                                break;
+                            }
+                        }
                     }
                 }
-            }
-        }
-    });
-
-    useSessionStore.setState({
-        messages: state.messages,
-        sessionMemoryState: state.sessionMemoryState,
-        messageStreamStates: state.messageStreamStates,
-        sessionCompactionUntil: state.sessionCompactionUntil,
-        sessionAbortFlags: state.sessionAbortFlags,
-        streamingMessageIds: state.streamingMessageIds,
-        abortControllers: state.abortControllers,
-        lastUsedProvider: state.lastUsedProvider,
-        isSyncing: state.isSyncing,
-        userSummaryTitles,
+            });
+            useSessionStore.setState({ userSummaryTitles });
+        }, 500);
     });
 });
 

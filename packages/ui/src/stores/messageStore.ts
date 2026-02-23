@@ -30,18 +30,6 @@ const cleanupPendingUserMessageMeta = (
     return nextPending;
 };
 
-interface QueuedPart {
-    sessionId: string;
-    messageId: string;
-    part: Part;
-    role?: string;
-    currentSessionId?: string;
-}
-
-let batchQueue: QueuedPart[] = [];
-let flushTimer: ReturnType<typeof setTimeout> | null = null;
-
-const USER_BATCH_WINDOW_MS = 50;
 const COMPACTION_WINDOW_MS = 30_000;
 
 const timeoutRegistry = new Map<string, ReturnType<typeof setTimeout>>();
@@ -1123,14 +1111,15 @@ export const useMessageStore = create<MessageStore>()(
                                 ...memoryState,
                                 backgroundMessageCount: (memoryState.backgroundMessageCount || 0) + 1,
                             });
-                            state.sessionMemoryState = newMemoryState;
+                            updates.sessionMemoryState = newMemoryState;
                         }
 
                         if (actualRole === 'assistant') {
-                            const currentMemoryState = state.sessionMemoryState.get(sessionId);
+                            const baseMemoryMap = updates.sessionMemoryState ?? state.sessionMemoryState;
+                            const currentMemoryState = baseMemoryMap.get(sessionId);
                             if (currentMemoryState) {
                                 const now = Date.now();
-                                const nextMemoryState = new Map(state.sessionMemoryState);
+                                const nextMemoryState = new Map(baseMemoryMap);
                                 nextMemoryState.set(sessionId, {
                                     ...currentMemoryState,
                                     isStreaming: true,
@@ -1138,7 +1127,7 @@ export const useMessageStore = create<MessageStore>()(
                                     lastAccessedAt: now,
                                     isZombie: false,
                                 });
-                                state.sessionMemoryState = nextMemoryState;
+                                updates.sessionMemoryState = nextMemoryState;
                             }
                         }
 
@@ -1206,7 +1195,7 @@ export const useMessageStore = create<MessageStore>()(
                             const newMessages = new Map(state.messages);
                             newMessages.set(sessionId, updatedMessages);
 
-                            return finalizeAbortState({ messages: newMessages });
+                            return finalizeAbortState({ messages: newMessages, ...updates });
                         }
 
                         if (actualRole === 'assistant' && messageIndex !== -1) {
@@ -1314,7 +1303,7 @@ export const useMessageStore = create<MessageStore>()(
                                 const newMessages = new Map(state.messages);
                                 newMessages.set(sessionId, updatedMessages);
 
-                                return finalizeAbortState({ messages: newMessages });
+                                return finalizeAbortState({ messages: newMessages, ...updates });
                             }
 
                             if ((part as any)?.type === 'text') {
@@ -1326,6 +1315,10 @@ export const useMessageStore = create<MessageStore>()(
                                     if (latestUser) {
                                         const latestUserText = latestUser.parts.map((p) => extractTextFromPart(p)).join('').trim();
                                         if (latestUserText.length > 0 && latestUserText === textIncoming) {
+                                            // Cap ignoredAssistantMessageIds size — it's only relevant for active streaming
+                                            if (ignoredAssistantMessageIds.size > 1000) {
+                                                ignoredAssistantMessageIds.clear();
+                                            }
                                             ignoredAssistantMessageIds.add(messageId);
                                             (window as any).__messageTracker?.(messageId, 'ignored_assistant_echo');
                                             return state;
@@ -1481,26 +1474,7 @@ export const useMessageStore = create<MessageStore>()(
                 },
 
                 addStreamingPart: (sessionId: string, messageId: string, part: Part, role?: string, currentSessionId?: string) => {
-
-                    if (role !== 'user') {
-                        get()._addStreamingPartImmediate(sessionId, messageId, part, role, currentSessionId);
-                        return;
-                    }
-
-                    batchQueue.push({ sessionId, messageId, part, role, currentSessionId });
-
-                    if (!flushTimer) {
-                        flushTimer = setTimeout(() => {
-                            const itemsToProcess = [...batchQueue];
-                            batchQueue = [];
-                            flushTimer = null;
-
-                            const store = get();
-                            for (const item of itemsToProcess) {
-                                store._addStreamingPartImmediate(item.sessionId, item.messageId, item.part, item.role, item.currentSessionId);
-                            }
-                        }, USER_BATCH_WINDOW_MS);
-                    }
+                    get()._addStreamingPartImmediate(sessionId, messageId, part, role, currentSessionId);
                 },
 
                 forceCompleteMessage: (sessionId: string | null | undefined, messageId: string, source: "timeout" | "cooldown" = "timeout") => {
@@ -2462,6 +2436,28 @@ export const useMessageStore = create<MessageStore>()(
                             const nextControllers = new Map(state.abortControllers);
                             nextControllers.delete(lruSessionId);
                             result.abortControllers = nextControllers;
+                        }
+
+                        // Clean up module-level registries for evicted session's message IDs
+                        for (const messageId of removedIds) {
+                            const existingTimeout = timeoutRegistry.get(messageId);
+                            if (existingTimeout) {
+                                clearTimeout(existingTimeout);
+                                timeoutRegistry.delete(messageId);
+                            }
+                            lastContentRegistry.delete(messageId);
+                        }
+
+                        // Clean up cooldown timer for evicted session
+                        const cooldownTimer = streamingCooldownTimers.get(lruSessionId);
+                        if (cooldownTimer) {
+                            clearTimeout(cooldownTimer);
+                            streamingCooldownTimers.delete(lruSessionId);
+                        }
+
+                        // Belt-and-suspenders: cap ignoredAssistantMessageIds size
+                        if (ignoredAssistantMessageIds.size > 1000) {
+                            ignoredAssistantMessageIds.clear();
                         }
 
                         return result;

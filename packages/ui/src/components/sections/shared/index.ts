@@ -54,3 +54,4 @@ export { SettingsSidebarHeader } from './SettingsSidebarHeader';
 export { SettingsSidebarItem, type SettingsSidebarItemAction } from './SettingsSidebarItem';
 export { SettingsPageLayout } from './SettingsPageLayout';
 export { SettingsSection } from './SettingsSection';
+export { SidebarGroup } from './SidebarGroup';

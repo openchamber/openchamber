@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { ButtonLarge } from '@/components/ui/button-large';
 import { Input } from '@/components/ui/input';
@@ -24,6 +24,7 @@ import { cn } from '@/lib/utils';
 import type { Agent } from '@opencode-ai/sdk/v2';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { SettingsProjectSelector } from '@/components/sections/shared/SettingsProjectSelector';
+import { SidebarGroup } from '@/components/sections/shared/SidebarGroup';
 
 interface AgentsSidebarProps {
   onItemSelect?: () => void;
@@ -303,6 +304,25 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
   const builtInAgents = visibleAgents.filter(isAgentBuiltIn);
   const customAgents = visibleAgents.filter((agent) => !isAgentBuiltIn(agent));
 
+  // Group custom agents by subfolder
+  const { groupedCustomAgents, ungroupedCustomAgents } = useMemo(() => {
+    const groups: Record<string, typeof customAgents> = {};
+    const ungrouped: typeof customAgents = [];
+    for (const agent of customAgents) {
+      const ext = agent as { group?: string };
+      if (ext.group) {
+        if (!groups[ext.group]) groups[ext.group] = [];
+        groups[ext.group].push(agent);
+      } else {
+        ungrouped.push(agent);
+      }
+    }
+    const sortedGroups = Object.keys(groups)
+      .sort((a, b) => a.localeCompare(b))
+      .map((name) => ({ name, agents: groups[name] }));
+    return { groupedCustomAgents: sortedGroups, ungroupedCustomAgents: ungrouped };
+  }, [customAgents]);
+
   return (
     <div className={cn('flex h-full flex-col', bgClass)}>
       <div className={cn('border-b px-3', isMobile ? 'mt-2 py-3' : 'pt-4 pb-3')}>
@@ -361,7 +381,38 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
                 <div className="px-2 pb-1.5 pt-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   Custom Agents
                 </div>
-                {customAgents.map((agent) => (
+
+                {/* Grouped agents by subfolder */}
+                {groupedCustomAgents.map(({ name: groupName, agents: groupAgents }) => (
+                  <SidebarGroup
+                    key={groupName}
+                    label={groupName}
+                    count={groupAgents.length}
+                    storageKey="agents"
+                  >
+                    {groupAgents.map((agent) => (
+                      <AgentListItem
+                        key={agent.name}
+                        agent={agent}
+                        isSelected={selectedAgentName === agent.name}
+                        onSelect={() => {
+                          setSelectedAgent(agent.name);
+                          onItemSelect?.();
+                          if (isMobile) {
+                            // Settings mobile drilldown handles navigation.
+                          }
+                        }}
+                        onRename={() => handleOpenRenameDialog(agent)}
+                        onDelete={() => handleDeleteAgent(agent)}
+                        onDuplicate={() => handleDuplicateAgent(agent)}
+                        getAgentModeIcon={getAgentModeIcon}
+                      />
+                    ))}
+                  </SidebarGroup>
+                ))}
+
+                {/* Ungrouped agents (flat in root agents dir) */}
+                {ungroupedCustomAgents.map((agent) => (
                   <AgentListItem
                     key={agent.name}
                     agent={agent}

@@ -3,7 +3,7 @@ import { opencodeClient, type RoutedOpencodeEvent } from '@/lib/opencode/client'
 import { saveSessionCursor } from '@/lib/messageCursorPersistence';
 import { useSessionStore } from '@/stores/useSessionStore';
 import { useMessageStore } from '@/stores/messageStore';
-import { getMessageLimit } from '@/stores/types/sessionTypes';
+import { getMessageLimit, STUCK_SESSION_TIMEOUT_MS } from '@/stores/types/sessionTypes';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore, type EventStreamStatus } from '@/stores/useUIStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -85,6 +85,8 @@ const isIdNewer = (id: string, referenceId: string): boolean => {
   return currentSortable > referenceSortable;
 };
 
+const MAX_MESSAGE_CACHE_SIZE = 500;
+const MESSAGE_CACHE_EVICT_COUNT = 100;
 const messageCache = new Map<string, { sessionId: string; message: { info: Message; parts: Part[] } | null }>();
 const getMessageFromStore = (sessionId: string, messageId: string): { info: Message; parts: Part[] } | null => {
   const cacheKey = `${sessionId}:${messageId}`;
@@ -96,7 +98,16 @@ const getMessageFromStore = (sessionId: string, messageId: string): { info: Mess
   const storeState = useSessionStore.getState();
   const sessionMessages = storeState.messages.get(sessionId) || [];
   const message = sessionMessages.find(m => m.info.id === messageId) || null;
-  
+
+  if (messageCache.size >= MAX_MESSAGE_CACHE_SIZE) {
+    // Evict oldest entries (Map preserves insertion order)
+    let count = 0;
+    for (const key of messageCache.keys()) {
+      if (count++ >= MESSAGE_CACHE_EVICT_COUNT) break;
+      messageCache.delete(key);
+    }
+  }
+
   messageCache.set(cacheKey, { sessionId, message });
   return message;
 };
@@ -581,6 +592,9 @@ export const useEventStream = () => {
     const prevDirectory = previousSessionDirectoryRef.current;
 
     if (prevSessionId && nextSessionId && prevSessionId !== nextSessionId) {
+      // Clear the message cache on session switch to free memory
+      messageCache.clear();
+
       if (prevDirectory && nextDirectory && prevDirectory !== nextDirectory) {
         // Removed: void refreshSessionStatus();
       }
@@ -1465,8 +1479,9 @@ export const useEventStream = () => {
 
               import('sonner').then(({ toast }) => {
                 toast.warning('Permission required', {
+                  id: toastKey,
                   description: sessionTitle,
-                  duration: Infinity,
+                  duration: 30000,
                   action: {
                     label: 'Open',
                     onClick: () => {
@@ -1536,8 +1551,9 @@ export const useEventStream = () => {
 
             import('sonner').then(({ toast }) => {
               toast.info('Input needed', {
+                id: toastKey,
                 description: sessionTitle,
-                duration: Infinity,
+                duration: 30000,
                 action: {
                   label: 'Open',
                   onClick: () => {
@@ -1638,6 +1654,29 @@ export const useEventStream = () => {
     updateSessionStatus,
   ]);
 
+  // --- Stable callback refs (Part A) ---
+  // Keep refs up to date with the latest version of each callback.
+  // This lets startStream use stable wrappers with empty deps so SSE connections
+  // are NOT torn down on every session switch.
+  const handleEventRef = React.useRef(handleEvent);
+  React.useEffect(() => {
+    handleEventRef.current = handleEvent;
+  }, [handleEvent]);
+
+  const bootstrapStateRef = React.useRef(bootstrapState);
+  React.useEffect(() => {
+    bootstrapStateRef.current = bootstrapState;
+  }, [bootstrapState]);
+
+  // Stable wrappers — identity never changes, so startStream deps stay minimal.
+  const stableHandleEvent = React.useCallback((event: EventData) => {
+    handleEventRef.current(event);
+  }, []); // intentionally empty deps
+
+  const stableBootstrapState = React.useCallback((reason: string) => {
+    return bootstrapStateRef.current(reason);
+  }, []); // intentionally empty deps
+
   const shouldHoldConnection = React.useCallback(() => {
     const currentVisibility = resolveVisibilityState();
     visibilityStateRef.current = currentVisibility;
@@ -1732,12 +1771,12 @@ export const useEventStream = () => {
       // Removed: void refreshSessionStatus();
 
        if (shouldRefresh) {
-         void bootstrapState('sse_reconnected');
+         void stableBootstrapState('sse_reconnected');
        } else {
          const sessionId = currentSessionIdRef.current;
          if (sessionId) {
            setTimeout(() => {
-            scheduleSoftResync(sessionId, 'sse_reconnected', getMessageLimit())
+            scheduleSoftResyncRef.current(sessionId, 'sse_reconnected', getMessageLimit())
               .then(() => requestSessionMetadataRefresh(sessionId))
               .catch((error: unknown) => {
                 console.warn('[useEventStream] Failed to resync messages after reconnect:', error);
@@ -1776,7 +1815,7 @@ export const useEventStream = () => {
               ? { ...baseProperties, directory: event.directory }
               : baseProperties;
 
-          handleEvent({
+          stableHandleEvent({
             type: typeof (payload as { type?: unknown }).type === 'string' ? (payload as { type: string }).type : '',
             properties,
           });
@@ -1808,13 +1847,11 @@ export const useEventStream = () => {
     stopStream,
     publishStatus,
     checkConnection,
-    scheduleSoftResync,
     requestSessionMetadataRefresh,
-    handleEvent,
+    stableHandleEvent,
+    stableBootstrapState,
     effectiveDirectory,
-    
     debugConnectionState,
-    bootstrapState
   ]);
 
   const scheduleReconnect = React.useCallback((hint?: string) => {
@@ -2026,8 +2063,27 @@ export const useEventStream = () => {
           }
         }, 10000);
 
+    // Part B: Idle timeout recovery — scan for sessions stuck in 'busy'/'retry'
+    // with no recent SSE events and force-reset them to 'idle'.
+    const stuckCheckInterval = setInterval(() => {
+      const sessionStatus = useSessionStore.getState().sessionStatus;
+      if (!sessionStatus) return;
+      const now = Date.now();
+      sessionStatus.forEach((status, sessionId) => {
+        if (status.type !== 'busy' && status.type !== 'retry') return;
+        const lastMsgAt = lastMessageEventBySessionRef.current.get(sessionId) ?? 0;
+        const busyTooLong = now - lastMsgAt > STUCK_SESSION_TIMEOUT_MS;
+        const noRecentEvents = now - lastMsgAt > 60000;
+        if (busyTooLong && noRecentEvents) {
+          console.warn('[useEventStream] Session stuck in busy state, forcing idle:', sessionId);
+          updateSessionStatus(sessionId, { type: 'idle' }, 'timeout_recovery');
+        }
+      });
+    }, 30000); // check every 30s
+
     return () => {
       clearTimeout(startTimer);
+      clearInterval(stuckCheckInterval);
 
       void desktopActivityHandler;
 
@@ -2086,5 +2142,6 @@ export const useEventStream = () => {
     maybeBootstrapIfStale,
     resyncMessages,
     scheduleSoftResync,
+    updateSessionStatus,
   ]);
 };

@@ -23,6 +23,7 @@ import {
 } from './toolRenderers';
 import type { ToolPopupContent, DiffViewMode } from './types';
 import { DiffViewToggle } from './DiffViewToggle';
+import { VirtualizedCodeBlock, type CodeLine } from './parts/VirtualizedCodeBlock';
 
 interface ToolOutputDialogProps {
     popup: ToolPopupContent;
@@ -355,6 +356,104 @@ const ImagePreviewDialog: React.FC<{
     return createPortal(content, document.body);
 };
 
+// ── PERF-007: Virtualised sub-components for dialog ──────────────────
+
+const DialogUnifiedDiff: React.FC<{
+    popup: ToolPopupContent;
+    syntaxTheme: Record<string, React.CSSProperties>;
+    isMobile: boolean;
+}> = React.memo(({ popup, syntaxTheme, isMobile }) => {
+    const hunks = React.useMemo(() => parseDiffToUnified(popup.content), [popup.content]);
+
+    return (
+        <div className="typography-code">
+            {hunks.map((hunk, hunkIdx) => {
+                const inputFile = (typeof popup.metadata?.input === 'object' && popup.metadata.input !== null)
+                    ? ((popup.metadata.input as Record<string, unknown>).file_path || (popup.metadata.input as Record<string, unknown>).filePath)
+                    : null;
+                const fileStr = typeof inputFile === 'string' ? inputFile : '';
+                const hunkFileStr = typeof hunk.file === 'string' ? hunk.file : '';
+                const lang = getLanguageFromExtension(fileStr || hunkFileStr || '') || 'text';
+
+                const codeLines: CodeLine[] = hunk.lines.map((line) => ({
+                    text: line.content,
+                    lineNumber: line.lineNumber || null,
+                    type: line.type as CodeLine['type'],
+                }));
+
+                return (
+                    <div key={hunkIdx} className="border-b border-border/20 last:border-b-0">
+                        <div className={cn('bg-muted/20 px-3 py-2 font-medium text-muted-foreground border-b border-border/10 sticky top-0 z-10 break-words -mx-3', isMobile ? 'typography-micro' : 'typography-markdown')}>
+                            {`${hunk.file} (line ${hunk.oldStart})`}
+                        </div>
+                        <VirtualizedCodeBlock
+                            lines={codeLines}
+                            language={lang}
+                            syntaxTheme={syntaxTheme}
+                            maxHeight="70vh"
+                            lineStyles={(line) =>
+                                line.type === 'removed'
+                                    ? { backgroundColor: 'var(--tools-edit-removed-bg)', color: 'var(--tools-edit-removed)' }
+                                    : line.type === 'added'
+                                        ? { backgroundColor: 'var(--tools-edit-added-bg)', color: 'var(--tools-edit-added)' }
+                                        : undefined
+                            }
+                        />
+                    </div>
+                );
+            })}
+        </div>
+    );
+});
+
+DialogUnifiedDiff.displayName = 'DialogUnifiedDiff';
+
+const DialogReadContent: React.FC<{
+    popup: ToolPopupContent;
+    syntaxTheme: Record<string, React.CSSProperties>;
+}> = React.memo(({ popup, syntaxTheme }) => {
+    const parsedReadOutput = React.useMemo(() => parseReadToolOutput(popup.content), [popup.content]);
+
+    const codeLines: CodeLine[] = React.useMemo(() => {
+        const inputMeta = popup.metadata?.input;
+        const inputObj = typeof inputMeta === 'object' && inputMeta !== null ? (inputMeta as Record<string, unknown>) : {};
+        const offset = typeof inputObj.offset === 'number' ? inputObj.offset : 0;
+        const hasExplicitLineNumbers = parsedReadOutput.lines.some((line) => line.lineNumber !== null);
+        let fallbackLineCursor = offset;
+
+        return parsedReadOutput.lines.map((line) => {
+            if (line.lineNumber !== null) {
+                fallbackLineCursor = line.lineNumber;
+            }
+            const shouldAssignFallback =
+                parsedReadOutput.type === 'file'
+                && !hasExplicitLineNumbers
+                && line.lineNumber === null
+                && !line.isInfo;
+            const effectiveLineNumber = line.lineNumber ?? (shouldAssignFallback
+                ? (fallbackLineCursor += 1)
+                : null);
+
+            return {
+                text: line.text,
+                lineNumber: effectiveLineNumber,
+                isInfo: line.isInfo,
+            };
+        });
+    }, [parsedReadOutput, popup.metadata?.input]);
+
+    return (
+        <VirtualizedCodeBlock
+            lines={codeLines}
+            language={popup.language || 'text'}
+            syntaxTheme={syntaxTheme}
+            maxHeight="70vh"
+        />
+    );
+});
+
+DialogReadContent.displayName = 'DialogReadContent';
+
 const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange, syntaxTheme, isMobile }) => {
     const [diffViewMode, setDiffViewMode] = React.useState<DiffViewMode>(isMobile ? 'unified' : 'side-by-side');
 
@@ -460,82 +559,7 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
 
                         {popup.isDiff ? (
                             diffViewMode === 'unified' ? (
-                            <div className="typography-code">
-                                {parseDiffToUnified(popup.content).map((hunk, hunkIdx) => (
-                                    <div key={hunkIdx} className="border-b border-border/20 last:border-b-0">
-                                        <div
-                                            className={cn('bg-muted/20 px-3 py-2 font-medium text-muted-foreground border-b border-border/10 sticky top-0 z-10 break-words -mx-3', isMobile ? 'typography-micro' : 'typography-markdown')}
-                                        >
-                                            {`${hunk.file} (line ${hunk.oldStart})`}
-                                        </div>
-                                        <div>
-                                            {hunk.lines.map((line, lineIdx) => (
-                                                <div
-                                                    key={lineIdx}
-                                                    className={cn(
-                                                        'typography-code font-mono px-3 py-0.5 flex',
-                                                        line.type === 'context' && 'bg-transparent',
-                                                        line.type === 'removed' && 'bg-transparent',
-                                                        line.type === 'added' && 'bg-transparent'
-                                                    )}
-                                                    style={{
-                                                        lineHeight: '1.1',
-                                                        ...(line.type === 'removed'
-                                                            ? { backgroundColor: 'var(--tools-edit-removed-bg)' }
-                                                            : line.type === 'added'
-                                                                ? { backgroundColor: 'var(--tools-edit-added-bg)' }
-                                                                : {}),
-                                                    }}
-                                                >
-                                                    <span className="w-12 flex-shrink-0 text-right pr-3 select-none border-r mr-3 -my-0.5 py-0.5" style={{ color: 'var(--tools-edit-line-number)', borderColor: 'var(--tools-border)' }}>
-                                                        {line.lineNumber || ''}
-                                                    </span>
-                                                    <div className="flex-1 min-w-0">
-                                                        {(() => {
-                                                          const inputFile = (typeof popup.metadata?.input === 'object' && popup.metadata.input !== null)
-                                                            ? ((popup.metadata.input as Record<string, unknown>).file_path || (popup.metadata.input as Record<string, unknown>).filePath)
-                                                            : null;
-                                                          const fileStr = typeof inputFile === 'string' ? inputFile : '';
-                                                          const hunkFile = (typeof hunk === 'object' && hunk !== null && 'file' in hunk) ? (hunk as UnifiedDiffHunk).file : null;
-                                                          const hunkFileStr = typeof hunkFile === 'string' ? hunkFile : '';
-                                                          const finalFile = fileStr || hunkFileStr || '';
-                                                          return (
-                                                            <SyntaxHighlighter
-                                                              style={syntaxTheme}
-                                                              language={getLanguageFromExtension(finalFile) || 'text'}
-                                                            PreTag="div"
-                                                            wrapLines
-                                                            wrapLongLines
-                                                            customStyle={{
-                                                                margin: 0,
-                                                                padding: 0,
-                                                                fontSize: 'inherit',
-                                                                background: 'transparent',
-                                                                backgroundColor: 'transparent',
-                                                                borderRadius: 0,
-                                                                overflow: 'visible',
-                                                                whiteSpace: 'pre-wrap',
-                                                                wordBreak: 'break-all',
-                                                                overflowWrap: 'anywhere',
-                                                            }}
-                                                            codeTagProps={{
-                                                                style: {
-                                                                    background: 'transparent',
-                                                                    backgroundColor: 'transparent',
-                                                                },
-                                                            }}
-                                                        >
-                                                            {line.content}
-                                                            </SyntaxHighlighter>
-                                                          );
-                                                        })()}
-                                                    </div>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
+                            <DialogUnifiedDiff popup={popup} syntaxTheme={syntaxTheme} isMobile={isMobile} />
                         ) : popup.diffHunks ? (
                             <div className="typography-code">
                                 {popup.diffHunks.map((hunk, hunkIdx) => (
@@ -741,77 +765,7 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
                                 }
 
                                 if (tool === 'read') {
-                                    const parsedReadOutput = parseReadToolOutput(popup.content);
-
-                                    const inputMeta = popup.metadata?.input;
-                                    const inputObj = typeof inputMeta === 'object' && inputMeta !== null ? (inputMeta as Record<string, unknown>) : {};
-                                    const offset = typeof inputObj.offset === 'number' ? inputObj.offset : 0;
-                                    let fallbackLineCursor = offset;
-                                    const hasExplicitLineNumbers = parsedReadOutput.lines.some((line) => line.lineNumber !== null);
-
-                                    return (
-                                        <div>
-                                            {parsedReadOutput.lines.map((line, idx: number) => {
-                                                if (line.lineNumber !== null) {
-                                                    fallbackLineCursor = line.lineNumber;
-                                                }
-
-                                                const shouldAssignFallbackLineNumber =
-                                                    parsedReadOutput.type === 'file'
-                                                    && !hasExplicitLineNumbers
-                                                    && line.lineNumber === null
-                                                    && !line.isInfo;
-
-                                                const effectiveLineNumber = line.lineNumber ?? (shouldAssignFallbackLineNumber
-                                                    ? (fallbackLineCursor += 1)
-                                                    : null);
-
-                                                const shouldShowLineNumber = !line.isInfo && effectiveLineNumber !== null;
-
-                                                    return (
-                                                        <div key={idx} className={`typography-code font-mono flex ${line.isInfo ? 'text-muted-foreground/70 italic' : ''}`}>
-                                                            <span className="w-12 flex-shrink-0 text-right pr-3 select-none border-r mr-3 -my-0.5 py-0.5" style={{ color: 'var(--tools-edit-line-number)', borderColor: 'var(--tools-border)' }}>
-                                                                {shouldShowLineNumber ? effectiveLineNumber : ''}
-                                                            </span>
-                                                            <div className="flex-1 min-w-0">
-                                                            {line.isInfo ? (
-                                                                <div className="whitespace-pre-wrap break-words">{line.text}</div>
-                                                            ) : (
-                                                                <SyntaxHighlighter
-                                                                    style={syntaxTheme}
-                                                                    language={popup.language || 'text'}
-                                                                    PreTag="div"
-                                                                    wrapLines
-                                                                    wrapLongLines
-                                                                    customStyle={{
-                                                                        margin: 0,
-                                                                        padding: 0,
-                                                                        fontSize: 'inherit',
-                                                                        background: 'transparent',
-                                                                        backgroundColor: 'transparent',
-                                                                        borderRadius: 0,
-                                                                        overflow: 'visible',
-                                                                        whiteSpace: 'pre-wrap',
-                                                                        wordBreak: 'break-all',
-                                                                        overflowWrap: 'anywhere',
-                                                                    }}
-                                                                    codeTagProps={{
-                                                                        style: {
-                                                                            background: 'transparent',
-                                                                            backgroundColor: 'transparent',
-                                                                            fontSize: 'inherit',
-                                                                        },
-                                                                    }}
-                                                                >
-                                                                    {line.text}
-                                                                </SyntaxHighlighter>
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
-                                    );
+                                    return <DialogReadContent popup={popup} syntaxTheme={syntaxTheme} />;
                                 }
 
                                 return (

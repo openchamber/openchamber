@@ -5467,7 +5467,7 @@ function setupProxy(app) {
         method: 'POST',
         headers,
         body: bodyBuffer,
-        signal: AbortSignal.timeout(45000),
+        signal: AbortSignal.timeout(LONG_REQUEST_TIMEOUT_MS),
       });
 
       const upstreamBody = Buffer.from(await upstreamResponse.arrayBuffer());
