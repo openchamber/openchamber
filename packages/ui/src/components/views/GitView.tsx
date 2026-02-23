@@ -818,16 +818,17 @@ export const GitView: React.FC<GitViewProps> = ({ mode = 'full' }) => {
 
     setIsGeneratingMessage(true);
     try {
-      const { settingsGitProviderId, settingsGitModelId, settingsZenModel } = useConfigStore.getState();
+      const { getResolvedGitGenerationModel, settingsZenModel } = useConfigStore.getState();
+      const resolvedModel = getResolvedGitGenerationModel();
       const options: { zenModel?: string; providerId?: string; modelId?: string } = {};
-      if (settingsZenModel) {
+      if (resolvedModel) {
+        options.providerId = resolvedModel.providerId;
+        options.modelId = resolvedModel.modelId;
+        if (resolvedModel.providerId === 'zen') {
+          options.zenModel = resolvedModel.modelId;
+        }
+      } else if (settingsZenModel) {
         options.zenModel = settingsZenModel;
-      }
-      if (settingsGitProviderId) {
-        options.providerId = settingsGitProviderId;
-      }
-      if (settingsGitModelId) {
-        options.modelId = settingsGitModelId;
       }
       const { message } = await git.generateCommitMessage(
         currentDirectory,

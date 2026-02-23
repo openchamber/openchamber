@@ -18,6 +18,8 @@ const MODELS_DEV_PROXY_URL = "/api/openchamber/models-metadata";
 
 const FALLBACK_PROVIDER_ID = "opencode";
 const FALLBACK_MODEL_ID = "big-pickle";
+const GIT_UTILITY_PROVIDER_ID = "zen";
+const GIT_UTILITY_PREFERRED_MODEL_ID = "big-pickle";
 
 interface OpenChamberDefaults {
     defaultModel?: string;
@@ -112,6 +114,83 @@ const isPrimaryMode = (mode?: string) => mode === "primary" || mode === "all" ||
 
 type ProviderModel = Provider["models"][string];
 type ProviderWithModelList = Omit<Provider, "models"> & { models: ProviderModel[] };
+
+type GitModelSelection = { providerId: string; modelId: string };
+
+const normalizeOptionalString = (value: unknown): string | undefined => {
+    if (typeof value !== "string") {
+        return undefined;
+    }
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+};
+
+const hasProviderModel = (
+    providers: ProviderWithModelList[],
+    providerId: string,
+    modelId: string
+): boolean => {
+    const provider = providers.find((item) => item.id === providerId);
+    if (!provider) {
+        return false;
+    }
+    return provider.models.some((model) => model.id === modelId);
+};
+
+const resolveGitGenerationModelSelection = ({
+    providers,
+    settingsGitProviderId,
+    settingsGitModelId,
+    settingsZenModel,
+}: {
+    providers: ProviderWithModelList[];
+    settingsGitProviderId?: string;
+    settingsGitModelId?: string;
+    settingsZenModel?: string;
+}): GitModelSelection | null => {
+    const gitProviderId = normalizeOptionalString(settingsGitProviderId);
+    const gitModelId = normalizeOptionalString(settingsGitModelId);
+    const zenModel = normalizeOptionalString(settingsZenModel);
+
+    if (!Array.isArray(providers) || providers.length === 0) {
+        if (gitProviderId && gitModelId) {
+            return { providerId: gitProviderId, modelId: gitModelId };
+        }
+        if (zenModel) {
+            return { providerId: GIT_UTILITY_PROVIDER_ID, modelId: zenModel };
+        }
+        return null;
+    }
+
+    if (gitProviderId && gitModelId && hasProviderModel(providers, gitProviderId, gitModelId)) {
+        return { providerId: gitProviderId, modelId: gitModelId };
+    }
+
+    if (zenModel && hasProviderModel(providers, GIT_UTILITY_PROVIDER_ID, zenModel)) {
+        return { providerId: GIT_UTILITY_PROVIDER_ID, modelId: zenModel };
+    }
+
+    if (hasProviderModel(providers, GIT_UTILITY_PROVIDER_ID, GIT_UTILITY_PREFERRED_MODEL_ID)) {
+        return { providerId: GIT_UTILITY_PROVIDER_ID, modelId: GIT_UTILITY_PREFERRED_MODEL_ID };
+    }
+
+    const zenProvider = providers.find((provider) => provider.id === GIT_UTILITY_PROVIDER_ID);
+    if (zenProvider?.models.length) {
+        const randomIndex = Math.floor(Math.random() * zenProvider.models.length);
+        const randomModelId = normalizeOptionalString(zenProvider.models[randomIndex]?.id);
+        if (randomModelId) {
+            return { providerId: GIT_UTILITY_PROVIDER_ID, modelId: randomModelId };
+        }
+    }
+
+    const firstProvider = providers.find((provider) => provider.models.length > 0);
+    const firstModelId = normalizeOptionalString(firstProvider?.models[0]?.id);
+    if (firstProvider?.id && firstModelId) {
+        return { providerId: firstProvider.id, modelId: firstModelId };
+    }
+
+    return null;
+};
 
 interface ModelsDevModelEntry {
     id?: string;
@@ -435,6 +514,7 @@ interface ConfigStore {
     setSettingsZenModel: (model: string | undefined) => void;
     setSettingsGitProviderId: (providerId: string | undefined) => void;
     setSettingsGitModelId: (modelId: string | undefined) => void;
+    getResolvedGitGenerationModel: () => { providerId: string; modelId: string } | null;
     saveAgentModelSelection: (agentName: string, providerId: string, modelId: string) => void;
     getAgentModelSelection: (agentName: string) => { providerId: string; modelId: string } | null;
     checkConnection: () => Promise<boolean>;
@@ -1019,26 +1099,34 @@ export const useConfigStore = create<ConfigStore>()(
 
                             const safeAgents = Array.isArray(agents) ? agents : [];
 
-                            // Backward compatibility: derive git settings from zenModel if git fields are missing
-                            let resolvedGitProviderId = openChamberDefaults.gitProviderId;
-                            let resolvedGitModelId = openChamberDefaults.gitModelId;
-                            if (!resolvedGitProviderId && !resolvedGitModelId && openChamberDefaults.zenModel) {
-                                resolvedGitProviderId = 'zen';
-                                resolvedGitModelId = openChamberDefaults.zenModel;
-                            }
-
-                            // Avoid overwriting valid existing git selections during hydration
-                            const existingGitProviderId = get().settingsGitProviderId;
-                            const existingGitModelId = get().settingsGitModelId;
-                            const hasValidGitSelection = existingGitProviderId && existingGitModelId;
-                            if (hasValidGitSelection) {
-                                resolvedGitProviderId = existingGitProviderId;
-                                resolvedGitModelId = existingGitModelId;
-                            }
-
                             const providers = get().activeDirectoryKey === directoryKey
                                 ? get().providers
                                 : (get().directoryScoped[directoryKey]?.providers ?? []);
+
+                            const existingGitProviderId = normalizeOptionalString(get().settingsGitProviderId);
+                            const existingGitModelId = normalizeOptionalString(get().settingsGitModelId);
+                            const existingZenModel = normalizeOptionalString(get().settingsZenModel);
+
+                            const defaultGitProviderId = normalizeOptionalString(openChamberDefaults.gitProviderId);
+                            const defaultGitModelId = normalizeOptionalString(openChamberDefaults.gitModelId);
+                            const defaultZenModel = normalizeOptionalString(openChamberDefaults.zenModel);
+
+                            const candidateGitProviderId = existingGitProviderId || defaultGitProviderId;
+                            const candidateGitModelId = existingGitModelId || defaultGitModelId;
+                            const candidateZenModel = existingZenModel || defaultZenModel;
+
+                            const resolvedGitSelection = resolveGitGenerationModelSelection({
+                                providers,
+                                settingsGitProviderId: candidateGitProviderId,
+                                settingsGitModelId: candidateGitModelId,
+                                settingsZenModel: candidateZenModel,
+                            });
+                            const resolvedGitProviderId = resolvedGitSelection?.providerId;
+                            const resolvedGitModelId = resolvedGitSelection?.modelId;
+                            const resolvedZenModel =
+                                resolvedGitProviderId === GIT_UTILITY_PROVIDER_ID && resolvedGitModelId
+                                    ? resolvedGitModelId
+                                    : (defaultZenModel || existingZenModel);
 
                             set((state) => {
                                 const baseSnapshot: DirectoryScopedConfig = state.directoryScoped[directoryKey] ?? {
@@ -1064,7 +1152,7 @@ export const useConfigStore = create<ConfigStore>()(
                                     settingsDefaultAgent: openChamberDefaults.defaultAgent,
                                     settingsAutoCreateWorktree: openChamberDefaults.autoCreateWorktree ?? false,
                                     settingsGitmojiEnabled: openChamberDefaults.gitmojiEnabled ?? false,
-                                    settingsZenModel: openChamberDefaults.zenModel,
+                                    settingsZenModel: resolvedZenModel,
                                     settingsGitProviderId: resolvedGitProviderId,
                                     settingsGitModelId: resolvedGitModelId,
                                     directoryScoped: {
@@ -1079,6 +1167,37 @@ export const useConfigStore = create<ConfigStore>()(
 
                                 return nextState;
                             });
+
+                            const shouldPersistResolvedGitSelection =
+                                !!resolvedGitProviderId &&
+                                !!resolvedGitModelId &&
+                                (
+                                    defaultGitProviderId !== resolvedGitProviderId ||
+                                    defaultGitModelId !== resolvedGitModelId ||
+                                    (
+                                        resolvedGitProviderId === GIT_UTILITY_PROVIDER_ID &&
+                                        resolvedZenModel !== defaultZenModel
+                                    )
+                                );
+
+                            if (shouldPersistResolvedGitSelection && resolvedGitProviderId && resolvedGitModelId) {
+                                const gitSettingsUpdate: {
+                                    gitProviderId: string;
+                                    gitModelId: string;
+                                    zenModel?: string;
+                                } = {
+                                    gitProviderId: resolvedGitProviderId,
+                                    gitModelId: resolvedGitModelId,
+                                };
+
+                                if (resolvedGitProviderId === GIT_UTILITY_PROVIDER_ID && resolvedZenModel) {
+                                    gitSettingsUpdate.zenModel = resolvedZenModel;
+                                }
+
+                                updateDesktopSettings(gitSettingsUpdate).catch(() => {
+                                    // Ignore errors - best effort cleanup
+                                });
+                            }
 
                             if (safeAgents.length === 0) {
                                 set((state) => {
@@ -1501,6 +1620,16 @@ export const useConfigStore = create<ConfigStore>()(
 
                 setSettingsGitModelId: (modelId: string | undefined) => {
                     set({ settingsGitModelId: modelId });
+                },
+
+                getResolvedGitGenerationModel: () => {
+                    const state = get();
+                    return resolveGitGenerationModelSelection({
+                        providers: state.providers,
+                        settingsGitProviderId: state.settingsGitProviderId,
+                        settingsGitModelId: state.settingsGitModelId,
+                        settingsZenModel: state.settingsZenModel,
+                    });
                 },
 
                 setVoiceProvider: (provider: 'browser' | 'openai' | 'say') => {

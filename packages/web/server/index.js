@@ -669,9 +669,11 @@ const resolveZenModel = async (override) => {
  */
 const resolveGitModel = async (requestParams) => {
   const { providerId, modelId, zenModel } = requestParams || {};
+  const requestProviderId = typeof providerId === 'string' ? providerId.trim() : '';
+  const requestModelId = typeof modelId === 'string' ? modelId.trim() : '';
 
-  if (providerId && modelId && typeof providerId === 'string' && typeof modelId === 'string') {
-    return { providerID: providerId.trim(), modelID: modelId.trim() };
+  if (requestProviderId && requestModelId) {
+    return { providerID: requestProviderId, modelID: requestModelId };
   }
 
   try {
