@@ -15,6 +15,8 @@ import Prism from 'prismjs';
 
 // Ensure common languages are loaded (react-syntax-highlighter lazy-loads them,
 // but we call Prism directly so we need them registered).
+import 'prismjs/components/prism-markup';
+import 'prismjs/components/prism-markup-templating';
 import 'prismjs/components/prism-typescript';
 import 'prismjs/components/prism-javascript';
 import 'prismjs/components/prism-jsx';
@@ -67,23 +69,104 @@ interface VirtualizedCodeBlockProps {
   lineStyles?: (line: CodeLine) => React.CSSProperties | undefined;
 }
 
-// ── Prism highlight (memoised per content+language) ──────────────────
-function highlightLines(
-  lines: CodeLine[],
-  language: string,
-): string[] {
-  const grammar = Prism.languages[language] ?? Prism.languages['text'];
-  if (!grammar) {
-    return lines.map((l) => escapeHtml(l.text));
+const toKebabCase = (value: string): string => value.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`);
+
+const styleObjectToCss = (style: React.CSSProperties): string => {
+  return Object.entries(style)
+    .filter(([, v]) => v !== undefined && v !== null)
+    .map(([k, v]) => `${toKebabCase(k)}:${String(v)};`)
+    .join('');
+};
+
+const buildSelectorList = (rawKey: string): string[] => {
+  return rawKey
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .flatMap((selector) => {
+      if (selector.startsWith('.token')) {
+        return [`.oc-virtualized-prism ${selector}`];
+      }
+      if (selector.startsWith('token.')) {
+        return [`.oc-virtualized-prism .${selector}`];
+      }
+      if (/^[a-z0-9_-]+$/i.test(selector)) {
+        return [`.oc-virtualized-prism .token.${selector}`];
+      }
+      if (selector.includes('token')) {
+        return [`.oc-virtualized-prism ${selector}`];
+      }
+      return [];
+    });
+};
+
+const buildPrismThemeCss = (theme: Record<string, React.CSSProperties>): string => {
+  const rules: string[] = [];
+  Object.entries(theme).forEach(([rawKey, style]) => {
+    const selectors = buildSelectorList(rawKey);
+    if (selectors.length === 0) {
+      return;
+    }
+    const css = styleObjectToCss(style);
+    if (!css) {
+      return;
+    }
+    rules.push(`${selectors.join(',')}{${css}}`);
+  });
+  return rules.join('\n');
+};
+
+const LANGUAGE_ALIASES: Record<string, string> = {
+  text: 'plain',
+  plaintext: 'plain',
+  shell: 'bash',
+  sh: 'bash',
+  zsh: 'bash',
+  patch: 'diff',
+  dockerfile: 'docker',
+  js: 'javascript',
+  ts: 'typescript',
+};
+
+const normalizeLanguage = (language: string): string => {
+  const lower = language.toLowerCase();
+  return LANGUAGE_ALIASES[lower] ?? lower;
+};
+
+const HIGHLIGHT_CACHE_MAX = 5000;
+const highlightCache = new Map<string, string>();
+
+const highlightLine = (text: string, language: string): string => {
+  const normalizedLanguage = normalizeLanguage(language);
+  const cacheKey = `${normalizedLanguage}\n${text}`;
+  const cached = highlightCache.get(cacheKey);
+  if (cached !== undefined) {
+    return cached;
   }
 
-  // Highlight the full text in one pass, then split back into lines.
-  // This is dramatically faster than N individual highlight() calls
-  // because Prism only builds the grammar state machine once.
-  const fullText = lines.map((l) => l.text).join('\n');
-  const highlighted = Prism.highlight(fullText, grammar, language);
-  return highlighted.split('\n');
-}
+  const grammar = Prism.languages[normalizedLanguage] ?? Prism.languages.text;
+  if (!grammar) {
+    const escaped = escapeHtml(text);
+    highlightCache.set(cacheKey, escaped);
+    return escaped;
+  }
+
+  try {
+    const highlighted = Prism.highlight(text, grammar, normalizedLanguage);
+    if (highlightCache.size >= HIGHLIGHT_CACHE_MAX) {
+      const oldestKey = highlightCache.keys().next().value;
+      if (typeof oldestKey === 'string') {
+        highlightCache.delete(oldestKey);
+      }
+    }
+    highlightCache.set(cacheKey, highlighted);
+    return highlighted;
+  } catch {
+    const escaped = escapeHtml(text);
+    highlightCache.set(cacheKey, escaped);
+    return escaped;
+  }
+};
 
 function escapeHtml(text: string): string {
   return text
@@ -97,15 +180,12 @@ export const VirtualizedCodeBlock: React.FC<VirtualizedCodeBlockProps> = React.m
   const {
     lines,
     language,
+    syntaxTheme,
     maxHeight = '60vh',
     showLineNumbers = true,
     lineStyles,
   } = props;
-  // Highlight once for the whole block
-  const highlightedHtml = React.useMemo(
-    () => highlightLines(lines, language),
-    [lines, language],
-  );
+  const prismThemeCss = React.useMemo(() => buildPrismThemeCss(syntaxTheme), [syntaxTheme]);
 
   const shouldVirtualize = lines.length > VIRTUALIZE_THRESHOLD;
 
@@ -113,14 +193,15 @@ export const VirtualizedCodeBlock: React.FC<VirtualizedCodeBlockProps> = React.m
   if (!shouldVirtualize) {
     return (
       <div
-        className="typography-code font-mono w-full min-w-0"
+        className="typography-code font-mono w-full min-w-0 oc-virtualized-prism"
         style={{ maxHeight, overflowY: 'auto' }}
       >
+        {prismThemeCss ? <style>{prismThemeCss}</style> : null}
         {lines.map((line, idx) => (
           <Row
             key={idx}
             line={line}
-            html={highlightedHtml[idx] ?? ''}
+            language={language}
             showLineNumbers={showLineNumbers}
             style={lineStyles?.(line)}
           />
@@ -133,7 +214,8 @@ export const VirtualizedCodeBlock: React.FC<VirtualizedCodeBlockProps> = React.m
   return (
     <VirtualizedRows
       lines={lines}
-      highlightedHtml={highlightedHtml}
+      language={language}
+      prismThemeCss={prismThemeCss}
       maxHeight={maxHeight}
       showLineNumbers={showLineNumbers}
       lineStyles={lineStyles}
@@ -146,7 +228,8 @@ VirtualizedCodeBlock.displayName = 'VirtualizedCodeBlock';
 // ── Virtualised container (extracted so the hook is top-level) ────────
 interface VirtualizedRowsProps {
   lines: CodeLine[];
-  highlightedHtml: string[];
+  language: string;
+  prismThemeCss: string;
   maxHeight: string;
   showLineNumbers: boolean;
   lineStyles?: (line: CodeLine) => React.CSSProperties | undefined;
@@ -154,7 +237,8 @@ interface VirtualizedRowsProps {
 
 const VirtualizedRows: React.FC<VirtualizedRowsProps> = React.memo(({
   lines,
-  highlightedHtml,
+  language,
+  prismThemeCss,
   maxHeight,
   showLineNumbers,
   lineStyles,
@@ -171,9 +255,10 @@ const VirtualizedRows: React.FC<VirtualizedRowsProps> = React.memo(({
   return (
     <div
       ref={parentRef}
-      className="typography-code font-mono w-full min-w-0"
+      className="typography-code font-mono w-full min-w-0 oc-virtualized-prism"
       style={{ maxHeight, overflowY: 'auto' }}
     >
+      {prismThemeCss ? <style>{prismThemeCss}</style> : null}
       <div
         style={{
           height: `${virtualizer.getTotalSize()}px`,
@@ -197,7 +282,7 @@ const VirtualizedRows: React.FC<VirtualizedRowsProps> = React.memo(({
             >
               <Row
                 line={line}
-                html={highlightedHtml[vItem.index] ?? ''}
+                language={language}
                 showLineNumbers={showLineNumbers}
                 style={lineStyles?.(line)}
               />
@@ -214,38 +299,42 @@ VirtualizedRows.displayName = 'VirtualizedRows';
 // ── Single row ───────────────────────────────────────────────────────
 interface RowProps {
   line: CodeLine;
-  html: string;
+  language: string;
   showLineNumbers: boolean;
   style?: React.CSSProperties;
 }
 
-const Row: React.FC<RowProps> = React.memo(({ line, html, showLineNumbers, style }) => (
-  <div
-    className="typography-code font-mono flex w-full min-w-0"
-    style={style}
-  >
-    {showLineNumbers && (
-      <span
-        className="w-10 flex-shrink-0 text-right pr-3 select-none border-r mr-3 -my-0.5 py-0.5"
-        style={{ color: 'var(--tools-edit-line-number)', borderColor: 'var(--tools-border)' }}
-      >
-        {!line.isInfo && line.lineNumber != null ? line.lineNumber : ''}
-      </span>
-    )}
-    <div className="flex-1 min-w-0">
-      {line.isInfo ? (
-        <div className="whitespace-pre-wrap break-words text-muted-foreground/70 italic">
-          {line.text}
-        </div>
-      ) : (
-        <div
-          className="whitespace-pre-wrap break-all"
-          style={{ overflowWrap: 'anywhere' }}
-          dangerouslySetInnerHTML={{ __html: html }}
-        />
+const Row: React.FC<RowProps> = React.memo(({ line, language, showLineNumbers, style }) => {
+  const html = React.useMemo(() => highlightLine(line.text, language), [line.text, language]);
+
+  return (
+    <div
+      className="typography-code font-mono flex w-full min-w-0"
+      style={style}
+    >
+      {showLineNumbers && (
+        <span
+          className="w-10 flex-shrink-0 text-right pr-3 select-none border-r mr-3 -my-0.5 py-0.5"
+          style={{ color: 'var(--tools-edit-line-number)', borderColor: 'var(--tools-border)' }}
+        >
+          {!line.isInfo && line.lineNumber != null ? line.lineNumber : ''}
+        </span>
       )}
+      <div className="flex-1 min-w-0">
+        {line.isInfo ? (
+          <div className="whitespace-pre-wrap break-words text-muted-foreground/70 italic">
+            {line.text}
+          </div>
+        ) : (
+          <div
+            className="whitespace-pre-wrap break-all"
+            style={{ overflowWrap: 'anywhere' }}
+            dangerouslySetInnerHTML={{ __html: html }}
+          />
+        )}
+      </div>
     </div>
-  </div>
-));
+  );
+});
 
 Row.displayName = 'VirtualizedCodeBlock.Row';
