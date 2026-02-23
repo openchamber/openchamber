@@ -4,7 +4,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
 import { AgentSelector } from '@/components/sections/commands/AgentSelector';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -293,19 +293,37 @@ export const DefaultsSettings: React.FC = () => {
   }
 
   return (
-    <div className="mb-8">
-      <div className="mb-3 px-1">
+    <div className="mb-6">
+      <div className="mb-0.5 px-1">
         <div className="flex items-center gap-2">
-          <h3 className="typography-ui-header font-semibold text-foreground">Session Defaults</h3>
+          <h3 className="typography-ui-header font-medium text-foreground">Session Defaults</h3>
         </div>
       </div>
 
-      <div className="rounded-lg bg-[var(--surface-elevated)]/70 overflow-hidden flex flex-col">
-        <div className={cn("flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-4 py-3 border-b border-[var(--surface-subtle)]")}>
-          <div className="flex min-w-0 flex-col sm:w-1/3 shrink-0">
+      <section className="px-2 pb-2 pt-0 space-y-0">
+        <div className="mt-0 mb-1 typography-meta text-muted-foreground">
+          New sessions will start with:{' '}
+          {parsedModel.providerId ? (
+            <span className="text-foreground">
+              {parsedModel.providerId}/{parsedModel.modelId}
+              {supportsVariants ? ` (${defaultVariant ?? 'default'})` : ''}
+            </span>
+          ) : (
+            <span className="text-foreground">opencode agent default</span>
+          )}
+          {defaultAgent && (
+            <>
+              {' / '}
+              <span className="text-foreground">{defaultAgent}</span>
+            </>
+          )}
+        </div>
+
+        <div className={cn("flex flex-col gap-2 py-1 sm:flex-row sm:items-center sm:gap-8")}>
+          <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
             <span className="typography-ui-label text-foreground">Default Model</span>
           </div>
-          <div className="flex items-center gap-3 flex-1 max-w-sm justify-end">
+          <div className="flex min-w-0 flex-1 items-center gap-2 sm:w-fit sm:flex-initial">
             <ModelSelector
               providerId={parsedModel.providerId}
               modelId={parsedModel.modelId}
@@ -314,13 +332,13 @@ export const DefaultsSettings: React.FC = () => {
           </div>
         </div>
 
-          <div className={cn("flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-4 py-3 border-b border-[var(--surface-subtle)]", !supportsVariants && "opacity-60")}>
-            <div className="flex min-w-0 flex-col sm:w-1/3 shrink-0">
+          <div className={cn("flex flex-col gap-2 py-1 sm:flex-row sm:items-center sm:gap-8", !supportsVariants && "opacity-60")}>
+            <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
               <span className="typography-ui-label text-foreground">Default Thinking</span>
             </div>
-            <div className="flex items-center gap-3 flex-1 justify-end">
+            <div className="flex items-center gap-2 sm:w-fit">
               <Select value={defaultVariant ?? DEFAULT_VARIANT_VALUE} onValueChange={handleVariantChange} disabled={!supportsVariants}>
-                <SelectTrigger size="lg" className="w-fit min-w-[120px] bg-interactive-selection/20 border-border/20 hover:bg-interactive-hover/30 shadow-none focus:ring-0">
+                <SelectTrigger className="w-fit min-w-[120px]">
                   <SelectValue placeholder="Thinking" />
                 </SelectTrigger>
                 <SelectContent>
@@ -335,11 +353,11 @@ export const DefaultsSettings: React.FC = () => {
             </div>
           </div>
 
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-4 py-3 border-b border-[var(--surface-subtle)]">
-          <div className="flex min-w-0 flex-col sm:w-1/3 shrink-0">
+        <div className="flex flex-col gap-2 py-1 sm:flex-row sm:items-center sm:gap-8">
+          <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
             <span className="typography-ui-label text-foreground">Default Agent</span>
           </div>
-          <div className="flex items-center gap-3 flex-1 max-w-sm justify-end">
+          <div className="flex min-w-0 flex-1 items-center gap-2 sm:w-fit sm:flex-initial">
             <AgentSelector
               agentName={defaultAgent || ''}
               onChange={handleAgentChange}
@@ -347,8 +365,8 @@ export const DefaultsSettings: React.FC = () => {
           </div>
         </div>
 
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-4 py-3 border-b border-[var(--surface-subtle)]">
-          <div className="flex min-w-0 flex-col sm:w-1/3 shrink-0">
+        <div className="flex flex-col gap-2 py-1 sm:flex-row sm:items-center sm:gap-8">
+          <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
             <div className="flex items-center gap-2">
               <span className="typography-ui-label text-foreground">Zen Model</span>
               <Tooltip delayDuration={1000}>
@@ -361,12 +379,12 @@ export const DefaultsSettings: React.FC = () => {
               </Tooltip>
             </div>
           </div>
-          <div className="flex items-center gap-3 flex-1 justify-end">
+          <div className="flex items-center gap-2 sm:w-fit">
             {zenModelsLoading ? (
               <span className="typography-meta text-muted-foreground">Loading models...</span>
             ) : zenModels.length > 0 ? (
               <Select value={selectedZenModel} onValueChange={handleZenModelChange}>
-                <SelectTrigger size="lg" className="w-fit min-w-[120px] bg-interactive-selection/20 border-border/20 hover:bg-interactive-hover/30 shadow-none focus:ring-0">
+                <SelectTrigger className="w-fit min-w-[120px]">
                   <SelectValue placeholder="Select model" />
                 </SelectTrigger>
                 <SelectContent>
@@ -383,19 +401,50 @@ export const DefaultsSettings: React.FC = () => {
           </div>
         </div>
 
-        <label className={cn("group flex cursor-pointer items-center justify-between gap-4 px-4 py-3 transition-colors hover:bg-[var(--interactive-hover)]/30", !isVSCode && "border-b border-[var(--surface-subtle)]")}>
-          <div className="flex min-w-0 flex-col sm:w-1/3 shrink-0">
-            <span className="typography-ui-label text-foreground">Show Deletion Dialog</span>
-          </div>
-          <Switch
+        <div
+          className="group flex cursor-pointer items-center gap-2 py-1"
+          role="button"
+          tabIndex={0}
+          aria-pressed={showDeletionDialog}
+          onClick={() => setShowDeletionDialog(!showDeletionDialog)}
+          onKeyDown={(event) => {
+            if (event.key === ' ' || event.key === 'Enter') {
+              event.preventDefault();
+              setShowDeletionDialog(!showDeletionDialog);
+            }
+          }}
+        >
+          <Checkbox
             checked={showDeletionDialog}
-            onCheckedChange={setShowDeletionDialog}
-            className="data-[state=checked]:bg-[var(--primary-base)]"
+            onChange={setShowDeletionDialog}
+            ariaLabel="Show deletion dialog"
           />
-        </label>
+          <span className="typography-ui-label text-foreground">Show Deletion Dialog</span>
+        </div>
 
         {!isVSCode && (
-          <label className="group flex cursor-pointer items-center justify-between gap-4 px-4 py-4 transition-colors hover:bg-[var(--interactive-hover)]/30">
+          <div
+            className="group flex cursor-pointer items-center gap-2 py-1"
+            role="button"
+            tabIndex={0}
+            aria-pressed={settingsAutoCreateWorktree}
+            onClick={() => {
+              void handleAutoWorktreeChange(!settingsAutoCreateWorktree);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === ' ' || event.key === 'Enter') {
+                event.preventDefault();
+                void handleAutoWorktreeChange(!settingsAutoCreateWorktree);
+              }
+            }}
+          >
+            <Checkbox
+              checked={settingsAutoCreateWorktree}
+              onChange={(checked) => {
+                void handleAutoWorktreeChange(checked);
+              }}
+              ariaLabel="Always create worktree"
+            />
             <div className="flex min-w-0 flex-col">
               <div className="flex items-center gap-1.5">
                 <span className="typography-ui-label text-foreground">Always Create Worktree</span>
@@ -411,32 +460,11 @@ export const DefaultsSettings: React.FC = () => {
                 </Tooltip>
               </div>
             </div>
-            <Switch
-              checked={settingsAutoCreateWorktree}
-              onCheckedChange={handleAutoWorktreeChange}
-              className="data-[state=checked]:bg-[var(--primary-base)]"
-            />
-          </label>
+          </div>
         )}
-      </div>
+
+      </section>
       
-      <div className="mt-3 px-3 typography-meta text-muted-foreground">
-        New sessions will start with:{' '}
-        {parsedModel.providerId ? (
-          <span className="text-foreground">
-            {parsedModel.providerId}/{parsedModel.modelId}
-            {supportsVariants ? ` (${defaultVariant ?? 'default'})` : ''}
-          </span>
-        ) : (
-          <span className="text-foreground">opencode agent default</span>
-        )}
-        {defaultAgent && (
-          <>
-            {' / '}
-            <span className="text-foreground">{defaultAgent}</span>
-          </>
-        )}
-      </div>
     </div>
   );
 };

@@ -2,6 +2,7 @@ import React from 'react';
 import { Button } from '@/components/ui/button';
 import { ButtonSmall } from '@/components/ui/button-small';
 import { Input } from '@/components/ui/input';
+import { NumberInput } from '@/components/ui/number-input';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui';
 import { useAgentsStore, type AgentConfig, type AgentScope } from '@/stores/useAgentsStore';
@@ -10,7 +11,7 @@ import { usePermissionStore } from '@/stores/permissionStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useDeviceInfo } from '@/lib/device';
 import { opencodeClient } from '@/lib/opencode/client';
-import { RiAddLine, RiAiAgentFill, RiAiAgentLine, RiInformationLine, RiRobot2Line, RiRobotLine, RiSubtractLine, RiUser3Line, RiFolderLine } from '@remixicon/react';
+import { RiAiAgentFill, RiAiAgentLine, RiCloseLine, RiInformationLine, RiRobot2Line, RiRobotLine, RiSubtractLine, RiUser3Line, RiFolderLine } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import { ModelSelector } from './ModelSelector';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -773,33 +774,34 @@ export const AgentsPage: React.FC = () => {
                 </div>
                 <span className="typography-meta text-muted-foreground">0.0 to 2.0</span>
               </div>
-              <div className="flex items-center gap-1 flex-1 justify-end">
-                <ButtonSmall variant="outline" onClick={() => {
-                  const current = temperature !== undefined ? temperature : 0.7;
-                  setTemperature(parseFloat(Math.max(0, current - 0.1).toFixed(1)));
-                }} className="px-1.5"><RiSubtractLine className="w-4 h-4" /></ButtonSmall>
-                <Input
-                  type="text"
-                  inputMode="decimal"
-                  value={temperature !== undefined ? temperature : ''}
-                  onChange={(e) => {
-                    if (e.target.value === '') { setTemperature(undefined); return; }
-                    const parsed = parseFloat(e.target.value);
-                    if (!isNaN(parsed) && parsed >= 0 && parsed <= 2) setTemperature(parsed);
-                  }}
-                  onBlur={(e) => {
-                    if (e.target.value !== '') {
-                      const parsed = parseFloat(e.target.value);
-                      if (!isNaN(parsed)) setTemperature(parseFloat(Math.max(0, Math.min(2, parsed)).toFixed(1)));
-                    }
-                  }}
-                  placeholder="—"
-                  className="w-16 h-8 text-center px-1 tabular-nums focus-visible:ring-[var(--primary-base)]"
-                />
-                <ButtonSmall variant="outline" onClick={() => {
-                  const current = temperature !== undefined ? temperature : 0.7;
-                  setTemperature(parseFloat(Math.min(2, current + 0.1).toFixed(1)));
-                }} className="px-1.5"><RiAddLine className="w-4 h-4" /></ButtonSmall>
+            <div className="flex items-center gap-1 flex-1 justify-end">
+                <div className="flex items-center gap-2">
+                  <NumberInput
+                    value={temperature}
+                    fallbackValue={0.7}
+                    onValueChange={setTemperature}
+                    onClear={() => setTemperature(undefined)}
+                    min={0}
+                    max={2}
+                    step={0.1}
+                    inputMode="decimal"
+                    placeholder="—"
+                    emptyLabel="—"
+                    className="w-16"
+                  />
+                  {temperature !== undefined && (
+                    <ButtonSmall
+                      type="button"
+                      variant="ghost"
+                      onClick={() => setTemperature(undefined)}
+                      className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
+                      aria-label="Clear temperature override"
+                      title="Clear"
+                    >
+                      <RiCloseLine className="h-3.5 w-3.5" />
+                    </ButtonSmall>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -818,33 +820,34 @@ export const AgentsPage: React.FC = () => {
                 </div>
                 <span className="typography-meta text-muted-foreground">0.0 to 1.0</span>
               </div>
-              <div className="flex items-center gap-1 flex-1 justify-end">
-                <ButtonSmall variant="outline" onClick={() => {
-                  const current = topP !== undefined ? topP : 0.9;
-                  setTopP(parseFloat(Math.max(0, current - 0.1).toFixed(1)));
-                }} className="px-1.5"><RiSubtractLine className="w-4 h-4" /></ButtonSmall>
-                <Input
-                  type="text"
-                  inputMode="decimal"
-                  value={topP !== undefined ? topP : ''}
-                  onChange={(e) => {
-                    if (e.target.value === '') { setTopP(undefined); return; }
-                    const parsed = parseFloat(e.target.value);
-                    if (!isNaN(parsed) && parsed >= 0 && parsed <= 1) setTopP(parsed);
-                  }}
-                  onBlur={(e) => {
-                    if (e.target.value !== '') {
-                      const parsed = parseFloat(e.target.value);
-                      if (!isNaN(parsed)) setTopP(parseFloat(Math.max(0, Math.min(1, parsed)).toFixed(1)));
-                    }
-                  }}
-                  placeholder="—"
-                  className="w-16 h-8 text-center px-1 tabular-nums focus-visible:ring-[var(--primary-base)]"
-                />
-                <ButtonSmall variant="outline" onClick={() => {
-                  const current = topP !== undefined ? topP : 0.9;
-                  setTopP(parseFloat(Math.min(1, current + 0.1).toFixed(1)));
-                }} className="px-1.5"><RiAddLine className="w-4 h-4" /></ButtonSmall>
+            <div className="flex items-center gap-1 flex-1 justify-end">
+                <div className="flex items-center gap-2">
+                  <NumberInput
+                    value={topP}
+                    fallbackValue={0.9}
+                    onValueChange={setTopP}
+                    onClear={() => setTopP(undefined)}
+                    min={0}
+                    max={1}
+                    step={0.1}
+                    inputMode="decimal"
+                    placeholder="—"
+                    emptyLabel="—"
+                    className="w-16"
+                  />
+                  {topP !== undefined && (
+                    <ButtonSmall
+                      type="button"
+                      variant="ghost"
+                      onClick={() => setTopP(undefined)}
+                      className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
+                      aria-label="Clear top p override"
+                      title="Clear"
+                    >
+                      <RiCloseLine className="h-3.5 w-3.5" />
+                    </ButtonSmall>
+                  )}
+                </div>
               </div>
             </div>
 

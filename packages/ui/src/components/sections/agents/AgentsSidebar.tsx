@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { ButtonLarge } from '@/components/ui/button-large';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui';
+import { isMobileDeviceViaCSS } from '@/lib/device';
 import {
   Dialog,
   DialogContent,
@@ -540,6 +541,7 @@ const AgentListItem: React.FC<AgentListItemProps> = ({
   onMenuOpenChange,
 }) => {
   const extAgent = agent as Agent & { scope?: AgentScope };
+  const isMobile = isMobileDeviceViaCSS();
   
   return (
     <div
@@ -547,10 +549,10 @@ const AgentListItem: React.FC<AgentListItemProps> = ({
         'group relative flex items-center rounded-md px-1.5 py-1 transition-all duration-200 select-none',
         isSelected ? 'bg-interactive-selection' : 'hover:bg-interactive-hover'
       )}
-      onContextMenu={(e) => {
+      onContextMenu={!isMobile ? (e) => {
         e.preventDefault();
         onMenuOpenChange(true);
-      }}
+      } : undefined}
     >
       <div className="flex min-w-0 flex-1 items-center">
         <button

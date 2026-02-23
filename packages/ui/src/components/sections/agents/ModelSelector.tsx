@@ -512,24 +512,24 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                 <DropdownMenu open={isDropdownOpen} onOpenChange={setIsDropdownOpen}>
                     <DropdownMenuTrigger asChild>
                         <div className={cn(
-                            'flex items-center gap-2 px-2 rounded-lg bg-interactive-selection/20 border border-border/20 cursor-pointer hover:bg-interactive-hover/30 h-8 w-fit',
+                            'border-input data-[placeholder]:text-muted-foreground flex items-center justify-between gap-2 rounded-lg border bg-transparent px-2 py-2 typography-ui-label whitespace-nowrap shadow-none outline-none hover:bg-interactive-hover data-[state=open]:bg-interactive-active h-6 w-fit',
                             className
                         )}>
                             {providerId ? (
                                 <>
                                     <ProviderLogo
                                         providerId={providerId}
-                                        className="h-3 w-3 flex-shrink-0"
+                                        className="h-3.5 w-3.5 flex-shrink-0"
                                     />
                                     <RiPencilAiLine className="h-3 w-3 text-primary/60 hidden" />
                                 </>
                             ) : (
-                                <RiPencilAiLine className="h-3 w-3 text-muted-foreground" />
+                                <RiPencilAiLine className="h-3.5 w-3.5 text-muted-foreground" />
                             )}
-                            <span className="typography-micro font-medium whitespace-nowrap">
+                            <span className="typography-ui-label font-normal whitespace-nowrap text-foreground">
                                 {providerId && modelId ? `${providerId}/${modelId}` : (placeholder || 'Not selected')}
                             </span>
-                            <RiArrowDownSLine className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
+                            <RiArrowDownSLine className="h-4 w-4 flex-shrink-0 text-muted-foreground/50" />
                         </div>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent className="w-[min(380px,calc(100vw-2rem))] p-0 flex flex-col" align="start">

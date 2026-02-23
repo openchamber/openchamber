@@ -1,12 +1,15 @@
 import React from 'react';
+import { RiRestartLine } from '@remixicon/react';
 import { useUIStore } from '@/stores/useUIStore';
 import { isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
 import { useDeviceInfo } from '@/lib/device';
-import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from '@/components/ui';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { GridLoader } from '@/components/ui/grid-loader';
+import { Input } from '@/components/ui/input';
 import { NumberInput } from '@/components/ui/number-input';
+import { ButtonSmall } from '@/components/ui/button-small';
 import { cn } from '@/lib/utils';
 
 const DEFAULT_NOTIFICATION_TEMPLATES = {
@@ -15,6 +18,10 @@ const DEFAULT_NOTIFICATION_TEMPLATES = {
   question: { title: 'Input needed', message: '{last_message}' },
   subtask: { title: '{agent_name} is ready', message: '{model_name} completed the task' },
 } as const;
+
+const DEFAULT_SUMMARY_THRESHOLD = 200;
+const DEFAULT_SUMMARY_LENGTH = 100;
+const DEFAULT_MAX_LAST_MESSAGE_LENGTH = 250;
 
 export const NotificationSettings: React.FC = () => {
   const { isMobile } = useDeviceInfo();
@@ -406,40 +413,64 @@ export const NotificationSettings: React.FC = () => {
 
         {/* --- Global Delivery Settings --- */}
         <div className="mb-8">
-          <div className="mb-3 px-1">
-            <h3 className="typography-ui-header font-semibold text-foreground">
-              Notification Delivery
-            </h3>
+          <div className="mb-1 px-1">
+              <h3 className="typography-ui-header font-medium text-foreground">
+                Notification Delivery
+              </h3>
           </div>
-          
-          <div className="rounded-lg bg-[var(--surface-elevated)]/70 overflow-hidden flex flex-col">
-            <label className="group flex cursor-pointer items-center justify-between gap-2 px-4 py-3 transition-colors hover:bg-[var(--interactive-hover)]/30">
-              <div className="flex min-w-0 flex-col">
-                <span className="typography-ui-label text-foreground">Enable Notifications</span>
-              </div>
-              <Switch
+
+          <section className="px-2 pb-2 pt-0 space-y-0.5">
+            <div
+              className="group flex cursor-pointer items-center gap-2 py-1.5"
+              role="button"
+              tabIndex={0}
+              aria-pressed={nativeNotificationsEnabled && canShowNotifications}
+              onClick={() => {
+                void handleToggleChange(!(nativeNotificationsEnabled && canShowNotifications));
+              }}
+              onKeyDown={(event) => {
+                if (event.key === ' ' || event.key === 'Enter') {
+                  event.preventDefault();
+                  void handleToggleChange(!(nativeNotificationsEnabled && canShowNotifications));
+                }
+              }}
+            >
+              <Checkbox
                 checked={nativeNotificationsEnabled && canShowNotifications}
-                onCheckedChange={handleToggleChange}
-                className="data-[state=checked]:bg-[var(--primary-base)]"
+                onChange={(checked) => {
+                  void handleToggleChange(checked);
+                }}
+                ariaLabel="Enable notifications"
               />
-            </label>
+              <span className="typography-ui-label text-foreground">Enable Notifications</span>
+            </div>
 
             {nativeNotificationsEnabled && canShowNotifications && (
-              <label className="group flex cursor-pointer items-center justify-between gap-2 px-4 py-3 transition-colors hover:bg-[var(--interactive-hover)]/30">
-                <div className="flex min-w-0 flex-col">
-                  <span className="typography-ui-label text-foreground">Notify While App is Focused</span>
-                </div>
-                <Switch
+              <div
+                className="group flex cursor-pointer items-center gap-2 py-1.5"
+                role="button"
+                tabIndex={0}
+                aria-pressed={notificationMode === 'always'}
+                onClick={() => setNotificationMode(notificationMode === 'always' ? 'hidden-only' : 'always')}
+                onKeyDown={(event) => {
+                  if (event.key === ' ' || event.key === 'Enter') {
+                    event.preventDefault();
+                    setNotificationMode(notificationMode === 'always' ? 'hidden-only' : 'always');
+                  }
+                }}
+              >
+                <Checkbox
                   checked={notificationMode === 'always'}
-                  onCheckedChange={(checked: boolean) => setNotificationMode(checked ? 'always' : 'hidden-only')}
-                  className="data-[state=checked]:bg-[var(--primary-base)]"
+                  onChange={(checked) => setNotificationMode(checked ? 'always' : 'hidden-only')}
+                  ariaLabel="Notify while app is focused"
                 />
-              </label>
+                <span className="typography-ui-label text-foreground">Notify While App is Focused</span>
+              </div>
             )}
-          </div>
-          
+          </section>
+
           {isBrowser && (
-            <div className="mt-2 px-3">
+            <div className="mt-1 px-2">
               <p className="typography-meta text-muted-foreground/70">
                 Your browser may ask for permission the first time.
               </p>
@@ -456,7 +487,7 @@ export const NotificationSettings: React.FC = () => {
             </div>
           )}
           {isVSCode && (
-            <div className="mt-2 px-3">
+            <div className="mt-1 px-2">
               <p className="typography-meta text-muted-foreground/70">
                 VS Code runtime handles notifications separately natively.
               </p>
@@ -468,63 +499,87 @@ export const NotificationSettings: React.FC = () => {
           <>
             {/* --- Events --- */}
             <div className="mb-8">
-              <div className="mb-3 px-1">
-                <h3 className="typography-ui-header font-semibold text-foreground">
+              <div className="mb-1 px-1">
+                <h3 className="typography-ui-header font-medium text-foreground">
                   Notification Events
                 </h3>
               </div>
 
-              <div className="rounded-lg bg-[var(--surface-elevated)]/70 overflow-hidden flex flex-col">
-                <label className="group flex cursor-pointer items-center justify-between gap-2 px-4 py-3 transition-colors hover:bg-[var(--interactive-hover)]/30">
-                  <div className="flex min-w-0 flex-col">
-                    <span className="typography-ui-label text-foreground">Agent Completion</span>
-                  </div>
-                  <Switch
-                    checked={notifyOnCompletion}
-                    onCheckedChange={setNotifyOnCompletion}
-                    className="data-[state=checked]:bg-[var(--primary-base)]"
-                  />
-                </label>
+              <section className="px-2 pb-2 pt-0 space-y-0.5">
+                <div
+                  className="group flex cursor-pointer items-center gap-2 py-1.5"
+                  role="button"
+                  tabIndex={0}
+                  aria-pressed={notifyOnCompletion}
+                  onClick={() => setNotifyOnCompletion(!notifyOnCompletion)}
+                  onKeyDown={(event) => {
+                    if (event.key === ' ' || event.key === 'Enter') {
+                      event.preventDefault();
+                      setNotifyOnCompletion(!notifyOnCompletion);
+                    }
+                  }}
+                >
+                  <Checkbox checked={notifyOnCompletion} onChange={setNotifyOnCompletion} ariaLabel="Agent completion" />
+                  <span className="typography-ui-label text-foreground">Agent Completion</span>
+                </div>
 
-                <label className="group flex cursor-pointer items-center justify-between gap-2 px-4 py-3 transition-colors hover:bg-[var(--interactive-hover)]/30">
-                  <div className="flex min-w-0 flex-col">
-                    <span className="typography-ui-label text-foreground">Subagent Completion</span>
-                  </div>
-                  <Switch
-                    checked={notifyOnSubtasks}
-                    onCheckedChange={(checked: boolean) => setNotifyOnSubtasks(checked)}
-                    className="data-[state=checked]:bg-[var(--primary-base)]"
-                  />
-                </label>
+                <div
+                  className="group flex cursor-pointer items-center gap-2 py-1.5"
+                  role="button"
+                  tabIndex={0}
+                  aria-pressed={notifyOnSubtasks}
+                  onClick={() => setNotifyOnSubtasks(!notifyOnSubtasks)}
+                  onKeyDown={(event) => {
+                    if (event.key === ' ' || event.key === 'Enter') {
+                      event.preventDefault();
+                      setNotifyOnSubtasks(!notifyOnSubtasks);
+                    }
+                  }}
+                >
+                  <Checkbox checked={notifyOnSubtasks} onChange={setNotifyOnSubtasks} ariaLabel="Subagent completion" />
+                  <span className="typography-ui-label text-foreground">Subagent Completion</span>
+                </div>
 
-                <label className="group flex cursor-pointer items-center justify-between gap-2 px-4 py-3 transition-colors hover:bg-[var(--interactive-hover)]/30">
-                  <div className="flex min-w-0 flex-col">
-                    <span className="typography-ui-label text-foreground">Agent Errors</span>
-                  </div>
-                  <Switch
-                    checked={notifyOnError}
-                    onCheckedChange={setNotifyOnError}
-                    className="data-[state=checked]:bg-[var(--primary-base)]"
-                  />
-                </label>
+                <div
+                  className="group flex cursor-pointer items-center gap-2 py-1.5"
+                  role="button"
+                  tabIndex={0}
+                  aria-pressed={notifyOnError}
+                  onClick={() => setNotifyOnError(!notifyOnError)}
+                  onKeyDown={(event) => {
+                    if (event.key === ' ' || event.key === 'Enter') {
+                      event.preventDefault();
+                      setNotifyOnError(!notifyOnError);
+                    }
+                  }}
+                >
+                  <Checkbox checked={notifyOnError} onChange={setNotifyOnError} ariaLabel="Agent errors" />
+                  <span className="typography-ui-label text-foreground">Agent Errors</span>
+                </div>
 
-                <label className="group flex cursor-pointer items-center justify-between gap-2 px-4 py-3 transition-colors hover:bg-[var(--interactive-hover)]/30">
-                  <div className="flex min-w-0 flex-col">
-                    <span className="typography-ui-label text-foreground">Agent Questions</span>
-                  </div>
-                  <Switch
-                    checked={notifyOnQuestion}
-                    onCheckedChange={setNotifyOnQuestion}
-                    className="data-[state=checked]:bg-[var(--primary-base)]"
-                  />
-                </label>
-              </div>
+                <div
+                  className="group flex cursor-pointer items-center gap-2 py-1.5"
+                  role="button"
+                  tabIndex={0}
+                  aria-pressed={notifyOnQuestion}
+                  onClick={() => setNotifyOnQuestion(!notifyOnQuestion)}
+                  onKeyDown={(event) => {
+                    if (event.key === ' ' || event.key === 'Enter') {
+                      event.preventDefault();
+                      setNotifyOnQuestion(!notifyOnQuestion);
+                    }
+                  }}
+                >
+                  <Checkbox checked={notifyOnQuestion} onChange={setNotifyOnQuestion} ariaLabel="Agent questions" />
+                  <span className="typography-ui-label text-foreground">Agent Questions</span>
+                </div>
+              </section>
             </div>
 
             {/* --- Template Customization --- */}
             <div className="mb-8">
-              <div className="mb-3 px-1">
-                <h3 className="typography-ui-header font-semibold text-foreground">
+              <div className="mb-1 px-1">
+                <h3 className="typography-ui-header font-medium text-foreground">
                   Notification Templates
                 </h3>
                 <p className="typography-meta text-muted-foreground mt-0.5">
@@ -532,76 +587,75 @@ export const NotificationSettings: React.FC = () => {
                 </p>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-2 md:grid-cols-2 md:gap-3">
                 {(['completion', 'subtask', 'error', 'question'] as const).map((event) => (
-                  <div key={event} className="rounded-lg bg-[var(--surface-elevated)]/70 py-3 px-4">
-                    <span className="typography-ui-label text-foreground font-medium capitalize mb-3 block">
+                  <section key={event} className="p-2">
+                    <span className="typography-ui-label text-foreground font-normal capitalize block">
                       {event === 'subtask' ? 'Subagent Completion' : event}
                     </span>
-                    <div className="space-y-3">
+                    <div className="mt-1.5 space-y-2">
                       <div>
                         <label className="typography-micro text-muted-foreground block mb-1">Title</label>
-                        <input
-                          type="text"
+                        <Input
                           value={notificationTemplates[event].title}
                           onChange={(e) => updateTemplate(event, 'title', e.target.value)}
-                          className="w-full rounded-md border border-[var(--interactive-border)] bg-background px-3 py-1.5 typography-ui text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-[var(--primary-base)]"
+                          className="h-7"
                           placeholder={DEFAULT_NOTIFICATION_TEMPLATES[event].title}
                         />
                       </div>
                       <div>
                         <label className="typography-micro text-muted-foreground block mb-1">Message</label>
-                        <input
-                          type="text"
+                        <Input
                           value={notificationTemplates[event].message}
                           onChange={(e) => updateTemplate(event, 'message', e.target.value)}
-                          className="w-full rounded-md border border-[var(--interactive-border)] bg-background px-3 py-1.5 typography-ui text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-[var(--primary-base)]"
+                          className="h-7"
                           placeholder={DEFAULT_NOTIFICATION_TEMPLATES[event].message}
                         />
                       </div>
                     </div>
-                  </div>
+                  </section>
                 ))}
               </div>
             </div>
 
             {/* --- Summarization --- */}
             <div className="mb-8">
-              <div className="mb-3 px-1">
-                <h3 className="typography-ui-header font-semibold text-foreground">
+              <div className="mb-1 px-1">
+                <h3 className="typography-ui-header font-medium text-foreground">
                   AI Summarization
                 </h3>
               </div>
 
-              <div className="rounded-lg bg-[var(--surface-elevated)]/70 overflow-hidden flex flex-col">
-                <label className="group flex cursor-pointer items-center justify-between gap-2 px-4 py-3 transition-colors hover:bg-[var(--interactive-hover)]/30">
-                  <div className="flex min-w-0 flex-col">
-                    <span className="typography-ui-label text-foreground">Summarize Last Message</span>
-                  </div>
-                  <Switch
+              <section className="px-2 pb-2 pt-0 space-y-0.5">
+                <div
+                  className="group flex cursor-pointer items-center gap-2 py-1.5"
+                  role="button"
+                  tabIndex={0}
+                  aria-pressed={summarizeLastMessage}
+                  onClick={() => setSummarizeLastMessage(!summarizeLastMessage)}
+                  onKeyDown={(event) => {
+                    if (event.key === ' ' || event.key === 'Enter') {
+                      event.preventDefault();
+                      setSummarizeLastMessage(!summarizeLastMessage);
+                    }
+                  }}
+                >
+                  <Checkbox
                     checked={summarizeLastMessage}
-                    onCheckedChange={setSummarizeLastMessage}
-                    className="data-[state=checked]:bg-[var(--primary-base)]"
+                    onChange={setSummarizeLastMessage}
+                    ariaLabel="Summarize last message"
                   />
-                </label>
+                  <span className="typography-ui-label text-foreground">Summarize Last Message</span>
+                </div>
 
                 {summarizeLastMessage ? (
                   <>
-                    <div className="flex items-center justify-between gap-6 px-4 py-3 mt-1 border-t border-[var(--surface-subtle)]">
-                      <div className="flex min-w-0 flex-col w-1/3 shrink-0">
+                    <div className="flex items-center gap-8 py-1.5 mt-1 border-t border-[var(--surface-subtle)]">
+                      <div className="flex min-w-0 flex-col w-56 shrink-0">
                         <span className="typography-ui-label text-foreground">Threshold</span>
                         <span className="typography-meta text-muted-foreground">Messages longer than this will be summarized</span>
                       </div>
-                      <div className="flex items-center gap-3 flex-1 max-w-xs justify-end">
-                        <input
-                          type="range"
-                          min={50}
-                          max={2000}
-                          step={50}
-                          value={summaryThreshold}
-                          onChange={(e) => setSummaryThreshold(Number(e.target.value))}
-                          className="flex-1 min-w-0 h-2 bg-[var(--surface-subtle)] rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[var(--primary-base)]"
-                        />
+                      <div className="flex items-center gap-2 w-fit">
                         <NumberInput
                           value={summaryThreshold}
                           onValueChange={setSummaryThreshold}
@@ -610,23 +664,25 @@ export const NotificationSettings: React.FC = () => {
                           step={50}
                           className="w-20 tabular-nums"
                         />
+                        <ButtonSmall
+                          type="button"
+                          variant="ghost"
+                          onClick={() => setSummaryThreshold(DEFAULT_SUMMARY_THRESHOLD)}
+                          disabled={summaryThreshold === DEFAULT_SUMMARY_THRESHOLD}
+                          className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
+                          aria-label="Reset threshold"
+                          title="Reset"
+                        >
+                          <RiRestartLine className="h-3.5 w-3.5" />
+                        </ButtonSmall>
                       </div>
                     </div>
-                    <div className="flex items-center justify-between gap-6 px-4 py-3">
-                      <div className="flex min-w-0 flex-col w-1/3 shrink-0">
+                    <div className="flex items-center gap-8 py-1.5">
+                      <div className="flex min-w-0 flex-col w-56 shrink-0">
                         <span className="typography-ui-label text-foreground">Length</span>
                         <span className="typography-meta text-muted-foreground">Target character length of the summary</span>
                       </div>
-                      <div className="flex items-center gap-3 flex-1 max-w-xs justify-end">
-                        <input
-                          type="range"
-                          min={20}
-                          max={500}
-                          step={10}
-                          value={summaryLength}
-                          onChange={(e) => setSummaryLength(Number(e.target.value))}
-                          className="flex-1 min-w-0 h-2 bg-[var(--surface-subtle)] rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[var(--primary-base)]"
-                        />
+                      <div className="flex items-center gap-2 w-fit">
                         <NumberInput
                           value={summaryLength}
                           onValueChange={setSummaryLength}
@@ -635,25 +691,27 @@ export const NotificationSettings: React.FC = () => {
                           step={10}
                           className="w-20 tabular-nums"
                         />
+                        <ButtonSmall
+                          type="button"
+                          variant="ghost"
+                          onClick={() => setSummaryLength(DEFAULT_SUMMARY_LENGTH)}
+                          disabled={summaryLength === DEFAULT_SUMMARY_LENGTH}
+                          className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
+                          aria-label="Reset summary length"
+                          title="Reset"
+                        >
+                          <RiRestartLine className="h-3.5 w-3.5" />
+                        </ButtonSmall>
                       </div>
                     </div>
                   </>
                 ) : (
-                  <div className={cn("px-4 py-3 mt-1 border-t border-[var(--surface-subtle)]", isMobile ? "flex flex-col gap-3" : "flex items-center justify-between gap-6")}>
-                    <div className={cn("flex min-w-0 flex-col", isMobile ? "w-full" : "w-1/3 shrink-0")}>
+                  <div className={cn("py-1.5 mt-1 border-t border-[var(--surface-subtle)]", isMobile ? "flex flex-col gap-3" : "flex items-center gap-8")}>
+                    <div className={cn("flex min-w-0 flex-col", isMobile ? "w-full" : "w-56 shrink-0")}>
                       <span className="typography-ui-label text-foreground">Max Length</span>
                       <span className="typography-meta text-muted-foreground">Truncate {'{last_message}'} to this length</span>
                     </div>
-                    <div className={cn("flex items-center gap-3", isMobile ? "w-full" : "flex-1 max-w-xs justify-end")}>
-                      <input
-                        type="range"
-                        min={50}
-                        max={1000}
-                        step={10}
-                        value={maxLastMessageLength}
-                        onChange={(e) => setMaxLastMessageLength(Number(e.target.value))}
-                        className="flex-1 min-w-0 h-2 bg-[var(--surface-subtle)] rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[var(--primary-base)] [&::-moz-range-thumb]:w-5 [&::-moz-range-thumb]:h-5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-[var(--primary-base)] [&::-moz-range-thumb]:border-0"
-                      />
+                    <div className={cn("flex items-center gap-2", isMobile ? "w-full" : "w-fit")}>
                       <NumberInput
                         value={maxLastMessageLength}
                         onValueChange={setMaxLastMessageLength}
@@ -662,10 +720,21 @@ export const NotificationSettings: React.FC = () => {
                         step={10}
                         className="w-20 tabular-nums"
                       />
+                      <ButtonSmall
+                        type="button"
+                        variant="ghost"
+                        onClick={() => setMaxLastMessageLength(DEFAULT_MAX_LAST_MESSAGE_LENGTH)}
+                        disabled={maxLastMessageLength === DEFAULT_MAX_LAST_MESSAGE_LENGTH}
+                        className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
+                        aria-label="Reset max message length"
+                        title="Reset"
+                      >
+                        <RiRestartLine className="h-3.5 w-3.5" />
+                      </ButtonSmall>
                     </div>
                   </div>
                 )}
-              </div>
+              </section>
             </div>
           </>
         )}
@@ -673,46 +742,41 @@ export const NotificationSettings: React.FC = () => {
         {/* --- Background Push Notifications --- */}
         {isBrowser && (
           <div className="mb-8">
-            <div className="mb-3 px-1">
-              <h3 className="typography-ui-header font-semibold text-foreground">
+            <div className="mb-1 px-1">
+              <h3 className="typography-ui-header font-medium text-foreground">
                 Background Push Notifications
               </h3>
             </div>
 
-            <div className="rounded-lg bg-[var(--surface-elevated)]/70 overflow-hidden flex flex-col">
-              <div className="flex items-center justify-between gap-4 px-4 py-3">
+            <section className="px-2 pb-2 pt-0">
+              <div className="flex items-start gap-2 py-1.5">
+                <Checkbox
+                  checked={pushSupported ? pushSubscribed : false}
+                  disabled={!pushSupported || pushBusy}
+                  onChange={(checked: boolean) => {
+                    if (checked) {
+                      void handleEnableBackgroundNotifications();
+                    } else {
+                      void handleDisableBackgroundNotifications();
+                    }
+                  }}
+                  ariaLabel="Enable push notifications"
+                />
                 <div className="flex min-w-0 flex-col">
                   <span className={cn("typography-ui-label", !pushSupported ? "text-muted-foreground" : "text-foreground")}>Enable push notifications</span>
                   <span className="typography-meta text-muted-foreground">
-                    {!pushSupported 
-                      ? "Push not supported. Desktop Chrome/Edge and Android support push. iOS requires an installed PWA." 
+                    {!pushSupported
+                      ? "Push not supported. Desktop Chrome/Edge and Android support push. iOS requires an installed PWA."
                       : "Receive alerts via your operating system background service"}
                   </span>
                 </div>
-                
-                {pushSupported && (
-                  <div className="flex items-center gap-2">
-                    {pushBusy && (
-                      <div className="text-muted-foreground">
-                        <GridLoader size="sm" />
-                      </div>
-                    )}
-                    <Switch
-                      checked={pushSubscribed}
-                      disabled={pushBusy}
-                      onCheckedChange={(checked: boolean) => {
-                        if (checked) {
-                          void handleEnableBackgroundNotifications();
-                        } else {
-                          void handleDisableBackgroundNotifications();
-                        }
-                      }}
-                      className="data-[state=checked]:bg-[var(--primary-base)]"
-                    />
+                {pushBusy && (
+                  <div className="pt-0.5 text-muted-foreground">
+                    <GridLoader size="sm" />
                   </div>
                 )}
               </div>
-            </div>
+            </section>
           </div>
         )}
 

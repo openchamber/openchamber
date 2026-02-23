@@ -2,7 +2,7 @@ import * as React from 'react';
 import { ButtonSmall } from '@/components/ui/button-small';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { RiInformationLine } from '@remixicon/react';
+import { RiFolderLine, RiInformationLine } from '@remixicon/react';
 import { isDesktopShell, isTauriShell } from '@/lib/desktop';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
@@ -82,9 +82,9 @@ export const OpenCodeCliSettings: React.FC = () => {
 
   return (
     <div className="mb-8">
-      <div className="mb-3 px-1">
+      <div className="mb-1 px-1">
         <div className="flex items-center gap-2">
-          <h3 className="typography-ui-header font-semibold text-foreground">
+          <h3 className="typography-ui-header font-medium text-foreground">
             OpenCode CLI
           </h3>
           <Tooltip delayDuration={1000}>
@@ -98,44 +98,52 @@ export const OpenCodeCliSettings: React.FC = () => {
         </div>
       </div>
 
-      <div className="rounded-lg bg-[var(--surface-elevated)]/70 overflow-hidden flex flex-col">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-4 py-3 border-b border-[var(--surface-subtle)]">
-          <div className="flex min-w-0 flex-col sm:w-1/3 shrink-0">
+      <section className="px-2 pb-2 pt-0 space-y-0.5">
+        <div className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-3">
+          <div className="flex min-w-0 flex-col shrink-0">
             <span className="typography-ui-label text-foreground">OpenCode Binary Path</span>
           </div>
-          <div className="flex items-center gap-2 flex-1 justify-end">
+          <div className="flex min-w-0 items-center gap-2 sm:w-[20rem]">
             <Input
               value={value}
               onChange={(e) => setValue(e.target.value)}
               placeholder="/Users/you/.bun/bin/opencode"
               disabled={isLoading || isSaving}
-              className="flex-1 max-w-sm font-mono text-xs h-8 border-[var(--interactive-border)] focus-visible:ring-[var(--primary-base)]"
+              className="h-7 min-w-0 flex-1 font-mono text-xs"
             />
             <ButtonSmall
               type="button"
               variant="outline"
+              size="xs"
               onClick={handleBrowse}
               disabled={isLoading || isSaving || !isDesktopShell() || !isTauriShell()}
+              className="h-7 w-7 p-0"
+              aria-label="Browse for OpenCode binary path"
+              title="Browse"
             >
-              Browse
+              <RiFolderLine className="h-4 w-4" />
             </ButtonSmall>
           </div>
         </div>
 
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-4 py-4">
-          <div className="typography-micro text-muted-foreground/70 flex-1">
+        <div className="py-1.5">
+          <div className="typography-micro text-muted-foreground/70">
             Tip: you can also use <span className="font-mono">OPENCODE_BINARY</span> env var, but this setting persists in <span className="font-mono">~/.config/openchamber/settings.json</span>.
           </div>
+        </div>
+
+        <div className="flex justify-start py-1.5">
           <ButtonSmall
             type="button"
+            size="xs"
             onClick={handleSaveAndReload}
             disabled={isLoading || isSaving}
-            className="shrink-0"
+            className="shrink-0 !font-normal"
           >
             {isSaving ? 'Saving…' : 'Save + Reload'}
           </ButtonSmall>
         </div>
-      </div>
+      </section>
     </div>
   );
 };

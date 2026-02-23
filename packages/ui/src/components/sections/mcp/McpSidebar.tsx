@@ -13,7 +13,7 @@ import { RiAddLine, RiDeleteBinLine, RiMore2Line, RiPlugLine } from '@remixicon/
 import { useMcpConfigStore, type McpDraft, type McpServerConfig } from '@/stores/useMcpConfigStore';
 import { useMcpStore } from '@/stores/useMcpStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { useDeviceInfo } from '@/lib/device';
+import { useDeviceInfo, isMobileDeviceViaCSS } from '@/lib/device';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
@@ -163,6 +163,7 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
                   const runtimeStatus = mcpStatus[server.name];
                   const tone = statusToneFromMcp(runtimeStatus?.status);
                   const isSelected = selectedMcpName === server.name;
+                  const isMobile = isMobileDeviceViaCSS();
 
                   return (
                     <div
@@ -171,10 +172,10 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
                         'group relative flex items-center rounded-md px-1.5 py-1 transition-all duration-200 select-none',
                         isSelected ? 'bg-interactive-selection' : 'hover:bg-interactive-hover',
                       )}
-                      onContextMenu={(e) => {
+                      onContextMenu={!isMobile ? (e) => {
                         e.preventDefault();
                         setOpenMenuMcp(server.name);
-                      }}
+                      } : undefined}
                     >
                       <button
                         onClick={() => {
@@ -232,6 +233,7 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
                   const runtimeStatus = mcpStatus[server.name];
                   const tone = statusToneFromMcp(runtimeStatus?.status);
                   const isSelected = selectedMcpName === server.name;
+                  const isMobile = isMobileDeviceViaCSS();
 
                   return (
                     <div
@@ -240,10 +242,10 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
                         'group relative flex items-center rounded-md px-1.5 py-1 transition-all duration-200 select-none',
                         isSelected ? 'bg-interactive-selection' : 'hover:bg-interactive-hover',
                       )}
-                      onContextMenu={(e) => {
+                      onContextMenu={!isMobile ? (e) => {
                         e.preventDefault();
                         setOpenMenuMcp(server.name);
-                      }}
+                      } : undefined}
                     >
                       <button
                         onClick={() => {
