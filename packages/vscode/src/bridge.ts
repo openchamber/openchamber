@@ -304,28 +304,189 @@ const normalizeMergeMethod = (value: string): 'merge' | 'squash' | 'rebase' => {
   return 'merge';
 };
 
-const extractZenOutputText = (value: unknown): string | null => {
-  if (!value || typeof value !== 'object') return null;
-  const root = value as Record<string, unknown>;
-  const output = root.output;
-  if (!Array.isArray(output)) return null;
+const BRIDGE_ZEN_DEFAULT_MODEL = 'gpt-5-nano';
+const BRIDGE_GIT_GENERATION_TIMEOUT_MS = 2 * 60 * 1000;
+const BRIDGE_GIT_GENERATION_POLL_INTERVAL_MS = 500;
 
-  const messageItem = output.find((item) => {
-    if (!item || typeof item !== 'object') return false;
-    return (item as Record<string, unknown>).type === 'message';
-  }) as Record<string, unknown> | undefined;
-  if (!messageItem) return null;
+const sleep = (ms: number) => new Promise<void>((resolve) => {
+  setTimeout(resolve, ms);
+});
 
-  const content = messageItem.content;
-  if (!Array.isArray(content)) return null;
+const resolveBridgeGitGenerationModel = (
+  payloadModel: { providerId?: string; modelId?: string; zenModel?: string },
+  settings: Record<string, unknown>
+): { providerID: string; modelID: string } => {
+  const requestProviderId = typeof payloadModel.providerId === 'string' ? payloadModel.providerId.trim() : '';
+  const requestModelId = typeof payloadModel.modelId === 'string' ? payloadModel.modelId.trim() : '';
+  if (requestProviderId && requestModelId) {
+    return { providerID: requestProviderId, modelID: requestModelId };
+  }
 
-  const textItem = content.find((item) => {
-    if (!item || typeof item !== 'object') return false;
-    return (item as Record<string, unknown>).type === 'output_text';
-  }) as Record<string, unknown> | undefined;
+  const settingsProviderId = readStringField(settings, 'gitProviderId');
+  const settingsModelId = readStringField(settings, 'gitModelId');
+  if (settingsProviderId && settingsModelId) {
+    return { providerID: settingsProviderId, modelID: settingsModelId };
+  }
 
-  const text = typeof textItem?.text === 'string' ? textItem.text.trim() : '';
-  return text || null;
+  const payloadZenModel = typeof payloadModel.zenModel === 'string' ? payloadModel.zenModel.trim() : '';
+  const settingsZenModel = readStringField(settings, 'zenModel');
+  return {
+    providerID: 'zen',
+    modelID: payloadZenModel || settingsZenModel || BRIDGE_ZEN_DEFAULT_MODEL,
+  };
+};
+
+const extractTextFromMessageParts = (parts: unknown): string => {
+  if (!Array.isArray(parts)) {
+    return '';
+  }
+
+  const textParts = parts
+    .filter((part) => {
+      if (!part || typeof part !== 'object') return false;
+      const record = part as Record<string, unknown>;
+      return record.type === 'text' && typeof record.text === 'string';
+    })
+    .map((part) => (part as Record<string, unknown>).text as string)
+    .map((text) => text.trim())
+    .filter((text) => text.length > 0);
+
+  return textParts.join('\n').trim();
+};
+
+const generateBridgeTextWithSessionFlow = async ({
+  apiUrl,
+  directory,
+  prompt,
+  providerID,
+  modelID,
+  authHeaders,
+}: {
+  apiUrl: string;
+  directory: string;
+  prompt: string;
+  providerID: string;
+  modelID: string;
+  authHeaders?: Record<string, string>;
+}): Promise<string> => {
+  const headers = authHeaders || {};
+  const apiBase = apiUrl.replace(/\/+$/, '');
+  const deadlineAt = Date.now() + BRIDGE_GIT_GENERATION_TIMEOUT_MS;
+  const remainingMs = () => Math.max(1_000, deadlineAt - Date.now());
+  let sessionId: string | null = null;
+
+  try {
+    const sessionUrl = new URL(`${apiBase}/session`);
+    if (directory) {
+      sessionUrl.searchParams.set('directory', directory);
+    }
+
+    const createResponse = await fetch(sessionUrl.toString(), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...headers,
+      },
+      body: JSON.stringify({ title: 'Git Generation' }),
+      signal: AbortSignal.timeout(remainingMs()),
+    });
+
+    if (!createResponse.ok) {
+      throw new Error('Failed to create OpenCode session');
+    }
+
+    const session = await createResponse.json().catch(() => null) as unknown;
+    const sessionObj = session && typeof session === 'object' ? session as Record<string, unknown> : null;
+    const createdSessionId = sessionObj && typeof sessionObj.id === 'string' ? sessionObj.id : '';
+    if (!createdSessionId) {
+      throw new Error('Invalid session response');
+    }
+    sessionId = createdSessionId;
+
+    const promptUrl = new URL(`${apiBase}/session/${encodeURIComponent(sessionId)}/prompt_async`);
+    if (directory) {
+      promptUrl.searchParams.set('directory', directory);
+    }
+
+    const promptResponse = await fetch(promptUrl.toString(), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...headers,
+      },
+      body: JSON.stringify({
+        model: {
+          providerID,
+          modelID,
+        },
+        parts: [{ type: 'text', text: prompt }],
+      }),
+      signal: AbortSignal.timeout(remainingMs()),
+    });
+
+    if (!promptResponse.ok) {
+      throw new Error('Failed to send prompt');
+    }
+
+    const messagesUrl = new URL(`${apiBase}/session/${encodeURIComponent(sessionId)}/message`);
+    if (directory) {
+      messagesUrl.searchParams.set('directory', directory);
+    }
+    messagesUrl.searchParams.set('limit', '10');
+
+    while (Date.now() < deadlineAt) {
+      await sleep(BRIDGE_GIT_GENERATION_POLL_INTERVAL_MS);
+
+      const messagesResponse = await fetch(messagesUrl.toString(), {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+          ...headers,
+        },
+        signal: AbortSignal.timeout(remainingMs()),
+      });
+
+      if (!messagesResponse.ok) {
+        continue;
+      }
+
+      const messages = await messagesResponse.json().catch(() => null) as unknown;
+      if (!Array.isArray(messages)) {
+        continue;
+      }
+
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const message = messages[i] as Record<string, unknown> | null;
+        if (!message || typeof message !== 'object') {
+          continue;
+        }
+        const info = message.info as Record<string, unknown> | undefined;
+        if (info?.role !== 'assistant' || info?.finish !== 'stop') {
+          continue;
+        }
+
+        const text = extractTextFromMessageParts(message.parts);
+        if (text) {
+          return text;
+        }
+      }
+    }
+
+    throw new Error('Timeout waiting for generation to complete');
+  } finally {
+    if (sessionId) {
+      const deleteUrl = new URL(`${apiBase}/session/${encodeURIComponent(sessionId)}`);
+      try {
+        await fetch(deleteUrl.toString(), {
+          method: 'DELETE',
+          headers,
+          signal: AbortSignal.timeout(5_000),
+        });
+      } catch {
+        // ignore cleanup failures
+      }
+    }
+  }
 };
 
 const parseJsonObjectSafe = (value: string): Record<string, unknown> | null => {
@@ -2791,10 +2952,14 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
       }
 
       case 'api:git/pr-description': {
-        const { directory, base, head } = (payload || {}) as {
+        const { directory, base, head, context, providerId, modelId, zenModel: payloadZenModel } = (payload || {}) as {
           directory?: string;
           base?: string;
           head?: string;
+          context?: string;
+          providerId?: string;
+          modelId?: string;
+          zenModel?: string;
         };
         if (!directory) {
           return { id, type, success: false, error: 'Directory is required' };
@@ -2832,31 +2997,31 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
           return { id, type, success: false, error: 'No diffs available for selected files' };
         }
 
-        const prompt = `You are drafting a GitHub Pull Request title + description. Respond in JSON of the shape {"title": string, "body": string} (ONLY JSON in response, no markdown fences) with these rules:\n- title: concise, sentence case, <= 80 chars, no trailing punctuation, no commit-style prefixes (no "feat:", "fix:")\n- body: GitHub-flavored markdown with these sections in this order: Summary, Testing, Notes\n- Summary: 3-6 bullet points describing user-visible changes; avoid internal helper function names\n- Testing: bullet list ("- Not tested" allowed)\n- Notes: bullet list; include breaking/rollout notes only when relevant\n\nContext:\n- base branch: ${base}\n- head branch: ${head}\n\nDiff summary:\n${diffSummaries}`;
+        const prompt = `You are drafting a GitHub Pull Request title + description. Respond in JSON of the shape {"title": string, "body": string} (ONLY JSON in response, no markdown fences) with these rules:\n- title: concise, sentence case, <= 80 chars, no trailing punctuation, no commit-style prefixes (no "feat:", "fix:")\n- body: GitHub-flavored markdown with these sections in this order: Summary, Testing, Notes\n- Summary: 3-6 bullet points describing user-visible changes; avoid internal helper function names\n- Testing: bullet list ("- Not tested" allowed)\n- Notes: bullet list; include breaking/rollout notes only when relevant\n\nContext:\n- base branch: ${base}\n- head branch: ${head}${context?.trim() ? `\n- Additional context: ${context.trim()}` : ''}\n\nDiff summary:\n${diffSummaries}`;
 
         try {
-          const zenSettings = readSettings(ctx) as Record<string, unknown>;
-          const zenModelRaw = typeof zenSettings?.zenModel === 'string' ? (zenSettings.zenModel as string).trim() : '';
-          const zenModel = zenModelRaw.length > 0 ? zenModelRaw : 'gpt-5-nano';
-          const response = await fetch('https://opencode.ai/zen/v1/responses', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              model: zenModel,
-              input: [{ role: 'user', content: prompt }],
-              max_output_tokens: 1200,
-              stream: false,
-              reasoning: { effort: 'low' },
-            }),
-          });
-          if (!response.ok) {
-            return { id, type, success: false, error: 'Failed to generate PR description' };
+          const apiUrl = ctx?.manager?.getApiUrl();
+          if (!apiUrl) {
+            return { id, type, success: false, error: 'OpenCode API unavailable' };
           }
-          const data = await response.json().catch(() => null) as unknown;
-          const raw = extractZenOutputText(data);
+
+          const settings = readSettings(ctx) as Record<string, unknown>;
+          const { providerID, modelID } = resolveBridgeGitGenerationModel(
+            { providerId, modelId, zenModel: payloadZenModel },
+            settings
+          );
+          const raw = await generateBridgeTextWithSessionFlow({
+            apiUrl,
+            directory,
+            prompt,
+            providerID,
+            modelID,
+            authHeaders: ctx?.manager?.getOpenCodeAuthHeaders(),
+          });
           if (!raw) {
             return { id, type, success: false, error: 'No PR description returned by generator' };
           }
+
           const cleaned = String(raw)
             .trim()
             .replace(/^```json\s*/i, '')
