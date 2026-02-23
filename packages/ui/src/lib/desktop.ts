@@ -92,6 +92,8 @@ export type DesktopSettings = {
   queueModeEnabled?: boolean;
   gitmojiEnabled?: boolean;
   zenModel?: string;
+  gitProviderId?: string;
+  gitModelId?: string;
   toolCallExpansion?: 'collapsed' | 'activity' | 'detailed';
   fontSize?: number;
   terminalFontSize?: number;
