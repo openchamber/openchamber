@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
-import { prepareNotificationLastMessage, truncateNotificationText } from './notification-message.js';
+import { prepareNotificationLastMessage, truncateNotificationText } from './message.js';
 
 describe('notification message helpers', () => {
   it('truncates oversized notification text', () => {

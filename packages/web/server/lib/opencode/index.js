@@ -56,3 +56,11 @@ export {
 } from './auth.js';
 
 export { createUiAuth } from './ui-auth.js';
+
+export {
+  listMcpConfigs,
+  getMcpConfig,
+  createMcpConfig,
+  updateMcpConfig,
+  deleteMcpConfig,
+} from './mcp.js';

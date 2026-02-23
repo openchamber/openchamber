@@ -556,6 +556,74 @@ const handleLocalApiRequest = async (url: URL, init?: RequestInit) => {
     }
   }
 
+  if (pathname === '/api/config/mcp') {
+    const verb = ((init?.method || 'GET') as string).toUpperCase();
+    const body = init?.body ? JSON.parse(init.body as string) : {};
+    const queryDirectory = url.searchParams.get('directory') || undefined;
+    const headerDirectory = (() => {
+      const headers = init?.headers;
+      if (!headers) return undefined;
+      if (headers instanceof Headers) {
+        return headers.get('x-opencode-directory') || undefined;
+      }
+      if (Array.isArray(headers)) {
+        const found = headers.find(([key]) => key.toLowerCase() === 'x-opencode-directory');
+        return found?.[1] || undefined;
+      }
+      if (typeof headers === 'object') {
+        for (const [key, value] of Object.entries(headers)) {
+          if (key.toLowerCase() === 'x-opencode-directory' && typeof value === 'string') {
+            return value;
+          }
+        }
+      }
+      return undefined;
+    })();
+    const directory = queryDirectory || headerDirectory;
+    try {
+      const data = await sendBridgeMessage('api:config/mcp', { method: verb, body, directory });
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  if (pathname.startsWith('/api/config/mcp/')) {
+    const encodedName = pathname.slice('/api/config/mcp/'.length);
+    const name = decodeURIComponent(encodedName);
+    const verb = ((init?.method || 'GET') as string).toUpperCase();
+    const body = init?.body ? JSON.parse(init.body as string) : {};
+    const queryDirectory = url.searchParams.get('directory') || undefined;
+    const headerDirectory = (() => {
+      const headers = init?.headers;
+      if (!headers) return undefined;
+      if (headers instanceof Headers) {
+        return headers.get('x-opencode-directory') || undefined;
+      }
+      if (Array.isArray(headers)) {
+        const found = headers.find(([key]) => key.toLowerCase() === 'x-opencode-directory');
+        return found?.[1] || undefined;
+      }
+      if (typeof headers === 'object') {
+        for (const [key, value] of Object.entries(headers)) {
+          if (key.toLowerCase() === 'x-opencode-directory' && typeof value === 'string') {
+            return value;
+          }
+        }
+      }
+      return undefined;
+    })();
+    const directory = queryDirectory || headerDirectory;
+    try {
+      const data = await sendBridgeMessage('api:config/mcp', { method: verb, name, body, directory });
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
   // Skills file operations: /api/config/skills/:name/files/:filePath
   const skillsFilesMatch = pathname.match(/^\/api\/config\/skills\/([^/]+)\/files\/(.+)$/);
   if (skillsFilesMatch) {

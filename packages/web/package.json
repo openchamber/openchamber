@@ -22,6 +22,8 @@
     "start": "node bin/cli.js serve"
   },
   "dependencies": {
+    "@codemirror/lang-cpp": "^6.0.3",
+    "@codemirror/lang-go": "^6.0.1",
     "@fontsource/ibm-plex-mono": "^5.2.7",
     "@fontsource/ibm-plex-sans": "^5.1.1",
     "@ibm/plex": "^6.4.1",

@@ -17,12 +17,15 @@ import { useAgentsStore } from '@/stores/useAgentsStore';
 import { useCommandsStore } from '@/stores/useCommandsStore';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useSkillsCatalogStore } from '@/stores/useSkillsCatalogStore';
+import { useMcpConfigStore } from '@/stores/useMcpConfigStore';
 import { AgentsSidebar } from '@/components/sections/agents/AgentsSidebar';
 import { AgentsPage } from '@/components/sections/agents/AgentsPage';
 import { CommandsSidebar } from '@/components/sections/commands/CommandsSidebar';
 import { CommandsPage } from '@/components/sections/commands/CommandsPage';
 import { SkillsSidebar } from '@/components/sections/skills/SkillsSidebar';
 import { SkillsPage } from '@/components/sections/skills/SkillsPage';
+import { McpSidebar } from '@/components/sections/mcp/McpSidebar';
+import { McpPage } from '@/components/sections/mcp/McpPage';
 import { ProvidersSidebar } from '@/components/sections/providers/ProvidersSidebar';
 import { ProvidersPage } from '@/components/sections/providers/ProvidersPage';
 import { UsageSidebar } from '@/components/sections/usage/UsageSidebar';
@@ -190,6 +193,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       void useSkillsStore.getState().loadSkills();
       void useSkillsCatalogStore.getState().loadCatalog();
     }
+
+    if (activeTab === 'mcp') {
+      void useMcpConfigStore.getState().loadMcpConfigs();
+    }
   }, [activeProjectId, activeTab]);
 
   // Update proportional width on window resize (if not manually resized)
@@ -306,6 +313,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return <CommandsSidebar onItemSelect={handleMobileSidebarClick} />;
       case 'skills':
         return <SkillsSidebar onItemSelect={handleMobileSidebarClick} />;
+      case 'mcp':
+        return <McpSidebar onItemSelect={handleMobileSidebarClick} />;
       case 'providers':
         return <ProvidersSidebar onItemSelect={handleMobileSidebarClick} />;
       case 'usage':
@@ -327,6 +336,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return <CommandsPage />;
       case 'skills':
         return <SkillsPage />;
+      case 'mcp':
+        return <McpPage />;
       case 'providers':
         return <ProvidersPage />;
       case 'usage':

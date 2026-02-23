@@ -24,6 +24,71 @@ export type HostProbeResult = {
   latencyMs: number;
 };
 
+const SENSITIVE_QUERY_KEY = /token|auth|secret|api/i;
+
+export const normalizeHostUrl = (raw: string): string | null => {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      return null;
+    }
+    return trimmed.split('#')[0] || null;
+  } catch {
+    return null;
+  }
+};
+
+export const redactSensitiveUrl = (raw: string): string => {
+  const normalized = normalizeHostUrl(raw);
+  if (!normalized) {
+    return raw;
+  }
+
+  try {
+    const url = new URL(normalized);
+    const keys = Array.from(new Set(Array.from(url.searchParams.keys())));
+    for (const key of keys) {
+      if (SENSITIVE_QUERY_KEY.test(key)) {
+        url.searchParams.set(key, '[REDACTED]');
+      }
+    }
+    return url.toString();
+  } catch {
+    return normalized;
+  }
+};
+
+export const locationMatchesHost = (locationHref: string, hostUrl: string): boolean => {
+  const normalizedCurrent = normalizeHostUrl(locationHref);
+  const normalizedHost = normalizeHostUrl(hostUrl);
+  if (!normalizedCurrent || !normalizedHost) {
+    return false;
+  }
+
+  try {
+    const current = new URL(normalizedCurrent);
+    const host = new URL(normalizedHost);
+    if (current.origin !== host.origin) {
+      return false;
+    }
+
+    if (host.search && current.search !== host.search) {
+      return false;
+    }
+
+    const hostPath = host.pathname.length > 1 ? host.pathname.replace(/\/+$/, '') : host.pathname;
+    const currentPath = current.pathname.length > 1 ? current.pathname.replace(/\/+$/, '') : current.pathname;
+    if (hostPath === '/') {
+      return true;
+    }
+    return currentPath === hostPath || currentPath.startsWith(`${hostPath}/`);
+  } catch {
+    return false;
+  }
+};
+
 const isRecord = (value: unknown): value is Record<string, unknown> => {
   return typeof value === 'object' && value !== null;
 };

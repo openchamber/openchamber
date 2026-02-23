@@ -39,6 +39,9 @@ import {
   desktopHostsGet,
   desktopHostsSet,
   desktopOpenNewWindowAtUrl,
+  locationMatchesHost,
+  normalizeHostUrl,
+  redactSensitiveUrl,
   type DesktopHost,
   type HostProbeResult,
 } from '@/lib/desktopHosts';
@@ -50,33 +53,21 @@ type HostStatus = {
   latencyMs: number;
 };
 
-const normalizeHostUrl = (raw: string): string | null => {
-  const trimmed = raw.trim();
-  if (!trimmed) return null;
-  try {
-    const url = new URL(trimmed);
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-      return null;
-    }
-    return url.origin;
-  } catch {
-    // Tauri/WebKit edge: accept origin without trailing slash.
-    try {
-      const url = new URL(trimmed.endsWith('/') ? trimmed : `${trimmed}/`);
-      if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-        return null;
-      }
-      return url.origin;
-    } catch {
-      return null;
-    }
+const toNavigationUrl = (rawUrl: string): string => {
+  const normalized = normalizeHostUrl(rawUrl);
+  if (!normalized) {
+    return rawUrl.trim();
   }
-};
 
-const toNavigationUrl = (origin: string): string => {
-  const trimmed = origin.trim();
-  if (!trimmed) return trimmed;
-  return trimmed.endsWith('/') ? trimmed : `${trimmed}/`;
+  try {
+    const url = new URL(normalized);
+    if (!url.pathname.endsWith('/')) {
+      url.pathname = `${url.pathname}/`;
+    }
+    return url.toString();
+  } catch {
+    return normalized;
+  }
 };
 
 const getLocalOrigin = (): string => {
@@ -119,18 +110,17 @@ const buildLocalHost = (): DesktopHost => ({
 });
 
 const resolveCurrentHost = (hosts: DesktopHost[]) => {
-  const currentOrigin = typeof window === 'undefined' ? '' : window.location.origin;
+  const currentHref = typeof window === 'undefined' ? '' : window.location.href;
   const localOrigin = getLocalOrigin();
-  const normalizedCurrent = normalizeHostUrl(currentOrigin) || currentOrigin;
   const normalizedLocal = normalizeHostUrl(localOrigin) || localOrigin;
+  const normalizedCurrent = normalizeHostUrl(currentHref) || currentHref;
 
-  if (normalizedCurrent && normalizedLocal && normalizedCurrent === normalizedLocal) {
+  if (currentHref && locationMatchesHost(currentHref, localOrigin)) {
     return { id: LOCAL_HOST_ID, label: 'Local', url: normalizedLocal };
   }
 
   const match = hosts.find((h) => {
-    const normalized = normalizeHostUrl(h.url);
-    return normalized && normalized === normalizedCurrent;
+    return currentHref ? locationMatchesHost(currentHref, h.url) : false;
   });
 
   if (match) {
@@ -139,7 +129,7 @@ const resolveCurrentHost = (hosts: DesktopHost[]) => {
 
   return {
     id: 'custom',
-    label: normalizedCurrent || 'Instance',
+    label: redactSensitiveUrl(normalizedCurrent || 'Instance'),
     url: normalizedCurrent,
   };
 };
@@ -279,7 +269,7 @@ export function DesktopHostSwitcherDialog({
       }));
 
       if (probe.status === 'unreachable') {
-        toast.error(`Instance "${host.label}" is unreachable`);
+        toast.error(`Instance "${redactSensitiveUrl(host.label)}" is unreachable`);
         setSwitchingHostId(null);
         return;
       }
@@ -321,7 +311,7 @@ export function DesktopHostSwitcherDialog({
       return;
     }
 
-    const label = (editLabel || url).trim();
+    const label = (editLabel || redactSensitiveUrl(url)).trim();
     const nextHosts = configHosts.map((h) => (h.id === editingId ? { ...h, label, url } : h));
     await persist(nextHosts, defaultHostId);
     cancelEdit();
@@ -333,7 +323,7 @@ export function DesktopHostSwitcherDialog({
       setError('Invalid URL (must be http/https)');
       return;
     }
-    const label = (newLabel || url).trim();
+    const label = (newLabel || redactSensitiveUrl(url)).trim();
     const id = makeId();
 
     const nextHosts = [{ id, label, url }, ...configHosts];
@@ -381,10 +371,10 @@ export function DesktopHostSwitcherDialog({
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0 flex items-center gap-2">
               <span className="typography-ui-header font-semibold text-foreground">Current</span>
-              <span className="max-w-[9rem] truncate typography-ui-label text-muted-foreground">{current.label}</span>
+              <span className="max-w-[9rem] truncate typography-ui-label text-muted-foreground">{redactSensitiveUrl(current.label)}</span>
               <span className="text-muted-foreground">•</span>
               <span className="typography-ui-header font-semibold text-foreground">Default</span>
-              <span className="max-w-[9rem] truncate typography-ui-label text-muted-foreground">{currentDefaultLabel}</span>
+              <span className="max-w-[9rem] truncate typography-ui-label text-muted-foreground">{redactSensitiveUrl(currentDefaultLabel)}</span>
             </div>
             <button
               type="button"
@@ -417,9 +407,9 @@ export function DesktopHostSwitcherDialog({
         <div className="flex items-center justify-between gap-2 flex-shrink-0">
           <div className="flex items-center gap-2 min-w-0">
             <span className="typography-meta text-muted-foreground">Current:</span>
-            <span className="typography-ui-label text-foreground truncate">{current.label}</span>
+            <span className="typography-ui-label text-foreground truncate">{redactSensitiveUrl(current.label)}</span>
             <span className="typography-meta text-muted-foreground">Current default:</span>
-            <span className="typography-ui-label text-foreground truncate">{currentDefaultLabel}</span>
+            <span className="typography-ui-label text-foreground truncate">{redactSensitiveUrl(currentDefaultLabel)}</span>
           </div>
           <div className="flex items-center gap-1">
             <Button
@@ -456,6 +446,8 @@ export function DesktopHostSwitcherDialog({
                 const status = statusById[host.id] || null;
                 const isEditing = editingId === host.id;
                 const effectiveUrl = isLocal ? getLocalOrigin() : (normalizeHostUrl(host.url) || host.url);
+                const displayLabel = redactSensitiveUrl(host.label);
+                const displayUrl = redactSensitiveUrl(effectiveUrl);
 
                 return (
                   <div
@@ -473,13 +465,13 @@ export function DesktopHostSwitcherDialog({
                       )}
                       onClick={() => void handleSwitch(host)}
                       disabled={switchingHostId === host.id}
-                      aria-label={`Switch to ${host.label}`}
+                      aria-label={`Switch to ${displayLabel}`}
                     >
                       <span className={cn('h-2 w-2 rounded-full flex-shrink-0', statusDotClass(status?.status ?? null))} />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 min-w-0">
                           <span className={cn('typography-ui-label truncate', isActive ? 'text-foreground' : 'text-foreground')}>
-                            {host.label}
+                            {displayLabel}
                           </span>
                           {isActive && (
                             <span className="typography-micro text-muted-foreground">Current</span>
@@ -493,7 +485,7 @@ export function DesktopHostSwitcherDialog({
                           </span>
                         </div>
                         <div className="typography-micro text-muted-foreground truncate font-mono">
-                          {effectiveUrl}
+                          {displayUrl}
                         </div>
                       </div>
                     </button>
@@ -734,7 +726,7 @@ export function DesktopHostSwitcherButton({ headerIconButtonClass }: DesktopHost
         const all = [local, ...(cfg.hosts || [])];
         const current = resolveCurrentHost(all);
         if (cancelled) return;
-        setLabel(current.label || 'Instance');
+        setLabel(redactSensitiveUrl(current.label || 'Instance'));
         const normalized = normalizeHostUrl(current.url);
         if (!normalized) {
           setStatus(null);
@@ -767,9 +759,7 @@ export function DesktopHostSwitcherButton({ headerIconButtonClass }: DesktopHost
 
   const isCurrentlyLocal = (() => {
     try {
-      const current = normalizeHostUrl(window.location.origin);
-      const local = normalizeHostUrl(getLocalOrigin());
-      return Boolean(current && local && current === local);
+      return locationMatchesHost(window.location.href, getLocalOrigin());
     } catch {
       return false;
     }
@@ -790,6 +780,7 @@ export function DesktopHostSwitcherButton({ headerIconButtonClass }: DesktopHost
     : label === 'Local'
       ? fallbackLabel
       : label;
+  const safeEffectiveLabel = redactSensitiveUrl(effectiveLabel);
 
   return (
     <>
@@ -804,7 +795,7 @@ export function DesktopHostSwitcherButton({ headerIconButtonClass }: DesktopHost
           >
             <RiServerLine className="h-5 w-5" />
             <span className="hidden sm:inline typography-ui-label font-medium text-muted-foreground truncate max-w-[11rem]">
-              {effectiveLabel}
+              {safeEffectiveLabel}
             </span>
             <span
               className={cn(

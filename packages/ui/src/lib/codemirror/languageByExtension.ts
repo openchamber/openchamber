@@ -12,6 +12,8 @@ import { xml } from '@codemirror/lang-xml';
 import { yaml as yamlLanguage } from '@codemirror/lang-yaml';
 import { rust } from '@codemirror/lang-rust';
 import { elixir } from 'codemirror-lang-elixir';
+import { cpp } from '@codemirror/lang-cpp';
+import { go } from '@codemirror/lang-go';
 
 import { Language, LanguageDescription, StreamLanguage, HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { tags as t } from '@lezer/highlight';
@@ -81,6 +83,13 @@ function codeBlockLanguageResolver(info: string): Language | LanguageDescription
     case 'rs':
     case 'rust':
       return rust().language;
+    case 'c':
+    case 'cpp':
+    case 'h':
+    case 'hpp':
+      return cpp().language;
+    case 'go':
+      return go().language;
     case 'ex':
     case 'exs':
     case 'elixir':
@@ -210,6 +219,13 @@ export function languageByExtension(filePath: string): Extension | null {
       return xml();
     case 'rs':
       return rust();
+    case 'c':
+    case 'cpp':
+    case 'h':
+    case 'hpp':
+      return cpp();
+    case 'go':
+      return go();
 
     // Legacy modes
     case 'rb':

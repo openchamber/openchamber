@@ -2602,7 +2602,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                   if (mobileVariant) {
                     setSessionSwitcherOpen(false);
                   }
-                  openNewSessionDraft({ directoryOverride: group.directory });
+                  openNewSessionDraft({ directoryOverride: group.directory, targetFolderId: folder.id });
                 }}
                  onNewSubFolder={depth === 0 ? () => {
                    if (!folderScopeKey) return;

@@ -1,7 +1,7 @@
-import { RiBrainAi3Line, RiChatAi3Line, RiCommandLine, RiGitBranchLine, RiSettings3Line, RiStackLine, RiBookLine, RiBarChart2Line } from '@remixicon/react';
+import { RiBrainAi3Line, RiChatAi3Line, RiCommandLine, RiGitBranchLine, RiSettings3Line, RiStackLine, RiBookLine, RiBarChart2Line, RiPlugLine } from '@remixicon/react';
 import type { ComponentType } from 'react';
 
-export type SidebarSection = 'sessions' | 'agents' | 'commands' | 'skills' | 'providers' | 'usage' | 'git-identities' | 'settings';
+export type SidebarSection = 'sessions' | 'agents' | 'commands' | 'skills' | 'mcp' | 'providers' | 'usage' | 'git-identities' | 'settings';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type IconComponent = ComponentType<any>;
@@ -37,6 +37,12 @@ export const SIDEBAR_SECTIONS: SidebarSectionConfig[] = [
         label: 'Skills',
         description: 'Create reusable instruction files for agents to load on-demand.',
         icon: RiBookLine,
+    },
+    {
+        id: 'mcp',
+        label: 'MCP',
+        description: 'Manage Model Context Protocol servers and their configurations.',
+        icon: RiPlugLine,
     },
     {
         id: 'providers',

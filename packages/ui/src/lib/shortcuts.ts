@@ -285,6 +285,13 @@ const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
     description: 'Cycle thinking variant while in chat',
   },
   {
+    id: 'expand_input',
+    defaultCombo: 'mod+shift+e',
+    label: 'Expand input',
+    description: 'Toggle focus mode for the chat input',
+    customizable: true,
+  },
+  {
     id: 'abort_run',
     defaultCombo: 'escape',
     label: 'Abort active run',

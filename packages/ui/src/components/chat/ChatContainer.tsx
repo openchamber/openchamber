@@ -18,6 +18,7 @@ import { OverlayScrollbar } from '@/components/ui/OverlayScrollbar';
 import { TimelineDialog } from './TimelineDialog';
 import type { PermissionRequest } from '@/types/permission';
 import type { QuestionRequest } from '@/types/question';
+import { cn } from '@/lib/utils';
 
 const EMPTY_MESSAGES: Array<{ info: Message; parts: Part[] }> = [];
 const EMPTY_PERMISSIONS: PermissionRequest[] = [];
@@ -101,6 +102,7 @@ export const ChatContainer: React.FC = () => {
     const {
         isTimelineDialogOpen,
         setTimelineDialogOpen,
+        isExpandedInput,
     } = useUIStore();
 
     const sessionMessages = useSessionStore(
@@ -163,6 +165,7 @@ export const ChatContainer: React.FC = () => {
 
     const { isMobile } = useDeviceInfo();
     const draftOpen = Boolean(newSessionDraft?.open);
+    const isDesktopExpandedInput = isExpandedInput && !isMobile;
 
     React.useEffect(() => {
         if (!currentSessionId && !draftOpen) {
@@ -423,13 +426,22 @@ export const ChatContainer: React.FC = () => {
     if (!currentSessionId && draftOpen) {
         return (
             <div
-                className="flex flex-col h-full bg-background transform-gpu"
+                className="relative flex flex-col h-full bg-background transform-gpu"
                 style={isMobile ? { paddingBottom: 'var(--oc-keyboard-inset, 0px)' } : undefined}
             >
+                {!isDesktopExpandedInput ? (
                 <div className="flex-1 flex items-center justify-center">
                     <ChatEmptyState showDraftContext />
                 </div>
-                <div className="relative bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 z-10">
+                ) : null}
+                <div
+                    className={cn(
+                        'relative z-10',
+                        isDesktopExpandedInput
+                            ? 'flex-1 min-h-0 bg-background'
+                            : 'bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80'
+                    )}
+                >
                     <ChatInput scrollToBottom={scrollToBottom} />
                 </div>
             </div>
@@ -470,13 +482,22 @@ export const ChatContainer: React.FC = () => {
     if (sessionMessages.length === 0 && !streamingMessageId) {
         return (
             <div
-                className="flex flex-col h-full bg-background transform-gpu"
+                className="relative flex flex-col h-full bg-background transform-gpu"
                 style={isMobile ? { paddingBottom: 'var(--oc-keyboard-inset, 0px)' } : undefined}
             >
+                {!isDesktopExpandedInput ? (
                 <div className="flex-1 flex items-center justify-center">
                     <ChatEmptyState />
                 </div>
-                <div className="relative bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 z-10">
+                ) : null}
+                <div
+                    className={cn(
+                        'relative z-10',
+                        isDesktopExpandedInput
+                            ? 'flex-1 min-h-0 bg-background'
+                            : 'bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80'
+                    )}
+                >
                     <ChatInput scrollToBottom={scrollToBottom} />
                 </div>
             </div>
@@ -485,11 +506,18 @@ export const ChatContainer: React.FC = () => {
 
     return (
         <div
-            className="flex flex-col h-full bg-background"
+            className="relative flex flex-col h-full bg-background"
             style={isMobile ? { paddingBottom: 'var(--oc-keyboard-inset, 0px)' } : undefined}
         >
-            <div className="relative flex-1 min-h-0">
-
+            <div
+                className={cn(
+                    'relative min-h-0',
+                    isDesktopExpandedInput
+                        ? 'absolute inset-0 opacity-0 pointer-events-none'
+                        : 'flex-1'
+                )}
+                aria-hidden={isDesktopExpandedInput}
+            >
                 <div className="absolute inset-0">
                     <ScrollShadow
                         className="absolute inset-0 overflow-y-auto overflow-x-hidden z-0 chat-scroll overlay-scrollbar-target"
@@ -518,8 +546,15 @@ export const ChatContainer: React.FC = () => {
                 </div>
             </div>
 
-            <div className="relative bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 z-10">
-                {showScrollButton && sessionMessages.length > 0 && (
+            <div
+                className={cn(
+                    'relative z-10',
+                    isDesktopExpandedInput
+                        ? 'flex-1 min-h-0 bg-background'
+                        : 'bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80'
+                )}
+            >
+                {!isDesktopExpandedInput && showScrollButton && sessionMessages.length > 0 && (
                     <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2">
                                 <Button
                                   variant="outline"

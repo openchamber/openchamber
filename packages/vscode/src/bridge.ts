@@ -5,7 +5,7 @@ import * as fs from 'fs';
 import { spawn, execFile } from 'child_process';
 import { promisify } from 'util';
 import { type OpenCodeManager } from './opencode';
-import { createAgent, createCommand, deleteAgent, deleteCommand, getAgentSources, getCommandSources, updateAgent, updateCommand, type AgentScope, type CommandScope, AGENT_SCOPE, COMMAND_SCOPE, discoverSkills, getSkillSources, createSkill, updateSkill, deleteSkill, readSkillSupportingFile, writeSkillSupportingFile, deleteSkillSupportingFile, type SkillScope, type SkillSource, type DiscoveredSkill, SKILL_SCOPE, getProviderSources, removeProviderConfig } from './opencodeConfig';
+import { createAgent, createCommand, deleteAgent, deleteCommand, getAgentSources, getCommandSources, updateAgent, updateCommand, type AgentScope, type CommandScope, AGENT_SCOPE, COMMAND_SCOPE, discoverSkills, getSkillSources, createSkill, updateSkill, deleteSkill, readSkillSupportingFile, writeSkillSupportingFile, deleteSkillSupportingFile, type SkillScope, type SkillSource, type DiscoveredSkill, SKILL_SCOPE, getProviderSources, removeProviderConfig, listMcpConfigs, getMcpConfig, createMcpConfig, updateMcpConfig, deleteMcpConfig } from './opencodeConfig';
 import { getProviderAuth, removeProviderAuth } from './opencodeAuth';
 import { fetchQuotaForProvider, listConfiguredQuotaProviders } from './quotaProviders';
 import * as gitService from './gitService';
@@ -1962,6 +1962,84 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
               success: true,
               requiresReload: true,
               message: `Command ${commandName} deleted successfully. Reloading interface…`,
+              reloadDelayMs: CLIENT_RELOAD_DELAY_MS,
+            },
+          };
+        }
+
+        return { id, type, success: false, error: `Unsupported method: ${normalizedMethod}` };
+      }
+
+      case 'api:config/mcp': {
+        const { method, name, body, directory } = (payload || {}) as { method?: string; name?: string; body?: Record<string, unknown>; directory?: string };
+        const normalizedMethod = typeof method === 'string' && method.trim() ? method.trim().toUpperCase() : 'GET';
+        const mcpName = typeof name === 'string' ? name.trim() : '';
+
+        const workingDirectory = (typeof directory === 'string' && directory.trim())
+          ? directory.trim()
+          : (ctx?.manager?.getWorkingDirectory() || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
+
+        if (normalizedMethod === 'GET' && !mcpName) {
+          const configs = listMcpConfigs(workingDirectory);
+          return { id, type, success: true, data: configs };
+        }
+
+        if (!mcpName) {
+          return { id, type, success: false, error: 'MCP server name is required' };
+        }
+
+        if (normalizedMethod === 'GET') {
+          const config = getMcpConfig(mcpName, workingDirectory);
+          if (!config) {
+            return { id, type, success: false, error: `MCP server "${mcpName}" not found` };
+          }
+          return { id, type, success: true, data: config };
+        }
+
+        if (normalizedMethod === 'POST') {
+          const scope = body?.scope as 'user' | 'project' | undefined;
+          createMcpConfig(mcpName, (body || {}) as Record<string, unknown>, workingDirectory, scope);
+          await ctx?.manager?.restart();
+          return {
+            id,
+            type,
+            success: true,
+            data: {
+              success: true,
+              requiresReload: true,
+              message: `MCP server "${mcpName}" created. Reloading interface…`,
+              reloadDelayMs: CLIENT_RELOAD_DELAY_MS,
+            },
+          };
+        }
+
+        if (normalizedMethod === 'PATCH') {
+          updateMcpConfig(mcpName, (body || {}) as Record<string, unknown>, workingDirectory);
+          await ctx?.manager?.restart();
+          return {
+            id,
+            type,
+            success: true,
+            data: {
+              success: true,
+              requiresReload: true,
+              message: `MCP server "${mcpName}" updated. Reloading interface…`,
+              reloadDelayMs: CLIENT_RELOAD_DELAY_MS,
+            },
+          };
+        }
+
+        if (normalizedMethod === 'DELETE') {
+          deleteMcpConfig(mcpName, workingDirectory);
+          await ctx?.manager?.restart();
+          return {
+            id,
+            type,
+            success: true,
+            data: {
+              success: true,
+              requiresReload: true,
+              message: `MCP server "${mcpName}" deleted. Reloading interface…`,
               reloadDelayMs: CLIENT_RELOAD_DELAY_MS,
             },
           };

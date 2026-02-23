@@ -17,6 +17,7 @@ import { opencodeClient } from "@/lib/opencode/client";
 import { useDirectoryStore } from "./useDirectoryStore";
 import { useConfigStore } from "./useConfigStore";
 import { useProjectsStore } from "./useProjectsStore";
+import { useSessionFoldersStore } from "./useSessionFoldersStore";
 import { EXECUTION_FORK_META_TEXT } from "@/lib/messages/executionMeta";
 import { flattenAssistantTextParts } from "@/lib/messages/messageText";
 
@@ -150,6 +151,7 @@ export const useSessionStore = create<SessionStore>()(
                             title: options?.title,
                             initialPrompt: options?.initialPrompt,
                             syntheticParts: options?.syntheticParts,
+                            targetFolderId: options?.targetFolderId,
                         },
                         currentSessionId: null,
                         error: null,
@@ -186,18 +188,24 @@ export const useSessionStore = create<SessionStore>()(
                 closeNewSessionDraft: () => {
                     const realCurrentSessionId = useSessionManagementStore.getState().currentSessionId;
                     set({
-                        newSessionDraft: { open: false, directoryOverride: null, parentID: null, title: undefined, initialPrompt: undefined, syntheticParts: undefined },
+                        newSessionDraft: { open: false, directoryOverride: null, parentID: null, title: undefined, initialPrompt: undefined, syntheticParts: undefined, targetFolderId: undefined },
                         currentSessionId: realCurrentSessionId,
                     });
                 },
 
                 createSession: async (title?: string, directoryOverride?: string | null, parentID?: string | null) => {
+                    const draft = get().newSessionDraft;
+                    const targetFolderId = draft.targetFolderId;
                     get().closeNewSessionDraft();
 
                     const result = await useSessionManagementStore.getState().createSession(title, directoryOverride, parentID);
 
                     if (result?.id) {
                         await get().setCurrentSession(result.id);
+                        const finalScopeKey = directoryOverride || get().lastLoadedDirectory || result.directory;
+                        if (targetFolderId && finalScopeKey) {
+                            useSessionFoldersStore.getState().addSessionToFolder(finalScopeKey, targetFolderId, result.id);
+                        }
                     }
                     return result;
                 },
@@ -348,6 +356,7 @@ export const useSessionStore = create<SessionStore>()(
                     };
 
                     if (draft?.open) {
+                        const draftTargetFolderId = draft.targetFolderId;
                         const draftDirectoryOverride = draft.directoryOverride ?? null;
 
                         const created = await useSessionManagementStore
@@ -412,6 +421,14 @@ export const useSessionStore = create<SessionStore>()(
                         const draftSyntheticParts = draft.syntheticParts;
 
                         get().closeNewSessionDraft();
+
+                        // Assign to target folder if session was created from folder's + button
+                        if (draftTargetFolderId) {
+                            const scopeKey = draftDirectoryOverride || created.directory || null;
+                            if (scopeKey) {
+                                useSessionFoldersStore.getState().addSessionToFolder(scopeKey, draftTargetFolderId, created.id);
+                            }
+                        }
 
                         setStatus(created.id, 'busy');
 

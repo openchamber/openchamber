@@ -10,7 +10,7 @@ import {
   parseRequestPathname,
   pruneRebindTimestamps,
   readTerminalInputWsControlFrame,
-} from './terminal-input-ws-protocol.js';
+} from './input-ws-protocol.js';
 
 describe('terminal input websocket protocol', () => {
   it('uses fixed websocket path', () => {
