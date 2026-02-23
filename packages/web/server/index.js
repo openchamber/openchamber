@@ -1444,6 +1444,9 @@ const sanitizeSettingsUpdate = (payload) => {
   if (typeof candidate.showTextJustificationActivity === 'boolean') {
     result.showTextJustificationActivity = candidate.showTextJustificationActivity;
   }
+  if (typeof candidate.showDeletionDialog === 'boolean') {
+    result.showDeletionDialog = candidate.showDeletionDialog;
+  }
   if (typeof candidate.nativeNotificationsEnabled === 'boolean') {
     result.nativeNotificationsEnabled = candidate.nativeNotificationsEnabled;
   }

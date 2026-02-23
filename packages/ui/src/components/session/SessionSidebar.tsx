@@ -51,6 +51,8 @@ import {
   RiAddLine,
   RiArrowDownSLine,
   RiArrowRightSLine,
+  RiCheckboxBlankLine,
+  RiCheckboxLine,
   RiCheckLine,
   RiCloseLine,
   RiDeleteBinLine,
@@ -872,6 +874,8 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const setSessionSwitcherOpen = useUIStore((state) => state.setSessionSwitcherOpen);
   const openMultiRunLauncher = useUIStore((state) => state.openMultiRunLauncher);
   const notifyOnSubtasks = useUIStore((state) => state.notifyOnSubtasks);
+  const showDeletionDialog = useUIStore((state) => state.showDeletionDialog);
+  const setShowDeletionDialog = useUIStore((state) => state.setShowDeletionDialog);
   const settingsAutoCreateWorktree = useConfigStore((state) => state.settingsAutoCreateWorktree);
 
   // Session Folders store
@@ -1303,27 +1307,19 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const deleteSession = useSessionStore((state) => state.deleteSession);
   const deleteSessions = useSessionStore((state) => state.deleteSessions);
 
-  const handleDeleteSession = React.useCallback(
-    (session: Session) => {
+  const executeDeleteSession = React.useCallback(
+    async (session: Session) => {
       const descendants = collectDescendants(session.id);
-      setDeleteSessionConfirm({ session, descendantCount: descendants.length });
-    },
-    [collectDescendants],
-  );
-
-  const confirmDeleteSession = React.useCallback(async () => {
-    if (!deleteSessionConfirm) return;
-    const { session } = deleteSessionConfirm;
-    setDeleteSessionConfirm(null);
-    const descendants = collectDescendants(session.id);
-    if (descendants.length === 0) {
-      const success = await deleteSession(session.id);
-      if (success) {
-        toast.success('Session deleted');
-      } else {
-        toast.error('Failed to delete session');
+      if (descendants.length === 0) {
+        const success = await deleteSession(session.id);
+        if (success) {
+          toast.success('Session deleted');
+        } else {
+          toast.error('Failed to delete session');
+        }
+        return;
       }
-    } else {
+
       const ids = [session.id, ...descendants.map((s) => s.id)];
       const { deletedIds, failedIds } = await deleteSessions(ids);
       if (deletedIds.length > 0) {
@@ -1332,8 +1328,28 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       if (failedIds.length > 0) {
         toast.error(`Failed to delete ${failedIds.length} session${failedIds.length === 1 ? '' : 's'}`);
       }
-    }
-  }, [deleteSessionConfirm, collectDescendants, deleteSession, deleteSessions]);
+    },
+    [collectDescendants, deleteSession, deleteSessions],
+  );
+
+  const handleDeleteSession = React.useCallback(
+    (session: Session) => {
+      const descendants = collectDescendants(session.id);
+      if (!showDeletionDialog) {
+        void executeDeleteSession(session);
+        return;
+      }
+      setDeleteSessionConfirm({ session, descendantCount: descendants.length });
+    },
+    [collectDescendants, showDeletionDialog, executeDeleteSession],
+  );
+
+  const confirmDeleteSession = React.useCallback(async () => {
+    if (!deleteSessionConfirm) return;
+    const { session } = deleteSessionConfirm;
+    setDeleteSessionConfirm(null);
+    await executeDeleteSession(session);
+  }, [deleteSessionConfirm, executeDeleteSession]);
 
   const confirmDeleteFolder = React.useCallback(() => {
     if (!deleteFolderConfirm) return;
@@ -2571,6 +2587,10 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                 }}
                  onDelete={() => {
                    if (!folderScopeKey) return;
+                   if (!showDeletionDialog) {
+                     deleteFolder(folderScopeKey, folder.id);
+                     return;
+                   }
                    // Count affected sub-folders and sessions for the confirm dialog
                    const subFolderCount = allFoldersForGroup.filter(({ folder: f }) => f.parentId === folder.id).length;
                    const sessionCount = nodes.length;
@@ -2760,32 +2780,12 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                     </TooltipContent>
                   </Tooltip>
                 ) : null}
-                <DropdownMenu>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <DropdownMenuTrigger asChild>
-                        <button
-                          type="button"
-                          onClick={(e) => e.stopPropagation()}
-                          className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-                          aria-label={`New session or folder in ${group.label}`}
-                        >
-                          <RiAddLine className="h-4 w-4" />
-                        </button>
-                      </DropdownMenuTrigger>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom" sideOffset={4}>
-                      <p>New session or folder</p>
-                    </TooltipContent>
-                  </Tooltip>
-                  <DropdownMenuContent
-                    align="end"
-                    className="min-w-[160px]"
-                    onClick={(event) => event.stopPropagation()}
-                    onKeyDown={(event) => event.stopPropagation()}
-                  >
-                    <DropdownMenuItem
-                      onClick={() => {
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
                         if (projectId && projectId !== activeProjectId) {
                           setActiveProject(projectId);
                         }
@@ -2795,22 +2795,16 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                         }
                         openNewSessionDraft({ directoryOverride: group.directory });
                       }}
+                      className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                      aria-label={`New session in ${group.label}`}
                     >
-                      <RiAddLine className="mr-1.5 h-4 w-4" />
-                      New session
-                    </DropdownMenuItem>
-                    {folderScopeKey ? (
-                      <DropdownMenuItem
-                        onClick={() => {
-                          createFolderAndStartRename(folderScopeKey);
-                        }}
-                      >
-                        <RiFolderAddLine className="mr-1.5 h-4 w-4" />
-                        New folder
-                      </DropdownMenuItem>
-                    ) : null}
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                      <RiAddLine className="h-4 w-4" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" sideOffset={4}>
+                    <p>New session</p>
+                  </TooltipContent>
+                </Tooltip>
               </div>
             ) : null}
           </div>
@@ -2874,6 +2868,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       createFolderAndStartRename,
       renameFolder,
       deleteFolder,
+      showDeletionDialog,
       addSessionToFolder,
       renamingFolderId,
       renameFolderDraft,
@@ -3410,21 +3405,32 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                 : `"${deleteSessionConfirm?.session.title || 'Untitled Session'}" will be permanently deleted.`}
             </DialogDescription>
           </DialogHeader>
-          <DialogFooter>
+          <DialogFooter className="w-full sm:items-center sm:justify-between">
             <button
               type="button"
-              onClick={() => setDeleteSessionConfirm(null)}
-              className="inline-flex h-8 items-center justify-center rounded-md border border-border px-3 typography-ui-label text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+              onClick={() => setShowDeletionDialog(!showDeletionDialog)}
+              className="inline-flex items-center gap-1.5 typography-ui-label text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50"
+              aria-pressed={!showDeletionDialog}
             >
-              Cancel
+              {!showDeletionDialog ? <RiCheckboxLine className="h-4 w-4 text-primary" /> : <RiCheckboxBlankLine className="h-4 w-4" />}
+              Never ask
             </button>
-            <button
-              type="button"
-              onClick={() => void confirmDeleteSession()}
-              className="inline-flex h-8 items-center justify-center rounded-md bg-destructive px-3 typography-ui-label text-destructive-foreground hover:bg-destructive/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/50"
-            >
-              Delete
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setDeleteSessionConfirm(null)}
+                className="inline-flex h-8 items-center justify-center rounded-md border border-border px-3 typography-ui-label text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmDeleteSession()}
+                className="inline-flex h-8 items-center justify-center rounded-md bg-destructive px-3 typography-ui-label text-destructive-foreground hover:bg-destructive/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/50"
+              >
+                Delete
+              </button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>

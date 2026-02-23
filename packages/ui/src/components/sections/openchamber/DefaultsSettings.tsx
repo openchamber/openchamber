@@ -8,6 +8,7 @@ import { Switch } from '@/components/ui/switch';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { useUIStore } from '@/stores/useUIStore';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { getModifierLabel, cn } from '@/lib/utils';
 
@@ -55,6 +56,8 @@ export const DefaultsSettings: React.FC = () => {
   const setSettingsAutoCreateWorktree = useConfigStore((state) => state.setSettingsAutoCreateWorktree);
   const settingsZenModel = useConfigStore((state) => state.settingsZenModel);
   const setSettingsZenModel = useConfigStore((state) => state.setSettingsZenModel);
+  const showDeletionDialog = useUIStore((state) => state.showDeletionDialog);
+  const setShowDeletionDialog = useUIStore((state) => state.setShowDeletionDialog);
   const providers = useConfigStore((state) => state.providers);
 
   const [defaultModel, setDefaultModel] = React.useState<string | undefined>();
@@ -369,7 +372,7 @@ export const DefaultsSettings: React.FC = () => {
           </div>
         </div>
 
-        <div className={cn("flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-4 py-3", !isVSCode && "border-b border-[var(--surface-subtle)]")}>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-4 py-3 border-b border-[var(--surface-subtle)]">
           <div className="flex min-w-0 flex-col sm:w-1/3 shrink-0">
             <div className="flex items-center gap-2">
               <span className="typography-ui-label text-foreground">Zen Model</span>
@@ -404,6 +407,17 @@ export const DefaultsSettings: React.FC = () => {
             )}
           </div>
         </div>
+
+        <label className={cn("group flex cursor-pointer items-center justify-between gap-4 px-4 py-3 transition-colors hover:bg-[var(--interactive-hover)]/30", !isVSCode && "border-b border-[var(--surface-subtle)]")}>
+          <div className="flex min-w-0 flex-col sm:w-1/3 shrink-0">
+            <span className="typography-ui-label text-foreground">Show Deletion Dialog</span>
+          </div>
+          <Switch
+            checked={showDeletionDialog}
+            onCheckedChange={setShowDeletionDialog}
+            className="data-[state=checked]:bg-[var(--primary-base)]"
+          />
+        </label>
 
         {!isVSCode && (
           <label className="group flex cursor-pointer items-center justify-between gap-4 px-4 py-4 transition-colors hover:bg-[var(--interactive-hover)]/30">

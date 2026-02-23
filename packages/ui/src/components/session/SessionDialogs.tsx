@@ -21,6 +21,7 @@ import { removeProjectWorktree } from '@/lib/worktrees/worktreeManager';
 import { useSessionStore } from '@/stores/useSessionStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useUIStore } from '@/stores/useUIStore';
 import { useFileSystemAccess } from '@/hooks/useFileSystemAccess';
 import { isDesktopLocalOriginActive, isTauriShell } from '@/lib/desktop';
 import { useDeviceInfo } from '@/lib/device';
@@ -64,6 +65,8 @@ export const SessionDialogs: React.FC = () => {
         loadSessions,
         getWorktreeMetadata,
     } = useSessionStore();
+    const showDeletionDialog = useUIStore((state) => state.showDeletionDialog);
+    const setShowDeletionDialog = useUIStore((state) => state.setShowDeletionDialog);
     const { currentDirectory, homeDirectory, isHomeReady } = useDirectoryStore();
     const { projects, addProject, activeProjectId } = useProjectsStore();
     const { requestAccess, startAccessing } = useFileSystemAccess();
@@ -194,11 +197,52 @@ export const SessionDialogs: React.FC = () => {
         setDirtyWorktreePaths(new Set());
     }, []);
 
+    const deleteSessionsWithoutDialog = React.useCallback(async (payload: { sessions: Session[]; dateLabel?: string }) => {
+        if (payload.sessions.length === 0) {
+            return;
+        }
+
+        if (payload.sessions.length === 1) {
+            const target = payload.sessions[0];
+            const success = await deleteSession(target.id);
+            if (success) {
+                toast.success('Session deleted');
+            } else {
+                toast.error('Failed to delete session');
+            }
+            return;
+        }
+
+        const ids = payload.sessions.map((session) => session.id);
+        const { deletedIds, failedIds } = await deleteSessions(ids);
+
+        if (deletedIds.length > 0) {
+            const successDescription = failedIds.length > 0
+                ? `${failedIds.length} session${failedIds.length === 1 ? '' : 's'} could not be deleted.`
+                : payload.dateLabel
+                    ? `Removed all sessions from ${payload.dateLabel}.`
+                    : undefined;
+            toast.success(`Deleted ${deletedIds.length} session${deletedIds.length === 1 ? '' : 's'}`, {
+                description: renderToastDescription(successDescription),
+            });
+        }
+
+        if (failedIds.length > 0) {
+            toast.error(`Failed to delete ${failedIds.length} session${failedIds.length === 1 ? '' : 's'}`, {
+                description: renderToastDescription('Please try again in a moment.'),
+            });
+        }
+    }, [deleteSession, deleteSessions]);
+
     React.useEffect(() => {
         return sessionEvents.onDeleteRequest((payload) => {
+            if (!showDeletionDialog && (payload.mode ?? 'session') === 'session') {
+                void deleteSessionsWithoutDialog(payload);
+                return;
+            }
             openDeleteDialog(payload);
         });
-    }, [openDeleteDialog]);
+    }, [openDeleteDialog, showDeletionDialog, deleteSessionsWithoutDialog]);
 
     React.useEffect(() => {
         return sessionEvents.onDirectoryRequest(() => {
@@ -634,18 +678,29 @@ export const SessionDialogs: React.FC = () => {
             </div>
         </div>
     ) : (
-        <>
-            <Button variant="ghost" onClick={closeDeleteDialog} disabled={isProcessingDelete}>
-                Cancel
-            </Button>
-            <Button variant="destructive" onClick={handleConfirmDelete} disabled={isProcessingDelete}>
-                {isProcessingDelete
-                    ? 'Deleting…'
-                    : deleteDialog?.sessions.length === 1
-                        ? 'Delete session'
-                        : 'Delete sessions'}
-            </Button>
-        </>
+        <div className="flex w-full items-center justify-between gap-3">
+            <button
+                type="button"
+                onClick={() => setShowDeletionDialog(!showDeletionDialog)}
+                className="inline-flex items-center gap-1.5 typography-meta text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50"
+                aria-pressed={!showDeletionDialog}
+            >
+                {!showDeletionDialog ? <RiCheckboxLine className="size-4 text-primary" /> : <RiCheckboxBlankLine className="size-4" />}
+                Never ask
+            </button>
+            <div className="flex items-center gap-2">
+                <Button variant="ghost" onClick={closeDeleteDialog} disabled={isProcessingDelete}>
+                    Cancel
+                </Button>
+                <Button variant="destructive" onClick={handleConfirmDelete} disabled={isProcessingDelete}>
+                    {isProcessingDelete
+                        ? 'Deleting…'
+                        : deleteDialog?.sessions.length === 1
+                            ? 'Delete session'
+                            : 'Delete sessions'}
+                </Button>
+            </div>
+        </div>
     );
 
     const deleteDialogTitle = isWorktreeDelete

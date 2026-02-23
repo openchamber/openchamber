@@ -170,6 +170,7 @@ interface UIStore {
   eventStreamHint: string | null;
   showReasoningTraces: boolean;
   showTextJustificationActivity: boolean;
+  showDeletionDialog: boolean;
   autoDeleteEnabled: boolean;
   autoDeleteAfterDays: number;
   autoDeleteLastRunAt: number | null;
@@ -268,6 +269,7 @@ interface UIStore {
   setEventStreamStatus: (status: EventStreamStatus, hint?: string | null) => void;
   setShowReasoningTraces: (value: boolean) => void;
   setShowTextJustificationActivity: (value: boolean) => void;
+  setShowDeletionDialog: (value: boolean) => void;
   setAutoDeleteEnabled: (value: boolean) => void;
   setAutoDeleteAfterDays: (days: number) => void;
   setAutoDeleteLastRunAt: (timestamp: number | null) => void;
@@ -365,6 +367,7 @@ export const useUIStore = create<UIStore>()(
         eventStreamHint: null,
         showReasoningTraces: true,
         showTextJustificationActivity: false,
+        showDeletionDialog: true,
         autoDeleteEnabled: false,
         autoDeleteAfterDays: 30,
         autoDeleteLastRunAt: null,
@@ -843,6 +846,10 @@ export const useUIStore = create<UIStore>()(
           set({ showTextJustificationActivity: value });
         },
 
+        setShowDeletionDialog: (value) => {
+          set({ showDeletionDialog: value });
+        },
+
         setAutoDeleteEnabled: (value) => {
           set({ autoDeleteEnabled: value });
         },
@@ -1309,6 +1316,7 @@ export const useUIStore = create<UIStore>()(
           // Note: isSettingsDialogOpen intentionally NOT persisted
           showReasoningTraces: state.showReasoningTraces,
           showTextJustificationActivity: state.showTextJustificationActivity,
+          showDeletionDialog: state.showDeletionDialog,
           autoDeleteEnabled: state.autoDeleteEnabled,
           autoDeleteAfterDays: state.autoDeleteAfterDays,
           autoDeleteLastRunAt: state.autoDeleteLastRunAt,

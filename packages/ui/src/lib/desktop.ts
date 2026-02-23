@@ -46,6 +46,7 @@ export type DesktopSettings = {
   pinnedDirectories?: string[];
   showReasoningTraces?: boolean;
   showTextJustificationActivity?: boolean;
+  showDeletionDialog?: boolean;
   nativeNotificationsEnabled?: boolean;
   notificationMode?: 'always' | 'hidden-only';
   notifyOnSubtasks?: boolean;
