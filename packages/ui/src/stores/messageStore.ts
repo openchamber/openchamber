@@ -36,6 +36,21 @@ const timeoutRegistry = new Map<string, ReturnType<typeof setTimeout>>();
 const lastContentRegistry = new Map<string, string>();
 const streamingCooldownTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
+// --- rAF batching for streaming parts ---
+// Buffer incoming streaming parts and flush them in a single requestAnimationFrame
+// callback. This coalesces N SSE tokens per frame into one synchronous flush,
+// which React 18 + Zustand batch into a single re-render.
+interface QueuedStreamingPart {
+    sessionId: string;
+    messageId: string;
+    part: Part;
+    role?: string;
+    currentSessionId?: string;
+}
+const streamingPartQueue: QueuedStreamingPart[] = [];
+let streamingFlushScheduled = false;
+let streamingFlushRafId: number | null = null;
+
 const MIN_SORTABLE_LENGTH = 10;
 
 const extractSortableId = (id: unknown): string | null => {
@@ -831,6 +846,21 @@ export const useMessageStore = create<MessageStore>()(
                         return;
                     }
 
+                    // Discard any buffered streaming parts — the session is being aborted.
+                    if (streamingPartQueue.length > 0) {
+                        // Remove queued parts for this session; keep parts for other sessions.
+                        for (let i = streamingPartQueue.length - 1; i >= 0; i--) {
+                            if (streamingPartQueue[i].sessionId === currentSessionId) {
+                                streamingPartQueue.splice(i, 1);
+                            }
+                        }
+                        if (streamingPartQueue.length === 0 && streamingFlushRafId !== null) {
+                            cancelAnimationFrame(streamingFlushRafId);
+                            streamingFlushRafId = null;
+                            streamingFlushScheduled = false;
+                        }
+                    }
+
                     const stateSnapshot = get();
                     const { abortControllers, messages: storeMessages } = stateSnapshot;
 
@@ -1474,7 +1504,29 @@ export const useMessageStore = create<MessageStore>()(
                 },
 
                 addStreamingPart: (sessionId: string, messageId: string, part: Part, role?: string, currentSessionId?: string) => {
-                    get()._addStreamingPartImmediate(sessionId, messageId, part, role, currentSessionId);
+                    streamingPartQueue.push({ sessionId, messageId, part, role, currentSessionId });
+
+                    if (!streamingFlushScheduled) {
+                        streamingFlushScheduled = true;
+                        streamingFlushRafId = requestAnimationFrame(() => {
+                            streamingFlushRafId = null;
+                            streamingFlushScheduled = false;
+
+                            // Drain the queue into a local copy to avoid re-entrancy issues
+                            const batch = streamingPartQueue.splice(0);
+                            if (batch.length === 0) return;
+
+                            // Process all queued parts synchronously.
+                            // Even though each _addStreamingPartImmediate calls set(),
+                            // React 18's automatic batching coalesces the resulting
+                            // re-renders into a single paint — so the UI updates once
+                            // per frame regardless of how many SSE tokens arrived.
+                            const immediateHandler = get()._addStreamingPartImmediate;
+                            for (const entry of batch) {
+                                immediateHandler(entry.sessionId, entry.messageId, entry.part, entry.role, entry.currentSessionId);
+                            }
+                        });
+                    }
                 },
 
                 forceCompleteMessage: (sessionId: string | null | undefined, messageId: string, source: "timeout" | "cooldown" = "timeout") => {
@@ -1958,6 +2010,21 @@ export const useMessageStore = create<MessageStore>()(
                 },
 
                 completeStreamingMessage: (sessionId: string, messageId: string) => {
+                    // Flush any buffered streaming parts before completing,
+                    // so the completion handler sees the latest accumulated state.
+                    if (streamingPartQueue.length > 0) {
+                        if (streamingFlushRafId !== null) {
+                            cancelAnimationFrame(streamingFlushRafId);
+                            streamingFlushRafId = null;
+                            streamingFlushScheduled = false;
+                        }
+                        const batch = streamingPartQueue.splice(0);
+                        const immediateHandler = get()._addStreamingPartImmediate;
+                        for (const entry of batch) {
+                            immediateHandler(entry.sessionId, entry.messageId, entry.part, entry.role, entry.currentSessionId);
+                        }
+                    }
+
                     const state = get();
 
                     (window as any).__messageTracker?.(
