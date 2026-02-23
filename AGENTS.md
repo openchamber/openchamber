@@ -49,6 +49,14 @@ GitHub authentication, OAuth device flow, Octokit client factory, and repository
 OpenCode server integration utilities including config management, provider authentication, and UI authentication.
 - Module docs: `packages/web/server/lib/opencode/DOCUMENTATION.md`
 
+##### notifications
+Notification message preparation utilities for system notifications, including text truncation and optional summarization.
+- Module docs: `packages/web/server/lib/notifications/DOCUMENTATION.md`
+
+##### terminal
+WebSocket protocol utilities for terminal input handling including message normalization, control frame parsing, and rate limiting.
+- Module docs: `packages/web/server/lib/terminal/DOCUMENTATION.md`
+
 ## Build / dev commands (verified)
 All scripts are in `package.json`.
 - Validate: `bun run type-check`, `bun run lint`

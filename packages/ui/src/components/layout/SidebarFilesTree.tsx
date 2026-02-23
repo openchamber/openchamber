@@ -11,6 +11,7 @@ import {
   RiFolder3Fill,
   RiFolderAddLine,
   RiFolderOpenFill,
+  RiFolderReceivedLine,
   RiLoader4Line,
   RiMore2Fill,
   RiRefreshLine,
@@ -186,11 +187,13 @@ interface FileRowProps {
     canCreateFile: boolean;
     canCreateFolder: boolean;
     canDelete: boolean;
+    canReveal: boolean;
   };
   contextMenuPath: string | null;
   setContextMenuPath: (path: string | null) => void;
   onSelect: (node: FileNode) => void;
   onToggle: (path: string) => void;
+  onRevealPath: (path: string) => void;
   onOpenDialog: (type: 'createFile' | 'createFolder' | 'rename' | 'delete', data: { path: string; name?: string; type?: 'file' | 'directory' }) => void;
 }
 
@@ -205,16 +208,17 @@ const FileRow: React.FC<FileRowProps> = ({
   setContextMenuPath,
   onSelect,
   onToggle,
+  onRevealPath,
   onOpenDialog,
 }) => {
   const isDir = node.type === 'directory';
-  const { canRename, canCreateFile, canCreateFolder, canDelete } = permissions;
+  const { canRename, canCreateFile, canCreateFolder, canDelete, canReveal } = permissions;
 
   const handleContextMenu = React.useCallback((event?: React.MouseEvent) => {
-    if (!canRename && !canCreateFile && !canCreateFolder && !canDelete) return;
+    if (!canRename && !canCreateFile && !canCreateFolder && !canDelete && !canReveal) return;
     event?.preventDefault();
     setContextMenuPath(node.path);
-  }, [canRename, canCreateFile, canCreateFolder, canDelete, node.path, setContextMenuPath]);
+  }, [canRename, canCreateFile, canCreateFolder, canDelete, canReveal, node.path, setContextMenuPath]);
 
   const handleInteraction = React.useCallback(() => {
     if (isDir) {
@@ -263,7 +267,7 @@ const FileRow: React.FC<FileRowProps> = ({
           </span>
         )}
       </button>
-      {(canRename || canCreateFile || canCreateFolder || canDelete) && (
+      {(canRename || canCreateFile || canCreateFolder || canDelete || canReveal) && (
         <div className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 focus-within:opacity-100 group-hover:opacity-100">
           <DropdownMenu
             open={contextMenuPath === node.path}
@@ -297,6 +301,11 @@ const FileRow: React.FC<FileRowProps> = ({
               }}>
                 <RiFileCopyLine className="mr-2 h-4 w-4" /> Copy Path
               </DropdownMenuItem>
+              {canReveal && (
+                <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onRevealPath(node.path); }}>
+                  <RiFolderReceivedLine className="mr-2 h-4 w-4" /> Reveal in Finder
+                </DropdownMenuItem>
+              )}
               {isDir && (canCreateFile || canCreateFolder) && (
                 <>
                   <DropdownMenuSeparator />
@@ -375,6 +384,14 @@ export const SidebarFilesTree: React.FC = () => {
   const canCreateFolder = Boolean(files.createDirectory);
   const canRename = Boolean(files.rename);
   const canDelete = Boolean(files.delete);
+  const canReveal = Boolean(files.revealPath);
+
+  const handleRevealPath = React.useCallback((targetPath: string) => {
+    if (!files.revealPath) return;
+    void files.revealPath(targetPath).catch(() => {
+      toast.error('Failed to reveal path');
+    });
+  }, [files]);
 
   const handleOpenDialog = React.useCallback((type: 'createFile' | 'createFolder' | 'rename' | 'delete', data: { path: string; name?: string; type?: 'file' | 'directory' }) => {
     setActiveDialog(type);
@@ -737,11 +754,12 @@ export const SidebarFilesTree: React.FC = () => {
             isActive={isActive}
             status={!isDir ? getFileStatus(node.path) : undefined}
             badge={isDir ? getFolderBadge(node.path) : undefined}
-            permissions={{ canRename, canCreateFile, canCreateFolder, canDelete }}
+            permissions={{ canRename, canCreateFile, canCreateFolder, canDelete, canReveal }}
             contextMenuPath={contextMenuPath}
             setContextMenuPath={setContextMenuPath}
             onSelect={handleOpenFile}
             onToggle={toggleDirectory}
+            onRevealPath={handleRevealPath}
             onOpenDialog={handleOpenDialog}
           />
           {isDir && isExpanded && (

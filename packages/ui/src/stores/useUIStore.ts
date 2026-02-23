@@ -215,6 +215,8 @@ interface UIStore {
   persistChatDraft: boolean;
   isMobileSessionStatusBarCollapsed: boolean;
 
+  isExpandedInput: boolean;
+
   shortcutOverrides: Record<string, ShortcutCombo>;
 
   setTheme: (theme: 'light' | 'dark' | 'system') => void;
@@ -298,6 +300,8 @@ interface UIStore {
   setMaxLastMessageLength: (value: number) => void;
   setPersistChatDraft: (value: boolean) => void;
   setIsMobileSessionStatusBarCollapsed: (value: boolean) => void;
+  toggleExpandedInput: () => void;
+  setExpandedInput: (value: boolean) => void;
   openMultiRunLauncher: () => void;
   openMultiRunLauncherWithPrompt: (prompt: string) => void;
   setShortcutOverride: (actionId: string, combo: ShortcutCombo) => void;
@@ -390,6 +394,7 @@ export const useUIStore = create<UIStore>()(
         showTerminalQuickKeysOnDesktop: false,
         persistChatDraft: true,
         isMobileSessionStatusBarCollapsed: false,
+        isExpandedInput: false,
         shortcutOverrides: {},
 
         setTheme: (theme) => {
@@ -1130,6 +1135,14 @@ export const useUIStore = create<UIStore>()(
 
         resetAllShortcutOverrides: () => {
           set({ shortcutOverrides: {} });
+        },
+
+        toggleExpandedInput: () => {
+          set((state) => ({ isExpandedInput: !state.isExpandedInput }));
+        },
+
+        setExpandedInput: (value) => {
+          set({ isExpandedInput: value });
         },
       }),
       {

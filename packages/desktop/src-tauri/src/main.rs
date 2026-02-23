@@ -1082,7 +1082,35 @@ fn normalize_host_url(raw: &str) -> Option<String> {
         normalized.push(':');
         normalized.push_str(&port.to_string());
     }
+    let path = parsed.path();
+    if path.is_empty() {
+        normalized.push('/');
+    } else {
+        normalized.push_str(path);
+    }
+    if let Some(query) = parsed.query() {
+        normalized.push('?');
+        normalized.push_str(query);
+    }
     Some(normalized)
+}
+
+fn sanitize_host_url_for_storage(raw: &str) -> Option<String> {
+    normalize_host_url(raw)
+}
+
+fn build_health_url(base_url: &str) -> Option<String> {
+    let normalized = normalize_host_url(base_url)?;
+    let mut parsed = url::Url::parse(&normalized).ok()?;
+    let current_path = parsed.path();
+    let trimmed_path = current_path.trim_end_matches('/');
+    let health_path = if trimmed_path.is_empty() {
+        "/health".to_string()
+    } else {
+        format!("{trimmed_path}/health")
+    };
+    parsed.set_path(&health_path);
+    Some(parsed.to_string())
 }
 
 fn settings_file_path() -> PathBuf {
@@ -1134,7 +1162,10 @@ fn write_desktop_local_port_to_disk(port: u16) -> Result<()> {
 
 
 fn read_desktop_hosts_config_from_disk() -> DesktopHostsConfig {
-    let path = settings_file_path();
+    read_desktop_hosts_config_from_path(&settings_file_path())
+}
+
+fn read_desktop_hosts_config_from_path(path: &Path) -> DesktopHostsConfig {
     let raw = fs::read_to_string(path).ok();
     let parsed = raw
         .as_deref()
@@ -1158,7 +1189,7 @@ fn read_desktop_hosts_config_from_disk() -> DesktopHostsConfig {
                 if host.id.trim().is_empty() || host.id == LOCAL_HOST_ID {
                     continue;
                 }
-                if let Some(url) = normalize_host_url(&host.url) {
+                if let Some(url) = sanitize_host_url_for_storage(&host.url) {
                     hosts.push(DesktopHost {
                         id: host.id,
                         label: if host.label.trim().is_empty() {
@@ -1215,7 +1246,10 @@ fn write_desktop_window_state_to_disk(state: &DesktopWindowState) -> Result<()> 
 }
 
 fn write_desktop_hosts_config_to_disk(config: &DesktopHostsConfig) -> Result<()> {
-    let path = settings_file_path();
+    write_desktop_hosts_config_to_path(&settings_file_path(), config)
+}
+
+fn write_desktop_hosts_config_to_path(path: &Path, config: &DesktopHostsConfig) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -1238,7 +1272,7 @@ fn write_desktop_hosts_config_to_disk(config: &DesktopHostsConfig) -> Result<()>
             if id.is_empty() || id == LOCAL_HOST_ID {
                 return None;
             }
-            let url = normalize_host_url(&h.url)?;
+            let url = sanitize_host_url_for_storage(&h.url)?;
             Some(DesktopHost {
                 id: id.to_string(),
                 label: if h.label.trim().is_empty() {
@@ -1281,8 +1315,7 @@ struct HostProbeResult {
 
 #[tauri::command]
 async fn desktop_host_probe(url: String) -> Result<HostProbeResult, String> {
-    let normalized = normalize_host_url(&url).ok_or_else(|| "Invalid URL".to_string())?;
-    let health = format!("{}/health", normalized.trim_end_matches('/'));
+    let health = build_health_url(&url).ok_or_else(|| "Invalid URL".to_string())?;
     let client = reqwest::Client::builder()
         .no_proxy()
         .timeout(Duration::from_secs(2))
@@ -1782,21 +1815,7 @@ fn resolve_web_dist_dir(app: &tauri::AppHandle) -> Result<PathBuf> {
 }
 
 fn normalize_server_url(input: &str) -> Option<String> {
-    let trimmed = input.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    match url::Url::parse(trimmed) {
-        Ok(url) => {
-            if url.scheme() == "http" || url.scheme() == "https" {
-                Some(trimmed.trim_end_matches('/').to_string())
-            } else {
-                None
-            }
-        }
-        Err(_) => None,
-    }
+    normalize_host_url(input)
 }
 
 #[derive(Deserialize)]
@@ -2689,4 +2708,56 @@ fn main() {
             _ => {}
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn unique_settings_path(test_name: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock drift")
+            .as_nanos();
+        std::env::temp_dir().join(format!("openchamber-{test_name}-{nanos}-settings.json"))
+    }
+
+    #[test]
+    fn sanitize_host_url_for_storage_keeps_query_params() {
+        let input = "https://example.com?coder_session_token=xxxxxx";
+        let sanitized = sanitize_host_url_for_storage(input).expect("sanitized url");
+        assert_eq!(sanitized, "https://example.com/?coder_session_token=xxxxxx");
+    }
+
+    #[test]
+    fn sanitize_host_url_for_storage_strips_fragment_and_keeps_query() {
+        let input = "https://example.com/workspace?coder_session_token=xxxxxx#ignored";
+        let sanitized = sanitize_host_url_for_storage(input).expect("sanitized url");
+        assert_eq!(sanitized, "https://example.com/workspace?coder_session_token=xxxxxx");
+    }
+
+    #[test]
+    fn write_and_read_hosts_config_preserves_query_params() {
+        let path = unique_settings_path("desktop-hosts-query");
+        let config = DesktopHostsConfig {
+            hosts: vec![DesktopHost {
+                id: "remote-1".to_string(),
+                label: "Remote".to_string(),
+                url: "https://example.com?coder_session_token=xxxxxx".to_string(),
+            }],
+            default_host_id: Some("remote-1".to_string()),
+        };
+
+        write_desktop_hosts_config_to_path(&path, &config).expect("write config");
+        let read_back = read_desktop_hosts_config_from_path(&path);
+        let _ = fs::remove_file(&path);
+
+        assert_eq!(read_back.hosts.len(), 1);
+        assert_eq!(
+            read_back.hosts[0].url,
+            "https://example.com/?coder_session_token=xxxxxx"
+        );
+        assert_eq!(read_back.default_host_id.as_deref(), Some("remote-1"));
+    }
 }

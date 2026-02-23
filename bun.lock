@@ -7,7 +7,9 @@
       "dependencies": {
         "@codemirror/autocomplete": "^6.20.0",
         "@codemirror/commands": "^6.10.1",
+        "@codemirror/lang-cpp": "^6.0.3",
         "@codemirror/lang-css": "^6.3.1",
+        "@codemirror/lang-go": "^6.0.1",
         "@codemirror/lang-html": "^6.4.11",
         "@codemirror/lang-javascript": "^6.2.4",
         "@codemirror/lang-json": "^6.0.2",
@@ -95,7 +97,7 @@
     },
     "packages/desktop": {
       "name": "@openchamber/desktop",
-      "version": "1.6.9",
+      "version": "1.7.3",
       "devDependencies": {
         "@tauri-apps/cli": "^2",
         "@types/node": "^24.3.1",
@@ -104,11 +106,13 @@
     },
     "packages/ui": {
       "name": "@openchamber/ui",
-      "version": "1.6.9",
+      "version": "1.7.3",
       "dependencies": {
         "@codemirror/autocomplete": "^6.20.0",
         "@codemirror/commands": "^6.10.1",
+        "@codemirror/lang-cpp": "^6.0.3",
         "@codemirror/lang-css": "^6.3.1",
+        "@codemirror/lang-go": "^6.0.1",
         "@codemirror/lang-html": "^6.4.11",
         "@codemirror/lang-javascript": "^6.2.4",
         "@codemirror/lang-json": "^6.0.2",
@@ -200,7 +204,7 @@
     },
     "packages/vscode": {
       "name": "openchamber",
-      "version": "1.6.9",
+      "version": "1.7.3",
       "dependencies": {
         "@openchamber/ui": "workspace:*",
         "@opencode-ai/sdk": "^1.2.5",
@@ -223,11 +227,13 @@
     },
     "packages/web": {
       "name": "@openchamber/web",
-      "version": "1.6.9",
+      "version": "1.7.3",
       "bin": {
         "openchamber": "./bin/cli.js",
       },
       "dependencies": {
+        "@codemirror/lang-cpp": "^6.0.3",
+        "@codemirror/lang-go": "^6.0.1",
         "@fontsource/ibm-plex-mono": "^5.2.7",
         "@fontsource/ibm-plex-sans": "^5.1.1",
         "@ibm/plex": "^6.4.1",

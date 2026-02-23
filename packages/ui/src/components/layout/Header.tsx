@@ -57,7 +57,7 @@ import { DesktopHostSwitcherDialog } from '@/components/desktop/DesktopHostSwitc
 import { OpenInAppButton } from '@/components/desktop/OpenInAppButton';
 import { isDesktopLocalOriginActive, isDesktopShell, isTauriShell, isVSCodeRuntime } from '@/lib/desktop';
 import { sessionEvents } from '@/lib/sessionEvents';
-import { desktopHostsGet } from '@/lib/desktopHosts';
+import { desktopHostsGet, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
 import { ProjectEditDialog } from '@/components/layout/ProjectEditDialog';
 import { GridLoader } from '@/components/ui/grid-loader';
 import { PROJECT_ICON_MAP, PROJECT_COLOR_MAP } from '@/lib/projectMeta';
@@ -539,47 +539,22 @@ export const Header: React.FC = () => {
       return;
     }
 
-    const normalizeHostUrl = (raw: string): string | null => {
-      const trimmed = raw.trim();
-      if (!trimmed) return null;
-      try {
-        const url = new URL(trimmed);
-        if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-          return null;
-        }
-        return url.origin;
-      } catch {
-        try {
-          const url = new URL(trimmed.endsWith('/') ? trimmed : `${trimmed}/`);
-          if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-            return null;
-          }
-          return url.origin;
-        } catch {
-          return null;
-        }
-      }
-    };
-
     try {
       const cfg = await desktopHostsGet();
-      const currentOrigin = window.location.origin;
-      const localOrigin = window.__OPENCHAMBER_LOCAL_ORIGIN__ || currentOrigin;
-      const normalizedCurrent = normalizeHostUrl(currentOrigin) || currentOrigin;
-      const normalizedLocal = normalizeHostUrl(localOrigin) || localOrigin;
+      const currentHref = window.location.href;
+      const localOrigin = window.__OPENCHAMBER_LOCAL_ORIGIN__ || window.location.origin;
 
-      if (normalizedCurrent && normalizedLocal && normalizedCurrent === normalizedLocal) {
+      if (locationMatchesHost(currentHref, localOrigin)) {
         setCurrentInstanceLabel('Local');
         return;
       }
 
       const match = cfg.hosts.find((host) => {
-        const normalized = normalizeHostUrl(host.url);
-        return normalized && normalized === normalizedCurrent;
+        return locationMatchesHost(currentHref, host.url);
       });
 
       if (match?.label?.trim()) {
-        setCurrentInstanceLabel(match.label.trim());
+        setCurrentInstanceLabel(redactSensitiveUrl(match.label.trim()));
         return;
       }
 
@@ -1794,7 +1769,9 @@ export const Header: React.FC = () => {
               </TooltipTrigger>
               <TooltipContent>
                 <p>
-                  {isDesktopApp ? `Current instance: ${currentInstanceLabel}` : 'Services'} ({shortcutLabel('toggle_services_menu')}; next tab {shortcutLabel('cycle_services_tab')})
+                  {isDesktopApp
+                    ? `Current instance: ${currentInstanceLabel}`
+                    : 'Services'} ({shortcutLabel('toggle_services_menu')}; next tab {shortcutLabel('cycle_services_tab')})
                 </p>
               </TooltipContent>
             </Tooltip>
