@@ -444,11 +444,11 @@ export const VoiceSettings: React.FC = () => {
                                     {voiceProvider === 'openai' && isOpenAIAvailable && (
                                         <>
                                             <Select value={openaiVoice} onValueChange={setOpenaiVoice}>
-                                                <SelectTrigger className="w-fit min-w-[120px]">
-                                                    <SelectValue placeholder="Select voice" />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    {OPENAI_VOICE_OPTIONS.map((v) => (
+                                            <SelectTrigger size="lg" className="w-fit min-w-[120px]">
+                                                 <SelectValue placeholder="Select voice" />
+                                             </SelectTrigger>
+                                             <SelectContent>
+                                                 {OPENAI_VOICE_OPTIONS.map((v) => (
                                                         <SelectItem key={v.value} value={v.value}>{v.label}</SelectItem>
                                                     ))}
                                                 </SelectContent>
@@ -462,11 +462,11 @@ export const VoiceSettings: React.FC = () => {
                                     {voiceProvider === 'say' && isSayAvailable && sayVoices.length > 0 && (
                                         <>
                                             <Select value={sayVoice} onValueChange={setSayVoice}>
-                                                <SelectTrigger className="w-fit min-w-[120px]">
-                                                    <SelectValue placeholder="Select voice" />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    {sayVoices.map((v) => (
+                                            <SelectTrigger size="lg" className="w-fit min-w-[120px]">
+                                                 <SelectValue placeholder="Select voice" />
+                                             </SelectTrigger>
+                                             <SelectContent>
+                                                 {sayVoices.map((v) => (
                                                         <SelectItem key={v.name} value={v.name}>{v.name}</SelectItem>
                                                     ))}
                                                 </SelectContent>
@@ -480,12 +480,12 @@ export const VoiceSettings: React.FC = () => {
                                     {voiceProvider === 'browser' && filteredBrowserVoices.length > 0 && (
                                         <>
                                             <Select value={browserVoice || '__auto__'} onValueChange={(value) => setBrowserVoice(value === '__auto__' ? '' : value)}>
-                                                <SelectTrigger className="w-fit min-w-[120px]">
-                                                    <SelectValue placeholder="Auto" />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    <SelectItem value="__auto__">Auto</SelectItem>
-                                                    {filteredBrowserVoices.map((v) => (
+                                            <SelectTrigger size="lg" className="w-fit min-w-[120px]">
+                                                 <SelectValue placeholder="Auto" />
+                                             </SelectTrigger>
+                                             <SelectContent>
+                                                 <SelectItem value="__auto__">Auto</SelectItem>
+                                                 {filteredBrowserVoices.map((v) => (
                                                         <SelectItem key={v.name} value={v.name}>{v.name} ({v.lang})</SelectItem>
                                                     ))}
                                                 </SelectContent>
@@ -590,9 +590,9 @@ export const VoiceSettings: React.FC = () => {
                                 </div>
                                 <div className={cn("flex", isMobile ? "w-full" : "justify-end flex-1")}>
                                     <Select value={language} onValueChange={setLanguage} disabled={!isSupported}>
-                                        <SelectTrigger className="w-fit min-w-[120px]">
-                                            <SelectValue placeholder="Select language" />
-                                        </SelectTrigger>
+                                         <SelectTrigger size="lg" className="w-fit min-w-[120px]">
+                                              <SelectValue placeholder="Select language" />
+                                          </SelectTrigger>
                                         <SelectContent>
                                             {LANGUAGE_OPTIONS.map((lang) => (
                                                 <SelectItem key={lang.value} value={lang.value}>{lang.label}</SelectItem>

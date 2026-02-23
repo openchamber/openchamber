@@ -95,7 +95,7 @@ export const InstallConflictsDialog: React.FC<InstallConflictsDialogProps> = ({
                   value={decisions[conflict.skillName] || 'skip'}
                   onValueChange={(v) => setDecisions((prev) => ({ ...prev, [conflict.skillName]: v as ConflictDecision }))}
                 >
-                  <SelectTrigger className="!h-9 w-36 justify-between">
+                  <SelectTrigger size="lg" className="w-36 justify-between">
                     <span className="capitalize">{decisions[conflict.skillName] || 'skip'}</span>
                   </SelectTrigger>
                   <SelectContent align="end">

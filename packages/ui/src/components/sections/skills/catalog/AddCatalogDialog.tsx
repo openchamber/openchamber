@@ -281,7 +281,7 @@ export const AddCatalogDialog: React.FC<AddCatalogDialogProps> = ({ open, onOpen
               </div>
               <div className="mt-2">
                 <Select value={gitIdentityId || ''} onValueChange={(v) => setGitIdentityId(v)}>
-                  <SelectTrigger className="!h-9 w-full justify-between">
+                  <SelectTrigger size="lg" className="w-full justify-between">
                     <span>{identityOptions.find((i) => i.id === gitIdentityId)?.name || 'Choose identity'}</span>
                   </SelectTrigger>
                   <SelectContent align="start">

@@ -334,7 +334,7 @@ export const InstallFromRepoDialog: React.FC<InstallFromRepoDialogProps> = ({ op
                     setTargetSource(next.source === 'agents' ? 'agents' : 'opencode');
                   }}
                 >
-                  <SelectTrigger className="!h-9 w-full gap-1.5">
+                  <SelectTrigger size="lg" className="w-full gap-1.5">
                     {scope === 'user' ? <RiUser3Line className="h-4 w-4" /> : <RiFolderLine className="h-4 w-4" />}
                     {targetSource === 'agents' ? <RiRobot2Line className="h-4 w-4" /> : null}
                     <span>{locationLabel(scope, targetSource)}</span>
@@ -368,7 +368,7 @@ export const InstallFromRepoDialog: React.FC<InstallFromRepoDialogProps> = ({ op
                     onValueChange={(v) => setTargetProjectId(v)}
                     disabled={projects.length === 1}
                   >
-                    <SelectTrigger className="!h-9 w-full justify-between">
+                    <SelectTrigger size="lg" className="w-full justify-between">
                       <SelectValue placeholder="Choose project" />
                     </SelectTrigger>
                     <SelectContent align="start">
@@ -391,7 +391,7 @@ export const InstallFromRepoDialog: React.FC<InstallFromRepoDialogProps> = ({ op
                 </div>
                 <div className="mt-2">
                   <Select value={gitIdentityId || ''} onValueChange={(v) => setGitIdentityId(v)}>
-                    <SelectTrigger className="!h-9 w-full justify-between">
+                    <SelectTrigger size="lg" className="w-full justify-between">
                       <span>{identities.find((i) => i.id === gitIdentityId)?.name || 'Choose identity'}</span>
                     </SelectTrigger>
                     <SelectContent align="start">

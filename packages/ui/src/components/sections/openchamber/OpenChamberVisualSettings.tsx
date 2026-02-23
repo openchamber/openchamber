@@ -210,7 +210,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     <span className="typography-ui-label text-foreground">Light Theme</span>
                                 </div>
                                 <Select value={selectedLightTheme?.metadata.id ?? ''} onValueChange={setLightThemePreference}>
-                                    <SelectTrigger aria-label="Select light theme" className="w-fit">
+                                    <SelectTrigger size="lg" aria-label="Select light theme" className="w-fit">
                                         <SelectValue placeholder="Select theme" />
                                     </SelectTrigger>
                                     <SelectContent>
@@ -228,7 +228,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     <span className="typography-ui-label text-foreground">Dark Theme</span>
                                 </div>
                                 <Select value={selectedDarkTheme?.metadata.id ?? ''} onValueChange={setDarkThemePreference}>
-                                    <SelectTrigger aria-label="Select dark theme" className="w-fit">
+                                    <SelectTrigger size="lg" aria-label="Select dark theme" className="w-fit">
                                         <SelectValue placeholder="Select theme" />
                                     </SelectTrigger>
                                     <SelectContent>

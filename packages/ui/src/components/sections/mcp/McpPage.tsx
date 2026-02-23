@@ -552,7 +552,7 @@ export const McpPage: React.FC = () => {
             <div className={cn('flex items-center gap-2', isMobile ? 'w-full' : 'shrink-0')}>
               {isNewServer ? (
                 <Select value={draftScope} onValueChange={(value) => setDraftScope(value as McpScope)}>
-                  <SelectTrigger className={cn('!h-8 gap-1.5', isMobile ? 'w-full' : 'w-auto')}>
+                  <SelectTrigger size="lg" className={cn('gap-1.5', isMobile ? 'w-full' : 'w-auto')}>
                     {draftScope === 'user' ? <RiUser3Line className="h-4 w-4" /> : <RiFolderLine className="h-4 w-4" />}
                     <span className="capitalize">{draftScope}</span>
                   </SelectTrigger>

@@ -399,7 +399,7 @@ const SkillsInstalledPage: React.FC = () => {
                       setDraftSource(next.source === 'agents' ? 'agents' : 'opencode');
                     }}
                   >
-                    <SelectTrigger className="h-8 w-fit min-w-[120px]">
+                    <SelectTrigger size="lg" className="w-fit min-w-[120px]">
                       {draftScope === 'user' ? (
                         <RiUser3Line className="h-3.5 w-3.5 mr-1" />
                       ) : (

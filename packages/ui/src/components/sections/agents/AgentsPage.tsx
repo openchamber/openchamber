@@ -643,7 +643,7 @@ export const AgentsPage: React.FC = () => {
                     />
                   </div>
                   <Select value={draftScope} onValueChange={(v) => setDraftScope(v as AgentScope)}>
-                    <SelectTrigger className="h-8 w-fit min-w-[100px]">
+                    <SelectTrigger size="lg" className="w-fit min-w-[100px]">
                       <SelectValue placeholder="Scope" />
                     </SelectTrigger>
                     <SelectContent align="end">
@@ -933,7 +933,7 @@ export const AgentsPage: React.FC = () => {
                     value={globalPermission}
                     onValueChange={(value) => setGlobalPermissionAndPrune(value as PermissionAction)}
                   >
-                    <SelectTrigger className="w-[100px] h-8 text-xs">
+                    <SelectTrigger size="lg" className="w-[100px] text-xs">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -991,11 +991,11 @@ export const AgentsPage: React.FC = () => {
                               upsertRule(permissionName, '*', value as PermissionAction);
                             }}
                           >
-                            <SelectTrigger className="w-[90px] h-7 text-xs">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="global">Global</SelectItem>
+                            <SelectTrigger size="lg" className="w-[90px] text-xs">
+                               <SelectValue />
+                             </SelectTrigger>
+                             <SelectContent>
+                               <SelectItem value="global">Global</SelectItem>
                               {wildcardOptions.map((action) => (
                                 <SelectItem key={action} value={action} className="capitalize">
                                   {action}
@@ -1032,11 +1032,11 @@ export const AgentsPage: React.FC = () => {
                                 value={rule.action}
                                 onValueChange={(value) => setRuleAction(rule.permission, rule.pattern, value as PermissionAction)}
                               >
-                                <SelectTrigger className="w-[90px] h-7 text-xs">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="allow">Allow</SelectItem>
+                                 <SelectTrigger size="lg" className="w-[90px] text-xs">
+                                   <SelectValue />
+                                 </SelectTrigger>
+                                 <SelectContent>
+                                   <SelectItem value="allow">Allow</SelectItem>
                                   <SelectItem value="ask">Ask</SelectItem>
                                   <SelectItem value="deny">Deny</SelectItem>
                                 </SelectContent>
@@ -1054,7 +1054,7 @@ export const AgentsPage: React.FC = () => {
                 <h4 className="typography-ui-label text-foreground mb-3">Add Custom Rule</h4>
                 <div className="flex flex-col sm:flex-row items-end sm:items-center gap-2">
                   <Select value={pendingRuleName} onValueChange={setPendingRuleName}>
-                    <SelectTrigger className="h-8 w-full sm:w-[160px]">
+                    <SelectTrigger size="lg" className="w-full sm:w-[160px]">
                       {pendingRuleName ? (
                         <span className="truncate">{formatPermissionLabel(pendingRuleName)}</span>
                       ) : (

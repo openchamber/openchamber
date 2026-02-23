@@ -187,7 +187,7 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
                 value={selectedSourceId || ''}
                 onValueChange={(v) => setSelectedSource(v)}
               >
-                <SelectTrigger className="w-fit min-w-[160px] h-8">
+                <SelectTrigger size="lg" className="w-fit min-w-[160px]">
                   <SelectValue placeholder="Select source" />
                 </SelectTrigger>
                 <SelectContent align="end">

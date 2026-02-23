@@ -105,7 +105,7 @@ export const UsageSidebar: React.FC<UsageSidebarProps> = ({ onItemSelect }) => {
               onValueChange={handleUsageRefreshIntervalChange}
               disabled={!usageAutoRefresh}
             >
-              <SelectTrigger size="sm" className="min-w-[72px]">
+              <SelectTrigger size="lg" className="min-w-[72px]">
                 <SelectValue placeholder="Interval" />
               </SelectTrigger>
               <SelectContent>
@@ -131,7 +131,7 @@ export const UsageSidebar: React.FC<UsageSidebarProps> = ({ onItemSelect }) => {
         <div className="mt-2 flex items-center justify-between gap-2">
           <span className="typography-micro text-muted-foreground">Display</span>
           <Select value={usageDisplayMode} onValueChange={handleUsageDisplayModeChange}>
-            <SelectTrigger size="sm" className="min-w-[140px]">
+            <SelectTrigger size="lg" className="min-w-[140px]">
               <SelectValue placeholder="Display mode" />
             </SelectTrigger>
             <SelectContent>
