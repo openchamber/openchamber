@@ -2,13 +2,20 @@ import React from 'react';
 import { useSessionStore } from '@/stores/useSessionStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { useProjectsStore } from '@/stores/useProjectsStore';
 import type { Session } from '@opencode-ai/sdk/v2';
-import { cn } from '@/lib/utils';
+import type { ProjectEntry } from '@/lib/api/types';
+import { cn, formatDirectoryName } from '@/lib/utils';
 import { getAgentColor } from '@/lib/agentColors';
-import { RiLoader4Line } from '@remixicon/react';
+import { RiLoader4Line, RiAddLine } from '@remixicon/react';
 import type { SessionContextUsage } from '@/stores/types/sessionTypes';
 import { useDrawer } from '@/contexts/DrawerContext';
 import { animate } from 'motion/react';
+import { PROJECT_ICON_MAP, PROJECT_COLOR_MAP } from '@/lib/projectMeta';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { toast } from '@/components/ui';
+import { isTauriShell, isDesktopLocalOriginActive } from '@/lib/desktop';
+import { sessionEvents } from '@/lib/sessionEvents';
 
 interface MobileSessionStatusBarProps {
   onSessionSwitch?: (sessionId: string) => void;
@@ -21,6 +28,13 @@ interface SessionWithStatus extends Session {
   _runningChildrenCount?: number;
   _childIndicators?: Array<{ session: Session; isRunning: boolean }>;
 }
+
+// Normalize path for comparison
+const normalize = (value: string): string => {
+  if (!value) return '';
+  const replaced = value.replace(/\\/g, '/');
+  return replaced === '/' ? '/' : replaced.replace(/\/+$/, '');
+};
 
 function useSessionGrouping(
   sessions: Session[],
@@ -149,6 +163,88 @@ function useSessionHelpers(
   }, [sessionAttentionStates]);
 
   return { getSessionAgentName, getSessionTitle, isRunning, needsAttention };
+}
+
+// Hook to calculate project status indicators
+function useProjectStatus(
+  sessions: Session[],
+  sessionStatus: Map<string, { type: string }> | undefined,
+  sessionAttentionStates: Map<string, { needsAttention: boolean }> | undefined,
+  currentSessionId: string | null
+) {
+  const availableWorktreesByProject = useSessionStore((state) => state.availableWorktreesByProject);
+  const sessionsByDirectory = useSessionStore((state) => state.sessionsByDirectory);
+  const getSessionsByDirectory = useSessionStore((state) => state.getSessionsByDirectory);
+
+  const projectStatusMap = React.useMemo(() => {
+    const result = new Map<string, { hasRunning: boolean; hasUnread: boolean }>();
+
+    const getStatusType = (sessionId: string): 'busy' | 'retry' | 'idle' => {
+      const status = sessionStatus?.get(sessionId);
+      if (status?.type === 'busy' || status?.type === 'retry') return status.type;
+      return 'idle';
+    };
+
+    return (projectPath: string): { hasRunning: boolean; hasUnread: boolean } => {
+      const cached = result.get(projectPath);
+      if (cached) return cached;
+
+      const projectRoot = normalize(projectPath);
+      if (!projectRoot) {
+        const empty = { hasRunning: false, hasUnread: false };
+        result.set(projectPath, empty);
+        return empty;
+      }
+
+      const dirs: string[] = [projectRoot];
+      const worktrees = availableWorktreesByProject.get(projectRoot) ?? [];
+      for (const meta of worktrees) {
+        const p = (meta && typeof meta === 'object' && 'path' in meta) ? (meta as { path?: unknown }).path : null;
+        if (typeof p === 'string' && p.trim()) {
+          const normalized = normalize(p);
+          if (normalized && normalized !== projectRoot) {
+            dirs.push(normalized);
+          }
+        }
+      }
+
+      const seen = new Set<string>();
+      let hasRunning = false;
+      let hasUnread = false;
+
+      for (const dir of dirs) {
+        const list = sessionsByDirectory.get(dir) ?? getSessionsByDirectory(dir);
+        for (const session of list) {
+          if (!session?.id || seen.has(session.id)) {
+            continue;
+          }
+          seen.add(session.id);
+
+          const statusType = getStatusType(session.id);
+          if (statusType === 'busy' || statusType === 'retry') {
+            hasRunning = true;
+          }
+
+          if (session.id !== currentSessionId && sessionAttentionStates?.get(session.id)?.needsAttention === true) {
+            hasUnread = true;
+          }
+
+          if (hasRunning && hasUnread) {
+            break;
+          }
+        }
+        if (hasRunning && hasUnread) {
+          break;
+        }
+      }
+
+      const status = { hasRunning, hasUnread };
+      result.set(projectPath, status);
+      return status;
+    };
+  }, [sessionsByDirectory, getSessionsByDirectory, availableWorktreesByProject, sessionStatus, sessionAttentionStates, currentSessionId]);
+
+  return projectStatusMap;
 }
 
 function StatusIndicator({ isRunning, needsAttention }: { isRunning: boolean; needsAttention: boolean }) {
@@ -282,20 +378,50 @@ function TokenUsageIndicator({ contextUsage }: { contextUsage: SessionContextUsa
   );
 }
 
+interface SessionStatusHeaderProps {
+  currentSessionTitle: string;
+  currentProjectLabel?: string;
+  currentProjectIcon?: string | null;
+  currentProjectColor?: string | null;
+  onToggle: () => void;
+}
+
 function SessionStatusHeader({
   currentSessionTitle,
+  currentProjectLabel,
+  currentProjectIcon,
+  currentProjectColor,
   onToggle
-}: {
-  currentSessionTitle: string;
-  onToggle: () => void;
-}) {
+}: SessionStatusHeaderProps) {
+  const ProjectIcon = currentProjectIcon ? PROJECT_ICON_MAP[currentProjectIcon] : null;
+  const projectColorVar = currentProjectColor ? (PROJECT_COLOR_MAP[currentProjectColor] ?? null) : null;
+
   return (
     <button
       type="button"
       onClick={onToggle}
-      className="w-full flex items-center px-2 py-0 text-left transition-colors hover:bg-[var(--interactive-hover)]"
+      className="w-full flex flex-col px-2 py-0 text-left transition-colors hover:bg-[var(--interactive-hover)]"
     >
-      <span className="text-xs text-[var(--surface-foreground)] truncate leading-tight">
+      {currentProjectLabel && (
+        <div className="flex flex-col items-start">
+          <div className="flex items-center gap-0.5 leading-none">
+            {ProjectIcon && (
+              <ProjectIcon
+                className="h-2 w-2"
+                style={projectColorVar ? { color: projectColorVar } : undefined}
+              />
+            )}
+            <span
+              className="text-[9px] leading-none text-[var(--surface-mutedForeground)] truncate max-w-[120px]"
+              style={projectColorVar ? { color: projectColorVar } : undefined}
+            >
+              {currentProjectLabel}
+            </span>
+          </div>
+          <div className="w-full h-px bg-[var(--interactive-border)] my-0.5" />
+        </div>
+      )}
+      <span className="text-xs text-[var(--surface-foreground)] truncate leading-none">
         {currentSessionTitle}
       </span>
     </button>
@@ -467,10 +593,164 @@ function useDrawerSwipe() {
   };
 }
 
+// Project bar component for expanded view
+interface ProjectBarProps {
+  projects: ProjectEntry[];
+  activeProjectId: string | null;
+  getProjectStatus: (path: string) => { hasRunning: boolean; hasUnread: boolean };
+  onProjectSwitch: (projectId: string) => void;
+  onAddProject: () => void;
+  homeDirectory: string | null;
+}
+
+function ProjectBar({
+  projects,
+  activeProjectId,
+  getProjectStatus,
+  onProjectSwitch,
+  onAddProject,
+  homeDirectory
+}: ProjectBarProps) {
+  const scrollRef = React.useRef<HTMLDivElement>(null);
+
+  // Scroll active project into view
+  React.useEffect(() => {
+    if (scrollRef.current && activeProjectId) {
+      const activeElement = scrollRef.current.querySelector(`[data-project-id="${activeProjectId}"]`);
+      if (activeElement) {
+        activeElement.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+      }
+    }
+  }, [activeProjectId]);
+
+  if (projects.length === 0) {
+    return (
+      <div className="flex items-center gap-2 px-2 py-0.5 border-b border-[var(--interactive-border)] bg-[var(--surface-muted)]/30">
+        <span className="text-xs text-[var(--surface-mutedForeground)]">No projects</span>
+        <button
+          type="button"
+          onClick={onAddProject}
+          className="flex items-center gap-1 px-1.5 py-[2px] text-xs rounded bg-[var(--interactive-hover)] text-[var(--surface-foreground)]"
+        >
+          <RiAddLine className="h-3 w-3" />
+          Add
+        </button>
+      </div>
+    );
+  }
+
+  const formatProjectLabel = (project: ProjectEntry): string => {
+    return project.label?.trim()
+      || formatDirectoryName(project.path, homeDirectory)
+      || project.path;
+  };
+
+  // Handle touch events to prevent drawer swipe when scrolling project bar
+  const handleTouchStart = (e: React.TouchEvent) => {
+    // Store initial touch position for this component
+    (e.currentTarget as HTMLElement).dataset.touchStartX = String(e.touches[0].clientX);
+    (e.currentTarget as HTMLElement).dataset.touchStartY = String(e.touches[0].clientY);
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    const target = e.currentTarget as HTMLElement;
+    const startX = Number(target.dataset.touchStartX || 0);
+    const startY = Number(target.dataset.touchStartY || 0);
+    const deltaX = e.touches[0].clientX - startX;
+    const deltaY = e.touches[0].clientY - startY;
+
+    // If horizontal scroll dominates, prevent default to stop drawer gesture
+    if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 5) {
+      e.stopPropagation();
+    }
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    // Clean up
+    const target = e.currentTarget as HTMLElement;
+    delete target.dataset.touchStartX;
+    delete target.dataset.touchStartY;
+  };
+
+  return (
+    <div className="flex items-center gap-1 px-2 py-0.5 border-b border-[var(--interactive-border)] bg-[var(--surface-muted)]/30">
+      <div
+        ref={scrollRef}
+        className="flex-1 flex items-center gap-1 overflow-x-auto scrollbar-none touch-pan-x"
+        style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+      >
+        {projects.map((project) => {
+          const isActive = project.id === activeProjectId;
+          const status = getProjectStatus(project.path);
+          const ProjectIcon = project.icon ? PROJECT_ICON_MAP[project.icon] : null;
+          const projectColorVar = project.color ? (PROJECT_COLOR_MAP[project.color] ?? null) : null;
+
+          return (
+            <button
+              key={project.id}
+              type="button"
+              data-project-id={project.id}
+              onClick={() => onProjectSwitch(project.id)}
+              className={cn(
+                "flex items-center gap-0.5 px-1.5 py-[2px] rounded text-xs whitespace-nowrap transition-colors shrink-0",
+                isActive
+                  ? "bg-[var(--interactive-selection)] text-[var(--interactive-selection-foreground)]"
+                  : "bg-[var(--surface-elevated)] text-[var(--surface-foreground)] hover:bg-[var(--interactive-hover)]"
+              )}
+            >
+              {/* Status indicators */}
+              <div className="flex items-center gap-0.5">
+                {status.hasRunning && (
+                  <RiLoader4Line className="h-2 w-2 animate-spin text-[var(--status-info)]" />
+                )}
+                {!status.hasRunning && status.hasUnread && (
+                  <div className="h-1 w-1 rounded-full bg-[var(--status-error)]" />
+                )}
+              </div>
+
+              {/* Icon */}
+              {ProjectIcon && (
+                <ProjectIcon
+                  className="h-3 w-3"
+                  style={projectColorVar ? { color: projectColorVar } : undefined}
+                />
+              )}
+
+              {/* Label */}
+              <span
+                className="truncate max-w-[100px]"
+                style={isActive && projectColorVar ? { color: projectColorVar } : undefined}
+              >
+                {formatProjectLabel(project)}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Add project button */}
+      <button
+        type="button"
+        onClick={onAddProject}
+        className="flex items-center justify-center h-6 w-6 rounded-md bg-[var(--interactive-hover)] text-[var(--surface-foreground)] hover:bg-[var(--interactive-selection)] shrink-0"
+        aria-label="Add project"
+      >
+        <RiAddLine className="h-4 w-4" />
+      </button>
+    </div>
+  );
+}
+
 function CollapsedView({
   runningCount,
   unreadCount,
   currentSessionTitle,
+  currentProjectLabel,
+  currentProjectIcon,
+  currentProjectColor,
   onToggle,
   onNewSession,
   cornerRadius,
@@ -479,6 +759,9 @@ function CollapsedView({
   runningCount: number;
   unreadCount: number;
   currentSessionTitle: string;
+  currentProjectLabel?: string;
+  currentProjectIcon?: string | null;
+  currentProjectColor?: string | null;
   onToggle: () => void;
   onNewSession: () => void;
   cornerRadius?: number;
@@ -500,13 +783,22 @@ function CollapsedView({
       <div className="flex-1 min-w-0 mr-1">
         <SessionStatusHeader
           currentSessionTitle={currentSessionTitle}
+          currentProjectLabel={currentProjectLabel}
+          currentProjectIcon={currentProjectIcon}
+          currentProjectColor={currentProjectColor}
           onToggle={onToggle}
         />
       </div>
       <div className="flex items-center gap-2 flex-shrink-0">
-        <RunningIndicator count={runningCount} />
-        <UnreadIndicator count={unreadCount} />
-        <TokenUsageIndicator contextUsage={contextUsage} />
+        <button
+          type="button"
+          className="flex items-center gap-2"
+          onClick={onToggle}
+        >
+          <RunningIndicator count={runningCount} />
+          <UnreadIndicator count={unreadCount} />
+          <TokenUsageIndicator contextUsage={contextUsage} />
+        </button>
         <button
           type="button"
           onClick={(e) => {
@@ -528,34 +820,52 @@ function ExpandedView({
   runningCount,
   unreadCount,
   currentSessionTitle,
+  currentProjectLabel,
+  currentProjectIcon,
+  currentProjectColor,
   isExpanded,
   onToggleCollapse,
   onToggleExpand,
   onNewSession,
   onSessionClick,
   onSessionDoubleClick,
+  onProjectSwitch,
+  onAddProject,
   getSessionAgentName,
   getSessionTitle,
   needsAttention,
   cornerRadius,
   contextUsage,
+  projects,
+  activeProjectId,
+  getProjectStatus,
+  homeDirectory,
 }: {
   sessions: SessionWithStatus[];
   currentSessionId: string;
   runningCount: number;
   unreadCount: number;
   currentSessionTitle: string;
+  currentProjectLabel?: string;
+  currentProjectIcon?: string | null;
+  currentProjectColor?: string | null;
   isExpanded: boolean;
   onToggleCollapse: () => void;
   onToggleExpand: () => void;
   onNewSession: () => void;
   onSessionClick: (id: string) => void;
   onSessionDoubleClick?: () => void;
+  onProjectSwitch: (projectId: string) => void;
+  onAddProject: () => void;
   getSessionAgentName: (s: Session) => string;
   getSessionTitle: (s: Session) => string;
   needsAttention: (sessionId: string) => boolean;
   cornerRadius?: number;
   contextUsage: SessionContextUsage | null;
+  projects: ProjectEntry[];
+  activeProjectId: string | null;
+  getProjectStatus: (path: string) => { hasRunning: boolean; hasUnread: boolean };
+  homeDirectory: string | null;
 }) {
   const containerRef = React.useRef<HTMLDivElement>(null);
   const [collapsedHeight, setCollapsedHeight] = React.useState<number | null>(null);
@@ -583,10 +893,14 @@ function ExpandedView({
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
     >
-      <div className="flex items-center justify-between px-2 py-0">
+      {/* Header row */}
+      <div className="flex items-center justify-between px-2 py-1.5">
         <div className="flex-1 min-w-0 mr-1">
           <SessionStatusHeader
             currentSessionTitle={currentSessionTitle}
+            currentProjectLabel={currentProjectLabel}
+            currentProjectIcon={currentProjectIcon}
+            currentProjectColor={currentProjectColor}
             onToggle={onToggleCollapse}
           />
         </div>
@@ -619,6 +933,17 @@ function ExpandedView({
         </div>
       </div>
 
+      {/* Project switcher bar */}
+      <ProjectBar
+        projects={projects}
+        activeProjectId={activeProjectId}
+        getProjectStatus={getProjectStatus}
+        onProjectSwitch={onProjectSwitch}
+        onAddProject={onAddProject}
+        homeDirectory={homeDirectory}
+      />
+
+      {/* Sessions list */}
       <div
         ref={containerRef}
         className="flex flex-col overflow-y-auto"
@@ -656,15 +981,30 @@ export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
   const { getCurrentModel } = useConfigStore();
   const { isMobile, isMobileSessionStatusBarCollapsed, setIsMobileSessionStatusBarCollapsed } = useUIStore();
   const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
-  const [isExpanded, setIsExpanded] = React.useState(false);
+
+  // Project store
+  const projects = useProjectsStore((state) => state.projects);
+  const activeProjectId = useProjectsStore((state) => state.activeProjectId);
+  const setActiveProject = useProjectsStore((state) => state.setActiveProject);
+  const addProject = useProjectsStore((state) => state.addProject);
+  const getActiveProject = useProjectsStore((state) => state.getActiveProject);
+
+  // Directory store
+  const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
 
   const { sessions: sortedSessions, totalRunning, totalUnread, totalCount } = useSessionGrouping(sessions, sessionStatus, sessionAttentionStates);
   const { getSessionAgentName, getSessionTitle, needsAttention } = useSessionHelpers(agents, sessionStatus, sessionAttentionStates);
+  const getProjectStatus = useProjectStatus(sessions, sessionStatus, sessionAttentionStates, currentSessionId);
 
   const currentSession = sessions.find((s) => s.id === currentSessionId);
-  const currentSessionTitle = currentSession 
-    ? getSessionTitle(currentSession) 
+  const currentSessionTitle = currentSession
+    ? getSessionTitle(currentSession)
     : '← Swipe here to open sidebars →';
+
+  const activeProject = getActiveProject();
+  const currentProjectLabel = activeProject?.label || formatDirectoryName(activeProject?.path || '', homeDirectory);
+  const currentProjectIcon = activeProject?.icon;
+  const currentProjectColor = activeProject?.color;
 
   // Calculate token usage for current session
   const currentModel = getCurrentModel();
@@ -674,6 +1014,9 @@ export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
   const contextLimit = (limit && typeof limit.context === 'number' ? limit.context : 0);
   const outputLimit = (limit && typeof limit.output === 'number' ? limit.output : 0);
   const contextUsage = getContextUsage(contextLimit, outputLimit);
+
+  const [isExpanded, setIsExpanded] = React.useState(false);
+  const tauriIpcAvailable = React.useMemo(() => isTauriShell(), []);
 
   if (!isMobile || totalCount === 0) {
     return null;
@@ -698,12 +1041,48 @@ export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
     }
   };
 
+  const handleProjectSwitch = (projectId: string) => {
+    if (projectId !== activeProjectId) {
+      setActiveProject(projectId);
+    }
+  };
+
+  const handleAddProject = () => {
+    if (!tauriIpcAvailable || !isDesktopLocalOriginActive()) {
+      sessionEvents.requestDirectoryDialog();
+      return;
+    }
+    import('@/lib/desktop')
+      .then(({ requestDirectoryAccess }) => requestDirectoryAccess(''))
+      .then((result) => {
+        if (result.success && result.path) {
+          const added = addProject(result.path, { id: result.projectId });
+          if (!added) {
+            toast.error('Failed to add project', {
+              description: 'Please select a valid directory.',
+            });
+          }
+        } else if (result.error && result.error !== 'Directory selection cancelled') {
+          toast.error('Failed to select directory', {
+            description: result.error,
+          });
+        }
+      })
+      .catch((error) => {
+        console.error('Failed to select directory:', error);
+        toast.error('Failed to select directory');
+      });
+  };
+
   if (isMobileSessionStatusBarCollapsed) {
     return (
       <CollapsedView
         runningCount={totalRunning}
         unreadCount={totalUnread}
         currentSessionTitle={currentSessionTitle}
+        currentProjectLabel={currentProjectLabel}
+        currentProjectIcon={currentProjectIcon}
+        currentProjectColor={currentProjectColor}
         onToggle={() => setIsMobileSessionStatusBarCollapsed(false)}
         onNewSession={handleCreateSession}
         cornerRadius={cornerRadius}
@@ -719,6 +1098,9 @@ export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
       runningCount={totalRunning}
       unreadCount={totalUnread}
       currentSessionTitle={currentSessionTitle}
+      currentProjectLabel={currentProjectLabel}
+      currentProjectIcon={currentProjectIcon}
+      currentProjectColor={currentProjectColor}
       isExpanded={isExpanded}
       onToggleCollapse={() => {
         setIsMobileSessionStatusBarCollapsed(true);
@@ -728,11 +1110,17 @@ export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
       onNewSession={handleCreateSession}
       onSessionClick={handleSessionClick}
       onSessionDoubleClick={handleSessionDoubleClick}
+      onProjectSwitch={handleProjectSwitch}
+      onAddProject={handleAddProject}
       getSessionAgentName={getSessionAgentName}
       getSessionTitle={getSessionTitle}
       needsAttention={needsAttention}
       cornerRadius={cornerRadius}
       contextUsage={contextUsage}
+      projects={projects}
+      activeProjectId={activeProjectId}
+      getProjectStatus={getProjectStatus}
+      homeDirectory={homeDirectory}
     />
   );
 };

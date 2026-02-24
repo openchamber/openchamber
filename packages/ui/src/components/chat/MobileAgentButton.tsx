@@ -26,7 +26,8 @@ export const MobileAgentButton: React.FC<MobileAgentButtonProps> = ({ onCycleAge
     const longPressTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const isLongPressRef = React.useRef(false);
 
-    const handlePointerDown = () => {
+    const handlePointerDown = (event: React.PointerEvent) => {
+        event.preventDefault();
         isLongPressRef.current = false;
         longPressTimerRef.current = setTimeout(() => {
             isLongPressRef.current = true;
