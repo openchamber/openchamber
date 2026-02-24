@@ -1,6 +1,6 @@
 import React from 'react';
 import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
+import { ButtonSmall } from '@/components/ui/button-small';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { cn } from '@/lib/utils';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -75,7 +75,7 @@ export const ProjectsPage: React.FC = () => {
       <div className="mx-auto w-full max-w-4xl p-3 sm:p-6 sm:pt-8">
         
         {/* Top Header & Actions */}
-        <div className="mb-8 flex items-center justify-between gap-4">
+        <div className="mb-4 flex items-center justify-between gap-4">
           <div className="min-w-0">
             <h2 className="typography-ui-header font-semibold text-foreground truncate">
               {selectedProject.label ?? 'Project Settings'}
@@ -86,47 +86,43 @@ export const ProjectsPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Identity Group */}
+        {/* Identity Controls */}
         <div className="mb-8">
-          <div className="mb-3 px-1">
-            <h3 className="typography-ui-header font-semibold text-foreground">
-              Identity
-            </h3>
-          </div>
-          
-          <div className="rounded-lg bg-[var(--surface-elevated)]/70 overflow-hidden flex flex-col">
+          <section className="px-2 pb-2 pt-0 space-y-0.5">
             
             {/* Name */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-4 py-3">
-              <div className="flex min-w-0 flex-col sm:w-1/3 shrink-0">
+            <div className="py-1.5">
+              <div className="flex min-w-0 flex-col">
                 <span className="typography-ui-label text-foreground">Project Name</span>
               </div>
-              <div className="flex-1 sm:max-w-sm flex justify-end">
+              <div className="mt-1.5 flex min-w-0 items-center gap-2">
                 <Input 
                   value={name} 
                   onChange={(e) => setName(e.target.value)} 
                   placeholder="Project name" 
-                  className="w-full sm:max-w-[240px]" 
+                  className="h-7 min-w-0 w-full sm:max-w-[19rem]" 
                 />
               </div>
             </div>
 
             {/* Color */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-4 py-3">
-              <div className="flex min-w-0 flex-col sm:w-1/3 shrink-0">
+            <div className="py-1.5">
+              <div className="flex min-w-0 flex-col">
                 <span className="typography-ui-label text-foreground">Accent Color</span>
               </div>
-              <div className="flex gap-2 flex-wrap flex-1 justify-start sm:justify-end">
+              <div className="mt-1.5 flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   onClick={() => setColor(null)}
                   className={cn(
-                    'w-7 h-7 rounded-md border-2 transition-all flex items-center justify-center',
-                    color === null ? 'border-foreground scale-110' : 'border-transparent hover:border-border hover:bg-[var(--surface-muted)]'
+                    'h-7 w-7 rounded-md border transition-colors flex items-center justify-center',
+                    color === null
+                      ? 'border-2 border-foreground bg-[var(--primary-base)]/10'
+                      : 'border-border/40 hover:border-border hover:bg-[var(--surface-muted)]'
                   )}
                   title="None"
                 >
-                  <RiCloseLine className="w-4 h-4 text-muted-foreground" />
+                  <RiCloseLine className="h-4 w-4 text-muted-foreground" />
                 </button>
                 {PROJECT_COLORS.map((c) => (
                   <button
@@ -134,8 +130,10 @@ export const ProjectsPage: React.FC = () => {
                     type="button"
                     onClick={() => setColor(c.key)}
                     className={cn(
-                      'w-7 h-7 rounded-md border-2 transition-all',
-                      color === c.key ? 'border-foreground scale-110' : 'border-transparent hover:scale-105'
+                      'h-7 w-7 rounded-md border transition-colors',
+                      color === c.key
+                        ? 'border-2 border-foreground ring-1 ring-[var(--primary-base)]/40'
+                        : 'border-transparent hover:border-border/70'
                     )}
                     style={{ backgroundColor: c.cssVar }}
                     title={c.label}
@@ -145,21 +143,23 @@ export const ProjectsPage: React.FC = () => {
             </div>
 
             {/* Icon */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-4 py-3">
-              <div className="flex min-w-0 flex-col sm:w-1/3 shrink-0">
+            <div className="py-1.5">
+              <div className="flex min-w-0 flex-col">
                 <span className="typography-ui-label text-foreground">Project Icon</span>
               </div>
-              <div className="flex gap-2 flex-wrap flex-1 justify-start sm:justify-end">
+              <div className="mt-1.5 flex max-w-[22rem] flex-wrap items-center gap-2">
                 <button
                   type="button"
                   onClick={() => setIcon(null)}
                   className={cn(
-                    'w-8 h-8 rounded-md border-2 transition-all flex items-center justify-center',
-                    icon === null ? 'border-foreground scale-110 bg-[var(--surface-muted)]' : 'border-transparent hover:border-border hover:bg-[var(--surface-muted)]'
+                    'h-7 w-7 rounded-md border transition-colors flex items-center justify-center',
+                    icon === null
+                      ? 'border-2 border-foreground bg-[var(--primary-base)]/10'
+                      : 'border-border/40 hover:border-border hover:bg-[var(--surface-muted)]'
                   )}
                   title="None"
                 >
-                  <RiCloseLine className="w-5 h-5 text-muted-foreground" />
+                  <RiCloseLine className="h-4 w-4 text-muted-foreground" />
                 </button>
                 {PROJECT_ICONS.map((i) => {
                   const IconComponent = i.Icon;
@@ -169,8 +169,10 @@ export const ProjectsPage: React.FC = () => {
                       type="button"
                       onClick={() => setIcon(i.key)}
                       className={cn(
-                        'w-8 h-8 rounded-md border-2 transition-all flex items-center justify-center',
-                        icon === i.key ? 'border-foreground scale-110 bg-[var(--surface-muted)]' : 'border-transparent hover:scale-105 hover:bg-[var(--surface-muted)]'
+                        'h-7 w-7 rounded-md border transition-colors flex items-center justify-center',
+                        icon === i.key
+                          ? 'border-2 border-foreground bg-[var(--primary-base)]/10'
+                          : 'border-transparent hover:border-border hover:bg-[var(--surface-muted)]'
                       )}
                       title={i.label}
                     >
@@ -181,25 +183,30 @@ export const ProjectsPage: React.FC = () => {
               </div>
             </div>
 
-          </div>
+          </section>
           
-          <div className="mt-4 flex justify-end">
-            <Button onClick={handleSave} disabled={!hasChanges || name.trim().length === 0} size="sm">
+          <div className="mt-0.5 px-2 py-1">
+            <ButtonSmall
+              onClick={handleSave}
+              disabled={!hasChanges || name.trim().length === 0}
+              size="xs"
+              className="!font-normal"
+            >
               Save Changes
-            </Button>
+            </ButtonSmall>
           </div>
         </div>
 
         {/* Worktree Group */}
         <div className="mb-8">
-          <div className="mb-3 px-1">
-            <h3 className="typography-ui-header font-semibold text-foreground">
+          <div className="mb-1 px-1">
+            <h3 className="typography-ui-header font-medium text-foreground">
               Worktree
             </h3>
           </div>
-          <div className="rounded-lg bg-[var(--surface-elevated)]/70 p-4">
+          <section className="px-2 pb-2 pt-0">
             <WorktreeSectionContent projectRef={{ id: selectedProject.id, path: selectedProject.path }} />
-          </div>
+          </section>
         </div>
 
       </div>

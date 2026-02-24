@@ -1,5 +1,5 @@
 import React from 'react';
-import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
@@ -81,33 +81,57 @@ export const GitSettings: React.FC = () => {
 
   return (
     <div className="mb-8">
-      <div className="mb-3 px-1">
-        <h3 className="typography-ui-header font-semibold text-foreground">Git Preferences</h3>
+      <div className="mb-1 px-1">
+        <h3 className="typography-ui-header font-medium text-foreground">Git Preferences</h3>
       </div>
 
-      <div className="rounded-lg bg-[var(--surface-elevated)]/70 overflow-hidden flex flex-col">
-        <label className="group flex cursor-pointer items-center justify-between gap-2 px-4 py-3 transition-colors hover:bg-[var(--interactive-hover)]/30 border-b border-[var(--surface-subtle)]">
-          <div className="flex min-w-0 flex-col">
-            <span className="typography-ui-label text-foreground">Enable Gitmoji Picker</span>
-          </div>
-          <Switch
+      <section className="px-2 pb-2 pt-0 space-y-0.5">
+        <div
+          className="group flex cursor-pointer items-center gap-2 py-1.5"
+          role="button"
+          tabIndex={0}
+          aria-pressed={settingsGitmojiEnabled}
+          onClick={() => {
+            void handleGitmojiChange(!settingsGitmojiEnabled);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === ' ' || event.key === 'Enter') {
+              event.preventDefault();
+              void handleGitmojiChange(!settingsGitmojiEnabled);
+            }
+          }}
+        >
+          <Checkbox
             checked={settingsGitmojiEnabled}
-            onCheckedChange={handleGitmojiChange}
-            className="data-[state=checked]:bg-[var(--primary-base)]"
+            onChange={(checked) => {
+              void handleGitmojiChange(checked);
+            }}
+            ariaLabel="Enable Gitmoji picker"
           />
-        </label>
+          <span className="typography-ui-label text-foreground">Enable Gitmoji Picker</span>
+        </div>
 
-        <label className="group flex cursor-pointer items-center justify-between gap-2 px-4 py-3 transition-colors hover:bg-[var(--interactive-hover)]/30">
-          <div className="flex min-w-0 flex-col">
-            <span className="typography-ui-label text-foreground">Display Gitignored Files</span>
-          </div>
-          <Switch
+        <div
+          className="group flex cursor-pointer items-center gap-2 py-1.5"
+          role="button"
+          tabIndex={0}
+          aria-pressed={showGitignored}
+          onClick={() => setFilesViewShowGitignored(!showGitignored)}
+          onKeyDown={(event) => {
+            if (event.key === ' ' || event.key === 'Enter') {
+              event.preventDefault();
+              setFilesViewShowGitignored(!showGitignored);
+            }
+          }}
+        >
+          <Checkbox
             checked={showGitignored}
-            onCheckedChange={setFilesViewShowGitignored}
-            className="data-[state=checked]:bg-[var(--primary-base)]"
+            onChange={setFilesViewShowGitignored}
+            ariaLabel="Display gitignored files"
           />
-        </label>
-      </div>
+          <span className="typography-ui-label text-foreground">Display Gitignored Files</span>
+        </div>
+      </section>
     </div>
   );
 };

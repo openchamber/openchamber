@@ -270,11 +270,6 @@ export const GitHubSettings: React.FC = () => {
             </TooltipContent>
           </Tooltip>
         </div>
-        {connected && (
-          <ButtonSmall variant="outline" onClick={startConnect} disabled={isBusy}>
-            Add Account
-          </ButtonSmall>
-        )}
       </div>
 
       <div className="rounded-lg bg-[var(--surface-elevated)]/70 overflow-hidden flex flex-col">
@@ -378,7 +373,21 @@ export const GitHubSettings: React.FC = () => {
             </div>
           </div>
         )}
+
       </div>
+
+      {connected && (
+        <div className="mt-2 px-2 pb-2">
+          <ButtonSmall
+            variant="outline"
+            onClick={startConnect}
+            disabled={isBusy}
+            className={cn(isMobile ? 'w-full' : undefined)}
+          >
+            Add Account
+          </ButtonSmall>
+        </div>
+      )}
 
       {flow && (
         <div className="mt-4 rounded-lg bg-[var(--surface-elevated)]/70 p-4 border border-[var(--interactive-border)]">

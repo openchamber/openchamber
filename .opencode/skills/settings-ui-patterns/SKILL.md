@@ -54,6 +54,12 @@ When removing cards/background wrappers, spacing must be rebalanced so header ow
   - outer section spacing `mb-8`
 - Do not leave legacy `mb-3` style gaps after flattening a section; it makes headers look detached.
 
+### 4. Headerless Blocks (when context is obvious)
+If the page title already provides enough context, remove redundant local headers and place controls directly below the title.
+
+- Example: project page identity controls can sit directly under project name/path.
+- Tighten top gap for this pattern (e.g. top header `mb-4` instead of larger section spacing).
+
 ```tsx
 <div className="space-y-3">
   <section className="p-2">...</section>
@@ -128,6 +134,12 @@ Use consistent label/control columns across settings rows so controls align on a
 </div>
 ```
 
+#### Disabled control rule
+If a control is unavailable, disable the control only. Do not dim the label row by default.
+
+#### Width-matching rule
+When matching visual widths across different rows, compare full row footprint (control + adjacent action buttons), not just input width.
+
 ### 5. Theme Row Composition
 For theme controls in Appearance:
 
@@ -199,6 +211,13 @@ For template-like settings (title/message pairs), use a simple grid and flat cel
 - Cell: `section p-2`
 - Field: `Input className="h-7"`
 
+### 9. Icon/Color Picker Rows
+For dense icon/color pickers in settings:
+
+- Place options under the field label when they are a palette/grid choice.
+- Use stable selected-state styling (`border`/`ring`/subtle background), avoid transform jumps (`scale-*`).
+- Keep chip size compact (`h-7 w-7`) and spacing consistent (`gap-2`).
+
 ## Control Selection Rules
 
 - **Use compact option buttons** for short, chip-like selection groups.
@@ -212,6 +231,7 @@ For template-like settings (title/message pairs), use a simple grid and flat cel
 - **Consistency**: Reuse shared controls (`Checkbox`, `Radio`, `ButtonSmall size="xs"`) instead of inline icon logic.
 - **Reuse via composition**: Prefer a single settings component with a `visibleSettings` subset (like `OpenChamberVisualSettings`) for multiple tabs (Appearance/Chat) instead of duplicating markup.
 - **Hierarchy**: Page title = `font-semibold`; section header = `font-medium`; control group header = `font-medium` (or `font-normal` if needed); option labels = non-bold.
+- **Subsection depth**: Nested subgroup headings under a section should usually be one step lighter than parent heading weight.
 - **Hierarchy sanity check**: after flattening UI, verify visual grouping by spacing first (not color).
 - **Helper blocks**: For small notes/errors under a section, use `mt-1 px-2` with `typography-meta text-muted-foreground/70` (and status token for errors).
 - **Truncation**: Always consider long text. Use `min-w-0 flex-1 truncate` on text containers that sit next to buttons or icons to prevent layout breakage.

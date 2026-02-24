@@ -332,7 +332,7 @@ export const DefaultsSettings: React.FC = () => {
           </div>
         </div>
 
-          <div className={cn("flex flex-col gap-2 py-1 sm:flex-row sm:items-center sm:gap-8", !supportsVariants && "opacity-60")}>
+          <div className="flex flex-col gap-2 py-1 sm:flex-row sm:items-center sm:gap-8">
             <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
               <span className="typography-ui-label text-foreground">Default Thinking</span>
             </div>
