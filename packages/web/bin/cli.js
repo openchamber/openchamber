@@ -177,6 +177,7 @@ OPTIONS:
 
 ENVIRONMENT:
   OPENCHAMBER_UI_PASSWORD      Alternative to --ui-password flag
+  OPENCODE_HOST               External OpenCode server base URL, e.g. http://hostname:4096 (overrides OPENCODE_PORT)
   OPENCODE_PORT               Port of external OpenCode server to connect to
   OPENCODE_SKIP_START          Skip starting OpenCode, use external server
 
