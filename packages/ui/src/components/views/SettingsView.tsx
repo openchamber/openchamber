@@ -20,7 +20,7 @@ import {
   RiCloudLine,
   RiFoldersLine,
   RiGitBranchLine,
-  RiInformationLine,
+
   RiMicLine,
   RiNotification3Line,
   RiPaletteLine,
@@ -548,19 +548,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
                 </TooltipContent>
               </Tooltip>
             )}
-
-            <button
-              type="button"
-              className={cn(
-                'flex h-7 w-full items-center gap-2 rounded-md px-2 overflow-hidden whitespace-nowrap',
-                'text-sm font-semibold text-sidebar-foreground/90',
-                'hover:text-sidebar-foreground hover:bg-interactive-hover',
-              )}
-              onClick={() => useUIStore.getState().setAboutDialogOpen(true)}
-            >
-              <RiInformationLine className="h-4 w-4 shrink-0" />
-              <span>About</span>
-            </button>
 
             {isMobile && runtimeCtx.isWeb && (
               <div className="px-1.5 pt-2">
