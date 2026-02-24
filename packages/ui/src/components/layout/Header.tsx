@@ -29,6 +29,7 @@ import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
 import { useDeviceInfo } from '@/lib/device';
 import { cn, hasModifier, formatDirectoryName } from '@/lib/utils';
 import { McpDropdownContent } from '@/components/mcp/McpDropdown';
+import { McpIcon } from '@/components/icons/McpIcon';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { formatPercent, formatWindowLabel, QUOTA_PROVIDERS, calculatePace, calculateExpectedUsagePercent } from '@/lib/quota';
 import { UsageProgressBar } from '@/components/sections/usage/UsageProgressBar';
@@ -1052,7 +1053,7 @@ export const Header: React.FC<HeaderProps> = ({
     }
     base.push(
       { value: 'usage', label: 'Usage', icon: RiTimerLine },
-      { value: 'mcp', label: 'MCP', icon: RiCommandLine }
+      { value: 'mcp', label: 'MCP', icon: McpIcon as unknown as RemixiconComponentType }
     );
     return base;
   }, [isDesktopApp]);

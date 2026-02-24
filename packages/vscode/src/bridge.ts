@@ -304,28 +304,253 @@ const normalizeMergeMethod = (value: string): 'merge' | 'squash' | 'rebase' => {
   return 'merge';
 };
 
-const extractZenOutputText = (value: unknown): string | null => {
-  if (!value || typeof value !== 'object') return null;
-  const root = value as Record<string, unknown>;
-  const output = root.output;
-  if (!Array.isArray(output)) return null;
+const BRIDGE_ZEN_DEFAULT_MODEL = 'gpt-5-nano';
+const BRIDGE_GIT_GENERATION_TIMEOUT_MS = 2 * 60 * 1000;
+const BRIDGE_GIT_GENERATION_POLL_INTERVAL_MS = 500;
+let bridgeGitModelCatalogCache: Set<string> | null = null;
+let bridgeGitModelCatalogCacheAt = 0;
+const BRIDGE_GIT_MODEL_CATALOG_CACHE_TTL_MS = 30 * 1000;
 
-  const messageItem = output.find((item) => {
-    if (!item || typeof item !== 'object') return false;
-    return (item as Record<string, unknown>).type === 'message';
-  }) as Record<string, unknown> | undefined;
-  if (!messageItem) return null;
+const sleep = (ms: number) => new Promise<void>((resolve) => {
+  setTimeout(resolve, ms);
+});
 
-  const content = messageItem.content;
-  if (!Array.isArray(content)) return null;
+const fetchBridgeGitModelCatalog = async (
+  apiUrl: string,
+  authHeaders?: Record<string, string>
+): Promise<Set<string>> => {
+  const now = Date.now();
+  if (bridgeGitModelCatalogCache && now - bridgeGitModelCatalogCacheAt < BRIDGE_GIT_MODEL_CATALOG_CACHE_TTL_MS) {
+    return bridgeGitModelCatalogCache;
+  }
 
-  const textItem = content.find((item) => {
-    if (!item || typeof item !== 'object') return false;
-    return (item as Record<string, unknown>).type === 'output_text';
-  }) as Record<string, unknown> | undefined;
+  const headers = authHeaders || {};
+  const modelsUrl = new URL(`${apiUrl.replace(/\/+$/, '')}/model`);
+  const response = await fetch(modelsUrl.toString(), {
+    method: 'GET',
+    headers: {
+      Accept: 'application/json',
+      ...headers,
+    },
+    signal: AbortSignal.timeout(8_000),
+  });
 
-  const text = typeof textItem?.text === 'string' ? textItem.text.trim() : '';
-  return text || null;
+  if (!response.ok) {
+    throw new Error('Failed to fetch model catalog');
+  }
+
+  const payload = await response.json().catch(() => null) as unknown;
+  const refs = new Set<string>();
+  if (Array.isArray(payload)) {
+    for (const item of payload) {
+      if (!item || typeof item !== 'object') {
+        continue;
+      }
+      const record = item as Record<string, unknown>;
+      const providerID = typeof record.providerID === 'string' ? record.providerID.trim() : '';
+      const modelID = typeof record.modelID === 'string' ? record.modelID.trim() : '';
+      if (providerID && modelID) {
+        refs.add(`${providerID}/${modelID}`);
+      }
+    }
+  }
+
+  bridgeGitModelCatalogCache = refs;
+  bridgeGitModelCatalogCacheAt = now;
+  return refs;
+};
+
+const resolveBridgeGitGenerationModel = async (
+  payloadModel: { providerId?: string; modelId?: string; zenModel?: string },
+  settings: Record<string, unknown>,
+  apiUrl: string,
+  authHeaders?: Record<string, string>
+): Promise<{ providerID: string; modelID: string }> => {
+  let catalog: Set<string> | null = null;
+  try {
+    catalog = await fetchBridgeGitModelCatalog(apiUrl, authHeaders);
+  } catch {
+    catalog = null;
+  }
+
+  const hasModel = (providerID: string, modelID: string): boolean => {
+    if (!catalog) {
+      return false;
+    }
+    return catalog.has(`${providerID}/${modelID}`);
+  };
+
+  const requestProviderId = typeof payloadModel.providerId === 'string' ? payloadModel.providerId.trim() : '';
+  const requestModelId = typeof payloadModel.modelId === 'string' ? payloadModel.modelId.trim() : '';
+  if (requestProviderId && requestModelId && hasModel(requestProviderId, requestModelId)) {
+    return { providerID: requestProviderId, modelID: requestModelId };
+  }
+
+  const settingsProviderId = readStringField(settings, 'gitProviderId');
+  const settingsModelId = readStringField(settings, 'gitModelId');
+  if (settingsProviderId && settingsModelId && hasModel(settingsProviderId, settingsModelId)) {
+    return { providerID: settingsProviderId, modelID: settingsModelId };
+  }
+
+  const payloadZenModel = typeof payloadModel.zenModel === 'string' ? payloadModel.zenModel.trim() : '';
+  const settingsZenModel = readStringField(settings, 'zenModel');
+  return {
+    providerID: 'zen',
+    modelID: payloadZenModel || settingsZenModel || BRIDGE_ZEN_DEFAULT_MODEL,
+  };
+};
+
+const extractTextFromMessageParts = (parts: unknown): string => {
+  if (!Array.isArray(parts)) {
+    return '';
+  }
+
+  const textParts = parts
+    .filter((part) => {
+      if (!part || typeof part !== 'object') return false;
+      const record = part as Record<string, unknown>;
+      return record.type === 'text' && typeof record.text === 'string';
+    })
+    .map((part) => (part as Record<string, unknown>).text as string)
+    .map((text) => text.trim())
+    .filter((text) => text.length > 0);
+
+  return textParts.join('\n').trim();
+};
+
+const generateBridgeTextWithSessionFlow = async ({
+  apiUrl,
+  directory,
+  prompt,
+  providerID,
+  modelID,
+  authHeaders,
+}: {
+  apiUrl: string;
+  directory: string;
+  prompt: string;
+  providerID: string;
+  modelID: string;
+  authHeaders?: Record<string, string>;
+}): Promise<string> => {
+  const headers = authHeaders || {};
+  const apiBase = apiUrl.replace(/\/+$/, '');
+  const deadlineAt = Date.now() + BRIDGE_GIT_GENERATION_TIMEOUT_MS;
+  const remainingMs = () => Math.max(1_000, deadlineAt - Date.now());
+  let sessionId: string | null = null;
+
+  try {
+    const sessionUrl = new URL(`${apiBase}/session`);
+    if (directory) {
+      sessionUrl.searchParams.set('directory', directory);
+    }
+
+    const createResponse = await fetch(sessionUrl.toString(), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...headers,
+      },
+      body: JSON.stringify({ title: 'Git Generation' }),
+      signal: AbortSignal.timeout(remainingMs()),
+    });
+
+    if (!createResponse.ok) {
+      throw new Error('Failed to create OpenCode session');
+    }
+
+    const session = await createResponse.json().catch(() => null) as unknown;
+    const sessionObj = session && typeof session === 'object' ? session as Record<string, unknown> : null;
+    const createdSessionId = sessionObj && typeof sessionObj.id === 'string' ? sessionObj.id : '';
+    if (!createdSessionId) {
+      throw new Error('Invalid session response');
+    }
+    sessionId = createdSessionId;
+
+    const promptUrl = new URL(`${apiBase}/session/${encodeURIComponent(sessionId)}/prompt_async`);
+    if (directory) {
+      promptUrl.searchParams.set('directory', directory);
+    }
+
+    const promptResponse = await fetch(promptUrl.toString(), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...headers,
+      },
+      body: JSON.stringify({
+        model: {
+          providerID,
+          modelID,
+        },
+        parts: [{ type: 'text', text: prompt }],
+      }),
+      signal: AbortSignal.timeout(remainingMs()),
+    });
+
+    if (!promptResponse.ok) {
+      throw new Error('Failed to send prompt');
+    }
+
+    const messagesUrl = new URL(`${apiBase}/session/${encodeURIComponent(sessionId)}/message`);
+    if (directory) {
+      messagesUrl.searchParams.set('directory', directory);
+    }
+    messagesUrl.searchParams.set('limit', '10');
+
+    while (Date.now() < deadlineAt) {
+      await sleep(BRIDGE_GIT_GENERATION_POLL_INTERVAL_MS);
+
+      const messagesResponse = await fetch(messagesUrl.toString(), {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+          ...headers,
+        },
+        signal: AbortSignal.timeout(remainingMs()),
+      });
+
+      if (!messagesResponse.ok) {
+        continue;
+      }
+
+      const messages = await messagesResponse.json().catch(() => null) as unknown;
+      if (!Array.isArray(messages)) {
+        continue;
+      }
+
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const message = messages[i] as Record<string, unknown> | null;
+        if (!message || typeof message !== 'object') {
+          continue;
+        }
+        const info = message.info as Record<string, unknown> | undefined;
+        if (info?.role !== 'assistant' || info?.finish !== 'stop') {
+          continue;
+        }
+
+        const text = extractTextFromMessageParts(message.parts);
+        if (text) {
+          return text;
+        }
+      }
+    }
+
+    throw new Error('Timeout waiting for generation to complete');
+  } finally {
+    if (sessionId) {
+      const deleteUrl = new URL(`${apiBase}/session/${encodeURIComponent(sessionId)}`);
+      try {
+        await fetch(deleteUrl.toString(), {
+          method: 'DELETE',
+          headers,
+          signal: AbortSignal.timeout(5_000),
+        });
+      } catch {
+        // ignore cleanup failures
+      }
+    }
+  }
 };
 
 const parseJsonObjectSafe = (value: string): Record<string, unknown> | null => {
@@ -909,18 +1134,134 @@ const sanitizeForwardHeaders = (input: Record<string, string> | undefined): Reco
   return headers;
 };
 
+const getFsAccessRoot = (): string => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir();
+
+const getFsMimeType = (filePath: string): string => {
+  const ext = path.extname(filePath).toLowerCase();
+  const mimeMap: Record<string, string> = {
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif',
+    '.webp': 'image/webp',
+    '.svg': 'image/svg+xml',
+    '.txt': 'text/plain; charset=utf-8',
+    '.md': 'text/markdown; charset=utf-8',
+    '.markdown': 'text/markdown; charset=utf-8',
+    '.mmd': 'text/plain; charset=utf-8',
+    '.mermaid': 'text/plain; charset=utf-8',
+    '.json': 'application/json; charset=utf-8',
+    '.pdf': 'application/pdf',
+  };
+  return mimeMap[ext] || 'application/octet-stream';
+};
+
+type FsReadPathResolution =
+  | { ok: true; resolvedPath: string }
+  | { ok: false; status: number; error: string };
+
+const resolveFileReadPath = async (targetPath: string): Promise<FsReadPathResolution> => {
+  const trimmed = targetPath.trim();
+  if (!trimmed) {
+    return { ok: false, status: 400, error: 'Path is required' };
+  }
+
+  const baseRoot = getFsAccessRoot();
+  const resolved = resolveUserPath(trimmed, baseRoot);
+  if (!resolved) {
+    return { ok: false, status: 400, error: 'Path is required' };
+  }
+
+  try {
+    const [canonicalPath, canonicalBase] = await Promise.all([
+      fs.promises.realpath(resolved),
+      fs.promises.realpath(baseRoot).catch(() => path.resolve(baseRoot)),
+    ]);
+
+    if (!isPathInside(canonicalPath, canonicalBase)) {
+      return { ok: false, status: 403, error: 'Access to file denied' };
+    }
+
+    return { ok: true, resolvedPath: canonicalPath };
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
+    if (err?.code === 'ENOENT') {
+      return { ok: false, status: 404, error: 'File not found' };
+    }
+    return { ok: false, status: 500, error: 'Failed to resolve file path' };
+  }
+};
+
+const buildProxyJsonError = (status: number, error: string): ApiProxyResponsePayload => ({
+  status,
+  headers: { 'content-type': 'application/json' },
+  bodyBase64: base64EncodeUtf8(JSON.stringify({ error })),
+});
+
+const tryHandleLocalFsProxy = async (method: string, requestPath: string): Promise<ApiProxyResponsePayload | null> => {
+  let parsed: URL;
+  try {
+    parsed = new URL(requestPath, 'https://openchamber.local');
+  } catch {
+    return buildProxyJsonError(400, 'Invalid request path');
+  }
+
+  if (parsed.pathname !== '/api/fs/read' && parsed.pathname !== '/api/fs/raw') {
+    return null;
+  }
+
+  if (method !== 'GET' && method !== 'HEAD') {
+    return buildProxyJsonError(405, 'Method not allowed');
+  }
+
+  const targetPath = parsed.searchParams.get('path') || '';
+  const resolution = await resolveFileReadPath(targetPath);
+  if (!resolution.ok) {
+    return buildProxyJsonError(resolution.status, resolution.error);
+  }
+
+  try {
+    const stats = await fs.promises.stat(resolution.resolvedPath);
+    if (!stats.isFile()) {
+      return buildProxyJsonError(400, 'Specified path is not a file');
+    }
+
+    if (parsed.pathname === '/api/fs/read') {
+      const content = await fs.promises.readFile(resolution.resolvedPath, 'utf8');
+      return {
+        status: 200,
+        headers: {
+          'content-type': 'text/plain; charset=utf-8',
+          'cache-control': 'no-store',
+        },
+        bodyBase64: base64EncodeUtf8(content),
+      };
+    }
+
+    const raw = await fs.promises.readFile(resolution.resolvedPath);
+    return {
+      status: 200,
+      headers: {
+        'content-type': getFsMimeType(resolution.resolvedPath),
+        'cache-control': 'no-store',
+      },
+      bodyBase64: Buffer.from(raw).toString('base64'),
+    };
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
+    if (err?.code === 'ENOENT') {
+      return buildProxyJsonError(404, 'File not found');
+    }
+    return buildProxyJsonError(500, 'Unable to read file');
+  }
+};
+
 export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeContext): Promise<BridgeResponse> {
   const { id, type, payload } = message;
 
   try {
     switch (type) {
       case 'api:proxy': {
-        const apiUrl = ctx?.manager?.getApiUrl();
-        if (!apiUrl) {
-          const data = buildUnavailableApiResponse();
-          return { id, type, success: true, data };
-        }
-
         const { method, path: requestPath, headers, bodyBase64 } = (payload || {}) as ApiProxyRequestPayload;
         const normalizedMethod = typeof method === 'string' && method.trim() ? method.trim().toUpperCase() : 'GET';
         const normalizedPath =
@@ -929,6 +1270,17 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
               ? requestPath.trim()
               : `/${requestPath.trim()}`
             : '/';
+
+        const localFsResponse = await tryHandleLocalFsProxy(normalizedMethod, normalizedPath);
+        if (localFsResponse) {
+          return { id, type, success: true, data: localFsResponse };
+        }
+
+        const apiUrl = ctx?.manager?.getApiUrl();
+        if (!apiUrl) {
+          const data = buildUnavailableApiResponse();
+          return { id, type, success: true, data };
+        }
 
         const base = `${apiUrl.replace(/\/+$/, '')}/`;
         const targetUrl = new URL(normalizedPath.replace(/^\/+/, ''), base).toString();
@@ -1145,13 +1497,15 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
         if (!target) {
           return { id, type, success: false, error: 'Path is required' };
         }
+
+        const resolution = await resolveFileReadPath(target);
+        if (!resolution.ok) {
+          return { id, type, success: false, error: resolution.error };
+        }
+
         try {
-          const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir();
-          const resolvedPath = resolveUserPath(target, workspaceRoot);
-          const uri = vscode.Uri.file(resolvedPath);
-          const bytes = await vscode.workspace.fs.readFile(uri);
-          const content = Buffer.from(bytes).toString('utf8');
-          return { id, type, success: true, data: { content, path: normalizeFsPath(resolvedPath) } };
+          const content = await fs.promises.readFile(resolution.resolvedPath, 'utf8');
+          return { id, type, success: true, data: { content, path: normalizeFsPath(resolution.resolvedPath) } };
         } catch (error) {
           const message = error instanceof Error ? error.message : 'Failed to read file';
           return { id, type, success: false, error: message };
@@ -2791,10 +3145,14 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
       }
 
       case 'api:git/pr-description': {
-        const { directory, base, head } = (payload || {}) as {
+        const { directory, base, head, context, providerId, modelId, zenModel: payloadZenModel } = (payload || {}) as {
           directory?: string;
           base?: string;
           head?: string;
+          context?: string;
+          providerId?: string;
+          modelId?: string;
+          zenModel?: string;
         };
         if (!directory) {
           return { id, type, success: false, error: 'Directory is required' };
@@ -2832,31 +3190,33 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
           return { id, type, success: false, error: 'No diffs available for selected files' };
         }
 
-        const prompt = `You are drafting a GitHub Pull Request title + description. Respond in JSON of the shape {"title": string, "body": string} (ONLY JSON in response, no markdown fences) with these rules:\n- title: concise, sentence case, <= 80 chars, no trailing punctuation, no commit-style prefixes (no "feat:", "fix:")\n- body: GitHub-flavored markdown with these sections in this order: Summary, Testing, Notes\n- Summary: 3-6 bullet points describing user-visible changes; avoid internal helper function names\n- Testing: bullet list ("- Not tested" allowed)\n- Notes: bullet list; include breaking/rollout notes only when relevant\n\nContext:\n- base branch: ${base}\n- head branch: ${head}\n\nDiff summary:\n${diffSummaries}`;
+        const prompt = `You are drafting a GitHub Pull Request title + description. Respond in JSON of the shape {"title": string, "body": string} (ONLY JSON in response, no markdown fences) with these rules:\n- title: concise, sentence case, <= 80 chars, no trailing punctuation, no commit-style prefixes (no "feat:", "fix:")\n- body: GitHub-flavored markdown with these sections in this order: Summary, Testing, Notes\n- Summary: 3-6 bullet points describing user-visible changes; avoid internal helper function names\n- Testing: bullet list ("- Not tested" allowed)\n- Notes: bullet list; include breaking/rollout notes only when relevant\n\nContext:\n- base branch: ${base}\n- head branch: ${head}${context?.trim() ? `\n- Additional context: ${context.trim()}` : ''}\n\nDiff summary:\n${diffSummaries}`;
 
         try {
-          const zenSettings = readSettings(ctx) as Record<string, unknown>;
-          const zenModelRaw = typeof zenSettings?.zenModel === 'string' ? (zenSettings.zenModel as string).trim() : '';
-          const zenModel = zenModelRaw.length > 0 ? zenModelRaw : 'gpt-5-nano';
-          const response = await fetch('https://opencode.ai/zen/v1/responses', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              model: zenModel,
-              input: [{ role: 'user', content: prompt }],
-              max_output_tokens: 1200,
-              stream: false,
-              reasoning: { effort: 'low' },
-            }),
-          });
-          if (!response.ok) {
-            return { id, type, success: false, error: 'Failed to generate PR description' };
+          const apiUrl = ctx?.manager?.getApiUrl();
+          if (!apiUrl) {
+            return { id, type, success: false, error: 'OpenCode API unavailable' };
           }
-          const data = await response.json().catch(() => null) as unknown;
-          const raw = extractZenOutputText(data);
+
+          const settings = readSettings(ctx) as Record<string, unknown>;
+          const { providerID, modelID } = await resolveBridgeGitGenerationModel(
+            { providerId, modelId, zenModel: payloadZenModel },
+            settings,
+            apiUrl,
+            ctx?.manager?.getOpenCodeAuthHeaders()
+          );
+          const raw = await generateBridgeTextWithSessionFlow({
+            apiUrl,
+            directory,
+            prompt,
+            providerID,
+            modelID,
+            authHeaders: ctx?.manager?.getOpenCodeAuthHeaders(),
+          });
           if (!raw) {
             return { id, type, success: false, error: 'No PR description returned by generator' };
           }
+
           const cleaned = String(raw)
             .trim()
             .replace(/^```json\s*/i, '')

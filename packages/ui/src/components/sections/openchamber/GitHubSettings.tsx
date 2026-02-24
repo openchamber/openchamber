@@ -1,10 +1,14 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
+import { ButtonSmall } from '@/components/ui/button-small';
 import { toast } from '@/components/ui';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import type { GitHubAuthStatus } from '@/lib/api/types';
-import { RiGithubFill } from '@remixicon/react';
+import { useDeviceInfo } from '@/lib/device';
+import { cn } from '@/lib/utils';
+import { RiGithubFill, RiInformationLine } from '@remixicon/react';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 type GitHubUser = {
   login: string;
@@ -29,6 +33,7 @@ type DeviceFlowCompleteResponse =
   | { connected: false; status?: string; error?: string };
 
 export const GitHubSettings: React.FC = () => {
+  const { isMobile } = useDeviceInfo();
   const runtimeGitHub = getRegisteredRuntimeAPIs()?.github;
   const status = useGitHubAuthStore((state) => state.status);
   const isLoading = useGitHubAuthStore((state) => state.isLoading);
@@ -252,134 +257,149 @@ export const GitHubSettings: React.FC = () => {
   const accounts = status?.accounts ?? [];
 
   return (
-    <div className="space-y-6">
-      <div className="space-y-1">
-        <h3 className="typography-ui-header font-semibold text-foreground">GitHub</h3>
-        <p className="typography-meta text-muted-foreground">
-          Connect a GitHub account for in-app PR and issue workflows.
-        </p>
+    <div className="mb-8">
+      <div className="mb-3 px-1 flex items-start justify-between gap-4">
+        <div className="flex items-center gap-2">
+          <h3 className="typography-ui-header font-semibold text-foreground">GitHub</h3>
+          <Tooltip delayDuration={1000}>
+            <TooltipTrigger asChild>
+              <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+            </TooltipTrigger>
+            <TooltipContent sideOffset={8} className="max-w-xs">
+              Connect a GitHub account for in-app PR and issue workflows.
+            </TooltipContent>
+          </Tooltip>
+        </div>
       </div>
 
-      {connected ? (
-        <div className="flex items-center justify-between gap-4 rounded-lg border bg-background/50 px-4 py-3">
-          <div className="flex min-w-0 items-center gap-4">
-            {user?.avatarUrl ? (
-              <img
-                src={user.avatarUrl}
-                alt={user.login ? `${user.login} avatar` : 'GitHub avatar'}
-                className="h-14 w-14 shrink-0 rounded-full border border-border/60 bg-muted object-cover"
-                loading="lazy"
-                referrerPolicy="no-referrer"
-              />
-            ) : (
-              <div className="h-14 w-14 shrink-0 rounded-full border border-border/60 bg-muted" />
-            )}
+      <div className="rounded-lg bg-[var(--surface-elevated)]/70 overflow-hidden flex flex-col">
+        {connected ? (
+          <div className={cn("px-4 py-3", isMobile ? "flex flex-col gap-3" : "flex items-center justify-between gap-4")}>
+            <div className={cn("flex min-w-0 items-center gap-4", isMobile ? "w-full" : undefined)}>
+              {user?.avatarUrl ? (
+                <img
+                  src={user.avatarUrl}
+                  alt={user.login ? `${user.login} avatar` : 'GitHub avatar'}
+                  className="h-10 w-10 shrink-0 rounded-full border border-[var(--interactive-border)] bg-[var(--surface-muted)] object-cover"
+                  loading="lazy"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <div className="h-10 w-10 shrink-0 rounded-full border border-[var(--interactive-border)] bg-[var(--surface-muted)]" />
+              )}
 
-            <div className="min-w-0">
-              <div className="typography-ui-header font-semibold text-foreground truncate">
-                {user?.name?.trim() || user?.login || 'GitHub'}
+              <div className="min-w-0 flex-1">
+                <div className="typography-ui-label text-foreground">
+                  {user?.name?.trim() || user?.login || 'GitHub'}
+                </div>
+                <div className={cn("flex items-center gap-2 typography-meta text-muted-foreground mt-0.5", isMobile ? "flex-wrap" : "truncate")}>
+                  <RiGithubFill className="h-3.5 w-3.5 shrink-0" />
+                  <span className="font-mono">{user?.login || 'unknown'}</span>
+                  {user?.email && <span className="opacity-50">•</span>}
+                  {user?.email && <span>{user.email}</span>}
+                </div>
+                {status?.scope && (
+                  <div className="typography-micro text-muted-foreground/70 mt-0.5">Scopes: {status.scope}</div>
+                )}
               </div>
-              {user?.email ? (
-                <div className="typography-body text-muted-foreground truncate">{user.email}</div>
-              ) : null}
-              <div className="mt-1 flex items-center gap-2 typography-meta text-muted-foreground truncate">
-                <RiGithubFill className="h-4 w-4" />
-                <span className="font-mono">{user?.login || 'unknown'}</span>
-              </div>
-              {status?.scope ? (
-                <div className="typography-micro text-muted-foreground truncate">Scopes: {status.scope}</div>
-              ) : null}
+            </div>
+
+            <ButtonSmall variant="outline" onClick={disconnect} disabled={isBusy} className={cn("text-[var(--status-error)] hover:text-[var(--status-error)]", isMobile ? "w-full" : undefined)}>
+              Disconnect
+            </ButtonSmall>
+          </div>
+        ) : (
+          <div className="flex items-center justify-between gap-4 px-4 py-4">
+            <div className="flex min-w-0 flex-col">
+              <span className="typography-ui-label text-foreground">Not Connected</span>
+            </div>
+            <ButtonSmall variant="default" onClick={startConnect} disabled={isBusy}>
+              Connect GitHub
+            </ButtonSmall>
+          </div>
+        )}
+
+        {accounts.length > 1 && (
+          <div className="mt-2 border-t border-[var(--surface-subtle)] pt-2 px-2 pb-1">
+            <div className="typography-micro text-muted-foreground mb-2 px-1">Other Accounts</div>
+            <div className="space-y-1">
+              {accounts.map((account) => {
+                const accountUser = account.user;
+                const isCurrent = Boolean(account.current);
+                return (
+                  <div
+                    key={account.id}
+                    className="flex items-center justify-between gap-3 rounded-md border border-[var(--surface-subtle)] bg-[var(--surface-muted)] px-3 py-2"
+                  >
+                    <div className="flex min-w-0 items-center gap-3">
+                      {accountUser?.avatarUrl ? (
+                        <img
+                          src={accountUser.avatarUrl}
+                          alt={accountUser.login ? `${accountUser.login} avatar` : 'GitHub avatar'}
+                          className="h-6 w-6 shrink-0 rounded-full border border-[var(--interactive-border)] bg-[var(--surface-muted)] object-cover"
+                          loading="lazy"
+                          referrerPolicy="no-referrer"
+                        />
+                      ) : (
+                        <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-[var(--interactive-border)] bg-[var(--surface-muted)]">
+                          <RiGithubFill className="h-3 w-3 text-muted-foreground" />
+                        </div>
+                      )}
+                      <div className="min-w-0 flex flex-col">
+                        <span className="typography-ui-label text-foreground truncate">
+                          {accountUser?.name?.trim() || accountUser?.login || 'GitHub'}
+                        </span>
+                        {accountUser?.login && (
+                          <span className="typography-micro text-muted-foreground truncate font-mono">
+                            {accountUser.login}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    {isCurrent ? (
+                      <span className="typography-micro text-[var(--primary-base)] bg-[var(--primary-base)]/10 px-1.5 py-0.5 rounded">Active</span>
+                    ) : (
+                      <ButtonSmall
+                        variant="ghost"
+                        onClick={() => activateAccount(account.id)}
+                        disabled={isBusy}
+                      >
+                        Switch to
+                      </ButtonSmall>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
+        )}
 
-          <Button variant="outline" onClick={disconnect} disabled={isBusy}>
-            Disconnect
-          </Button>
-        </div>
-      ) : (
-        <div className="flex items-center justify-between gap-3 rounded-lg border bg-background/50 px-3 py-2">
-          <div className="typography-ui-label text-foreground">Not connected</div>
-          <Button onClick={startConnect} disabled={isBusy}>
-            Connect
-          </Button>
+      </div>
+
+      {connected && (
+        <div className="mt-2 px-2 pb-2">
+          <ButtonSmall
+            variant="outline"
+            onClick={startConnect}
+            disabled={isBusy}
+            className={cn(isMobile ? 'w-full' : undefined)}
+          >
+            Add Account
+          </ButtonSmall>
         </div>
       )}
 
-      {connected ? (
-        <div className="flex justify-end">
-          <Button variant="ghost" onClick={startConnect} disabled={isBusy}>
-            Add account
-          </Button>
-        </div>
-      ) : null}
-
-      {accounts.length > 1 ? (
-        <div className="space-y-2 rounded-lg border bg-background/50 p-3">
-          <div className="typography-ui-label text-foreground">Accounts</div>
-          <div className="space-y-2">
-            {accounts.map((account) => {
-              const accountUser = account.user;
-              const isCurrent = Boolean(account.current);
-              return (
-                <div
-                  key={account.id}
-                  className="flex items-center justify-between gap-3 rounded-md border border-border/40 bg-background/70 px-3 py-2"
-                >
-                  <div className="flex min-w-0 items-center gap-3">
-                    {accountUser?.avatarUrl ? (
-                      <img
-                        src={accountUser.avatarUrl}
-                        alt={accountUser.login ? `${accountUser.login} avatar` : 'GitHub avatar'}
-                        className="h-8 w-8 shrink-0 rounded-full border border-border/60 bg-muted object-cover"
-                        loading="lazy"
-                        referrerPolicy="no-referrer"
-                      />
-                    ) : (
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border/60 bg-muted">
-                        <RiGithubFill className="h-4 w-4 text-muted-foreground" />
-                      </div>
-                    )}
-                    <div className="min-w-0">
-                      <div className="typography-ui-label text-foreground truncate">
-                        {accountUser?.name?.trim() || accountUser?.login || 'GitHub'}
-                      </div>
-                      {accountUser?.login ? (
-                        <div className="typography-micro text-muted-foreground truncate font-mono">
-                          {accountUser.login}
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-                  {isCurrent ? (
-                    <span className="typography-micro text-primary">Active</span>
-                  ) : (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => activateAccount(account.id)}
-                      disabled={isBusy}
-                    >
-                      Use
-                    </Button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      ) : null}
-
-      {flow ? (
-        <div className="space-y-3 rounded-lg border bg-background/50 p-3">
+      {flow && (
+        <div className="mt-4 rounded-lg bg-[var(--surface-elevated)]/70 p-4 border border-[var(--interactive-border)]">
           <div className="space-y-1">
-            <div className="typography-ui-label text-foreground">Authorize OpenChamber</div>
-            <div className="typography-meta text-muted-foreground">
-              In GitHub, enter this code:
-            </div>
+            <h4 className="typography-ui-label text-foreground">Authorize OpenChamber</h4>
+            <p className="typography-meta text-muted-foreground">
+              In GitHub, enter the following code to authorize this device:
+            </p>
           </div>
-          <div className="flex items-center justify-between gap-3">
-            <div className="font-mono text-lg tracking-widest text-foreground">{flow.userCode}</div>
-            <Button variant="outline" asChild>
+          <div className="flex items-center justify-between gap-3 mt-4">
+            <div className="font-mono text-xl tracking-widest text-foreground bg-[var(--surface-muted)] px-3 py-1.5 rounded-md border border-[var(--interactive-border)]">{flow.userCode}</div>
+            <Button size="sm" asChild>
               <a
                 href={flow.verificationUriComplete || flow.verificationUri}
                 target="_blank"
@@ -389,19 +409,19 @@ export const GitHubSettings: React.FC = () => {
               </a>
             </Button>
           </div>
-          <div className="typography-micro text-muted-foreground">
-            Waiting for approval… (auto-refresh)
-          </div>
-          <div className="flex justify-end">
-            <Button variant="ghost" disabled={isBusy} onClick={() => {
+          <div className="mt-4 flex items-center justify-between">
+            <span className="typography-micro text-muted-foreground animate-pulse">
+              Waiting for approval… (auto-refresh)
+            </span>
+            <ButtonSmall variant="ghost" disabled={isBusy} onClick={() => {
               stopPolling();
               setFlow(null);
             }}>
               Cancel
-            </Button>
+            </ButtonSmall>
           </div>
         </div>
-      ) : null}
+      )}
     </div>
   );
 };

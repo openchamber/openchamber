@@ -2,7 +2,6 @@ import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   Dialog,
   DialogContent,
-  DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
@@ -64,6 +63,11 @@ function formatIsoDateForUI(isoDate: string): string {
 
 function stripChangelogHeading(sectionRaw: string): string {
   return sectionRaw.replace(/^## \[[^\]]+\] - \d{4}-\d{2}-\d{2}\s*\n?/, '').trim();
+}
+
+function processChangelogMentions(content: string): string {
+  // Convert @username to markdown links so they can be styled via css
+  return content.replace(/(^|[^a-zA-Z0-9])@([a-zA-Z0-9-]+)/g, '$1[@$2](https://github.com/$2)');
 }
 
 function compareSemverDesc(a: string, b: string): number {
@@ -177,11 +181,30 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
     if (result.ok) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } else {
-      // Clipboard access denied
     }
   };
 
+  const handleOpenExternal = useCallback(async (url: string) => {
+    if (typeof window === 'undefined') return;
+
+    // Try Tauri backend
+    type TauriShell = { shell?: { open?: (url: string) => Promise<unknown> } };
+    const tauri = (window as unknown as { __TAURI__?: TauriShell }).__TAURI__;
+    if (tauri?.shell?.open) {
+      try {
+        await tauri.shell.open(url);
+        return;
+      } catch {
+        // fall through to window.open
+      }
+    }
+
+    try {
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } catch {
+      // ignore
+    }
+  }, []);
   const handleWebUpdate = useCallback(async () => {
     setWebUpdateState('updating');
     setWebError(null);
@@ -231,7 +254,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
       return {
         kind: 'raw',
         title: "What's new",
-        content: body,
+        content: processChangelogMentions(body),
       };
     }
 
@@ -242,102 +265,110 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
       sections: sorted.map((section) => ({
         version: section.version,
         dateLabel: formatIsoDateForUI(section.date),
-        content: stripChangelogHeading(section.raw) || body,
+        content: processChangelogMentions(stripChangelogHeading(section.raw) || body),
       })),
     };
   }, [info?.body]);
 
   return (
     <Dialog open={open} onOpenChange={isWebUpdating ? undefined : onOpenChange}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <RiDownloadCloudLine className="h-5 w-5 text-primary" />
-            {webUpdateState === 'restarting' || webUpdateState === 'reconnecting'
-              ? 'Updating...'
-              : 'Update Available'}
+      <DialogContent className="max-w-4xl p-5 bg-background border-[var(--interactive-border)]" showCloseButton={true}>
+        
+        {/* Header Section */}
+        <div className="flex items-center mb-1">
+          <DialogTitle className="flex items-center gap-2.5">
+            <RiDownloadCloudLine className="h-5 w-5 text-[var(--primary-base)]" />
+            <span className="text-lg font-semibold text-foreground">
+              {webUpdateState === 'restarting' || webUpdateState === 'reconnecting'
+                ? 'Updating OpenChamber...'
+                : 'Update Available'}
+            </span>
           </DialogTitle>
-        </DialogHeader>
 
-        <div className="space-y-4 mt-2">
+          {/* Version Diff */}
           {(info?.currentVersion || info?.version) && (
-            <div className="flex items-center gap-2 text-sm">
+            <div className="flex items-center gap-2 font-mono text-sm ml-3">
               {info?.currentVersion && (
-                <span className="font-mono">{info.currentVersion}</span>
+                <span className="text-muted-foreground">{info.currentVersion}</span>
               )}
               {info?.currentVersion && info?.version && (
-                <span className="text-muted-foreground">→</span>
+                <span className="text-muted-foreground/50">→</span>
               )}
               {info?.version && (
-                <span className="font-mono text-primary">{info.version}</span>
+                <span className="text-[var(--primary-base)] font-medium">{info.version}</span>
               )}
             </div>
           )}
+        </div>
+
+        {/* Content Body */}
+        <div className="space-y-2">
 
           {/* Web update progress */}
           {isWebRuntime && isWebUpdating && (
-            <div className="space-y-3">
+            <div className="rounded-lg bg-[var(--surface-elevated)]/30 p-5 border border-[var(--surface-subtle)]">
               <div className="flex items-center gap-3">
-                <RiLoaderLine className="h-5 w-5 animate-spin text-primary" />
-                <div className="text-sm">
+                <RiLoaderLine className="h-5 w-5 animate-spin text-[var(--primary-base)]" />
+                <div className="typography-ui-label text-foreground">
                   {webUpdateState === 'updating' && 'Installing update...'}
                   {webUpdateState === 'restarting' && 'Server restarting...'}
                   {webUpdateState === 'reconnecting' && 'Waiting for server...'}
                 </div>
               </div>
-              <p className="text-xs text-muted-foreground">
+              <p className="mt-2 text-xs text-muted-foreground">
                 The page will reload automatically when the update is complete.
               </p>
             </div>
           )}
 
+          {/* Changelog Rendering */}
           {changelog && !isWebUpdating && (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between gap-3">
-                <div className="typography-ui-label font-medium text-foreground/90">
-                  {changelog.title}
-                </div>
-              </div>
-
+            <div className="rounded-lg border border-[var(--surface-subtle)] bg-[var(--surface-elevated)]/20 overflow-hidden">
               <ScrollableOverlay
-                className={cn(
-                  'max-h-56 rounded-md border border-border/70',
-                  'bg-background/40 p-3'
-                )}
+                className="max-h-[400px] p-0"
                 fillContainer={false}
               >
                 {changelog.kind === 'raw' ? (
-                  <SimpleMarkdownRenderer
-                    content={changelog.content}
-                    className="typography-markdown-body text-foreground/90 leading-relaxed pr-3 break-words"
-                  />
+                  <div
+                    className="p-4 typography-markdown-body text-foreground leading-relaxed break-words [&_a]:!text-[var(--primary-base)] [&_a]:!no-underline hover:[&_a]:!underline"
+                    onClickCapture={(e) => {
+                      const target = e.target as HTMLElement;
+                      const a = target.closest('a');
+                      if (a && a.href) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        void handleOpenExternal(a.href);
+                      }
+                    }}
+                  >
+                    <SimpleMarkdownRenderer content={changelog.content} disableLinkSafety={true} />
+                  </div>
                 ) : (
-                  <div className="space-y-4 pr-3">
-                    {changelog.sections.map((section, idx) => (
-                      <div
-                        key={section.version}
-                        className={cn(
-                          idx > 0 && 'border-t border-border/40 pt-3'
-                        )}
-                      >
-                        <div className="flex items-center gap-2 mb-2">
-                          <span
-                            className={cn(
-                              'typography-ui-badge font-mono',
-                              'bg-primary/10 text-primary',
-                              'px-2 py-0.5 rounded-md'
-                            )}
-                          >
+                  <div className="divide-y divide-[var(--surface-subtle)]">
+                    {changelog.sections.map((section) => (
+                      <div key={section.version} className="p-4 hover:bg-background/40 transition-colors">
+                        <div className="flex items-center gap-3 mb-3">
+                          <span className="typography-ui-label font-mono text-[var(--primary-base)] bg-[var(--primary-base)]/10 px-1.5 py-0.5 rounded">
                             v{section.version}
                           </span>
-                          <span className="typography-micro text-muted-foreground">
+                          <span className="text-sm font-medium text-muted-foreground">
                             {section.dateLabel}
                           </span>
                         </div>
-                        <SimpleMarkdownRenderer
-                          content={section.content}
-                          className="typography-markdown-body text-foreground/90 leading-relaxed break-words"
-                        />
+                        <div
+                          className="typography-markdown-body text-foreground leading-relaxed break-words [&_a]:!text-[var(--primary-base)] [&_a]:!no-underline hover:[&_a]:!underline"
+                          onClickCapture={(e) => {
+                            const target = e.target as HTMLElement;
+                            const a = target.closest('a');
+                            if (a && a.href) {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              void handleOpenExternal(a.href);
+                            }
+                          }}
+                        >
+                          <SimpleMarkdownRenderer content={section.content} disableLinkSafety={true} />
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -346,24 +377,24 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
             </div>
           )}
 
-          {/* Web runtime: show CLI command only on error as fallback */}
+          {/* Web runtime fallback command */}
           {isWebRuntime && webUpdateState === 'error' && (
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <div className="space-y-2 mt-4">
+              <div className="flex items-center gap-2 typography-meta text-muted-foreground">
                 <RiTerminalLine className="h-4 w-4" />
                 <span>Or update via terminal:</span>
               </div>
-              <div className="flex items-center gap-2">
-                <code className="flex-1 px-3 py-2 bg-muted rounded-md font-mono text-sm text-foreground overflow-x-auto">
+              <div className="flex items-center gap-2 p-1 pl-3 bg-[var(--surface-elevated)]/50 rounded-md border border-[var(--surface-subtle)]">
+                <code className="flex-1 font-mono text-sm text-foreground overflow-x-auto whitespace-nowrap">
                   {updateCommand}
                 </code>
                 <button
                   onClick={handleCopyCommand}
                   className={cn(
-                    'flex items-center justify-center p-2 rounded-md',
-                    'text-muted-foreground hover:text-foreground hover:bg-interactive-hover',
+                    'flex items-center justify-center p-2 rounded',
+                    'text-muted-foreground hover:text-foreground hover:bg-[var(--interactive-hover)]',
                     'transition-colors',
-                    copied && 'text-primary'
+                    copied && 'text-[var(--status-success)]'
                   )}
                   title={copied ? 'Copied!' : 'Copy command'}
                 >
@@ -377,55 +408,48 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
             </div>
           )}
 
-          {/* Desktop runtime: show download progress */}
+          {/* Desktop progress bar */}
           {!isWebRuntime && downloading && (
-            <div className="space-y-2">
+            <div className="space-y-2 mt-4">
               <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Downloading...</span>
-                <span className="font-mono">{progressPercent}%</span>
+                <span className="text-muted-foreground">Downloading update payload...</span>
+                <span className="font-mono text-foreground">{progressPercent}%</span>
               </div>
-              <div className="h-2 bg-muted rounded-full overflow-hidden">
+              <div className="h-1.5 bg-[var(--surface-subtle)] rounded-full overflow-hidden">
                 <div
-                  className="h-full bg-primary transition-all duration-300"
+                  className="h-full bg-[var(--primary-base)] transition-all duration-300"
                   style={{ width: `${progressPercent}%` }}
                 />
               </div>
             </div>
           )}
 
+          {/* Error display */}
           {(error || webError) && (
-            <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-lg">
-              <p className="text-sm text-destructive">{error || webError}</p>
+            <div className="p-3 mt-4 bg-[var(--status-error-background)] border border-[var(--status-error-border)] rounded-lg">
+              <p className="text-sm text-[var(--status-error)]">{error || webError}</p>
             </div>
           )}
+        </div>
 
-          <div className="flex gap-2 pt-2">
-            <a
-              href={releaseUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={cn(
-                'flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md',
-                'text-sm text-muted-foreground',
-                'hover:text-foreground hover:bg-interactive-hover',
-                'transition-colors'
-              )}
-            >
-              <RiExternalLinkLine className="h-4 w-4" />
-              GitHub
-            </a>
+        {/* Action Footer */}
+        <div className="mt-4 flex items-center justify-between gap-4">
+          <a
+            href={releaseUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors shrink-0"
+          >
+            <RiExternalLinkLine className="h-4 w-4" />
+            GitHub
+          </a>
 
-            {/* Desktop runtime buttons */}
+          <div className="flex-1 flex justify-end">
+            {/* Desktop Buttons */}
             {!isWebRuntime && !downloaded && !downloading && (
               <button
                 onClick={onDownload}
-                className={cn(
-                  'flex-1 flex items-center justify-center gap-2 px-3 py-1.5 rounded-md',
-                  'text-sm font-medium',
-                  'bg-primary text-primary-foreground',
-                  'hover:bg-primary/90',
-                  'transition-colors'
-                )}
+                className="flex items-center justify-center gap-2 px-5 py-2 rounded-md text-sm font-medium bg-[var(--primary-base)] text-[var(--primary-foreground)] hover:opacity-90 transition-opacity"
               >
                 <RiDownloadLine className="h-4 w-4" />
                 Download Update
@@ -435,12 +459,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
             {!isWebRuntime && downloading && (
               <button
                 disabled
-                className={cn(
-                  'flex-1 flex items-center justify-center gap-2 px-3 py-1.5 rounded-md',
-                  'text-sm font-medium',
-                  'bg-primary/50 text-primary-foreground',
-                  'cursor-not-allowed'
-                )}
+                className="flex items-center justify-center gap-2 px-5 py-2 rounded-md text-sm font-medium bg-[var(--primary-base)]/50 text-[var(--primary-foreground)] cursor-not-allowed"
               >
                 <RiLoaderLine className="h-4 w-4 animate-spin" />
                 Downloading...
@@ -450,46 +469,28 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
             {!isWebRuntime && downloaded && (
               <button
                 onClick={onRestart}
-                className={cn(
-                  'flex-1 flex items-center justify-center gap-2 px-3 py-1.5 rounded-md',
-                  'text-sm font-medium',
-                  'bg-primary text-primary-foreground',
-                  'hover:bg-primary/90',
-                  'transition-colors'
-                )}
+                className="flex items-center justify-center gap-2 px-5 py-2 rounded-md text-sm font-medium bg-[var(--status-success)] text-white hover:opacity-90 transition-opacity"
               >
                 <RiRestartLine className="h-4 w-4" />
                 Restart to Update
               </button>
             )}
 
-            {/* Web runtime: Update Now button */}
+            {/* Web Buttons */}
             {isWebRuntime && !isWebUpdating && (
               <button
                 onClick={handleWebUpdate}
-                className={cn(
-                  'flex-1 flex items-center justify-center gap-2 px-3 py-1.5 rounded-md',
-                  'text-sm font-medium',
-                  'bg-primary text-primary-foreground',
-                  'hover:bg-primary/90',
-                  'transition-colors'
-                )}
+                className="flex items-center justify-center gap-2 px-5 py-2 rounded-md text-sm font-medium bg-[var(--primary-base)] text-[var(--primary-foreground)] hover:opacity-90 transition-opacity"
               >
                 <RiDownloadLine className="h-4 w-4" />
                 Update Now
               </button>
             )}
 
-            {/* Web runtime: updating state */}
             {isWebRuntime && isWebUpdating && (
               <button
                 disabled
-                className={cn(
-                  'flex-1 flex items-center justify-center gap-2 px-3 py-1.5 rounded-md',
-                  'text-sm font-medium',
-                  'bg-primary/50 text-primary-foreground',
-                  'cursor-not-allowed'
-                )}
+                className="flex items-center justify-center gap-2 px-5 py-2 rounded-md text-sm font-medium bg-[var(--primary-base)]/50 text-[var(--primary-foreground)] cursor-not-allowed"
               >
                 <RiLoaderLine className="h-4 w-4 animate-spin" />
                 Updating...

@@ -304,6 +304,10 @@ export const useContextStore = create<ContextStore>()(
                                 ? infoAny.model.modelID
                                 : (typeof infoAny.modelID === 'string' && infoAny.modelID.trim().length > 0 ? infoAny.modelID : undefined);
 
+                            const userVariant = typeof infoAny.variant === 'string' && infoAny.variant.trim().length > 0
+                                ? infoAny.variant
+                                : undefined;
+
                             if (agentName && userProvider && userModel && agents.find((a) => a.name === agentName)) {
                                 const choice = {
                                     providerId: userProvider,
@@ -314,15 +318,11 @@ export const useContextStore = create<ContextStore>()(
                                 if (!existing || choice.timestamp > existing.timestamp) {
                                     agentLastChoices.set(agentName, choice);
                                 }
-                                if (typeof infoAny.variant === 'string' && infoAny.variant.trim().length > 0) {
-                                    saveAgentModelVariantForSession(sessionId, agentName, userProvider, userModel, infoAny.variant);
-                                }
+                                saveAgentModelVariantForSession(sessionId, agentName, userProvider, userModel, userVariant);
                             }
 
                             // User message: variant is top-level, model is nested in model.providerID/modelID
-                            pendingVariant = typeof infoAny.variant === 'string' && infoAny.variant.trim().length > 0
-                                ? infoAny.variant
-                                : undefined;
+                            pendingVariant = userVariant;
                             pendingUserModel = infoAny.model?.providerID && infoAny.model?.modelID
                                 ? { providerID: infoAny.model.providerID, modelID: infoAny.model.modelID }
                                 : undefined;
@@ -335,7 +335,7 @@ export const useContextStore = create<ContextStore>()(
 
                             if (agentName && agents.find((a) => a.name === agentName)) {
                                 // Apply pending variant from user message if model matches
-                                if (pendingVariant && pendingUserModel &&
+                                if (pendingUserModel &&
                                     pendingUserModel.providerID === infoAny.providerID &&
                                     pendingUserModel.modelID === infoAny.modelID) {
                                     saveAgentModelVariantForSession(sessionId, agentName, infoAny.providerID, infoAny.modelID, pendingVariant);

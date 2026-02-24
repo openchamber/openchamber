@@ -275,8 +275,62 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false }
     return <RiFileLine className="h-3.5 w-3.5" />;
   };
 
+  const extractExtension = (value?: string): string => {
+    if (!value) return '';
+    const normalized = value.replace(/\\/g, '/').trim();
+    const filename = normalized.split('/').pop() || normalized;
+    const dotIndex = filename.lastIndexOf('.');
+    if (dotIndex < 0) return '';
+    return filename.slice(dotIndex).toLowerCase();
+  };
+
+  const isMermaidMimeType = (mimeType?: string): boolean => {
+    if (!mimeType) return false;
+    const normalized = mimeType.toLowerCase();
+    return normalized === 'text/vnd.mermaid'
+      || normalized === 'application/vnd.mermaid'
+      || normalized === 'text/x-mermaid'
+      || normalized === 'application/x-mermaid';
+  };
+
+  const isGenericTextOrUnknownMime = (mimeType?: string): boolean => {
+    if (!mimeType) return true;
+    const normalized = mimeType.toLowerCase();
+    return normalized === 'text/plain' || normalized === 'application/octet-stream';
+  };
+
+  const isExplicitBinaryMime = (mimeType?: string): boolean => {
+    if (!mimeType) return false;
+    const normalized = mimeType.toLowerCase();
+    return normalized.startsWith('image/')
+      || normalized.startsWith('video/')
+      || normalized.startsWith('audio/')
+      || normalized === 'application/pdf';
+  };
+
+  const isMermaidFile = (file: FilePart): boolean => {
+    const normalizedMime = file.mime?.toLowerCase();
+    if (isMermaidMimeType(normalizedMime)) {
+      return true;
+    }
+
+    if (isExplicitBinaryMime(normalizedMime)) {
+      return false;
+    }
+
+    const extension = extractExtension(file.filename || file.url);
+    const isMermaidExtension = extension === '.mmd' || extension === '.mermaid';
+    return isMermaidExtension && isGenericTextOrUnknownMime(normalizedMime);
+  };
+
   const imageFiles = fileItems.filter(f => f.mime?.startsWith('image/') && f.url);
-  const otherFiles = fileItems.filter(f => !f.mime?.startsWith('image/'));
+  const mermaidFiles = fileItems.filter((file) => isMermaidFile(file) && file.url);
+  const otherFiles = fileItems.filter((file) => {
+    if (file.mime?.startsWith('image/')) {
+      return false;
+    }
+    return !isMermaidFile(file);
+  });
 
   const imageGallery = React.useMemo(
     () =>
@@ -326,6 +380,30 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false }
     onShowPopup(popupPayload);
   }, [imageGallery, onShowPopup]);
 
+  const handleMermaidClick = React.useCallback((file: FilePart) => {
+    if (!onShowPopup || !file.url) {
+      return;
+    }
+
+    const filename = extractFilename(file.filename) || 'Diagram';
+    onShowPopup({
+      open: true,
+      title: filename,
+      content: '',
+      metadata: {
+        tool: 'mermaid-preview',
+        filename,
+        mime: file.mime,
+        size: file.size,
+      },
+      mermaid: {
+        url: file.url,
+        mimeType: file.mime,
+        filename,
+      },
+    });
+  }, [onShowPopup]);
+
   if (fileItems.length === 0) return null;
 
   return (
@@ -335,7 +413,7 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false }
         <div className={cn('flex flex-wrap', compact ? 'gap-1.5' : 'gap-2')}>
           {otherFiles.map((file, index) => (
             <div
-              key={`file-${index}`}
+              key={`file-${file.url || file.filename || index}`}
               className={cn(
                 'inline-flex items-center bg-muted/30 border border-border/30 typography-meta',
                 compact ? 'gap-1 px-2 py-0.5 rounded-lg' : 'gap-1.5 px-2.5 py-1 rounded-xl'
@@ -352,6 +430,36 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false }
         </div>
       )}
 
+      {mermaidFiles.length > 0 && (
+        <div className={cn('flex flex-wrap', compact ? 'gap-1.5' : 'gap-2')}>
+          {mermaidFiles.map((file, index) => {
+            const filename = extractFilename(file.filename) || 'Diagram';
+
+            return (
+              <button
+                key={`mermaid-${file.url || file.filename || index}`}
+                type="button"
+                onClick={() => handleMermaidClick(file)}
+                className={cn(
+                  'inline-flex items-center bg-muted/30 border border-border/30 typography-meta transition-colors',
+                  'hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1',
+                  compact ? 'gap-1 px-2 py-0.5 rounded-lg' : 'gap-1.5 px-2.5 py-1 rounded-xl'
+                )}
+                title={`Open ${filename}`}
+                aria-label={`Open diagram ${filename}`}
+              >
+                {getFileIcon(file.mime)}
+                <div className={cn('overflow-hidden', compact ? 'max-w-[140px]' : 'max-w-[200px]')}>
+                  <span className="truncate block" title={filename}>
+                    {filename}
+                  </span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {}
       {imageFiles.length > 0 && (
         <div className={cn('overflow-x-auto -mx-1 px-1 scrollbar-thin', compact ? 'py-0.5' : 'py-1')}>
@@ -360,7 +468,7 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false }
     const filename = extractFilename(file.filename) || 'Image';
 
               return (
-                <Tooltip key={`img-${index}`} delayDuration={1000}>
+                <Tooltip key={`img-${file.url || file.filename || index}`} delayDuration={1000}>
                   <TooltipTrigger asChild>
                     <button
                       type="button"

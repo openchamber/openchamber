@@ -161,10 +161,16 @@ interface UIStore {
   isSettingsDialogOpen: boolean;
   isModelSelectorOpen: boolean;
   sidebarSection: SidebarSection;
+
+  // Settings IA (new shell)
+  settingsPage: string;
+  settingsHasOpenedOnce: boolean;
+  settingsProjectsSelectedId: string | null;
   eventStreamStatus: EventStreamStatus;
   eventStreamHint: string | null;
   showReasoningTraces: boolean;
   showTextJustificationActivity: boolean;
+  showDeletionDialog: boolean;
   autoDeleteEnabled: boolean;
   autoDeleteAfterDays: number;
   autoDeleteLastRunAt: number | null;
@@ -178,6 +184,7 @@ interface UIStore {
   inputBarOffset: number;
 
   favoriteModels: Array<{ providerID: string; modelID: string }>;
+  hiddenModels: Array<{ providerID: string; modelID: string }>;
   recentModels: Array<{ providerID: string; modelID: string }>;
   recentAgents: string[];
   recentEfforts: Record<string, string[]>;
@@ -258,9 +265,12 @@ interface UIStore {
   setModelSelectorOpen: (open: boolean) => void;
   applyTheme: () => void;
   setSidebarSection: (section: SidebarSection) => void;
+  setSettingsPage: (slug: string) => void;
+  setSettingsProjectsSelectedId: (projectId: string | null) => void;
   setEventStreamStatus: (status: EventStreamStatus, hint?: string | null) => void;
   setShowReasoningTraces: (value: boolean) => void;
   setShowTextJustificationActivity: (value: boolean) => void;
+  setShowDeletionDialog: (value: boolean) => void;
   setAutoDeleteEnabled: (value: boolean) => void;
   setAutoDeleteAfterDays: (days: number) => void;
   setAutoDeleteLastRunAt: (timestamp: number | null) => void;
@@ -276,6 +286,10 @@ interface UIStore {
   applyPadding: () => void;
   updateProportionalSidebarWidths: () => void;
   toggleFavoriteModel: (providerID: string, modelID: string) => void;
+  toggleHiddenModel: (providerID: string, modelID: string) => void;
+  isHiddenModel: (providerID: string, modelID: string) => boolean;
+  hideAllModels: (providerID: string, modelIDs: string[]) => void;
+  showAllModels: (providerID: string) => void;
   isFavoriteModel: (providerID: string, modelID: string) => boolean;
   addRecentModel: (providerID: string, modelID: string) => void;
   addRecentAgent: (agentName: string) => void;
@@ -348,10 +362,14 @@ export const useUIStore = create<UIStore>()(
         isSettingsDialogOpen: false,
         isModelSelectorOpen: false,
         sidebarSection: 'sessions',
+        settingsPage: 'home',
+        settingsHasOpenedOnce: false,
+        settingsProjectsSelectedId: null,
         eventStreamStatus: 'idle',
         eventStreamHint: null,
         showReasoningTraces: true,
         showTextJustificationActivity: false,
+        showDeletionDialog: true,
         autoDeleteEnabled: false,
         autoDeleteAfterDays: 30,
         autoDeleteLastRunAt: null,
@@ -363,6 +381,7 @@ export const useUIStore = create<UIStore>()(
         cornerRadius: 12,
         inputBarOffset: 0,
         favoriteModels: [],
+        hiddenModels: [],
         recentModels: [],
         recentAgents: [],
         recentEfforts: {},
@@ -787,7 +806,15 @@ export const useUIStore = create<UIStore>()(
         },
 
         setSettingsDialogOpen: (open) => {
-          set({ isSettingsDialogOpen: open });
+          set((state) => {
+            if (!open) {
+              return { isSettingsDialogOpen: false };
+            }
+            if (state.settingsHasOpenedOnce) {
+              return { isSettingsDialogOpen: true };
+            }
+            return { isSettingsDialogOpen: true, settingsHasOpenedOnce: true };
+          });
         },
 
         setModelSelectorOpen: (open) => {
@@ -796,6 +823,14 @@ export const useUIStore = create<UIStore>()(
 
         setSidebarSection: (section) => {
           set({ sidebarSection: section });
+        },
+
+        setSettingsPage: (slug) => {
+          set({ settingsPage: slug });
+        },
+
+        setSettingsProjectsSelectedId: (projectId) => {
+          set({ settingsProjectsSelectedId: projectId });
         },
 
         setEventStreamStatus: (status, hint) => {
@@ -811,6 +846,10 @@ export const useUIStore = create<UIStore>()(
 
         setShowTextJustificationActivity: (value) => {
           set({ showTextJustificationActivity: value });
+        },
+
+        setShowDeletionDialog: (value) => {
+          set({ showDeletionDialog: value });
         },
 
         setAutoDeleteEnabled: (value) => {
@@ -965,6 +1004,49 @@ export const useUIStore = create<UIStore>()(
               };
             }
           });
+        },
+
+        toggleHiddenModel: (providerID, modelID) => {
+          set((state) => {
+            const exists = state.hiddenModels.some(
+              (item) => item.providerID === providerID && item.modelID === modelID
+            );
+
+            if (exists) {
+              return {
+                hiddenModels: state.hiddenModels.filter(
+                  (item) => !(item.providerID === providerID && item.modelID === modelID)
+                ),
+              };
+            }
+
+            return {
+              hiddenModels: [{ providerID, modelID }, ...state.hiddenModels],
+            };
+          });
+        },
+
+        isHiddenModel: (providerID, modelID) => {
+          const { hiddenModels } = get();
+          return hiddenModels.some(
+            (item) => item.providerID === providerID && item.modelID === modelID
+          );
+        },
+
+        hideAllModels: (providerID, modelIDs) => {
+          set((state) => {
+            const current = state.hiddenModels.filter((item) => item.providerID !== providerID);
+            const additions = modelIDs
+              .filter((modelID) => typeof modelID === 'string' && modelID.length > 0)
+              .map((modelID) => ({ providerID, modelID }));
+            return { hiddenModels: [...additions, ...current] };
+          });
+        },
+
+        showAllModels: (providerID) => {
+          set((state) => ({
+            hiddenModels: state.hiddenModels.filter((item) => item.providerID !== providerID),
+          }));
         },
 
         isFavoriteModel: (providerID, modelID) => {
@@ -1240,10 +1322,14 @@ export const useUIStore = create<UIStore>()(
           isSessionSwitcherOpen: state.isSessionSwitcherOpen,
           activeMainTab: state.activeMainTab,
           sidebarSection: state.sidebarSection,
+          settingsPage: state.settingsPage,
+          settingsHasOpenedOnce: state.settingsHasOpenedOnce,
+          settingsProjectsSelectedId: state.settingsProjectsSelectedId,
           isSessionCreateDialogOpen: state.isSessionCreateDialogOpen,
           // Note: isSettingsDialogOpen intentionally NOT persisted
           showReasoningTraces: state.showReasoningTraces,
           showTextJustificationActivity: state.showTextJustificationActivity,
+          showDeletionDialog: state.showDeletionDialog,
           autoDeleteEnabled: state.autoDeleteEnabled,
           autoDeleteAfterDays: state.autoDeleteAfterDays,
           autoDeleteLastRunAt: state.autoDeleteLastRunAt,
@@ -1254,6 +1340,7 @@ export const useUIStore = create<UIStore>()(
           padding: state.padding,
           cornerRadius: state.cornerRadius,
           favoriteModels: state.favoriteModels,
+          hiddenModels: state.hiddenModels,
           recentModels: state.recentModels,
           recentAgents: state.recentAgents,
           recentEfforts: state.recentEfforts,

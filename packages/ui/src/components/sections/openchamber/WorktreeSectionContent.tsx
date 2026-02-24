@@ -1,21 +1,28 @@
 import React from 'react';
 import { RiAddLine, RiCloseLine, RiDeleteBinLine, RiInformationLine } from '@remixicon/react';
+import { ButtonSmall } from '@/components/ui/button-small';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionStore } from '@/stores/useSessionStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useDeviceInfo } from '@/lib/device';
 import { checkIsGitRepository } from '@/lib/gitApi';
 import { getWorktreeSetupCommands, saveWorktreeSetupCommands } from '@/lib/openchamberConfig';
 import { listProjectWorktrees } from '@/lib/worktrees/worktreeManager';
 import { sessionEvents } from '@/lib/sessionEvents';
 import type { WorktreeMetadata } from '@/types/worktree';
-import { formatPathForDisplay } from '@/lib/utils';
+import { formatPathForDisplay, cn } from '@/lib/utils';
 
-export const WorktreeSectionContent: React.FC = () => {
+export interface WorktreeSectionContentProps {
+  projectRef?: { id: string; path: string } | null;
+}
+
+export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ projectRef: projectRefProp = null }) => {
+  const { isMobile } = useDeviceInfo();
   const activeProject = useProjectsStore((state) => state.getActiveProject());
 
-  const projectPath = activeProject?.path ?? null;
+  const projectPath = projectRefProp?.path ?? activeProject?.path ?? null;
 
   const { sessions, getWorktreeMetadata } = useSessionStore();
   const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
@@ -27,11 +34,14 @@ export const WorktreeSectionContent: React.FC = () => {
   const [isLoadingWorktrees, setIsLoadingWorktrees] = React.useState(false);
 
   const projectRef = React.useMemo(() => {
+    if (projectRefProp?.id && projectRefProp?.path) {
+      return { id: projectRefProp.id, path: projectRefProp.path };
+    }
     if (!activeProject?.id || !projectPath) {
       return null;
     }
     return { id: activeProject.id, path: projectPath };
-  }, [activeProject?.id, projectPath]);
+  }, [activeProject?.id, projectPath, projectRefProp?.id, projectRefProp?.path]);
 
   const refreshWorktrees = React.useCallback(async () => {
     if (!projectRef || isGitRepoLocal === false) return;
@@ -253,60 +263,68 @@ export const WorktreeSectionContent: React.FC = () => {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="max-w-[44rem] space-y-5">
       {/* Setup commands */}
-      <div className="space-y-4">
-        <div className="space-y-1">
-          <h3 className="typography-ui-header font-semibold text-foreground">Setup commands</h3>
-          <p className="typography-meta text-muted-foreground">
-            Run automatically inside the new worktree directory when a worktree is created.
-            <br />
-            Use <code className="font-mono text-xs bg-sidebar-accent/50 px-1 rounded">$ROOT_PROJECT_PATH</code> for the project root.
-          </p>
+      <div className="space-y-2">
+        <div className="mb-1 px-1">
+          <div className="flex items-center gap-2">
+            <h3 className="typography-ui-header font-normal text-foreground">Setup commands</h3>
+            <Tooltip delayDuration={1000}>
+              <TooltipTrigger asChild>
+                <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+              </TooltipTrigger>
+              <TooltipContent sideOffset={8} className="max-w-xs">
+                Run automatically inside the new worktree directory when a worktree is created.
+                Use <code className="font-mono text-xs bg-sidebar-accent/50 px-1 rounded">$ROOT_PROJECT_PATH</code> for the project root.
+              </TooltipContent>
+            </Tooltip>
+          </div>
         </div>
 
         {isLoadingCommands ? (
-          <p className="typography-meta text-muted-foreground">Loading...</p>
+          <p className="typography-meta text-muted-foreground px-1">Loading...</p>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-2 px-1">
             {setupCommands.map((command, index) => (
-              <div key={index} className="flex gap-2">
+              <div key={index} className="flex w-full gap-2">
                 <Input
                   value={command}
                   onChange={(e) => handleSetupCommandChange(index, e.target.value)}
                   onBlur={handleCommandBlur}
                   placeholder="e.g., bun install"
-                  className="flex-1 font-mono text-xs"
+                  className="h-7 w-[30rem] max-w-full font-mono text-xs"
                 />
                   <button
                     type="button"
                     onClick={() => {
                     handleRemoveCommand(index);
                     }}
-                    className="flex-shrink-0 flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                    className="flex-shrink-0 flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
                     aria-label="Remove command"
                   >
                   <RiCloseLine className="h-4 w-4" />
                 </button>
               </div>
             ))}
-            <button
+            <ButtonSmall
               type="button"
+              variant="ghost"
+              size="xs"
+              className="!font-normal"
               onClick={handleAddCommand}
-              className="flex items-center gap-1.5 typography-meta text-muted-foreground hover:text-foreground transition-colors"
             >
               <RiAddLine className="h-3.5 w-3.5" />
               Add command
-            </button>
+            </ButtonSmall>
           </div>
         )}
       </div>
 
       {/* Existing worktrees */}
-      <div className="space-y-4 border-t border-border/40 pt-6">
-        <div className="space-y-1">
+      <div className="space-y-2 border-t border-border/40 pt-4">
+        <div className="mb-1 px-1">
           <div className="flex items-center gap-2">
-            <h3 className="typography-ui-header font-semibold text-foreground">Existing worktrees</h3>
+            <h3 className="typography-ui-header font-normal text-foreground">Existing worktrees</h3>
             <Tooltip delayDuration={1000}>
               <TooltipTrigger asChild>
                 <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
@@ -316,23 +334,20 @@ export const WorktreeSectionContent: React.FC = () => {
               </TooltipContent>
             </Tooltip>
           </div>
-          <p className="typography-meta text-muted-foreground">
-            Manage worktrees for this project
-          </p>
         </div>
 
         {isLoadingWorktrees ? (
-          <p className="typography-meta text-muted-foreground">Loading worktrees...</p>
+          <p className="typography-meta text-muted-foreground px-1">Loading worktrees...</p>
         ) : availableWorktrees.length === 0 ? (
-          <p className="typography-meta text-muted-foreground/70">
+          <p className="typography-meta text-muted-foreground/70 px-1">
             No worktrees found for this project
           </p>
         ) : (
-          <div className="space-y-1">
+          <div className="space-y-1 px-1 max-w-[32.5rem]">
             {availableWorktrees.map((worktree) => (
               <div
                 key={worktree.path}
-                className="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-sidebar-accent/30 transition-colors group"
+                className="group flex w-full items-center gap-2 py-1.5"
               >
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 min-w-0">
@@ -347,11 +362,14 @@ export const WorktreeSectionContent: React.FC = () => {
                     {formatPathForDisplay(worktree.path, homeDirectory)}
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => handleDeleteWorktree(worktree)}
-                  className="flex-shrink-0 flex h-7 w-7 items-center justify-center rounded text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100 transition-opacity focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-                  aria-label={`Delete worktree ${worktree.branch || worktree.label}`}
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteWorktree(worktree)}
+                    className={cn(
+                      "flex-shrink-0 flex h-7 w-7 items-center justify-center rounded text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 transition-opacity focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
+                      isMobile ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+                    )}
+                    aria-label={`Delete worktree ${worktree.branch || worktree.label}`}
                 >
                   <RiDeleteBinLine className="h-4 w-4" />
                 </button>

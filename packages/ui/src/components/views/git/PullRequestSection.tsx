@@ -278,15 +278,15 @@ export const PullRequestSection: React.FC<{
   const githubAuthStatus = useGitHubAuthStore((state) => state.status);
   const githubAuthChecked = useGitHubAuthStore((state) => state.hasChecked);
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
-  const setSidebarSection = useUIStore((state) => state.setSidebarSection);
+  const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
   const currentSessionId = useSessionStore((state) => state.currentSessionId);
   const { isMobile, hasTouchInput } = useDeviceInfo();
 
   const openGitHubSettings = React.useCallback(() => {
-    setSidebarSection('settings');
+    setSettingsPage('github');
     setSettingsDialogOpen(true);
-  }, [setSettingsDialogOpen, setSidebarSection]);
+  }, [setSettingsDialogOpen, setSettingsPage]);
 
   const snapshotKey = React.useMemo(() => getPullRequestSnapshotKey(directory, branch), [directory, branch]);
   const initialSnapshot = React.useMemo(
@@ -1128,13 +1128,25 @@ export const PullRequestSection: React.FC<{
     if (!directory) return;
     setIsGenerating(true);
     try {
-      const zenModel = useConfigStore.getState().settingsZenModel;
-      const generated = await generatePullRequestDescription(directory, {
+      const { getResolvedGitGenerationModel, settingsZenModel } = useConfigStore.getState();
+      const resolvedModel = getResolvedGitGenerationModel();
+      const payload: { base: string; head: string; context?: string; zenModel?: string; providerId?: string; modelId?: string } = {
         base: targetBaseBranch,
         head: branch,
-        context: additionalContext,
-        ...(zenModel ? { zenModel } : {}),
-      });
+      };
+      if (additionalContext) {
+        payload.context = additionalContext;
+      }
+      if (resolvedModel) {
+        payload.providerId = resolvedModel.providerId;
+        payload.modelId = resolvedModel.modelId;
+        if (resolvedModel.providerId === 'zen') {
+          payload.zenModel = resolvedModel.modelId;
+        }
+      } else if (settingsZenModel) {
+        payload.zenModel = settingsZenModel;
+      }
+      const generated = await generatePullRequestDescription(directory, payload);
 
       if (generated.title?.trim()) {
         setTitle(generated.title.trim());

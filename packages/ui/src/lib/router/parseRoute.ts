@@ -1,4 +1,3 @@
-import type { SidebarSection } from '@/constants/sidebar';
 import type { MainTab } from '@/stores/useUIStore';
 import {
   type RouteState,
@@ -17,7 +16,7 @@ export function parseRoute(searchParams?: URLSearchParams): RouteState {
   return {
     sessionId: parseSessionId(params),
     tab: parseTab(params),
-    settingsSection: parseSettingsSection(params),
+    settingsPath: parseSettingsPath(params),
     diffFile: parseDiffFile(params),
   };
 }
@@ -68,10 +67,10 @@ function parseTab(params: URLSearchParams): MainTab | null {
 }
 
 /**
- * Parse settings section from URL parameters.
- * Returns null if missing or invalid.
+ * Parse settings target from URL parameters.
+ * Returns null if missing/empty.
  */
-function parseSettingsSection(params: URLSearchParams): SidebarSection | null {
+function parseSettingsPath(params: URLSearchParams): string | null {
   const value = params.get(ROUTE_PARAMS.SETTINGS);
   if (!value) {
     return null;
@@ -79,17 +78,21 @@ function parseSettingsSection(params: URLSearchParams): SidebarSection | null {
 
   const normalized = value.toLowerCase().trim();
 
-  // Check if it's a valid section
-  if ((VALID_SETTINGS_SECTIONS as readonly string[]).includes(normalized)) {
-    return normalized as SidebarSection;
+  if (normalized.length === 0) {
+    return null;
   }
 
   // Handle common aliases
   if (normalized === 'openchamber' || normalized === 'general' || normalized === 'preferences') {
-    return 'settings';
+    return 'home';
   }
 
-  return null;
+  // Keep legacy section ids as-is (mapping happens at apply time).
+  if ((VALID_SETTINGS_SECTIONS as readonly string[]).includes(normalized)) {
+    return normalized;
+  }
+
+  return normalized;
 }
 
 /**

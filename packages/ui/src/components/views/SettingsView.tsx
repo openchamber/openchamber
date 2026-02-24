@@ -1,61 +1,73 @@
 import React from 'react';
 import { cn, getModifierLabel } from '@/lib/utils';
-import { SIDEBAR_SECTIONS } from '@/constants/sidebar';
-import type { SidebarSection } from '@/constants/sidebar';
 import { useUIStore } from '@/stores/useUIStore';
-import { RiArrowDownSLine, RiArrowLeftSLine, RiCloseLine, RiFolderLine } from '@remixicon/react';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useAgentsStore } from '@/stores/useAgentsStore';
 import { useCommandsStore } from '@/stores/useCommandsStore';
+import { useMcpConfigStore } from '@/stores/useMcpConfigStore';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useSkillsCatalogStore } from '@/stores/useSkillsCatalogStore';
-import { useMcpConfigStore } from '@/stores/useMcpConfigStore';
+import {
+  RiAiAgentLine,
+  RiArrowLeftSLine,
+  RiBarChart2Line,
+  RiBookLine,
+  RiBookOpenLine,
+  RiChatAi3Line,
+  RiChatHistoryLine,
+  RiCloseLine,
+  RiCommandLine,
+  RiCloudLine,
+  RiFoldersLine,
+  RiGitBranchLine,
+
+  RiMicLine,
+  RiNotification3Line,
+  RiPaletteLine,
+  RiListUnordered,
+  RiRobot2Line,
+  RiRestartLine,
+  RiSlashCommands2,
+} from '@remixicon/react';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { AgentsSidebar } from '@/components/sections/agents/AgentsSidebar';
 import { AgentsPage } from '@/components/sections/agents/AgentsPage';
 import { CommandsSidebar } from '@/components/sections/commands/CommandsSidebar';
 import { CommandsPage } from '@/components/sections/commands/CommandsPage';
-import { SkillsSidebar } from '@/components/sections/skills/SkillsSidebar';
-import { SkillsPage } from '@/components/sections/skills/SkillsPage';
 import { McpSidebar } from '@/components/sections/mcp/McpSidebar';
 import { McpPage } from '@/components/sections/mcp/McpPage';
+import { SkillsSidebar } from '@/components/sections/skills/SkillsSidebar';
+import { SkillsPage } from '@/components/sections/skills/SkillsPage';
+import { ProjectsSidebar } from '@/components/sections/projects/ProjectsSidebar';
+import { ProjectsPage } from '@/components/sections/projects/ProjectsPage';
 import { ProvidersSidebar } from '@/components/sections/providers/ProvidersSidebar';
 import { ProvidersPage } from '@/components/sections/providers/ProvidersPage';
 import { UsageSidebar } from '@/components/sections/usage/UsageSidebar';
 import { UsagePage } from '@/components/sections/usage/UsagePage';
-import { GitIdentitiesSidebar } from '@/components/sections/git-identities/GitIdentitiesSidebar';
-import { GitIdentitiesPage } from '@/components/sections/git-identities/GitIdentitiesPage';
+import { GitPage } from '@/components/sections/git-identities/GitPage';
+import type { OpenChamberSection } from '@/components/sections/openchamber/types';
 import { OpenChamberPage } from '@/components/sections/openchamber/OpenChamberPage';
-import { OpenChamberSidebar, type OpenChamberSection } from '@/components/sections/openchamber/OpenChamberSidebar';
-import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
+import { AboutSettings } from '@/components/sections/openchamber/AboutSettings';
+import { McpIcon } from '@/components/icons/McpIcon';
 import { useDeviceInfo } from '@/lib/device';
-import { isVSCodeRuntime } from '@/lib/desktop';
-
-const getSettingsSections = (isVSCode: boolean) => {
-  let filtered = SIDEBAR_SECTIONS.filter(section => section.id !== 'sessions');
-  // Hide Git Identities tab for VS Code
-  if (isVSCode) {
-    filtered = filtered.filter(section => section.id !== 'git-identities');
-  }
-  const settingsSection = filtered.find(s => s.id === 'settings');
-  const otherSections = filtered.filter(s => s.id !== 'settings');
-  return settingsSection ? [settingsSection, ...otherSections] : filtered;
-};
+import { isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
+import { reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
+import {
+  SETTINGS_PAGE_METADATA,
+  getSettingsPageMeta,
+  resolveSettingsSlug,
+  type SettingsPageSlug,
+  type SettingsRuntimeContext,
+  type SettingsPageMeta,
+} from '@/lib/settings/metadata';
 
 // Same constraints as main sidebar
-const SETTINGS_SIDEBAR_MIN_WIDTH = 200;
-const SETTINGS_SIDEBAR_MAX_WIDTH = 500;
-const SETTINGS_SIDEBAR_DEFAULT_WIDTH = 264;
+const SETTINGS_NAV_MIN_WIDTH = 176;
+const SETTINGS_NAV_MAX_WIDTH = 280;
+const SETTINGS_NAV_RAIL_WIDTH = 48;
 
-// Width threshold for hiding tab labels (show icons only)
-const TAB_LABELS_MIN_WIDTH = 1024;
+type MobileStage = 'nav' | 'page-sidebar' | 'page-content';
 
 interface SettingsViewProps {
   onClose?: () => void;
@@ -65,177 +77,227 @@ interface SettingsViewProps {
   isWindowed?: boolean;
 }
 
+const pageOrder: SettingsPageSlug[] = [
+  'appearance',
+  'chat',
+  'notifications',
+  'sessions',
+  'shortcuts',
+  'git',
+  'projects',
+  'agents',
+  'commands',
+  'mcp',
+  'providers',
+  'usage',
+  'skills.installed',
+  'skills.catalog',
+  'voice',
+];
+
+function buildRuntimeContext(isDesktop: boolean): SettingsRuntimeContext {
+  const isVSCode = isVSCodeRuntime();
+  const isWeb = isWebRuntime();
+  return { isVSCode, isWeb, isDesktop };
+}
+
+function isPageAvailable(page: SettingsPageMeta, ctx: SettingsRuntimeContext): boolean {
+  if (!page.isAvailable) {
+    return true;
+  }
+  return page.isAvailable(ctx);
+}
+
+function getSettingsNavIcon(slug: SettingsPageSlug): React.ComponentType<{ className?: string }> | null {
+  switch (slug) {
+    case 'projects':
+      return RiFoldersLine;
+    case 'appearance':
+      return RiPaletteLine;
+    case 'chat':
+      return RiChatAi3Line;
+    case 'notifications':
+      return RiNotification3Line;
+    case 'shortcuts':
+      return RiCommandLine;
+    case 'sessions':
+      return RiChatHistoryLine;
+
+    case 'providers':
+      return RiCloudLine;
+    case 'agents':
+      return RiAiAgentLine;
+    case 'commands':
+      return RiSlashCommands2;
+    case 'mcp':
+      return McpIcon;
+
+    case 'skills.installed':
+      return RiBookOpenLine;
+    case 'skills.catalog':
+      return RiBookLine;
+
+    case 'git':
+      return RiGitBranchLine;
+
+    case 'usage':
+      return RiBarChart2Line;
+    case 'voice':
+      return RiMicLine;
+    case 'home':
+      return null;
+    default:
+      return RiRobot2Line;
+  }
+}
+
+const SettingsHome: React.FC<{ onOpen: (slug: SettingsPageSlug) => void }> = ({ onOpen }) => {
+  return (
+    <div className="h-full overflow-auto">
+      <div className="mx-auto w-full max-w-3xl px-6 py-6 space-y-6">
+        <div className="space-y-1">
+          <h1 className="typography-ui-header font-semibold text-foreground">Settings</h1>
+          <p className="typography-ui text-muted-foreground">Jump to common pages.</p>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <button
+            type="button"
+            onClick={() => onOpen('providers')}
+            className={cn(
+              'rounded-lg border border-border bg-[var(--surface-elevated)] p-4 text-left',
+              'hover:bg-[var(--interactive-hover)] transition-colors'
+            )}
+          >
+            <div className="typography-ui-label text-foreground">Providers</div>
+            <div className="typography-micro text-muted-foreground/70">Connect models + credentials</div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onOpen('agents')}
+            className={cn(
+              'rounded-lg border border-border bg-[var(--surface-elevated)] p-4 text-left',
+              'hover:bg-[var(--interactive-hover)] transition-colors'
+            )}
+          >
+            <div className="typography-ui-label text-foreground">Agents</div>
+            <div className="typography-micro text-muted-foreground/70">Prompts, tools, permissions</div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onOpen('skills.catalog')}
+            className={cn(
+              'rounded-lg border border-border bg-[var(--surface-elevated)] p-4 text-left',
+              'hover:bg-[var(--interactive-hover)] transition-colors'
+            )}
+          >
+            <div className="typography-ui-label text-foreground">Skills Catalog</div>
+            <div className="typography-micro text-muted-foreground/70">Install skills from catalogs</div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onOpen('mcp')}
+            className={cn(
+              'rounded-lg border border-border bg-[var(--surface-elevated)] p-4 text-left',
+              'hover:bg-[var(--interactive-hover)] transition-colors'
+            )}
+          >
+            <div className="typography-ui-label text-foreground">MCP</div>
+            <div className="typography-micro text-muted-foreground/70">Configure MCP servers + connections</div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onOpen('usage')}
+            className={cn(
+              'rounded-lg border border-border bg-[var(--surface-elevated)] p-4 text-left',
+              'hover:bg-[var(--interactive-hover)] transition-colors'
+            )}
+          >
+            <div className="typography-ui-label text-foreground">Usage</div>
+            <div className="typography-micro text-muted-foreground/70">Quota + spend visibility</div>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile, isWindowed }) => {
   const deviceInfo = useDeviceInfo();
   const isMobile = forceMobile ?? deviceInfo.isMobile;
 
-  // Sync activeTab with store's sidebarSection for routing support
-  const storeSidebarSection = useUIStore((state) => state.sidebarSection);
-  const setSidebarSection = useUIStore((state) => state.setSidebarSection);
+  const settingsPageRaw = useUIStore((state) => state.settingsPage);
+  const setSettingsPage = useUIStore((state) => state.setSettingsPage);
+  const settingsSlug = resolveSettingsSlug(settingsPageRaw);
 
-  // Use store's sidebarSection as the source of truth, but filter to valid settings sections
-  const activeTab = React.useMemo<SidebarSection>(() => {
-    // If store has a valid settings section (not 'sessions'), use it
-    if (storeSidebarSection !== 'sessions') {
-      return storeSidebarSection;
-    }
-    // Default to 'settings' if store has 'sessions'
-    return 'settings';
-  }, [storeSidebarSection]);
+  const [mobileStage, setMobileStage] = React.useState<MobileStage>('nav');
+  const autoNavSlugRef = React.useRef<string | null>(null);
 
-  // Update store when tab changes
-  const setActiveTab = React.useCallback((tab: SidebarSection) => {
-    setSidebarSection(tab);
-  }, [setSidebarSection]);
-  const [selectedOpenChamberSection, setSelectedOpenChamberSection] = React.useState<OpenChamberSection>('visual');
-  // Mobile drill-down state: show page content instead of sidebar
-  const [showMobilePageContent, setShowMobilePageContent] = React.useState(false);
-  const [sidebarWidth, setSidebarWidth] = React.useState(() => {
-    // Use proportional width like main sidebar (20% of window)
-    if (typeof window !== 'undefined') {
-      return Math.min(
-        SETTINGS_SIDEBAR_MAX_WIDTH,
-        Math.max(SETTINGS_SIDEBAR_MIN_WIDTH, Math.floor(window.innerWidth * 0.2))
-      );
-    }
-    return SETTINGS_SIDEBAR_DEFAULT_WIDTH;
-  });
+  const [navWidth, setNavWidth] = React.useState(216);
   const [hasManuallyResized, setHasManuallyResized] = React.useState(false);
   const [isResizing, setIsResizing] = React.useState(false);
-  const [containerWidth, setContainerWidth] = React.useState(0);
-  const containerRef = React.useRef<HTMLDivElement>(null);
   const startXRef = React.useRef(0);
-  const startWidthRef = React.useRef(sidebarWidth);
+  const startWidthRef = React.useRef(navWidth);
+  const containerRef = React.useRef<HTMLDivElement>(null);
 
-  const isTauri = React.useMemo(() => {
+  const isDesktopApp = React.useMemo(() => {
     if (typeof window === 'undefined') return false;
     return Boolean((window as unknown as { __TAURI__?: unknown }).__TAURI__);
   }, []);
 
-  const isMacPlatform = React.useMemo(() => {
-    if (typeof navigator === 'undefined') return false;
-    return /Macintosh|Mac OS X/.test(navigator.userAgent || '');
-  }, []);
+  // keep platform check available for future window chrome tweaks
 
-  const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
+  const runtimeCtx = React.useMemo(() => buildRuntimeContext(isDesktopApp), [isDesktopApp]);
 
-  const settingsSections = React.useMemo(() => getSettingsSections(isVSCode), [isVSCode]);
+  const visiblePages = React.useMemo(() => {
+    return SETTINGS_PAGE_METADATA
+      .filter((page) => page.slug !== 'home')
+      .filter((page) => isPageAvailable(page, runtimeCtx))
+      .filter((page) => !(isMobile && page.slug === 'shortcuts'));
+  }, [runtimeCtx, isMobile]);
 
-  const isDesktopApp = isTauri;
+  const sortedFilteredPages = React.useMemo(() => {
+    const rank = new Map<SettingsPageSlug, number>(pageOrder.map((s, i) => [s, i]));
+    return visiblePages
+      .slice()
+      .sort((a, b) => (rank.get(a.slug) ?? 999) - (rank.get(b.slug) ?? 999));
+  }, [visiblePages]);
 
-  // Track container width for responsive tab labels
-  React.useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        setContainerWidth(entry.contentRect.width);
-      }
-    });
-
-    observer.observe(container);
-    setContainerWidth(container.clientWidth);
-
-    return () => observer.disconnect();
-  }, []);
-
-  const projects = useProjectsStore((state) => state.projects);
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
-  const setActiveProject = useProjectsStore((state) => state.setActiveProject);
 
-  const sortedProjects = React.useMemo(() => {
-    return [...projects].sort((a, b) => (a.label || a.path).localeCompare(b.label || b.path));
-  }, [projects]);
-
-  const activeProject = React.useMemo(() => {
-    if (sortedProjects.length === 0) {
-      return null;
-    }
-    return sortedProjects.find((p) => p.id === activeProjectId) ?? sortedProjects[0];
-  }, [activeProjectId, sortedProjects]);
-
-  // Format project label: kebab-case/snake_case → Title Case
-  const formatProjectLabel = React.useCallback((label: string): string => {
-    return label
-      .replace(/[-_]/g, ' ')
-      .replace(/\b\w/g, (char) => char.toUpperCase());
-  }, []);
-
-  const activeProjectLabel = React.useMemo(() => {
-    if (!activeProject) {
-      return 'Project';
-    }
-    const rawLabel = activeProject.label && activeProject.label.trim().length > 0
-      ? activeProject.label
-      : (activeProject.path.split('/').filter(Boolean).pop() || activeProject.path);
-    return formatProjectLabel(rawLabel);
-  }, [activeProject, formatProjectLabel]);
-
-  const showProjectSwitcher = sortedProjects.length > 0 && !isVSCode;
-
-  const showTabLabels = containerWidth === 0 || containerWidth >= TAB_LABELS_MIN_WIDTH;
-
-  React.useEffect(() => {
-    // Force reload when activeProject changes to ensure scopes update
-    if (activeTab === 'agents') {
-      // Small delay to allow store state to propagate if needed
-      setTimeout(() => void useAgentsStore.getState().loadAgents(), 0);
-      return;
-    }
-
-    if (activeTab === 'commands') {
-      setTimeout(() => void useCommandsStore.getState().loadCommands(), 0);
-      return;
-    }
-
-    if (activeTab === 'skills') {
-      void useSkillsStore.getState().loadSkills();
-      void useSkillsCatalogStore.getState().loadCatalog();
-    }
-
-    if (activeTab === 'mcp') {
-      void useMcpConfigStore.getState().loadMcpConfigs();
-    }
-  }, [activeProjectId, activeTab]);
-
-  // Update proportional width on window resize (if not manually resized)
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
-
     const handleResize = () => {
       if (!hasManuallyResized) {
         const proportionalWidth = Math.min(
-          SETTINGS_SIDEBAR_MAX_WIDTH,
-          Math.max(SETTINGS_SIDEBAR_MIN_WIDTH, Math.floor(window.innerWidth * 0.2))
+          SETTINGS_NAV_MAX_WIDTH,
+          Math.max(SETTINGS_NAV_MIN_WIDTH, Math.floor(window.innerWidth * 0.12))
         );
-        setSidebarWidth(proportionalWidth);
+        setNavWidth(proportionalWidth);
       }
     };
-
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, [hasManuallyResized]);
 
-  // Resize handling
   React.useEffect(() => {
     if (!isResizing) return;
-
     const handlePointerMove = (event: PointerEvent) => {
       const delta = event.clientX - startXRef.current;
       const nextWidth = Math.min(
-        SETTINGS_SIDEBAR_MAX_WIDTH,
-        Math.max(SETTINGS_SIDEBAR_MIN_WIDTH, startWidthRef.current + delta)
+        SETTINGS_NAV_MAX_WIDTH,
+        Math.max(SETTINGS_NAV_MIN_WIDTH, startWidthRef.current + delta)
       );
-      setSidebarWidth(nextWidth);
+      setNavWidth(nextWidth);
       setHasManuallyResized(true);
     };
-
     const handlePointerUp = () => setIsResizing(false);
-
     window.addEventListener('pointermove', handlePointerMove);
     window.addEventListener('pointerup', handlePointerUp, { once: true });
-
     return () => {
       window.removeEventListener('pointermove', handlePointerMove);
       window.removeEventListener('pointerup', handlePointerUp);
@@ -245,321 +307,429 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   const handlePointerDown = (event: React.PointerEvent) => {
     setIsResizing(true);
     startXRef.current = event.clientX;
-    startWidthRef.current = sidebarWidth;
+    startWidthRef.current = navWidth;
     event.preventDefault();
   };
 
-  // Draggable header for Tauri desktop
-  const handleDragStart = React.useCallback(async (e: React.MouseEvent) => {
-    if ((e.target as HTMLElement).closest('button, a, input, select, textarea')) return;
-    if (e.button !== 0) return;
-
-    if (isDesktopApp) {
-      try {
-        const { getCurrentWindow } = await import('@tauri-apps/api/window');
-        const window = getCurrentWindow();
-        await window.startDragging();
-      } catch (error) {
-        console.error('Failed to start window dragging:', error);
-      }
+  // Load stores when project changes or when a page becomes active.
+  React.useEffect(() => {
+    if (settingsSlug === 'agents') {
+      setTimeout(() => void useAgentsStore.getState().loadAgents(), 0);
+      return;
     }
-  }, [isDesktopApp]);
-
-  // Active tab can be dragged (like main header)
-  const handleActiveTabDragStart = React.useCallback(async (e: React.MouseEvent) => {
-    if (e.button !== 0) return;
-
-    if (isDesktopApp) {
-      try {
-        const { getCurrentWindow } = await import('@tauri-apps/api/window');
-        const window = getCurrentWindow();
-        await window.startDragging();
-      } catch (error) {
-        console.error('Failed to start window dragging:', error);
-      }
+    if (settingsSlug === 'commands') {
+      setTimeout(() => void useCommandsStore.getState().loadCommands(), 0);
+      return;
     }
-  }, [isDesktopApp]);
-
-  const handleTabChange = React.useCallback((tab: SidebarSection) => {
-    setActiveTab(tab);
-    // Reset mobile drill-down state when changing tabs
-    setShowMobilePageContent(false);
-  }, [setActiveTab]);
-
-  // Handle mobile sidebar item selection (drill-down to page)
-  const handleMobileSidebarClick = React.useCallback(() => {
-    if (isMobile) {
-      setShowMobilePageContent(true);
+    if (settingsSlug === 'mcp') {
+      setTimeout(() => void useMcpConfigStore.getState().loadMcpConfigs(), 0);
+      return;
     }
-  }, [isMobile]);
+    if (settingsSlug === 'skills.installed' || settingsSlug === 'skills.catalog') {
+      setTimeout(() => {
+        void useSkillsStore.getState().loadSkills();
+        void useSkillsCatalogStore.getState().loadCatalog();
+      }, 0);
+    }
+  }, [activeProjectId, settingsSlug]);
 
-  const renderSidebarContent = () => {
-    switch (activeTab) {
-      case 'settings':
-        return (
-          <div className="h-full">
-            <OpenChamberSidebar
-              selectedSection={selectedOpenChamberSection}
-              onSelectSection={(section) => {
-                setSelectedOpenChamberSection(section);
-                handleMobileSidebarClick();
-              }}
-            />
-          </div>
-        );
+  const openPage = React.useCallback((slug: SettingsPageSlug) => {
+    setSettingsPage(slug);
+    if (!isMobile) {
+      return;
+    }
+    const def = getSettingsPageMeta(slug);
+    if (!def || def.slug === 'home') {
+      setMobileStage('nav');
+      return;
+    }
+    setMobileStage(def.kind === 'split' ? 'page-sidebar' : 'page-content');
+  }, [isMobile, setSettingsPage]);
+
+  const activePageMeta = React.useMemo(() => {
+    return getSettingsPageMeta(settingsSlug);
+  }, [settingsSlug]);
+
+  // Collapse main nav to icon rail when active page has its own sidebar
+  const isNavCollapsed = !isMobile && activePageMeta?.kind === 'split';
+
+  const openChamberSectionBySlug: Partial<Record<SettingsPageSlug, OpenChamberSection>> = React.useMemo(() => ({
+    appearance: 'visual',
+    chat: 'chat',
+    shortcuts: 'shortcuts',
+    sessions: 'sessions',
+    notifications: 'notifications',
+    voice: 'voice',
+  }), []);
+
+  const renderUnavailable = React.useCallback(() => {
+    return (
+      <div className="flex h-full items-center justify-center px-6">
+        <div className="max-w-md text-center">
+          <div className="typography-ui-header font-semibold text-foreground">Not available</div>
+          <p className="typography-ui text-muted-foreground mt-1">This settings page is not available in this runtime.</p>
+        </div>
+      </div>
+    );
+  }, []);
+
+  const renderPageSidebar = React.useCallback((slug: SettingsPageSlug, opts: { onItemSelect?: () => void }) => {
+    switch (slug) {
+      case 'projects':
+        return <ProjectsSidebar onItemSelect={opts.onItemSelect} />;
       case 'agents':
-        return <AgentsSidebar onItemSelect={handleMobileSidebarClick} />;
+        return <AgentsSidebar onItemSelect={opts.onItemSelect} />;
       case 'commands':
-        return <CommandsSidebar onItemSelect={handleMobileSidebarClick} />;
-      case 'skills':
-        return <SkillsSidebar onItemSelect={handleMobileSidebarClick} />;
+        return <CommandsSidebar onItemSelect={opts.onItemSelect} />;
       case 'mcp':
-        return <McpSidebar onItemSelect={handleMobileSidebarClick} />;
+        return <McpSidebar onItemSelect={opts.onItemSelect} />;
+      case 'skills.installed':
+        return <SkillsSidebar onItemSelect={opts.onItemSelect} />;
       case 'providers':
-        return <ProvidersSidebar onItemSelect={handleMobileSidebarClick} />;
+        return <ProvidersSidebar onItemSelect={opts.onItemSelect} />;
       case 'usage':
-        return <UsageSidebar onItemSelect={handleMobileSidebarClick} />;
-      case 'git-identities':
-        return <GitIdentitiesSidebar onItemSelect={handleMobileSidebarClick} />;
+        return <UsageSidebar onItemSelect={opts.onItemSelect} />;
       default:
         return null;
     }
-  };
+  }, []);
 
-  const hasSidebar = true; // All tabs now have sidebars
+  const renderPageContent = React.useCallback((slug: SettingsPageSlug) => {
+    const meta = getSettingsPageMeta(slug);
+    if (meta && !isPageAvailable(meta, runtimeCtx)) {
+      return renderUnavailable();
+    }
 
-  const renderPageContent = () => {
-    switch (activeTab) {
+    switch (slug) {
+      case 'home':
+        return <SettingsHome onOpen={openPage} />;
+      case 'projects':
+        return <ProjectsPage />;
       case 'agents':
         return <AgentsPage />;
       case 'commands':
         return <CommandsPage />;
-      case 'skills':
-        return <SkillsPage />;
       case 'mcp':
         return <McpPage />;
+      case 'skills.installed':
+        return <SkillsPage view="installed" />;
+      case 'skills.catalog':
+        return <SkillsPage view="catalog" />;
       case 'providers':
         return <ProvidersPage />;
       case 'usage':
         return <UsagePage />;
-      case 'git-identities':
-        return <GitIdentitiesPage />;
-      case 'settings':
-        return <OpenChamberPage section={selectedOpenChamberSection} />;
+      case 'git':
+        return <GitPage />;
+      case 'appearance':
+      case 'chat':
+      case 'shortcuts':
+      case 'sessions':
+      case 'notifications':
+      case 'voice': {
+        const section = openChamberSectionBySlug[slug] ?? 'visual';
+        return <OpenChamberPage section={section} />;
+      }
       default:
-        return null;
+        return <SettingsHome onOpen={openPage} />;
     }
-  };
+  }, [openChamberSectionBySlug, openPage, renderUnavailable, runtimeCtx]);
 
-  // Keyboard shortcut display based on platform
+  // Mobile: if opened via deep-link / palette to a non-home page, jump into it once.
+  React.useEffect(() => {
+    if (!isMobile) {
+      return;
+    }
+    if (mobileStage !== 'nav') {
+      return;
+    }
+    if (settingsSlug === 'home') {
+      return;
+    }
+    if (autoNavSlugRef.current === settingsSlug) {
+      return;
+    }
+    const def = getSettingsPageMeta(settingsSlug);
+    if (!def || def.slug === 'home') {
+      return;
+    }
+    autoNavSlugRef.current = settingsSlug;
+    setMobileStage(def.kind === 'split' ? 'page-sidebar' : 'page-content');
+  }, [isMobile, mobileStage, settingsSlug]);
+
+  const showBackButton = isMobile && mobileStage !== 'nav';
   const shortcutKey = getModifierLabel();
 
-  // Desktop padding for Mac titlebar area (only when full-screen, not windowed)
-  const desktopPaddingClass = React.useMemo(() => {
-    if (isWindowed) {
-      return 'pl-1.5'; // Balanced padding for windowed mode
-    }
-    if (isDesktopApp && isMacPlatform) {
-      return 'pl-[5.75rem]'; // Space for traffic lights
-    }
-    return '';
-  }, [isDesktopApp, isMacPlatform, isWindowed]);
+  const handleBack = React.useCallback(() => {
+    setMobileStage('nav');
+  }, []);
 
+  const handleOpenPageSidebar = React.useCallback(() => {
+    setMobileStage('page-sidebar');
+  }, []);
 
-  return (
-    <div ref={containerRef} data-settings-view="true" className={cn('flex h-full flex-col overflow-hidden bg-background')}>
-      {/* Header with tabs and close button */}
-      <div
-        onMouseDown={!isMobile ? handleDragStart : undefined}
-        className={cn(
-          'flex select-none items-center justify-between border-b',
-          isMobile ? 'h-auto px-3 py-2' : 'app-region-drag h-12',
-          !isMobile && desktopPaddingClass,
-          isDesktopApp ? 'bg-background' : 'bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80'
-        )}
-        style={{ borderColor: 'var(--interactive-border)' }}
-      >
-        {/* Mobile: back button when drilling down */}
-        {isMobile && showMobilePageContent && (
-          <button
-            type="button"
-            onClick={() => setShowMobilePageContent(false)}
-            aria-label="Back"
-            className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center p-2 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-          >
-            <RiArrowLeftSLine className="h-5 w-5" />
-          </button>
-        )}
+  const renderSettingsNav = (collapsed: boolean) => {
+    return (
+      <div className="flex h-full flex-col overflow-hidden">
+        {/* Scrollable nav items */}
+        <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
+          <div className="flex flex-col gap-0.5 pt-4 pb-2 px-2">
+            {sortedFilteredPages.map((page) => {
+              const selected = settingsSlug === page.slug;
+              const Icon = getSettingsNavIcon(page.slug);
+              if (!Icon) return null;
 
-        {/* Mobile: spacer to push tabs to the right */}
-        {isMobile && <div className="flex-1" />}
-
-        <div className={cn('flex items-center', isMobile ? 'gap-1' : 'h-full')}>
-          <div className={cn('flex items-center gap-1', !isMobile && 'p-1 bg-background/50 rounded-lg')}>
-            {settingsSections.map(({ id, label, icon: Icon }) => {
-              const isActive = activeTab === id;
-              const PhosphorIcon = Icon as React.ComponentType<{ className?: string; weight?: string }>;
-
-              if (isMobile) {
-                // Mobile: icon-only buttons
-                return (
-                  <Tooltip key={id} delayDuration={500}>
-                    <TooltipTrigger asChild>
-                      <button
-                        onClick={() => handleTabChange(id)}
-                        className={cn(
-                          'relative flex h-9 w-9 items-center justify-center rounded-md transition-colors',
-                          'hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-                          isActive ? 'bg-interactive-selection text-interactive-selection-foreground shadow-sm' : 'text-muted-foreground hover:bg-interactive-hover/50'
-                        )}
-                        aria-pressed={isActive}
-                        aria-label={label}
-                      >
-                        <PhosphorIcon className="h-5 w-5" weight="regular" />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>{label}</p>
-                    </TooltipContent>
-                  </Tooltip>
-                );
-              }
-
-              // Desktop: pill tabs like main header
               return (
-                <button
-                  key={id}
-                  onClick={() => handleTabChange(id)}
-                  onMouseDown={isActive ? handleActiveTabDragStart : undefined}
-                  className={cn(
-                    'relative flex h-8 items-center gap-2 px-3 rounded-md typography-ui-label font-medium transition-colors',
-                    isActive ? 'app-region-drag bg-interactive-selection text-interactive-selection-foreground shadow-sm' : 'app-region-no-drag text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground',
-                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'
+                <Tooltip key={page.slug} delayDuration={collapsed ? 100 : 600}>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={() => openPage(page.slug)}
+                      className={cn(
+                        'flex h-8 items-center gap-2 rounded-md px-2 overflow-hidden',
+                        selected
+                          ? 'bg-interactive-selection text-foreground'
+                          : 'text-foreground hover:bg-interactive-hover'
+                      )}
+                    >
+                      <Icon className="h-4 w-4 shrink-0" />
+                      <span
+                        className={cn(
+                          'flex items-center gap-1.5 whitespace-nowrap overflow-hidden transition-opacity duration-150',
+                          collapsed ? 'opacity-0' : 'opacity-100'
+                        )}
+                      >
+                        <span className="typography-ui-label font-normal truncate">{page.title}</span>
+                        {page.slug === 'voice' && (
+                          <span className="shrink-0 typography-micro px-1 rounded leading-none pb-px text-[var(--status-warning)] bg-[var(--status-warning)]/10">
+                            beta
+                          </span>
+                        )}
+                      </span>
+                    </button>
+                  </TooltipTrigger>
+                  {collapsed && (
+                    <TooltipContent side="right" sideOffset={8}>
+                      {page.title}
+                    </TooltipContent>
                   )}
-                  aria-pressed={isActive}
-                  aria-label={label}
-                >
-                  <PhosphorIcon className="h-4 w-4" weight="regular" />
-                  {showTabLabels && <span>{label}</span>}
-                </button>
+                </Tooltip>
               );
             })}
           </div>
         </div>
 
-        {(onClose || showProjectSwitcher) && (
-          <div className={cn('flex items-center gap-2', isMobile ? '' : 'pr-3')}>
-            {showProjectSwitcher && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  {isMobile ? (
-                    <button
-                      type="button"
-                      aria-label="Switch project"
-                      title={activeProjectLabel}
-                      className="inline-flex h-9 w-9 items-center justify-center p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary border border-[var(--interactive-border)]"
-                    >
-                      <RiFolderLine className="h-5 w-5" />
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      aria-label="Switch project"
-                      title={activeProjectLabel}
-                      className={cn(
-                        'flex h-9 max-w-[18rem] items-center gap-1.5 bg-transparent px-2 rounded-lg text-foreground outline-none hover:bg-interactive-hover/50 focus-visible:ring-2 focus-visible:ring-ring border border-[var(--interactive-border)]',
-                        !isMobile && 'app-region-no-drag'
-                      )}
-                    >
-                      <span className="min-w-0 flex-1 truncate typography-ui-label font-medium">{activeProjectLabel}</span>
-                      <RiArrowDownSLine className="size-4 opacity-50" />
-                    </button>
-                  )}
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-auto">
-                  <DropdownMenuRadioGroup
-                    value={activeProject?.id ?? ''}
-                    onValueChange={(value) => {
-                      if (!value) return;
-                      setActiveProject(value);
-                    }}
-                  >
-                    {sortedProjects.map((project) => {
-                      const rawLabel = project.label?.trim()
-                        ? project.label.trim()
-                        : (project.path.split('/').filter(Boolean).pop() || project.path);
-                      const label = formatProjectLabel(rawLabel);
-                      return (
-                        <DropdownMenuRadioItem key={project.id} value={project.id}>
-                          <span className="min-w-0 truncate typography-ui">{label}</span>
-                        </DropdownMenuRadioItem>
-                      );
-                    })}
-                  </DropdownMenuRadioGroup>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
-
-            {onClose && (
-              <Tooltip delayDuration={500}>
+        {/* Footer — hidden when collapsed via overflow on parent */}
+        <div
+          className={cn(
+            'overflow-hidden transition-opacity duration-150',
+            collapsed ? 'opacity-0 pointer-events-none' : 'opacity-100'
+          )}
+        >
+          <div className="border-t border-border bg-sidebar px-2 py-1 space-y-0.5">
+            {!runtimeCtx.isVSCode && (
+              <Tooltip delayDuration={300}>
                 <TooltipTrigger asChild>
                   <button
                     type="button"
-                    onClick={onClose}
-                    aria-label="Close settings"
                     className={cn(
-                      'inline-flex h-9 w-9 items-center justify-center p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-                      !isMobile && 'app-region-no-drag'
+                      'flex h-7 w-full items-center gap-2 rounded-md px-2 overflow-hidden whitespace-nowrap',
+                      'text-sm font-semibold text-sidebar-foreground/90',
+                      'hover:text-sidebar-foreground hover:bg-interactive-hover',
                     )}
+                    onClick={() => void reloadOpenCodeConfiguration({ message: 'Restarting OpenCode…', mode: 'projects', scopes: ['all'] })}
                   >
-                    <RiCloseLine className="h-5 w-5" />
+                    <RiRestartLine className="h-4 w-4 shrink-0" />
+                    <span>Reload OpenCode</span>
                   </button>
                 </TooltipTrigger>
                 <TooltipContent>
-                  <p>Close Settings ({shortcutKey}+,)</p>
+                  Restart OpenCode and reload its configuration.
                 </TooltipContent>
               </Tooltip>
             )}
-          </div>
-        )}
-      </div>
 
-      {/* Content area */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Mobile: show sidebar OR page content based on drill-down state */}
-        {isMobile ? (
-          showMobilePageContent ? (
-            <div className="flex-1 overflow-hidden bg-background" data-keyboard-avoid="true">
-              <ErrorBoundary>{renderPageContent()}</ErrorBoundary>
-            </div>
-          ) : (
-            <div className={cn('flex-1 overflow-hidden', isVSCode ? 'bg-background' : 'bg-sidebar')}>
-              <div className="flex h-full min-h-0 flex-col">
-                <ErrorBoundary>{renderSidebarContent()}</ErrorBoundary>
+            {isMobile && runtimeCtx.isWeb && (
+              <div className="px-1.5 pt-2">
+                <AboutSettings />
               </div>
-            </div>
-          )
-        ) : (
-          /* Desktop: show both sidebar and page content side by side */
-          <>
-            {hasSidebar && (
-              <div
-                className={cn(
-                  'relative flex h-full min-h-0 flex-col overflow-hidden border-r',
-                  isDesktopApp
-                    ? 'bg-[color:var(--sidebar-overlay-strong)] backdrop-blur supports-[backdrop-filter]:bg-[color:var(--sidebar-overlay-soft)]'
-                    : isVSCode
-                      ? 'bg-background'
-                      : 'bg-sidebar',
-                  isResizing ? 'transition-none' : ''
-                )}
-                style={{
-                  width: `${sidebarWidth}px`,
-                  minWidth: `${sidebarWidth}px`,
-                  borderColor: 'var(--interactive-border)',
-                }}
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderMobileStage = () => {
+    if (mobileStage === 'nav') {
+      return (
+        <div className={cn('flex-1 overflow-hidden', runtimeCtx.isVSCode ? 'bg-background' : 'bg-sidebar')}>
+          <div className="flex h-full min-h-0 flex-col">
+            <ErrorBoundary>{renderSettingsNav(false)}</ErrorBoundary>
+          </div>
+        </div>
+      );
+    }
+
+    if (!activePageMeta) {
+      return <div className="flex-1 bg-background" />;
+    }
+
+    if (mobileStage === 'page-sidebar') {
+      if (activePageMeta.kind !== 'split') {
+        // No sidebar available; fall back to direct content.
+        const fallback = renderPageContent(settingsSlug);
+        return (
+          <div className="flex-1 overflow-hidden bg-background" data-keyboard-avoid="true">
+            <ErrorBoundary>{fallback}</ErrorBoundary>
+          </div>
+        );
+      }
+      return (
+        <div className={cn('flex-1 overflow-hidden', runtimeCtx.isVSCode ? 'bg-background' : 'bg-sidebar')}>
+          <ErrorBoundary>
+            {renderPageSidebar(settingsSlug, { onItemSelect: () => setMobileStage('page-content') })}
+          </ErrorBoundary>
+        </div>
+      );
+    }
+
+    // page-content
+    const content = renderPageContent(settingsSlug);
+
+    return (
+      <div className="flex-1 overflow-hidden bg-background" data-keyboard-avoid="true">
+        <ErrorBoundary>{content}</ErrorBoundary>
+      </div>
+    );
+  };
+
+  const renderDesktopContent = () => {
+    if (!activePageMeta || settingsSlug === 'home') {
+      return <SettingsHome onOpen={openPage} />;
+    }
+
+    if (activePageMeta.kind === 'split') {
+      return (
+        <div className="flex h-full min-h-0 overflow-hidden">
+          <div className={cn('w-[264px] min-w-[264px] border-r', runtimeCtx.isVSCode ? 'bg-background' : 'bg-sidebar')} style={{ borderColor: 'var(--interactive-border)' }}>
+            <ErrorBoundary>{renderPageSidebar(settingsSlug, {})}</ErrorBoundary>
+          </div>
+          <div className="flex-1 overflow-hidden bg-background">
+            <ErrorBoundary>{renderPageContent(settingsSlug)}</ErrorBoundary>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="h-full overflow-hidden bg-background">
+        <ErrorBoundary>{renderPageContent(settingsSlug)}</ErrorBoundary>
+      </div>
+    );
+  };
+
+  return (
+    <div ref={containerRef} data-settings-view="true" className={cn('relative flex h-full flex-col overflow-hidden bg-background')}>
+      {isMobile ? (
+        <div
+          className={cn(
+            'flex items-center gap-2 px-3 py-2 border-b',
+            'bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80'
+          )}
+          style={{ borderColor: 'var(--interactive-border)' }}
+        >
+          <button
+            type="button"
+            onClick={showBackButton ? handleBack : onClose}
+            aria-label={showBackButton ? 'Back to Settings' : 'Close settings'}
+            className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg p-2 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          >
+            <RiArrowLeftSLine className="h-5 w-5" />
+          </button>
+
+          <div className="min-w-0 flex-1 typography-ui-label font-medium text-foreground truncate">
+            {mobileStage === 'nav'
+              ? 'Settings'
+              : (activePageMeta?.title ?? 'Settings')}
+          </div>
+
+          {mobileStage === 'page-content' && activePageMeta?.kind === 'split' && (
+            <button
+              type="button"
+              onClick={handleOpenPageSidebar}
+              aria-label="Open section list"
+              className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg p-2 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            >
+              <RiListUnordered className="h-5 w-5" />
+            </button>
+          )}
+
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close settings"
+              title={`Close Settings (${shortcutKey}+,)`}
+              className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg p-2 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            >
+              <RiCloseLine className="h-5 w-5" />
+            </button>
+          )}
+        </div>
+      ) : (
+        <>
+          {showBackButton && (
+            <div className={cn('absolute left-3 z-50', isWindowed ? 'top-2' : 'top-3')}>
+              <button
+                type="button"
+                onClick={handleBack}
+                aria-label="Back"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-lg p-2 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               >
-                {/* Resize handle */}
+                <RiArrowLeftSLine className="h-5 w-5" />
+              </button>
+            </div>
+          )}
+
+      {onClose && (
+        <div className={cn('absolute right-0.5 z-50', isWindowed ? 'top-0.5' : 'top-1')}>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close settings"
+            title={`Close Settings (${shortcutKey}+,)`}
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md p-0.5 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          >
+            <RiCloseLine className="h-5 w-5" />
+          </button>
+        </div>
+      )}
+        </>
+      )}
+
+      <div className="flex flex-1 overflow-hidden">
+        {isMobile ? (
+          renderMobileStage()
+        ) : (
+          <>
+            <div
+              className={cn(
+                'relative flex h-full min-h-0 flex-col overflow-hidden border-r',
+                isDesktopApp
+                  ? 'bg-[color:var(--sidebar-overlay-strong)] backdrop-blur supports-[backdrop-filter]:bg-[color:var(--sidebar-overlay-soft)]'
+                  : runtimeCtx.isVSCode
+                    ? 'bg-background'
+                    : 'bg-sidebar',
+                isResizing && !isNavCollapsed ? '' : 'transition-[width,min-width] duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)]'
+              )}
+              style={{
+                width: isNavCollapsed ? `${SETTINGS_NAV_RAIL_WIDTH}px` : `${navWidth}px`,
+                minWidth: isNavCollapsed ? `${SETTINGS_NAV_RAIL_WIDTH}px` : `${navWidth}px`,
+                borderColor: 'var(--interactive-border)',
+              }}
+            >
+              {!isNavCollapsed && (
                 <div
                   className={cn(
                     'absolute right-0 top-0 z-20 h-full w-[6px] -mr-[3px] cursor-col-resize',
@@ -568,16 +738,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
                   onPointerDown={handlePointerDown}
                   role="separator"
                   aria-orientation="vertical"
-                  aria-label="Resize settings sidebar"
+                  aria-label="Resize settings navigation"
                 />
-                <div className="flex h-full min-h-0 flex-col">
-                  <ErrorBoundary>{renderSidebarContent()}</ErrorBoundary>
-                </div>
-              </div>
-            )}
+              )}
+              <ErrorBoundary>
+                {renderSettingsNav(isNavCollapsed)}
+              </ErrorBoundary>
+            </div>
 
             <div className="flex-1 overflow-hidden bg-background">
-              <ErrorBoundary>{renderPageContent()}</ErrorBoundary>
+              {renderDesktopContent()}
             </div>
           </>
         )}

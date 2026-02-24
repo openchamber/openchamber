@@ -48,9 +48,23 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
             <MobileOverlayPanel
                 open={isMobilePanelOpen}
                 onClose={closeMobilePanel}
-                title="Select Agent"
+                title="Select agent"
             >
                 <div className="space-y-1">
+                    <button
+                        type="button"
+                        className={cn(
+                            'flex w-full items-center justify-between rounded-lg border border-border/40 bg-background/95 px-2 py-1.5 text-left',
+                            !agentName ? 'bg-primary/10 text-primary' : 'text-foreground'
+                        )}
+                        onClick={() => {
+                            handleAgentChange('');
+                            closeMobilePanel();
+                        }}
+                    >
+                        <span className={cn('typography-meta', !agentName ? 'font-medium' : 'text-muted-foreground')}>Not selected</span>
+                        {!agentName && <div className="h-2 w-2 rounded-full bg-primary" />}
+                    </button>
                     {agents.map((agent) => {
                         const isSelected = agent.name === agentName;
 
@@ -81,17 +95,6 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
                             </button>
                         );
                     })}
-
-                    <button
-                        type="button"
-                        className="flex w-full items-center justify-between rounded-lg border border-border/40 bg-background/95 px-2 py-1.5 text-left"
-                        onClick={() => {
-                            handleAgentChange('');
-                            closeMobilePanel();
-                        }}
-                    >
-                        <span className="typography-meta text-muted-foreground">No agent (optional)</span>
-                    </button>
                 </div>
             </MobileOverlayPanel>
         );
@@ -131,6 +134,12 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
                         </div>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent className="max-w-[300px]">
+                        <DropdownMenuItem
+                            className="typography-meta"
+                            onSelect={() => handleAgentChange('')}
+                        >
+                            <span className="text-muted-foreground">Not selected</span>
+                        </DropdownMenuItem>
                         {agents.map((agent) => (
                             <DropdownMenuItem
                                 key={agent.name}
@@ -140,12 +149,6 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
                                 <span className="font-medium">{agent.name}</span>
                             </DropdownMenuItem>
                         ))}
-                        <DropdownMenuItem
-                            className="typography-meta"
-                            onSelect={() => handleAgentChange('')}
-                        >
-                            <span className="text-muted-foreground">No agent (optional)</span>
-                        </DropdownMenuItem>
                     </DropdownMenuContent>
                 </DropdownMenu>
             )}

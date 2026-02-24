@@ -397,14 +397,12 @@ export const useSessionStore = create<SessionStore>()(
                                         // ignored
                                     }
 
-                                    if (variant !== undefined) {
-                                        try {
-                                            useContextStore
-                                                .getState()
-                                                .saveAgentModelVariantForSession(created.id, effectiveDraftAgent, draftProviderId, draftModelId, variant);
-                                        } catch {
-                                            // ignored
-                                        }
+                                    try {
+                                        useContextStore
+                                            .getState()
+                                            .saveAgentModelVariantForSession(created.id, effectiveDraftAgent, draftProviderId, draftModelId, variant);
+                                    } catch {
+                                        // ignored
                                     }
                                 }
                         }
@@ -461,14 +459,12 @@ export const useSessionStore = create<SessionStore>()(
                             // ignored
                         }
 
-                        if (variant !== undefined) {
-                            try {
-                                useContextStore
-                                    .getState()
-                                    .saveAgentModelVariantForSession(currentSessionId, effectiveAgent, providerID, modelID, variant);
-                            } catch {
-                                // ignored
-                            }
+                        try {
+                            useContextStore
+                                .getState()
+                                .saveAgentModelVariantForSession(currentSessionId, effectiveAgent, providerID, modelID, variant);
+                        } catch {
+                            // ignored
                         }
                     }
  

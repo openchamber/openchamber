@@ -1,15 +1,16 @@
 import React from 'react';
-import { RiRestartLine } from '@remixicon/react';
+import { RiRestartLine, RiInformationLine } from '@remixicon/react';
 
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import type { ThemeMode } from '@/types/theme';
 import { useUIStore } from '@/stores/useUIStore';
 import { useMessageQueueStore } from '@/stores/messageQueueStore';
 import { cn, getModifierLabel } from '@/lib/utils';
 import { ButtonSmall } from '@/components/ui/button-small';
-import { NumberInput } from '@/components/ui/number-input';
-import { Switch } from '@/components/ui/switch';
 import { Checkbox } from '@/components/ui/checkbox';
+import { NumberInput } from '@/components/ui/number-input';
+import { Radio } from '@/components/ui/radio';
 import {
     Select,
     SelectContent,
@@ -55,17 +56,17 @@ const DIFF_LAYOUT_OPTIONS: Option<'dynamic' | 'inline' | 'side-by-side'>[] = [
     {
         id: 'dynamic',
         label: 'Dynamic',
-        description: 'New files inline, modified files side-by-side. Responsive inline fallback only in Dynamic mode.',
+        description: 'New inline, modified side-by-side.',
     },
     {
         id: 'inline',
         label: 'Always inline',
-        description: 'Show all file diffs as a single unified view.',
+        description: 'Show as a single unified view.',
     },
     {
         id: 'side-by-side',
         label: 'Always side-by-side',
-        description: 'Compare original and modified files next to each other.',
+        description: 'Compare original and modified files.',
     },
 ];
 
@@ -73,12 +74,12 @@ const DIFF_VIEW_MODE_OPTIONS: Option<'single' | 'stacked'>[] = [
     {
         id: 'single',
         label: 'Single file',
-        description: 'Show one file at a time in the Diff tab.',
+        description: 'Show one file at a time.',
     },
     {
         id: 'stacked',
         label: 'All files',
-        description: 'Stack all changed files together in the Diff tab.',
+        description: 'Stack all changed files together.',
     },
 ];
 
@@ -166,615 +167,550 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         return visibleSettings.includes(setting);
     };
 
+    const hasAppearanceSettings = shouldShow('theme') && !isVSCodeRuntime();
+    const hasLayoutSettings = shouldShow('fontSize') || shouldShow('terminalFontSize') || shouldShow('spacing') || shouldShow('cornerRadius') || shouldShow('inputBarOffset');
+    const hasBehaviorSettings = shouldShow('toolOutput')
+        || shouldShow('diffLayout')
+        || shouldShow('dotfiles')
+        || shouldShow('reasoning')
+        || shouldShow('queueMode')
+        || shouldShow('textJustificationActivity')
+        || shouldShow('persistDraft')
+        || (shouldShow('terminalQuickKeys') && !isMobile);
     return (
-        <div className="w-full space-y-8">
-            {shouldShow('theme') && !isVSCodeRuntime() && (
-                <div className="space-y-4">
-                    <div className="space-y-1">
-                        <h3 className="typography-ui-header font-semibold text-foreground">
-                            Theme Mode
-                        </h3>
-                    </div>
+        <div className="space-y-8">
 
-                    <div className="flex gap-1 w-fit">
-                        {THEME_MODE_OPTIONS.map((option) => (
-                            <ButtonSmall
-                                key={option.value}
-                                variant={themeMode === option.value ? 'default' : 'outline'}
-                                className={cn(themeMode === option.value ? undefined : 'text-foreground')}
-                                onClick={() => setThemeMode(option.value)}
-                            >
-                                {option.label}
-                            </ButtonSmall>
-                        ))}
-                    </div>
+                {/* --- Appearance & Themes --- */}
+                {hasAppearanceSettings && (
+                    <div className="mb-8 space-y-3">
+                        <section className="px-2 pb-2 pt-0 space-y-0.5">
 
-                    <div className="flex gap-10">
-                        <div className="flex flex-col gap-1.5">
-                            <h4 className="typography-ui-label font-medium text-foreground">Light Theme</h4>
-                            <Select value={selectedLightTheme?.metadata.id ?? ''} onValueChange={setLightThemePreference}>
-                                <SelectTrigger aria-label="Select light theme" className="min-w-32">
-                                    <SelectValue placeholder="Select theme" />
-                                </SelectTrigger>
-                                <SelectContent className="max-h-64 min-w-40">
-                                    {lightThemes.map((theme) => (
-                                        <SelectItem key={theme.metadata.id} value={theme.metadata.id}>
-                                            {formatThemeLabel(theme.metadata.name, 'light')}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
+                            <div className="pb-1.5">
+                                <div className="flex min-w-0 flex-col gap-1.5">
+                                    <span className="typography-ui-header font-medium text-foreground">Color Mode</span>
+                                    <div className="flex flex-wrap items-center gap-1">
+                                        {THEME_MODE_OPTIONS.map((option) => (
+                                            <ButtonSmall
+                                                key={option.value}
+                                                variant="outline"
+                                                size="xs"
+                                                className={cn(
+                                                    '!font-normal',
+                                                    themeMode === option.value
+                                                        ? 'border-[var(--primary-base)] text-[var(--primary-base)] bg-[var(--primary-base)]/10 hover:text-[var(--primary-base)]'
+                                                        : 'text-foreground'
+                                                )}
+                                                onClick={() => setThemeMode(option.value)}
+                                            >
+                                                {option.label}
+                                            </ButtonSmall>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
 
-                        <div className="flex flex-col gap-1.5">
-                            <h4 className="typography-ui-label font-medium text-foreground">Dark Theme</h4>
-                            <Select value={selectedDarkTheme?.metadata.id ?? ''} onValueChange={setDarkThemePreference}>
-                                <SelectTrigger aria-label="Select dark theme" className="min-w-32">
-                                    <SelectValue placeholder="Select theme" />
-                                </SelectTrigger>
-                                <SelectContent className="max-h-64 min-w-40">
-                                    {darkThemes.map((theme) => (
-                                        <SelectItem key={theme.metadata.id} value={theme.metadata.id}>
-                                            {formatThemeLabel(theme.metadata.name, 'dark')}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                    </div>
-
-                    <div className="space-y-1.5">
-                        <button
-                            type="button"
-                            disabled={customThemesLoading || themesReloading}
-                            onClick={async () => {
-                                setThemesReloading(true);
-                                try {
-                                    await reloadCustomThemes();
-                                } finally {
-                                    setThemesReloading(false);
-                                }
-                            }}
-                            className="typography-ui-label text-muted-foreground hover:text-foreground hover:underline underline-offset-2 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
-                        >
-                            <RiRestartLine className={cn('h-3.5 w-3.5', themesReloading && 'animate-spin')} />
-                            Reload custom themes
-                        </button>
-                        <p className="typography-meta text-muted-foreground/70">
-                            Import themes from ~/.config/openchamber/themes/
-                        </p>
-                    </div>
-                </div>
-            )}
-
-            {shouldShow('fontSize') && !isMobile && (
-                <div className="space-y-4">
-                    <div className="space-y-1">
-                        <h3 className="typography-ui-header font-semibold text-foreground">
-                            Font Size
-                        </h3>
-
-                    </div>
-                    <div className="flex items-center gap-3 w-full max-w-md">
-                        <input
-                            type="range"
-                            min="50"
-                            max="200"
-                            step="5"
-                            value={fontSize}
-                            onChange={(e) => setFontSize(Number(e.target.value))}
-                            className="flex-1 min-w-0 h-2 bg-muted rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-primary [&::-moz-range-thumb]:border-0"
-                        />
-                        <NumberInput
-                            value={fontSize}
-                            onValueChange={setFontSize}
-                            min={50}
-                            max={200}
-                            step={5}
-                            aria-label="Font size percentage"
-                        />
-                        <ButtonSmall
-                            type="button"
-                            variant="ghost"
-                            onClick={() => setFontSize(100)}
-                            disabled={fontSize === 100}
-                            className="h-8 w-8 px-0 border border-border bg-background hover:bg-interactive-hover disabled:opacity-100 disabled:bg-background"
-                            aria-label="Reset font size"
-                            title="Reset"
-                        >
-                            <RiRestartLine className="h-3.5 w-3.5" />
-                        </ButtonSmall>
-                    </div>
-                </div>
-            )}
-
-            {shouldShow('terminalFontSize') && (
-                <div className="space-y-4">
-                    <div className="space-y-1">
-                        <h3 className="typography-ui-header font-semibold text-foreground">
-                            Terminal Font Size
-                        </h3>
-
-                    </div>
-                    {isMobile ? (
-                        <div className="flex items-center gap-2 w-full">
-                            <input
-                                type="range"
-                                min="9"
-                                max="52"
-                                step="1"
-                                value={terminalFontSize}
-                                onChange={(e) => setTerminalFontSize(Number(e.target.value))}
-                                className="flex-1 min-w-0 h-3 bg-muted rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary [&::-moz-range-thumb]:w-5 [&::-moz-range-thumb]:h-5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-primary [&::-moz-range-thumb]:border-0"
-                                aria-label="Terminal font size"
-                            />
-
-                            <span className="typography-ui-label font-medium text-foreground tabular-nums rounded-md border border-border bg-background px-2 py-1.5 min-w-[3.75rem] text-center">
-                                {terminalFontSize}px
-                            </span>
-
-                            <ButtonSmall
-                                type="button"
-                                variant="ghost"
-                                onClick={() => setTerminalFontSize(13)}
-                                disabled={terminalFontSize === 13}
-                                className="h-8 w-8 px-0 border border-border bg-background hover:bg-interactive-hover disabled:opacity-100 disabled:bg-background"
-                                aria-label="Reset terminal font size"
-                                title="Reset"
-                            >
-                                <RiRestartLine className="h-3.5 w-3.5" />
-                            </ButtonSmall>
-                        </div>
-                    ) : (
-                        <div className="flex items-center gap-3 w-full max-w-md">
-                            <input
-                                type="range"
-                                min="9"
-                                max="52"
-                                step="1"
-                                value={terminalFontSize}
-                                onChange={(e) => setTerminalFontSize(Number(e.target.value))}
-                                className="flex-1 min-w-0 h-2 bg-muted rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-primary [&::-moz-range-thumb]:border-0"
-                            />
-                            <NumberInput
-                                value={terminalFontSize}
-                                onValueChange={setTerminalFontSize}
-                                min={9}
-                                max={52}
-                                step={1}
-                                aria-label="Terminal font size"
-                            />
-                            <ButtonSmall
-                                type="button"
-                                variant="ghost"
-                                onClick={() => setTerminalFontSize(13)}
-                                disabled={terminalFontSize === 13}
-                                className="h-8 w-8 px-0 border border-border bg-background hover:bg-interactive-hover disabled:opacity-100 disabled:bg-background"
-                                aria-label="Reset terminal font size"
-                                title="Reset"
-                            >
-                                <RiRestartLine className="h-3.5 w-3.5" />
-                            </ButtonSmall>
-                        </div>
-                    )}
-                </div>
-            )}
-
-            {shouldShow('spacing') && (
-                <div className="space-y-4">
-                    <div className="space-y-1">
-                        <h3 className="typography-ui-header font-semibold text-foreground">
-                            Spacing
-                        </h3>
-
-                    </div>
-
-                    {isMobile ? (
-                        <div className="flex items-center gap-2 w-full">
-                            <input
-                                type="range"
-                                min="50"
-                                max="200"
-                                step="5"
-                                value={padding}
-                                onChange={(e) => setPadding(Number(e.target.value))}
-                                className="flex-1 min-w-0 h-3 bg-muted rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary [&::-moz-range-thumb]:w-5 [&::-moz-range-thumb]:h-5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-primary [&::-moz-range-thumb]:border-0"
-                                aria-label="Spacing percentage"
-                            />
-
-                            <span className="typography-ui-label font-medium text-foreground tabular-nums rounded-md border border-border bg-background px-2 py-1.5 min-w-[3.75rem] text-center">
-                                {padding}
-                            </span>
-
-                            <ButtonSmall
-                                type="button"
-                                variant="ghost"
-                                onClick={() => setPadding(100)}
-                                disabled={padding === 100}
-                                className="h-8 w-8 px-0 border border-border bg-background hover:bg-interactive-hover disabled:opacity-100 disabled:bg-background"
-                                aria-label="Reset spacing"
-                                title="Reset"
-                            >
-                                <RiRestartLine className="h-3.5 w-3.5" />
-                            </ButtonSmall>
-                        </div>
-                    ) : (
-                        <div className="flex items-center gap-3 w-full max-w-md">
-                            <input
-                                type="range"
-                                min="50"
-                                max="200"
-                                step="5"
-                                value={padding}
-                                onChange={(e) => setPadding(Number(e.target.value))}
-                                className="flex-1 min-w-0 h-2 bg-muted rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-primary [&::-moz-range-thumb]:border-0"
-                            />
-                            <NumberInput
-                                value={padding}
-                                onValueChange={setPadding}
-                                min={50}
-                                max={200}
-                                step={5}
-                                aria-label="Spacing percentage"
-                            />
-                            <ButtonSmall
-                                type="button"
-                                variant="ghost"
-                                onClick={() => setPadding(100)}
-                                disabled={padding === 100}
-                                className="h-8 w-8 px-0 border border-border bg-background hover:bg-interactive-hover disabled:opacity-100 disabled:bg-background"
-                                aria-label="Reset spacing"
-                                title="Reset"
-                            >
-                                <RiRestartLine className="h-3.5 w-3.5" />
-                            </ButtonSmall>
-                        </div>
-                    )}
-                </div>
-            )}
-
-            {shouldShow('terminalQuickKeys') && !isMobile && (
-                <div className="space-y-4">
-                    <div className="space-y-1">
-                        <h3 className="typography-ui-header font-semibold text-foreground">
-                            Show terminal optional key bar
-                        </h3>
-                        <p className="typography-ui text-muted-foreground">
-                            Esc, Ctrl, arrows, Enter.
-                        </p>
-                    </div>
-
-                    <Switch
-                        checked={showTerminalQuickKeysOnDesktop}
-                        onCheckedChange={setShowTerminalQuickKeysOnDesktop}
-                        className="data-[state=checked]:bg-status-info"
-                    />
-                </div>
-            )}
-
-            {shouldShow('cornerRadius') && (
-                <div className="space-y-4">
-                    <div className="space-y-1">
-                        <h3 className="typography-ui-header font-semibold text-foreground">
-                            Input Field Corner Radius
-                        </h3>
-                    </div>
-
-                    {isMobile ? (
-                        <div className="flex items-center gap-2 w-full">
-                            <input
-                                type="range"
-                                min="0"
-                                max="32"
-                                step="1"
-                                value={cornerRadius}
-                                onChange={(e) => setCornerRadius(Number(e.target.value))}
-                                className="flex-1 min-w-0 h-3 bg-muted rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary [&::-moz-range-thumb]:w-5 [&::-moz-range-thumb]:h-5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-primary [&::-moz-range-thumb]:border-0"
-                                aria-label="Corner radius in pixels"
-                            />
-
-                            <span className="typography-ui-label font-medium text-foreground tabular-nums rounded-md border border-border bg-background px-2 py-1.5 min-w-[3.75rem] text-center">
-                                {cornerRadius}px
-                            </span>
-
-                            <ButtonSmall
-                                type="button"
-                                variant="ghost"
-                                onClick={() => setCornerRadius(12)}
-                                disabled={cornerRadius === 12}
-                                className="h-8 w-8 px-0 border border-border bg-background hover:bg-interactive-hover disabled:opacity-100 disabled:bg-background"
-                                aria-label="Reset corner radius"
-                                title="Reset"
-                            >
-                                <RiRestartLine className="h-3.5 w-3.5" />
-                            </ButtonSmall>
-                        </div>
-                    ) : (
-                        <div className="flex items-center gap-3 w-full max-w-md">
-                            <input
-                                type="range"
-                                min="0"
-                                max="32"
-                                step="1"
-                                value={cornerRadius}
-                                onChange={(e) => setCornerRadius(Number(e.target.value))}
-                                className="flex-1 min-w-0 h-2 bg-muted rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-primary [&::-moz-range-thumb]:border-0"
-                                aria-label="Corner radius in pixels"
-                            />
-                            <NumberInput
-                                value={cornerRadius}
-                                onValueChange={setCornerRadius}
-                                min={0}
-                                max={32}
-                                step={1}
-                                aria-label="Corner radius in pixels"
-                            />
-                            <ButtonSmall
-                                type="button"
-                                variant="ghost"
-                                onClick={() => setCornerRadius(12)}
-                                disabled={cornerRadius === 12}
-                                className="h-8 w-8 px-0 border border-border bg-background hover:bg-interactive-hover disabled:opacity-100 disabled:bg-background"
-                                aria-label="Reset corner radius"
-                                title="Reset"
-                            >
-                                <RiRestartLine className="h-3.5 w-3.5" />
-                            </ButtonSmall>
-                        </div>
-                    )}
-                </div>
-            )}
-
-            {shouldShow('inputBarOffset') && (
-                <div className="space-y-4">
-                    <div className="space-y-1">
-                        <h3 className="typography-ui-header font-semibold text-foreground">
-                            Input Bar Offset
-                        </h3>
-                        <p className="typography-meta text-muted-foreground">
-                            Raise the input bar to avoid screen obstructions.
-                        </p>
-                    </div>
-
-                    {isMobile ? (
-                        <div className="flex items-center gap-2 w-full">
-                            <input
-                                type="range"
-                                min="0"
-                                max="100"
-                                step="5"
-                                value={inputBarOffset}
-                                onChange={(e) => setInputBarOffset(Number(e.target.value))}
-                                className="flex-1 min-w-0 h-3 bg-muted rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary [&::-moz-range-thumb]:w-5 [&::-moz-range-thumb]:h-5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-primary [&::-moz-range-thumb]:border-0"
-                                aria-label="Input bar offset in pixels"
-                            />
-
-                            <span className="typography-ui-label font-medium text-foreground tabular-nums rounded-md border border-border bg-background px-2 py-1.5 min-w-[3.75rem] text-center">
-                                {inputBarOffset}px
-                            </span>
-
-                            <ButtonSmall
-                                type="button"
-                                variant="ghost"
-                                onClick={() => setInputBarOffset(0)}
-                                disabled={inputBarOffset === 0}
-                                className="h-8 w-8 px-0 border border-border bg-background hover:bg-interactive-hover disabled:opacity-100 disabled:bg-background"
-                                aria-label="Reset input bar offset"
-                                title="Reset"
-                            >
-                                <RiRestartLine className="h-3.5 w-3.5" />
-                            </ButtonSmall>
-                        </div>
-                    ) : (
-                        <div className="flex items-center gap-3 w-full max-w-md">
-                            <input
-                                type="range"
-                                min="0"
-                                max="100"
-                                step="5"
-                                value={inputBarOffset}
-                                onChange={(e) => setInputBarOffset(Number(e.target.value))}
-                                className="flex-1 min-w-0 h-2 bg-muted rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-primary [&::-moz-range-thumb]:border-0"
-                                aria-label="Input bar offset in pixels"
-                            />
-                            <NumberInput
-                                value={inputBarOffset}
-                                onValueChange={setInputBarOffset}
-                                min={0}
-                                max={100}
-                                step={5}
-                                aria-label="Input bar offset in pixels"
-                            />
-                            <ButtonSmall
-                                type="button"
-                                variant="ghost"
-                                onClick={() => setInputBarOffset(0)}
-                                disabled={inputBarOffset === 0}
-                                className="h-8 w-8 px-0 border border-border bg-background hover:bg-interactive-hover disabled:opacity-100 disabled:bg-background"
-                                aria-label="Reset input bar offset"
-                                title="Reset"
-                            >
-                                <RiRestartLine className="h-3.5 w-3.5" />
-                            </ButtonSmall>
-                        </div>
-                    )}
-                </div>
-            )}
-
-            {shouldShow('toolOutput') && (
-                <div className="space-y-4">
-                    <div className="space-y-1">
-                        <h3 className="typography-ui-header font-semibold text-foreground">
-                            Default Tool Output
-                        </h3>
-                        <p className="typography-meta text-muted-foreground">
-                            {TOOL_EXPANSION_OPTIONS.find(o => o.value === toolCallExpansion)?.description}
-                        </p>
-                    </div>
-                    <div className="flex gap-1 w-fit">
-                        {TOOL_EXPANSION_OPTIONS.map((option) => (
-                            <ButtonSmall
-                                key={option.value}
-                                variant={toolCallExpansion === option.value ? 'default' : 'outline'}
-                                className={cn(toolCallExpansion === option.value ? undefined : 'text-foreground')}
-                                onClick={() => setToolCallExpansion(option.value)}
-                            >
-                                {option.label}
-                            </ButtonSmall>
-                        ))}
-                    </div>
-                </div>
-            )}
-
-            {shouldShow('diffLayout') && !isMobile && !isVSCodeRuntime() && (
-                <div className="space-y-6">
-                    <div className="space-y-1">
-                        <h3 className="typography-ui-header font-semibold text-foreground">
-                            Diff layout (Diff tab)
-                        </h3>
-                        <p className="typography-meta text-muted-foreground/80">
-                            Choose the default layout for file diffs. You can still override layout per file from the Diff tab.
-                        </p>
-                    </div>
-
-                    <div className="flex flex-col gap-2">
-                        <div className="flex gap-1 w-fit">
-                            {DIFF_LAYOUT_OPTIONS.map((option) => (
+                            <div className="mt-2 grid grid-cols-1 gap-2 py-1.5 md:grid-cols-[14rem_auto] md:gap-x-8 md:gap-y-2">
+                                <div className="flex min-w-0 items-center gap-2">
+                                    <span className="typography-ui-label text-foreground shrink-0">Light Theme</span>
+                                    <Select value={selectedLightTheme?.metadata.id ?? ''} onValueChange={setLightThemePreference}>
+                                        <SelectTrigger aria-label="Select light theme" className="w-fit">
+                                            <SelectValue placeholder="Select theme" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {lightThemes.map((theme) => (
+                                                <SelectItem key={theme.metadata.id} value={theme.metadata.id}>
+                                                    {formatThemeLabel(theme.metadata.name, 'light')}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div className="flex min-w-0 items-center gap-2">
+                                    <span className="typography-ui-label text-foreground shrink-0">Dark Theme</span>
+                                    <Select value={selectedDarkTheme?.metadata.id ?? ''} onValueChange={setDarkThemePreference}>
+                                        <SelectTrigger aria-label="Select dark theme" className="w-fit">
+                                            <SelectValue placeholder="Select theme" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {darkThemes.map((theme) => (
+                                                <SelectItem key={theme.metadata.id} value={theme.metadata.id}>
+                                                    {formatThemeLabel(theme.metadata.name, 'dark')}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-2 py-1.5">
                                 <ButtonSmall
-                                    key={option.id}
-                                    variant={diffLayoutPreference === option.id ? 'default' : 'outline'}
-                                    className={cn(diffLayoutPreference === option.id ? undefined : 'text-foreground')}
-                                    onClick={() => setDiffLayoutPreference(option.id)}
+                                    type="button"
+                                    variant="outline"
+                                    size="xs"
+                                    disabled={customThemesLoading || themesReloading}
+                                    onClick={async () => {
+                                        setThemesReloading(true);
+                                        try {
+                                            await reloadCustomThemes();
+                                        } finally {
+                                            setThemesReloading(false);
+                                        }
+                                    }}
+                                    className="!font-normal"
                                 >
-                                    {option.label}
+                                    <RiRestartLine className={cn('h-3.5 w-3.5', themesReloading && 'animate-spin')} />
+                                    Reload themes
                                 </ButtonSmall>
-                            ))}
-                        </div>
-                        <p className="typography-meta text-muted-foreground/80 max-w-xl">
-                            {DIFF_LAYOUT_OPTIONS.find((option) => option.id === diffLayoutPreference)?.description}
-                        </p>
+                                <Tooltip delayDuration={700}>
+                                    <TooltipTrigger asChild>
+                                        <button
+                                            type="button"
+                                            className="flex items-center justify-center rounded-md p-1 text-muted-foreground/70 hover:text-foreground"
+                                            aria-label="Theme import info"
+                                        >
+                                            <RiInformationLine className="h-3.5 w-3.5" />
+                                        </button>
+                                    </TooltipTrigger>
+                                    <TooltipContent sideOffset={8}>
+                                        Import custom themes from ~/.config/openchamber/themes/
+                                    </TooltipContent>
+                                </Tooltip>
+                            </div>
+                        </section>
                     </div>
+                )}
 
-                    <div className="space-y-1">
-                        <h3 className="typography-ui-header font-semibold text-foreground">
-                            Diff view (Diff tab)
-                        </h3>
-                        <p className="typography-meta text-muted-foreground/80">
-                            Choose whether the Diff tab defaults to a single file or all files.
-                        </p>
+                {/* --- UI Scaling & Layout --- */}
+                {hasLayoutSettings && (
+                    <div className="mb-8 space-y-3">
+                        <section className="p-2 space-y-0.5">
+
+                            {shouldShow('fontSize') && !isMobile && (
+                                <div className="flex items-center gap-8 py-1.5">
+                                    <div className="flex min-w-0 flex-col w-56 shrink-0">
+                                        <span className="typography-ui-label text-foreground">Interface Font Size</span>
+                                    </div>
+                                    <div className="flex items-center gap-2 w-fit">
+                                        <NumberInput
+                                            value={fontSize}
+                                            onValueChange={setFontSize}
+                                            min={50}
+                                            max={200}
+                                            step={5}
+                                            aria-label="Font size percentage"
+                                            className="w-16"
+                                        />
+                                        <ButtonSmall
+                                            type="button"
+                                            variant="ghost"
+                                            onClick={() => setFontSize(100)}
+                                            disabled={fontSize === 100}
+                                            className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
+                                            aria-label="Reset font size"
+                                            title="Reset"
+                                        >
+                                            <RiRestartLine className="h-3.5 w-3.5" />
+                                        </ButtonSmall>
+                                    </div>
+                                </div>
+                            )}
+
+                            {shouldShow('terminalFontSize') && (
+                                <div className={cn("py-1.5", isMobile ? "flex flex-col gap-3" : "flex items-center gap-8")}>
+                                    <div className={cn("flex min-w-0 flex-col", isMobile ? "w-full" : "w-56 shrink-0")}>
+                                        <span className="typography-ui-label text-foreground">Terminal Font Size</span>
+                                    </div>
+                                    <div className={cn("flex items-center gap-2", isMobile ? "w-full" : "w-fit")}>
+                                        <NumberInput
+                                            value={terminalFontSize}
+                                            onValueChange={setTerminalFontSize}
+                                            min={9}
+                                            max={52}
+                                            step={1}
+                                            className="w-16"
+                                        />
+                                        <ButtonSmall
+                                            type="button"
+                                            variant="ghost"
+                                            onClick={() => setTerminalFontSize(13)}
+                                            disabled={terminalFontSize === 13}
+                                            className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
+                                            aria-label="Reset terminal font size"
+                                            title="Reset"
+                                        >
+                                            <RiRestartLine className="h-3.5 w-3.5" />
+                                        </ButtonSmall>
+                                    </div>
+                                </div>
+                            )}
+
+                            {shouldShow('spacing') && (
+                                <div className={cn("py-1.5", isMobile ? "flex flex-col gap-3" : "flex items-center gap-8")}>
+                                    <div className={cn("flex min-w-0 flex-col", isMobile ? "w-full" : "w-56 shrink-0")}>
+                                        <span className="typography-ui-label text-foreground">Spacing Density</span>
+                                    </div>
+                                    <div className={cn("flex items-center gap-2", isMobile ? "w-full" : "w-fit")}>
+                                        <NumberInput
+                                            value={padding}
+                                            onValueChange={setPadding}
+                                            min={50}
+                                            max={200}
+                                            step={5}
+                                            className="w-16"
+                                        />
+                                        <ButtonSmall
+                                            type="button"
+                                            variant="ghost"
+                                            onClick={() => setPadding(100)}
+                                            disabled={padding === 100}
+                                            className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
+                                            aria-label="Reset spacing"
+                                            title="Reset"
+                                        >
+                                            <RiRestartLine className="h-3.5 w-3.5" />
+                                        </ButtonSmall>
+                                    </div>
+                                </div>
+                            )}
+
+                            {shouldShow('cornerRadius') && (
+                                <div className={cn("py-1.5", isMobile ? "flex flex-col gap-3" : "flex items-center gap-8")}>
+                                    <div className={cn("flex min-w-0 flex-col", isMobile ? "w-full" : "w-56 shrink-0")}>
+                                        <span className="typography-ui-label text-foreground">Corner Radius</span>
+                                    </div>
+                                    <div className={cn("flex items-center gap-2", isMobile ? "w-full" : "w-fit")}>
+                                        <NumberInput
+                                            value={cornerRadius}
+                                            onValueChange={setCornerRadius}
+                                            min={0}
+                                            max={32}
+                                            step={1}
+                                            className="w-16"
+                                        />
+                                        <ButtonSmall
+                                            type="button"
+                                            variant="ghost"
+                                            onClick={() => setCornerRadius(12)}
+                                            disabled={cornerRadius === 12}
+                                            className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
+                                            aria-label="Reset corner radius"
+                                            title="Reset"
+                                        >
+                                            <RiRestartLine className="h-3.5 w-3.5" />
+                                        </ButtonSmall>
+                                    </div>
+                                </div>
+                            )}
+
+                            {shouldShow('inputBarOffset') && (
+                                <div className={cn("py-1.5", isMobile ? "flex flex-col gap-3" : "flex items-center gap-8")}>
+                                    <div className={cn("flex min-w-0 flex-col", isMobile ? "w-full" : "w-56 shrink-0")}>
+                                        <div className="flex items-center gap-1.5">
+                                            <span className="typography-ui-label text-foreground">Input Bar Offset</span>
+                                            <Tooltip delayDuration={1000}>
+                                                <TooltipTrigger asChild>
+                                                    <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+                                                </TooltipTrigger>
+                                                <TooltipContent sideOffset={8} className="max-w-xs">
+                                                    Raise input bar to avoid OS-level screen obstructions like home bars.
+                                                </TooltipContent>
+                                            </Tooltip>
+                                        </div>
+                                    </div>
+                                    <div className={cn("flex items-center gap-2", isMobile ? "w-full" : "w-fit")}>
+                                        <NumberInput
+                                            value={inputBarOffset}
+                                            onValueChange={setInputBarOffset}
+                                            min={0}
+                                            max={100}
+                                            step={5}
+                                            className="w-16"
+                                        />
+                                        <ButtonSmall
+                                            type="button"
+                                            variant="ghost"
+                                            onClick={() => setInputBarOffset(0)}
+                                            disabled={inputBarOffset === 0}
+                                            className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
+                                            aria-label="Reset input bar offset"
+                                            title="Reset"
+                                        >
+                                            <RiRestartLine className="h-3.5 w-3.5" />
+                                        </ButtonSmall>
+                                    </div>
+                                </div>
+                            )}
+
+                        </section>
                     </div>
+                )}
 
-                    <div className="flex flex-col gap-2">
-                        <div className="flex gap-1 w-fit">
-                            {DIFF_VIEW_MODE_OPTIONS.map((option) => (
-                                <ButtonSmall
-                                    key={option.id}
-                                    variant={diffViewMode === option.id ? 'default' : 'outline'}
-                                    className={cn(diffViewMode === option.id ? undefined : 'text-foreground')}
-                                    onClick={() => setDiffViewMode(option.id)}
-                                >
-                                    {option.label}
-                                </ButtonSmall>
-                            ))}
-                        </div>
-                        <p className="typography-meta text-muted-foreground/80 max-w-xl">
-                            {DIFF_VIEW_MODE_OPTIONS.find((option) => option.id === diffViewMode)?.description}
-                        </p>
+                {hasBehaviorSettings && (
+                    <div className="space-y-3">
+
+                            {shouldShow('toolOutput') && (
+                                <section className="px-2 pb-2 pt-0">
+                                    <h4 className="typography-ui-header font-medium text-foreground">Default Tool Output</h4>
+                                    <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                                        {TOOL_EXPANSION_OPTIONS.map((option) => {
+                                            return (
+                                                <ButtonSmall
+                                                    key={option.value}
+                                                    variant="outline"
+                                                    size="xs"
+                                                    className={cn(
+                                                        '!font-normal',
+                                                        toolCallExpansion === option.value
+                                                            ? 'border-[var(--primary-base)] text-[var(--primary-base)] bg-[var(--primary-base)]/10 hover:text-[var(--primary-base)]'
+                                                            : 'text-foreground'
+                                                    )}
+                                                    onClick={() => setToolCallExpansion(option.value)}
+                                                >
+                                                    {option.label}
+                                                </ButtonSmall>
+                                            );
+                                        })}
+                                    </div>
+                                </section>
+                            )}
+
+                            {shouldShow('diffLayout') && !isVSCodeRuntime() && (
+                                <section className="p-2">
+                                    <h4 className="typography-ui-header font-medium text-foreground">Diff Layout</h4>
+                                    <div role="radiogroup" aria-label="Diff layout" className="mt-1 space-y-0">
+                                        {DIFF_LAYOUT_OPTIONS.map((option) => {
+                                            const selected = diffLayoutPreference === option.id;
+                                            return (
+                                                <div
+                                                    key={option.id}
+                                                    role="button"
+                                                    tabIndex={0}
+                                                    aria-pressed={selected}
+                                                    onClick={() => setDiffLayoutPreference(option.id)}
+                                                    onKeyDown={(event) => {
+                                                        if (event.key === ' ' || event.key === 'Enter') {
+                                                            event.preventDefault();
+                                                            setDiffLayoutPreference(option.id);
+                                                        }
+                                                    }}
+                                                    className="flex w-full items-center gap-2 py-0.5 text-left"
+                                                >
+                                                    <Radio
+                                                        checked={selected}
+                                                        onChange={() => setDiffLayoutPreference(option.id)}
+                                                        ariaLabel={`Diff layout: ${option.label}`}
+                                                    />
+                                                    <span className={cn('typography-ui-label font-normal', selected ? 'text-foreground' : 'text-foreground/50')}>
+                                                        {option.label}
+                                                    </span>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </section>
+                            )}
+
+                            {shouldShow('diffLayout') && !isVSCodeRuntime() && (
+                                <section className="p-2">
+                                    <h4 className="typography-ui-header font-medium text-foreground">Diff View Mode</h4>
+                                    <div role="radiogroup" aria-label="Diff view mode" className="mt-1 space-y-0">
+                                        {DIFF_VIEW_MODE_OPTIONS.map((option) => {
+                                            const selected = diffViewMode === option.id;
+                                            return (
+                                                <div
+                                                    key={option.id}
+                                                    role="button"
+                                                    tabIndex={0}
+                                                    aria-pressed={selected}
+                                                    onClick={() => setDiffViewMode(option.id)}
+                                                    onKeyDown={(event) => {
+                                                        if (event.key === ' ' || event.key === 'Enter') {
+                                                            event.preventDefault();
+                                                            setDiffViewMode(option.id);
+                                                        }
+                                                    }}
+                                                    className="flex w-full items-center gap-2 py-0.5 text-left"
+                                                >
+                                                    <Radio
+                                                        checked={selected}
+                                                        onChange={() => setDiffViewMode(option.id)}
+                                                        ariaLabel={`Diff view mode: ${option.label}`}
+                                                    />
+                                                    <span className={cn('typography-ui-label font-normal', selected ? 'text-foreground' : 'text-foreground/50')}>
+                                                        {option.label}
+                                                    </span>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </section>
+                            )}
+
+                            {(shouldShow('dotfiles') || shouldShow('queueMode') || shouldShow('persistDraft') || shouldShow('reasoning') || shouldShow('textJustificationActivity')) && (
+                                <section className="p-2 space-y-0.5">
+                                    {shouldShow('dotfiles') && !isVSCodeRuntime() && (
+                                        <div
+                                            className="group flex cursor-pointer items-center gap-2 py-1.5"
+                                            role="button"
+                                            tabIndex={0}
+                                            aria-pressed={directoryShowHidden}
+                                            onClick={() => setDirectoryShowHidden(!directoryShowHidden)}
+                                            onKeyDown={(event) => {
+                                                if (event.key === ' ' || event.key === 'Enter') {
+                                                    event.preventDefault();
+                                                    setDirectoryShowHidden(!directoryShowHidden);
+                                                }
+                                            }}
+                                        >
+                                            <Checkbox
+                                                checked={directoryShowHidden}
+                                                onChange={setDirectoryShowHidden}
+                                                ariaLabel="Show dotfiles"
+                                            />
+                                            <span className="typography-ui-label text-foreground">Show Dotfiles</span>
+                                        </div>
+                                    )}
+
+                                    {shouldShow('queueMode') && (
+                                        <div
+                                            className="group flex cursor-pointer items-center gap-2 py-1.5"
+                                            role="button"
+                                            tabIndex={0}
+                                            aria-pressed={queueModeEnabled}
+                                            onClick={() => setQueueMode(!queueModeEnabled)}
+                                            onKeyDown={(event) => {
+                                                if (event.key === ' ' || event.key === 'Enter') {
+                                                    event.preventDefault();
+                                                    setQueueMode(!queueModeEnabled);
+                                                }
+                                            }}
+                                        >
+                                            <Checkbox
+                                                checked={queueModeEnabled}
+                                                onChange={setQueueMode}
+                                                ariaLabel="Queue messages by default"
+                                            />
+                                            <div className="flex min-w-0 items-center gap-1.5">
+                                                <span className="typography-ui-label text-foreground">Queue Messages by Default</span>
+                                                <Tooltip delayDuration={1000}>
+                                                    <TooltipTrigger asChild>
+                                                        <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+                                                    </TooltipTrigger>
+                                                    <TooltipContent sideOffset={8} className="max-w-xs">
+                                                        When enabled, Enter queues messages. Use {getModifierLabel()}+Enter to send.
+                                                    </TooltipContent>
+                                                </Tooltip>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {shouldShow('persistDraft') && (
+                                        <div
+                                            className="group flex cursor-pointer items-center gap-2 py-1.5"
+                                            role="button"
+                                            tabIndex={0}
+                                            aria-pressed={persistChatDraft}
+                                            onClick={() => setPersistChatDraft(!persistChatDraft)}
+                                            onKeyDown={(event) => {
+                                                if (event.key === ' ' || event.key === 'Enter') {
+                                                    event.preventDefault();
+                                                    setPersistChatDraft(!persistChatDraft);
+                                                }
+                                            }}
+                                        >
+                                            <Checkbox
+                                                checked={persistChatDraft}
+                                                onChange={setPersistChatDraft}
+                                                ariaLabel="Persist draft messages"
+                                            />
+                                            <span className="typography-ui-label text-foreground">Persist Draft Messages</span>
+                                        </div>
+                                    )}
+
+                                    {shouldShow('reasoning') && (
+                                        <div
+                                            className="group flex cursor-pointer items-center gap-2 py-1.5"
+                                            role="button"
+                                            tabIndex={0}
+                                            aria-pressed={showReasoningTraces}
+                                            onClick={() => setShowReasoningTraces(!showReasoningTraces)}
+                                            onKeyDown={(event) => {
+                                                if (event.key === ' ' || event.key === 'Enter') {
+                                                    event.preventDefault();
+                                                    setShowReasoningTraces(!showReasoningTraces);
+                                                }
+                                            }}
+                                        >
+                                            <Checkbox
+                                                checked={showReasoningTraces}
+                                                onChange={setShowReasoningTraces}
+                                                ariaLabel="Show reasoning traces"
+                                            />
+                                            <span className="typography-ui-label text-foreground">Show Reasoning Traces</span>
+                                        </div>
+                                    )}
+
+                                    {shouldShow('textJustificationActivity') && (
+                                        <div
+                                            className="group flex cursor-pointer items-center gap-2 py-1.5"
+                                            role="button"
+                                            tabIndex={0}
+                                            aria-pressed={showTextJustificationActivity}
+                                            onClick={() => setShowTextJustificationActivity(!showTextJustificationActivity)}
+                                            onKeyDown={(event) => {
+                                                if (event.key === ' ' || event.key === 'Enter') {
+                                                    event.preventDefault();
+                                                    setShowTextJustificationActivity(!showTextJustificationActivity);
+                                                }
+                                            }}
+                                        >
+                                            <Checkbox
+                                                checked={showTextJustificationActivity}
+                                                onChange={setShowTextJustificationActivity}
+                                                ariaLabel="Show justification activity"
+                                            />
+                                            <span className="typography-ui-label text-foreground">Show Justification Activity</span>
+                                        </div>
+                                    )}
+                                </section>
+                            )}
+
+                            {shouldShow('terminalQuickKeys') && !isMobile && (
+                                <section className="p-2">
+                                    <div
+                                        className="group flex cursor-pointer items-center gap-2 rounded-md py-1.5 transition-colors hover:bg-[var(--interactive-hover)]/30"
+                                        role="button"
+                                        tabIndex={0}
+                                        aria-pressed={showTerminalQuickKeysOnDesktop}
+                                        onClick={() => setShowTerminalQuickKeysOnDesktop(!showTerminalQuickKeysOnDesktop)}
+                                        onKeyDown={(event) => {
+                                            if (event.key === ' ' || event.key === 'Enter') {
+                                                event.preventDefault();
+                                                setShowTerminalQuickKeysOnDesktop(!showTerminalQuickKeysOnDesktop);
+                                            }
+                                        }}
+                                    >
+                                        <Checkbox
+                                            checked={showTerminalQuickKeysOnDesktop}
+                                            onChange={setShowTerminalQuickKeysOnDesktop}
+                                            ariaLabel="Terminal quick keys"
+                                        />
+                                        <div className="flex min-w-0 items-center gap-1.5">
+                                            <span className="typography-ui-label text-foreground">Terminal Quick Keys</span>
+                                            <Tooltip delayDuration={1000}>
+                                                <TooltipTrigger asChild>
+                                                    <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+                                                </TooltipTrigger>
+                                                <TooltipContent sideOffset={8} className="max-w-xs">
+                                                    Show Esc, Ctrl, Arrows in terminal view
+                                                </TooltipContent>
+                                            </Tooltip>
+                                        </div>
+                                    </div>
+                                </section>
+                            )}
                     </div>
+                )}
 
-                </div>
-            )}
-
-            {shouldShow('dotfiles') && !isVSCodeRuntime() && (
-                <div className="space-y-3">
-                    <div className="space-y-1">
-                        <h3 className="typography-ui-header font-semibold text-foreground">
-                            Hidden files (Chat)
-                        </h3>
-                        <p className="typography-meta text-muted-foreground/80">
-                            Show or hide dotfiles in file lists and directory pickers.
-                        </p>
-                    </div>
-
-                    <div className="flex flex-col gap-2">
-                        <div className="flex gap-1 w-fit">
-                            {[
-                                { id: 'hide', label: 'Hide', value: false },
-                                { id: 'show', label: 'Show', value: true },
-                            ].map((option) => (
-                                <ButtonSmall
-                                    key={option.id}
-                                    variant={directoryShowHidden === option.value ? 'default' : 'outline'}
-                                    className={cn(directoryShowHidden === option.value ? undefined : 'text-foreground')}
-                                    onClick={() => setDirectoryShowHidden(option.value)}
-                                >
-                                    {option.label}
-                                </ButtonSmall>
-                            ))}
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {shouldShow('reasoning') && (
-                <label className="flex items-center gap-2 cursor-pointer">
-                    <Checkbox
-                        checked={showReasoningTraces}
-                        onChange={setShowReasoningTraces}
-                    />
-                    <span className="typography-ui-header font-semibold text-foreground">
-                        Show thinking / reasoning traces
-                    </span>
-                </label>
-            )}
-
-            {shouldShow('textJustificationActivity') && (
-                <label className="flex items-center gap-2 cursor-pointer">
-                    <Checkbox
-                        checked={showTextJustificationActivity}
-                        onChange={setShowTextJustificationActivity}
-                    />
-                    <span className="typography-ui-header font-semibold text-foreground">
-                        Show text justification in activity
-                    </span>
-                </label>
-            )}
-
-            {shouldShow('queueMode') && (
-                <div className="space-y-2">
-                    <label className="flex items-center gap-2 cursor-pointer">
-                        <Checkbox
-                            checked={queueModeEnabled}
-                            onChange={setQueueMode}
-                        />
-                        <span className="typography-ui-header font-semibold text-foreground">
-                            Queue messages by default
-                        </span>
-                    </label>
-                    <p className="typography-meta text-muted-foreground pl-5">
-                        {queueModeEnabled
-                            ? `Enter queues messages, ${getModifierLabel()}+Enter sends immediately.`
-                            : `Enter sends immediately, ${getModifierLabel()}+Enter queues messages.`}
-                    </p>
-                </div>
-            )}
-
-            {shouldShow('persistDraft') && (
-                <div className="space-y-2">
-                    <label className="flex items-center gap-2 cursor-pointer">
-                        <Checkbox
-                            checked={persistChatDraft}
-                            onChange={setPersistChatDraft}
-                        />
-                        <span className="typography-ui-header font-semibold text-foreground">
-                            Persist chat input draft
-                        </span>
-                    </label>
-                    <p className="typography-meta text-muted-foreground pl-5">
-                        Save your typed message across page reloads and session switches.
-                    </p>
-                </div>
-            )}
-        </div>
+            </div>
     );
 };

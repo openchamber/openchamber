@@ -57,6 +57,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
 }) => {
     const { providers, modelsMetadata } = useConfigStore();
     const isMobile = useUIStore(state => state.isMobile);
+    const hiddenModels = useUIStore(state => state.hiddenModels);
     const { toggleFavoriteModel, isFavoriteModel, addRecentModel } = useUIStore();
     const { favoriteModelsList, recentModelsList } = useModelLists();
     const { isMobile: deviceIsMobile } = useDeviceInfo();
@@ -77,11 +78,23 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     }, [allowedProviderIds]);
 
     const visibleProviders = React.useMemo(() => {
-        if (!allowedProviderSet) {
-            return providers;
-        }
-        return providers.filter((provider) => allowedProviderSet.has(String(provider.id)));
-    }, [providers, allowedProviderSet]);
+        const baseProviders = allowedProviderSet
+            ? providers.filter((provider) => allowedProviderSet.has(String(provider.id)))
+            : providers;
+
+        return baseProviders
+            .map((provider) => {
+                const providerModels = Array.isArray(provider.models) ? provider.models : [];
+                const filteredModels = providerModels.filter((model: ProviderModel) => {
+                    const modelId = typeof model?.id === 'string' ? model.id : '';
+                    return !hiddenModels.some(
+                        (hidden) => hidden.providerID === String(provider.id) && hidden.modelID === modelId
+                    );
+                });
+                return { ...provider, models: filteredModels };
+            })
+            .filter((provider) => provider.models.length > 0);
+    }, [providers, allowedProviderSet, hiddenModels]);
 
     const closeMobilePanel = () => setIsMobilePanelOpen(false);
     const toggleMobileProviderExpansion = (provId: string) => {
@@ -250,7 +263,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
             <MobileOverlayPanel
                 open={isMobilePanelOpen}
                 onClose={closeMobilePanel}
-                title="Select Model"
+                title="Select model"
             >
                 <div className="space-y-1">
                     {/* Favorites Section for Mobile */}
@@ -499,24 +512,24 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                 <DropdownMenu open={isDropdownOpen} onOpenChange={setIsDropdownOpen}>
                     <DropdownMenuTrigger asChild>
                         <div className={cn(
-                            'flex items-center gap-2 px-2 rounded-lg bg-interactive-selection/20 border border-border/20 cursor-pointer hover:bg-interactive-hover/30 h-6 w-fit',
+                            'border-input data-[placeholder]:text-muted-foreground flex items-center justify-between gap-2 rounded-lg border bg-transparent px-2 py-2 typography-ui-label whitespace-nowrap shadow-none outline-none hover:bg-interactive-hover data-[state=open]:bg-interactive-active h-6 w-fit',
                             className
                         )}>
                             {providerId ? (
                                 <>
                                     <ProviderLogo
                                         providerId={providerId}
-                                        className="h-3 w-3 flex-shrink-0"
+                                        className="h-3.5 w-3.5 flex-shrink-0"
                                     />
                                     <RiPencilAiLine className="h-3 w-3 text-primary/60 hidden" />
                                 </>
                             ) : (
-                                <RiPencilAiLine className="h-3 w-3 text-muted-foreground" />
+                                <RiPencilAiLine className="h-3.5 w-3.5 text-muted-foreground" />
                             )}
-                            <span className="typography-micro font-medium whitespace-nowrap">
+                            <span className="typography-ui-label font-normal whitespace-nowrap text-foreground">
                                 {providerId && modelId ? `${providerId}/${modelId}` : (placeholder || 'Not selected')}
                             </span>
-                            <RiArrowDownSLine className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
+                            <RiArrowDownSLine className="h-4 w-4 flex-shrink-0 text-muted-foreground/50" />
                         </div>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent className="w-[min(380px,calc(100vw-2rem))] p-0 flex flex-col" align="start">

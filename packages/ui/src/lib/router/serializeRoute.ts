@@ -1,4 +1,3 @@
-import type { SidebarSection } from '@/constants/sidebar';
 import type { MainTab } from '@/stores/useUIStore';
 import { ROUTE_PARAMS } from './types';
 
@@ -9,7 +8,7 @@ export interface AppRouteState {
   sessionId: string | null;
   tab: MainTab;
   isSettingsOpen: boolean;
-  settingsSection: SidebarSection;
+  settingsPath: string;
   diffFile: string | null;
 }
 
@@ -32,8 +31,8 @@ export function serializeRoute(state: AppRouteState): URLSearchParams {
 
   // Settings takes precedence - if open, include settings section
   if (state.isSettingsOpen) {
-    const settingsSection = state.settingsSection === 'sessions' ? 'settings' : state.settingsSection;
-    params.set(ROUTE_PARAMS.SETTINGS, settingsSection);
+    const settingsPath = state.settingsPath.trim().length > 0 ? state.settingsPath : 'home';
+    params.set(ROUTE_PARAMS.SETTINGS, settingsPath);
     // Don't include tab when settings is open (it's a full-screen overlay)
     return params;
   }

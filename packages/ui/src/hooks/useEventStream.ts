@@ -1149,9 +1149,7 @@ export const useEventStream = () => {
                   const variant = typeof (messageExt as { variant?: unknown }).variant === 'string'
                     ? (messageExt as { variant: string }).variant
                     : undefined;
-                  if (variant) {
-                    context.saveAgentModelVariantForSession(sessionId, agentCandidate, providerID, modelID, variant);
-                  }
+                  context.saveAgentModelVariantForSession(sessionId, agentCandidate, providerID, modelID, variant);
 
                   if (currentSessionIdRef.current === sessionId) {
                     try {
