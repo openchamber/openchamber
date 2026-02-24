@@ -1072,28 +1072,16 @@ function ExpandedView({
           <RunningIndicator count={runningCount} />
           <UnreadIndicator count={unreadCount} />
           <TokenUsageIndicator contextUsage={contextUsage} />
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onNewSession();
-              }}
-              className="flex items-center gap-0.5 px-1.5 py-1 text-[11px] leading-tight !min-h-0 rounded border border-border/50 text-[var(--surface-foreground)] hover:bg-[var(--interactive-hover)] self-start"
-            >
-              New
-            </button>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onToggleExpand();
-              }}
-              className="text-[11px] leading-tight px-1.5 py-1 !min-h-0 rounded border border-border/50 text-[var(--surface-mutedForeground)] hover:text-[var(--surface-foreground)] hover:bg-[var(--interactive-hover)] self-start"
-            >
-              {isExpanded ? 'Less' : 'More'}
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onNewSession();
+            }}
+            className="flex items-center gap-0.5 px-1.5 py-1 text-[11px] leading-tight !min-h-0 rounded border border-border/50 text-[var(--surface-foreground)] hover:bg-[var(--interactive-hover)] self-start"
+          >
+            New
+          </button>
         </div>
       </div>
 
