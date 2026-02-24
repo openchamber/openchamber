@@ -1,6 +1,8 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { ButtonLarge } from '@/components/ui/button-large';
+import { ButtonSmall } from '@/components/ui/button-small';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui';
@@ -20,13 +22,10 @@ import {
   RiEyeOffLine,
   RiFolderLine,
   RiPlugLine,
-  RiSaveLine,
   RiUser3Line,
 } from '@remixicon/react';
 import { cn } from '@/lib/utils';
-import { useDeviceInfo } from '@/lib/device';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
-import { ButtonSmall } from '@/components/ui/button-small';
 import {
   Dialog,
   DialogContent,
@@ -41,7 +40,6 @@ import {
   SelectItem,
   SelectTrigger,
 } from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch';
 
 // ─────────────────────────────────────────────────────────────
 // CommandTextarea  — one arg per line, paste-friendly
@@ -112,17 +110,17 @@ const CommandTextarea: React.FC<CommandTextareaProps> = ({ value, onChange }) =>
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-end gap-2">
-        <Button
+        <ButtonSmall
           variant="ghost"
-          size="sm"
-          className="h-6 gap-1 px-2 typography-micro text-muted-foreground"
+          size="xs"
+          className="!font-normal gap-1 text-muted-foreground"
           onClick={handlePasteFromClipboard}
           type="button"
           title="Paste full command from clipboard and auto-split"
         >
           <RiClipboardLine className="h-3 w-3" />
           Paste command
-        </Button>
+        </ButtonSmall>
       </div>
 
       <Textarea
@@ -254,17 +252,17 @@ const EnvEditor: React.FC<EnvEditorProps> = ({ value, onChange }) => {
           <span className="typography-micro text-muted-foreground w-32 shrink-0">Key</span>
           <span className="typography-micro text-muted-foreground">Value</span>
         </div>
-        <Button
+        <ButtonSmall
           variant="ghost"
-          size="sm"
-          className="h-6 gap-1 px-2 typography-micro text-muted-foreground"
+          size="xs"
+          className="!font-normal gap-1 text-muted-foreground"
           onClick={handlePasteDotEnv}
           type="button"
           title="Paste KEY=VALUE lines from clipboard"
         >
           <RiClipboardLine className="h-3 w-3" />
           Paste .env
-        </Button>
+        </ButtonSmall>
       </div>
 
       {/* Rows */}
@@ -301,28 +299,27 @@ const EnvEditor: React.FC<EnvEditorProps> = ({ value, onChange }) => {
               </button>
             </div>
             {/* Remove */}
-            <Button
-              size="icon"
+            <ButtonSmall
               variant="ghost"
-              className="h-8 w-7 shrink-0 text-muted-foreground hover:text-destructive"
+              className="h-7 w-7 px-0 shrink-0 text-muted-foreground hover:text-[var(--status-error)]"
               onClick={() => removeRow(idx)}
             >
               <RiDeleteBinLine className="h-3.5 w-3.5" />
-            </Button>
+            </ButtonSmall>
           </div>
         ))}
       </div>
 
-      <Button
+      <ButtonSmall
         variant="outline"
-        size="sm"
-        className="gap-1.5 h-7 typography-meta"
+        size="xs"
+        className="!font-normal gap-1.5"
         onClick={addRow}
         type="button"
       >
         <RiAddLine className="h-3.5 w-3.5" />
         Add variable
-      </Button>
+      </ButtonSmall>
 
       {hasSensitiveValues && (
         <p className="typography-micro text-muted-foreground/60">
@@ -365,7 +362,6 @@ const StatusBadge: React.FC<{ status: string | undefined; enabled: boolean }> = 
 // McpPage
 // ─────────────────────────────────────────────────────────────
 export const McpPage: React.FC = () => {
-  const { isMobile } = useDeviceInfo();
   const {
     selectedMcpName,
     mcpServers,
@@ -521,173 +517,200 @@ export const McpPage: React.FC = () => {
 
   return (
     <ScrollableOverlay keyboardAvoid outerClassName="h-full" className="w-full">
-      <div className="openchamber-page-body mx-auto w-full max-w-3xl space-y-6 p-3 sm:p-6 sm:pt-8">
+      <div className="mx-auto w-full max-w-3xl p-3 sm:p-6 sm:pt-8">
 
-        {/* ── Header card: identity + controls ── */}
-        <div className="rounded-lg bg-[var(--surface-elevated)]/70 overflow-hidden flex flex-col">
-          <div className={cn('px-4 py-3 border-b border-[var(--surface-subtle)]', isMobile ? 'flex flex-col gap-3' : 'flex items-center justify-between gap-4')}>
-            <div className="min-w-0 flex-1">
-              {isNewServer ? (
-                <Input
-                  value={draftName}
-                  onChange={(e) => setDraftName(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, '-'))}
-                  placeholder="my-mcp-server"
-                  className="font-mono text-base h-8 w-full sm:w-64"
-                  autoFocus
-                />
-              ) : (
-                <div className="flex items-center gap-2 min-w-0">
-                  <h1 className="typography-ui-header font-semibold truncate">{selectedMcpName}</h1>
-                  <StatusBadge status={runtimeStatus?.status} enabled={enabled} />
-                </div>
-              )}
-              {isNewServer && (
-                <p className="typography-micro text-muted-foreground mt-0.5">Lowercase, numbers, hyphens and underscores only</p>
-              )}
-            </div>
-
-            <div className={cn('flex items-center gap-2', isMobile ? 'w-full' : 'shrink-0')}>
-              {isNewServer ? (
-                <Select value={draftScope} onValueChange={(value) => setDraftScope(value as McpScope)}>
-                  <SelectTrigger size="lg" className={cn('gap-1.5', isMobile ? 'w-full' : 'w-auto')}>
-                    {draftScope === 'user' ? <RiUser3Line className="h-4 w-4" /> : <RiFolderLine className="h-4 w-4" />}
-                    <span className="capitalize">{draftScope}</span>
-                  </SelectTrigger>
-                  <SelectContent align="end">
-                    <SelectItem value="user" className="pr-2 [&>span:first-child]:hidden">
-                      <div className="flex flex-col gap-0.5">
-                        <div className="flex items-center gap-2">
-                          <RiUser3Line className="h-4 w-4" />
-                          <span>User</span>
-                        </div>
-                        <span className="typography-micro text-muted-foreground ml-6">Available in all projects</span>
-                      </div>
-                    </SelectItem>
-                    <SelectItem value="project" className="pr-2 [&>span:first-child]:hidden">
-                      <div className="flex flex-col gap-0.5">
-                        <div className="flex items-center gap-2">
-                          <RiFolderLine className="h-4 w-4" />
-                          <span>Project</span>
-                        </div>
-                        <span className="typography-micro text-muted-foreground ml-6">Only in current project</span>
-                      </div>
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              ) : (
-                <Button
-                  size="sm"
+        {/* Header */}
+        <div className="mb-4">
+          <div className="min-w-0">
+            {isNewServer ? (
+              <h2 className="typography-ui-header font-semibold text-foreground truncate">New MCP Server</h2>
+            ) : (
+              <div className="flex items-center gap-2 min-w-0">
+                <h2 className="typography-ui-header font-semibold text-foreground truncate">{selectedMcpName}</h2>
+                <StatusBadge status={runtimeStatus?.status} enabled={enabled} />
+              </div>
+            )}
+            <div className="flex items-center gap-2 mt-0.5">
+              <p className="typography-meta text-muted-foreground truncate">
+                {isNewServer ? 'Configure a new MCP server' : `${mcpType === 'local' ? 'Local · stdio' : 'Remote · SSE'} transport`}
+              </p>
+              {!isNewServer && (
+                <ButtonSmall
                   variant={isConnected ? 'outline' : 'default'}
+                  size="xs"
+                  className="!font-normal"
                   onClick={handleToggleConnect}
                   disabled={isConnecting || !enabled}
-                  className={cn('h-8', isMobile ? 'w-full' : 'shrink-0')}
                 >
-                  {isConnecting ? 'Working…' : isConnected ? 'Disconnect' : 'Connect'}
-                </Button>
+                  {isConnecting ? 'Working...' : isConnected ? 'Disconnect' : 'Connect'}
+                </ButtonSmall>
               )}
-            </div>
-          </div>
-
-          <label className="group flex cursor-pointer items-center justify-between gap-2 px-4 py-3 transition-colors hover:bg-[var(--interactive-hover)]/30 border-b border-[var(--surface-subtle)]">
-            <div className="flex min-w-0 flex-col">
-              <span className="typography-ui-label text-foreground">Enable Server</span>
-            </div>
-            <Switch checked={enabled} onCheckedChange={setEnabled} aria-label="Toggle MCP server enabled" />
-          </label>
-
-          <div className={cn('px-4 py-3', isMobile ? 'flex flex-col gap-3' : 'flex items-center justify-between gap-4')}>
-            <div className={cn('flex min-w-0 flex-col', isMobile ? 'w-full' : 'shrink-0')}>
-              <span className="typography-ui-label text-foreground">Transport Mode</span>
-            </div>
-            <div className={cn('flex gap-1 flex-wrap', isMobile ? 'w-full' : 'justify-end')}>
-              <ButtonSmall
-                variant="outline"
-                onClick={() => setMcpType('local')}
-                className={cn(
-                  mcpType === 'local'
-                    ? 'border-[var(--primary-base)] text-[var(--primary-base)] bg-[var(--primary-base)]/10 hover:text-[var(--primary-base)]'
-                    : 'text-foreground'
-                )}
-              >
-                Local · stdio
-              </ButtonSmall>
-              <ButtonSmall
-                variant="outline"
-                onClick={() => setMcpType('remote')}
-                className={cn(
-                  mcpType === 'remote'
-                    ? 'border-[var(--primary-base)] text-[var(--primary-base)] bg-[var(--primary-base)]/10 hover:text-[var(--primary-base)]'
-                    : 'text-foreground'
-                )}
-              >
-                Remote · SSE
-              </ButtonSmall>
             </div>
           </div>
         </div>
 
-        {/* ── Connection ── */}
-        <div className="space-y-2">
-          {mcpType === 'local' ? (
-            <>
-              <label className="typography-ui-label font-medium text-foreground">
-                Command
-              </label>
+        {/* Server Identity */}
+        <div className="mb-8">
+          <div className="mb-1 px-1">
+            <h3 className="typography-ui-header font-medium text-foreground">Server</h3>
+          </div>
+
+          <section className="px-2 pb-2 pt-0 space-y-0">
+
+            {isNewServer && (
+              <div className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
+                <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
+                  <span className="typography-ui-label text-foreground">Server Name</span>
+                </div>
+                <div className="flex min-w-0 flex-1 items-center gap-2 sm:w-fit sm:flex-initial">
+                  <Input
+                    value={draftName}
+                    onChange={(e) => setDraftName(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, '-'))}
+                    placeholder="my-mcp-server"
+                    className="h-7 w-48 font-mono px-2"
+                    autoFocus
+                  />
+                  <Select value={draftScope} onValueChange={(value) => setDraftScope(value as McpScope)}>
+                    <SelectTrigger className="!h-7 !w-7 !min-w-0 !px-0 !py-0 justify-center [&>svg:last-child]:hidden" title={draftScope === 'user' ? 'User scope' : 'Project scope'}>
+                      {draftScope === 'user' ? <RiUser3Line className="h-3.5 w-3.5" /> : <RiFolderLine className="h-3.5 w-3.5" />}
+                    </SelectTrigger>
+                    <SelectContent align="end">
+                      <SelectItem value="user">
+                        <div className="flex items-center gap-2">
+                          <RiUser3Line className="h-3.5 w-3.5" />
+                          <span>User</span>
+                        </div>
+                      </SelectItem>
+                      <SelectItem value="project">
+                        <div className="flex items-center gap-2">
+                          <RiFolderLine className="h-3.5 w-3.5" />
+                          <span>Project</span>
+                        </div>
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
+
+            <div
+              className="group flex cursor-pointer items-center gap-2 py-1.5"
+              role="button"
+              tabIndex={0}
+              aria-pressed={enabled}
+              onClick={() => setEnabled(!enabled)}
+              onKeyDown={(event) => {
+                if (event.key === ' ' || event.key === 'Enter') {
+                  event.preventDefault();
+                  setEnabled(!enabled);
+                }
+              }}
+            >
+              <Checkbox
+                checked={enabled}
+                onChange={setEnabled}
+                ariaLabel="Enable server"
+              />
+              <span className="typography-ui-label text-foreground">Enable Server</span>
+            </div>
+
+            <div className="pb-1.5 pt-0.5">
+              <div className="flex min-w-0 flex-col gap-1.5">
+                <span className="typography-ui-label text-foreground">Transport Mode</span>
+                <div className="flex flex-wrap items-center gap-1">
+                  <ButtonSmall
+                    variant="outline"
+                    size="xs"
+                    onClick={() => setMcpType('local')}
+                    className={cn(
+                      '!font-normal',
+                      mcpType === 'local'
+                        ? 'border-[var(--primary-base)] text-[var(--primary-base)] bg-[var(--primary-base)]/10 hover:text-[var(--primary-base)]'
+                        : 'text-foreground'
+                    )}
+                  >
+                    Local · stdio
+                  </ButtonSmall>
+                  <ButtonSmall
+                    variant="outline"
+                    size="xs"
+                    onClick={() => setMcpType('remote')}
+                    className={cn(
+                      '!font-normal',
+                      mcpType === 'remote'
+                        ? 'border-[var(--primary-base)] text-[var(--primary-base)] bg-[var(--primary-base)]/10 hover:text-[var(--primary-base)]'
+                        : 'text-foreground'
+                    )}
+                  >
+                    Remote · SSE
+                  </ButtonSmall>
+                </div>
+              </div>
+            </div>
+
+          </section>
+        </div>
+
+        {/* Connection */}
+        <div className="mb-8">
+          <div className="mb-1 px-1">
+            <h3 className="typography-ui-header font-medium text-foreground">
+              {mcpType === 'local' ? 'Command' : 'Server URL'}
+            </h3>
+          </div>
+
+          <section className="px-2 pb-2 pt-0">
+            {mcpType === 'local' ? (
               <CommandTextarea value={command} onChange={setCommand} />
-            </>
-          ) : (
-            <>
-              <label className="typography-ui-label font-medium text-foreground">
-                Server URL (SSE endpoint)
-              </label>
+            ) : (
               <Input
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
                 placeholder="https://mcp.example.com/mcp"
                 className="font-mono typography-meta"
               />
-            </>
-          )}
+            )}
+          </section>
         </div>
 
-        {/* ── Environment Variables ── */}
-        <div className="space-y-2">
-          <div className="flex items-baseline justify-between">
-            <label className="typography-ui-label font-medium text-foreground">
+        {/* Environment Variables */}
+        <div className="mb-8">
+          <div className="mb-1 px-1">
+            <h3 className="typography-ui-header font-medium text-foreground">
               Environment Variables
               {envEntries.length > 0 && (
                 <span className="ml-1.5 typography-micro text-muted-foreground font-normal">
                   ({envEntries.length})
                 </span>
               )}
-            </label>
+            </h3>
           </div>
-          <EnvEditor value={envEntries} onChange={setEnvEntries} />
+
+          <section className="px-2 pb-2 pt-0">
+            <EnvEditor value={envEntries} onChange={setEnvEntries} />
+          </section>
         </div>
 
-        {/* ── Actions ── */}
-        <div className="flex items-center justify-between border-t border-[var(--interactive-border)] pt-4 gap-4">
-          {!isNewServer ? (
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => setShowDeleteConfirm(true)}
-              className="h-7 gap-1.5 typography-meta text-destructive hover:text-destructive hover:bg-destructive/10"
-            >
-              <RiDeleteBinLine className="h-3.5 w-3.5" />
-              Delete
-            </Button>
-          ) : <div />}
-
-          <Button
-            size="sm"
+        {/* Actions */}
+        <div className="flex items-center gap-2 px-2 py-1">
+          <ButtonSmall
             onClick={handleSave}
             disabled={isSaving || (!isDirty && !isNewServer)}
-            className="h-7 gap-1.5 typography-meta"
+            size="xs"
+            className="!font-normal"
           >
-            <RiSaveLine className="h-3.5 w-3.5" />
-            {isSaving ? 'Saving…' : isNewServer ? 'Create' : 'Save changes'}
-          </Button>
+            {isSaving ? 'Saving...' : isNewServer ? 'Create' : 'Save Changes'}
+          </ButtonSmall>
+          {!isNewServer && (
+            <ButtonSmall
+              variant="ghost"
+              size="xs"
+              className="!font-normal text-[var(--status-error)] hover:text-[var(--status-error)]"
+              onClick={() => setShowDeleteConfirm(true)}
+            >
+              Delete
+            </ButtonSmall>
+          )}
         </div>
       </div>
 
