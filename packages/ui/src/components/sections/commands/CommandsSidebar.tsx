@@ -1,5 +1,5 @@
 import React from 'react';
-import { Button } from '@/components/ui/button';
+import { ButtonSmall } from '@/components/ui/button-small';
 import { ButtonLarge } from '@/components/ui/button-large';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui';
@@ -21,7 +21,6 @@ import {
 import { RiAddLine, RiTerminalBoxLine, RiMore2Line, RiDeleteBinLine, RiFileCopyLine, RiRestartLine, RiEditLine } from '@remixicon/react';
 import { useCommandsStore, isCommandBuiltIn, type Command } from '@/stores/useCommandsStore';
 import { useSkillsStore } from '@/stores/useSkillsStore';
-import { useDeviceInfo } from '@/lib/device';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { cn } from '@/lib/utils';
 import { SettingsProjectSelector } from '@/components/sections/shared/SettingsProjectSelector';
@@ -48,9 +47,6 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
     loadCommands,
   } = useCommandsStore();
   const { skills, loadSkills } = useSkillsStore();
-
-  const { isMobile } = useDeviceInfo();
-
 
   React.useEffect(() => {
     loadCommands();
@@ -90,9 +86,7 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
     setSelectedCommand(newName);
     onItemSelect?.();
 
-    if (isMobile) {
-      // Settings mobile drilldown handles navigation.
-    }
+
   };
 
   const handleDeleteCommand = async (command: Command) => {
@@ -164,9 +158,7 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
     });
     setSelectedCommand(newName);
 
-    if (isMobile) {
-      // Settings mobile drilldown handles navigation.
-    }
+
   };
 
   const handleOpenRenameDialog = (command: Command) => {
@@ -224,20 +216,18 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
 
   return (
     <div className={cn('flex h-full flex-col', bgClass)}>
-      <div className={cn('border-b px-3', isMobile ? 'mt-2 py-3' : 'pt-4 pb-3')}>
+      <div className="border-b px-3 pt-4 pb-3">
         <h2 className="text-base font-semibold text-foreground mb-3">Commands</h2>
         <SettingsProjectSelector className="mb-3" />
         <div className="flex items-center justify-between gap-2">
           <span className="typography-meta text-muted-foreground">Total {commandOnlyItems.length}</span>
-          <Button
-            type="button"
+          <ButtonSmall
             variant="ghost"
-            size="icon"
-            className="h-7 w-7 -my-1 text-muted-foreground"
+            className="h-7 w-7 px-0 -my-1 text-muted-foreground"
             onClick={handleCreateNew}
           >
-            <RiAddLine className="size-4" />
-          </Button>
+            <RiAddLine className="h-3.5 w-3.5" />
+          </ButtonSmall>
         </div>
       </div>
 
@@ -263,9 +253,7 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
                     onSelect={() => {
                       setSelectedCommand(command.name);
                       onItemSelect?.();
-                      if (isMobile) {
-                        // Settings mobile drilldown handles navigation.
-                      }
+
                     }}
                     onReset={() => handleResetCommand(command)}
                     onDuplicate={() => handleDuplicateCommand(command)}
@@ -289,9 +277,7 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
                     onSelect={() => {
                       setSelectedCommand(command.name);
                       onItemSelect?.();
-                      if (isMobile) {
-                        // Settings mobile drilldown handles navigation.
-                      }
+
                     }}
                     onRename={() => handleOpenRenameDialog(command)}
                     onDelete={() => handleDeleteCommand(command)}
@@ -324,14 +310,13 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button
+            <ButtonLarge
               variant="ghost"
               onClick={closeConfirmActionDialog}
               disabled={isConfirmActionPending}
-              className="text-foreground hover:bg-interactive-hover hover:text-foreground"
             >
               Cancel
-            </Button>
+            </ButtonLarge>
             <ButtonLarge onClick={handleConfirmAction} disabled={isConfirmActionPending}>
               {confirmActionType === 'delete' ? 'Delete' : 'Reset'}
             </ButtonLarge>
@@ -360,13 +345,12 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
             }}
           />
           <DialogFooter>
-            <Button
+            <ButtonLarge
               variant="ghost"
               onClick={() => setRenameDialogCommand(null)}
-                className="text-foreground hover:bg-interactive-hover hover:text-foreground"
             >
               Cancel
-            </Button>
+            </ButtonLarge>
             <ButtonLarge onClick={handleRenameCommand}>
               Rename
             </ButtonLarge>
@@ -438,13 +422,12 @@ const CommandListItem: React.FC<CommandListItemProps> = ({
 
         <DropdownMenu open={isMenuOpen} onOpenChange={onMenuOpenChange}>
           <DropdownMenuTrigger asChild>
-            <Button
-              size="icon"
+            <ButtonSmall
               variant="ghost"
-              className="h-6 w-6 flex-shrink-0 -mr-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100"
+              className="h-6 w-6 px-0 flex-shrink-0 -mr-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100"
             >
               <RiMore2Line className="h-3.5 w-3.5" />
-            </Button>
+            </ButtonSmall>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-fit min-w-20">
             {onRename && (

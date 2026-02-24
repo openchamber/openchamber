@@ -1,10 +1,9 @@
 import React from 'react';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
-import { Button } from '@/components/ui/button';
+import { ButtonSmall } from '@/components/ui/button-small';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { useDeviceInfo } from '@/lib/device';
 import { RiAddLine, RiStackLine } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import { SettingsProjectSelector } from '@/components/sections/shared/SettingsProjectSelector';
@@ -41,8 +40,6 @@ export const ProvidersSidebar: React.FC<ProvidersSidebarProps> = ({ onItemSelect
   const selectedProviderId = useConfigStore((state) => state.selectedProviderId);
   const setSelectedProvider = useConfigStore((state) => state.setSelectedProvider);
   const activeProjectId = useProjectsStore((s) => s.activeProjectId);
-  const { isMobile } = useDeviceInfo();
-
   const [sourcesByProvider, setSourcesByProvider] = React.useState<Record<string, ProviderSources>>({});
   const directory = React.useMemo(() => {
     // tie refresh to active project changes (directory is stored in the client)
@@ -108,16 +105,14 @@ export const ProvidersSidebar: React.FC<ProvidersSidebarProps> = ({ onItemSelect
 
   return (
     <div className={cn('flex h-full flex-col', bgClass)}>
-      <div className={cn('border-b px-3', isMobile ? 'mt-2 py-3' : 'pt-4 pb-3')}>
+      <div className="border-b px-3 pt-4 pb-3">
         <h2 className="text-base font-semibold text-foreground mb-3">Providers</h2>
         <SettingsProjectSelector className="mb-3" />
         <div className="flex items-center justify-between gap-2">
           <span className="typography-meta text-muted-foreground">Total {providers.length}</span>
-          <Button
-            type="button"
+          <ButtonSmall
             variant="ghost"
-            size="icon"
-            className="h-7 w-7 -my-1 text-muted-foreground"
+            className="h-7 w-7 px-0 -my-1 text-muted-foreground"
             onClick={() => {
               setSelectedProvider(ADD_PROVIDER_ID);
               onItemSelect?.();
@@ -125,8 +120,8 @@ export const ProvidersSidebar: React.FC<ProvidersSidebarProps> = ({ onItemSelect
             aria-label="Connect provider"
             title="Connect provider"
           >
-            <RiAddLine className="size-4" />
-          </Button>
+            <RiAddLine className="h-3.5 w-3.5" />
+          </ButtonSmall>
         </div>
       </div>
 

@@ -1,11 +1,10 @@
 import React from 'react';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
-import { Button } from '@/components/ui/button';
-import { Switch } from '@/components/ui/switch';
+import { ButtonSmall } from '@/components/ui/button-small';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { useDeviceInfo } from '@/lib/device';
 import { cn } from '@/lib/utils';
 import { QUOTA_PROVIDERS, resolveUsageTone } from '@/lib/quota';
 import { useQuotaStore } from '@/stores/useQuotaStore';
@@ -40,7 +39,6 @@ export const UsageSidebar: React.FC<UsageSidebarProps> = ({ onItemSelect }) => {
   const setUsageRefreshInterval = useQuotaStore((state) => state.setRefreshInterval);
   const setUsageDisplayMode = useQuotaStore((state) => state.setDisplayMode);
   const loadUsageSettings = useQuotaStore((state) => state.loadSettings);
-  const { isMobile } = useDeviceInfo();
 
   React.useEffect(() => {
     void loadUsageSettings();
@@ -80,7 +78,7 @@ export const UsageSidebar: React.FC<UsageSidebarProps> = ({ onItemSelect }) => {
 
   return (
     <div className={cn('flex h-full flex-col', bgClass)}>
-      <div className={cn('border-b px-3', isMobile ? 'mt-2 py-3' : 'pt-4 pb-3')}>
+      <div className="border-b px-3 pt-4 pb-3">
         <h2 className="text-base font-semibold text-foreground mb-3">Usage</h2>
         <div className="flex items-center justify-between gap-2">
           <span className="typography-meta text-muted-foreground">Total {QUOTA_PROVIDERS.length}</span>
@@ -88,11 +86,10 @@ export const UsageSidebar: React.FC<UsageSidebarProps> = ({ onItemSelect }) => {
             <Tooltip delayDuration={700}>
               <TooltipTrigger asChild>
                 <span className="inline-flex">
-                  <Switch
+                  <Checkbox
                     checked={usageAutoRefresh}
-                    onCheckedChange={handleUsageAutoRefreshChange}
-                    aria-label="Toggle auto refresh"
-                    className="data-[state=checked]:bg-[var(--status-info)]"
+                    onChange={handleUsageAutoRefreshChange}
+                    ariaLabel="Toggle auto refresh"
                   />
                 </span>
               </TooltipTrigger>
@@ -105,42 +102,36 @@ export const UsageSidebar: React.FC<UsageSidebarProps> = ({ onItemSelect }) => {
               onValueChange={handleUsageRefreshIntervalChange}
               disabled={!usageAutoRefresh}
             >
-              <SelectTrigger size="lg" className="min-w-[72px]">
+              <SelectTrigger className="w-fit">
                 <SelectValue placeholder="Interval" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="30000" className="pr-2 [&>span:first-child]:hidden">30s</SelectItem>
-                <SelectItem value="60000" className="pr-2 [&>span:first-child]:hidden">1m</SelectItem>
-                <SelectItem value="300000" className="pr-2 [&>span:first-child]:hidden">5m</SelectItem>
+                <SelectItem value="30000">30s</SelectItem>
+                <SelectItem value="60000">1m</SelectItem>
+                <SelectItem value="300000">5m</SelectItem>
               </SelectContent>
             </Select>
-            <Button
-              type="button"
+            <ButtonSmall
               variant="ghost"
-              size="icon"
-              className="h-7 w-7 -my-1 text-muted-foreground overflow-hidden"
+              className="h-7 w-7 px-0 text-muted-foreground"
               onClick={() => fetchAllQuotas()}
               aria-label="Refresh usage"
               title="Refresh usage"
               disabled={isLoading}
             >
-              <RiRefreshLine className={cn('size-4', isLoading && 'animate-spin')} />
-            </Button>
+              <RiRefreshLine className={cn('h-3.5 w-3.5', isLoading && 'animate-spin')} />
+            </ButtonSmall>
           </div>
         </div>
         <div className="mt-2 flex items-center justify-between gap-2">
           <span className="typography-micro text-muted-foreground">Display</span>
           <Select value={usageDisplayMode} onValueChange={handleUsageDisplayModeChange}>
-            <SelectTrigger size="lg" className="min-w-[140px]">
+            <SelectTrigger className="w-fit">
               <SelectValue placeholder="Display mode" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="usage" className="pr-2 [&>span:first-child]:hidden">
-                Usage
-              </SelectItem>
-              <SelectItem value="remaining" className="pr-2 [&>span:first-child]:hidden">
-                Quota remaining
-              </SelectItem>
+              <SelectItem value="usage">Usage</SelectItem>
+              <SelectItem value="remaining">Quota remaining</SelectItem>
             </SelectContent>
           </Select>
         </div>

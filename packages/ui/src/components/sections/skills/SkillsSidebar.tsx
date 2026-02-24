@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { Button } from '@/components/ui/button';
+import { ButtonSmall } from '@/components/ui/button-small';
 import { ButtonLarge } from '@/components/ui/button-large';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui';
@@ -20,7 +20,6 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { RiAddLine, RiDeleteBinLine, RiFileCopyLine, RiMore2Line, RiEditLine, RiBookOpenLine } from '@remixicon/react';
 import { useSkillsStore, type DiscoveredSkill } from '@/stores/useSkillsStore';
-import { useDeviceInfo } from '@/lib/device';
 import { cn } from '@/lib/utils';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { SettingsProjectSelector } from '@/components/sections/shared/SettingsProjectSelector';
@@ -47,8 +46,6 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
     getSkillDetail,
   } = useSkillsStore();
 
-  const { isMobile } = useDeviceInfo();
-
   // Skills are loaded by the Settings shell when this page is active.
 
   const bgClass = 'bg-background';
@@ -68,9 +65,7 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
     setSelectedSkill(newName);
     onItemSelect?.();
 
-    if (isMobile) {
-      // Settings mobile drilldown handles navigation.
-    }
+
   };
 
   const handleDeleteSkill = async (skill: DiscoveredSkill) => {
@@ -120,9 +115,7 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
       });
     setSelectedSkill(newName);
 
-    if (isMobile) {
-      // Settings mobile drilldown handles navigation.
-    }
+
   };
 
   const handleOpenRenameDialog = (skill: DiscoveredSkill) => {
@@ -209,20 +202,18 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
 
   return (
     <div className={cn('flex h-full flex-col', bgClass)}>
-      <div className={cn('border-b px-3', isMobile ? 'mt-2 py-3' : 'pt-4 pb-3')}>
+      <div className="border-b px-3 pt-4 pb-3">
         <h2 className="text-base font-semibold text-foreground mb-3">Skills</h2>
         <SettingsProjectSelector className="mb-3" />
         <div className="flex items-center justify-between gap-2">
           <span className="typography-meta text-muted-foreground">Total {skills.length}</span>
-          <Button
-            type="button"
+          <ButtonSmall
             variant="ghost"
-            size="icon"
-            className="h-7 w-7 -my-1 text-muted-foreground"
+            className="h-7 w-7 px-0 -my-1 text-muted-foreground"
             onClick={handleCreateNew}
           >
-            <RiAddLine className="size-4" />
-          </Button>
+            <RiAddLine className="h-3.5 w-3.5" />
+          </ButtonSmall>
         </div>
       </div>
 
@@ -255,9 +246,7 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
                         onSelect={() => {
                           setSelectedSkill(skill.name);
                           onItemSelect?.();
-                          if (isMobile) {
-                            // Settings mobile drilldown handles navigation.
-                          }
+
                         }}
                         onRename={() => handleOpenRenameDialog(skill)}
                         onDelete={() => handleDeleteSkill(skill)}
@@ -276,9 +265,7 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
                     onSelect={() => {
                       setSelectedSkill(skill.name);
                       onItemSelect?.();
-                      if (isMobile) {
-                        // Settings mobile drilldown handles navigation.
-                      }
+
                     }}
                     onRename={() => handleOpenRenameDialog(skill)}
                     onDelete={() => handleDeleteSkill(skill)}
@@ -310,9 +297,7 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
                         onSelect={() => {
                           setSelectedSkill(skill.name);
                           onItemSelect?.();
-                          if (isMobile) {
-                            // Settings mobile drilldown handles navigation.
-                          }
+
                         }}
                         onRename={() => handleOpenRenameDialog(skill)}
                         onDelete={() => handleDeleteSkill(skill)}
@@ -331,9 +316,7 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
                     onSelect={() => {
                       setSelectedSkill(skill.name);
                       onItemSelect?.();
-                      if (isMobile) {
-                        // Settings mobile drilldown handles navigation.
-                      }
+
                     }}
                     onRename={() => handleOpenRenameDialog(skill)}
                     onDelete={() => handleDeleteSkill(skill)}
@@ -478,13 +461,12 @@ const SkillListItem: React.FC<SkillListItemProps> = ({
 
         <DropdownMenu open={isMenuOpen} onOpenChange={onMenuOpenChange}>
           <DropdownMenuTrigger asChild>
-            <Button
-              size="icon"
+            <ButtonSmall
               variant="ghost"
-              className="h-6 w-6 flex-shrink-0 -mr-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100"
+              className="h-6 w-6 px-0 flex-shrink-0 -mr-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100"
             >
               <RiMore2Line className="h-3.5 w-3.5" />
-            </Button>
+            </ButtonSmall>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-fit min-w-20">
             <DropdownMenuItem

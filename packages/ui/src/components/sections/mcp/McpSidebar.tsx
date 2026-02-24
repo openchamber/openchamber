@@ -1,5 +1,5 @@
 import React from 'react';
-import { Button } from '@/components/ui/button';
+import { ButtonSmall } from '@/components/ui/button-small';
 import { ButtonLarge } from '@/components/ui/button-large';
 import {
   Dialog,
@@ -13,7 +13,7 @@ import { RiAddLine, RiDeleteBinLine, RiMore2Line, RiPlugLine } from '@remixicon/
 import { useMcpConfigStore, type McpDraft, type McpServerConfig } from '@/stores/useMcpConfigStore';
 import { useMcpStore } from '@/stores/useMcpStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { useDeviceInfo, isMobileDeviceViaCSS } from '@/lib/device';
+import { isMobileDeviceViaCSS } from '@/lib/device';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
@@ -60,7 +60,6 @@ const StatusDot: React.FC<{ tone: StatusTone; enabled: boolean }> = ({ tone, ena
 };
 
 export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
-  const { isMobile } = useDeviceInfo();
   const bgClass = 'bg-background';
 
   const { mcpServers, selectedMcpName, setSelectedMcp, setMcpDraft, loadMcpConfigs, deleteMcp } =
@@ -124,23 +123,21 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
 
   return (
     <div className={cn('flex h-full flex-col', bgClass)}>
-      <div className={cn('border-b px-3', isMobile ? 'mt-2 py-3' : 'pt-4 pb-3')}>
+      <div className="border-b px-3 pt-4 pb-3">
         <h2 className="text-base font-semibold text-foreground mb-3">MCP Servers</h2>
         <SettingsProjectSelector className="mb-3" />
         <div className="flex items-center justify-between gap-2">
           <span className="typography-meta text-muted-foreground">
             Total {mcpServers.length}
           </span>
-          <Button
-            type="button"
+          <ButtonSmall
             variant="ghost"
-            size="icon"
-            className="h-7 w-7 -my-1 text-muted-foreground"
+            className="h-7 w-7 px-0 -my-1 text-muted-foreground"
             onClick={handleCreateNew}
             title="Add MCP server"
           >
-            <RiAddLine className="size-4" />
-          </Button>
+            <RiAddLine className="h-3.5 w-3.5" />
+          </ButtonSmall>
         </div>
       </div>
 
@@ -201,9 +198,9 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
 
                       <DropdownMenu open={openMenuMcp === server.name} onOpenChange={(open) => setOpenMenuMcp(open ? server.name : null)}>
                         <DropdownMenuTrigger asChild>
-                          <Button size="icon" variant="ghost" className="h-6 w-6 flex-shrink-0 -mr-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100">
+                          <ButtonSmall variant="ghost" className="h-6 w-6 px-0 flex-shrink-0 -mr-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100">
                             <RiMore2Line className="h-3.5 w-3.5" />
-                          </Button>
+                          </ButtonSmall>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-fit min-w-20">
                           <DropdownMenuItem
@@ -271,9 +268,9 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
 
                       <DropdownMenu open={openMenuMcp === server.name} onOpenChange={(open) => setOpenMenuMcp(open ? server.name : null)}>
                         <DropdownMenuTrigger asChild>
-                          <Button size="icon" variant="ghost" className="h-6 w-6 flex-shrink-0 -mr-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100">
+                          <ButtonSmall variant="ghost" className="h-6 w-6 px-0 flex-shrink-0 -mr-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100">
                             <RiMore2Line className="h-3.5 w-3.5" />
-                          </Button>
+                          </ButtonSmall>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-fit min-w-20">
                           <DropdownMenuItem
@@ -311,14 +308,13 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button
+            <ButtonLarge
               variant="ghost"
               onClick={() => setDeleteTarget(null)}
               disabled={isDeleting}
-              className="text-foreground hover:bg-interactive-hover hover:text-foreground"
             >
               Cancel
-            </Button>
+            </ButtonLarge>
             <ButtonLarge onClick={handleDelete} disabled={isDeleting}>
               {isDeleting ? 'Deleting…' : 'Delete'}
             </ButtonLarge>
