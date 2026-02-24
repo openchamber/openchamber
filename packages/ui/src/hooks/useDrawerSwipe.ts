@@ -2,8 +2,23 @@ import React from 'react';
 import { animate } from 'motion/react';
 import { useDrawer } from '@/contexts/DrawerContext';
 
-export function useDrawerSwipe() {
+type DrawerSwipeOptions = {
+  edgeSide?: 'left' | 'right';
+  strictHorizontalIntent?: boolean;
+  horizontalIntentRatio?: number;
+  activationDistance?: number;
+  onlyWhenClosed?: boolean;
+};
+
+export function useDrawerSwipe(options: DrawerSwipeOptions = {}) {
   const drawer = useDrawer();
+  const {
+    edgeSide,
+    strictHorizontalIntent = false,
+    horizontalIntentRatio = 1.35,
+    activationDistance = 30,
+    onlyWhenClosed = false,
+  } = options;
   const touchStartXRef = React.useRef(0);
   const touchStartYRef = React.useRef(0);
   const isHorizontalSwipeRef = React.useRef<boolean | null>(null);
@@ -24,29 +39,49 @@ export function useDrawerSwipe() {
 
     if (isHorizontalSwipeRef.current === null) {
       if (Math.abs(deltaX) > 5 || Math.abs(deltaY) > 5) {
-        isHorizontalSwipeRef.current = Math.abs(deltaX) > Math.abs(deltaY);
+        if (strictHorizontalIntent) {
+          isHorizontalSwipeRef.current = Math.abs(deltaX) > Math.abs(deltaY) * horizontalIntentRatio;
+        } else {
+          isHorizontalSwipeRef.current = Math.abs(deltaX) > Math.abs(deltaY);
+        }
       }
     }
 
     if (isHorizontalSwipeRef.current === true) {
-      e.preventDefault();
+      if (onlyWhenClosed && (drawer.leftDrawerOpen || drawer.rightDrawerOpen)) {
+        return;
+      }
 
       const leftDrawerWidthPx = drawer.leftDrawerWidth.current || window.innerWidth * 0.85;
       const rightDrawerWidthPx = drawer.rightDrawerWidth.current || window.innerWidth * 0.85;
 
       if (isDraggingDrawerRef.current === null) {
-        if (drawer.leftDrawerOpen && deltaX > 10) {
+        if (!edgeSide && drawer.leftDrawerOpen && deltaX > 10) {
           isDraggingDrawerRef.current = 'left';
-        } else if (drawer.rightDrawerOpen && deltaX < -10) {
+        } else if (!edgeSide && drawer.rightDrawerOpen && deltaX < -10) {
           isDraggingDrawerRef.current = 'right';
         } else if (!drawer.leftDrawerOpen && !drawer.rightDrawerOpen) {
-          if (deltaX > 30) {
+          if (edgeSide === 'left') {
+            if (deltaX > activationDistance) {
+              isDraggingDrawerRef.current = 'left';
+            }
+          } else if (edgeSide === 'right') {
+            if (deltaX < -activationDistance) {
+              isDraggingDrawerRef.current = 'right';
+            }
+          } else if (deltaX > activationDistance) {
             isDraggingDrawerRef.current = 'left';
-          } else if (deltaX < -30) {
+          } else if (deltaX < -activationDistance) {
             isDraggingDrawerRef.current = 'right';
           }
         }
       }
+
+      if (!isDraggingDrawerRef.current) {
+        return;
+      }
+
+      e.preventDefault();
 
       if (isDraggingDrawerRef.current === 'left') {
         if (drawer.leftDrawerOpen) {
@@ -68,7 +103,7 @@ export function useDrawerSwipe() {
         }
       }
     }
-  }, [drawer]);
+  }, [activationDistance, drawer, edgeSide, horizontalIntentRatio, onlyWhenClosed, strictHorizontalIntent]);
 
   const handleTouchEnd = React.useCallback((e: React.TouchEvent) => {
     if (isHorizontalSwipeRef.current !== true) return;

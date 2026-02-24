@@ -87,23 +87,21 @@ export const ScrollShadow = React.forwardRef<HTMLDivElement, ScrollShadowProps>(
         return;
       }
 
-      let hasBefore = orientation === "vertical" ? el.scrollTop > offset : el.scrollLeft > offset;
+      const hasBefore = orientation === "vertical" ? el.scrollTop > offset : el.scrollLeft > offset;
       let hasAfter =
         orientation === "vertical"
           ? el.scrollTop + el.clientHeight + offset < el.scrollHeight
           : el.scrollLeft + el.clientWidth + offset < el.scrollWidth;
 
-      if (hideTopShadow && orientation === "vertical") {
-        hasBefore = false;
-      }
+      const effectiveHasBefore = hideTopShadow && orientation === "vertical" ? false : hasBefore;
 
       if (hideBottomShadow && orientation === "vertical") {
         hasAfter = false;
       }
 
-      setAttributes(el, hasBefore, hasAfter, orientation === "vertical" ? "top" : "left", orientation === "vertical" ? "bottom" : "right");
+      setAttributes(el, effectiveHasBefore, hasAfter, orientation === "vertical" ? "top" : "left", orientation === "vertical" ? "bottom" : "right");
 
-      const next = hasBefore && hasAfter ? "both" : hasBefore ? (orientation === "vertical" ? "top" : "left") : hasAfter ? (orientation === "vertical" ? "bottom" : "right") : "none";
+      const next = effectiveHasBefore && hasAfter ? "both" : effectiveHasBefore ? (orientation === "vertical" ? "top" : "left") : hasAfter ? (orientation === "vertical" ? "bottom" : "right") : "none";
       if (next !== visibleRef.current) {
         visibleRef.current = next;
         onVisibilityChange?.(next);

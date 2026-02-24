@@ -21,14 +21,12 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useDeviceInfo } from '@/lib/device';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
-import { useDrawerSwipe } from '@/hooks/useDrawerSwipe';
 import { cn } from '@/lib/utils';
 
 import { ChatView, PlanView, GitView, DiffView, TerminalView, FilesView, SettingsView, SettingsWindow } from '@/components/views';
 
 // Mobile drawer width as screen percentage
 const MOBILE_DRAWER_WIDTH_PERCENT = 85;
-const MOBILE_EDGE_SWIPE_WIDTH_PX = 20;
 
 const normalizeDirectoryKey = (value: string): string => {
     if (!value) return '';
@@ -48,43 +46,6 @@ const normalizeDirectoryKey = (value: string): string => {
 
     return normalized;
 };
-
-const MobileDrawerEdgeSwipeZones: React.FC<{ disabled?: boolean }> = ({ disabled = false }) => {
-    const { handleTouchStart, handleTouchMove, handleTouchEnd } = useDrawerSwipe();
-
-    if (disabled) {
-        return null;
-    }
-
-    return (
-        <>
-            <div
-                className="fixed left-0 bottom-0 z-30"
-                style={{
-                    top: 'var(--oc-header-height, 56px)',
-                    width: `${MOBILE_EDGE_SWIPE_WIDTH_PX}px`,
-                    touchAction: 'pan-y',
-                }}
-                onTouchStart={handleTouchStart}
-                onTouchMove={handleTouchMove}
-                onTouchEnd={handleTouchEnd}
-            />
-            <div
-                className="fixed right-0 bottom-0 z-30"
-                style={{
-                    top: 'var(--oc-header-height, 56px)',
-                    width: `${MOBILE_EDGE_SWIPE_WIDTH_PX}px`,
-                    touchAction: 'pan-y',
-                }}
-                onTouchStart={handleTouchStart}
-                onTouchMove={handleTouchMove}
-                onTouchEnd={handleTouchEnd}
-            />
-        </>
-    );
-};
-
-
 
 export const MainLayout: React.FC = () => {
     const RIGHT_SIDEBAR_AUTO_CLOSE_WIDTH = 1140;
@@ -767,7 +728,6 @@ export const MainLayout: React.FC = () => {
                     </motion.aside>
                     
                     {/* Main content area (fixed) */}
-                    <MobileDrawerEdgeSwipeZones disabled={isSettingsDialogOpen || isMultiRunLauncherOpen} />
                     <div
                         className={cn(
                             'flex flex-1 overflow-hidden relative',

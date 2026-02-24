@@ -12,6 +12,7 @@ import { filterSyntheticParts } from '@/lib/messages/synthetic';
 import { detectTurns, type Turn } from './hooks/useTurnGrouping';
 import { TurnGroupingProvider, useMessageNeighbors, useTurnGroupingContextForMessage, useTurnGroupingContextStatic, useLastTurnMessageIds } from './contexts/TurnGroupingContext';
 import { useSessionStore } from '@/stores/useSessionStore';
+import { useDeviceInfo } from '@/lib/device';
 
 interface ChatMessageEntry {
     info: Message;
@@ -421,6 +422,7 @@ const MessageList: React.FC<MessageListProps> = ({
     onRenderEarlier,
     scrollToBottom,
 }) => {
+    const { isMobile } = useDeviceInfo();
     React.useEffect(() => {
         if (permissions.length === 0 && questions.length === 0) {
             return;
@@ -641,8 +643,8 @@ const MessageList: React.FC<MessageListProps> = ({
                     </div>
                 )}
 
-                {/* Bottom spacer - always 10% of viewport height */}
-                <div className="flex-shrink-0" style={{ height: '10vh' }} aria-hidden="true" />
+                {/* Bottom spacer */}
+                <div className="flex-shrink-0" style={{ height: isMobile ? '8px' : '10vh' }} aria-hidden="true" />
             </div>
         </TurnGroupingProvider>
     );

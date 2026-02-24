@@ -134,7 +134,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     } = useThemeSystem();
 
     const [themesReloading, setThemesReloading] = React.useState(false);
-
     const lightThemes = React.useMemo(
         () => availableThemes
             .filter((theme) => theme.metadata.variant === 'light')
