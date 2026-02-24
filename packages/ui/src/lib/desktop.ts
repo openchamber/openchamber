@@ -46,6 +46,7 @@ export type DesktopSettings = {
   pinnedDirectories?: string[];
   showReasoningTraces?: boolean;
   showTextJustificationActivity?: boolean;
+  showDeletionDialog?: boolean;
   nativeNotificationsEnabled?: boolean;
   notificationMode?: 'always' | 'hidden-only';
   notifyOnSubtasks?: boolean;
@@ -92,6 +93,8 @@ export type DesktopSettings = {
   queueModeEnabled?: boolean;
   gitmojiEnabled?: boolean;
   zenModel?: string;
+  gitProviderId?: string;
+  gitModelId?: string;
   toolCallExpansion?: 'collapsed' | 'activity' | 'detailed';
   fontSize?: number;
   terminalFontSize?: number;

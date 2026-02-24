@@ -14,6 +14,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { opencodeClient } from '@/lib/opencode/client';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import type { ContentChangeReason } from '@/hooks/useChatScrollManager';
+import type { ToolPopupContent } from '../types';
 
 import {
     renderListOutput,
@@ -38,6 +39,7 @@ interface ToolPartProps {
     syntaxTheme: { [key: string]: React.CSSProperties };
     isMobile: boolean;
     onContentChange?: (reason?: ContentChangeReason) => void;
+    onShowPopup?: (content: ToolPopupContent) => void;
     hasPrevTool?: boolean;
     hasNextTool?: boolean;
 }
@@ -456,7 +458,8 @@ const TaskToolSummary: React.FC<{
     hasNextTool: boolean;
     output?: string;
     sessionId?: string;
-}> = ({ entries, isExpanded, hasPrevTool, hasNextTool, output, sessionId }) => {
+    onShowPopup?: (content: ToolPopupContent) => void;
+}> = ({ entries, isExpanded, hasPrevTool, hasNextTool, output, sessionId, onShowPopup }) => {
     const setCurrentSession = useSessionStore((state) => state.setCurrentSession);
     const displayEntries = React.useMemo(() => {
         const nonPending = entries.filter((entry) => entry.state?.status !== 'pending');
@@ -555,7 +558,7 @@ const TaskToolSummary: React.FC<{
                     {isOutputExpanded ? (
                         <ToolScrollableSection maxHeightClass="max-h-[50vh]">
                             <div className="w-full min-w-0">
-                                <SimpleMarkdownRenderer content={trimmedOutput} variant="tool" />
+                                <SimpleMarkdownRenderer content={trimmedOutput} variant="tool" onShowPopup={onShowPopup} />
                             </div>
                         </ToolScrollableSection>
                     ) : null}
@@ -770,6 +773,7 @@ interface ToolExpandedContentProps {
     syntaxTheme: { [key: string]: React.CSSProperties };
     isMobile: boolean;
     currentDirectory: string;
+    onShowPopup?: (content: ToolPopupContent) => void;
     hasPrevTool: boolean;
     hasNextTool: boolean;
 }
@@ -780,6 +784,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     syntaxTheme,
     isMobile,
     currentDirectory,
+    onShowPopup,
     hasPrevTool,
     hasNextTool,
 }) => {
@@ -946,7 +951,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         if (part.tool === 'task' && hasStringOutput) {
             return renderScrollableBlock(
                 <div className="w-full min-w-0">
-                    <SimpleMarkdownRenderer content={outputString} variant="tool" />
+                    <SimpleMarkdownRenderer content={outputString} variant="tool" onShowPopup={onShowPopup} />
                 </div>
             );
         }
@@ -965,7 +970,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         if (part.tool === 'codesearch' && hasStringOutput) {
             return renderScrollableBlock(
                 <div className="w-full min-w-0">
-                    <SimpleMarkdownRenderer content={outputString} variant="tool" />
+                    <SimpleMarkdownRenderer content={outputString} variant="tool" onShowPopup={onShowPopup} />
                 </div>
             );
         }
@@ -973,7 +978,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         if (part.tool === 'skill' && hasStringOutput) {
             return renderScrollableBlock(
                 <div className="w-full min-w-0">
-                    <SimpleMarkdownRenderer content={outputString} variant="tool" />
+                    <SimpleMarkdownRenderer content={outputString} variant="tool" onShowPopup={onShowPopup} />
                 </div>
             );
         }
@@ -1106,7 +1111,17 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
 
 ToolExpandedContent.displayName = 'ToolExpandedContent';
 
-const ToolPart: React.FC<ToolPartProps> = ({ part, isExpanded, onToggle, syntaxTheme, isMobile, onContentChange, hasPrevTool = false, hasNextTool = false }) => {
+const ToolPart: React.FC<ToolPartProps> = ({
+    part,
+    isExpanded,
+    onToggle,
+    syntaxTheme,
+    isMobile,
+    onContentChange,
+    onShowPopup,
+    hasPrevTool = false,
+    hasNextTool = false,
+}) => {
     const state = part.state;
     const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
 
@@ -1413,6 +1428,7 @@ const ToolPart: React.FC<ToolPartProps> = ({ part, isExpanded, onToggle, syntaxT
                     hasNextTool={hasNextTool}
                     output={taskOutputString}
                     sessionId={taskSessionId}
+                    onShowPopup={onShowPopup}
                 />
             ) : null}
 
@@ -1423,6 +1439,7 @@ const ToolPart: React.FC<ToolPartProps> = ({ part, isExpanded, onToggle, syntaxT
                     syntaxTheme={syntaxTheme}
                     isMobile={isMobile}
                     currentDirectory={currentDirectory}
+                    onShowPopup={onShowPopup}
                     hasPrevTool={hasPrevTool}
                     hasNextTool={hasNextTool}
                 />

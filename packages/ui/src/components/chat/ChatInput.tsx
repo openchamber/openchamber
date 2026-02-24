@@ -2249,7 +2249,11 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                                     <div className="flex items-center min-w-0 gap-x-1 justify-end">
                                         <div className="flex items-center gap-x-1 min-w-0 max-w-[60vw] flex-shrink">
                                             <MobileModelButton onOpenModel={handleOpenMobileControls} className="min-w-0 flex-shrink" />
-                                            <MobileAgentButton onCycleAgent={handleCycleAgent} onOpenAgentPanel={() => setMobileControlsPanel('agent')} className="min-w-0 flex-shrink" />
+                                            <MobileAgentButton
+                                                onOpenAgentPanel={() => setMobileControlsPanel('agent')}
+                                                onCycleAgent={handleCycleAgent}
+                                                className="min-w-0 flex-shrink"
+                                            />
                                         </div>
                                         <div className="flex items-center gap-x-1 flex-shrink-0">
                                             <BrowserVoiceButton />

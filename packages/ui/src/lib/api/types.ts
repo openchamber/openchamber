@@ -390,10 +390,10 @@ export interface GitAPI {
   getGitBranches(directory: string): Promise<GitBranch>;
   deleteGitBranch(directory: string, payload: GitDeleteBranchPayload): Promise<{ success: boolean }>;
   deleteRemoteBranch(directory: string, payload: GitDeleteRemoteBranchPayload): Promise<{ success: boolean }>;
-  generateCommitMessage(directory: string, files: string[], options?: { zenModel?: string }): Promise<{ message: GeneratedCommitMessage }>;
+  generateCommitMessage(directory: string, files: string[], options?: { zenModel?: string; providerId?: string; modelId?: string }): Promise<{ message: GeneratedCommitMessage }>;
   generatePullRequestDescription(
     directory: string,
-    payload: { base: string; head: string; context?: string; zenModel?: string }
+    payload: { base: string; head: string; context?: string; zenModel?: string; providerId?: string; modelId?: string }
   ): Promise<GeneratedPullRequestDescription>;
   listGitWorktrees(directory: string): Promise<GitWorktreeInfo[]>;
   validateGitWorktree?(directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeValidationResult>;
@@ -511,6 +511,7 @@ export interface SettingsPayload {
   pinnedDirectories?: string[];
   showReasoningTraces?: boolean;
   showTextJustificationActivity?: boolean;
+  showDeletionDialog?: boolean;
   nativeNotificationsEnabled?: boolean;
   notificationMode?: 'always' | 'hidden-only';
   autoDeleteEnabled?: boolean;
@@ -528,6 +529,8 @@ export interface SettingsPayload {
   directoryShowHidden?: boolean;
   filesViewShowGitignored?: boolean;
   openInAppId?: string;
+  gitProviderId?: string;
+  gitModelId?: string;
 
   [key: string]: unknown;
 }

@@ -6,13 +6,14 @@ import { type VariantProps } from "class-variance-authority"
 function ButtonSmall({
   className,
   variant,
+  size = "sm",
   ...props
 }: React.ComponentProps<"button"> & VariantProps<typeof buttonVariants>) {
   return (
     <Button
       variant={variant}
-      size="sm"
-      className={cn("h-6 px-2 text-xs", className)}
+      size={size}
+      className={cn(size === "sm" && "h-7 px-2", className)}
       {...props}
     />
   )

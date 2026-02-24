@@ -11,62 +11,60 @@ interface MobileAgentButtonProps {
     className?: string;
 }
 
-export const MobileAgentButton: React.FC<MobileAgentButtonProps> = ({ onCycleAgent, onOpenAgentPanel, className }) => {
+const LONG_PRESS_MS = 500;
+
+export const MobileAgentButton: React.FC<MobileAgentButtonProps> = ({ onOpenAgentPanel, onCycleAgent, className }) => {
     const { currentAgentName, getVisibleAgents } = useConfigStore();
     const currentSessionId = useSessionStore((state) => state.currentSessionId);
     const sessionAgentName = useSessionStore((state) =>
         currentSessionId ? state.getSessionAgentSelection(currentSessionId) : null
     );
+    const longPressTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+    const longPressTriggeredRef = React.useRef(false);
 
     const agents = getVisibleAgents();
     const uiAgentName = currentSessionId ? (sessionAgentName || currentAgentName) : currentAgentName;
     const agentLabel = getAgentDisplayName(agents, uiAgentName);
     const agentColor = getAgentColor(uiAgentName);
 
-    const longPressTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-    const isLongPressRef = React.useRef(false);
+    const clearLongPressTimer = React.useCallback(() => {
+        if (longPressTimerRef.current) {
+            clearTimeout(longPressTimerRef.current);
+            longPressTimerRef.current = null;
+        }
+    }, []);
 
-    const handlePointerDown = (event: React.PointerEvent) => {
-        event.preventDefault();
-        isLongPressRef.current = false;
+    const startLongPressTimer = React.useCallback(() => {
+        clearLongPressTimer();
+        longPressTriggeredRef.current = false;
         longPressTimerRef.current = setTimeout(() => {
-            isLongPressRef.current = true;
+            longPressTriggeredRef.current = true;
             onOpenAgentPanel();
-        }, 500);
-    };
-
-    const handlePointerUp = () => {
-        if (longPressTimerRef.current) {
-            clearTimeout(longPressTimerRef.current);
-            longPressTimerRef.current = null;
-        }
-        if (!isLongPressRef.current) {
-            onCycleAgent();
-        }
-    };
-
-    const handlePointerLeave = () => {
-        if (longPressTimerRef.current) {
-            clearTimeout(longPressTimerRef.current);
-            longPressTimerRef.current = null;
-        }
-    };
+        }, LONG_PRESS_MS);
+    }, [clearLongPressTimer, onOpenAgentPanel]);
 
     React.useEffect(() => {
-        return () => {
-            if (longPressTimerRef.current) {
-                clearTimeout(longPressTimerRef.current);
-            }
-        };
-    }, []);
+        return () => clearLongPressTimer();
+    }, [clearLongPressTimer]);
 
     return (
         <button
             type="button"
-            onPointerDown={handlePointerDown}
-            onPointerUp={handlePointerUp}
-            onPointerLeave={handlePointerLeave}
-            onContextMenu={(e) => e.preventDefault()}
+            onPointerDown={(event) => {
+                if (event.button !== 0) return;
+                startLongPressTimer();
+            }}
+            onPointerUp={clearLongPressTimer}
+            onPointerLeave={clearLongPressTimer}
+            onPointerCancel={clearLongPressTimer}
+            onClick={(event) => {
+                if (longPressTriggeredRef.current) {
+                    event.preventDefault();
+                    longPressTriggeredRef.current = false;
+                    return;
+                }
+                onCycleAgent();
+            }}
             className={cn(
                 'inline-flex min-w-0 items-center select-none',
                 'rounded-lg border border-border/50 px-1.5',

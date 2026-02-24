@@ -21,7 +21,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useDeviceInfo } from '@/lib/device';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
-import { useEdgeSwipe } from '@/hooks/useEdgeSwipe';
+import { useDrawerSwipe } from '@/hooks/useDrawerSwipe';
 import { cn } from '@/lib/utils';
 
 import { ChatView, PlanView, GitView, DiffView, TerminalView, FilesView, SettingsView, SettingsWindow } from '@/components/views';
@@ -46,6 +46,26 @@ const normalizeDirectoryKey = (value: string): string => {
     }
 
     return normalized;
+};
+
+const MobileDrawerGestureSurface: React.FC<{
+    className?: string;
+    style?: React.CSSProperties;
+    children: React.ReactNode;
+}> = ({ className, style, children }) => {
+    const { handleTouchStart, handleTouchMove, handleTouchEnd } = useDrawerSwipe();
+
+    return (
+        <div
+            className={className}
+            style={style}
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
+        >
+            {children}
+        </div>
+    );
 };
 
 export const MainLayout: React.FC = () => {
@@ -83,8 +103,6 @@ export const MainLayout: React.FC = () => {
     const rightSidebarAutoClosedRef = React.useRef(false);
     const bottomTerminalAutoClosedRef = React.useRef(false);
     const leftSidebarAutoClosedByContextRef = React.useRef(false);
-
-    useEdgeSwipe({ enabled: true });
 
     // 移动端抽屉状态
     const [mobileLeftDrawerOpen, setMobileLeftDrawerOpen] = React.useState(false);
@@ -731,7 +749,7 @@ export const MainLayout: React.FC = () => {
                     </motion.aside>
                     
                     {/* 主内容区（固定） */}
-                    <div
+                    <MobileDrawerGestureSurface
                         className={cn(
                             'flex flex-1 overflow-hidden relative',
                             (isSettingsDialogOpen || isMultiRunLauncherOpen) && 'hidden'
@@ -748,7 +766,7 @@ export const MainLayout: React.FC = () => {
                                 </div>
                             )}
                         </main>
-                    </div>
+                    </MobileDrawerGestureSurface>
 
                     {/* Mobile multi-run launcher: full screen */}
                     {isMultiRunLauncherOpen && (

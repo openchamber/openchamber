@@ -11,7 +11,7 @@ export interface RouteState {
   /** Main tab to display (chat, git, diff, terminal, files) */
   tab: MainTab | null;
   /** Settings section - when non-null, settings dialog should be open */
-  settingsSection: SidebarSection | null;
+  settingsPath: string | null;
   /** File path for diff view */
   diffFile: string | null;
 }
@@ -40,6 +40,7 @@ export const VALID_SETTINGS_SECTIONS: readonly SidebarSection[] = [
   'commands',
   'skills',
   'providers',
+  'usage',
   'git-identities',
 ] as const;
 

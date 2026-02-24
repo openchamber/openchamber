@@ -604,6 +604,9 @@ let validatedZenFallback = null;
 let cachedZenModels = null;
 let cachedZenModelsTimestamp = 0;
 const ZEN_MODELS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+let cachedGitModelCatalog = null;
+let cachedGitModelCatalogTimestamp = 0;
+const GIT_MODEL_CATALOG_CACHE_TTL = 30 * 1000;
 
 /**
  * Fetch free models from the zen API with caching. Returns an array of
@@ -658,6 +661,220 @@ const resolveZenModel = async (override) => {
     // ignore
   }
   return validatedZenFallback || ZEN_DEFAULT_MODEL;
+};
+
+const getGitModelCatalog = async () => {
+  const now = Date.now();
+  if (cachedGitModelCatalog && now - cachedGitModelCatalogTimestamp < GIT_MODEL_CATALOG_CACHE_TTL) {
+    return cachedGitModelCatalog;
+  }
+
+  const response = await fetch(buildOpenCodeUrl('/model', ''), {
+    method: 'GET',
+    headers: {
+      Accept: 'application/json',
+      ...getOpenCodeAuthHeaders(),
+    },
+    signal: AbortSignal.timeout(8_000),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch model catalog: ${response.status}`);
+  }
+
+  const payload = await response.json().catch(() => null);
+  const modelRefs = new Set();
+  if (Array.isArray(payload)) {
+    for (const item of payload) {
+      if (!item || typeof item !== 'object') {
+        continue;
+      }
+      const providerID = typeof item.providerID === 'string' ? item.providerID.trim() : '';
+      const modelID = typeof item.modelID === 'string' ? item.modelID.trim() : '';
+      if (providerID && modelID) {
+        modelRefs.add(`${providerID}/${modelID}`);
+      }
+    }
+  }
+
+  cachedGitModelCatalog = modelRefs;
+  cachedGitModelCatalogTimestamp = now;
+  return modelRefs;
+};
+
+/**
+ * Resolve git generation model based on priority:
+ * 1) request providerId+modelId
+ * 2) saved settings gitProviderId+gitModelId
+ * 3) legacy zenModel from request/settings as zen/<model>
+ * 4) Zen default (validatedZenFallback || ZEN_DEFAULT_MODEL)
+ */
+const resolveGitModel = async (requestParams) => {
+  const { providerId, modelId, zenModel } = requestParams || {};
+  const requestProviderId = typeof providerId === 'string' ? providerId.trim() : '';
+  const requestModelId = typeof modelId === 'string' ? modelId.trim() : '';
+
+  let modelCatalog = null;
+  try {
+    modelCatalog = await getGitModelCatalog();
+  } catch {
+    modelCatalog = null;
+  }
+
+  const hasModel = (providerID, modelID) => {
+    if (!modelCatalog) {
+      return false;
+    }
+    return modelCatalog.has(`${providerID}/${modelID}`);
+  };
+
+  if (requestProviderId && requestModelId && hasModel(requestProviderId, requestModelId)) {
+    return { providerID: requestProviderId, modelID: requestModelId };
+  }
+
+  try {
+    const settings = await readSettingsFromDisk();
+    const settingsProviderId = typeof settings?.gitProviderId === 'string' ? settings.gitProviderId.trim() : '';
+    const settingsModelId = typeof settings?.gitModelId === 'string' ? settings.gitModelId.trim() : '';
+    if (settingsProviderId && settingsModelId && hasModel(settingsProviderId, settingsModelId)) {
+      return { providerID: settingsProviderId, modelID: settingsModelId };
+    }
+  } catch {
+    // ignore
+  }
+
+  const fallbackZenModel = typeof zenModel === 'string' && zenModel.trim().length > 0
+    ? zenModel.trim()
+    : (await resolveZenModel(zenModel));
+
+  return { providerID: 'zen', modelID: fallbackZenModel };
+};
+
+const GIT_GENERATION_TIMEOUT_MS = 2 * 60 * 1000;
+const GIT_GENERATION_POLL_INTERVAL_MS = 500;
+
+/**
+ * Generate text using OpenCode session flow:
+ * - Create short-lived session
+ * - POST prompt_async with model and text prompt
+ * - Poll session messages until final assistant response
+ * - Extract text from parts
+ * - Best-effort cleanup of temporary session
+ */
+const generateWithSessionFlow = async ({ prompt, providerID, modelID }) => {
+  const completionTimeout = createTimeoutSignal(GIT_GENERATION_TIMEOUT_MS);
+  let sessionId = null;
+
+  try {
+    const createUrl = buildOpenCodeUrl('/session', '');
+    const createResponse = await fetch(createUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        ...getOpenCodeAuthHeaders(),
+      },
+      body: JSON.stringify({
+        title: 'Git Generation',
+      }),
+      signal: completionTimeout.signal,
+    });
+
+    if (!createResponse.ok) {
+      const errorBody = await createResponse.json().catch(() => ({}));
+      throw new Error(`Failed to create session: ${createResponse.status} ${JSON.stringify(errorBody)}`);
+    }
+
+    const sessionData = await createResponse.json();
+    sessionId = sessionData?.id;
+    if (!sessionId) {
+      throw new Error('Session created but no ID returned');
+    }
+
+    const promptUrl = buildOpenCodeUrl(`/session/${encodeURIComponent(sessionId)}/prompt_async`, '');
+    const promptResponse = await fetch(promptUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        ...getOpenCodeAuthHeaders(),
+      },
+      body: JSON.stringify({
+        model: { providerID, modelID },
+        parts: [{ type: 'text', text: prompt }],
+      }),
+      signal: completionTimeout.signal,
+    });
+
+    if (!promptResponse.ok) {
+      const errorBody = await promptResponse.json().catch(() => ({}));
+      throw new Error(`Failed to send prompt: ${promptResponse.status} ${JSON.stringify(errorBody)}`);
+    }
+
+    const messagesUrl = buildOpenCodeUrl(`/session/${encodeURIComponent(sessionId)}/message`, '');
+    let lastAssistantText = '';
+    let pollingAttempts = 0;
+    const maxPollingAttempts = Math.ceil(GIT_GENERATION_TIMEOUT_MS / GIT_GENERATION_POLL_INTERVAL_MS);
+
+    while (pollingAttempts < maxPollingAttempts) {
+      pollingAttempts++;
+
+      await new Promise((resolve) => setTimeout(resolve, GIT_GENERATION_POLL_INTERVAL_MS));
+
+      const messagesResponse = await fetch(`${messagesUrl}?limit=10`, {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+          ...getOpenCodeAuthHeaders(),
+        },
+        signal: completionTimeout.signal,
+      });
+
+      if (!messagesResponse.ok) {
+        console.warn(`Session messages poll failed: ${messagesResponse.status}`);
+        continue;
+      }
+
+      const messages = await messagesResponse.json().catch(() => null);
+      if (!Array.isArray(messages)) {
+        continue;
+      }
+
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const msg = messages[i];
+        if (msg?.info?.role === 'assistant' && msg?.info?.finish === 'stop') {
+          if (Array.isArray(msg.parts)) {
+            const textParts = msg.parts
+              .filter((p) => p?.type === 'text' && typeof p?.text === 'string')
+              .map((p) => p.text)
+              .filter(Boolean);
+            if (textParts.length > 0) {
+              return textParts.join('\n').trim();
+            }
+          }
+        }
+      }
+    }
+
+    throw new Error('Timeout waiting for generation to complete');
+  } finally {
+    completionTimeout.cleanup();
+
+    if (sessionId) {
+      try {
+        const deleteUrl = buildOpenCodeUrl(`/session/${encodeURIComponent(sessionId)}`, '');
+        await fetch(deleteUrl, {
+          method: 'DELETE',
+          headers: getOpenCodeAuthHeaders(),
+          signal: AbortSignal.timeout(5000),
+        }).catch((err) => {
+          console.warn('Failed to cleanup temporary session:', err?.message || err);
+        });
+      } catch (err) {
+        console.warn('Failed to cleanup temporary session:', err?.message || err);
+      }
+    }
+  }
 };
 
 const summarizeText = async (text, targetLength, zenModel) => {
@@ -1444,6 +1661,9 @@ const sanitizeSettingsUpdate = (payload) => {
   if (typeof candidate.showTextJustificationActivity === 'boolean') {
     result.showTextJustificationActivity = candidate.showTextJustificationActivity;
   }
+  if (typeof candidate.showDeletionDialog === 'boolean') {
+    result.showDeletionDialog = candidate.showDeletionDialog;
+  }
   if (typeof candidate.nativeNotificationsEnabled === 'boolean') {
     result.nativeNotificationsEnabled = candidate.nativeNotificationsEnabled;
   }
@@ -1530,6 +1750,14 @@ const sanitizeSettingsUpdate = (payload) => {
   if (typeof candidate.zenModel === 'string') {
     const trimmed = candidate.zenModel.trim();
     result.zenModel = trimmed.length > 0 ? trimmed : undefined;
+  }
+  if (typeof candidate.gitProviderId === 'string') {
+    const trimmed = candidate.gitProviderId.trim();
+    result.gitProviderId = trimmed.length > 0 ? trimmed : undefined;
+  }
+  if (typeof candidate.gitModelId === 'string') {
+    const trimmed = candidate.gitModelId.trim();
+    result.gitModelId = trimmed.length > 0 ? trimmed : undefined;
   }
   if (typeof candidate.toolCallExpansion === 'string') {
     const mode = candidate.toolCallExpansion.trim();
@@ -9710,37 +9938,13 @@ highlights:
 Diff summary (may be truncated):
 ${diffSummaries}`;
 
-      const model = await resolveZenModel(typeof req.body?.zenModel === 'string' ? req.body.zenModel : undefined);
+      const { providerID, modelID } = await resolveGitModel({
+        providerId: req.body?.providerId,
+        modelId: req.body?.modelId,
+        zenModel: req.body?.zenModel,
+      });
 
-      const completionTimeout = createTimeoutSignal(LONG_REQUEST_TIMEOUT_MS);
-      let response;
-      try {
-        response = await fetch('https://opencode.ai/zen/v1/responses', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model,
-            input: [{ role: 'user', content: prompt }],
-            max_output_tokens: 1000,
-            stream: false,
-            reasoning: {
-              effort: 'low'
-            }
-          }),
-          signal: completionTimeout.signal,
-        });
-      } finally {
-        completionTimeout.cleanup();
-      }
-
-      if (!response.ok) {
-        const errorBody = await response.json().catch(() => ({}));
-        console.error('Commit message generation failed:', errorBody);
-        return res.status(502).json({ error: 'Failed to generate commit message' });
-      }
-
-      const data = await response.json();
-      const raw = data?.output?.find((item) => item?.type === 'message')?.content?.find((item) => item?.type === 'output_text')?.text?.trim();
+      const raw = await generateWithSessionFlow({ prompt, providerID, modelID });
 
       if (!raw) {
         return res.status(502).json({ error: 'No commit message returned by generator' });
@@ -9823,35 +10027,13 @@ Context:
 
       prompt += `\n\nDiff summary:\n${diffSummaries}`;
 
-      const model = await resolveZenModel(typeof req.body?.zenModel === 'string' ? req.body.zenModel : undefined);
+      const { providerID, modelID } = await resolveGitModel({
+        providerId: req.body?.providerId,
+        modelId: req.body?.modelId,
+        zenModel: req.body?.zenModel,
+      });
 
-      const completionTimeout = createTimeoutSignal(LONG_REQUEST_TIMEOUT_MS);
-      let response;
-      try {
-        response = await fetch('https://opencode.ai/zen/v1/responses', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model,
-            input: [{ role: 'user', content: prompt }],
-            max_output_tokens: 1200,
-            stream: false,
-            reasoning: { effort: 'low' },
-          }),
-          signal: completionTimeout.signal,
-        });
-      } finally {
-        completionTimeout.cleanup();
-      }
-
-      if (!response.ok) {
-        const errorBody = await response.json().catch(() => ({}));
-        console.error('PR description generation failed:', errorBody);
-        return res.status(502).json({ error: 'Failed to generate PR description' });
-      }
-
-      const data = await response.json();
-      const raw = data?.output?.find((item) => item?.type === 'message')?.content?.find((item) => item?.type === 'output_text')?.text?.trim();
+      const raw = await generateWithSessionFlow({ prompt, providerID, modelID });
       if (!raw) {
         return res.status(502).json({ error: 'No PR description returned by generator' });
       }
@@ -10432,17 +10614,26 @@ Context:
     }
 
     try {
-      const resolvedPath = path.resolve(normalizeDirectoryPath(filePath));
-      if (resolvedPath.includes('..')) {
-        return res.status(400).json({ error: 'Invalid path: path traversal not allowed' });
+      const resolved = await resolveWorkspacePathFromContext(req, filePath);
+      if (!resolved.ok) {
+        return res.status(400).json({ error: resolved.error });
       }
 
-      const stats = await fsPromises.stat(resolvedPath);
+      const [canonicalPath, canonicalBase] = await Promise.all([
+        fsPromises.realpath(resolved.resolved),
+        fsPromises.realpath(resolved.base).catch(() => path.resolve(resolved.base)),
+      ]);
+
+      if (!isPathWithinRoot(canonicalPath, canonicalBase)) {
+        return res.status(403).json({ error: 'Access to file denied' });
+      }
+
+      const stats = await fsPromises.stat(canonicalPath);
       if (!stats.isFile()) {
         return res.status(400).json({ error: 'Specified path is not a file' });
       }
 
-      const content = await fsPromises.readFile(resolvedPath, 'utf8');
+      const content = await fsPromises.readFile(canonicalPath, 'utf8');
       res.type('text/plain').send(content);
     } catch (error) {
       const err = error;
@@ -10465,17 +10656,26 @@ Context:
     }
 
     try {
-      const resolvedPath = path.resolve(normalizeDirectoryPath(filePath));
-      if (resolvedPath.includes('..')) {
-        return res.status(400).json({ error: 'Invalid path: path traversal not allowed' });
+      const resolved = await resolveWorkspacePathFromContext(req, filePath);
+      if (!resolved.ok) {
+        return res.status(400).json({ error: resolved.error });
       }
 
-      const stats = await fsPromises.stat(resolvedPath);
+      const [canonicalPath, canonicalBase] = await Promise.all([
+        fsPromises.realpath(resolved.resolved),
+        fsPromises.realpath(resolved.base).catch(() => path.resolve(resolved.base)),
+      ]);
+
+      if (!isPathWithinRoot(canonicalPath, canonicalBase)) {
+        return res.status(403).json({ error: 'Access to file denied' });
+      }
+
+      const stats = await fsPromises.stat(canonicalPath);
       if (!stats.isFile()) {
         return res.status(400).json({ error: 'Specified path is not a file' });
       }
 
-      const ext = path.extname(resolvedPath).toLowerCase();
+      const ext = path.extname(canonicalPath).toLowerCase();
       const mimeMap = {
         '.png': 'image/png',
         '.jpg': 'image/jpeg',
@@ -10489,7 +10689,7 @@ Context:
       };
       const mimeType = mimeMap[ext] || 'application/octet-stream';
 
-      const content = await fsPromises.readFile(resolvedPath);
+      const content = await fsPromises.readFile(canonicalPath);
       res.setHeader('Cache-Control', 'no-store');
       res.type(mimeType).send(content);
     } catch (error) {

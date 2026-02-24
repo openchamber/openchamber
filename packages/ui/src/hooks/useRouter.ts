@@ -3,8 +3,8 @@ import { useSessionStore } from '@/stores/useSessionStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { parseRoute, updateBrowserURL, hasRouteParams } from '@/lib/router';
 import type { RouteState, AppRouteState } from '@/lib/router';
-import type { SidebarSection } from '@/constants/sidebar';
 import type { MainTab } from '@/stores/useUIStore';
+import { resolveSettingsSlug } from '@/lib/settings/metadata';
 
 /**
  * Check if running in VS Code webview context.
@@ -41,7 +41,7 @@ export function useRouter(): void {
   const setCurrentSession = useSessionStore((state) => state.setCurrentSession);
   const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
-  const setSidebarSection = useUIStore((state) => state.setSidebarSection);
+  const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const navigateToDiff = useUIStore((state) => state.navigateToDiff);
 
   /**
@@ -65,8 +65,8 @@ export function useRouter(): void {
         }
 
         // 2. Handle settings (takes precedence over tabs - it's a full-screen overlay)
-        if (route.settingsSection) {
-          setSidebarSection(route.settingsSection);
+        if (route.settingsPath) {
+          setSettingsPage(resolveSettingsSlug(route.settingsPath));
           setSettingsDialogOpen(true);
           // Don't process tab when settings is open
           return;
@@ -90,7 +90,7 @@ export function useRouter(): void {
         isApplyingRouteRef.current = false;
       }
     },
-    [setCurrentSession, setActiveMainTab, setSettingsDialogOpen, setSidebarSection, navigateToDiff]
+    [setCurrentSession, setActiveMainTab, setSettingsDialogOpen, setSettingsPage, navigateToDiff]
   );
 
   /**
@@ -104,7 +104,7 @@ export function useRouter(): void {
       sessionId: sessionState.currentSessionId,
       tab: uiState.activeMainTab,
       isSettingsOpen: uiState.isSettingsDialogOpen,
-      settingsSection: uiState.sidebarSection,
+      settingsPath: uiState.settingsPage,
       diffFile: uiState.pendingDiffFile,
     };
   }, []);
@@ -183,7 +183,7 @@ export function useRouter(): void {
 
     let prevTab: MainTab = useUIStore.getState().activeMainTab;
     let prevSettingsOpen: boolean = useUIStore.getState().isSettingsDialogOpen;
-    let prevSettingsSection: SidebarSection = useUIStore.getState().sidebarSection;
+    let prevSettingsPath: string = useUIStore.getState().settingsPage;
     let prevDiffFile: string | null = useUIStore.getState().pendingDiffFile;
 
     const unsubscribe = useUIStore.subscribe((state) => {
@@ -194,17 +194,17 @@ export function useRouter(): void {
 
       const tabChanged = state.activeMainTab !== prevTab;
       const settingsOpenChanged = state.isSettingsDialogOpen !== prevSettingsOpen;
-      const settingsSectionChanged = state.sidebarSection !== prevSettingsSection;
+      const settingsPathChanged = state.settingsPage !== prevSettingsPath;
       const diffFileChanged = state.pendingDiffFile !== prevDiffFile && state.activeMainTab === 'diff';
 
       // Update tracking vars
       prevTab = state.activeMainTab;
       prevSettingsOpen = state.isSettingsDialogOpen;
-      prevSettingsSection = state.sidebarSection;
+      prevSettingsPath = state.settingsPage;
       prevDiffFile = state.pendingDiffFile;
 
       // Only sync if something relevant changed
-      if (tabChanged || settingsOpenChanged || settingsSectionChanged || diffFileChanged) {
+      if (tabChanged || settingsOpenChanged || settingsPathChanged || diffFileChanged) {
         syncURLFromState();
       }
     });
@@ -263,8 +263,8 @@ export function navigateToRoute(route: Partial<RouteState>): void {
     if (route.sessionId) {
       void useSessionStore.getState().setCurrentSession(route.sessionId);
     }
-    if (route.settingsSection) {
-      useUIStore.getState().setSidebarSection(route.settingsSection);
+    if (route.settingsPath) {
+      useUIStore.getState().setSettingsPage(resolveSettingsSlug(route.settingsPath));
       useUIStore.getState().setSettingsDialogOpen(true);
     } else if (route.tab) {
       useUIStore.getState().setActiveMainTab(route.tab);
@@ -281,8 +281,8 @@ export function navigateToRoute(route: Partial<RouteState>): void {
   if (route.sessionId) {
     params.set('session', route.sessionId);
   }
-  if (route.settingsSection) {
-    params.set('settings', route.settingsSection);
+  if (route.settingsPath) {
+    params.set('settings', route.settingsPath);
   } else if (route.tab && route.tab !== 'chat') {
     if (useUIStore.getState().isSettingsDialogOpen) {
       useUIStore.getState().setSettingsDialogOpen(false);
@@ -302,8 +302,8 @@ export function navigateToRoute(route: Partial<RouteState>): void {
   if (route.sessionId) {
     void useSessionStore.getState().setCurrentSession(route.sessionId);
   }
-  if (route.settingsSection) {
-    useUIStore.getState().setSidebarSection(route.settingsSection);
+  if (route.settingsPath) {
+    useUIStore.getState().setSettingsPage(resolveSettingsSlug(route.settingsPath));
     useUIStore.getState().setSettingsDialogOpen(true);
   } else if (route.tab) {
     useUIStore.getState().setActiveMainTab(route.tab);
@@ -331,8 +331,7 @@ export function getShareableURL(): string {
   }
 
   if (uiState.isSettingsDialogOpen) {
-    const settingsSection = uiState.sidebarSection === 'sessions' ? 'settings' : uiState.sidebarSection;
-    params.set('settings', settingsSection);
+    params.set('settings', uiState.settingsPage || 'home');
   } else if (uiState.activeMainTab !== 'chat') {
     params.set('tab', uiState.activeMainTab);
   }

@@ -1,8 +1,9 @@
 import React, { useMemo } from 'react';
-import { Button } from '@/components/ui/button';
+import { ButtonSmall } from '@/components/ui/button-small';
 import { ButtonLarge } from '@/components/ui/button-large';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui';
+import { isMobileDeviceViaCSS } from '@/lib/device';
 import {
   Dialog,
   DialogContent,
@@ -19,12 +20,10 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { RiAddLine, RiAiAgentFill, RiAiAgentLine, RiDeleteBinLine, RiFileCopyLine, RiMore2Line, RiRobot2Line, RiRobotLine, RiRestartLine, RiEditLine } from '@remixicon/react';
 import { useAgentsStore, isAgentBuiltIn, isAgentHidden, type AgentScope, type AgentDraft } from '@/stores/useAgentsStore';
-import { useUIStore } from '@/stores/useUIStore';
-import { useDeviceInfo } from '@/lib/device';
-import { isVSCodeRuntime } from '@/lib/desktop';
 import { cn } from '@/lib/utils';
 import type { Agent } from '@opencode-ai/sdk/v2';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { SettingsProjectSelector } from '@/components/sections/shared/SettingsProjectSelector';
 import { SidebarGroup } from '@/components/sections/shared/SidebarGroup';
 
 interface AgentsSidebarProps {
@@ -106,6 +105,7 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
   const [confirmActionAgent, setConfirmActionAgent] = React.useState<Agent | null>(null);
   const [confirmActionType, setConfirmActionType] = React.useState<'delete' | 'reset' | null>(null);
   const [isConfirmActionPending, setIsConfirmActionPending] = React.useState(false);
+  const [openMenuAgent, setOpenMenuAgent] = React.useState<string | null>(null);
 
   const {
     selectedAgentName,
@@ -117,16 +117,11 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
     loadAgents,
   } = useAgentsStore();
 
-  const { setSidebarOpen } = useUIStore();
-  const { isMobile } = useDeviceInfo();
-
-  const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
-
   React.useEffect(() => {
     loadAgents();
   }, [loadAgents]);
 
-  const bgClass = isVSCode ? 'bg-background' : 'bg-sidebar';
+  const bgClass = 'bg-background';
 
   const handleCreateNew = () => {
     // Generate unique name
@@ -143,9 +138,6 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
     setSelectedAgent(newName);
     onItemSelect?.();
 
-    if (isMobile) {
-      setSidebarOpen(false);
-    }
   };
 
   const handleDeleteAgent = async (agent: Agent) => {
@@ -226,9 +218,7 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
     });
     setSelectedAgent(newName);
 
-    if (isMobile) {
-      setSidebarOpen(false);
-    }
+
   };
 
   const handleOpenRenameDialog = (agent: Agent) => {
@@ -329,18 +319,18 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
 
   return (
     <div className={cn('flex h-full flex-col', bgClass)}>
-      <div className={cn('border-b px-3', isMobile ? 'mt-2 py-3' : 'py-3')}>
+      <div className="border-b px-3 pt-4 pb-3">
+        <h2 className="text-base font-semibold text-foreground mb-3">Agents</h2>
+        <SettingsProjectSelector className="mb-3" />
         <div className="flex items-center justify-between gap-2">
           <span className="typography-meta text-muted-foreground">Total {visibleAgents.length}</span>
-          <Button
-            type="button"
+          <ButtonSmall
             variant="ghost"
-            size="icon"
-            className="h-7 w-7 -my-1 text-muted-foreground"
+            className="h-7 w-7 px-0 -my-1 text-muted-foreground"
             onClick={handleCreateNew}
           >
-            <RiAddLine className="size-4" />
-          </Button>
+            <RiAddLine className="h-3.5 w-3.5" />
+          </ButtonSmall>
         </div>
       </div>
 
@@ -366,13 +356,13 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
                     onSelect={() => {
                       setSelectedAgent(agent.name);
                       onItemSelect?.();
-                      if (isMobile) {
-                        setSidebarOpen(false);
-                      }
+
                     }}
                     onReset={() => handleResetAgent(agent)}
                     onDuplicate={() => handleDuplicateAgent(agent)}
                     getAgentModeIcon={getAgentModeIcon}
+                    isMenuOpen={openMenuAgent === agent.name}
+                    onMenuOpenChange={(open) => setOpenMenuAgent(open ? agent.name : null)}
                   />
                 ))}
               </>
@@ -400,14 +390,14 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
                         onSelect={() => {
                           setSelectedAgent(agent.name);
                           onItemSelect?.();
-                          if (isMobile) {
-                            setSidebarOpen(false);
-                          }
+
                         }}
                         onRename={() => handleOpenRenameDialog(agent)}
                         onDelete={() => handleDeleteAgent(agent)}
                         onDuplicate={() => handleDuplicateAgent(agent)}
                         getAgentModeIcon={getAgentModeIcon}
+                        isMenuOpen={openMenuAgent === agent.name}
+                        onMenuOpenChange={(open) => setOpenMenuAgent(open ? agent.name : null)}
                       />
                     ))}
                   </SidebarGroup>
@@ -422,14 +412,14 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
                     onSelect={() => {
                       setSelectedAgent(agent.name);
                       onItemSelect?.();
-                      if (isMobile) {
-                        setSidebarOpen(false);
-                      }
+
                     }}
                     onRename={() => handleOpenRenameDialog(agent)}
                     onDelete={() => handleDeleteAgent(agent)}
                     onDuplicate={() => handleDuplicateAgent(agent)}
                     getAgentModeIcon={getAgentModeIcon}
+                    isMenuOpen={openMenuAgent === agent.name}
+                    onMenuOpenChange={(open) => setOpenMenuAgent(open ? agent.name : null)}
                   />
                 ))}
               </>
@@ -456,14 +446,13 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button
+            <ButtonLarge
               variant="ghost"
               onClick={closeConfirmActionDialog}
               disabled={isConfirmActionPending}
-              className="text-foreground hover:bg-interactive-hover hover:text-foreground"
             >
               Cancel
-            </Button>
+            </ButtonLarge>
             <ButtonLarge onClick={handleConfirmAction} disabled={isConfirmActionPending}>
               {confirmActionType === 'delete' ? 'Delete' : 'Reset'}
             </ButtonLarge>
@@ -492,13 +481,12 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
             }}
           />
           <DialogFooter>
-            <Button
+            <ButtonLarge
               variant="ghost"
               onClick={() => setRenameDialogAgent(null)}
-              className="text-foreground hover:bg-interactive-hover hover:text-foreground"
             >
               Cancel
-            </Button>
+            </ButtonLarge>
             <ButtonLarge onClick={handleRenameAgent}>
               Rename
             </ButtonLarge>
@@ -518,6 +506,8 @@ interface AgentListItemProps {
   onRename?: () => void;
   onDuplicate: () => void;
   getAgentModeIcon: (mode?: string) => React.ReactNode;
+  isMenuOpen: boolean;
+  onMenuOpenChange: (open: boolean) => void;
 }
 
 const AgentListItem: React.FC<AgentListItemProps> = ({
@@ -529,15 +519,22 @@ const AgentListItem: React.FC<AgentListItemProps> = ({
   onRename,
   onDuplicate,
   getAgentModeIcon,
+  isMenuOpen,
+  onMenuOpenChange,
 }) => {
   const extAgent = agent as Agent & { scope?: AgentScope };
+  const isMobile = isMobileDeviceViaCSS();
   
   return (
     <div
       className={cn(
-        'group relative flex items-center rounded-md px-1.5 py-1 transition-all duration-200',
+        'group relative flex items-center rounded-md px-1.5 py-1 transition-all duration-200 select-none',
         isSelected ? 'bg-interactive-selection' : 'hover:bg-interactive-hover'
       )}
+      onContextMenu={!isMobile ? (e) => {
+        e.preventDefault();
+        onMenuOpenChange(true);
+      } : undefined}
     >
       <div className="flex min-w-0 flex-1 items-center">
         <button
@@ -564,15 +561,14 @@ const AgentListItem: React.FC<AgentListItemProps> = ({
           )}
         </button>
 
-        <DropdownMenu>
+        <DropdownMenu open={isMenuOpen} onOpenChange={onMenuOpenChange}>
           <DropdownMenuTrigger asChild>
-            <Button
-              size="icon"
+            <ButtonSmall
               variant="ghost"
-              className="h-6 w-6 flex-shrink-0 -mr-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100"
+              className="h-6 w-6 px-0 flex-shrink-0 -mr-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100"
             >
               <RiMore2Line className="h-3.5 w-3.5" />
-            </Button>
+            </ButtonSmall>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-fit min-w-20">
             {onRename && (

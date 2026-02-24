@@ -15,10 +15,9 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { AnimatedTabs } from '@/components/ui/animated-tabs';
 
-import { RiArrowLeftSLine, RiChat4Line, RiCheckLine, RiCloseLine, RiCommandLine, RiFileTextLine, RiFolder6Line, RiFolderAddLine, RiGitBranchLine, RiGithubFill, RiLayoutLeftLine, RiLayoutRightLine, RiMore2Fill, RiPencilLine, RiPlayListAddLine, RiRefreshLine, RiServerLine, RiSettings3Line, RiStackLine, RiTerminalBoxLine, RiTimerLine, type RemixiconComponentType } from '@remixicon/react';
+import { RiArrowLeftSLine, RiChat4Line, RiCheckLine, RiCloseLine, RiCommandLine, RiFileTextLine, RiFolder6Line, RiFolderAddLine, RiGithubFill, RiLayoutLeftLine, RiLayoutRightLine, RiMore2Fill, RiPencilLine, RiPlayListAddLine, RiRefreshLine, RiServerLine, RiStackLine, RiTerminalBoxLine, RiTimerLine, type RemixiconComponentType } from '@remixicon/react';
 import { DiffIcon } from '@/components/icons/DiffIcon';
 import { useUIStore, type MainTab } from '@/stores/useUIStore';
-import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useSessionStore } from '@/stores/useSessionStore';
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
@@ -29,8 +28,8 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
 import { useDeviceInfo } from '@/lib/device';
 import { cn, hasModifier, formatDirectoryName } from '@/lib/utils';
-import { useDiffFileCount } from '@/components/views/DiffView';
-import { McpDropdown, McpDropdownContent } from '@/components/mcp/McpDropdown';
+import { McpDropdownContent } from '@/components/mcp/McpDropdown';
+import { McpIcon } from '@/components/icons/McpIcon';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { formatPercent, formatWindowLabel, QUOTA_PROVIDERS, calculatePace, calculateExpectedUsagePercent } from '@/lib/quota';
 import { UsageProgressBar } from '@/components/sections/usage/UsageProgressBar';
@@ -158,7 +157,6 @@ export const Header: React.FC<HeaderProps> = ({
   const openContextPlan = useUIStore((state) => state.openContextPlan);
   const closeContextPanel = useUIStore((state) => state.closeContextPanel);
   const contextPanelByDirectory = useUIStore((state) => state.contextPanelByDirectory);
-  const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
   const activeMainTab = useUIStore((state) => state.activeMainTab);
   const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
@@ -197,8 +195,6 @@ export const Header: React.FC<HeaderProps> = ({
   const removeProject = useProjectsStore((state) => state.removeProject);
 
   const { isMobile } = useDeviceInfo();
-  const diffFileCount = useDiffFileCount();
-  const updateAvailable = useUpdateStore((state) => state.available);
   const githubAuthStatus = useGitHubAuthStore((state) => state.status);
   const setGitHubAuthStatus = useGitHubAuthStore((state) => state.setStatus);
 
@@ -877,14 +873,6 @@ export const Header: React.FC<HeaderProps> = ({
     toggleSidebar();
   }, [blurActiveElement, isMobile, isSessionSwitcherOpen, setSessionSwitcherOpen, toggleSidebar]);
 
-  const handleOpenSettings = React.useCallback(() => {
-    if (isMobile) {
-      blurActiveElement();
-    }
-    setSessionSwitcherOpen(false);
-    setSettingsDialogOpen(true);
-  }, [blurActiveElement, isMobile, setSessionSwitcherOpen, setSettingsDialogOpen]);
-
   const handleOpenContextPanel = React.useCallback(() => {
     const directory = normalize(openDirectory || '');
     if (!directory) {
@@ -1065,7 +1053,7 @@ export const Header: React.FC<HeaderProps> = ({
     }
     base.push(
       { value: 'usage', label: 'Usage', icon: RiTimerLine },
-      { value: 'mcp', label: 'MCP', icon: RiCommandLine }
+      { value: 'mcp', label: 'MCP', icon: McpIcon as unknown as RemixiconComponentType }
     );
     return base;
   }, [isDesktopApp]);

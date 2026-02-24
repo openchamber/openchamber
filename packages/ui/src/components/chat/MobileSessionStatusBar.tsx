@@ -9,8 +9,6 @@ import { cn, formatDirectoryName } from '@/lib/utils';
 import { getAgentColor } from '@/lib/agentColors';
 import { RiLoader4Line, RiAddLine } from '@remixicon/react';
 import type { SessionContextUsage } from '@/stores/types/sessionTypes';
-import { useDrawer } from '@/contexts/DrawerContext';
-import { animate } from 'motion/react';
 import { PROJECT_ICON_MAP, PROJECT_COLOR_MAP } from '@/lib/projectMeta';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { toast } from '@/components/ui';
@@ -25,6 +23,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { useDrawerSwipe } from '@/hooks/useDrawerSwipe';
 
 interface MobileSessionStatusBarProps {
   onSessionSwitch?: (sessionId: string) => void;
@@ -439,170 +438,7 @@ function SessionStatusHeader({
   );
 }
 
-// Hook for drawer swipe gestures on MobileSessionStatusBar
-function useDrawerSwipe() {
-  const drawer = useDrawer();
-  const touchStartXRef = React.useRef(0);
-  const touchStartYRef = React.useRef(0);
-  const isHorizontalSwipeRef = React.useRef<boolean | null>(null);
-  const isDraggingDrawerRef = React.useRef<'left' | 'right' | null>(null);
 
-  const handleTouchStart = React.useCallback((e: React.TouchEvent) => {
-    touchStartXRef.current = e.touches[0].clientX;
-    touchStartYRef.current = e.touches[0].clientY;
-    isHorizontalSwipeRef.current = null;
-    isDraggingDrawerRef.current = null;
-  }, []);
-
-  const handleTouchMove = React.useCallback((e: React.TouchEvent) => {
-    const currentX = e.touches[0].clientX;
-    const currentY = e.touches[0].clientY;
-    const deltaX = currentX - touchStartXRef.current;
-    const deltaY = currentY - touchStartYRef.current;
-
-    // Determine if this is a horizontal swipe
-    if (isHorizontalSwipeRef.current === null) {
-      if (Math.abs(deltaX) > 5 || Math.abs(deltaY) > 5) {
-        isHorizontalSwipeRef.current = Math.abs(deltaX) > Math.abs(deltaY);
-      }
-    }
-
-    if (isHorizontalSwipeRef.current === true) {
-      e.preventDefault();
-
-      const leftDrawerWidthPx = drawer.leftDrawerWidth.current || window.innerWidth * 0.85;
-      const rightDrawerWidthPx = drawer.rightDrawerWidth.current || window.innerWidth * 0.85;
-
-      // Determine which drawer to drag
-      if (isDraggingDrawerRef.current === null) {
-        if (drawer.leftDrawerOpen && deltaX > 10) {
-          isDraggingDrawerRef.current = 'left';
-        } else if (drawer.rightDrawerOpen && deltaX < -10) {
-          isDraggingDrawerRef.current = 'right';
-        } else if (!drawer.leftDrawerOpen && !drawer.rightDrawerOpen) {
-          if (deltaX > 30) {
-            isDraggingDrawerRef.current = 'left';
-          } else if (deltaX < -30) {
-            isDraggingDrawerRef.current = 'right';
-          }
-        }
-      }
-
-      // Real-time drawer position update (follow finger)
-      if (isDraggingDrawerRef.current === 'left') {
-        if (drawer.leftDrawerOpen) {
-          // Closing: x goes from 0 to -width
-          const progress = Math.max(0, Math.min(1, deltaX / leftDrawerWidthPx));
-          drawer.leftDrawerX.set(-leftDrawerWidthPx * (1 - progress));
-        } else {
-          // Opening: x goes from -width to 0
-          const progress = Math.max(0, Math.min(1, deltaX / leftDrawerWidthPx));
-          drawer.leftDrawerX.set(-leftDrawerWidthPx + (leftDrawerWidthPx * progress));
-        }
-      }
-
-      if (isDraggingDrawerRef.current === 'right') {
-        if (drawer.rightDrawerOpen) {
-          // Closing: x goes from 0 to width
-          const progress = Math.max(0, Math.min(1, -deltaX / rightDrawerWidthPx));
-          drawer.rightDrawerX.set(rightDrawerWidthPx * (1 - progress));
-        } else {
-          // Opening: x goes from width to 0
-          const progress = Math.max(0, Math.min(1, -deltaX / rightDrawerWidthPx));
-          drawer.rightDrawerX.set(rightDrawerWidthPx - (rightDrawerWidthPx * progress));
-        }
-      }
-    }
-  }, [drawer]);
-
-  const handleTouchEnd = React.useCallback((e: React.TouchEvent) => {
-    if (isHorizontalSwipeRef.current !== true) return;
-
-    const endX = e.changedTouches[0].clientX;
-    const deltaX = endX - touchStartXRef.current;
-    const velocityThreshold = 500;
-    const progressThreshold = 0.3;
-
-    const leftDrawerWidthPx = drawer.leftDrawerWidth.current || window.innerWidth * 0.85;
-    const rightDrawerWidthPx = drawer.rightDrawerWidth.current || window.innerWidth * 0.85;
-
-    // Handle left drawer
-    if (isDraggingDrawerRef.current === 'left') {
-      const isOpen = drawer.leftDrawerOpen;
-      const currentX = drawer.leftDrawerX.get();
-      const progress = isOpen
-        ? 1 - Math.abs(currentX) / leftDrawerWidthPx  // How much we've closed
-        : 1 + currentX / leftDrawerWidthPx;           // How much we've opened
-
-      const shouldComplete = progress > progressThreshold || Math.abs(deltaX * 10) > velocityThreshold;
-
-      if (shouldComplete) {
-        // Complete the action
-        const targetX = isOpen ? -leftDrawerWidthPx : 0;
-        animate(drawer.leftDrawerX, targetX, {
-          type: "spring",
-          stiffness: 400,
-          damping: 35,
-          mass: 0.8
-        });
-        drawer.setMobileLeftDrawerOpen(!isOpen);
-      } else {
-        // Snap back
-        const targetX = isOpen ? 0 : -leftDrawerWidthPx;
-        animate(drawer.leftDrawerX, targetX, {
-          type: "spring",
-          stiffness: 400,
-          damping: 35,
-          mass: 0.8
-        });
-      }
-
-      isDraggingDrawerRef.current = null;
-      return;
-    }
-
-    // Handle right drawer
-    if (isDraggingDrawerRef.current === 'right') {
-      const isOpen = drawer.rightDrawerOpen;
-      const currentX = drawer.rightDrawerX.get();
-      const progress = isOpen
-        ? 1 - Math.abs(currentX) / rightDrawerWidthPx
-        : 1 - currentX / rightDrawerWidthPx;
-
-      const shouldComplete = progress > progressThreshold || Math.abs(deltaX * 10) > velocityThreshold;
-
-      if (shouldComplete) {
-        const targetX = isOpen ? rightDrawerWidthPx : 0;
-        animate(drawer.rightDrawerX, targetX, {
-          type: "spring",
-          stiffness: 400,
-          damping: 35,
-          mass: 0.8
-        });
-        drawer.setRightSidebarOpen(!isOpen);
-      } else {
-        const targetX = isOpen ? 0 : rightDrawerWidthPx;
-        animate(drawer.rightDrawerX, targetX, {
-          type: "spring",
-          stiffness: 400,
-          damping: 35,
-          mass: 0.8
-        });
-      }
-
-      isDraggingDrawerRef.current = null;
-      return;
-    }
-
-    isHorizontalSwipeRef.current = null;
-  }, [drawer]);
-
-  return {
-    handleTouchStart,
-    handleTouchMove,
-    handleTouchEnd,
-  };
-}
 
 // Hook for long press
 function useLongPress(
@@ -957,7 +793,6 @@ function ExpandedView({
   currentProjectColor,
   isExpanded,
   onToggleCollapse,
-  onToggleExpand,
   onNewSession,
   onSessionClick,
   onSessionDoubleClick,
@@ -984,7 +819,6 @@ function ExpandedView({
   currentProjectColor?: string | null;
   isExpanded: boolean;
   onToggleCollapse: () => void;
-  onToggleExpand: () => void;
   onNewSession: () => void;
   onSessionClick: (id: string) => void;
   onSessionDoubleClick?: () => void;
@@ -1266,7 +1100,6 @@ export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
         setIsMobileSessionStatusBarCollapsed(true);
         setIsExpanded(false);
       }}
-      onToggleExpand={() => setIsExpanded(!isExpanded)}
       onNewSession={handleCreateSession}
       onSessionClick={handleSessionClick}
       onSessionDoubleClick={handleSessionDoubleClick}

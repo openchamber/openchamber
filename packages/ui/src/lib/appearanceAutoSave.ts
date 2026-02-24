@@ -5,6 +5,7 @@ import type { DesktopSettings } from '@/lib/desktop';
 type AppearanceSlice = {
   showReasoningTraces: boolean;
   showTextJustificationActivity: boolean;
+  showDeletionDialog: boolean;
   nativeNotificationsEnabled: boolean;
   notificationMode: 'always' | 'hidden-only';
   notifyOnSubtasks: boolean;
@@ -45,6 +46,7 @@ export const startAppearanceAutoSave = (): void => {
   let previous: AppearanceSlice = {
     showReasoningTraces: useUIStore.getState().showReasoningTraces,
     showTextJustificationActivity: useUIStore.getState().showTextJustificationActivity,
+    showDeletionDialog: useUIStore.getState().showDeletionDialog,
     nativeNotificationsEnabled: useUIStore.getState().nativeNotificationsEnabled,
     notificationMode: useUIStore.getState().notificationMode,
     notifyOnSubtasks: useUIStore.getState().notifyOnSubtasks,
@@ -92,6 +94,7 @@ export const startAppearanceAutoSave = (): void => {
     const current: AppearanceSlice = {
       showReasoningTraces: state.showReasoningTraces,
       showTextJustificationActivity: state.showTextJustificationActivity,
+      showDeletionDialog: state.showDeletionDialog,
       nativeNotificationsEnabled: state.nativeNotificationsEnabled,
       notificationMode: state.notificationMode,
       notifyOnSubtasks: state.notifyOnSubtasks,
@@ -122,6 +125,9 @@ export const startAppearanceAutoSave = (): void => {
     }
     if (current.showTextJustificationActivity !== previous.showTextJustificationActivity) {
       diff.showTextJustificationActivity = current.showTextJustificationActivity;
+    }
+    if (current.showDeletionDialog !== previous.showDeletionDialog) {
+      diff.showDeletionDialog = current.showDeletionDialog;
     }
     if (current.nativeNotificationsEnabled !== previous.nativeNotificationsEnabled) {
       diff.nativeNotificationsEnabled = current.nativeNotificationsEnabled;

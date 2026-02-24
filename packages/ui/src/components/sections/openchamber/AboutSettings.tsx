@@ -5,6 +5,7 @@ import { UpdateDialog } from '@/components/ui/UpdateDialog';
 import { useDeviceInfo } from '@/lib/device';
 import { toast } from '@/components/ui';
 import { cn } from '@/lib/utils';
+import { ButtonSmall } from '@/components/ui/button-small';
 
 const GITHUB_URL = 'https://github.com/btriapitsyn/openchamber';
 
@@ -67,7 +68,7 @@ export const AboutSettings: React.FC = () => {
           {!isChecking && updateStore.available && (
             <button
               onClick={() => setUpdateDialogOpen(true)}
-              className="flex items-center gap-1 typography-meta text-primary hover:underline"
+              className="flex items-center gap-1 typography-meta text-[var(--primary-base)] hover:underline"
             >
               <RiDownloadLine className="h-3.5 w-3.5" />
               Update
@@ -76,7 +77,7 @@ export const AboutSettings: React.FC = () => {
         </div>
 
         {updateStore.error && (
-          <p className="typography-micro text-destructive truncate">{updateStore.error}</p>
+          <p className="typography-micro text-[var(--status-error)] truncate">{updateStore.error}</p>
         )}
 
         {/* Links row */}
@@ -129,99 +130,83 @@ export const AboutSettings: React.FC = () => {
   }
 
 
-  // Desktop layout (unchanged)
+  // Desktop layout (redesigned)
   return (
-    <div className="w-full space-y-6">
-      <div className="space-y-1">
+    <div className="mb-8">
+      <div className="mb-3 px-1">
         <h3 className="typography-ui-header font-semibold text-foreground">
           About OpenChamber
         </h3>
       </div>
 
-      {/* Version and Update */}
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <div className="space-y-0.5">
-            <div className="typography-ui-label text-muted-foreground">Version</div>
-            <div className="typography-ui-header font-mono">{currentVersion}</div>
+      <div className="rounded-lg bg-[var(--surface-elevated)]/70 overflow-hidden flex flex-col">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-4 py-3 border-b border-[var(--surface-subtle)]">
+          <div className="flex min-w-0 flex-col">
+            <span className="typography-ui-label text-foreground">Version</span>
+            <span className="typography-meta text-muted-foreground font-mono">{currentVersion}</span>
           </div>
+          
+          <div className="flex items-center gap-3">
+            {updateStore.checking && (
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <RiLoaderLine className="h-4 w-4 animate-spin" />
+                <span className="typography-meta">Checking...</span>
+              </div>
+            )}
 
-          {updateStore.checking && (
-            <div className="flex items-center gap-2 text-muted-foreground">
-              <RiLoaderLine className="h-4 w-4 animate-spin" />
-              <span className="typography-meta">Checking...</span>
-            </div>
-          )}
+            {!updateStore.checking && updateStore.available && (
+              <ButtonSmall
+                variant="default"
+                onClick={() => setUpdateDialogOpen(true)}
+              >
+                <RiDownloadLine className="h-4 w-4 mr-1" />
+                Update to {updateStore.info?.version}
+              </ButtonSmall>
+            )}
 
-          {!updateStore.checking && updateStore.available && (
-            <button
-              onClick={() => setUpdateDialogOpen(true)}
-              className={cn(
-                'flex items-center gap-2 px-3 py-1.5 rounded-md',
-                'text-sm font-medium',
-                'bg-primary text-primary-foreground',
-                'hover:bg-primary/90',
-                'transition-colors'
-              )}
+            {!updateStore.checking && !updateStore.available && !updateStore.error && (
+              <span className="typography-meta text-muted-foreground">Up to date</span>
+            )}
+
+            <ButtonSmall
+              variant="outline"
+              onClick={() => updateStore.checkForUpdates()}
+              disabled={updateStore.checking}
             >
-              <RiDownloadLine className="h-4 w-4" />
-              Update to {updateStore.info?.version}
-            </button>
-          )}
-
-          {!updateStore.checking && !updateStore.available && !updateStore.error && (
-            <span className="typography-meta text-muted-foreground">Up to date</span>
-          )}
+              Check for updates
+            </ButtonSmall>
+          </div>
         </div>
-
+        
         {updateStore.error && (
-          <p className="typography-meta text-destructive">{updateStore.error}</p>
+          <div className="px-3 py-2 border-b border-[var(--surface-subtle)]">
+            <p className="typography-meta text-[var(--status-error)]">{updateStore.error}</p>
+          </div>
         )}
 
-        <button
-          onClick={() => updateStore.checkForUpdates()}
-          disabled={updateStore.checking}
-          className={cn(
-            'typography-meta text-muted-foreground hover:text-foreground',
-            'underline-offset-2 hover:underline',
-            'disabled:opacity-50 disabled:cursor-not-allowed'
-          )}
-        >
-          Check for updates
-        </button>
+        <div className="flex items-center gap-4 px-4 py-4">
+          <a
+            href={GITHUB_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground typography-meta transition-colors"
+          >
+            <RiGithubFill className="h-4 w-4" />
+            <span>GitHub</span>
+          </a>
+
+          <a
+            href="https://x.com/btriapitsyn"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground typography-meta transition-colors"
+          >
+            <RiTwitterXFill className="h-4 w-4" />
+            <span>@btriapitsyn</span>
+          </a>
+        </div>
       </div>
 
-      {/* Links */}
-      {/* Links */}
-      <div className="flex items-center gap-4">
-        <a
-          href={GITHUB_URL}
-          target="_blank"
-          rel="noopener noreferrer"
-          className={cn(
-            'flex items-center gap-1.5 text-muted-foreground hover:text-foreground',
-            'typography-meta transition-colors'
-          )}
-        >
-          <RiGithubFill className="h-4 w-4" />
-          <span>GitHub</span>
-        </a>
-
-        <a
-          href="https://x.com/btriapitsyn"
-          target="_blank"
-          rel="noopener noreferrer"
-          className={cn(
-            'flex items-center gap-1.5 text-muted-foreground hover:text-foreground',
-            'typography-meta transition-colors'
-          )}
-        >
-          <RiTwitterXFill className="h-4 w-4" />
-          <span>@btriapitsyn</span>
-        </a>
-      </div>
-
-      {/* Update Dialog */}
       <UpdateDialog
         open={updateDialogOpen}
         onOpenChange={setUpdateDialogOpen}

@@ -9,7 +9,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
+import { ButtonLarge } from '@/components/ui/button-large';
 import { Input } from '@/components/ui/input';
 import {
   Select,
@@ -240,12 +240,12 @@ export const AddCatalogDialog: React.FC<AddCatalogDialogProps> = ({ open, onOpen
 
         <div className="space-y-4">
           <div className="space-y-2">
-            <label className="typography-ui-label font-medium text-foreground">Catalog name</label>
+            <label className="typography-ui-label text-foreground">Catalog name</label>
             <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. Team Skills" />
           </div>
 
           <div className="space-y-2">
-            <label className="typography-ui-label font-medium text-foreground">Repository</label>
+            <label className="typography-ui-label text-foreground">Repository</label>
             <Input
               value={source}
               onChange={(e) => {
@@ -261,7 +261,7 @@ export const AddCatalogDialog: React.FC<AddCatalogDialogProps> = ({ open, onOpen
           </div>
 
           <div className="space-y-2">
-            <label className="typography-ui-label font-medium text-foreground">Optional subpath</label>
+            <label className="typography-ui-label text-foreground">Optional subpath</label>
             <Input
               value={subpath}
               onChange={(e) => {
@@ -274,28 +274,26 @@ export const AddCatalogDialog: React.FC<AddCatalogDialogProps> = ({ open, onOpen
           </div>
 
           {identityOptions.length > 0 && !isVSCodeRuntime() ? (
-            <div className="rounded-lg border bg-muted/20 px-3 py-2">
-              <div className="typography-ui-label font-medium text-foreground">Authentication required</div>
-              <div className="typography-meta text-muted-foreground mt-1">
-                Select a Git identity (SSH key) that can access this repository.
+            <div className="space-y-2">
+              <div>
+                <span className="typography-ui-label text-[var(--status-warning)]">Authentication required</span>
+                <span className="typography-meta text-muted-foreground ml-2">Select a Git identity (SSH key)</span>
               </div>
-              <div className="mt-2">
-                <Select value={gitIdentityId || ''} onValueChange={(v) => setGitIdentityId(v)}>
-                  <SelectTrigger className="!h-9 w-full justify-between">
-                    <span>{identityOptions.find((i) => i.id === gitIdentityId)?.name || 'Choose identity'}</span>
-                  </SelectTrigger>
-                  <SelectContent align="start">
-                    {identityOptions.map((id) => (
-                      <SelectItem key={id.id} value={id.id} className="pr-2 [&>span:first-child]:hidden">
-                        {id.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="typography-micro text-muted-foreground mt-2">
-                Configure identities in Settings → Git Identities.
-              </div>
+              <Select value={gitIdentityId || ''} onValueChange={(v) => setGitIdentityId(v)}>
+                <SelectTrigger className="w-fit">
+                  <span>{identityOptions.find((i) => i.id === gitIdentityId)?.name || 'Choose identity'}</span>
+                </SelectTrigger>
+                <SelectContent align="start">
+                  {identityOptions.map((id) => (
+                    <SelectItem key={id.id} value={id.id}>
+                      {id.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="typography-micro text-muted-foreground">
+                Configure identities in Settings - Git Identities.
+              </p>
             </div>
           ) : null}
 
@@ -313,25 +311,24 @@ export const AddCatalogDialog: React.FC<AddCatalogDialogProps> = ({ open, onOpen
         </div>
 
         <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>
+          <ButtonLarge variant="ghost" onClick={() => onOpenChange(false)}>
             Cancel
-          </Button>
-          <Button
-            variant="outline"
+          </ButtonLarge>
+          <ButtonLarge
+            variant="ghost"
             onClick={() => void handleScan()}
             disabled={isScanning || !source.trim()}
             className="gap-2"
           >
             <RiGitRepositoryLine className="h-4 w-4" />
-            {isScanning ? 'Scanning…' : 'Scan'}
-          </Button>
-          <Button
-            variant="default"
+            {isScanning ? 'Scanning...' : 'Scan'}
+          </ButtonLarge>
+          <ButtonLarge
             onClick={() => void handleAdd()}
             disabled={!scanOk || isDuplicate || !label.trim() || !source.trim()}
           >
             Add catalog
-          </Button>
+          </ButtonLarge>
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -210,7 +210,7 @@ export async function deleteRemoteBranch(directory: string, payload: GitDeleteRe
 export async function generateCommitMessage(
   directory: string,
   files: string[],
-  options?: { zenModel?: string }
+  options?: { zenModel?: string; providerId?: string; modelId?: string }
 ): Promise<{ message: GeneratedCommitMessage }> {
   if (!Array.isArray(files) || files.length === 0) {
     throw new Error('No files provided to generate commit message');
@@ -219,6 +219,12 @@ export async function generateCommitMessage(
   const body: Record<string, unknown> = { files };
   if (options?.zenModel) {
     body.zenModel = options.zenModel;
+  }
+  if (options?.providerId) {
+    body.providerId = options.providerId;
+  }
+  if (options?.modelId) {
+    body.modelId = options.modelId;
   }
 
   const response = await fetch(buildUrl(`${API_BASE}/commit-message`, directory), {
@@ -259,19 +265,25 @@ export async function generateCommitMessage(
 
 export async function generatePullRequestDescription(
   directory: string,
-  payload: { base: string; head: string; context?: string; zenModel?: string }
+  payload: { base: string; head: string; context?: string; zenModel?: string; providerId?: string; modelId?: string }
 ): Promise<{ title: string; body: string }> {
-  const { base, head, context, zenModel } = payload;
+  const { base, head, context, zenModel, providerId, modelId } = payload;
   if (!base || !head) {
     throw new Error('base and head are required');
   }
 
-  const requestBody: { base: string; head: string; context?: string; zenModel?: string } = { base, head };
+  const requestBody: { base: string; head: string; context?: string; zenModel?: string; providerId?: string; modelId?: string } = { base, head };
   if (context?.trim()) {
     requestBody.context = context.trim();
   }
   if (zenModel) {
     requestBody.zenModel = zenModel;
+  }
+  if (providerId) {
+    requestBody.providerId = providerId;
+  }
+  if (modelId) {
+    requestBody.modelId = modelId;
   }
 
   const response = await fetch(buildUrl(`${API_BASE}/pr-description`, directory), {

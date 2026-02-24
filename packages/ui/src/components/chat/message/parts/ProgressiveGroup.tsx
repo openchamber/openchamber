@@ -69,6 +69,7 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
     isMobile,
     expandedTools,
     onToggleTool,
+    onShowPopup,
     onContentChange,
     diffStats,
 }) => {
@@ -252,6 +253,7 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
                                             syntaxTheme={syntaxTheme}
                                             isMobile={isMobile}
                                             onContentChange={onContentChange}
+                                            onShowPopup={onShowPopup}
                                             hasPrevTool={connection?.hasPrev ?? false}
                                             hasNextTool={connection?.hasNext ?? false}
                                         />

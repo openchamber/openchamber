@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useBrowserVoice } from '@/hooks/useBrowserVoice';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { SettingsSection } from '@/components/sections/shared/SettingsSection';
+import { useDeviceInfo } from '@/lib/device';
 
 import {
     Select,
@@ -10,14 +10,14 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch';
-import { Button } from '@/components/ui/button';
-import { Slider } from '@/components/ui/slider';
-import { RiMicLine, RiAlertLine, RiVolumeUpLine, RiSpeedLine, RiMusicLine, RiSoundModuleLine, RiAppleLine, RiPlayLine, RiStopLine, RiChromeLine, RiFileTextLine, RiKeyLine, RiCloseLine } from '@remixicon/react';
+import { Checkbox } from '@/components/ui/checkbox';
+import { ButtonSmall } from '@/components/ui/button-small';
+import { NumberInput } from '@/components/ui/number-input';
+import { RiPlayLine, RiStopLine, RiCloseLine, RiAppleLine, RiInformationLine } from '@remixicon/react';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { browserVoiceService } from '@/lib/voice/browserVoiceService';
+import { cn } from '@/lib/utils';
 
-// Common language options with display names
-// Shared with BrowserVoiceButton.tsx
 const LANGUAGE_OPTIONS = [
     { value: 'en-US', label: 'English' },
     { value: 'es-ES', label: 'Español' },
@@ -31,11 +31,24 @@ const LANGUAGE_OPTIONS = [
     { value: 'uk-UA', label: 'Українська' },
 ];
 
-/**
- * Voice settings section for OpenChamber settings
- * Allows users to configure voice conversation preferences
- */
+const OPENAI_VOICE_OPTIONS = [
+    { value: 'alloy', label: 'Alloy' },
+    { value: 'ash', label: 'Ash' },
+    { value: 'ballad', label: 'Ballad' },
+    { value: 'coral', label: 'Coral' },
+    { value: 'echo', label: 'Echo' },
+    { value: 'fable', label: 'Fable' },
+    { value: 'nova', label: 'Nova' },
+    { value: 'onyx', label: 'Onyx' },
+    { value: 'sage', label: 'Sage' },
+    { value: 'shimmer', label: 'Shimmer' },
+    { value: 'verse', label: 'Verse' },
+    { value: 'marin', label: 'Marin' },
+    { value: 'cedar', label: 'Cedar' },
+];
+
 export const VoiceSettings: React.FC = () => {
+    const { isMobile } = useDeviceInfo();
     const {
         isSupported,
         language,
@@ -72,22 +85,18 @@ export const VoiceSettings: React.FC = () => {
         setSummarizeMaxLength,
     } = useConfigStore();
 
-    // Check if macOS 'say' is available and get voices
     const [isSayAvailable, setIsSayAvailable] = useState(false);
     const [sayVoices, setSayVoices] = useState<Array<{ name: string; locale: string }>>([]);
     const [isPreviewPlaying, setIsPreviewPlaying] = useState(false);
     const [previewAudio, setPreviewAudio] = useState<HTMLAudioElement | null>(null);
 
-    // Check if OpenAI TTS is available
     const [isOpenAIAvailable, setIsOpenAIAvailable] = useState(false);
     const [isOpenAIPreviewPlaying, setIsOpenAIPreviewPlaying] = useState(false);
     const [openaiPreviewAudio, setOpenaiPreviewAudio] = useState<HTMLAudioElement | null>(null);
 
-    // Browser voices
     const [browserVoices, setBrowserVoices] = useState<SpeechSynthesisVoice[]>([]);
     const [isBrowserPreviewPlaying, setIsBrowserPreviewPlaying] = useState(false);
 
-    // Load browser voices
     useEffect(() => {
         const loadVoices = async () => {
             const voices = await browserVoiceService.waitForVoices();
@@ -95,7 +104,6 @@ export const VoiceSettings: React.FC = () => {
         };
         loadVoices();
 
-        // Also listen for voice changes (Chrome loads voices asynchronously)
         if ('speechSynthesis' in window) {
             window.speechSynthesis.onvoiceschanged = () => {
                 setBrowserVoices(window.speechSynthesis.getVoices());
@@ -109,25 +117,20 @@ export const VoiceSettings: React.FC = () => {
         };
     }, []);
 
-    // Filter and sort browser voices by language
     const filteredBrowserVoices = useMemo(() => {
-        // Group voices by language, prioritize English voices at top
         return browserVoices
-            .filter(v => v.lang) // Only voices with a language
+            .filter(v => v.lang)
             .sort((a, b) => {
-                // Prioritize English voices
                 const aIsEnglish = a.lang.startsWith('en');
                 const bIsEnglish = b.lang.startsWith('en');
                 if (aIsEnglish && !bIsEnglish) return -1;
                 if (!aIsEnglish && bIsEnglish) return 1;
-                // Then sort by language, then by name
                 const langCompare = a.lang.localeCompare(b.lang);
                 if (langCompare !== 0) return langCompare;
                 return a.name.localeCompare(b.name);
             });
     }, [browserVoices]);
 
-    // Preview browser voice
     const previewBrowserVoice = useCallback(() => {
         if (isBrowserPreviewPlaying) {
             browserVoiceService.cancelSpeech();
@@ -158,7 +161,6 @@ export const VoiceSettings: React.FC = () => {
         window.speechSynthesis.speak(utterance);
     }, [browserVoice, browserVoices, speechRate, speechPitch, speechVolume, isBrowserPreviewPlaying]);
 
-    // Cleanup browser preview on unmount
     useEffect(() => {
         return () => {
             if (isBrowserPreviewPlaying) {
@@ -167,39 +169,15 @@ export const VoiceSettings: React.FC = () => {
         };
     }, [isBrowserPreviewPlaying]);
 
-    // OpenAI voice options
-    const OPENAI_VOICE_OPTIONS = [
-        { value: 'alloy', label: 'Alloy' },
-        { value: 'ash', label: 'Ash' },
-        { value: 'ballad', label: 'Ballad' },
-        { value: 'coral', label: 'Coral' },
-        { value: 'echo', label: 'Echo' },
-        { value: 'fable', label: 'Fable' },
-        { value: 'nova', label: 'Nova' },
-        { value: 'onyx', label: 'Onyx' },
-        { value: 'sage', label: 'Sage' },
-        { value: 'shimmer', label: 'Shimmer' },
-        { value: 'verse', label: 'Verse' },
-        { value: 'marin', label: 'Marin' },
-        { value: 'cedar', label: 'Cedar' },
-    ];
-
-    // Check OpenAI TTS availability (including API key from settings)
     useEffect(() => {
         const checkOpenAIAvailability = async () => {
             try {
-                // First check if server has API key configured
                 const response = await fetch('/api/tts/status');
                 const data = await response.json();
-                console.log('[VoiceSettings] OpenAI TTS status:', data);
-
-                // Available if server has key OR user has set API key in settings
                 const hasServerKey = data.available;
                 const hasSettingsKey = openaiApiKey.trim().length > 0;
                 setIsOpenAIAvailable(hasServerKey || hasSettingsKey);
-            } catch (err) {
-                console.error('[VoiceSettings] Failed to check OpenAI TTS status:', err);
-                // Still available if user has set API key in settings
+            } catch {
                 setIsOpenAIAvailable(openaiApiKey.trim().length > 0);
             }
         };
@@ -211,10 +189,8 @@ export const VoiceSettings: React.FC = () => {
         fetch('/api/tts/say/status')
             .then(res => res.json())
             .then(data => {
-                console.log('[VoiceSettings] Say TTS status:', data);
                 setIsSayAvailable(data.available);
                 if (data.voices) {
-                    // Filter to unique voice names and sort alphabetically
                     const uniqueVoices = data.voices
                         .filter((v: { name: string; locale: string }, i: number, arr: Array<{ name: string; locale: string }>) =>
                             arr.findIndex((x: { name: string }) => x.name === v.name) === i
@@ -223,15 +199,12 @@ export const VoiceSettings: React.FC = () => {
                     setSayVoices(uniqueVoices);
                 }
             })
-            .catch((err) => {
-                console.error('[VoiceSettings] Failed to check Say TTS status:', err);
+            .catch(() => {
                 setIsSayAvailable(false);
             });
     }, []);
 
-    // Preview voice function
     const previewVoice = useCallback(async () => {
-        // Stop any existing preview
         if (previewAudio) {
             previewAudio.pause();
             previewAudio.currentTime = 0;
@@ -272,13 +245,11 @@ export const VoiceSettings: React.FC = () => {
 
             setPreviewAudio(audio);
             await audio.play();
-        } catch (err) {
-            console.error('Voice preview failed:', err);
+        } catch {
             setIsPreviewPlaying(false);
         }
     }, [sayVoice, speechRate, previewAudio]);
 
-    // Cleanup preview audio on unmount
     useEffect(() => {
         return () => {
             if (previewAudio) {
@@ -287,9 +258,7 @@ export const VoiceSettings: React.FC = () => {
         };
     }, [previewAudio]);
 
-    // Preview OpenAI voice
     const previewOpenAIVoice = useCallback(async () => {
-        // Stop any existing preview
         if (openaiPreviewAudio) {
             openaiPreviewAudio.pause();
             openaiPreviewAudio.currentTime = 0;
@@ -334,13 +303,11 @@ export const VoiceSettings: React.FC = () => {
 
             setOpenaiPreviewAudio(audio);
             await audio.play();
-        } catch (err) {
-            console.error('[VoiceSettings] OpenAI voice preview failed:', err);
+        } catch {
             setIsOpenAIPreviewPlaying(false);
         }
     }, [openaiVoice, speechRate, openaiPreviewAudio, openaiApiKey]);
 
-    // Cleanup OpenAI preview audio on unmount
     useEffect(() => {
         return () => {
             if (openaiPreviewAudio) {
@@ -349,526 +316,321 @@ export const VoiceSettings: React.FC = () => {
         };
     }, [openaiPreviewAudio]);
 
+    const sliderClass = "flex-1 min-w-0 h-1.5 bg-[var(--interactive-border)] rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[var(--primary-base)] [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-[var(--primary-base)] [&::-moz-range-thumb]:border-0 disabled:opacity-50";
+
     return (
-        <SettingsSection
-            title="Voice"
-            description="Configure voice conversation settings"
-        >
-            <div className="space-y-6">
-                {/* Voice Mode Enable/Disable */}
-                <div className="flex items-start justify-between gap-4">
-                    <div className="space-y-1 flex-1">
-                        <div className="flex items-center gap-2">
-                            <RiMicLine className="w-4 h-4 text-muted-foreground" />
-                            <span className="typography-ui-label text-foreground">
-                                Voice Mode
-                            </span>
-                        </div>
-                        <p className="typography-meta text-muted-foreground">
-                            Enable voice conversations with microphone input
-                        </p>
-                    </div>
-                    <Switch
-                        checked={voiceModeEnabled}
-                        onCheckedChange={setVoiceModeEnabled}
-                        aria-label="Toggle voice mode"
-                    />
+        <div className="space-y-8">
+
+            {/* Voice Setup */}
+            <div className="mb-8">
+                <div className="mb-1 px-1">
+                    <h3 className="typography-ui-header font-medium text-foreground">
+                        Voice Setup
+                    </h3>
                 </div>
 
-                {/* Voice provider selection - only show when voice mode is enabled */}
-                {voiceModeEnabled && (
-                    <div className="flex items-start justify-between gap-4">
-                        <div className="space-y-1 flex-1">
-                            <div className="flex items-center gap-2">
-                                <RiVolumeUpLine className="w-4 h-4 text-muted-foreground" />
-                                <span className="typography-ui-label text-foreground">
-                                    Voice Provider
-                                </span>
-                            </div>
-                            <p className="typography-meta text-muted-foreground">
-                                Choose your preferred text-to-speech provider
-                            </p>
-                        </div>
-                        <div className="flex gap-2 flex-wrap justify-end">
-                            <Button
-                                variant={voiceProvider === 'browser' ? 'default' : 'outline'}
-                                size="sm"
-                                onClick={() => setVoiceProvider('browser')}
-                                className="min-w-[80px]"
-                            >
-                                Browser
-                            </Button>
-                            <Button
-                                variant={voiceProvider === 'openai' ? 'default' : 'outline'}
-                                size="sm"
-                                onClick={() => setVoiceProvider('openai')}
-                                className="min-w-[80px]"
-                                title={isOpenAIAvailable ? 'OpenAI voice' : 'OpenAI voice unavailable - API key not configured'}
-                            >
-                                OpenAI
-                            </Button>
-                            {isSayAvailable && (
-                                <Button
-                                    variant={voiceProvider === 'say' ? 'default' : 'outline'}
-                                    size="sm"
-                                    onClick={() => setVoiceProvider('say')}
-                                    className="min-w-[80px]"
-                                >
-                                    <RiAppleLine className="w-4 h-4 mr-1" />
-                                    Say
-                                </Button>
-                            )}
-                        </div>
-                    </div>
-                )}
+                <section className="px-2 pb-2 pt-0 space-y-0">
 
-                {/* Provider description */}
-                {voiceModeEnabled && (
-                    <div className="p-3 rounded-lg bg-muted/50 border border-border/50">
-                        <p className="typography-micro text-muted-foreground">
-                            <span className="font-medium text-foreground">
-                                {voiceProvider === 'browser' ? 'Browser Voice:' : voiceProvider === 'openai' ? 'OpenAI:' : 'macOS Say:'}
-                            </span>{' '}
-                            {voiceProvider === 'browser'
-                                ? 'Free, works offline, but has limited mobile support. Best for desktop use.'
-                                : voiceProvider === 'openai'
-                                    ? 'Higher quality voice synthesis that works reliably on mobile. Requires OpenAI API key.'
-                                    : 'Native macOS speech synthesis. Free, fast, and works offline. Desktop only.'}
-                        </p>
-                    </div>
-                )}
-
-                {/* OpenAI unavailable warning */}
-                {voiceModeEnabled && voiceProvider === 'openai' && !isOpenAIAvailable && (
-                    <div className="flex items-start gap-3 p-3 rounded-lg bg-destructive/10 border border-destructive/20">
-                        <RiAlertLine className="w-5 h-5 text-destructive flex-shrink-0 mt-0.5" />
-                        <div className="space-y-1">
-                            <p className="typography-ui text-destructive font-medium">
-                                OpenAI voice unavailable
-                            </p>
-                            <p className="typography-micro text-destructive/80">
-                                OpenAI voice requires an OpenAI API key to be configured. Please set the OpenAI API key or switch to Browser voice.
-                            </p>
-                        </div>
-                    </div>
-                )}
-
-                {/* OpenAI API Key Input - show when OpenAI is selected or when no server key is configured */}
-                {voiceModeEnabled && voiceProvider === 'openai' && (
-                    <div className="flex items-start justify-between gap-4">
-                        <div className="space-y-1 flex-1">
-                            <div className="flex items-center gap-2">
-                                <RiKeyLine className="w-4 h-4 text-muted-foreground" />
-                                <span className="typography-ui-label text-foreground">
-                                    OpenAI API Key
-                                </span>
-                            </div>
-                            <p className="typography-meta text-muted-foreground">
-                                {isOpenAIAvailable && !openaiApiKey ? 'Using API key from OpenCode configuration' : 'Enter your OpenAI API key for voice synthesis'}
-                            </p>
-                        </div>
-                        <div className="flex items-center gap-2 w-[280px]">
-                            <input
-                                type="password"
-                                value={openaiApiKey}
-                                onChange={(e) => setOpenaiApiKey(e.target.value)}
-                                placeholder="sk-..."
-                                className="flex-1 px-3 py-2 text-sm bg-background border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring"
-                            />
-                            {openaiApiKey && (
-                                <Button
-                                    size="icon"
-                                    variant="ghost"
-                                    onClick={() => setOpenaiApiKey('')}
-                                    title="Clear API key"
-                                >
-                                    <RiCloseLine className="w-4 h-4" />
-                                </Button>
-                            )}
-                        </div>
-                    </div>
-                )}
-
-                {/* OpenAI Voice Selection */}
-                {voiceModeEnabled && voiceProvider === 'openai' && isOpenAIAvailable && (
-                    <div className="flex items-start justify-between gap-4">
-                        <div className="space-y-1 flex-1">
-                            <div className="flex items-center gap-2">
-                                <RiVolumeUpLine className="w-4 h-4 text-muted-foreground" />
-                                <span className="typography-ui-label text-foreground">
-                                    OpenAI Voice
-                                </span>
-                            </div>
-                            <p className="typography-meta text-muted-foreground">
-                                Select an OpenAI voice for text-to-speech
-                            </p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <Select
-                                value={openaiVoice}
-                                onValueChange={setOpenaiVoice}
-                            >
-                                <SelectTrigger className="w-[160px]" aria-label="Select OpenAI voice">
-                                    <SelectValue placeholder="Select voice" />
-                                </SelectTrigger>
-                                <SelectContent className="max-h-[300px]">
-                                    {OPENAI_VOICE_OPTIONS.map((voice) => (
-                                        <SelectItem key={voice.value} value={voice.value}>
-                                            {voice.label}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                            <Button
-                                size="icon"
-                                variant="outline"
-                                onClick={previewOpenAIVoice}
-                                disabled={!isOpenAIAvailable}
-                                title={isOpenAIPreviewPlaying ? 'Stop preview' : 'Preview voice'}
-                            >
-                                {isOpenAIPreviewPlaying ? (
-                                    <RiStopLine className="w-4 h-4" />
-                                ) : (
-                                    <RiPlayLine className="w-4 h-4" />
-                                )}
-                            </Button>
-                        </div>
-                    </div>
-                )}
-
-                {/* macOS Say Voice Selection */}
-                {voiceModeEnabled && voiceProvider === 'say' && isSayAvailable && sayVoices.length > 0 && (
-                    <div className="flex items-start justify-between gap-4">
-                        <div className="space-y-1 flex-1">
-                            <div className="flex items-center gap-2">
-                                <RiAppleLine className="w-4 h-4 text-muted-foreground" />
-                                <span className="typography-ui-label text-foreground">
-                                    macOS Voice
-                                </span>
-                            </div>
-                            <p className="typography-meta text-muted-foreground">
-                                Select a voice installed on your Mac
-                            </p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <Select
-                                value={sayVoice}
-                                onValueChange={setSayVoice}
-                            >
-                                <SelectTrigger className="w-[160px]" aria-label="Select macOS voice">
-                                    <SelectValue placeholder="Select voice" />
-                                </SelectTrigger>
-                                <SelectContent className="max-h-[300px]">
-                                    {sayVoices.map((voice) => (
-                                        <SelectItem key={voice.name} value={voice.name}>
-                                            {voice.name}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                            <Button
-                                size="icon"
-                                variant="outline"
-                                onClick={previewVoice}
-                                title={isPreviewPlaying ? 'Stop preview' : 'Preview voice'}
-                            >
-                                {isPreviewPlaying ? (
-                                    <RiStopLine className="w-4 h-4" />
-                                ) : (
-                                    <RiPlayLine className="w-4 h-4" />
-                                )}
-                            </Button>
-                        </div>
-                    </div>
-                )}
-
-                {/* Browser Voice Selection */}
-                {voiceModeEnabled && voiceProvider === 'browser' && filteredBrowserVoices.length > 0 && (
-                    <div className="flex items-start justify-between gap-4">
-                        <div className="space-y-1 flex-1">
-                            <div className="flex items-center gap-2">
-                                <RiChromeLine className="w-4 h-4 text-muted-foreground" />
-                                <span className="typography-ui-label text-foreground">
-                                    Browser Voice
-                                </span>
-                            </div>
-                            <p className="typography-meta text-muted-foreground">
-                                Select a voice from your browser
-                            </p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <Select
-                                value={browserVoice || '__auto__'}
-                                onValueChange={(value) => setBrowserVoice(value === '__auto__' ? '' : value)}
-                            >
-                                <SelectTrigger className="w-[200px]" aria-label="Select browser voice">
-                                    <SelectValue placeholder="Auto (default)" />
-                                </SelectTrigger>
-                                <SelectContent className="max-h-[300px]">
-                                    <SelectItem value="__auto__">Auto (default)</SelectItem>
-                                    {filteredBrowserVoices.map((voice) => (
-                                        <SelectItem key={voice.name} value={voice.name}>
-                                            {voice.name} ({voice.lang})
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                            <Button
-                                size="icon"
-                                variant="outline"
-                                onClick={previewBrowserVoice}
-                                title={isBrowserPreviewPlaying ? 'Stop preview' : 'Preview voice'}
-                            >
-                                {isBrowserPreviewPlaying ? (
-                                    <RiStopLine className="w-4 h-4" />
-                                ) : (
-                                    <RiPlayLine className="w-4 h-4" />
-                                )}
-                            </Button>
-                        </div>
-                    </div>
-                )}
-
-                {/* Language selection */}
-                {voiceModeEnabled && (
-                    <div className="flex items-start justify-between gap-4">
-                        <div className="space-y-1 flex-1">
-                            <div className="flex items-center gap-2">
-                                <RiMicLine className="w-4 h-4 text-muted-foreground" />
-                                <span className="typography-ui-label text-foreground">
-                                    Language
-                                </span>
-                            </div>
-                            <p className="typography-meta text-muted-foreground">
-                                Language for speech recognition and synthesis
-                            </p>
-                        </div>
-                        <Select
-                            value={language}
-                            onValueChange={setLanguage}
-                            disabled={!isSupported}
-                        >
-                            <SelectTrigger className="w-[180px]" aria-label="Select language">
-                                <SelectValue placeholder="Select language" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                {LANGUAGE_OPTIONS.map((lang) => (
-                                    <SelectItem key={lang.value} value={lang.value}>
-                                        {lang.label}
-                                    </SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
-                    </div>
-                )}
-
-                {/* Show TTS buttons on messages */}
-                <div className="flex items-start justify-between gap-4">
-                    <div className="space-y-1 flex-1">
-                        <div className="flex items-center gap-2">
-                            <RiVolumeUpLine className="w-4 h-4 text-muted-foreground" />
-                            <span className="typography-ui-label text-foreground">
-                                Message Read Aloud
-                            </span>
-                        </div>
-                        <p className="typography-meta text-muted-foreground">
-                            Show speaker button on AI responses to read them aloud
-                        </p>
-                    </div>
-                    <Switch
-                        checked={showMessageTTSButtons}
-                        onCheckedChange={setShowMessageTTSButtons}
-                        aria-label="Toggle message TTS buttons"
-                    />
-                </div>
-
-                {/* Summarization Section */}
-                <div className="pt-4 border-t border-border/40 space-y-4">
-                    <div className="flex items-center gap-2 mb-2">
-                        <RiFileTextLine className="w-4 h-4 text-muted-foreground" />
-                        <span className="typography-ui-label text-foreground font-medium">
-                            Summarization
-                        </span>
+                    <div
+                        className="group flex cursor-pointer items-center gap-2 py-1.5"
+                        role="button"
+                        tabIndex={0}
+                        aria-pressed={voiceModeEnabled}
+                        onClick={() => setVoiceModeEnabled(!voiceModeEnabled)}
+                        onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setVoiceModeEnabled(!voiceModeEnabled); } }}
+                    >
+                        <Checkbox checked={voiceModeEnabled} onChange={setVoiceModeEnabled} ariaLabel="Enable voice mode" />
+                        <span className="typography-ui-label text-foreground">Enable Voice Mode</span>
                     </div>
 
-                    {/* Summarize Message TTS */}
-                    <div className="flex items-start justify-between gap-4">
-                        <div className="space-y-1 flex-1">
-                            <span className="typography-ui-label text-foreground">
-                                Summarize Message Playback
-                            </span>
-                            <p className="typography-meta text-muted-foreground">
-                                Summarize long messages before reading them aloud
-                            </p>
-                        </div>
-                        <Switch
-                            checked={summarizeMessageTTS}
-                            onCheckedChange={setSummarizeMessageTTS}
-                            aria-label="Toggle message TTS summarization"
-                        />
-                    </div>
-
-                    {/* Summarize Voice Conversation */}
                     {voiceModeEnabled && (
-                        <div className="flex items-start justify-between gap-4">
-                            <div className="space-y-1 flex-1">
-                                <span className="typography-ui-label text-foreground">
-                                    Summarize Voice Responses
-                                </span>
-                                <p className="typography-meta text-muted-foreground">
-                                    Summarize long AI responses during voice conversations
-                                </p>
-                            </div>
-                            <Switch
-                                checked={summarizeVoiceConversation}
-                                onCheckedChange={setSummarizeVoiceConversation}
-                                aria-label="Toggle voice conversation summarization"
-                            />
-                        </div>
-                    )}
-
-                    {/* Character Threshold - only show if either summarization is enabled */}
-                    {(summarizeMessageTTS || summarizeVoiceConversation) && (
                         <>
-                        <div className="flex items-start justify-between gap-4">
-                            <div className="space-y-1 flex-1">
-                                <span className="typography-ui-label text-foreground">
-                                    Character Threshold
-                                </span>
-                                <p className="typography-meta text-muted-foreground">
-                                    Summarize text longer than this ({summarizeCharacterThreshold} chars)
-                                </p>
+                            <div className="pb-1.5 pt-0.5">
+                                <div className="flex min-w-0 flex-col gap-1.5">
+                                    <div className="flex items-center gap-1.5">
+                                        <span className="typography-ui-label text-foreground">Provider</span>
+                                        <Tooltip delayDuration={1000}>
+                                            <TooltipTrigger asChild>
+                                                <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+                                            </TooltipTrigger>
+                                            <TooltipContent sideOffset={8} className="max-w-xs">
+                                                <ul className="space-y-1">
+                                                    <li><strong>Browser:</strong> Free, offline, limited mobile support.</li>
+                                                    <li><strong>OpenAI:</strong> High quality, mobile ready, needs API key.</li>
+                                                    <li><strong>Say:</strong> macOS native. Fast, free, offline.</li>
+                                                </ul>
+                                            </TooltipContent>
+                                        </Tooltip>
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-1">
+                                        <ButtonSmall
+                                            variant="outline"
+                                            size="xs"
+                                            onClick={() => setVoiceProvider('browser')}
+                                            className={cn(
+                                                '!font-normal',
+                                                voiceProvider === 'browser'
+                                                    ? 'border-[var(--primary-base)] text-[var(--primary-base)] bg-[var(--primary-base)]/10 hover:text-[var(--primary-base)]'
+                                                    : 'text-foreground'
+                                            )}
+                                        >
+                                            Browser
+                                        </ButtonSmall>
+                                        <ButtonSmall
+                                            variant="outline"
+                                            size="xs"
+                                            onClick={() => setVoiceProvider('openai')}
+                                            className={cn(
+                                                '!font-normal',
+                                                voiceProvider === 'openai'
+                                                    ? 'border-[var(--primary-base)] text-[var(--primary-base)] bg-[var(--primary-base)]/10 hover:text-[var(--primary-base)]'
+                                                    : 'text-foreground'
+                                            )}
+                                        >
+                                            OpenAI
+                                        </ButtonSmall>
+                                        {isSayAvailable && (
+                                            <ButtonSmall
+                                                variant="outline"
+                                                size="xs"
+                                                onClick={() => setVoiceProvider('say')}
+                                                className={cn(
+                                                    '!font-normal',
+                                                    voiceProvider === 'say'
+                                                        ? 'border-[var(--primary-base)] text-[var(--primary-base)] bg-[var(--primary-base)]/10 hover:text-[var(--primary-base)]'
+                                                        : 'text-foreground'
+                                                )}
+                                            >
+                                                <RiAppleLine className="w-3.5 h-3.5 mr-0.5" />
+                                                Say
+                                            </ButtonSmall>
+                                        )}
+                                    </div>
+                                </div>
                             </div>
-                            <div className="w-[180px]">
-                                <Slider
-                                    value={summarizeCharacterThreshold}
-                                    onChange={setSummarizeCharacterThreshold}
-                                    min={50}
-                                    max={2000}
-                                    step={50}
-                                    label="Character threshold"
-                                    valueFormatter={(v: number) => `${v}`}
-                                />
-                            </div>
-                        </div>
 
-                        <div className="flex items-start justify-between gap-4">
-                            <div className="space-y-1 flex-1">
-                                <span className="typography-ui-label text-foreground">
-                                    Summary Length Limit
-                                </span>
-                                <p className="typography-meta text-muted-foreground">
-                                    Max characters for the summary ({summarizeMaxLength} chars)
-                                </p>
+                            {/* OpenAI API Key */}
+                            {voiceProvider === 'openai' && (
+                                <div className="py-1.5">
+                                    <span className={cn("typography-ui-label text-foreground", !isOpenAIAvailable && "text-[var(--status-error)]")}>
+                                        API Key
+                                    </span>
+                                    <span className={cn("typography-meta ml-2", !isOpenAIAvailable ? "text-[var(--status-error)]/80" : "text-muted-foreground")}>
+                                        {isOpenAIAvailable && !openaiApiKey ? 'Using key from configuration' : !isOpenAIAvailable ? 'OpenAI TTS requires an API key' : 'Provide your OpenAI key'}
+                                    </span>
+                                    <div className="relative mt-1.5 max-w-xs">
+                                        <input
+                                            type="password"
+                                            value={openaiApiKey}
+                                            onChange={(e) => setOpenaiApiKey(e.target.value)}
+                                            placeholder="sk-..."
+                                            className="w-full h-7 rounded-lg border border-input bg-transparent px-2 typography-ui-label text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/70"
+                                        />
+                                        {openaiApiKey && (
+                                            <button
+                                                type="button"
+                                                onClick={() => setOpenaiApiKey('')}
+                                                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                                            >
+                                                <RiCloseLine className="w-3.5 h-3.5" />
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Voice Selection */}
+                            <div className="flex items-center gap-8 py-1.5">
+                                <span className="typography-ui-label text-foreground sm:w-56 shrink-0">Voice</span>
+                                <div className="flex items-center gap-2 w-fit">
+                                    {voiceProvider === 'openai' && isOpenAIAvailable && (
+                                        <>
+                                            <Select value={openaiVoice} onValueChange={setOpenaiVoice}>
+                                                <SelectTrigger className="w-fit">
+                                                    <SelectValue placeholder="Select voice" />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {OPENAI_VOICE_OPTIONS.map((v) => (
+                                                        <SelectItem key={v.value} value={v.value}>{v.label}</SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                            <ButtonSmall variant="ghost" className="h-7 w-7 px-0" onClick={previewOpenAIVoice} title="Preview">
+                                                {isOpenAIPreviewPlaying ? <RiStopLine className="w-3.5 h-3.5" /> : <RiPlayLine className="w-3.5 h-3.5" />}
+                                            </ButtonSmall>
+                                        </>
+                                    )}
+
+                                    {voiceProvider === 'say' && isSayAvailable && sayVoices.length > 0 && (
+                                        <>
+                                            <Select value={sayVoice} onValueChange={setSayVoice}>
+                                                <SelectTrigger className="w-fit">
+                                                    <SelectValue placeholder="Select voice" />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {sayVoices.map((v) => (
+                                                        <SelectItem key={v.name} value={v.name}>{v.name}</SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                            <ButtonSmall variant="ghost" className="h-7 w-7 px-0" onClick={previewVoice} title="Preview">
+                                                {isPreviewPlaying ? <RiStopLine className="w-3.5 h-3.5" /> : <RiPlayLine className="w-3.5 h-3.5" />}
+                                            </ButtonSmall>
+                                        </>
+                                    )}
+
+                                    {voiceProvider === 'browser' && filteredBrowserVoices.length > 0 && (
+                                        <>
+                                            <Select value={browserVoice || '__auto__'} onValueChange={(value) => setBrowserVoice(value === '__auto__' ? '' : value)}>
+                                                <SelectTrigger className="w-fit max-w-[200px]">
+                                                    <SelectValue placeholder="Auto" />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="__auto__">Auto</SelectItem>
+                                                    {filteredBrowserVoices.map((v) => (
+                                                        <SelectItem key={v.name} value={v.name}>{v.name} ({v.lang})</SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                            <ButtonSmall variant="ghost" className="h-7 w-7 px-0" onClick={previewBrowserVoice} title="Preview">
+                                                {isBrowserPreviewPlaying ? <RiStopLine className="w-3.5 h-3.5" /> : <RiPlayLine className="w-3.5 h-3.5" />}
+                                            </ButtonSmall>
+                                        </>
+                                    )}
+                                </div>
                             </div>
-                            <div className="w-[180px]">
-                                <Slider
-                                    value={summarizeMaxLength}
-                                    onChange={setSummarizeMaxLength}
-                                    min={50}
-                                    max={2000}
-                                    step={50}
-                                    label="Summary length limit"
-                                    valueFormatter={(v: number) => `${v}`}
-                                />
+
+                            {/* Speech Rate */}
+                            <div className="flex items-center gap-8 py-1.5">
+                                <span className="typography-ui-label text-foreground sm:w-56 shrink-0">Speech Rate</span>
+                                <div className="flex items-center gap-2 w-fit">
+                                    {!isMobile && <input type="range" min={0.5} max={2} step={0.1} value={speechRate} onChange={(e) => setSpeechRate(Number(e.target.value))} disabled={!isSupported} className={sliderClass} />}
+                                    <NumberInput value={speechRate} onValueChange={setSpeechRate} min={0.5} max={2} step={0.1} className="w-16 tabular-nums" />
+                                </div>
                             </div>
-                        </div>
+
+                            {/* Speech Pitch */}
+                            <div className="flex items-center gap-8 py-1.5">
+                                <span className="typography-ui-label text-foreground sm:w-56 shrink-0">Speech Pitch</span>
+                                <div className="flex items-center gap-2 w-fit">
+                                    {!isMobile && <input type="range" min={0.5} max={2} step={0.1} value={speechPitch} onChange={(e) => setSpeechPitch(Number(e.target.value))} disabled={!isSupported} className={sliderClass} />}
+                                    <NumberInput value={speechPitch} onValueChange={setSpeechPitch} min={0.5} max={2} step={0.1} className="w-16 tabular-nums" />
+                                </div>
+                            </div>
+
+                            {/* Speech Volume */}
+                            <div className="flex items-center gap-8 py-1.5">
+                                <span className="typography-ui-label text-foreground sm:w-56 shrink-0">Speech Volume</span>
+                                <div className="flex items-center gap-2 w-fit">
+                                    {!isMobile && <input type="range" min={0} max={1} step={0.1} value={speechVolume} onChange={(e) => setSpeechVolume(Number(e.target.value))} disabled={!isSupported} className={sliderClass} />}
+                                    {isMobile ? (
+                                        <NumberInput value={Math.round(speechVolume * 100)} onValueChange={(v) => setSpeechVolume(v / 100)} min={0} max={100} step={10} className="w-16 tabular-nums" />
+                                    ) : (
+                                        <span className="typography-ui-label text-foreground tabular-nums min-w-[3rem] text-right">
+                                            {Math.round(speechVolume * 100)}%
+                                        </span>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Language */}
+                            <div className="flex items-center gap-8 py-1.5">
+                                <span className="typography-ui-label text-foreground sm:w-56 shrink-0">Language</span>
+                                <div className="flex items-center gap-2 w-fit">
+                                    <Select value={language} onValueChange={setLanguage} disabled={!isSupported}>
+                                        <SelectTrigger className="w-fit">
+                                            <SelectValue placeholder="Select language" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {LANGUAGE_OPTIONS.map((lang) => (
+                                                <SelectItem key={lang.value} value={lang.value}>{lang.label}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            </div>
                         </>
                     )}
+                </section>
+            </div>
+
+            {/* Playback & Summarization */}
+            <div className="mb-8">
+                <div className="mb-1 px-1">
+                    <h3 className="typography-ui-header font-medium text-foreground">
+                        Playback & Summarization
+                    </h3>
                 </div>
 
-                {/* Speech Rate */}
-                <div className="flex items-start justify-between gap-4">
-                    <div className="space-y-1 flex-1">
-                        <div className="flex items-center gap-2">
-                            <RiSpeedLine className="w-4 h-4 text-muted-foreground" />
-                            <span className="typography-ui-label text-foreground">
-                                Speech Rate
-                            </span>
+                <section className="px-2 pb-2 pt-0 space-y-0">
+                    <div
+                        className="group flex cursor-pointer items-center gap-2 py-1.5"
+                        role="button"
+                        tabIndex={0}
+                        aria-pressed={showMessageTTSButtons}
+                        onClick={() => setShowMessageTTSButtons(!showMessageTTSButtons)}
+                        onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setShowMessageTTSButtons(!showMessageTTSButtons); } }}
+                    >
+                        <Checkbox checked={showMessageTTSButtons} onChange={setShowMessageTTSButtons} ariaLabel="Message read aloud button" />
+                        <span className="typography-ui-label text-foreground">Message Read Aloud Button</span>
+                    </div>
+
+                    <div
+                        className="group flex cursor-pointer items-center gap-2 py-1.5"
+                        role="button"
+                        tabIndex={0}
+                        aria-pressed={summarizeMessageTTS}
+                        onClick={() => setSummarizeMessageTTS(!summarizeMessageTTS)}
+                        onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setSummarizeMessageTTS(!summarizeMessageTTS); } }}
+                    >
+                        <Checkbox checked={summarizeMessageTTS} onChange={setSummarizeMessageTTS} ariaLabel="Summarize before playback" />
+                        <span className="typography-ui-label text-foreground">Summarize Before Playback</span>
+                    </div>
+
+                    {voiceModeEnabled && (
+                        <div
+                            className="group flex cursor-pointer items-center gap-2 py-1.5"
+                            role="button"
+                            tabIndex={0}
+                            aria-pressed={summarizeVoiceConversation}
+                            onClick={() => setSummarizeVoiceConversation(!summarizeVoiceConversation)}
+                            onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setSummarizeVoiceConversation(!summarizeVoiceConversation); } }}
+                        >
+                            <Checkbox checked={summarizeVoiceConversation} onChange={setSummarizeVoiceConversation} ariaLabel="Summarize voice mode responses" />
+                            <span className="typography-ui-label text-foreground">Summarize Voice Mode Responses</span>
                         </div>
-                        <p className="typography-meta text-muted-foreground">
-                            Speed of speech (0.5x - 2x)
-                        </p>
-                    </div>
-                    <div className="w-[180px]">
-                        <Slider
-                            value={speechRate}
-                            onChange={setSpeechRate}
-                            min={0.5}
-                            max={2}
-                            step={0.1}
-                            disabled={!isSupported}
-                            label="Speech rate"
-                            valueFormatter={(v: number) => `${v.toFixed(1)}x`}
-                        />
-                    </div>
-                </div>
+                    )}
 
-                {/* Speech Pitch */}
-                <div className="flex items-start justify-between gap-4">
-                    <div className="space-y-1 flex-1">
-                        <div className="flex items-center gap-2">
-                            <RiMusicLine className="w-4 h-4 text-muted-foreground" />
-                            <span className="typography-ui-label text-foreground">
-                                Speech Pitch
-                            </span>
-                        </div>
-                        <p className="typography-meta text-muted-foreground">
-                            Voice pitch (0.5 - 2)
-                        </p>
-                    </div>
-                    <div className="w-[180px]">
-                        <Slider
-                            value={speechPitch}
-                            onChange={setSpeechPitch}
-                            min={0.5}
-                            max={2}
-                            step={0.1}
-                            disabled={!isSupported}
-                            label="Speech pitch"
-                        />
-                    </div>
-                </div>
+                    {(summarizeMessageTTS || summarizeVoiceConversation) && (
+                        <>
+                            <div className="flex items-center gap-8 py-1.5">
+                                <span className="typography-ui-label text-foreground sm:w-56 shrink-0">Summarization Threshold</span>
+                                <div className="flex items-center gap-2 w-fit">
+                                    {!isMobile && <input type="range" min={50} max={2000} step={50} value={summarizeCharacterThreshold} onChange={(e) => setSummarizeCharacterThreshold(Number(e.target.value))} className={sliderClass} />}
+                                    <NumberInput value={summarizeCharacterThreshold} onValueChange={setSummarizeCharacterThreshold} min={50} max={2000} step={50} className="w-16 tabular-nums" />
+                                </div>
+                            </div>
 
-                {/* Speech Volume */}
-                <div className="flex items-start justify-between gap-4">
-                    <div className="space-y-1 flex-1">
-                        <div className="flex items-center gap-2">
-                            <RiSoundModuleLine className="w-4 h-4 text-muted-foreground" />
-                            <span className="typography-ui-label text-foreground">
-                                Speech Volume
-                            </span>
-                        </div>
-                        <p className="typography-meta text-muted-foreground">
-                            Voice volume (0 - 100%)
-                        </p>
-                    </div>
-                    <div className="w-[180px]">
-                        <Slider
-                            value={speechVolume}
-                            onChange={setSpeechVolume}
-                            min={0}
-                            max={1}
-                            step={0.1}
-                            disabled={!isSupported}
-                            label="Speech volume"
-                            valueFormatter={(v: number) => `${Math.round(v * 100)}%`}
-                        />
-                    </div>
-                </div>
+                            <div className="flex items-center gap-8 py-1.5">
+                                <span className="typography-ui-label text-foreground sm:w-56 shrink-0">Summary Max Length</span>
+                                <div className="flex items-center gap-2 w-fit">
+                                    {!isMobile && <input type="range" min={50} max={2000} step={50} value={summarizeMaxLength} onChange={(e) => setSummarizeMaxLength(Number(e.target.value))} className={sliderClass} />}
+                                    <NumberInput value={summarizeMaxLength} onValueChange={setSummarizeMaxLength} min={50} max={2000} step={50} className="w-16 tabular-nums" />
+                                </div>
+                            </div>
+                        </>
+                    )}
+                </section>
 
-                {/* Keyboard shortcut hint */}
                 {voiceModeEnabled && isSupported && (
-                    <div className="pt-4 border-t border-border/40">
-                        <p className="typography-micro text-muted-foreground">
-                            <span className="font-medium text-foreground">Tip:</span>{' '}
-                            Press <kbd className="px-1.5 py-0.5 rounded bg-muted typography-mono text-xs">Shift</kbd> +{' '}
-                            <kbd className="px-1.5 py-0.5 rounded bg-muted typography-mono text-xs">Click</kbd>{' '}
-                            on the voice button to quickly toggle continuous mode
+                    <div className="mt-2 px-2">
+                        <p className="typography-meta text-muted-foreground">
+                            Press <kbd className="px-1 py-0.5 mx-0.5 rounded border border-[var(--interactive-border)] bg-background typography-mono text-[10px]">Shift</kbd> + <kbd className="px-1 py-0.5 mx-0.5 rounded border border-[var(--interactive-border)] bg-background typography-mono text-[10px]">Click</kbd> on the mic button to toggle continuous mode
                         </p>
                     </div>
                 )}
             </div>
-        </SettingsSection>
+
+        </div>
     );
 };

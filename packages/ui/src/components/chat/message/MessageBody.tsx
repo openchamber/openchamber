@@ -940,6 +940,7 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
                         syntaxTheme={syntaxTheme}
                         isMobile={isMobile}
                         onContentChange={onContentChange}
+                        onShowPopup={onShowPopup}
                         hasPrevTool={false}
                         hasNextTool={false}
                     />
@@ -997,6 +998,7 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
                                 syntaxTheme={syntaxTheme}
                                 isMobile={isMobile}
                                 onContentChange={onContentChange}
+                                onShowPopup={onShowPopup}
                                 hasPrevTool={connection?.hasPrev ?? false}
                                 hasNextTool={connection?.hasNext ?? false}
                             />
@@ -1242,7 +1244,7 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
                     {showErrorMessage && (
                         <FadeInOnReveal key="assistant-error">
                             <div className="group/assistant-text relative break-words">
-                                <SimpleMarkdownRenderer content={errorMessage ?? ''} />
+                                <SimpleMarkdownRenderer content={errorMessage ?? ''} onShowPopup={onShowPopup} />
                             </div>
                         </FadeInOnReveal>
                     )}
@@ -1251,7 +1253,7 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
                             <div
                                 className="group/assistant-text relative break-words"
                             >
-                                <SimpleMarkdownRenderer content={summaryBody} />
+                                <SimpleMarkdownRenderer content={summaryBody} onShowPopup={onShowPopup} />
                                 {shouldShowFooter && (
                                     <div className="mt-2 mb-1 flex items-center justify-start gap-1.5">
                                         <div className="flex items-center gap-1.5">

@@ -1,11 +1,16 @@
 import React from 'react';
+import { RiRestartLine } from '@remixicon/react';
 import { useUIStore } from '@/stores/useUIStore';
 import { isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
-import { Switch } from '@/components/ui/switch';
+import { useDeviceInfo } from '@/lib/device';
+import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from '@/components/ui';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
-
 import { GridLoader } from '@/components/ui/grid-loader';
+import { Input } from '@/components/ui/input';
+import { NumberInput } from '@/components/ui/number-input';
+import { ButtonSmall } from '@/components/ui/button-small';
+import { cn } from '@/lib/utils';
 
 const DEFAULT_NOTIFICATION_TEMPLATES = {
   completion: { title: '{agent_name} is ready', message: '{model_name} completed the task' },
@@ -14,7 +19,12 @@ const DEFAULT_NOTIFICATION_TEMPLATES = {
   subtask: { title: '{agent_name} is ready', message: '{model_name} completed the task' },
 } as const;
 
+const DEFAULT_SUMMARY_THRESHOLD = 200;
+const DEFAULT_SUMMARY_LENGTH = 100;
+const DEFAULT_MAX_LAST_MESSAGE_LENGTH = 250;
+
 export const NotificationSettings: React.FC = () => {
+  const { isMobile } = useDeviceInfo();
   const isDesktop = React.useMemo(() => isDesktopShell(), []);
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
   const isBrowser = !isDesktop && !isVSCode;
@@ -205,8 +215,6 @@ export const NotificationSettings: React.FC = () => {
       throw new Error('navigator.serviceWorker.register unavailable');
     }
 
-    // iOS Safari can throw non-sensical internal errors when unsupported options
-    // are passed. Try no-options first, then add options progressively.
     const attempts: Array<{ label: string; opts: RegistrationOptions | null }> = [
       { label: 'no-options', opts: null },
       { label: 'scope-root', opts: { scope: '/' } },
@@ -225,7 +233,6 @@ export const NotificationSettings: React.FC = () => {
         return await withTimeout(promise, 10000, `Service worker registration timed out (${attempt.label})`);
       } catch (error) {
         lastError = error;
-        // ignore
       }
     }
 
@@ -253,7 +260,6 @@ export const NotificationSettings: React.FC = () => {
     await waitForSwActive(registered);
     return registered;
   };
-
 
   const formatUnknownError = (error: unknown) => {
     const anyError = error as { name?: unknown; message?: unknown; stack?: unknown } | null;
@@ -325,24 +331,20 @@ export const NotificationSettings: React.FC = () => {
         throw new Error('PushManager unavailable (requires installed PWA + iOS 16.4+)');
       }
 
-
       const subscription = existing ?? await withTimeout(
         registration.pushManager.subscribe({
           userVisibleOnly: true,
-          // iOS Safari is picky here; pass Uint8Array (not ArrayBuffer).
           applicationServerKey: base64UrlToUint8Array(key.publicKey),
         }),
         15000,
         'Push subscription timed out'
       );
 
-
       const json = subscription.toJSON();
       const keys = json.keys;
       if (!json.endpoint || !keys?.p256dh || !keys.auth) {
         throw new Error('Push subscription missing keys');
       }
-
 
       const ok = await withTimeout(
         apis.push.subscribe({
@@ -357,7 +359,6 @@ export const NotificationSettings: React.FC = () => {
         'Push subscribe request timed out'
       );
 
-
       if (!ok?.ok) {
         toast.error('Failed to enable background notifications');
         return;
@@ -371,7 +372,6 @@ export const NotificationSettings: React.FC = () => {
       toast.error('Failed to enable background notifications', {
         description: formatted.summary,
       });
-
     } finally {
       setPushBusy(false);
     }
@@ -409,338 +409,377 @@ export const NotificationSettings: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="space-y-1 pt-2">
-        <h3 className="typography-ui-header font-semibold text-foreground">
-          When to notify
-        </h3>
-        <p className="typography-ui text-muted-foreground">
-          Customize when notifications show up.
-        </p>
-      </div>
+    <div className="space-y-8">
 
-      <div className="flex items-center justify-between">
-        <div className="space-y-0.5">
-          <span className="typography-ui text-foreground">
-            Enable notifications
-          </span>
-          <p className="typography-micro text-muted-foreground">
-            Turns notifications on or off.
-          </p>
-        </div>
-        <Switch
-          checked={nativeNotificationsEnabled && canShowNotifications}
-          onCheckedChange={handleToggleChange}
-          className="data-[state=checked]:bg-status-info"
-        />
-      </div>
-
-      {isBrowser && (
-        <p className="typography-micro text-muted-foreground">
-          Your browser may ask for permission the first time.
-        </p>
-      )}
-
-      {nativeNotificationsEnabled && canShowNotifications && (
-        <div className="flex items-center justify-between">
-          <div className="space-y-0.5">
-            <span className="typography-ui text-foreground">
-              Notify while app is focused
-            </span>
-            <p className="typography-micro text-muted-foreground">
-              When off, only notify when you are not looking at OpenChamber.
-            </p>
-          </div>
-          <Switch
-            checked={notificationMode === 'always'}
-            onCheckedChange={(checked: boolean) => setNotificationMode(checked ? 'always' : 'hidden-only')}
-            className="data-[state=checked]:bg-status-info"
-          />
-        </div>
-      )}
-
-      {nativeNotificationsEnabled && canShowNotifications && (
-        <div className="space-y-3 pt-2">
-          <div className="space-y-0.5">
-            <span className="typography-ui text-foreground font-medium">
-              Events
-            </span>
-            <p className="typography-micro text-muted-foreground">
-              Choose which events trigger notifications.
-            </p>
+        {/* --- Global Delivery Settings --- */}
+        <div className="mb-8">
+          <div className="mb-1 px-1">
+              <h3 className="typography-ui-header font-medium text-foreground">
+                Notification Delivery
+              </h3>
           </div>
 
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <span className="typography-ui text-foreground">Completion</span>
-              <p className="typography-micro text-muted-foreground">Agent finished its task.</p>
-            </div>
-            <Switch
-              checked={notifyOnCompletion}
-              onCheckedChange={setNotifyOnCompletion}
-              className="data-[state=checked]:bg-status-info"
-            />
-          </div>
-
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <span className="typography-ui text-foreground">Errors</span>
-              <p className="typography-micro text-muted-foreground">A tool call failed.</p>
-            </div>
-            <Switch
-              checked={notifyOnError}
-              onCheckedChange={setNotifyOnError}
-              className="data-[state=checked]:bg-status-info"
-            />
-          </div>
-
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <span className="typography-ui text-foreground">Questions</span>
-              <p className="typography-micro text-muted-foreground">Agent is asking for input or permission.</p>
-            </div>
-            <Switch
-              checked={notifyOnQuestion}
-              onCheckedChange={setNotifyOnQuestion}
-              className="data-[state=checked]:bg-status-info"
-            />
-          </div>
-
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <span className="typography-ui text-foreground">Subagents</span>
-              <p className="typography-micro text-muted-foreground">Also notify for child sessions started by the main one.</p>
-            </div>
-            <Switch
-              checked={notifyOnSubtasks}
-              onCheckedChange={(checked: boolean) => setNotifyOnSubtasks(checked)}
-              className="data-[state=checked]:bg-status-info"
-            />
-          </div>
-        </div>
-      )}
-
-      {nativeNotificationsEnabled && canShowNotifications && (
-        <div className="space-y-4 pt-4">
-          <div className="space-y-1">
-            <h3 className="typography-ui-header font-semibold text-foreground">
-              Customize content
-            </h3>
-            <p className="typography-micro text-muted-foreground">
-              Use template variables: <code className="text-accent-foreground">{'{project_name}'}</code>{' '}
-              <code className="text-accent-foreground">{'{worktree}'}</code>{' '}
-              <code className="text-accent-foreground">{'{branch}'}</code>{' '}
-              <code className="text-accent-foreground">{'{session_name}'}</code>{' '}
-              <code className="text-accent-foreground">{'{agent_name}'}</code>{' '}
-              <code className="text-accent-foreground">{'{last_message}'}</code>
-            </p>
-          </div>
-
-          {(['completion', 'error', 'question', 'subtask'] as const).map((event) => (
-            <div key={event} className="space-y-2">
-              <span className="typography-ui text-foreground font-medium capitalize">{event}</span>
-              <div className="space-y-1.5">
-                <div>
-                  <label className="typography-micro text-muted-foreground block mb-1">Title</label>
-                  <input
-                    type="text"
-                    value={notificationTemplates[event].title}
-                    onChange={(e) => updateTemplate(event, 'title', e.target.value)}
-                    className="w-full rounded-md border border-border bg-background px-3 py-1.5 typography-ui text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-accent"
-                    placeholder={DEFAULT_NOTIFICATION_TEMPLATES[event].title}
-                  />
-                </div>
-                <div>
-                  <label className="typography-micro text-muted-foreground block mb-1">Message</label>
-                  <input
-                    type="text"
-                    value={notificationTemplates[event].message}
-                    onChange={(e) => updateTemplate(event, 'message', e.target.value)}
-                    className="w-full rounded-md border border-border bg-background px-3 py-1.5 typography-ui text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-accent"
-                    placeholder={DEFAULT_NOTIFICATION_TEMPLATES[event].message}
-                  />
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {nativeNotificationsEnabled && canShowNotifications && (
-        <div className="space-y-3 pt-4">
-          <div className="space-y-1">
-            <h3 className="typography-ui-header font-semibold text-foreground">
-              Summarization
-            </h3>
-            <p className="typography-micro text-muted-foreground">
-              Summarize long messages in notifications using AI.
-            </p>
-          </div>
-
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <span className="typography-ui text-foreground">
-                Summarize last message
-              </span>
-              <p className="typography-micro text-muted-foreground">
-                Uses AI to shorten the {'{last_message}'} variable.
-              </p>
-            </div>
-            <Switch
-              checked={summarizeLastMessage}
-              onCheckedChange={setSummarizeLastMessage}
-              className="data-[state=checked]:bg-status-info"
-            />
-          </div>
-
-          {summarizeLastMessage ? (
-            <>
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <label className="typography-ui text-foreground">
-                    Summary threshold
-                  </label>
-                  <span className="typography-micro text-muted-foreground tabular-nums">{summaryThreshold} chars</span>
-                </div>
-                <p className="typography-micro text-muted-foreground">
-                  Messages longer than this will be summarized.
-                </p>
-                <input
-                  type="range"
-                  min={50}
-                  max={2000}
-                  step={50}
-                  value={summaryThreshold}
-                  onChange={(e) => setSummaryThreshold(Number(e.target.value))}
-                  className="w-full h-2 bg-muted rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-primary [&::-moz-range-thumb]:border-0"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <label className="typography-ui text-foreground">
-                    Summary length
-                  </label>
-                  <span className="typography-micro text-muted-foreground tabular-nums">{summaryLength} chars</span>
-                </div>
-                <p className="typography-micro text-muted-foreground">
-                  Target length of the summary.
-                </p>
-                <input
-                  type="range"
-                  min={20}
-                  max={500}
-                  step={10}
-                  value={summaryLength}
-                  onChange={(e) => setSummaryLength(Number(e.target.value))}
-                  className="w-full h-2 bg-muted rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-primary [&::-moz-range-thumb]:border-0"
-                />
-              </div>
-            </>
-          ) : (
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <label className="typography-ui text-foreground">
-                  Max last message length
-                </label>
-                <span className="typography-micro text-muted-foreground tabular-nums">{maxLastMessageLength} chars</span>
-              </div>
-              <p className="typography-micro text-muted-foreground">
-                Truncate {'{last_message}'} to this many characters.
-              </p>
-              <input
-                type="range"
-                min={50}
-                max={1000}
-                step={10}
-                value={maxLastMessageLength}
-                onChange={(e) => setMaxLastMessageLength(Number(e.target.value))}
-                className="w-full h-2 bg-muted rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-primary [&::-moz-range-thumb]:border-0"
+          <section className="px-2 pb-2 pt-0 space-y-0.5">
+            <div
+              className="group flex cursor-pointer items-center gap-2 py-1.5"
+              role="button"
+              tabIndex={0}
+              aria-pressed={nativeNotificationsEnabled && canShowNotifications}
+              onClick={() => {
+                void handleToggleChange(!(nativeNotificationsEnabled && canShowNotifications));
+              }}
+              onKeyDown={(event) => {
+                if (event.key === ' ' || event.key === 'Enter') {
+                  event.preventDefault();
+                  void handleToggleChange(!(nativeNotificationsEnabled && canShowNotifications));
+                }
+              }}
+            >
+              <Checkbox
+                checked={nativeNotificationsEnabled && canShowNotifications}
+                onChange={(checked) => {
+                  void handleToggleChange(checked);
+                }}
+                ariaLabel="Enable notifications"
               />
+              <span className="typography-ui-label text-foreground">Enable Notifications</span>
+            </div>
+
+            {nativeNotificationsEnabled && canShowNotifications && (
+              <div
+                className="group flex cursor-pointer items-center gap-2 py-1.5"
+                role="button"
+                tabIndex={0}
+                aria-pressed={notificationMode === 'always'}
+                onClick={() => setNotificationMode(notificationMode === 'always' ? 'hidden-only' : 'always')}
+                onKeyDown={(event) => {
+                  if (event.key === ' ' || event.key === 'Enter') {
+                    event.preventDefault();
+                    setNotificationMode(notificationMode === 'always' ? 'hidden-only' : 'always');
+                  }
+                }}
+              >
+                <Checkbox
+                  checked={notificationMode === 'always'}
+                  onChange={(checked) => setNotificationMode(checked ? 'always' : 'hidden-only')}
+                  ariaLabel="Notify while app is focused"
+                />
+                <span className="typography-ui-label text-foreground">Notify While App is Focused</span>
+              </div>
+            )}
+          </section>
+
+          {isBrowser && (
+            <div className="mt-1 px-2">
+              <p className="typography-meta text-muted-foreground/70">
+                Your browser may ask for permission the first time.
+              </p>
+              {notificationPermission === 'denied' && (
+                <p className="typography-meta text-[var(--status-error)] mt-1">
+                  Notification permission denied. Enable it in your browser settings.
+                </p>
+              )}
+              {notificationPermission === 'granted' && !nativeNotificationsEnabled && (
+                <p className="typography-meta text-muted-foreground/70 mt-1">
+                  Permission granted, but notifications are disabled.
+                </p>
+              )}
+            </div>
+          )}
+          {isVSCode && (
+            <div className="mt-1 px-2">
+              <p className="typography-meta text-muted-foreground/70">
+                VS Code runtime handles notifications separately natively.
+              </p>
             </div>
           )}
         </div>
-      )}
 
-      {isBrowser && (
-        <>
-          {notificationPermission === 'denied' && (
-            <p className="typography-micro text-destructive">
-              Notification permission denied. Enable it in your browser settings.
-            </p>
-          )}
+        {nativeNotificationsEnabled && canShowNotifications && (
+          <>
+            {/* --- Events --- */}
+            <div className="mb-8">
+              <div className="mb-1 px-1">
+                <h3 className="typography-ui-header font-medium text-foreground">
+                  Notification Events
+                </h3>
+              </div>
 
-          {notificationPermission === 'granted' && !nativeNotificationsEnabled && (
-            <p className="typography-micro text-muted-foreground">
-              Permission granted, but notifications are disabled.
-            </p>
-          )}
+              <section className="px-2 pb-2 pt-0 space-y-0.5">
+                <div
+                  className="group flex cursor-pointer items-center gap-2 py-1.5"
+                  role="button"
+                  tabIndex={0}
+                  aria-pressed={notifyOnCompletion}
+                  onClick={() => setNotifyOnCompletion(!notifyOnCompletion)}
+                  onKeyDown={(event) => {
+                    if (event.key === ' ' || event.key === 'Enter') {
+                      event.preventDefault();
+                      setNotifyOnCompletion(!notifyOnCompletion);
+                    }
+                  }}
+                >
+                  <Checkbox checked={notifyOnCompletion} onChange={setNotifyOnCompletion} ariaLabel="Agent completion" />
+                  <span className="typography-ui-label text-foreground">Agent Completion</span>
+                </div>
 
-          <div className="space-y-1 pt-4">
-            <h3 className="typography-ui-header font-semibold text-foreground">
-              Background (Push)
-            </h3>
-            <p className="typography-ui text-muted-foreground">
-              Get notified even if this page is closed.
-            </p>
-          </div>
+                <div
+                  className="group flex cursor-pointer items-center gap-2 py-1.5"
+                  role="button"
+                  tabIndex={0}
+                  aria-pressed={notifyOnSubtasks}
+                  onClick={() => setNotifyOnSubtasks(!notifyOnSubtasks)}
+                  onKeyDown={(event) => {
+                    if (event.key === ' ' || event.key === 'Enter') {
+                      event.preventDefault();
+                      setNotifyOnSubtasks(!notifyOnSubtasks);
+                    }
+                  }}
+                >
+                  <Checkbox checked={notifyOnSubtasks} onChange={setNotifyOnSubtasks} ariaLabel="Subagent completion" />
+                  <span className="typography-ui-label text-foreground">Subagent Completion</span>
+                </div>
 
-          {!pushSupported ? (
-            <p className="typography-micro text-muted-foreground">
-              Push not supported in this browser.
-            </p>
-          ) : (
-            <p className="typography-micro text-muted-foreground">
-              Desktop Chrome/Edge and Android support push. iOS requires an installed PWA.
-            </p>
-          )}
+                <div
+                  className="group flex cursor-pointer items-center gap-2 py-1.5"
+                  role="button"
+                  tabIndex={0}
+                  aria-pressed={notifyOnError}
+                  onClick={() => setNotifyOnError(!notifyOnError)}
+                  onKeyDown={(event) => {
+                    if (event.key === ' ' || event.key === 'Enter') {
+                      event.preventDefault();
+                      setNotifyOnError(!notifyOnError);
+                    }
+                  }}
+                >
+                  <Checkbox checked={notifyOnError} onChange={setNotifyOnError} ariaLabel="Agent errors" />
+                  <span className="typography-ui-label text-foreground">Agent Errors</span>
+                </div>
 
-          {pushSupported && (
-            <div className="flex items-center justify-between gap-3">
-              <div className="space-y-0.5">
-                <span className="typography-ui text-foreground">
-                  Enable push notifications
-                </span>
-                <p className="typography-micro text-muted-foreground">
-                  Clicking a notification opens the relevant session.
+                <div
+                  className="group flex cursor-pointer items-center gap-2 py-1.5"
+                  role="button"
+                  tabIndex={0}
+                  aria-pressed={notifyOnQuestion}
+                  onClick={() => setNotifyOnQuestion(!notifyOnQuestion)}
+                  onKeyDown={(event) => {
+                    if (event.key === ' ' || event.key === 'Enter') {
+                      event.preventDefault();
+                      setNotifyOnQuestion(!notifyOnQuestion);
+                    }
+                  }}
+                >
+                  <Checkbox checked={notifyOnQuestion} onChange={setNotifyOnQuestion} ariaLabel="Agent questions" />
+                  <span className="typography-ui-label text-foreground">Agent Questions</span>
+                </div>
+              </section>
+            </div>
+
+            {/* --- Template Customization --- */}
+            <div className="mb-8">
+              <div className="mb-1 px-1">
+                <h3 className="typography-ui-header font-medium text-foreground">
+                  Notification Templates
+                </h3>
+                <p className="typography-meta text-muted-foreground mt-0.5">
+                  Variables: <code className="text-[var(--primary-base)]">{'{project_name}'}</code> <code className="text-[var(--primary-base)]">{'{worktree}'}</code> <code className="text-[var(--primary-base)]">{'{branch}'}</code> <code className="text-[var(--primary-base)]">{'{session_name}'}</code> <code className="text-[var(--primary-base)]">{'{agent_name}'}</code> <code className="text-[var(--primary-base)]">{'{model_name}'}</code> <code className="text-[var(--primary-base)]">{'{last_message}'}</code>
                 </p>
               </div>
 
-              <div className="flex items-center gap-2">
-                {pushBusy && (
-                  <div className="text-muted-foreground">
-                    <GridLoader size="sm" />
+              <div className="grid grid-cols-1 gap-2 md:grid-cols-2 md:gap-3">
+                {(['completion', 'subtask', 'error', 'question'] as const).map((event) => (
+                  <section key={event} className="p-2">
+                    <span className="typography-ui-label text-foreground font-normal capitalize block">
+                      {event === 'subtask' ? 'Subagent Completion' : event}
+                    </span>
+                    <div className="mt-1.5 space-y-2">
+                      <div>
+                        <label className="typography-micro text-muted-foreground block mb-1">Title</label>
+                        <Input
+                          value={notificationTemplates[event].title}
+                          onChange={(e) => updateTemplate(event, 'title', e.target.value)}
+                          className="h-7"
+                          placeholder={DEFAULT_NOTIFICATION_TEMPLATES[event].title}
+                        />
+                      </div>
+                      <div>
+                        <label className="typography-micro text-muted-foreground block mb-1">Message</label>
+                        <Input
+                          value={notificationTemplates[event].message}
+                          onChange={(e) => updateTemplate(event, 'message', e.target.value)}
+                          className="h-7"
+                          placeholder={DEFAULT_NOTIFICATION_TEMPLATES[event].message}
+                        />
+                      </div>
+                    </div>
+                  </section>
+                ))}
+              </div>
+            </div>
+
+            {/* --- Summarization --- */}
+            <div className="mb-8">
+              <div className="mb-1 px-1">
+                <h3 className="typography-ui-header font-medium text-foreground">
+                  AI Summarization
+                </h3>
+              </div>
+
+              <section className="px-2 pb-2 pt-0 space-y-0.5">
+                <div
+                  className="group flex cursor-pointer items-center gap-2 py-1.5"
+                  role="button"
+                  tabIndex={0}
+                  aria-pressed={summarizeLastMessage}
+                  onClick={() => setSummarizeLastMessage(!summarizeLastMessage)}
+                  onKeyDown={(event) => {
+                    if (event.key === ' ' || event.key === 'Enter') {
+                      event.preventDefault();
+                      setSummarizeLastMessage(!summarizeLastMessage);
+                    }
+                  }}
+                >
+                  <Checkbox
+                    checked={summarizeLastMessage}
+                    onChange={setSummarizeLastMessage}
+                    ariaLabel="Summarize last message"
+                  />
+                  <span className="typography-ui-label text-foreground">Summarize Last Message</span>
+                </div>
+
+                {summarizeLastMessage ? (
+                  <>
+                    <div className="flex items-center gap-8 py-1.5 mt-1 border-t border-[var(--surface-subtle)]">
+                      <div className="flex min-w-0 flex-col w-56 shrink-0">
+                        <span className="typography-ui-label text-foreground">Threshold</span>
+                        <span className="typography-meta text-muted-foreground">Messages longer than this will be summarized</span>
+                      </div>
+                      <div className="flex items-center gap-2 w-fit">
+                        <NumberInput
+                          value={summaryThreshold}
+                          onValueChange={setSummaryThreshold}
+                          min={50}
+                          max={2000}
+                          step={50}
+                          className="w-20 tabular-nums"
+                        />
+                        <ButtonSmall
+                          type="button"
+                          variant="ghost"
+                          onClick={() => setSummaryThreshold(DEFAULT_SUMMARY_THRESHOLD)}
+                          disabled={summaryThreshold === DEFAULT_SUMMARY_THRESHOLD}
+                          className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
+                          aria-label="Reset threshold"
+                          title="Reset"
+                        >
+                          <RiRestartLine className="h-3.5 w-3.5" />
+                        </ButtonSmall>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-8 py-1.5">
+                      <div className="flex min-w-0 flex-col w-56 shrink-0">
+                        <span className="typography-ui-label text-foreground">Length</span>
+                        <span className="typography-meta text-muted-foreground">Target character length of the summary</span>
+                      </div>
+                      <div className="flex items-center gap-2 w-fit">
+                        <NumberInput
+                          value={summaryLength}
+                          onValueChange={setSummaryLength}
+                          min={20}
+                          max={500}
+                          step={10}
+                          className="w-20 tabular-nums"
+                        />
+                        <ButtonSmall
+                          type="button"
+                          variant="ghost"
+                          onClick={() => setSummaryLength(DEFAULT_SUMMARY_LENGTH)}
+                          disabled={summaryLength === DEFAULT_SUMMARY_LENGTH}
+                          className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
+                          aria-label="Reset summary length"
+                          title="Reset"
+                        >
+                          <RiRestartLine className="h-3.5 w-3.5" />
+                        </ButtonSmall>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div className={cn("py-1.5 mt-1 border-t border-[var(--surface-subtle)]", isMobile ? "flex flex-col gap-3" : "flex items-center gap-8")}>
+                    <div className={cn("flex min-w-0 flex-col", isMobile ? "w-full" : "w-56 shrink-0")}>
+                      <span className="typography-ui-label text-foreground">Max Length</span>
+                      <span className="typography-meta text-muted-foreground">Truncate {'{last_message}'} to this length</span>
+                    </div>
+                    <div className={cn("flex items-center gap-2", isMobile ? "w-full" : "w-fit")}>
+                      <NumberInput
+                        value={maxLastMessageLength}
+                        onValueChange={setMaxLastMessageLength}
+                        min={50}
+                        max={1000}
+                        step={10}
+                        className="w-20 tabular-nums"
+                      />
+                      <ButtonSmall
+                        type="button"
+                        variant="ghost"
+                        onClick={() => setMaxLastMessageLength(DEFAULT_MAX_LAST_MESSAGE_LENGTH)}
+                        disabled={maxLastMessageLength === DEFAULT_MAX_LAST_MESSAGE_LENGTH}
+                        className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
+                        aria-label="Reset max message length"
+                        title="Reset"
+                      >
+                        <RiRestartLine className="h-3.5 w-3.5" />
+                      </ButtonSmall>
+                    </div>
                   </div>
                 )}
+              </section>
+            </div>
+          </>
+        )}
 
-                <Switch
-                  checked={pushSubscribed}
-                  disabled={pushBusy}
-                  onCheckedChange={(checked: boolean) => {
+        {/* --- Background Push Notifications --- */}
+        {isBrowser && (
+          <div className="mb-8">
+            <div className="mb-1 px-1">
+              <h3 className="typography-ui-header font-medium text-foreground">
+                Background Push Notifications
+              </h3>
+            </div>
+
+            <section className="px-2 pb-2 pt-0">
+              <div className="flex items-start gap-2 py-1.5">
+                <Checkbox
+                  checked={pushSupported ? pushSubscribed : false}
+                  disabled={!pushSupported || pushBusy}
+                  onChange={(checked: boolean) => {
                     if (checked) {
                       void handleEnableBackgroundNotifications();
                     } else {
                       void handleDisableBackgroundNotifications();
                     }
                   }}
-                  className="data-[state=checked]:bg-status-info"
+                  ariaLabel="Enable push notifications"
                 />
+                <div className="flex min-w-0 flex-col">
+                  <span className={cn("typography-ui-label", !pushSupported ? "text-muted-foreground" : "text-foreground")}>Enable push notifications</span>
+                  <span className="typography-meta text-muted-foreground">
+                    {!pushSupported
+                      ? "Push not supported. Desktop Chrome/Edge and Android support push. iOS requires an installed PWA."
+                      : "Receive alerts via your operating system background service"}
+                  </span>
+                </div>
+                {pushBusy && (
+                  <div className="pt-0.5 text-muted-foreground">
+                    <GridLoader size="sm" />
+                  </div>
+                )}
               </div>
-            </div>
-          )}
-        </>
-      )}
+            </section>
+          </div>
+        )}
 
-      {isVSCode && (
-        <div className="space-y-1 pt-4">
-          <h3 className="typography-ui-header font-semibold text-foreground">
-            Delivery
-          </h3>
-          <p className="typography-ui text-muted-foreground">
-            VS Code runtime handles notifications separately.
-          </p>
-        </div>
-      )}
     </div>
   );
 };

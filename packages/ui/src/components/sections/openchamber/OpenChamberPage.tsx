@@ -5,7 +5,6 @@ import { SessionRetentionSettings } from './SessionRetentionSettings';
 import { MemoryLimitsSettings } from './MemoryLimitsSettings';
 import { DefaultsSettings } from './DefaultsSettings';
 import { GitSettings } from './GitSettings';
-import { WorktreeSectionContent } from './WorktreeSectionContent';
 import { NotificationSettings } from './NotificationSettings';
 import { GitHubSettings } from './GitHubSettings';
 import { VoiceSettings } from './VoiceSettings';
@@ -14,7 +13,7 @@ import { KeyboardShortcutsSettings } from './KeyboardShortcutsSettings';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { useDeviceInfo } from '@/lib/device';
 import { isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
-import type { OpenChamberSection } from './OpenChamberSidebar';
+import type { OpenChamberSection } from './types';
 
 interface OpenChamberPageProps {
     /** Which section to display. If undefined, shows all sections (mobile/legacy behavior) */
@@ -34,7 +33,7 @@ export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => 
                 outerClassName="h-full"
                 className="w-full"
             >
-                <div className="openchamber-page-body mx-auto max-w-3xl space-y-3 p-3 sm:space-y-6 sm:p-6">
+                <div className="openchamber-page-body mx-auto max-w-3xl space-y-3 p-3 sm:space-y-6 sm:p-6 sm:pt-8">
                     <OpenChamberVisualSettings />
                     <div className="border-t border-border/40 pt-6">
                         <DefaultsSettings />
@@ -87,7 +86,7 @@ export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => 
             outerClassName="h-full"
             className="w-full"
         >
-            <div className="openchamber-page-body mx-auto max-w-3xl space-y-6 p-3 sm:p-6">
+            <div className="openchamber-page-body mx-auto max-w-3xl space-y-6 p-3 sm:p-6 sm:pt-8">
                 {renderSectionContent()}
             </div>
         </ScrollableOverlay>
@@ -134,15 +133,6 @@ const GitSectionContent: React.FC = () => {
     return (
         <div className="space-y-6">
             <GitSettings />
-            <div className="border-t border-border/40 pt-6">
-                <div className="space-y-1 mb-4">
-                    <h3 className="typography-ui-header font-semibold text-foreground">Worktree</h3>
-                    <p className="typography-meta text-muted-foreground">
-                        Configure worktree branch defaults and manage existing worktrees.
-                    </p>
-                </div>
-                <WorktreeSectionContent />
-            </div>
         </div>
     );
 };

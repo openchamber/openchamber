@@ -39,7 +39,7 @@
     "@fontsource/ibm-plex-sans": "^5.1.1",
     "@ibm/plex": "^6.4.1",
     "@lezer/highlight": "^1.2.3",
-    "@opencode-ai/sdk": "^1.2.5",
+    "@opencode-ai/sdk": "^1.2.10",
     "@pierre/diffs": "1.1.0-beta.13",
     "@radix-ui/react-collapsible": "^1.1.12",
     "@radix-ui/react-dialog": "^1.1.15",

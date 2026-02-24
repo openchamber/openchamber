@@ -19,6 +19,7 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
+  SelectValue,
 } from '@/components/ui/select';
 import { RiFolderLine, RiGitRepositoryLine, RiRobot2Line, RiUser3Line } from '@remixicon/react';
 
@@ -27,6 +28,7 @@ import type { SkillsCatalogItem } from '@/lib/api/types';
 import { useSkillsCatalogStore } from '@/stores/useSkillsCatalogStore';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useGitIdentitiesStore } from '@/stores/useGitIdentitiesStore';
+import { useProjectsStore } from '@/stores/useProjectsStore';
 import { InstallConflictsDialog, type ConflictDecision, type SkillConflict } from './InstallConflictsDialog';
 import {
   SKILL_LOCATION_OPTIONS,
@@ -49,6 +51,10 @@ export const InstallFromRepoDialog: React.FC<InstallFromRepoDialogProps> = ({ op
   const defaultGitIdentityId = useGitIdentitiesStore((s) => s.defaultGitIdentityId);
   const loadDefaultGitIdentityId = useGitIdentitiesStore((s) => s.loadDefaultGitIdentityId);
 
+  const projects = useProjectsStore((s) => s.projects);
+  const activeProjectId = useProjectsStore((s) => s.activeProjectId);
+  const [targetProjectId, setTargetProjectId] = React.useState<string | null>(null);
+
   const [source, setSource] = React.useState('');
   const [subpath, setSubpath] = React.useState('');
   const [scope, setScope] = React.useState<'user' | 'project'>('user');
@@ -70,6 +76,7 @@ export const InstallFromRepoDialog: React.FC<InstallFromRepoDialogProps> = ({ op
     targetSource: 'opencode' | 'agents';
     selections: Array<{ skillDir: string }>;
     gitIdentityId?: string;
+    directoryOverride?: string | null;
   } | null>(null);
 
   React.useEffect(() => {
@@ -78,6 +85,7 @@ export const InstallFromRepoDialog: React.FC<InstallFromRepoDialogProps> = ({ op
     setSubpath('');
     setScope('user');
     setTargetSource('opencode');
+    setTargetProjectId(activeProjectId);
     setItems([]);
     setSelected({});
     setSearch('');
@@ -89,7 +97,32 @@ export const InstallFromRepoDialog: React.FC<InstallFromRepoDialogProps> = ({ op
 
     setConflicts([]);
     setBaseInstallRequest(null);
-  }, [open, loadDefaultGitIdentityId]);
+  }, [open, loadDefaultGitIdentityId, activeProjectId]);
+
+  const resolvedTargetProjectId = React.useMemo(() => {
+    if (projects.length === 0) {
+      return null;
+    }
+    if (targetProjectId && projects.some((p) => p.id === targetProjectId)) {
+      return targetProjectId;
+    }
+    if (activeProjectId && projects.some((p) => p.id === activeProjectId)) {
+      return activeProjectId;
+    }
+    return projects[0]?.id ?? null;
+  }, [activeProjectId, projects, targetProjectId]);
+
+  const directoryOverride = React.useMemo(() => {
+    if (scope !== 'project') {
+      return null;
+    }
+    const id = resolvedTargetProjectId;
+    if (!id) {
+      return null;
+    }
+    const project = projects.find((p) => p.id === id);
+    return project?.path ?? null;
+  }, [projects, resolvedTargetProjectId, scope]);
 
   const installedByName = React.useMemo(() => {
     const map = new Map<string, { scope: 'user' | 'project'; source: 'opencode' | 'claude' | 'agents' }>();
@@ -189,13 +222,22 @@ export const InstallFromRepoDialog: React.FC<InstallFromRepoDialogProps> = ({ op
       targetSource,
       selections: selectedDirs.map((dir) => ({ skillDir: dir })),
       gitIdentityId: gitIdentityId || undefined,
+      directoryOverride,
     };
 
-    const result = await installSkills({
-      ...request,
-      conflictPolicy: 'prompt',
-      conflictDecisions: opts.conflictDecisions,
-    });
+    const result = await installSkills(
+      {
+        source: request.source,
+        subpath: request.subpath,
+        scope: request.scope,
+        targetSource: request.targetSource,
+        selections: request.selections,
+        gitIdentityId: request.gitIdentityId,
+        conflictPolicy: 'prompt',
+        conflictDecisions: opts.conflictDecisions,
+      },
+      { directory: request.directoryOverride ?? null }
+    );
 
     if (result.ok) {
       const installedCount = result.installed?.length || 0;
@@ -292,7 +334,7 @@ export const InstallFromRepoDialog: React.FC<InstallFromRepoDialogProps> = ({ op
                     setTargetSource(next.source === 'agents' ? 'agents' : 'opencode');
                   }}
                 >
-                  <SelectTrigger className="!h-9 w-full gap-1.5">
+                  <SelectTrigger size="lg" className="w-full gap-1.5">
                     {scope === 'user' ? <RiUser3Line className="h-4 w-4" /> : <RiFolderLine className="h-4 w-4" />}
                     {targetSource === 'agents' ? <RiRobot2Line className="h-4 w-4" /> : null}
                     <span>{locationLabel(scope, targetSource)}</span>
@@ -315,6 +357,32 @@ export const InstallFromRepoDialog: React.FC<InstallFromRepoDialogProps> = ({ op
               </div>
             </div>
 
+            {scope === 'project' && (
+              <div className="space-y-2">
+                <label className="typography-ui-label font-medium text-foreground">Project</label>
+                {projects.length === 0 ? (
+                  <p className="typography-meta text-muted-foreground">No projects available</p>
+                ) : (
+                  <Select
+                    value={resolvedTargetProjectId ?? ''}
+                    onValueChange={(v) => setTargetProjectId(v)}
+                    disabled={projects.length === 1}
+                  >
+                    <SelectTrigger size="lg" className="w-full justify-between">
+                      <SelectValue placeholder="Choose project" />
+                    </SelectTrigger>
+                    <SelectContent align="start">
+                      {projects.map((p) => (
+                        <SelectItem key={p.id} value={p.id} className="pr-2 [&>span:first-child]:hidden">
+                          {p.label || p.path}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
+            )}
+
             {identities.length > 0 && !isVSCodeRuntime() ? (
               <div className="rounded-lg border bg-muted/20 px-3 py-2">
                 <div className="typography-ui-label font-medium text-foreground">Authentication required</div>
@@ -323,7 +391,7 @@ export const InstallFromRepoDialog: React.FC<InstallFromRepoDialogProps> = ({ op
                 </div>
                 <div className="mt-2">
                   <Select value={gitIdentityId || ''} onValueChange={(v) => setGitIdentityId(v)}>
-                    <SelectTrigger className="!h-9 w-full justify-between">
+                    <SelectTrigger size="lg" className="w-full justify-between">
                       <span>{identities.find((i) => i.id === gitIdentityId)?.name || 'Choose identity'}</span>
                     </SelectTrigger>
                     <SelectContent align="start">
@@ -419,11 +487,11 @@ export const InstallFromRepoDialog: React.FC<InstallFromRepoDialogProps> = ({ op
           </div>
 
           <DialogFooter className="flex-shrink-0">
-            <Button variant="ghost" onClick={() => onOpenChange(false)}>
+            <ButtonLarge variant="ghost" onClick={() => onOpenChange(false)}>
               Cancel
-            </Button>
+            </ButtonLarge>
             <ButtonLarge
-              disabled={isInstalling || selectedDirs.length === 0 || !source.trim()}
+              disabled={isInstalling || selectedDirs.length === 0 || !source.trim() || (scope === 'project' && !directoryOverride)}
               onClick={() => void doInstall({})}
             >
               {isInstalling ? 'Installing…' : 'Install selected'}

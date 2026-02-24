@@ -110,7 +110,7 @@ export function GitHubPullRequestPickerDialog({
   const githubAuthStatus = useGitHubAuthStore((state) => state.status);
   const githubAuthChecked = useGitHubAuthStore((state) => state.hasChecked);
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
-  const setSidebarSection = useUIStore((state) => state.setSidebarSection);
+  const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const activeProject = useProjectsStore((state) => state.getActiveProject());
 
   const projectDirectory = activeProject?.path ?? null;
@@ -300,9 +300,9 @@ export function GitHubPullRequestPickerDialog({
   const repoUrl = result?.repo?.url ?? null;
 
   const openGitHubSettings = React.useCallback(() => {
-    setSidebarSection('settings');
+    setSettingsPage('github');
     setSettingsDialogOpen(true);
-  }, [setSettingsDialogOpen, setSidebarSection]);
+  }, [setSettingsDialogOpen, setSettingsPage]);
 
   const filtered = React.useMemo(() => {
     const q = query.trim().toLowerCase();
