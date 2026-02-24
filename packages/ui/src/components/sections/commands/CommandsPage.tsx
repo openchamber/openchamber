@@ -1,14 +1,12 @@
 import React from 'react';
-import { Button } from '@/components/ui/button';
+import { ButtonSmall } from '@/components/ui/button-small';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Switch } from '@/components/ui/switch';
 import { toast } from '@/components/ui';
 import { useCommandsStore, type CommandConfig, type CommandScope } from '@/stores/useCommandsStore';
-import { RiInformationLine, RiTerminalBoxLine, RiUser3Line, RiFolderLine } from '@remixicon/react';
+import { RiTerminalBoxLine, RiUser3Line, RiFolderLine } from '@remixicon/react';
 import { ModelSelector } from '../agents/ModelSelector';
 import { AgentSelector } from './AgentSelector';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import {
   Select,
@@ -30,7 +28,6 @@ export const CommandsPage: React.FC = () => {
   const [agent, setAgent] = React.useState('');
   const [model, setModel] = React.useState('');
   const [template, setTemplate] = React.useState('');
-  const [subtask, setSubtask] = React.useState(false);
   const [isSaving, setIsSaving] = React.useState(false);
   const initialStateRef = React.useRef<{
     draftName: string;
@@ -39,7 +36,6 @@ export const CommandsPage: React.FC = () => {
     agent: string;
     model: string;
     template: string;
-    subtask: boolean;
   } | null>(null);
 
   React.useEffect(() => {
@@ -50,15 +46,12 @@ export const CommandsPage: React.FC = () => {
       const agentValue = commandDraft.agent || '';
       const modelValue = commandDraft.model || '';
       const templateValue = commandDraft.template || '';
-      const subtaskValue = commandDraft.subtask || false;
-
       setDraftName(draftNameValue);
       setDraftScope(draftScopeValue);
       setDescription(descriptionValue);
       setAgent(agentValue);
       setModel(modelValue);
       setTemplate(templateValue);
-      setSubtask(subtaskValue);
 
       initialStateRef.current = {
         draftName: draftNameValue,
@@ -67,20 +60,16 @@ export const CommandsPage: React.FC = () => {
         agent: agentValue,
         model: modelValue,
         template: templateValue,
-        subtask: subtaskValue,
       };
     } else if (selectedCommand) {
       const descriptionValue = selectedCommand.description || '';
       const agentValue = selectedCommand.agent || '';
       const modelValue = selectedCommand.model || '';
       const templateValue = selectedCommand.template || '';
-      const subtaskValue = selectedCommand.subtask || false;
-
       setDescription(descriptionValue);
       setAgent(agentValue);
       setModel(modelValue);
       setTemplate(templateValue);
-      setSubtask(subtaskValue);
 
       initialStateRef.current = {
         draftName: '',
@@ -89,7 +78,6 @@ export const CommandsPage: React.FC = () => {
         agent: agentValue,
         model: modelValue,
         template: templateValue,
-        subtask: subtaskValue,
       };
     }
   }, [selectedCommand, isNewCommand, selectedCommandName, commands, commandDraft]);
@@ -109,10 +97,8 @@ export const CommandsPage: React.FC = () => {
     if (agent !== initial.agent) return true;
     if (model !== initial.model) return true;
     if (template !== initial.template) return true;
-    if (subtask !== initial.subtask) return true;
-
     return false;
-  }, [agent, description, draftName, draftScope, isNewCommand, model, subtask, template]);
+  }, [agent, description, draftName, draftScope, isNewCommand, model, template]);
 
   const handleSave = async () => {
     const commandName = isNewCommand ? draftName.trim().replace(/\s+/g, '-') : selectedCommandName?.trim();
@@ -144,7 +130,6 @@ export const CommandsPage: React.FC = () => {
         agent: trimmedAgent === '' ? null : trimmedAgent,
         model: trimmedModel === '' ? null : trimmedModel,
         template: trimmedTemplate,
-        subtask,
         scope: isNewCommand ? draftScope : undefined,
       };
 
@@ -184,11 +169,11 @@ export const CommandsPage: React.FC = () => {
   }
 
   return (
-    <ScrollableOverlay keyboardAvoid outerClassName="h-full" className="w-full bg-background">
-      <div className="mx-auto w-full max-w-4xl p-3 sm:p-6 sm:pt-8">
-        
-        {/* Header & Actions */}
-        <div className="mb-8 flex items-center justify-between gap-4">
+    <ScrollableOverlay keyboardAvoid outerClassName="h-full" className="w-full">
+      <div className="mx-auto w-full max-w-3xl p-3 sm:p-6 sm:pt-8">
+
+        {/* Header */}
+        <div className="mb-4 flex items-center justify-between gap-4">
           <div className="min-w-0">
             <h2 className="typography-ui-header font-semibold text-foreground truncate">
               {isNewCommand ? 'New Command' : `/${selectedCommandName}`}
@@ -197,38 +182,35 @@ export const CommandsPage: React.FC = () => {
               {isNewCommand ? 'Configure a new slash command' : 'Edit command settings'}
             </p>
           </div>
-          <Button onClick={handleSave} disabled={isSaving || !isDirty} size="sm">
-            {isSaving ? 'Saving...' : 'Save Changes'}
-          </Button>
         </div>
 
-        {/* Basic Information */}
+        {/* Identity */}
         <div className="mb-8">
-          <div className="mb-3 px-1">
-            <h3 className="typography-ui-header font-semibold text-foreground">
+          <div className="mb-1 px-1">
+            <h3 className="typography-ui-header font-medium text-foreground">
               Identity
             </h3>
           </div>
 
-          <div className="rounded-lg bg-[var(--surface-elevated)]/70 overflow-hidden flex flex-col">
-            
+          <section className="px-2 pb-2 pt-0 space-y-0">
+
             {isNewCommand && (
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-4 py-3 border-b border-[var(--surface-subtle)]">
-                <div className="flex min-w-0 flex-col sm:w-1/3 shrink-0">
+              <div className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
+                <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
                   <span className="typography-ui-label text-foreground">Command Name</span>
                 </div>
-                <div className="flex items-center gap-2 flex-1 justify-end">
-                  <div className="flex items-center flex-1 max-w-[200px]">
+                <div className="flex min-w-0 flex-1 items-center gap-2 sm:w-fit sm:flex-initial">
+                  <div className="flex items-center">
                     <span className="typography-ui-label text-muted-foreground mr-1">/</span>
                     <Input
                       value={draftName}
                       onChange={(e) => setDraftName(e.target.value)}
                       placeholder="command-name"
-                      className="flex-1 h-8 px-2 focus-visible:ring-[var(--primary-base)]"
+                      className="h-7 w-40 px-2"
                     />
                   </div>
                   <Select value={draftScope} onValueChange={(v) => setDraftScope(v as CommandScope)}>
-                    <SelectTrigger size="lg" className="w-fit min-w-[100px]">
+                    <SelectTrigger className="w-fit min-w-[100px]">
                       <SelectValue placeholder="Scope" />
                     </SelectTrigger>
                     <SelectContent align="end">
@@ -250,37 +232,37 @@ export const CommandsPage: React.FC = () => {
               </div>
             )}
 
-            <div className="px-4 py-3">
-              <div className="mb-2">
-                <span className="typography-ui-label text-foreground">Description</span>
+            <div className="py-1.5">
+              <span className="typography-ui-label text-foreground">Description</span>
+              <div className="mt-1.5">
+                <Textarea
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="What does this command do?"
+                  rows={2}
+                  className="w-full resize-none min-h-[60px] bg-transparent"
+                />
               </div>
-              <Textarea
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="What does this command do?"
-                rows={2}
-                className="w-full resize-none min-h-[60px] bg-transparent focus-visible:ring-[var(--primary-base)]"
-              />
             </div>
 
-          </div>
+          </section>
         </div>
 
-        {/* Model & Agent Configuration */}
+        {/* Execution Context */}
         <div className="mb-8">
-          <div className="mb-3 px-1">
-            <h3 className="typography-ui-header font-semibold text-foreground">
+          <div className="mb-1 px-1">
+            <h3 className="typography-ui-header font-medium text-foreground">
               Execution Context
             </h3>
           </div>
 
-          <div className="rounded-lg bg-[var(--surface-elevated)]/70 overflow-hidden flex flex-col">
-            
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-4 py-3 border-b border-[var(--surface-subtle)]">
-              <div className="flex min-w-0 flex-col sm:w-1/3 shrink-0">
+          <section className="px-2 pb-2 pt-0 space-y-0">
+
+            <div className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
+              <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
                 <span className="typography-ui-label text-foreground">Override Agent</span>
               </div>
-              <div className="flex-1 max-w-sm flex justify-end">
+              <div className="flex min-w-0 flex-1 items-center gap-2 sm:w-fit sm:flex-initial">
                 <AgentSelector
                   agentName={agent}
                   onChange={(agentName: string) => setAgent(agentName)}
@@ -288,11 +270,11 @@ export const CommandsPage: React.FC = () => {
               </div>
             </div>
 
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-4 py-3 border-b border-[var(--surface-subtle)]">
-              <div className="flex min-w-0 flex-col sm:w-1/3 shrink-0">
+            <div className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
+              <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
                 <span className="typography-ui-label text-foreground">Override Model</span>
               </div>
-              <div className="flex-1 max-w-sm flex justify-end">
+              <div className="flex min-w-0 flex-1 items-center gap-2 sm:w-fit sm:flex-initial">
                 <ModelSelector
                   providerId={model ? model.split('/')[0] : ''}
                   modelId={model ? model.split('/')[1] : ''}
@@ -307,67 +289,46 @@ export const CommandsPage: React.FC = () => {
               </div>
             </div>
 
-            <label className="group flex cursor-pointer items-center justify-between gap-2 px-4 py-3 transition-colors hover:bg-[var(--interactive-hover)]/30">
-              <div className="flex min-w-0 flex-col">
-                <div className="flex items-center gap-1.5">
-                  <span className="typography-ui-label text-foreground">Force Subagent Context</span>
-                  <Tooltip delayDuration={1000}>
-                    <TooltipTrigger asChild>
-                      <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
-                    </TooltipTrigger>
-                    <TooltipContent sideOffset={8} className="max-w-xs">
-                      When enabled, this command will always execute in an isolated subagent context,<br/>
-                      even if triggered from the main agent.<br/>
-                      Useful for isolating command logic.
-                    </TooltipContent>
-                  </Tooltip>
-                </div>
-              </div>
-              <Switch
-                checked={subtask}
-                onCheckedChange={setSubtask}
-                className="data-[state=checked]:bg-[var(--primary-base)]"
-              />
-            </label>
-
-          </div>
+          </section>
         </div>
 
         {/* Command Template */}
         <div className="mb-8">
-          <div className="mb-3 px-1">
-            <h3 className="typography-ui-header font-semibold text-foreground">
+          <div className="mb-1 px-1">
+            <h3 className="typography-ui-header font-medium text-foreground">
               Command Template
             </h3>
           </div>
-          
-          <div className="rounded-lg bg-[var(--surface-elevated)]/70 overflow-hidden flex flex-col">
+
+          <section className="px-2 pb-2 pt-0">
             <Textarea
               value={template}
               onChange={(e) => setTemplate(e.target.value)}
               placeholder={`Your command template here...\n\nUse $ARGUMENTS to reference user input.\nUse !\`shell command\` to inject shell output.\nUse @filename to include file contents.`}
               rows={12}
-              className="w-full font-mono typography-meta min-h-[160px] max-h-[60vh] bg-transparent focus-visible:ring-[var(--primary-base)] focus-visible:outline-none resize-y"
+              className="w-full font-mono typography-meta min-h-[160px] max-h-[60vh] bg-transparent resize-y"
             />
-          </div>
+          </section>
 
-          <div className="mt-4 rounded-lg bg-muted/30 p-3">
-            <p className="typography-meta text-foreground font-medium mb-2">Template Features</p>
-            <ul className="list-disc list-inside space-y-1.5 ml-1 typography-meta text-muted-foreground">
-              <li className="flex items-center gap-2">
-                <code className="bg-background border border-[var(--interactive-border)] px-1 rounded text-foreground">$ARGUMENTS</code>
-                <span>- User input after command</span>
-              </li>
-              <li className="flex items-center gap-2">
-                <code className="bg-background border border-[var(--interactive-border)] px-1 rounded text-foreground">!`command`</code>
-                <span>- Inject shell command output</span>
-              </li>
-              <li className="flex items-center gap-2">
-                <code className="bg-background border border-[var(--interactive-border)] px-1 rounded text-foreground">@filename</code>
-                <span>- Include file contents</span>
-              </li>
-            </ul>
+          <div className="mt-2 px-2">
+            <p className="typography-meta text-muted-foreground">
+              <code className="text-foreground">$ARGUMENTS</code> user input &middot;{' '}
+              <code className="text-foreground">!`cmd`</code> shell output &middot;{' '}
+              <code className="text-foreground">@file</code> file contents
+            </p>
           </div>
+        </div>
+
+        {/* Save action */}
+        <div className="mt-0.5 px-2 py-1">
+          <ButtonSmall
+            onClick={handleSave}
+            disabled={isSaving || !isDirty}
+            size="xs"
+            className="!font-normal"
+          >
+            {isSaving ? 'Saving...' : 'Save Changes'}
+          </ButtonSmall>
         </div>
 
       </div>
