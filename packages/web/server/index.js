@@ -2885,6 +2885,12 @@ const ENV_CONFIGURED_OPENCODE_HOST = (() => {
     console.error(`[fatal] OPENCODE_HOST must include an explicit port (e.g. http://hostname:4096), got: ${JSON.stringify(raw)}`);
     process.exit(1);
   }
+  if (url.pathname !== '/' || url.search || url.hash) {
+    console.error(
+      `[fatal] OPENCODE_HOST must not include a path, query, or hash; got: ${JSON.stringify(raw)}`
+    );
+    process.exit(1);
+  }
   return { origin: url.origin, port };
 })();
 
