@@ -1,9 +1,9 @@
 import React from 'react';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { Checkbox } from '@/components/ui/checkbox';
 import { UsageCard } from './UsageCard';
 import { QUOTA_PROVIDERS } from '@/lib/quota';
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
-import { Switch } from '@/components/ui/switch';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import {
@@ -148,59 +148,63 @@ export const UsagePage: React.FC = () => {
   }
 
   return (
-    <ScrollableOverlay keyboardAvoid outerClassName="h-full" className="w-full bg-background">
-      <div className="mx-auto w-full max-w-4xl p-3 sm:p-6 sm:pt-8">
-        
+    <ScrollableOverlay keyboardAvoid outerClassName="h-full" className="w-full">
+      <div className="mx-auto w-full max-w-3xl p-3 sm:p-6 sm:pt-8">
+
         {/* Header */}
-        <div className="mb-8 flex items-start justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-muted)]">
-              <ProviderLogo providerId={selectedProviderId} className="h-6 w-6" />
-            </div>
-            <div>
-              <h1 className="typography-ui-header font-semibold text-foreground truncate flex items-center gap-2">
-                {providerName} Usage
-              </h1>
-              <p className="typography-meta text-muted-foreground truncate">
-                {isLoading ? (
-                  <span className="animate-pulse">Refreshing usage...</span>
-                ) : (
-                  `Last updated: ${formatTime(lastUpdated)}`
-                )}
-              </p>
-            </div>
+        <div className="mb-4 flex items-center gap-3">
+          <ProviderLogo providerId={selectedProviderId} className="h-5 w-5 shrink-0" />
+          <div className="min-w-0">
+            <h2 className="typography-ui-header font-semibold text-foreground truncate">
+              {providerName} Usage
+            </h2>
+            <p className="typography-meta text-muted-foreground truncate">
+              {isLoading ? (
+                <span className="animate-pulse">Refreshing usage...</span>
+              ) : (
+                `Last updated: ${formatTime(lastUpdated)}`
+              )}
+            </p>
           </div>
         </div>
 
-        {/* Global Options */}
-        <div className="mb-8">
-          <div className="rounded-lg bg-[var(--surface-elevated)]/70 overflow-hidden flex flex-col">
-            <label className="group flex cursor-pointer items-center justify-between gap-4 px-4 py-3 transition-colors hover:bg-[var(--interactive-hover)]/30">
-              <div className="flex min-w-0 flex-col">
-                <div className="flex items-center gap-1.5">
-                  <span className="typography-ui-label text-foreground">Show in Header Menu</span>
-                  <Tooltip delayDuration={1000}>
-                    <TooltipTrigger asChild>
-                      <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
-                    </TooltipTrigger>
-                    <TooltipContent sideOffset={8} className="max-w-xs">
-                      When enabled, this provider's usage will be visible in the quick access dropdown menu in the app header.
-                    </TooltipContent>
-                  </Tooltip>
-                </div>
-              </div>
-              <Switch
-                checked={showInDropdown}
-                onCheckedChange={handleDropdownToggle}
-                className="data-[state=checked]:bg-[var(--primary-base)]"
-              />
-            </label>
+        {/* Options */}
+        <div className="mb-8 px-2">
+          <div
+            className="group flex cursor-pointer items-center gap-2 py-1.5"
+            role="button"
+            tabIndex={0}
+            aria-pressed={showInDropdown}
+            onClick={() => handleDropdownToggle(!showInDropdown)}
+            onKeyDown={(event) => {
+              if (event.key === ' ' || event.key === 'Enter') {
+                event.preventDefault();
+                handleDropdownToggle(!showInDropdown);
+              }
+            }}
+          >
+            <Checkbox
+              checked={showInDropdown}
+              onChange={handleDropdownToggle}
+              ariaLabel="Show in header menu"
+            />
+            <div className="flex min-w-0 items-center gap-1.5">
+              <span className="typography-ui-label text-foreground">Show in Header Menu</span>
+              <Tooltip delayDuration={1000}>
+                <TooltipTrigger asChild>
+                  <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+                </TooltipTrigger>
+                <TooltipContent sideOffset={8} className="max-w-xs">
+                  When enabled, this provider's usage will be visible in the quick access dropdown menu in the app header.
+                </TooltipContent>
+              </Tooltip>
+            </div>
           </div>
         </div>
 
         {/* State Messages */}
         {!selectedResult && (
-          <div className="mb-8 rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)]/60 p-6 text-center">
+          <div className="mb-8 px-2">
             <p className="typography-ui-label text-foreground">No usage data available yet.</p>
           </div>
         )}
@@ -223,23 +227,25 @@ export const UsagePage: React.FC = () => {
 
         {/* Overall Usage Windows */}
         {usage?.windows && Object.keys(usage.windows).length > 0 && (
-          <div className="mb-8 rounded-lg bg-[var(--surface-elevated)]/70 py-1 border border-[var(--surface-subtle)]">
-            <div className="divide-y divide-[var(--surface-subtle)]">
-              {Object.entries(usage.windows).map(([label, window]) => (
-                <UsageCard key={label} title={label} window={window} />
-              ))}
-            </div>
+          <div className="mb-8">
+            <section className="px-2 pb-2 pt-0">
+              <div className="divide-y divide-[var(--surface-subtle)]">
+                {Object.entries(usage.windows).map(([label, window]) => (
+                  <UsageCard key={label} title={label} window={window} />
+                ))}
+              </div>
+            </section>
           </div>
         )}
 
         {/* Models Section */}
         {providerModels.length > 0 && (
           <div className="mb-8">
-            <div className="mb-3 px-1">
-              <h2 className="typography-ui-header font-semibold text-foreground">Model Quotas</h2>
+            <div className="mb-1 px-1">
+              <h3 className="typography-ui-header font-medium text-foreground">Model Quotas</h3>
             </div>
 
-            <div className="space-y-4">
+            <div className="space-y-3">
               {/* Predefined families */}
               {sortedFamilies.map((family) => {
                 const familyModels = modelsByFamily.get(family.id) ?? [];
@@ -248,26 +254,26 @@ export const UsagePage: React.FC = () => {
                 const isCollapsed = collapsedFamilies[family.id] ?? false;
 
                 return (
-                  <div key={family.id} className="rounded-lg bg-[var(--surface-elevated)]/70 overflow-hidden">
+                  <section key={family.id} className="p-2">
                     <Collapsible
                       open={!isCollapsed}
                       onOpenChange={() => toggleFamilyCollapsed(family.id)}
                     >
-                      <CollapsibleTrigger className="flex w-full items-center justify-between px-4 py-3 hover:bg-[var(--interactive-hover)]/30 transition-colors group">
-                        <div className="flex flex-col text-left">
-                          <span className="typography-ui-label font-semibold text-foreground">{family.label}</span>
-                          <span className="typography-meta text-muted-foreground">
-                            {familyModels.length} model{familyModels.length !== 1 ? 's' : ''}
+                      <CollapsibleTrigger className="flex w-full items-center justify-between py-0.5 group">
+                        <div className="flex items-center gap-1.5 text-left">
+                          <span className="typography-ui-label font-normal text-foreground">{family.label}</span>
+                          <span className="typography-micro text-muted-foreground">
+                            ({familyModels.length})
                           </span>
                         </div>
                         {isCollapsed ? (
-                          <RiArrowRightSLine className="h-5 w-5 text-muted-foreground group-hover:text-foreground transition-colors" />
+                          <RiArrowRightSLine className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
                         ) : (
-                          <RiArrowDownSLine className="h-5 w-5 text-muted-foreground group-hover:text-foreground transition-colors" />
+                          <RiArrowDownSLine className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
                         )}
                       </CollapsibleTrigger>
-                      <CollapsibleContent className="border-t border-[var(--surface-subtle)]">
-                        <div className="divide-y divide-[var(--surface-subtle)]">
+                      <CollapsibleContent>
+                        <div className="divide-y divide-[var(--surface-subtle)] mt-1">
                           {familyModels.map((model) => {
                             const entries = Object.entries(model.windows.windows);
                             if (entries.length === 0) return null;
@@ -289,7 +295,7 @@ export const UsagePage: React.FC = () => {
                         </div>
                       </CollapsibleContent>
                     </Collapsible>
-                  </div>
+                  </section>
                 );
               })}
 
@@ -301,26 +307,26 @@ export const UsagePage: React.FC = () => {
                 const isCollapsed = collapsedFamilies['other'] ?? false;
 
                 return (
-                  <div className="rounded-lg bg-[var(--surface-elevated)]/70 overflow-hidden">
+                  <section className="p-2">
                     <Collapsible
                       open={!isCollapsed}
                       onOpenChange={() => toggleFamilyCollapsed('other')}
                     >
-                      <CollapsibleTrigger className="flex w-full items-center justify-between px-4 py-3 hover:bg-[var(--interactive-hover)]/30 transition-colors group">
-                        <div className="flex flex-col text-left">
-                          <span className="typography-ui-label font-semibold text-foreground">Other Models</span>
-                          <span className="typography-meta text-muted-foreground">
-                            {otherModels.length} model{otherModels.length !== 1 ? 's' : ''}
+                      <CollapsibleTrigger className="flex w-full items-center justify-between py-0.5 group">
+                        <div className="flex items-center gap-1.5 text-left">
+                          <span className="typography-ui-label font-normal text-foreground">Other Models</span>
+                          <span className="typography-micro text-muted-foreground">
+                            ({otherModels.length})
                           </span>
                         </div>
                         {isCollapsed ? (
-                          <RiArrowRightSLine className="h-5 w-5 text-muted-foreground group-hover:text-foreground transition-colors" />
+                          <RiArrowRightSLine className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
                         ) : (
-                          <RiArrowDownSLine className="h-5 w-5 text-muted-foreground group-hover:text-foreground transition-colors" />
+                          <RiArrowDownSLine className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
                         )}
                       </CollapsibleTrigger>
-                      <CollapsibleContent className="border-t border-[var(--surface-subtle)]">
-                        <div className="divide-y divide-[var(--surface-subtle)]">
+                      <CollapsibleContent>
+                        <div className="divide-y divide-[var(--surface-subtle)] mt-1">
                           {otherModels.map((model) => {
                             const entries = Object.entries(model.windows.windows);
                             if (entries.length === 0) return null;
@@ -342,7 +348,7 @@ export const UsagePage: React.FC = () => {
                         </div>
                       </CollapsibleContent>
                     </Collapsible>
-                  </div>
+                  </section>
                 );
               })()}
             </div>
@@ -351,7 +357,7 @@ export const UsagePage: React.FC = () => {
 
         {selectedResult?.configured && usage && Object.keys(usage.windows ?? {}).length === 0 &&
           providerModels.length === 0 && (
-          <div className="mb-8 rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)]/60 p-6 text-center">
+          <div className="mb-8 px-2">
             <p className="typography-ui-label text-foreground">No quota windows reported</p>
             <p className="typography-meta text-muted-foreground mt-1">This provider does not currently report any rate limits or usage quotas.</p>
           </div>

@@ -9,7 +9,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
+import { ButtonLarge } from '@/components/ui/button-large';
 import {
   Select,
   SelectContent,
@@ -153,24 +153,10 @@ export const InstallSkillDialog: React.FC<InstallSkillDialogProps> = ({ open, on
     return null;
   }
 
-  // computed inline in UI; keep vars minimal
-  const targetProjectLabel = (() => {
-    if (scope !== 'project') {
-      return null;
-    }
-    const id = resolvedTargetProjectId;
-    if (!id) {
-      return null;
-    }
-    const project = projects.find((p) => p.id === id);
-    return project?.label || project?.path || null;
-  })();
-
-
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-lg" keyboardAvoid>
+        <DialogContent className="max-w-md" keyboardAvoid>
           <DialogHeader>
             <DialogTitle>Install skill</DialogTitle>
             <DialogDescription>
@@ -178,110 +164,80 @@ export const InstallSkillDialog: React.FC<InstallSkillDialogProps> = ({ open, on
             </DialogDescription>
           </DialogHeader>
 
-          <div className="mt-2 space-y-2">
-            <div className="rounded-lg px-2 py-2">
-              <div className="flex items-center gap-2">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="typography-ui-label font-medium text-foreground">Destination</span>
-                    <span className="typography-meta text-muted-foreground truncate">
-                      {locationLabel(scope, targetSource)}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="mt-2 pl-0 pr-1 pb-1">
-                <Select
-                  value={locationValueFrom(scope, targetSource)}
-                  onValueChange={(v) => {
-                    const next = locationPartsFrom(v as SkillLocationValue);
-                    setScope(next.scope);
-                    setTargetSource(next.source === 'agents' ? 'agents' : 'opencode');
-                  }}
-                >
-                  <SelectTrigger size="lg" className="w-full justify-between">
-                    <span className="flex min-w-0 items-center gap-2">
-                      {scope === 'user' ? <RiUser3Line className="h-4 w-4" /> : <RiFolderLine className="h-4 w-4" />}
-                      {targetSource === 'agents' ? <RiRobot2Line className="h-4 w-4" /> : null}
-                      <span className="min-w-0 truncate">{locationLabel(scope, targetSource)}</span>
-                    </span>
-                  </SelectTrigger>
-                  <SelectContent align="start">
-                    {SKILL_LOCATION_OPTIONS.map((option) => (
-                      <SelectItem key={option.value} value={option.value} className="pr-2 [&>span:first-child]:hidden">
-                        <div className="flex flex-col gap-0.5">
-                          <div className="flex items-center gap-2">
-                            {option.scope === 'user' ? <RiUser3Line className="h-4 w-4" /> : <RiFolderLine className="h-4 w-4" />}
-                            {option.source === 'agents' ? <RiRobot2Line className="h-4 w-4" /> : null}
-                            <span>{option.label}</span>
-                          </div>
-                          <span className="typography-micro text-muted-foreground ml-6">{option.description}</span>
+          <div className="mt-2 space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="typography-ui-label text-foreground">Destination</span>
+              <Select
+                value={locationValueFrom(scope, targetSource)}
+                onValueChange={(v) => {
+                  const next = locationPartsFrom(v as SkillLocationValue);
+                  setScope(next.scope);
+                  setTargetSource(next.source === 'agents' ? 'agents' : 'opencode');
+                }}
+              >
+                <SelectTrigger className="w-fit gap-1.5">
+                  {scope === 'user' ? <RiUser3Line className="h-3.5 w-3.5" /> : <RiFolderLine className="h-3.5 w-3.5" />}
+                  {targetSource === 'agents' ? <RiRobot2Line className="h-3.5 w-3.5" /> : null}
+                  <span>{locationLabel(scope, targetSource)}</span>
+                </SelectTrigger>
+                <SelectContent align="start">
+                  {SKILL_LOCATION_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value} className="pr-2 [&>span:first-child]:hidden">
+                      <div className="flex flex-col gap-0.5">
+                        <div className="flex items-center gap-2">
+                          {option.scope === 'user' ? <RiUser3Line className="h-3.5 w-3.5" /> : <RiFolderLine className="h-3.5 w-3.5" />}
+                          {option.source === 'agents' ? <RiRobot2Line className="h-3.5 w-3.5" /> : null}
+                          <span>{option.label}</span>
                         </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+                        <span className="typography-micro text-muted-foreground ml-5">{option.description}</span>
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
-            {scope === 'project' ? (
-              <div className="rounded-lg px-2 py-2">
-                <div className="flex items-center gap-2">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="typography-ui-label font-medium text-foreground">Project</span>
-                      <span className="typography-meta text-muted-foreground truncate">{targetProjectLabel || 'Choose'}</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="mt-2 pl-0 pr-1 pb-1">
-                  {projects.length === 0 ? (
-                    <div className="h-9 rounded-lg border border-border/60 bg-[var(--surface-elevated)] px-2 flex items-center typography-meta text-muted-foreground">
-                      No projects available
-                    </div>
-                  ) : (
-                    <Select
-                      value={resolvedTargetProjectId ?? ''}
-                      onValueChange={(v) => setTargetProjectId(v)}
-                      disabled={projects.length === 1}
-                    >
-                      <SelectTrigger size="lg" className="w-full justify-between">
-                        <SelectValue placeholder="Choose project" />
-                      </SelectTrigger>
-                      <SelectContent align="start">
-                        {projects.map((p) => (
-                          <SelectItem key={p.id} value={p.id} className="pr-2 [&>span:first-child]:hidden">
-                            {p.label || p.path}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                </div>
+            {scope === 'project' && (
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="typography-ui-label text-foreground">Project</span>
+                {projects.length === 0 ? (
+                  <span className="typography-meta text-muted-foreground">No projects available</span>
+                ) : (
+                  <Select
+                    value={resolvedTargetProjectId ?? ''}
+                    onValueChange={(v) => setTargetProjectId(v)}
+                    disabled={projects.length === 1}
+                  >
+                    <SelectTrigger className="w-fit">
+                      <SelectValue placeholder="Choose project" />
+                    </SelectTrigger>
+                    <SelectContent align="start">
+                      {projects.map((p) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.label || p.path}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
               </div>
-            ) : null}
+            )}
 
             {item.warnings?.length ? (
-              <div className="rounded-lg border bg-[var(--surface-elevated)] px-3 py-2">
-                <div className="typography-micro text-muted-foreground">Warnings</div>
-                <ul className="mt-1 space-y-1">
-                  {item.warnings.map((w) => (
-                    <li key={w} className="typography-meta text-muted-foreground">{w}</li>
-                  ))}
-                </ul>
+              <div className="typography-micro text-[var(--status-warning)] bg-[var(--status-warning)]/10 px-2 py-1.5 rounded">
+                {item.warnings.join(' · ')}
               </div>
             ) : null}
           </div>
 
-          <DialogFooter className="mt-4 flex flex-col gap-2 sm:flex-row sm:justify-end">
-            <Button className="w-full sm:w-auto" variant="ghost" onClick={() => onOpenChange(false)}>
+          <DialogFooter>
+            <ButtonLarge
+              variant="ghost"
+              onClick={() => onOpenChange(false)}
+            >
               Cancel
-            </Button>
-            <Button
-              className="w-full sm:w-auto"
-              variant="default"
+            </ButtonLarge>
+            <ButtonLarge
               disabled={isInstalling || !item.installable || (scope === 'project' && !directoryOverride)}
               onClick={() =>
                 void doInstall({
@@ -294,8 +250,8 @@ export const InstallSkillDialog: React.FC<InstallSkillDialogProps> = ({ open, on
                 })
               }
             >
-              {isInstalling ? 'Installing…' : 'Install'}
-            </Button>
+              {isInstalling ? 'Installing...' : 'Install'}
+            </ButtonLarge>
           </DialogFooter>
         </DialogContent>
       </Dialog>

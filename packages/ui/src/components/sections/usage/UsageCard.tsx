@@ -4,7 +4,7 @@ import { formatPercent, formatWindowLabel, calculatePace, calculateExpectedUsage
 import { UsageProgressBar } from './UsageProgressBar';
 import { PaceIndicator } from './PaceIndicator';
 import { useQuotaStore } from '@/stores/useQuotaStore';
-import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
 
 interface UsageCardProps {
   title: string;
@@ -43,26 +43,26 @@ export const UsageCard: React.FC<UsageCardProps> = ({
   }, [paceInfo, displayMode]);
 
   return (
-    <div className="px-4 py-3">
+    <div className="py-3">
       <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0 flex-1 flex flex-col">
-          <span className="typography-ui-label text-foreground truncate">{windowLabel}</span>
-          {subtitle && (
-            <span className="typography-meta text-muted-foreground truncate">{subtitle}</span>
+        <div className="min-w-0 flex-1 flex items-center gap-2">
+          {showToggle && (
+            <Checkbox
+              checked={toggleEnabled}
+              onChange={(checked) => onToggle?.(checked)}
+              ariaLabel="Show in dropdown"
+            />
           )}
-        </div>
-        {showToggle ? (
-          <Switch
-            checked={toggleEnabled}
-            onCheckedChange={onToggle}
-            aria-label="Show in dropdown"
-            className="data-[state=checked]:bg-[var(--primary-base)]"
-          />
-        ) : (
-          <div className="typography-ui-label text-foreground tabular-nums flex items-center justify-end">
-            {percentLabel === '-' ? '' : percentLabel}
+          <div className="min-w-0 flex flex-col">
+            <span className="typography-ui-label text-foreground truncate">{windowLabel}</span>
+            {subtitle && (
+              <span className="typography-meta text-muted-foreground truncate">{subtitle}</span>
+            )}
           </div>
-        )}
+        </div>
+        <div className="typography-ui-label text-foreground tabular-nums flex items-center justify-end">
+          {percentLabel === '-' ? '' : percentLabel}
+        </div>
       </div>
 
       <div className="mt-2.5">

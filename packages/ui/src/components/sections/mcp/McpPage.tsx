@@ -674,7 +674,7 @@ export const McpPage: React.FC = () => {
         </div>
 
         {/* Environment Variables */}
-        <div className="mb-8">
+        <div className="mb-2">
           <div className="mb-1 px-1">
             <h3 className="typography-ui-header font-medium text-foreground">
               Environment Variables

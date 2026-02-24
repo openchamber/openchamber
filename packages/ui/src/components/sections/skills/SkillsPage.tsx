@@ -1,5 +1,4 @@
 import React from 'react';
-import { Button } from '@/components/ui/button';
 import { ButtonSmall } from '@/components/ui/button-small';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -342,11 +341,11 @@ const SkillsInstalledPage: React.FC = () => {
   }
 
   return (
-    <ScrollableOverlay keyboardAvoid outerClassName="h-full" className="w-full bg-background p-3 sm:p-6 sm:pt-8">
-      <div className="space-y-8">
-        
-        {/* Header & Actions */}
-        <div className="mb-8 flex items-center justify-between gap-4">
+    <ScrollableOverlay keyboardAvoid outerClassName="h-full" className="w-full">
+      <div className="mx-auto w-full max-w-3xl p-3 sm:p-6 sm:pt-8">
+
+        {/* Header */}
+        <div className="mb-4">
           <div className="min-w-0">
             <h2 className="typography-ui-header font-semibold text-foreground truncate flex items-center gap-2">
               {isNewSkill ? 'New Skill' : selectedSkillName}
@@ -360,33 +359,28 @@ const SkillsInstalledPage: React.FC = () => {
               {selectedSkill ? `${locationLabel(selectedSkill.scope, selectedSkill.source)} skill` : 'Configure a new skill'}
             </p>
           </div>
-          <Button onClick={handleSave} disabled={isSaving || !hasSkillChanges} size="sm">
-            {isSaving ? 'Saving...' : isNewSkill ? 'Create Skill' : 'Save Changes'}
-          </Button>
         </div>
 
         {/* Basic Information */}
         <div className="mb-8">
-          <div className="mb-3 px-1">
-            <h3 className="typography-ui-header font-semibold text-foreground">
+          <div className="mb-1 px-1">
+            <h3 className="typography-ui-header font-medium text-foreground">
               Basic Information
             </h3>
           </div>
 
-          <div className="rounded-lg bg-[var(--surface-elevated)]/70 overflow-hidden flex flex-col">
-            
+          <section className="px-2 pb-2 pt-0 space-y-0">
+
             {isNewSkill && (
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-4 py-3 border-b border-[var(--surface-subtle)]">
-                <div className="flex min-w-0 flex-col sm:w-1/3 shrink-0">
-                  <span className="typography-ui-label text-foreground">Skill Name & Location</span>
-                  <span className="typography-meta text-muted-foreground">Lowercase, numbers, hyphens</span>
-                </div>
-                <div className="flex items-center gap-2 flex-1 justify-end">
+              <div className="py-1.5">
+                <span className="typography-ui-label text-foreground">Skill Name & Location</span>
+                <span className="typography-meta text-muted-foreground ml-2">Lowercase, numbers, hyphens</span>
+                <div className="flex items-center gap-2 mt-1.5">
                   <Input
                     value={draftName}
                     onChange={(e) => setDraftName(e.target.value.toLowerCase().replace(/\s+/g, '-'))}
                     placeholder="skill-name"
-                    className="flex-1 max-w-[200px] h-8 focus-visible:ring-[var(--primary-base)]"
+                    className="h-7 w-40 px-2"
                   />
                   <Select
                     value={locationValueFrom(draftScope, draftSource)}
@@ -396,16 +390,16 @@ const SkillsInstalledPage: React.FC = () => {
                       setDraftSource(next.source === 'agents' ? 'agents' : 'opencode');
                     }}
                   >
-                    <SelectTrigger size="lg" className="w-fit min-w-[120px]">
+                    <SelectTrigger className="w-fit gap-1.5">
                       {draftScope === 'user' ? (
-                        <RiUser3Line className="h-3.5 w-3.5 mr-1" />
+                        <RiUser3Line className="h-3.5 w-3.5" />
                       ) : (
-                        <RiFolderLine className="h-3.5 w-3.5 mr-1" />
+                        <RiFolderLine className="h-3.5 w-3.5" />
                       )}
-                      {draftSource === 'agents' ? <RiRobot2Line className="h-3.5 w-3.5 mr-1" /> : null}
+                      {draftSource === 'agents' ? <RiRobot2Line className="h-3.5 w-3.5" /> : null}
                       <span>{locationLabel(draftScope, draftSource)}</span>
                     </SelectTrigger>
-                    <SelectContent align="end">
+                    <SelectContent align="start">
                       {SKILL_LOCATION_OPTIONS.map((option) => (
                         <SelectItem key={option.value} value={option.value}>
                           <div className="flex flex-col gap-0.5">
@@ -424,99 +418,107 @@ const SkillsInstalledPage: React.FC = () => {
               </div>
             )}
 
-            <div className="px-4 py-3">
-              <div className="mb-2">
-                <span className="typography-ui-label text-foreground">Description <span className="text-[var(--status-error)]">*</span></span>
-                <span className="typography-meta text-muted-foreground ml-2">The agent uses this to decide when to load the skill</span>
+            <div className="py-1.5">
+              <span className="typography-ui-label text-foreground">Description <span className="text-[var(--status-error)]">*</span></span>
+              <span className="typography-meta text-muted-foreground ml-2">The agent uses this to decide when to load the skill</span>
+              <div className="mt-1.5">
+                <Textarea
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="Brief description of what this skill does..."
+                  rows={2}
+                  className="w-full resize-none min-h-[60px] max-h-32 bg-transparent"
+                />
               </div>
-              <Textarea
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="Brief description of what this skill does..."
-                rows={2}
-                className="w-full resize-none min-h-[60px] max-h-32 bg-transparent focus-visible:ring-[var(--primary-base)]"
-              />
             </div>
 
-          </div>
+          </section>
         </div>
 
         {/* Instructions */}
         <div className="mb-8">
-          <div className="mb-3 px-1">
-            <h3 className="typography-ui-header font-semibold text-foreground">
+          <div className="mb-1 px-1">
+            <h3 className="typography-ui-header font-medium text-foreground">
               Instructions
             </h3>
           </div>
 
-          <Textarea
-            value={instructions}
-            onChange={(e) => setInstructions(e.target.value)}
-            placeholder="Step-by-step instructions, guidelines, or reference content..."
-            className="min-h-[220px] max-h-[60vh] font-mono typography-meta"
-          />
+          <section className="px-2 pb-2 pt-0">
+            <Textarea
+              value={instructions}
+              onChange={(e) => setInstructions(e.target.value)}
+              placeholder="Step-by-step instructions, guidelines, or reference content..."
+              className="min-h-[220px] max-h-[60vh] font-mono typography-meta"
+            />
+          </section>
         </div>
 
         {/* Supporting Files */}
-        <div className="mb-8">
-          <div className="mb-3 px-1 flex items-center justify-between gap-4">
-            <div>
-              <h3 className="typography-ui-header font-semibold text-foreground">
-                Supporting Files
-              </h3>
-            </div>
-            <ButtonSmall variant="outline" onClick={handleAddFile}>
-              <RiAddLine className="h-3.5 w-3.5 mr-1" /> Add File
+        <div className="mb-2">
+          <div className="mb-1 px-1 flex items-center gap-2">
+            <h3 className="typography-ui-header font-medium text-foreground">
+              Supporting Files
+            </h3>
+            <ButtonSmall variant="outline" size="xs" className="!font-normal gap-1" onClick={handleAddFile}>
+              <RiAddLine className="h-3.5 w-3.5" /> Add File
             </ButtonSmall>
           </div>
 
-          {(() => {
-            const filesToShow = isNewSkill ? pendingFiles : supportingFiles;
-            
-            if (filesToShow.length === 0) {
-              return (
-                <div className="rounded-lg bg-[var(--surface-elevated)]/70 border border-[var(--surface-subtle)] p-4 text-center">
-                  <p className="typography-meta text-muted-foreground">
-                    {isNewSkill ? 'No files yet. Use "Add File" to include reference materials.' : 'No supporting files. Use "Add File" to include reference materials.'}
+          <section className="px-2 pb-2 pt-0">
+            {(() => {
+              const filesToShow = isNewSkill ? pendingFiles : supportingFiles;
+
+              if (filesToShow.length === 0) {
+                return (
+                  <p className="typography-meta text-muted-foreground py-1.5">
+                    No supporting files. Use "Add File" to include reference materials.
                   </p>
-                </div>
-              );
-            }
-            
-            return (
-              <div className="rounded-lg bg-[var(--surface-elevated)]/70 py-1 border border-[var(--surface-subtle)]">
+                );
+              }
+
+              return (
                 <div className="divide-y divide-[var(--surface-subtle)]">
                   {filesToShow.map((file) => (
                     <div
                       key={file.path}
-                      className="flex items-center justify-between px-3 py-2 hover:bg-[var(--interactive-hover)]/30 cursor-pointer transition-colors group"
+                      className="flex items-center gap-2 py-1.5 cursor-pointer group"
                       onClick={() => handleEditFile(file.path)}
                     >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <RiFileLine className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                        <span className="typography-ui-label text-foreground truncate">{file.path}</span>
-                        {isNewSkill && (
-                          <span className="typography-micro text-[var(--status-warning)] bg-[var(--status-warning)]/10 px-1.5 py-0.5 rounded flex-shrink-0">
-                            pending
-                          </span>
-                        )}
-                      </div>
+                      <RiFileLine className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                      <span className="typography-ui-label text-foreground truncate">{file.path}</span>
+                      {isNewSkill && (
+                        <span className="typography-micro text-[var(--status-warning)] bg-[var(--status-warning)]/10 px-1.5 py-0.5 rounded flex-shrink-0">
+                          pending
+                        </span>
+                      )}
                       <ButtonSmall
                         variant="ghost"
-                        className="h-6 px-1.5 text-muted-foreground hover:text-[var(--status-error)] hover:bg-[var(--status-error)]/10 opacity-0 group-hover:opacity-100 transition-opacity"
+                        className="h-5 w-5 px-0 flex-shrink-0 text-muted-foreground hover:text-[var(--status-error)] opacity-0 group-hover:opacity-100 transition-opacity"
                         onClick={(e) => {
                           e.stopPropagation();
                           handleDeleteFile(file.path);
                         }}
                       >
-                        <RiDeleteBinLine className="h-3.5 w-3.5" />
+                        <RiDeleteBinLine className="h-3 w-3" />
                       </ButtonSmall>
                     </div>
                   ))}
                 </div>
-              </div>
-            );
-          })()}
+              );
+            })()}
+          </section>
+        </div>
+
+        {/* Save action */}
+        <div className="px-2 py-1">
+          <ButtonSmall
+            onClick={handleSave}
+            disabled={isSaving || !hasSkillChanges}
+            size="xs"
+            className="!font-normal"
+          >
+            {isSaving ? 'Saving...' : isNewSkill ? 'Create Skill' : 'Save Changes'}
+          </ButtonSmall>
         </div>
 
       </div>

@@ -24,7 +24,6 @@ import {
 import { RiAddLine, RiDeleteBinLine, RiRefreshLine, RiDownloadLine, RiStarLine, RiSearchLine } from '@remixicon/react';
 
 import { useSkillsCatalogStore } from '@/stores/useSkillsCatalogStore';
-import { useDeviceInfo } from '@/lib/device';
 import { cn } from '@/lib/utils';
 import type { SkillsCatalogItem } from '@/lib/api/types';
 
@@ -67,7 +66,6 @@ const loadSettings = async (): Promise<DesktopSettings | null> => {
 };
 
 export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onModeChange, showModeTabs = true }) => {
-  const { isMobile } = useDeviceInfo();
   const {
     sources,
     itemsBySource,
@@ -147,45 +145,43 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
   };
 
   return (
-    <ScrollableOverlay keyboardAvoid outerClassName="h-full" className="w-full bg-background">
-      <div className="openchamber-page-body mx-auto w-full max-w-3xl space-y-6 p-3 sm:p-6 sm:pt-8">
-        
-        {/* Header */}
-        <div className="mb-8">
-          <div className="mb-3 px-1">
-            {showModeTabs && (
-              <div className="mb-4">
-                <AnimatedTabs
-                  tabs={[
-                    { value: 'manual', label: 'Manual' },
-                    { value: 'external', label: 'External' },
-                  ]}
-                  value={mode}
-                  onValueChange={onModeChange}
-                  animate={false}
-                />
-              </div>
-            )}
+    <ScrollableOverlay keyboardAvoid outerClassName="h-full" className="w-full">
+      <div className="mx-auto w-full max-w-3xl p-3 sm:p-6 sm:pt-8">
 
-            <h1 className="typography-ui-header font-semibold text-foreground">Skills Catalog</h1>
-          </div>
+        {/* Header */}
+        <div className="mb-4">
+          {showModeTabs && (
+            <div className="mb-4">
+              <AnimatedTabs
+                tabs={[
+                  { value: 'manual', label: 'Manual' },
+                  { value: 'external', label: 'External' },
+                ]}
+                value={mode}
+                onValueChange={onModeChange}
+                animate={false}
+              />
+            </div>
+          )}
+          <h2 className="typography-ui-header font-semibold text-foreground px-1">Skills Catalog</h2>
         </div>
 
-        {/* Filters and Actions */}
-        <div className="mb-8 rounded-lg bg-[var(--surface-elevated)]/70 overflow-hidden flex flex-col">
-          <div className={cn("px-4 py-3 border-b border-[var(--surface-subtle)]", isMobile ? "flex flex-col gap-3" : "flex flex-col sm:flex-row sm:items-center justify-between gap-4")}>
-            <div className={cn("flex min-w-0 flex-col", isMobile ? "w-full" : "sm:w-1/3 shrink-0")}>
-              <span className="typography-ui-label text-foreground">Source Repository</span>
-            </div>
-            <div className={cn("flex items-center gap-2 flex-wrap", isMobile ? "w-full" : "flex-1 justify-end")}>
+        {/* Source & Search */}
+        <div className="mb-8">
+          <div className="mb-1 px-1">
+            <h3 className="typography-ui-header font-medium text-foreground">Source Repository</h3>
+          </div>
+
+          <section className="px-2 pb-2 pt-0 space-y-0">
+            <div className="flex flex-wrap items-center gap-2 py-1.5">
               <Select
                 value={selectedSourceId || ''}
                 onValueChange={(v) => setSelectedSource(v)}
               >
-                <SelectTrigger size="lg" className="w-fit min-w-[160px]">
+                <SelectTrigger className="w-fit">
                   <SelectValue placeholder="Select source" />
                 </SelectTrigger>
-                <SelectContent align="end">
+                <SelectContent align="start">
                   {sources.map((src) => (
                     <SelectItem key={src.id} value={src.id}>
                       {src.label}
@@ -193,9 +189,11 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
                   ))}
                 </SelectContent>
               </Select>
-              
+
               <ButtonSmall
                 variant="outline"
+                size="xs"
+                className="!font-normal h-6 w-6 px-0"
                 onClick={() => {
                   if (selectedSourceId) {
                     void loadSource(selectedSourceId, { refresh: true });
@@ -205,49 +203,47 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
                 }}
                 disabled={isLoadingCatalog || isLoadingSource}
                 title="Refresh"
-                className="px-2"
               >
-                <RiRefreshLine className={cn("h-4 w-4", (isLoadingCatalog || isLoadingSource) && "animate-spin")} />
+                <RiRefreshLine className={cn("h-3.5 w-3.5", (isLoadingCatalog || isLoadingSource) && "animate-spin")} />
               </ButtonSmall>
-              
+
               {isCustomSource && (
                 <ButtonSmall
-                  variant="outline"
+                  variant="ghost"
+                  size="xs"
+                  className="!font-normal h-6 w-6 px-0 text-[var(--status-error)] hover:text-[var(--status-error)]"
                   onClick={() => setIsRemoveCatalogDialogOpen(true)}
                   disabled={isRemovingCatalog}
-                  className="text-[var(--status-error)] hover:text-[var(--status-error)] border-[var(--status-error)]/30 hover:bg-[var(--status-error)]/10"
                   title="Remove Catalog"
                 >
-                  <RiDeleteBinLine className="h-4 w-4" />
+                  <RiDeleteBinLine className="h-3.5 w-3.5" />
                 </ButtonSmall>
               )}
-              
+
               <ButtonSmall
-                variant="default"
+                size="xs"
+                className="!font-normal gap-1"
                 onClick={() => setAddCatalogOpen(true)}
               >
-                <RiAddLine className="h-4 w-4 mr-1" /> Add Catalog
+                <RiAddLine className="h-3.5 w-3.5" /> Add Catalog
               </ButtonSmall>
             </div>
-          </div>
 
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-4 py-3">
-            <div className="flex min-w-0 flex-col sm:w-1/3 shrink-0">
-              <span className="typography-ui-label text-foreground">Search Skills</span>
-              <span className="typography-meta text-muted-foreground">
-                {isLoadingCatalog ? 'Loading…' : `${filtered.length} skill(s) found`}
+            <div className="py-1.5">
+              <div className="relative">
+                <RiSearchLine className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                <Input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search skills..."
+                  className="h-7 pl-8 w-full sm:w-64"
+                />
+              </div>
+              <span className="typography-meta text-muted-foreground mt-1 block">
+                {isLoadingCatalog ? 'Loading...' : `${filtered.length} skill(s) found`}
               </span>
             </div>
-            <div className="flex items-center gap-2 flex-1 justify-end relative max-w-sm">
-              <RiSearchLine className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search..."
-                className="h-8 pl-8 focus-visible:ring-[var(--primary-base)]"
-              />
-            </div>
-          </div>
+          </section>
         </div>
 
         {/* Error State */}
@@ -260,16 +256,16 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
 
         {/* Skills List */}
         <div className="mb-8">
-          <div className="rounded-lg bg-[var(--surface-elevated)]/70 py-1 border border-[var(--surface-subtle)]">
+          <section className="px-2 pb-2 pt-0">
             {filtered.length === 0 && !isLoadingSource ? (
-              <div className="py-12 text-center text-muted-foreground">
+              <div className="py-8 text-center text-muted-foreground">
                 <p className="typography-body">No skills found</p>
                 <p className="typography-meta mt-1 opacity-75">Try a different search or refresh the catalog</p>
               </div>
             ) : isLoadingSource ? (
-              <div className="py-12 text-center text-muted-foreground">
-                <RiRefreshLine className="mx-auto mb-3 h-6 w-6 animate-spin opacity-50" />
-                <p className="typography-meta">Loading skills…</p>
+              <div className="py-8 text-center text-muted-foreground">
+                <RiRefreshLine className="mx-auto mb-3 h-5 w-5 animate-spin opacity-50" />
+                <p className="typography-meta">Loading skills...</p>
               </div>
             ) : (
               <div className="divide-y divide-[var(--surface-subtle)]">
@@ -278,14 +274,11 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
                   const installedScope = item.installed?.scope;
 
                   return (
-                    <div
-                      key={`${item.sourceId}:${item.skillDir}`}
-                      className="px-4 py-3"
-                    >
+                    <div key={`${item.sourceId}:${item.skillDir}`} className="py-2">
                       <div className="flex items-start justify-between gap-4">
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2">
-                            <span className="typography-ui-label font-semibold text-foreground truncate">{item.skillName}</span>
+                            <span className="typography-ui-label font-medium text-foreground truncate">{item.skillName}</span>
                             {installed && (
                               <span className="typography-micro text-[var(--status-success)] bg-[var(--status-success)]/10 px-1.5 py-0.5 rounded flex-shrink-0">
                                 installed ({installedScope || 'unknown'})
@@ -297,15 +290,15 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
                               </span>
                             )}
                           </div>
-                          
+
                           {item.description ? (
-                            <div className="typography-meta text-muted-foreground mt-1 line-clamp-2">{item.description}</div>
+                            <div className="typography-meta text-muted-foreground mt-0.5 line-clamp-2">{item.description}</div>
                           ) : (
-                            <div className="typography-meta text-muted-foreground/50 mt-1 italic">No description provided</div>
+                            <div className="typography-meta text-muted-foreground/50 mt-0.5 italic">No description provided</div>
                           )}
-                          
+
                           {item.clawdhub && (
-                            <div className="typography-micro text-muted-foreground mt-2 flex items-center gap-3">
+                            <div className="typography-micro text-muted-foreground mt-1.5 flex items-center gap-3">
                               {item.clawdhub.owner && (
                                 <span>by <span className="font-medium text-foreground/80">{item.clawdhub.owner}</span></span>
                               )}
@@ -322,9 +315,9 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
                               <span className="bg-[var(--surface-muted)] px-1.5 py-0.5 rounded">v{item.clawdhub.version}</span>
                             </div>
                           )}
-                          
+
                           {item.warnings?.length ? (
-                            <div className="typography-micro text-[var(--status-warning)] mt-2 bg-[var(--status-warning)]/10 px-2 py-1 rounded w-fit">
+                            <div className="typography-micro text-[var(--status-warning)] mt-1.5 bg-[var(--status-warning)]/10 px-2 py-1 rounded w-fit">
                               {item.warnings.join(' · ')}
                             </div>
                           ) : null}
@@ -332,12 +325,13 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
 
                         <ButtonSmall
                           variant="outline"
+                          size="xs"
+                          className="!font-normal shrink-0"
                           disabled={!item.installable}
                           onClick={() => {
                             setInstallItem(item);
                             setInstallDialogOpen(true);
                           }}
-                          className="shrink-0"
                         >
                           Install
                         </ButtonSmall>
@@ -347,16 +341,18 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
                 })}
               </div>
             )}
-          </div>
-          
+          </section>
+
           {isClawdHubSource && hasMoreClawdHub && !isLoadingSource && filtered.length > 0 && (
-            <div className="flex justify-center mt-4">
+            <div className="flex justify-center mt-2 px-2">
               <ButtonSmall
                 variant="outline"
+                size="xs"
+                className="!font-normal"
                 onClick={() => void loadMoreClawdHub()}
                 disabled={isLoadingMore}
               >
-                {isLoadingMore ? 'Loading…' : 'Load More Skills'}
+                {isLoadingMore ? 'Loading...' : 'Load More Skills'}
               </ButtonSmall>
             </div>
           )}
@@ -365,7 +361,7 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
         {/* Dialogs */}
         <AddCatalogDialog open={addCatalogOpen} onOpenChange={setAddCatalogOpen} />
         <InstallSkillDialog open={installDialogOpen} onOpenChange={setInstallDialogOpen} item={installItem} />
-        
+
         <Dialog
           open={isRemoveCatalogDialogOpen}
           onOpenChange={(open) => {

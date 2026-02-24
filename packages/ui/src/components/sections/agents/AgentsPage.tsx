@@ -871,7 +871,7 @@ export const AgentsPage: React.FC = () => {
         </div>
 
         {/* Tool Permissions */}
-        <div className="mb-8">
+        <div className="mb-2">
           <div className="mb-1 px-1 flex items-center justify-between gap-4">
             <h3 className="typography-ui-header font-medium text-foreground">
               Tool Permissions
@@ -1080,7 +1080,7 @@ export const AgentsPage: React.FC = () => {
         </div>
 
         {/* Save action */}
-        <div className="mt-0.5 px-2 py-1">
+        <div className="px-2 py-1">
           <ButtonSmall
             onClick={handleSave}
             disabled={isSaving || !isDirty}

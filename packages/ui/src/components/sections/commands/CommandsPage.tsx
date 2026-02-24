@@ -293,7 +293,7 @@ export const CommandsPage: React.FC = () => {
         </div>
 
         {/* Command Template */}
-        <div className="mb-8">
+        <div className="mb-2">
           <div className="mb-1 px-1">
             <h3 className="typography-ui-header font-medium text-foreground">
               Command Template
@@ -320,7 +320,7 @@ export const CommandsPage: React.FC = () => {
         </div>
 
         {/* Save action */}
-        <div className="mt-0.5 px-2 py-1">
+        <div className="px-2 py-1">
           <ButtonSmall
             onClick={handleSave}
             disabled={isSaving || !isDirty}
