@@ -1,6 +1,6 @@
 import React from 'react';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
-import { RiArrowLeftSLine, RiArrowRightSLine, RiBrainAi3Line, RiCloseLine, RiFileImageLine, RiFileList2Line, RiFilePdfLine, RiFileSearchLine, RiFolder6Line, RiGitBranchLine, RiGlobalLine, RiListCheck3, RiPencilAiLine, RiSearchLine, RiTaskLine, RiTerminalBoxLine, RiToolsLine } from '@remixicon/react';
+import { RiArrowLeftSLine, RiArrowRightSLine, RiBrainAi3Line, RiCloseLine, RiFileImageLine, RiFileList2Line, RiFilePdfLine, RiFileSearchLine, RiFolder6Line, RiGitBranchLine, RiGlobalLine, RiListCheck3, RiLoader4Line, RiPencilAiLine, RiSearchLine, RiTaskLine, RiTerminalBoxLine, RiToolsLine } from '@remixicon/react';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { createPortal } from 'react-dom';
 
@@ -41,6 +41,9 @@ const getToolIcon = (toolName: string) => {
     }
     if (tool === 'image-preview') {
         return <RiFileImageLine className={iconClass} />;
+    }
+    if (tool === 'mermaid-preview') {
+        return <RiFileList2Line className={iconClass} />;
     }
     if (tool === 'edit' || tool === 'multiedit' || tool === 'apply_patch' || tool === 'str_replace' || tool === 'str_replace_based_edit_tool') {
         return <RiPencilAiLine className={iconClass} />;
@@ -84,7 +87,157 @@ const getToolIcon = (toolName: string) => {
     return <RiToolsLine className={iconClass} />;
 };
 
-const IMAGE_PREVIEW_ANIMATION_MS = 150;
+const PREVIEW_ANIMATION_MS = 150;
+const MERMAID_DIALOG_HEADER_HEIGHT = 40;
+const MERMAID_ASPECT_RETRY_DELAY_MS = 120;
+const MERMAID_ASPECT_MAX_RETRIES = 3;
+
+type ViewportSize = { width: number; height: number };
+
+const getWindowViewport = (): ViewportSize => ({
+    width: typeof window !== 'undefined' ? window.innerWidth : 0,
+    height: typeof window !== 'undefined' ? window.innerHeight : 0,
+});
+
+const PREVIEW_VIEWPORT_LIMITS = {
+    mobile: { widthRatio: 0.94, heightRatio: 0.86, padding: 10 },
+    desktop: { widthRatio: 0.8, heightRatio: 0.8, padding: 16 },
+} as const;
+
+const getPreviewViewportBounds = (viewport: { width: number; height: number }, isMobile: boolean) => {
+    const limits = isMobile ? PREVIEW_VIEWPORT_LIMITS.mobile : PREVIEW_VIEWPORT_LIMITS.desktop;
+    const paddedWidth = Math.max(160, viewport.width - limits.padding * 2);
+    const paddedHeight = Math.max(160, viewport.height - limits.padding * 2);
+
+    return {
+        maxWidth: Math.max(160, Math.min(paddedWidth, viewport.width * limits.widthRatio)),
+        maxHeight: Math.max(160, Math.min(paddedHeight, viewport.height * limits.heightRatio)),
+    };
+};
+
+const getSvgAspectRatio = (svg: SVGElement): number | null => {
+    try {
+        const groups = Array.from(svg.querySelectorAll('g'));
+        let bestArea = 0;
+        let bestRatio: number | null = null;
+
+        for (const group of groups) {
+            if (!(group instanceof SVGGraphicsElement)) {
+                continue;
+            }
+            const box = group.getBBox();
+            if (!(box.width > 0 && box.height > 0)) {
+                continue;
+            }
+            const area = box.width * box.height;
+            if (area > bestArea) {
+                bestArea = area;
+                bestRatio = box.width / box.height;
+            }
+        }
+
+        if (bestRatio && Number.isFinite(bestRatio) && bestRatio > 0) {
+            return bestRatio;
+        }
+    } catch {
+        // Ignore getBBox failures and fall back to SVG attrs/viewBox.
+    }
+
+    const viewBox = svg.getAttribute('viewBox');
+    if (viewBox) {
+        const parts = viewBox.trim().split(/\s+/).map(Number);
+        if (parts.length === 4) {
+            const width = parts[2];
+            const height = parts[3];
+            if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
+                return width / height;
+            }
+        }
+    }
+
+    const attrWidth = Number(svg.getAttribute('width'));
+    const attrHeight = Number(svg.getAttribute('height'));
+    if (Number.isFinite(attrWidth) && Number.isFinite(attrHeight) && attrWidth > 0 && attrHeight > 0) {
+        return attrWidth / attrHeight;
+    }
+
+    const rect = svg.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) {
+        return rect.width / rect.height;
+    }
+
+    return null;
+};
+
+const usePreviewOverlayState = (open: boolean) => {
+    const [isRendered, setIsRendered] = React.useState(open);
+    const [isVisible, setIsVisible] = React.useState(open);
+    const [isTransitioning, setIsTransitioning] = React.useState(false);
+
+    React.useEffect(() => {
+        if (open) {
+            setIsRendered(true);
+            setIsTransitioning(true);
+            if (typeof window === 'undefined') {
+                setIsVisible(true);
+                return;
+            }
+
+            const raf = window.requestAnimationFrame(() => {
+                setIsVisible(true);
+            });
+
+            const doneId = window.setTimeout(() => {
+                setIsTransitioning(false);
+            }, PREVIEW_ANIMATION_MS);
+
+            return () => {
+                window.cancelAnimationFrame(raf);
+                window.clearTimeout(doneId);
+            };
+        }
+
+        setIsVisible(false);
+        setIsTransitioning(true);
+        if (typeof window === 'undefined') {
+            setIsRendered(false);
+            return;
+        }
+
+        const timeoutId = window.setTimeout(() => {
+            setIsRendered(false);
+            setIsTransitioning(false);
+        }, PREVIEW_ANIMATION_MS);
+
+        return () => {
+            window.clearTimeout(timeoutId);
+        };
+    }, [open]);
+
+    return { isRendered, isVisible, isTransitioning };
+};
+
+const usePreviewViewport = (open: boolean) => {
+    const [viewport, setViewport] = React.useState<ViewportSize>(getWindowViewport);
+
+    React.useEffect(() => {
+        if (!open || typeof window === 'undefined') {
+            return;
+        }
+
+        const onResize = () => {
+            setViewport(getWindowViewport());
+        };
+
+        onResize();
+        window.addEventListener('resize', onResize);
+        return () => {
+            window.removeEventListener('resize', onResize);
+        };
+    }, [open]);
+
+    return viewport;
+};
 
 const ImagePreviewDialog: React.FC<{
     popup: ToolPopupContent;
@@ -112,13 +265,8 @@ const ImagePreviewDialog: React.FC<{
 
     const [currentIndex, setCurrentIndex] = React.useState(0);
     const [imageNaturalSize, setImageNaturalSize] = React.useState<{ width: number; height: number } | null>(null);
-    const [isRendered, setIsRendered] = React.useState(popup.open);
-    const [isVisible, setIsVisible] = React.useState(popup.open);
-    const [isTransitioning, setIsTransitioning] = React.useState(false);
-    const [viewport, setViewport] = React.useState<{ width: number; height: number }>({
-        width: typeof window !== 'undefined' ? window.innerWidth : 0,
-        height: typeof window !== 'undefined' ? window.innerHeight : 0,
-    });
+    const { isRendered, isVisible, isTransitioning } = usePreviewOverlayState(popup.open);
+    const viewport = usePreviewViewport(popup.open);
 
     React.useEffect(() => {
         if (!popup.open || gallery.length === 0) {
@@ -152,46 +300,6 @@ const ImagePreviewDialog: React.FC<{
     }, [gallery.length]);
 
     React.useEffect(() => {
-        if (popup.open) {
-            setIsRendered(true);
-            setIsTransitioning(true);
-            if (typeof window === 'undefined') {
-                setIsVisible(true);
-                return;
-            }
-
-            const raf = window.requestAnimationFrame(() => {
-                setIsVisible(true);
-            });
-
-            const doneId = window.setTimeout(() => {
-                setIsTransitioning(false);
-            }, IMAGE_PREVIEW_ANIMATION_MS);
-
-            return () => {
-                window.cancelAnimationFrame(raf);
-                window.clearTimeout(doneId);
-            };
-        }
-
-        setIsVisible(false);
-        setIsTransitioning(true);
-        if (typeof window === 'undefined') {
-            setIsRendered(false);
-            return;
-        }
-
-        const timeoutId = window.setTimeout(() => {
-            setIsRendered(false);
-            setIsTransitioning(false);
-        }, IMAGE_PREVIEW_ANIMATION_MS);
-
-        return () => {
-            window.clearTimeout(timeoutId);
-        };
-    }, [popup.open]);
-
-    React.useEffect(() => {
         if (!popup.open) {
             return;
         }
@@ -219,22 +327,6 @@ const ImagePreviewDialog: React.FC<{
             window.removeEventListener('keydown', onKeyDown);
         };
     }, [hasMultipleImages, onOpenChange, popup.open, showNext, showPrevious]);
-
-    React.useEffect(() => {
-        if (!popup.open || typeof window === 'undefined') {
-            return;
-        }
-
-        const onResize = () => {
-            setViewport({ width: window.innerWidth, height: window.innerHeight });
-        };
-
-        onResize();
-        window.addEventListener('resize', onResize);
-        return () => {
-            window.removeEventListener('resize', onResize);
-        };
-    }, [popup.open]);
 
     React.useEffect(() => {
         setImageNaturalSize(null);
@@ -453,12 +545,352 @@ const DialogReadContent: React.FC<{
 });
 
 DialogReadContent.displayName = 'DialogReadContent';
+const MermaidPreviewDialog: React.FC<{
+    popup: ToolPopupContent;
+    onOpenChange: (open: boolean) => void;
+    isMobile: boolean;
+}> = ({ popup, onOpenChange, isMobile }) => {
+    const [source, setSource] = React.useState<string>(popup.mermaid?.source || '');
+    const [status, setStatus] = React.useState<'idle' | 'loading' | 'ready' | 'error'>(popup.mermaid?.source ? 'ready' : 'idle');
+    const [errorMessage, setErrorMessage] = React.useState<string>('');
+    const { isRendered, isVisible, isTransitioning } = usePreviewOverlayState(popup.open);
+    const [diagramAspectRatio, setDiagramAspectRatio] = React.useState<number | null>(null);
+    const viewport = usePreviewViewport(popup.open);
+    const requestIdRef = React.useRef(0);
+    const mermaidPreviewRef = React.useRef<HTMLDivElement | null>(null);
+
+    const normalizeFilePath = React.useCallback((rawPath: string): string | null => {
+        const input = rawPath.trim();
+        if (!input.toLowerCase().startsWith('file://')) {
+            return null;
+        }
+
+        const isSafeLocalPath = (path: string): boolean => {
+            if (!path || /[\0\r\n]/.test(path)) {
+                return false;
+            }
+
+            const normalized = path.replace(/\\/g, '/');
+            const segments = normalized.split('/').filter(Boolean);
+            if (segments.includes('..')) {
+                return false;
+            }
+
+            if (normalized.startsWith('/')) {
+                return true;
+            }
+
+            return /^[A-Za-z]:\//.test(normalized);
+        };
+
+        try {
+            let pathname = decodeURIComponent(new URL(input).pathname || '');
+            if (/^\/[A-Za-z]:\//.test(pathname)) {
+                pathname = pathname.slice(1);
+            }
+            return isSafeLocalPath(pathname) ? pathname : null;
+        } catch {
+            const stripped = input.replace(/^file:\/\//i, '');
+            try {
+                const decoded = decodeURIComponent(stripped);
+                return isSafeLocalPath(decoded) ? decoded : null;
+            } catch {
+                return isSafeLocalPath(stripped) ? stripped : null;
+            }
+        }
+    }, []);
+
+    const decodeDataUrl = React.useCallback((value: string): string => {
+        const commaIndex = value.indexOf(',');
+        if (commaIndex < 0) {
+            throw new Error('Malformed data URL');
+        }
+
+        const metadata = value.slice(0, commaIndex).toLowerCase();
+        const payload = value.slice(commaIndex + 1);
+        if (metadata.includes(';base64')) {
+            return atob(payload);
+        }
+        return decodeURIComponent(payload);
+    }, []);
+
+    const loadMermaidSource = React.useCallback(async () => {
+        const target = popup.mermaid;
+        if (!target?.url) {
+            setStatus('error');
+            setErrorMessage('Missing Mermaid source URL.');
+            return;
+        }
+
+        if (target.source) {
+            setSource(target.source);
+            setStatus('ready');
+            setErrorMessage('');
+            return;
+        }
+
+        const requestId = requestIdRef.current + 1;
+        requestIdRef.current = requestId;
+
+        setStatus('loading');
+        setErrorMessage('');
+
+        try {
+            let resolvedSource = '';
+            if (target.url.startsWith('data:')) {
+                resolvedSource = decodeDataUrl(target.url);
+            } else if (target.url.toLowerCase().startsWith('file://')) {
+                const normalizedPath = normalizeFilePath(target.url);
+                if (!normalizedPath) {
+                    throw new Error('Invalid local file path for Mermaid preview.');
+                }
+                const response = await fetch(`/api/fs/raw?path=${encodeURIComponent(normalizedPath)}`);
+                if (!response.ok) {
+                    throw new Error(`Failed to read diagram file (${response.status})`);
+                }
+                resolvedSource = await response.text();
+            } else {
+                const resolvedUrl = new URL(target.url, window.location.origin);
+                if (resolvedUrl.protocol !== 'http:' && resolvedUrl.protocol !== 'https:') {
+                    throw new Error('Unsupported Mermaid URL protocol.');
+                }
+
+                const response = await fetch(resolvedUrl.toString());
+                if (!response.ok) {
+                    throw new Error(`Failed to load diagram (${response.status})`);
+                }
+                resolvedSource = await response.text();
+            }
+
+            if (requestIdRef.current !== requestId) {
+                return;
+            }
+
+            setSource(resolvedSource);
+            setStatus('ready');
+        } catch (error) {
+            if (requestIdRef.current !== requestId) {
+                return;
+            }
+            setStatus('error');
+            setErrorMessage(error instanceof Error ? error.message : 'Unable to load Mermaid diagram.');
+        }
+    }, [decodeDataUrl, normalizeFilePath, popup.mermaid]);
+
+    React.useEffect(() => {
+        if (!popup.open || !popup.mermaid) {
+            return;
+        }
+        void loadMermaidSource();
+    }, [loadMermaidSource, popup.mermaid, popup.open]);
+
+    React.useEffect(() => {
+        if (!popup.open) {
+            return;
+        }
+
+        const onKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                onOpenChange(false);
+            }
+        };
+
+        window.addEventListener('keydown', onKeyDown);
+        return () => {
+            window.removeEventListener('keydown', onKeyDown);
+        };
+    }, [onOpenChange, popup.open]);
+
+    React.useEffect(() => {
+        if (!popup.open || status !== 'ready') {
+            setDiagramAspectRatio(null);
+            return;
+        }
+
+        const measureAspectRatio = () => {
+            const svg = mermaidPreviewRef.current?.querySelector('svg');
+            if (!svg) {
+                return false;
+            }
+
+            const aspectRatio = getSvgAspectRatio(svg as SVGElement);
+            if (!aspectRatio || !Number.isFinite(aspectRatio) || aspectRatio <= 0) {
+                return false;
+            }
+
+            setDiagramAspectRatio((previous) => {
+                if (previous && Math.abs(previous - aspectRatio) < 0.001) {
+                    return previous;
+                }
+                return aspectRatio;
+            });
+            return true;
+        };
+
+        let rafId = window.requestAnimationFrame(() => {
+            if (!measureAspectRatio()) {
+                rafId = window.requestAnimationFrame(() => {
+                    measureAspectRatio();
+                });
+            }
+        });
+
+        let retryCount = 0;
+        let timeoutId: number | undefined;
+        const scheduleRetry = () => {
+            if (retryCount >= MERMAID_ASPECT_MAX_RETRIES) {
+                return;
+            }
+
+            timeoutId = window.setTimeout(() => {
+                retryCount += 1;
+                if (!measureAspectRatio()) {
+                    scheduleRetry();
+                }
+            }, MERMAID_ASPECT_RETRY_DELAY_MS);
+        };
+        scheduleRetry();
+
+        const observer = new MutationObserver(() => {
+            measureAspectRatio();
+        });
+
+        if (mermaidPreviewRef.current) {
+            observer.observe(mermaidPreviewRef.current, { childList: true, subtree: true, attributes: true });
+        }
+
+        return () => {
+            window.cancelAnimationFrame(rafId);
+            if (typeof timeoutId === 'number') {
+                window.clearTimeout(timeoutId);
+            }
+            observer.disconnect();
+        };
+    }, [popup.open, source, status]);
+
+    const mermaidMarkdown = `\`\`\`mermaid\n${source}\n\`\`\``;
+
+    const dialogSize = React.useMemo(() => {
+        const { maxWidth, maxHeight } = getPreviewViewportBounds(viewport, isMobile);
+        const availableDiagramHeight = Math.max(160, maxHeight - MERMAID_DIALOG_HEADER_HEIGHT);
+
+        if (diagramAspectRatio && diagramAspectRatio < 1) {
+            const squareSide = Math.min(maxWidth, availableDiagramHeight);
+            return { width: Math.round(squareSide), height: Math.round(squareSide) };
+        }
+
+        return { width: Math.round(maxWidth), height: Math.round(availableDiagramHeight) };
+    }, [diagramAspectRatio, isMobile, viewport]);
+
+    if (!isRendered || typeof document === 'undefined') {
+        return null;
+    }
+
+    const content = (
+        <div className={cn('fixed inset-0 z-50', popup.open ? 'pointer-events-auto' : 'pointer-events-none')}>
+            <div
+                aria-hidden="true"
+                className={cn(
+                    'absolute inset-0 bg-black/25 backdrop-blur-md',
+                    isTransitioning && 'transition-opacity duration-150 ease-out',
+                    isVisible ? 'opacity-100' : 'opacity-0'
+                )}
+                onMouseDown={() => onOpenChange(false)}
+            />
+
+            <div
+                className={cn(
+                    'absolute inset-0 flex items-center justify-center pointer-events-none',
+                    isMobile ? 'p-2.5' : 'p-4'
+                )}
+            >
+                <div
+                    className={cn(
+                        'pointer-events-auto flex flex-col gap-2',
+                        isTransitioning && 'transition-opacity duration-150 ease-out',
+                        isVisible ? 'opacity-100' : 'opacity-0'
+                    )}
+                    style={{ width: `${dialogSize.width}px` }}
+                    onMouseDown={(event) => event.stopPropagation()}
+                >
+                    <div className="flex items-center justify-end">
+                        <button
+                            type="button"
+                            className="h-8 w-8 flex items-center justify-center rounded-lg text-muted-foreground/80 hover:text-foreground focus:outline-none focus:ring-2 focus:ring-primary/60"
+                            onClick={() => onOpenChange(false)}
+                            aria-label="Close diagram preview"
+                        >
+                            <RiCloseLine className="h-4 w-4" />
+                        </button>
+                    </div>
+                    <div
+                        className="relative overflow-hidden"
+                        style={{ height: `${dialogSize.height}px` }}
+                    >
+                        <div className="h-full overflow-hidden">
+                            {status === 'loading' && (
+                                <div className="h-full min-h-28 flex items-center justify-center gap-2 text-muted-foreground typography-meta">
+                                    <RiLoader4Line className="h-4 w-4 animate-spin" />
+                                    <span>Loading diagram...</span>
+                                </div>
+                            )}
+
+                            {status === 'error' && (
+                                <div className="rounded-xl border border-border/30 bg-muted/20 p-3 space-y-3">
+                                    <p className="typography-markdown" style={{ color: 'var(--status-error)' }}>
+                                        {errorMessage || 'Unable to render Mermaid diagram.'}
+                                    </p>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            void loadMermaidSource();
+                                        }}
+                                        className="px-3 py-1.5 rounded-lg typography-meta border transition-colors hover:bg-[var(--interactive-hover)]"
+                                        style={{
+                                            borderColor: 'var(--interactive-border)',
+                                            color: 'var(--surface-foreground)',
+                                        }}
+                                    >
+                                        Retry
+                                    </button>
+                                </div>
+                            )}
+
+                            {status === 'ready' && (
+                                <div ref={mermaidPreviewRef} className="h-full">
+                                    <SimpleMarkdownRenderer
+                                        content={mermaidMarkdown}
+                                        variant="tool"
+                                        allowMermaidWheelZoom
+                                        className="streamdown-mermaid-fullscreen h-full [&_[data-streamdown='mermaid-block']_button]:hidden"
+                                        mermaidControls={{
+                                            download: false,
+                                            copy: false,
+                                            fullscreen: false,
+                                            panZoom: true,
+                                        }}
+                                    />
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+
+    return createPortal(content, document.body);
+};
 
 const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange, syntaxTheme, isMobile }) => {
     const [diffViewMode, setDiffViewMode] = React.useState<DiffViewMode>(isMobile ? 'unified' : 'side-by-side');
 
     if (popup.image) {
         return <ImagePreviewDialog popup={popup} onOpenChange={onOpenChange} isMobile={isMobile} />;
+    }
+
+    if (popup.mermaid) {
+        return <MermaidPreviewDialog popup={popup} onOpenChange={onOpenChange} isMobile={isMobile} />;
     }
 
     return (

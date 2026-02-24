@@ -28,4 +28,10 @@ export interface ToolPopupContent {
         }>;
         index?: number;
     };
+    mermaid?: {
+        url: string;
+        mimeType?: string;
+        filename?: string;
+        source?: string;
+    };
 }

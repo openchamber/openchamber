@@ -14,6 +14,7 @@ import { isVSCodeRuntime } from '@/lib/desktop';
 import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
 import { getStreamdownThemePair } from '@/lib/shiki/appThemeRegistry';
 import { getDefaultTheme } from '@/lib/theme/themes';
+import type { ToolPopupContent } from './message/types';
 
 const withStableStringId = <T extends object>(value: T, id: string): T => {
   const existingPrimitive = (value as Record<symbol, unknown>)[Symbol.toPrimitive];
@@ -131,13 +132,17 @@ const useStreamdownMermaidOptions = () => {
       ? fallbackDark
       : fallbackLight);
 
-  const mermaidRenderKey = `${currentTheme.metadata.id}:${currentTheme.metadata.variant}:${themeSystem?.themeMode ?? 'fallback'}`;
+  const MERMAID_CONFIG_VERSION = 'sequence-nowrap-v1';
+  const mermaidRenderKey = `${currentTheme.metadata.id}:${currentTheme.metadata.variant}:${themeSystem?.themeMode ?? 'fallback'}:${MERMAID_CONFIG_VERSION}`;
 
   const options = React.useMemo(() => {
     const isDark = currentTheme.metadata.variant === 'dark';
     return {
       config: {
         theme: isDark ? 'dark' : 'base',
+        sequence: {
+          useMaxWidth: false,
+        },
         themeVariables: {
           primaryColor: currentTheme.colors.surface.elevated,
           primaryTextColor: currentTheme.colors.surface.foreground,
@@ -475,9 +480,9 @@ const CodeBlockWrapper: React.FC<CodeBlockWrapperProps> = ({ children, className
     return next;
   }, [style]);
 
-  // Mermaid blocks get their own controls via MermaidWrapper — skip the code copy button.
+  // Mermaid blocks are handled by Streamdown Mermaid controls.
   if (mermaidInfo.isMermaid) {
-    return <MermaidWrapper source={mermaidInfo.source}>{codeChild}</MermaidWrapper>;
+    return codeChild;
   }
 
   const getCodeContent = (): string => {
@@ -535,77 +540,32 @@ const streamdownControls = {
   code: false,
   table: false,
   mermaid: {
-    download: false,
-    copy: false,
+    download: true,
+    copy: true,
     fullscreen: false,
     panZoom: false,
   },
 };
 
-// Mermaid copy button — copies raw mermaid source
-const MermaidCopyButton: React.FC<{ source: string }> = ({ source }) => {
-  const [copied, setCopied] = React.useState(false);
-
-  const handleCopy = async () => {
-    if (!source) return;
-    const result = await copyTextToClipboard(source);
-    if (result.ok) {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } else {
-      console.error('Failed to copy diagram:', result.error);
-    }
-  };
-
-  return (
-    <button
-      onClick={handleCopy}
-      className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
-      title="Copy diagram source"
-    >
-      {copied ? <RiCheckLine className="size-3.5" /> : <RiFileCopyLine className="size-3.5" />}
-    </button>
-  );
+type MermaidControlOptions = {
+  download: boolean;
+  copy: boolean;
+  fullscreen: boolean;
+  panZoom: boolean;
 };
 
-// Mermaid download button — downloads rendered SVG
-const MermaidDownloadButton: React.FC<{ containerRef: React.RefObject<HTMLDivElement | null> }> = ({ containerRef }) => {
-  const handleDownload = () => {
-    const svgEl = containerRef.current?.querySelector('svg');
-    if (!(svgEl instanceof SVGElement)) return;
-    const serializer = new XMLSerializer();
-    let markup = serializer.serializeToString(svgEl);
-    if (!markup.includes('xmlns=')) {
-      markup = markup.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
-    }
-    downloadFile('diagram.svg', markup, 'image/svg+xml');
-    toast.success('Diagram downloaded');
-  };
+const extractMermaidBlocks = (markdown: string): string[] => {
+  const blocks: string[] = [];
+  const regex = /(?:^|\r?\n)(`{3,}|~{3,})mermaid[^\n\r]*\r?\n([\s\S]*?)\r?\n\1(?=\r?\n|$)/gi;
+  let match: RegExpExecArray | null = regex.exec(markdown);
 
-  return (
-    <button
-      onClick={handleDownload}
-      className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
-      title="Download diagram"
-    >
-      <RiDownloadLine className="size-3.5" />
-    </button>
-  );
-};
+  while (match) {
+    const block = (match[2] ?? '').replace(/\s+$/, '');
+    blocks.push(block);
+    match = regex.exec(markdown);
+  }
 
-// Mermaid wrapper with custom controls (same pattern as TableWrapper)
-const MermaidWrapper: React.FC<{ children: React.ReactNode; source: string }> = ({ children, source }) => {
-  const containerRef = React.useRef<HTMLDivElement>(null);
-
-  return (
-    <div className="group relative" ref={containerRef}>
-      {children}
-      <div className="absolute top-1 right-2 z-20 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-        <MermaidDownloadButton containerRef={containerRef} />
-        <MermaidCopyButton source={source} />
-      </div>
-    </div>
-  );
+  return blocks;
 };
 
 export type MarkdownVariant = 'assistant' | 'tool';
@@ -618,7 +578,103 @@ interface MarkdownRendererProps {
   className?: string;
   isStreaming?: boolean;
   variant?: MarkdownVariant;
+  onShowPopup?: (content: ToolPopupContent) => void;
 }
+
+const MERMAID_BLOCK_SELECTOR = '[data-streamdown="mermaid-block"]';
+
+const useMermaidInlineInteractions = ({
+  containerRef,
+  mermaidBlocks,
+  onShowPopup,
+  allowWheelZoom,
+}: {
+  containerRef: React.RefObject<HTMLDivElement | null>;
+  mermaidBlocks: string[];
+  onShowPopup?: (content: ToolPopupContent) => void;
+  allowWheelZoom?: boolean;
+}) => {
+  React.useEffect(() => {
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+
+    const handleMermaidClick = (event: MouseEvent) => {
+      if (!onShowPopup) {
+        return;
+      }
+
+      const target = event.target;
+      if (!(target instanceof Element)) {
+        return;
+      }
+
+      if (target.closest('button, a, [role="button"]')) {
+        return;
+      }
+
+      const block = target.closest(MERMAID_BLOCK_SELECTOR);
+      if (!block) {
+        return;
+      }
+
+      const renderedBlocks = Array.from(container.querySelectorAll(MERMAID_BLOCK_SELECTOR));
+      const blockIndex = renderedBlocks.indexOf(block);
+      if (blockIndex < 0) {
+        return;
+      }
+
+      const source = mermaidBlocks[blockIndex];
+      if (!source || source.trim().length === 0) {
+        return;
+      }
+
+      const filename = `Diagram ${blockIndex + 1}`;
+      onShowPopup({
+        open: true,
+        title: filename,
+        content: '',
+        metadata: {
+          tool: 'mermaid-preview',
+          filename,
+        },
+        mermaid: {
+          url: `data:text/plain;charset=utf-8,${encodeURIComponent(source)}`,
+          source,
+          filename,
+        },
+      });
+    };
+
+    const handleInlineWheel = (event: WheelEvent) => {
+      if (allowWheelZoom) {
+        return;
+      }
+
+      const target = event.target;
+      if (!(target instanceof Element)) {
+        return;
+      }
+
+      const block = target.closest(MERMAID_BLOCK_SELECTOR);
+      if (!block) {
+        return;
+      }
+
+      // Keep regular page scroll while preventing Streamdown inline wheel-zoom handlers.
+      event.stopPropagation();
+    };
+
+    container.addEventListener('click', handleMermaidClick);
+    container.addEventListener('wheel', handleInlineWheel, { capture: true, passive: true });
+
+    return () => {
+      container.removeEventListener('click', handleMermaidClick);
+      container.removeEventListener('wheel', handleInlineWheel, true);
+    };
+  }, [allowWheelZoom, containerRef, mermaidBlocks, onShowPopup]);
+};
 
 export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
   content,
@@ -628,7 +684,12 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
   className,
   isStreaming = false,
   variant = 'assistant',
+  onShowPopup,
 }) => {
+  const streamdownContainerRef = React.useRef<HTMLDivElement>(null);
+  const mermaidBlocks = React.useMemo(() => extractMermaidBlocks(content), [content]);
+  useMermaidInlineInteractions({ containerRef: streamdownContainerRef, mermaidBlocks, onShowPopup });
+
   const shikiThemes = useMarkdownShikiThemes();
   const { options: mermaidOptions, mermaidRenderKey } = useStreamdownMermaidOptions();
   const componentKey = React.useMemo(() => {
@@ -641,7 +702,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
     : 'streamdown-content';
 
   const markdownContent = (
-    <div className={cn('break-words', className)}>
+    <div className={cn('break-words', className)} ref={streamdownContainerRef}>
       <Streamdown
          key={`streamdown-${componentKey}-${mermaidRenderKey}`}
          mode={isStreaming ? 'streaming' : 'static'}
@@ -673,7 +734,19 @@ export const SimpleMarkdownRenderer: React.FC<{
   className?: string;
   variant?: MarkdownVariant;
   disableLinkSafety?: boolean;
-}> = ({ content, className, variant = 'assistant', disableLinkSafety }) => {
+  onShowPopup?: (content: ToolPopupContent) => void;
+  mermaidControls?: MermaidControlOptions;
+  allowMermaidWheelZoom?: boolean;
+}> = ({ content, className, variant = 'assistant', disableLinkSafety, onShowPopup, mermaidControls, allowMermaidWheelZoom = false }) => {
+  const streamdownContainerRef = React.useRef<HTMLDivElement>(null);
+  const mermaidBlocks = React.useMemo(() => extractMermaidBlocks(content), [content]);
+  useMermaidInlineInteractions({
+    containerRef: streamdownContainerRef,
+    mermaidBlocks,
+    onShowPopup,
+    allowWheelZoom: allowMermaidWheelZoom,
+  });
+
   const shikiThemes = useMarkdownShikiThemes();
   const { options: mermaidOptions, mermaidRenderKey } = useStreamdownMermaidOptions();
 
@@ -682,13 +755,16 @@ export const SimpleMarkdownRenderer: React.FC<{
     : 'streamdown-content';
 
   return (
-    <div className={cn('break-words', className)}>
+    <div className={cn('break-words', className)} ref={streamdownContainerRef}>
       <Streamdown
         key={`streamdown-simple-${mermaidRenderKey}`}
         mode="static"
         shikiTheme={shikiThemes}
         className={streamdownClassName}
-        controls={streamdownControls}
+        controls={{
+          ...streamdownControls,
+          mermaid: mermaidControls ?? streamdownControls.mermaid,
+        }}
         plugins={streamdownPlugins}
         mermaid={mermaidOptions}
         components={streamdownComponents}

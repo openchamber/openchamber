@@ -10435,17 +10435,26 @@ Context:
     }
 
     try {
-      const resolvedPath = path.resolve(normalizeDirectoryPath(filePath));
-      if (resolvedPath.includes('..')) {
-        return res.status(400).json({ error: 'Invalid path: path traversal not allowed' });
+      const resolved = await resolveWorkspacePathFromContext(req, filePath);
+      if (!resolved.ok) {
+        return res.status(400).json({ error: resolved.error });
       }
 
-      const stats = await fsPromises.stat(resolvedPath);
+      const [canonicalPath, canonicalBase] = await Promise.all([
+        fsPromises.realpath(resolved.resolved),
+        fsPromises.realpath(resolved.base).catch(() => path.resolve(resolved.base)),
+      ]);
+
+      if (!isPathWithinRoot(canonicalPath, canonicalBase)) {
+        return res.status(403).json({ error: 'Access to file denied' });
+      }
+
+      const stats = await fsPromises.stat(canonicalPath);
       if (!stats.isFile()) {
         return res.status(400).json({ error: 'Specified path is not a file' });
       }
 
-      const content = await fsPromises.readFile(resolvedPath, 'utf8');
+      const content = await fsPromises.readFile(canonicalPath, 'utf8');
       res.type('text/plain').send(content);
     } catch (error) {
       const err = error;
@@ -10468,17 +10477,26 @@ Context:
     }
 
     try {
-      const resolvedPath = path.resolve(normalizeDirectoryPath(filePath));
-      if (resolvedPath.includes('..')) {
-        return res.status(400).json({ error: 'Invalid path: path traversal not allowed' });
+      const resolved = await resolveWorkspacePathFromContext(req, filePath);
+      if (!resolved.ok) {
+        return res.status(400).json({ error: resolved.error });
       }
 
-      const stats = await fsPromises.stat(resolvedPath);
+      const [canonicalPath, canonicalBase] = await Promise.all([
+        fsPromises.realpath(resolved.resolved),
+        fsPromises.realpath(resolved.base).catch(() => path.resolve(resolved.base)),
+      ]);
+
+      if (!isPathWithinRoot(canonicalPath, canonicalBase)) {
+        return res.status(403).json({ error: 'Access to file denied' });
+      }
+
+      const stats = await fsPromises.stat(canonicalPath);
       if (!stats.isFile()) {
         return res.status(400).json({ error: 'Specified path is not a file' });
       }
 
-      const ext = path.extname(resolvedPath).toLowerCase();
+      const ext = path.extname(canonicalPath).toLowerCase();
       const mimeMap = {
         '.png': 'image/png',
         '.jpg': 'image/jpeg',
@@ -10492,7 +10510,7 @@ Context:
       };
       const mimeType = mimeMap[ext] || 'application/octet-stream';
 
-      const content = await fsPromises.readFile(resolvedPath);
+      const content = await fsPromises.readFile(canonicalPath);
       res.setHeader('Cache-Control', 'no-store');
       res.type(mimeType).send(content);
     } catch (error) {

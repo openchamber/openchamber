@@ -867,6 +867,69 @@ html:not(.dark) .chat-scroll {
 /* Mermaid block: position context for controls wrapper. */
 [data-streamdown="mermaid-block"] {
   position: relative;
+  border-radius: 0.75rem;
+  border: 1px solid var(--interactive-border);
+  background: var(--surface-elevated);
+  padding: 0.5rem;
+}
+
+[data-streamdown="mermaid-block"] [data-streamdown="mermaid"] {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+[data-streamdown="mermaid-block"] [data-streamdown="mermaid"] svg {
+  width: 100% !important;
+  max-width: none !important;
+  height: auto !important;
+}
+
+[data-streamdown="mermaid-block"] svg {
+  display: block;
+  background: var(--surface-elevated);
+}
+
+/* Fullscreen Mermaid popup: scale diagrams to fill available viewport panel area. */
+.streamdown-mermaid-fullscreen {
+  height: 100%;
+  width: 100%;
+}
+
+.streamdown-mermaid-fullscreen .streamdown-content {
+  height: 100%;
+  width: 100%;
+}
+
+.streamdown-mermaid-fullscreen [data-streamdown="mermaid-block"] {
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: var(--surface-elevated);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.streamdown-mermaid-fullscreen [data-streamdown="mermaid-block"] [data-streamdown="mermaid"] {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.streamdown-mermaid-fullscreen [data-streamdown="mermaid-block"] svg {
+  width: 100% !important;
+  height: 100% !important;
+  max-width: 100% !important;
+  max-height: 100% !important;
+  display: block;
+  background: transparent;
 }
 
 /* Hide system caret in terminal - targets both Ghostty internal input and our custom touch input */

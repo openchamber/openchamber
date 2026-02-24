@@ -484,6 +484,7 @@ class OpencodeService {
       'application/x-sh',
       'application/x-shellscript',
       'application/octet-stream',
+      'image/svg+xml',
     ];
     
     return textBasedTypes.includes(lowerMime);
