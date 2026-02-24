@@ -1,4 +1,6 @@
-import React from 'react';
+import React, { useRef, useEffect } from 'react';
+import { motion, useMotionValue, animate } from 'motion/react';
+import { RiSettings3Line } from '@remixicon/react';
 import { Header } from './Header';
 import { BottomTerminalDock } from './BottomTerminalDock';
 import { Sidebar } from './Sidebar';
@@ -13,6 +15,7 @@ import { SessionSidebar } from '@/components/session/SessionSidebar';
 import { SessionDialogs } from '@/components/session/SessionDialogs';
 import { DiffWorkerProvider } from '@/contexts/DiffWorkerProvider';
 import { MultiRunLauncher } from '@/components/multirun';
+import { DrawerProvider } from '@/contexts/DrawerContext';
 
 import { useUIStore } from '@/stores/useUIStore';
 import { useUpdateStore } from '@/stores/useUpdateStore';
@@ -22,6 +25,9 @@ import { useEdgeSwipe } from '@/hooks/useEdgeSwipe';
 import { cn } from '@/lib/utils';
 
 import { ChatView, PlanView, GitView, DiffView, TerminalView, FilesView, SettingsView, SettingsWindow } from '@/components/views';
+
+// 移动端抽屉宽度（占屏幕比例）
+const MOBILE_DRAWER_WIDTH_PERCENT = 85;
 
 const normalizeDirectoryKey = (value: string): string => {
     if (!value) return '';
@@ -79,6 +85,65 @@ export const MainLayout: React.FC = () => {
     const leftSidebarAutoClosedByContextRef = React.useRef(false);
 
     useEdgeSwipe({ enabled: true });
+
+    // 移动端抽屉状态
+    const [mobileLeftDrawerOpen, setMobileLeftDrawerOpen] = React.useState(false);
+    const mobileRightDrawerOpenRef = React.useRef(false);
+
+    // 左抽屉 motion value
+    const leftDrawerX = useMotionValue(0);
+    const leftDrawerWidth = useRef(0);
+
+    // 右抽屉 motion value
+    const rightDrawerX = useMotionValue(0);
+    const rightDrawerWidth = useRef(0);
+
+    // 计算抽屉宽度
+    useEffect(() => {
+        if (isMobile) {
+            leftDrawerWidth.current = window.innerWidth * (MOBILE_DRAWER_WIDTH_PERCENT / 100);
+            rightDrawerWidth.current = window.innerWidth * (MOBILE_DRAWER_WIDTH_PERCENT / 100);
+        }
+    }, [isMobile]);
+
+    // 同步左抽屉 state 和 motion value
+    useEffect(() => {
+        if (!isMobile) return;
+        const targetX = mobileLeftDrawerOpen ? 0 : -leftDrawerWidth.current;
+        animate(leftDrawerX, targetX, {
+            type: "spring",
+            stiffness: 400,
+            damping: 35,
+            mass: 0.8
+        });
+    }, [mobileLeftDrawerOpen, isMobile, leftDrawerX]);
+
+    // 同步右抽屉 state 和 motion value
+    useEffect(() => {
+        if (!isMobile) return;
+        mobileRightDrawerOpenRef.current = isRightSidebarOpen;
+        const targetX = isRightSidebarOpen ? 0 : rightDrawerWidth.current;
+        animate(rightDrawerX, targetX, {
+            type: "spring",
+            stiffness: 400,
+            damping: 35,
+            mass: 0.8
+        });
+    }, [isMobile, isRightSidebarOpen, rightDrawerX]);
+
+    // 同步 session switcher 状态到左抽屉 (单向同步，避免循环)
+    useEffect(() => {
+        if (isMobile) {
+            setMobileLeftDrawerOpen(isSessionSwitcherOpen);
+        }
+    }, [isSessionSwitcherOpen, isMobile]);
+
+    // 同步右抽屉和 git sidebar 状态
+    useEffect(() => {
+        if (isMobile) {
+            mobileRightDrawerOpenRef.current = isRightSidebarOpen;
+        }
+    }, [isRightSidebarOpen, isMobile]);
 
     // Trigger update check 3 seconds after mount (for both mobile and desktop)
     const checkForUpdates = useUpdateStore((state) => state.checkForUpdates);
@@ -502,21 +567,178 @@ export const MainLayout: React.FC = () => {
                 <SessionDialogs />
 
                 {isMobile ? (
-                <>
-                    {/* Mobile: Header + content with drill-down pattern */}
-                    {!(isSettingsDialogOpen || isMultiRunLauncherOpen) && <Header />}
+                <DrawerProvider value={{
+                    leftDrawerOpen: mobileLeftDrawerOpen,
+                    rightDrawerOpen: isRightSidebarOpen,
+                    toggleLeftDrawer: () => {
+                        if (isRightSidebarOpen) {
+                            setRightSidebarOpen(false);
+                        }
+                        setMobileLeftDrawerOpen(!mobileLeftDrawerOpen);
+                    },
+                    toggleRightDrawer: () => {
+                        if (mobileLeftDrawerOpen) {
+                            setMobileLeftDrawerOpen(false);
+                        }
+                        setRightSidebarOpen(!isRightSidebarOpen);
+                    },
+                    leftDrawerX,
+                    rightDrawerX,
+                    leftDrawerWidth,
+                    rightDrawerWidth,
+                    setMobileLeftDrawerOpen,
+                    setRightSidebarOpen,
+                }}>
+                    {/* Mobile: Header + Drawer 模式 */}
+                    {!(isSettingsDialogOpen || isMultiRunLauncherOpen) && <Header 
+                        onToggleLeftDrawer={() => {
+                            if (isRightSidebarOpen) {
+                                setRightSidebarOpen(false);
+                            }
+                            setMobileLeftDrawerOpen(!mobileLeftDrawerOpen);
+                        }}
+                        onToggleRightDrawer={() => {
+                            if (mobileLeftDrawerOpen) {
+                                setMobileLeftDrawerOpen(false);
+                            }
+                            setRightSidebarOpen(!isRightSidebarOpen);
+                        }}
+                        leftDrawerOpen={mobileLeftDrawerOpen}
+                        rightDrawerOpen={isRightSidebarOpen}
+                    />}
+                    
+                    {/* 遮罩层 */}
+                    <motion.button
+                        type="button"
+                        initial={false}
+                        animate={{
+                            opacity: mobileLeftDrawerOpen || isRightSidebarOpen ? 1 : 0,
+                            pointerEvents: mobileLeftDrawerOpen || isRightSidebarOpen ? 'auto' : 'none',
+                        }}
+                        className="fixed inset-0 z-40 bg-black/50 cursor-default"
+                        onClick={() => {
+                            setMobileLeftDrawerOpen(false);
+                            setRightSidebarOpen(false);
+                        }}
+                        aria-label="Close drawer"
+                    />
+                    
+                    {/* 左抽屉（Session） */}
+                    <motion.aside
+                        drag="x"
+                        dragElastic={0.08}
+                        dragMomentum={false}
+                        dragConstraints={{ left: -(leftDrawerWidth.current || window.innerWidth * 0.85), right: 0 }}
+                        style={{
+                            width: `${MOBILE_DRAWER_WIDTH_PERCENT}%`,
+                            x: leftDrawerX,
+                        }}
+                        onDragEnd={(_, info) => {
+                            const drawerWidthPx = leftDrawerWidth.current || window.innerWidth * 0.85;
+                            const threshold = drawerWidthPx * 0.3;
+                            const velocityThreshold = 500;
+                            const currentX = leftDrawerX.get();
+                            
+                            const shouldClose = info.offset.x < -threshold || info.velocity.x < -velocityThreshold;
+                            const shouldOpen = info.offset.x > threshold || info.velocity.x > velocityThreshold;
+                            
+                            if (shouldClose) {
+                                leftDrawerX.set(-drawerWidthPx);
+                                setMobileLeftDrawerOpen(false);
+                            } else if (shouldOpen) {
+                                leftDrawerX.set(0);
+                                setMobileLeftDrawerOpen(true);
+                            } else {
+                                if (currentX > -drawerWidthPx / 2) {
+                                    leftDrawerX.set(0);
+                                } else {
+                                    leftDrawerX.set(-drawerWidthPx);
+                                }
+                            }
+                        }}
+                        className={cn(
+                            'fixed left-0 top-0 z-50 h-full bg-transparent',
+                            'cursor-grab active:cursor-grabbing'
+                        )}
+                        aria-hidden={!mobileLeftDrawerOpen}
+                    >
+                        <div className="h-full overflow-hidden flex flex-col bg-sidebar shadow-xl drawer-safe-area">
+                            <div className="flex-1 overflow-hidden">
+                                <ErrorBoundary>
+                                    <SessionSidebar mobileVariant />
+                                </ErrorBoundary>
+                            </div>
+                            <div className="border-t border-border p-3">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setMobileLeftDrawerOpen(false);
+                                        setSettingsDialogOpen(true);
+                                    }}
+                                    className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-muted-foreground hover:bg-interactive-hover hover:text-foreground transition-colors"
+                                >
+                                    <RiSettings3Line className="h-5 w-5" />
+                                    <span className="typography-ui-label">Settings</span>
+                                </button>
+                            </div>
+                        </div>
+                    </motion.aside>
+                    
+                    {/* 右抽屉（Git） */}
+                    <motion.aside
+                        drag="x"
+                        dragElastic={0.08}
+                        dragMomentum={false}
+                        dragConstraints={{ left: 0, right: rightDrawerWidth.current || window.innerWidth * 0.85 }}
+                        style={{
+                            width: `${MOBILE_DRAWER_WIDTH_PERCENT}%`,
+                            x: rightDrawerX,
+                        }}
+                        onDragEnd={(_, info) => {
+                            const drawerWidthPx = rightDrawerWidth.current || window.innerWidth * 0.85;
+                            const threshold = drawerWidthPx * 0.3;
+                            const velocityThreshold = 500;
+                            const currentX = rightDrawerX.get();
+                            
+                            const shouldClose = info.offset.x > threshold || info.velocity.x > velocityThreshold;
+                            const shouldOpen = info.offset.x < -threshold || info.velocity.x < -velocityThreshold;
+                            
+                            if (shouldClose) {
+                                rightDrawerX.set(drawerWidthPx);
+                                setRightSidebarOpen(false);
+                            } else if (shouldOpen) {
+                                rightDrawerX.set(0);
+                                setRightSidebarOpen(true);
+                            } else {
+                                if (currentX < drawerWidthPx / 2) {
+                                    rightDrawerX.set(0);
+                                } else {
+                                    rightDrawerX.set(drawerWidthPx);
+                                }
+                            }
+                        }}
+                        className={cn(
+                            'fixed right-0 top-0 z-50 h-full bg-transparent',
+                            'cursor-grab active:cursor-grabbing'
+                        )}
+                        aria-hidden={!isRightSidebarOpen}
+                    >
+                        <div className="h-full overflow-hidden flex flex-col bg-background shadow-xl drawer-safe-area">
+                            <ErrorBoundary>
+                                <GitView mode="sidebar" />
+                            </ErrorBoundary>
+                        </div>
+                    </motion.aside>
+                    
+                    {/* 主内容区（固定） */}
                     <div
                         className={cn(
-                            'flex flex-1 overflow-hidden',
+                            'flex flex-1 overflow-hidden relative',
                             (isSettingsDialogOpen || isMultiRunLauncherOpen) && 'hidden'
                         )}
                         style={{ paddingTop: 'var(--oc-header-height, 56px)' }}
                     >
-                        {/* Mobile drill-down: show sessions sidebar OR main content */}
-                        <div className={cn('flex-1 overflow-hidden bg-sidebar', !isSessionSwitcherOpen && 'hidden')}>
-                            <ErrorBoundary><SessionSidebar mobileVariant /></ErrorBoundary>
-                        </div>
-                        <main className={cn('flex-1 overflow-hidden bg-background relative', isSessionSwitcherOpen && 'hidden')}>
+                        <main className="w-full h-full overflow-hidden bg-background relative">
                             <div className={cn('absolute inset-0', !isChatActive && 'invisible')}>
                                 <ErrorBoundary><ChatView /></ErrorBoundary>
                             </div>
@@ -547,7 +769,7 @@ export const MainLayout: React.FC = () => {
                             <ErrorBoundary><SettingsView onClose={() => setSettingsDialogOpen(false)} /></ErrorBoundary>
                         </div>
                     )}
-                </>
+                </DrawerProvider>
             ) : (
                 <>
                     {/* Desktop: Header always on top, then Sidebar + Content below */}
@@ -574,7 +796,7 @@ export const MainLayout: React.FC = () => {
                                             </main>
                                             <ContextPanel />
                                         </div>
-                                        <RightSidebar isOpen={isRightSidebarOpen} isMobile={isMobile}>
+                                        <RightSidebar isOpen={isRightSidebarOpen}>
                                             <ErrorBoundary><RightSidebarTabs /></ErrorBoundary>
                                         </RightSidebar>
                                     </div>

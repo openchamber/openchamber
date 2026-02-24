@@ -137,7 +137,19 @@ interface TabConfig {
   showDot?: boolean;
 }
 
-export const Header: React.FC = () => {
+interface HeaderProps {
+  onToggleLeftDrawer?: () => void;
+  onToggleRightDrawer?: () => void;
+  leftDrawerOpen?: boolean;
+  rightDrawerOpen?: boolean;
+}
+
+export const Header: React.FC<HeaderProps> = ({
+  onToggleLeftDrawer,
+  onToggleRightDrawer,
+  leftDrawerOpen,
+  rightDrawerOpen,
+}) => {
   const setSessionSwitcherOpen = useUIStore((state) => state.setSessionSwitcherOpen);
   const toggleSidebar = useUIStore((state) => state.toggleSidebar);
   const toggleBottomTerminal = useUIStore((state) => state.toggleBottomTerminal);
@@ -277,6 +289,7 @@ export const Header: React.FC = () => {
   const [desktopServicesTab, setDesktopServicesTab] = React.useState<'instance' | 'usage' | 'mcp'>(
     isDesktopApp ? 'instance' : 'usage'
   );
+  const [mobileServicesTab, setMobileServicesTab] = React.useState<'usage' | 'mcp'>('usage');
   useEffect(() => {
     if (!isDesktopApp && desktopServicesTab === 'instance') {
       setDesktopServicesTab('usage');
@@ -1029,17 +1042,11 @@ export const Header: React.FC = () => {
           label: 'Terminal',
           icon: RiTerminalBoxLine,
         },
-        {
-          id: 'git',
-          label: 'Git',
-          icon: RiGitBranchLine,
-          showDot: diffFileCount > 0,
-        },
       );
     }
 
     return base;
-  }, [diffFileCount, isMobile, showPlanTab]);
+  }, [isMobile, showPlanTab]);
 
   const shortcutLabel = React.useCallback((actionId: string) => {
     return formatShortcutForDisplay(getEffectiveShortcutCombo(actionId, shortcutOverrides));
@@ -2125,11 +2132,24 @@ export const Header: React.FC = () => {
   );
 
   const renderMobile = () => (
-    <div className="app-region-drag relative flex items-center justify-between gap-2 px-3 py-2 select-none">
+    <div className="app-region-drag relative flex items-center gap-2 px-3 py-2 select-none">
       <div className="flex items-center gap-2 shrink-0">
-        {/* Show back button when sessions sidebar is open, otherwise show sessions toggle */}
-        {isSessionSwitcherOpen ? (
+        {/* Use drawer toggle when onToggleLeftDrawer is provided, otherwise use legacy session switcher */}
+        {onToggleLeftDrawer ? (
           <button
+            type="button"
+            onClick={onToggleLeftDrawer}
+            className={cn(
+              headerIconButtonClass,
+              leftDrawerOpen && 'bg-interactive-selection text-interactive-selection-foreground'
+            )}
+            aria-label={leftDrawerOpen ? 'Close sessions' : 'Open sessions'}
+          >
+            <RiLayoutLeftLine className="h-5 w-5" />
+          </button>
+        ) : isSessionSwitcherOpen ? (
+          <button
+            type="button"
             onClick={() => setSessionSwitcherOpen(false)}
             className="app-region-no-drag h-9 w-9 p-2 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-md active:bg-interactive-active"
             aria-label="Back"
@@ -2138,6 +2158,7 @@ export const Header: React.FC = () => {
           </button>
         ) : (
           <button
+            type="button"
             onClick={handleOpenSessionSwitcher}
             className="app-region-no-drag h-9 w-9 p-2 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-md active:bg-interactive-active"
             aria-label="Open sessions"
@@ -2145,16 +2166,7 @@ export const Header: React.FC = () => {
             <RiPlayListAddLine className="h-5 w-5" />
           </button>
         )}
-        {!isSessionSwitcherOpen && contextUsage && contextUsage.totalTokens > 0 && activeMainTab === 'chat' && (
-          <ContextUsageDisplay
-            totalTokens={contextUsage.totalTokens}
-            percentage={contextUsage.percentage}
-            contextLimit={contextUsage.contextLimit}
-            outputLimit={contextUsage.outputLimit ?? 0}
-            size="compact"
-            isMobile={true}
-          />
-        )}
+
         {isSessionSwitcherOpen && (
           <span className="typography-ui-label font-semibold text-foreground">Sessions</span>
         )}
@@ -2162,66 +2174,71 @@ export const Header: React.FC = () => {
 
       {/* Hide tabs and right-side buttons when sessions sidebar is open */}
       {!isSessionSwitcherOpen && (
-        <div className="app-region-no-drag flex min-w-0 flex-1 items-center">
-          <div className="flex min-w-0 flex-1 overflow-x-auto overflow-y-hidden scrollbar-hidden touch-pan-x overscroll-x-contain">
-            <div className="flex w-max items-center gap-1 pr-1">
-            <div
-              className="flex items-center gap-0.5 rounded-lg bg-[var(--surface-muted)]/50 p-0.5"
-              role="tablist"
-              aria-label="Main navigation"
-            >
-              {tabs.map((tab) => {
-                const isActive = activeMainTab === tab.id;
-                const isDiffTab = tab.icon === 'diff';
-                const Icon = isDiffTab ? null : (tab.icon as RemixiconComponentType);
-                return (
-                  <Tooltip key={tab.id} delayDuration={500}>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (isMobile) {
-                            blurActiveElement();
-                          }
-                          setActiveMainTab(tab.id);
-                        }}
-                        aria-label={tab.label}
-                        aria-selected={isActive}
-                        role="tab"
-                        className={cn(
-                          headerIconButtonClass,
-                          'relative rounded-lg',
-                          isActive && 'bg-interactive-selection text-interactive-selection-foreground'
-                        )}
-                      >
-                        {isDiffTab ? (
-                          <DiffIcon className="h-5 w-5" />
-                        ) : Icon ? (
-                          <Icon className="h-5 w-5" />
-                        ) : null}
-                        {tab.badge !== undefined && tab.badge > 0 && (
-                          <span className="absolute -top-1 -right-1 text-[10px] font-semibold text-primary">
-                            {tab.badge}
-                          </span>
-                        )}
-                        {tab.showDot && (
-                          <span
-                            className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-primary"
-                            aria-label="Changes available"
-                          />
-                        )}
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>{tab.label}</p>
-                    </TooltipContent>
-                  </Tooltip>
-                );
-              })}
+        <>
+          <div className="app-region-no-drag flex min-w-0 flex-1 items-center">
+            <div className="flex min-w-0 flex-1 overflow-x-auto overflow-y-hidden scrollbar-hidden touch-pan-x overscroll-x-contain">
+              <div className="flex w-max items-center gap-1 pr-1">
+                <div
+                  className="flex items-center gap-0.5 rounded-lg bg-[var(--surface-muted)]/50 p-0.5"
+                  role="tablist"
+                  aria-label="Main navigation"
+                >
+                  {tabs.map((tab) => {
+                    const isActive = activeMainTab === tab.id;
+                    const isDiffTab = tab.icon === 'diff';
+                    const Icon = isDiffTab ? null : (tab.icon as RemixiconComponentType);
+                    return (
+                      <Tooltip key={tab.id} delayDuration={500}>
+                        <TooltipTrigger asChild>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (isMobile) {
+                                blurActiveElement();
+                              }
+                              setActiveMainTab(tab.id);
+                            }}
+                            aria-label={tab.label}
+                            aria-selected={isActive}
+                            role="tab"
+                            className={cn(
+                              headerIconButtonClass,
+                              'relative rounded-lg',
+                              isActive && 'bg-interactive-selection text-interactive-selection-foreground'
+                            )}
+                          >
+                            {isDiffTab ? (
+                              <DiffIcon className="h-5 w-5" />
+                            ) : Icon ? (
+                              <Icon className="h-5 w-5" />
+                            ) : null}
+                            {tab.badge !== undefined && tab.badge > 0 && (
+                              <span className="absolute -top-1 -right-1 text-[10px] font-semibold text-primary">
+                                {tab.badge}
+                              </span>
+                            )}
+                            {tab.showDot && (
+                              <span
+                                className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-primary"
+                                aria-label="Changes available"
+                              />
+                            )}
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>{tab.label}</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
+          </div>
 
-            <McpDropdown headerIconButtonClass={headerIconButtonClass} />
+          <div className="flex items-center gap-1 shrink-0">
 
+            {/* Mobile Services Menu (Usage + MCP) */}
             <DropdownMenu
               open={isMobileRateLimitsOpen}
               onOpenChange={(open) => {
@@ -2236,16 +2253,15 @@ export const Header: React.FC = () => {
                   <DropdownMenuTrigger asChild>
                     <button
                       type="button"
-                      aria-label="View rate limits"
+                      aria-label="View services"
                       className={headerIconButtonClass}
-                      disabled={isQuotaLoading}
                     >
-                      <RiTimerLine className="h-5 w-5" />
+                      <RiStackLine className="h-5 w-5" />
                     </button>
                   </DropdownMenuTrigger>
                 </TooltipTrigger>
                 <TooltipContent>
-                  <p>Rate limits</p>
+                  <p>Services</p>
                 </TooltipContent>
               </Tooltip>
               <DropdownMenuContent
@@ -2254,216 +2270,245 @@ export const Header: React.FC = () => {
                 className="h-dvh w-[100vw] max-h-none rounded-none border-0 p-0 overflow-hidden"
               >
                 <div className="flex h-full flex-col bg-[var(--surface-elevated)]">
-                  <div className="sticky top-0 z-20 border-b border-[var(--interactive-border)] bg-[var(--surface-elevated)]">
+                  <div className="sticky top-0 z-20 border-b border-[var(--interactive-border)] bg-[var(--surface-elevated)] p-2">
                     <div className="flex items-center justify-between gap-2 px-3 py-3">
-                      <span className="typography-ui-header font-semibold text-foreground">Rate limits</span>
-                      <div className="flex items-center gap-2">
-                        <div className="flex items-center rounded-md border border-[var(--interactive-border)] p-0.5">
-                          <button
-                            type="button"
-                            className={cn(
-                              'px-1.5 py-0.5 rounded-sm typography-micro text-[9px] transition-colors',
-                              quotaDisplayMode === 'usage'
-                                ? 'bg-interactive-selection text-interactive-selection-foreground'
-                                : 'text-muted-foreground hover:text-foreground'
-                            )}
-                            onClick={() => handleDisplayModeChange('usage')}
-                            aria-label="Show used quota"
-                          >
-                            Used
-                          </button>
-                          <button
-                            type="button"
-                            className={cn(
-                              'px-1.5 py-0.5 rounded-sm typography-micro text-[9px] transition-colors',
-                              quotaDisplayMode === 'remaining'
-                                ? 'bg-interactive-selection text-interactive-selection-foreground'
-                                : 'text-muted-foreground hover:text-foreground'
-                            )}
-                            onClick={() => handleDisplayModeChange('remaining')}
-                            aria-label="Show remaining quota"
-                          >
-                            Remaining
-                          </button>
-                        </div>
-                        <button
-                          type="button"
-                          className={cn(
-                            'inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors',
-                            'hover:text-foreground hover:bg-interactive-hover',
-                            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'
-                          )}
-                          onClick={() => fetchAllQuotas()}
-                          disabled={isQuotaLoading}
-                          aria-label="Refresh rate limits"
-                        >
-                          <RiRefreshLine className="h-4 w-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setIsMobileRateLimitsOpen(false)}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover"
-                          aria-label="Close rate limits"
-                        >
-                          <RiCloseLine className="h-5 w-5" />
-                        </button>
-                      </div>
-                    </div>
-                    <div className="px-3 pb-3 text-right typography-micro text-muted-foreground text-[8px]">
-                      Last updated {formatTime(quotaLastUpdated)}
+                      <AnimatedTabs<'usage' | 'mcp'>
+                        value={mobileServicesTab}
+                        onValueChange={(value) => {
+                          setMobileServicesTab(value);
+                          if (value === 'usage' && quotaResults.length === 0) {
+                            fetchAllQuotas();
+                          }
+                        }}
+                        tabs={[
+                          { value: 'usage', label: 'Usage', icon: RiTimerLine },
+                          { value: 'mcp', label: 'MCP', icon: RiCommandLine },
+                        ]}
+                        className="rounded-md"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setIsMobileRateLimitsOpen(false)}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover"
+                        aria-label="Close services"
+                      >
+                        <RiCloseLine className="h-5 w-5" />
+                      </button>
                     </div>
                   </div>
-                  <div className="flex-1 overflow-y-auto overflow-x-hidden pb-[calc(4rem+env(safe-area-inset-bottom))]">
-                    {!hasRateLimits && (
-                      <div className="px-3 py-4 typography-ui-label text-muted-foreground">
-                        No rate limits available.
-                      </div>
-                    )}
-                    {rateLimitGroups.map((group) => (
-                      <React.Fragment key={group.providerId}>
-                        <div className="flex items-center gap-2 bg-[var(--surface-elevated)] px-3 py-2">
-                          <ProviderLogo providerId={group.providerId} className="h-4 w-4" />
-                          <span className="typography-ui-label text-foreground">{group.providerName}</span>
-                        </div>
-                        {group.entries.length === 0 && (!group.modelFamilies || group.modelFamilies.length === 0) && (
-                          <div className="px-3 py-2 typography-ui-label text-muted-foreground">
-                            {group.error ?? 'No rate limits reported.'}
+
+                  {mobileServicesTab === 'mcp' && (
+                    <McpDropdownContent active={isMobileRateLimitsOpen && mobileServicesTab === 'mcp'} />
+                  )}
+
+                  {mobileServicesTab === 'usage' && (
+                    <div className="flex-1 overflow-y-auto overflow-x-hidden pb-[calc(4rem+env(safe-area-inset-bottom))]">
+                      <div className="bg-[var(--surface-elevated)] border-b border-[var(--interactive-border)]">
+                        <div className="flex items-center justify-between gap-3 px-3 py-2.5">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span className="typography-ui-header font-semibold text-foreground">Rate limits</span>
+                            <span className="truncate typography-ui-label text-muted-foreground">
+                              Last updated {formatTime(quotaLastUpdated)}
+                            </span>
                           </div>
-                        )}
-                        {group.entries.map(([label, window]) => {
-                          const displayPercent = quotaDisplayMode === 'remaining'
-                            ? window.remainingPercent
-                            : window.usedPercent;
-                          const paceInfo = calculatePace(window.usedPercent, window.resetAt, window.windowSeconds, label);
-                          const expectedMarker = paceInfo?.dailyAllocationPercent != null
-                            ? (quotaDisplayMode === 'remaining'
-                                ? 100 - calculateExpectedUsagePercent(paceInfo.elapsedRatio)
-                                : calculateExpectedUsagePercent(paceInfo.elapsedRatio))
-                            : null;
-                          return (
-                            <div key={`${group.providerId}-${label}`} className="px-3 py-2">
-                              <div className="flex items-center justify-between gap-3">
-                                <span className="truncate typography-micro text-muted-foreground">
-                                  {formatWindowLabel(label)}
-                                </span>
-                                <span className="typography-ui-label text-foreground tabular-nums">
-                                  {formatPercent(displayPercent)}
-                                </span>
-                              </div>
-                              <UsageProgressBar
-                                percent={displayPercent}
-                                tonePercent={window.usedPercent}
-                                className="mt-2 h-1"
-                                expectedMarkerPercent={expectedMarker}
-                              />
-                              {paceInfo && (
-                                <div className="mt-1.5">
-                                  <PaceIndicator paceInfo={paceInfo} compact />
+                          <div className="flex items-center gap-1.5">
+                            <AnimatedTabs<'usage' | 'remaining'>
+                              value={quotaDisplayMode}
+                              onValueChange={handleDisplayModeChange}
+                              tabs={quotaDisplayTabs}
+                              size="sm"
+                              className="w-[10.5rem]"
+                            />
+                            <button
+                              type="button"
+                              className={cn(
+                                'inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors',
+                                'hover:text-foreground hover:bg-interactive-hover',
+                                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'
+                              )}
+                              onClick={handleUsageRefresh}
+                              disabled={isQuotaLoading || isUsageRefreshSpinning}
+                              aria-label="Refresh rate limits"
+                            >
+                              <RiRefreshLine className={cn('h-4 w-4', isUsageRefreshSpinning && 'animate-spin')} />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                      {!hasRateLimits && (
+                        <DropdownMenuItem
+                          className="cursor-default hover:bg-transparent focus:bg-transparent data-[highlighted]:bg-transparent"
+                          onSelect={(event) => event.preventDefault()}
+                        >
+                          <span className="typography-ui-label text-muted-foreground">No rate limits available.</span>
+                        </DropdownMenuItem>
+                      )}
+                      {rateLimitGroups.map((group) => (
+                        <React.Fragment key={group.providerId}>
+                          <DropdownMenuLabel className="flex items-center gap-2 border-b border-[var(--interactive-border)] bg-[var(--surface-elevated)] typography-ui-label text-foreground">
+                            <ProviderLogo providerId={group.providerId} className="h-4 w-4" />
+                            {group.providerName}
+                          </DropdownMenuLabel>
+
+                          {group.entries.length === 0 && (!group.modelFamilies || group.modelFamilies.length === 0) ? (
+                            <DropdownMenuItem
+                              key={`${group.providerId}-empty`}
+                              className="cursor-default hover:bg-transparent focus:bg-transparent data-[highlighted]:bg-transparent"
+                              onSelect={(event) => event.preventDefault()}
+                            >
+                              <span className="typography-ui-label text-muted-foreground">
+                                {group.error ?? 'No rate limits reported.'}
+                              </span>
+                            </DropdownMenuItem>
+                          ) : (
+                            <>
+                              {group.entries.map(([label, window]) => {
+                                const displayPercent = quotaDisplayMode === 'remaining'
+                                  ? window.remainingPercent
+                                  : window.usedPercent;
+                                const paceInfo = calculatePace(window.usedPercent, window.resetAt, window.windowSeconds, label);
+                                const expectedMarker = paceInfo?.dailyAllocationPercent != null
+                                  ? (quotaDisplayMode === 'remaining'
+                                      ? 100 - calculateExpectedUsagePercent(paceInfo.elapsedRatio)
+                                      : calculateExpectedUsagePercent(paceInfo.elapsedRatio))
+                                  : null;
+                                return (
+                                  <DropdownMenuItem
+                                    key={`${group.providerId}-${label}`}
+                                    className="cursor-default items-start hover:bg-transparent focus:bg-transparent data-[highlighted]:bg-transparent"
+                                    onSelect={(event) => event.preventDefault()}
+                                  >
+                                    <span className="flex min-w-0 flex-1 flex-col gap-2">
+                                      <span className="flex min-w-0 items-center justify-between gap-3">
+                                        <span className="min-w-0 flex items-center gap-2">
+                                          <span className="truncate typography-ui-label text-foreground">{formatWindowLabel(label)}</span>
+                                          {(window.resetAfterFormatted ?? window.resetAtFormatted) ? (
+                                            <span className="truncate typography-ui-label text-muted-foreground">
+                                              {window.resetAfterFormatted ?? window.resetAtFormatted}
+                                            </span>
+                                          ) : null}
+                                        </span>
+                                        <span className="typography-ui-label text-foreground tabular-nums">
+                                          {formatPercent(displayPercent) === '-' ? '' : formatPercent(displayPercent)}
+                                        </span>
+                                      </span>
+                                      <UsageProgressBar
+                                        percent={displayPercent}
+                                        tonePercent={window.usedPercent}
+                                        className="h-1.5"
+                                        expectedMarkerPercent={expectedMarker}
+                                      />
+                                      {paceInfo && (
+                                        <div className="mb-1">
+                                          <PaceIndicator paceInfo={paceInfo} compact />
+                                        </div>
+                                      )}
+                                    </span>
+                                  </DropdownMenuItem>
+                                );
+                              })}
+
+                              {group.modelFamilies && group.modelFamilies.length > 0 && (
+                                <div className="px-2 py-1">
+                                  {group.modelFamilies.map((family) => {
+                                    const providerExpandedFamilies = expandedFamilies[group.providerId] ?? [];
+                                    const isExpanded = providerExpandedFamilies.includes(family.familyId ?? 'other');
+
+                                    return (
+                                      <Collapsible
+                                        key={family.familyId ?? 'other'}
+                                        open={isExpanded}
+                                        onOpenChange={() => toggleFamilyExpanded(group.providerId, family.familyId ?? 'other')}
+                                      >
+                                        <CollapsibleTrigger className="flex w-full items-center justify-between py-1.5 text-left">
+                                          <span className="typography-ui-label font-medium text-foreground">
+                                            {family.familyLabel}
+                                          </span>
+                                          {isExpanded ? (
+                                            <RiArrowDownSLine className="h-4 w-4 text-muted-foreground" />
+                                          ) : (
+                                            <RiArrowRightSLine className="h-4 w-4 text-muted-foreground" />
+                                          )}
+                                        </CollapsibleTrigger>
+                                        <CollapsibleContent>
+                                          <div className="space-y-1 pl-2">
+                                            {family.models.map(([modelName, window]) => {
+                                              const displayPercent = quotaDisplayMode === 'remaining'
+                                                ? window.remainingPercent
+                                                : window.usedPercent;
+                                              const paceInfo = calculatePace(window.usedPercent, window.resetAt, window.windowSeconds);
+                                              const expectedMarker = paceInfo?.dailyAllocationPercent != null
+                                                ? (quotaDisplayMode === 'remaining'
+                                                    ? 100 - calculateExpectedUsagePercent(paceInfo.elapsedRatio)
+                                                    : calculateExpectedUsagePercent(paceInfo.elapsedRatio))
+                                                : null;
+                                              return (
+                                                <div
+                                                  key={`${group.providerId}-${modelName}`}
+                                                  className="py-1.5"
+                                                >
+                                                  <div className="flex min-w-0 flex-col gap-1.5">
+                                                    <span className="flex min-w-0 items-center justify-between gap-3">
+                                                      <span className="truncate typography-micro text-muted-foreground">{getDisplayModelName(modelName)}</span>
+                                                      <span className="typography-ui-label text-foreground tabular-nums">
+                                                        {formatPercent(displayPercent) === '-' ? '' : formatPercent(displayPercent)}
+                                                      </span>
+                                                    </span>
+                                                    <UsageProgressBar
+                                                      percent={displayPercent}
+                                                      tonePercent={window.usedPercent}
+                                                      className="h-1.5"
+                                                      expectedMarkerPercent={expectedMarker}
+                                                    />
+                                                    {paceInfo && (
+                                                      <div className="mb-1">
+                                                        <PaceIndicator paceInfo={paceInfo} compact />
+                                                      </div>
+                                                    )}
+                                                  </div>
+                                                </div>
+                                              );
+                                            })}
+                                          </div>
+                                        </CollapsibleContent>
+                                      </Collapsible>
+                                    );
+                                  })}
                                 </div>
                               )}
-                              <div className="mt-1 typography-micro text-muted-foreground text-[10px]">
-                                {window.resetAfterFormatted ?? window.resetAtFormatted ?? ''}
-                              </div>
-                            </div>
-                          );
-                        })}
-                        {/* Model families with collapsible sections */}
-                        {group.modelFamilies && group.modelFamilies.length > 0 && (
-                          <div className="px-2 py-1">
-                            {group.modelFamilies.map((family) => {
-                              const providerExpandedFamilies = expandedFamilies[group.providerId] ?? [];
-                              const isExpanded = providerExpandedFamilies.includes(family.familyId ?? 'other');
-
-                              return (
-                                <Collapsible
-                                  key={family.familyId ?? 'other'}
-                                  open={isExpanded}
-                                  onOpenChange={() => toggleFamilyExpanded(group.providerId, family.familyId ?? 'other')}
-                                >
-                                  <CollapsibleTrigger className="flex w-full items-center justify-between py-2 text-left">
-                                    <span className="typography-ui-label font-medium text-foreground">
-                                      {family.familyLabel}
-                                    </span>
-                                    {isExpanded ? (
-                                      <RiArrowDownSLine className="h-4 w-4 text-muted-foreground" />
-                                    ) : (
-                                      <RiArrowRightSLine className="h-4 w-4 text-muted-foreground" />
-                                    )}
-                                  </CollapsibleTrigger>
-                                  <CollapsibleContent>
-                                    <div className="space-y-2 pl-2">
-                                      {family.models.map(([modelName, window]) => {
-                                        const displayPercent = quotaDisplayMode === 'remaining'
-                                          ? window.remainingPercent
-                                          : window.usedPercent;
-                                        const paceInfo = calculatePace(window.usedPercent, window.resetAt, window.windowSeconds);
-                                        const expectedMarker = paceInfo?.dailyAllocationPercent != null
-                                          ? (quotaDisplayMode === 'remaining'
-                                              ? 100 - calculateExpectedUsagePercent(paceInfo.elapsedRatio)
-                                              : calculateExpectedUsagePercent(paceInfo.elapsedRatio))
-                                          : null;
-                                        return (
-                                          <div key={`${group.providerId}-${modelName}`} className="py-1.5">
-                                            <div className="flex items-center justify-between gap-3">
-                                              <span className="truncate typography-micro text-muted-foreground">
-                                                {getDisplayModelName(modelName)}
-                                              </span>
-                                              <span className="typography-ui-label text-foreground tabular-nums">
-                                                {formatPercent(displayPercent) === '-' ? '' : formatPercent(displayPercent)}
-                                              </span>
-                                            </div>
-                                            <UsageProgressBar
-                                              percent={displayPercent}
-                                              tonePercent={window.usedPercent}
-                                              className="mt-1.5 h-1"
-                                              expectedMarkerPercent={expectedMarker}
-                                            />
-                                            {paceInfo && (
-                                              <div className="mt-1">
-                                                <PaceIndicator paceInfo={paceInfo} compact />
-                                              </div>
-                                            )}
-                                          </div>
-                                        );
-                                      })}
-                                    </div>
-                                  </CollapsibleContent>
-                                </Collapsible>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </React.Fragment>
-                    ))}
-                  </div>
+                            </>
+                          )}
+                        </React.Fragment>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </DropdownMenuContent>
             </DropdownMenu>
 
-            <Tooltip delayDuration={500}>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={handleOpenSettings}
-                  aria-label="Open settings"
-                  className={cn(headerIconButtonClass, 'relative')}
-                >
-                  <RiSettings3Line className="h-5 w-5" />
-                  {updateAvailable && (
-                    <span
-                      className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-primary"
-                      aria-label="Update available"
-                    />
-                  )}
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>{updateAvailable ? `Settings (Update available) (${shortcutLabel('open_settings')})` : `Settings (${shortcutLabel('open_settings')})`}</p>
-              </TooltipContent>
-            </Tooltip>
-            </div>
+            {onToggleRightDrawer ? (
+              <Tooltip delayDuration={500}>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={onToggleRightDrawer}
+                    className={cn(
+                      headerIconButtonClass,
+                      'relative',
+                      rightDrawerOpen && 'bg-interactive-selection text-interactive-selection-foreground'
+                    )}
+                    aria-label={rightDrawerOpen ? 'Close git sidebar' : 'Open git sidebar'}
+                  >
+                    <RiLayoutRightLine className="h-5 w-5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>{rightDrawerOpen ? 'Close git sidebar' : 'Open git sidebar'}</p>
+                </TooltipContent>
+              </Tooltip>
+            ) : null}
           </div>
-        </div>
+        </>
       )}
     </div>
   );

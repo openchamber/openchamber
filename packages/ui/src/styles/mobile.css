@@ -273,6 +273,12 @@
       padding-bottom: var(--oc-safe-area-bottom-visual) !important;
     }
 
+    /* Drawer safe area - only top/bottom padding, no positioning */
+    .drawer-safe-area {
+      padding-top: var(--oc-safe-area-top);
+      padding-bottom: var(--oc-safe-area-bottom-visual);
+    }
+
     /* iOS keyboard home indicator safe area - used when keyboard is open */
     .ios-keyboard-safe-area {
       padding-bottom: calc(var(--oc-keyboard-home-indicator, 34px) + var(--oc-safe-area-bottom-visual, 0px)) !important;

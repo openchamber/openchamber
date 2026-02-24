@@ -214,6 +214,7 @@ interface UIStore {
   showTerminalQuickKeysOnDesktop: boolean;
   persistChatDraft: boolean;
   isMobileSessionStatusBarCollapsed: boolean;
+  viewPagerPage: 'left' | 'center' | 'right';
 
   isExpandedInput: boolean;
 
@@ -300,6 +301,7 @@ interface UIStore {
   setMaxLastMessageLength: (value: number) => void;
   setPersistChatDraft: (value: boolean) => void;
   setIsMobileSessionStatusBarCollapsed: (value: boolean) => void;
+  setViewPagerPage: (page: 'left' | 'center' | 'right') => void;
   toggleExpandedInput: () => void;
   setExpandedInput: (value: boolean) => void;
   openMultiRunLauncher: () => void;
@@ -1114,6 +1116,17 @@ export const useUIStore = create<UIStore>()(
         },
         setIsMobileSessionStatusBarCollapsed: (value) => {
           set({ isMobileSessionStatusBarCollapsed: value });
+        },
+        viewPagerPage: 'center',
+        setViewPagerPage: (page: 'left' | 'center' | 'right') => {
+          set({ viewPagerPage: page });
+          if (page === 'left') {
+            set({ isSessionSwitcherOpen: true, isRightSidebarOpen: false });
+          } else if (page === 'right') {
+            set({ isRightSidebarOpen: true, isSessionSwitcherOpen: false });
+          } else {
+            set({ isSessionSwitcherOpen: false, isRightSidebarOpen: false });
+          }
         },
 
         setShortcutOverride: (actionId, combo) => {

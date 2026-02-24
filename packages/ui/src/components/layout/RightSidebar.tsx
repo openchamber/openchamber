@@ -7,11 +7,10 @@ const RIGHT_SIDEBAR_MAX_WIDTH = 860;
 
 interface RightSidebarProps {
   isOpen: boolean;
-  isMobile: boolean;
   children: React.ReactNode;
 }
 
-export const RightSidebar: React.FC<RightSidebarProps> = ({ isOpen, isMobile, children }) => {
+export const RightSidebar: React.FC<RightSidebarProps> = ({ isOpen, children }) => {
   const rightSidebarWidth = useUIStore((state) => state.rightSidebarWidth);
   const setRightSidebarWidth = useUIStore((state) => state.setRightSidebarWidth);
   const [isResizing, setIsResizing] = React.useState(false);
@@ -19,7 +18,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ isOpen, isMobile, ch
   const startWidthRef = React.useRef(rightSidebarWidth || 420);
 
   React.useEffect(() => {
-    if (isMobile || !isResizing) {
+    if (!isResizing) {
       return;
     }
 
@@ -43,17 +42,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ isOpen, isMobile, ch
       window.removeEventListener('pointermove', handlePointerMove);
       window.removeEventListener('pointerup', handlePointerUp);
     };
-  }, [isMobile, isResizing, setRightSidebarWidth]);
-
-  React.useEffect(() => {
-    if (isMobile && isResizing) {
-      setIsResizing(false);
-    }
-  }, [isMobile, isResizing]);
-
-  if (isMobile) {
-    return null;
-  }
+  }, [isResizing, setRightSidebarWidth]);
 
   const appliedWidth = isOpen
     ? Math.min(RIGHT_SIDEBAR_MAX_WIDTH, Math.max(RIGHT_SIDEBAR_MIN_WIDTH, rightSidebarWidth || 420))
