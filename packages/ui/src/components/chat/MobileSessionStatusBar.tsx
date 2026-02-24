@@ -664,7 +664,7 @@ export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
   const currentSession = sessions.find((s) => s.id === currentSessionId);
   const currentSessionTitle = currentSession 
     ? getSessionTitle(currentSession) 
-    : '← Swipe to open sidebars →';
+    : '← Swipe here to open sidebars →';
 
   // Calculate token usage for current session
   const currentModel = getCurrentModel();
