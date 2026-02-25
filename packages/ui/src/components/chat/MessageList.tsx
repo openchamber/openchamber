@@ -57,6 +57,10 @@ const hasSameTurnStructure = (prev: ChatMessageEntry[], next: ChatMessageEntry[]
         const prevMessage = prev[index];
         const nextMessage = next[index];
 
+        if (prevMessage !== nextMessage) {
+            return false;
+        }
+
         if (prevMessage.info.id !== nextMessage.info.id) {
             return false;
         }
@@ -466,19 +470,24 @@ const MessageList: React.FC<MessageListProps> = ({
     }, [permissions, questions, onMessageContentChange]);
 
     const baseDisplayMessages = React.useMemo(() => {
-        const seenIds = new Set<string>();
+        const seenIdsFromTail = new Set<string>();
         const nextNormalizedCache = new Map<string, { source: ChatMessageEntry; normalized: ChatMessageEntry }>();
-        const normalizedMessages = messages
-            .filter((message) => {
-                const messageId = message.info?.id;
-                if (typeof messageId === 'string') {
-                    if (seenIds.has(messageId)) {
-                        return false;
-                    }
-                    seenIds.add(messageId);
+
+        const dedupedMessages: ChatMessageEntry[] = [];
+        for (let index = messages.length - 1; index >= 0; index -= 1) {
+            const message = messages[index];
+            const messageId = message.info?.id;
+            if (typeof messageId === 'string') {
+                if (seenIdsFromTail.has(messageId)) {
+                    continue;
                 }
-                return true;
-            })
+                seenIdsFromTail.add(messageId);
+            }
+            dedupedMessages.push(message);
+        }
+        dedupedMessages.reverse();
+
+        const normalizedMessages = dedupedMessages
             .map((message, index) => {
                 const messageId = typeof message.info?.id === 'string' && message.info.id.length > 0
                     ? message.info.id
