@@ -8,6 +8,7 @@ import { GitSettings } from './GitSettings';
 import { NotificationSettings } from './NotificationSettings';
 import { GitHubSettings } from './GitHubSettings';
 import { VoiceSettings } from './VoiceSettings';
+import { TunnelSettings } from './TunnelSettings';
 import { OpenCodeCliSettings } from './OpenCodeCliSettings';
 import { KeyboardShortcutsSettings } from './KeyboardShortcutsSettings';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
@@ -75,6 +76,8 @@ export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => 
                 return <NotificationSectionContent />;
             case 'voice':
                 return <VoiceSectionContent />;
+            case 'tunnel':
+                return <TunnelSectionContent />;
             default:
                 return null;
         }
@@ -156,4 +159,11 @@ const VoiceSectionContent: React.FC = () => {
         return null;
     }
     return <VoiceSettings />;
+};
+
+const TunnelSectionContent: React.FC = () => {
+    if (isVSCodeRuntime()) {
+        return null;
+    }
+    return <TunnelSettings />;
 };

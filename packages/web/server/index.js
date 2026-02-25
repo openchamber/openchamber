@@ -2904,6 +2904,7 @@ let isExternalOpenCode = false;
 let exitOnShutdown = true;
 let uiAuthController = null;
 let cloudflareTunnelController = null;
+let tunnelPassword = null;
 let terminalInputWsServer = null;
 const userProvidedOpenCodePassword =
   typeof hmrState.userProvidedOpenCodePassword === 'string' && hmrState.userProvidedOpenCodePassword.length > 0
@@ -5869,6 +5870,7 @@ async function gracefulShutdown(options = {}) {
     console.log('Stopping Cloudflare tunnel...');
     cloudflareTunnelController.stop();
     cloudflareTunnelController = null;
+    tunnelPassword = null;
   }
 
   console.log('Graceful shutdown complete');
@@ -6003,7 +6005,8 @@ async function main(options = {}) {
       req.path.startsWith('/api/opencode') ||
       req.path.startsWith('/api/push') ||
       req.path.startsWith('/api/voice') ||
-      req.path.startsWith('/api/tts')
+      req.path.startsWith('/api/tts') ||
+      req.path.startsWith('/api/openchamber/tunnel')
     ) {
 
       express.json({ limit: '50mb' })(req, res, next);
@@ -6725,6 +6728,84 @@ async function main(options = {}) {
       }
     }
   });
+
+  // ── Cloudflare Tunnel API ──────────────────────────────────────────
+
+  app.get('/api/openchamber/tunnel/check', async (_req, res) => {
+    try {
+      const result = await checkCloudflaredAvailable();
+      res.json({ available: result.available, version: result.version || null });
+    } catch (error) {
+      console.warn('Cloudflare tunnel check failed:', error);
+      res.json({ available: false, version: null });
+    }
+  });
+
+  app.get('/api/openchamber/tunnel/status', (_req, res) => {
+    const publicUrl = cloudflareTunnelController?.getPublicUrl?.() ?? null;
+    const active = Boolean(publicUrl);
+    if (active && publicUrl && tunnelPassword) {
+      const passwordUrl = `${publicUrl}?p=${tunnelPassword}`;
+      res.json({ active, url: publicUrl, passwordUrl });
+    } else {
+      res.json({ active: false, url: null, passwordUrl: null });
+    }
+  });
+
+  app.post('/api/openchamber/tunnel/start', async (_req, res) => {
+    const existingUrl = cloudflareTunnelController?.getPublicUrl?.() ?? null;
+    if (existingUrl) {
+      const passwordUrl = tunnelPassword ? `${existingUrl}?p=${tunnelPassword}` : existingUrl;
+      return res.json({ ok: true, url: existingUrl, passwordUrl });
+    }
+
+    try {
+      const cfCheck = await checkCloudflaredAvailable();
+      if (!cfCheck.available) {
+        return res.status(400).json({
+          ok: false,
+          error: 'cloudflared is not installed. Install it with: brew install cloudflared',
+        });
+      }
+
+      const originUrl = `http://127.0.0.1:${activePort}`;
+      cloudflareTunnelController = await startCloudflareTunnel({ originUrl, port: activePort });
+      const publicUrl = cloudflareTunnelController.getPublicUrl();
+
+      if (!publicUrl) {
+        cloudflareTunnelController.stop();
+        cloudflareTunnelController = null;
+        return res.status(500).json({ ok: false, error: 'Tunnel started but no public URL was assigned' });
+      }
+
+      tunnelPassword = crypto.randomUUID();
+      const passwordUrl = `${publicUrl}?p=${tunnelPassword}`;
+
+      printTunnelWarning();
+      console.log(`Cloudflare tunnel active: ${publicUrl}`);
+
+      res.json({ ok: true, url: publicUrl, passwordUrl });
+    } catch (error) {
+      console.error('Failed to start Cloudflare tunnel:', error);
+      cloudflareTunnelController = null;
+      tunnelPassword = null;
+      res.status(500).json({ ok: false, error: error?.message || 'Failed to start tunnel' });
+    }
+  });
+
+  app.post('/api/openchamber/tunnel/stop', (_req, res) => {
+    if (cloudflareTunnelController) {
+      console.log('Stopping Cloudflare tunnel (user requested)...');
+      cloudflareTunnelController.stop();
+      cloudflareTunnelController = null;
+      tunnelPassword = null;
+      res.json({ ok: true });
+    } else {
+      res.json({ ok: true, message: 'No tunnel running' });
+    }
+  });
+
+  // ── End Cloudflare Tunnel API ─────────────────────────────────────
 
   app.get('/api/global/event', async (req, res) => {
     let targetUrl;

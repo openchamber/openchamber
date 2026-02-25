@@ -20,7 +20,7 @@ import {
   RiCloudLine,
   RiFoldersLine,
   RiGitBranchLine,
-
+  RiGlobalLine,
   RiMicLine,
   RiNotification3Line,
   RiPaletteLine,
@@ -97,6 +97,7 @@ const pageOrder: SettingsPageSlug[] = [
   'skills.installed',
   'skills.catalog',
   'voice',
+  'tunnel',
 ];
 
 function buildRuntimeContext(isDesktop: boolean): SettingsRuntimeContext {
@@ -150,6 +151,8 @@ function getSettingsNavIcon(slug: SettingsPageSlug): React.ComponentType<{ class
       return RiBarChart2Line;
     case 'voice':
       return RiMicLine;
+    case 'tunnel':
+      return RiGlobalLine;
     case 'home':
       return null;
     default:
@@ -367,6 +370,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     sessions: 'sessions',
     notifications: 'notifications',
     voice: 'voice',
+    tunnel: 'tunnel',
   }), []);
 
   const renderUnavailable = React.useCallback(() => {
@@ -437,7 +441,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       case 'shortcuts':
       case 'sessions':
       case 'notifications':
-      case 'voice': {
+      case 'voice':
+      case 'tunnel': {
         const section = openChamberSectionBySlug[slug] ?? 'visual';
         return <OpenChamberPage section={section} />;
       }
