@@ -172,7 +172,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
 
     const hasAppearanceSettings = shouldShow('theme') && !isVSCodeRuntime();
     const hasLayoutSettings = shouldShow('fontSize') || shouldShow('terminalFontSize') || shouldShow('spacing') || shouldShow('cornerRadius') || shouldShow('inputBarOffset');
-    const hasNavigationSettings = shouldShow('navRail') && !isMobile;
+    const hasNavigationSettings = (!isMobile && shouldShow('navRail')) || (shouldShow('terminalQuickKeys') && !isMobile);
     const hasBehaviorSettings = shouldShow('toolOutput')
         || shouldShow('diffLayout')
         || (shouldShow('mobileStatusBar') && isMobile)
@@ -180,8 +180,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         || shouldShow('reasoning')
         || shouldShow('queueMode')
         || shouldShow('textJustificationActivity')
-        || shouldShow('persistDraft')
-        || (shouldShow('terminalQuickKeys') && !isMobile);
+        || shouldShow('persistDraft');
     return (
         <div className="space-y-8">
 
@@ -247,24 +246,28 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 </div>
                             </div>
                             <div className="flex items-center gap-2 py-1.5">
-                                <ButtonSmall
+                                <button
                                     type="button"
-                                    variant="outline"
-                                    size="xs"
                                     disabled={customThemesLoading || themesReloading}
                                     onClick={async () => {
+                                        const startedAt = Date.now();
                                         setThemesReloading(true);
                                         try {
                                             await reloadCustomThemes();
                                         } finally {
+                                            const elapsed = Date.now() - startedAt;
+                                            if (elapsed < 500) {
+                                                await new Promise<void>((resolve) => {
+                                                    window.setTimeout(resolve, 500 - elapsed);
+                                                });
+                                            }
                                             setThemesReloading(false);
                                         }
                                     }}
-                                    className="!font-normal"
+                                    className="inline-flex items-center typography-ui-label font-normal text-foreground underline decoration-[1px] underline-offset-2 hover:text-foreground/80 disabled:cursor-not-allowed disabled:text-muted-foreground/60"
                                 >
-                                    <RiRestartLine className={cn('h-3.5 w-3.5', themesReloading && 'animate-spin')} />
-                                    Reload themes
-                                </ButtonSmall>
+                                    {themesReloading ? 'Reloading themes...' : 'Reload themes'}
+                                </button>
                                 <Tooltip delayDuration={700}>
                                     <TooltipTrigger asChild>
                                         <button
@@ -288,9 +291,11 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                 {hasLayoutSettings && (
                     <div className="mb-8 space-y-3">
                         <section className="p-2 space-y-0.5">
+                            <h4 className="typography-ui-header font-medium text-foreground">Spacing & Layout</h4>
+                            <div className="pl-2">
 
                             {shouldShow('fontSize') && !isMobile && (
-                                <div className="flex items-center gap-8 py-1.5">
+                                <div className="flex items-center gap-8 py-1">
                                     <div className="flex min-w-0 flex-col w-56 shrink-0">
                                         <span className="typography-ui-label text-foreground">Interface Font Size</span>
                                     </div>
@@ -320,7 +325,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                             )}
 
                             {shouldShow('terminalFontSize') && (
-                                <div className={cn("py-1.5", isMobile ? "flex flex-col gap-3" : "flex items-center gap-8")}>
+                                <div className={cn("py-1", isMobile ? "flex flex-col gap-3" : "flex items-center gap-8")}>
                                     <div className={cn("flex min-w-0 flex-col", isMobile ? "w-full" : "w-56 shrink-0")}>
                                         <span className="typography-ui-label text-foreground">Terminal Font Size</span>
                                     </div>
@@ -349,7 +354,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                             )}
 
                             {shouldShow('spacing') && (
-                                <div className={cn("py-1.5", isMobile ? "flex flex-col gap-3" : "flex items-center gap-8")}>
+                                <div className={cn("py-1", isMobile ? "flex flex-col gap-3" : "flex items-center gap-8")}>
                                     <div className={cn("flex min-w-0 flex-col", isMobile ? "w-full" : "w-56 shrink-0")}>
                                         <span className="typography-ui-label text-foreground">Spacing Density</span>
                                     </div>
@@ -378,7 +383,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                             )}
 
                             {shouldShow('cornerRadius') && (
-                                <div className={cn("py-1.5", isMobile ? "flex flex-col gap-3" : "flex items-center gap-8")}>
+                                <div className={cn("py-1", isMobile ? "flex flex-col gap-3" : "flex items-center gap-8")}>
                                     <div className={cn("flex min-w-0 flex-col", isMobile ? "w-full" : "w-56 shrink-0")}>
                                         <span className="typography-ui-label text-foreground">Corner Radius</span>
                                     </div>
@@ -407,7 +412,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                             )}
 
                             {shouldShow('inputBarOffset') && (
-                                <div className={cn("py-1.5", isMobile ? "flex flex-col gap-3" : "flex items-center gap-8")}>
+                                <div className={cn("py-1", isMobile ? "flex flex-col gap-3" : "flex items-center gap-8")}>
                                     <div className={cn("flex min-w-0 flex-col", isMobile ? "w-full" : "w-56 shrink-0")}>
                                         <div className="flex items-center gap-1.5">
                                             <span className="typography-ui-label text-foreground">Input Bar Offset</span>
@@ -445,6 +450,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 </div>
                             )}
 
+                            </div>
+
                         </section>
                     </div>
                 )}
@@ -454,28 +461,70 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                     <div className="space-y-3">
                         <section className="px-2 pb-2 pt-0">
                             <h4 className="typography-ui-header font-medium text-foreground">Navigation</h4>
-                            <div
-                                className="group mt-1.5 flex cursor-pointer items-center gap-2 py-1.5"
-                                role="button"
-                                tabIndex={0}
-                                onClick={() => setNavRailExpanded(!isNavRailExpanded)}
-                                onKeyDown={(e) => {
-                                    if (e.key === 'Enter' || e.key === ' ') {
-                                        e.preventDefault();
-                                        setNavRailExpanded(!isNavRailExpanded);
-                                    }
-                                }}
-                            >
-                                <Checkbox
-                                    checked={isNavRailExpanded}
-                                    onChange={setNavRailExpanded}
-                                    ariaLabel="Expand project rail by default"
-                                />
-                                <span className="typography-ui-label text-foreground">Expand project rail</span>
-                            </div>
-                            <p className="typography-meta text-muted-foreground/70 mt-0.5 px-6">
-                                Show project names in the left rail when multiple projects are open. Auto-collapses with a single project.
-                            </p>
+                            {shouldShow('navRail') && !isMobile && (
+                                <div
+                                    className="group mt-1.5 flex cursor-pointer items-center gap-2 py-1.5"
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={() => setNavRailExpanded(!isNavRailExpanded)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter' || e.key === ' ') {
+                                            e.preventDefault();
+                                            setNavRailExpanded(!isNavRailExpanded);
+                                        }
+                                    }}
+                                >
+                                    <Checkbox
+                                        checked={isNavRailExpanded}
+                                        onChange={setNavRailExpanded}
+                                        ariaLabel="Expand project rail by default"
+                                    />
+                                    <div className="flex min-w-0 items-center gap-1.5">
+                                        <span className="typography-ui-label text-foreground">Expand project rail</span>
+                                        <Tooltip delayDuration={1000}>
+                                            <TooltipTrigger asChild>
+                                                <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+                                            </TooltipTrigger>
+                                            <TooltipContent sideOffset={8} className="max-w-xs">
+                                                Show project names in the left rail when multiple projects are open. Auto-collapses with a single project.
+                                            </TooltipContent>
+                                        </Tooltip>
+                                    </div>
+                                </div>
+                            )}
+
+                            {shouldShow('terminalQuickKeys') && !isMobile && (
+                                <div
+                                    className="group flex cursor-pointer items-center gap-2 py-1.5"
+                                    role="button"
+                                    tabIndex={0}
+                                    aria-pressed={showTerminalQuickKeysOnDesktop}
+                                    onClick={() => setShowTerminalQuickKeysOnDesktop(!showTerminalQuickKeysOnDesktop)}
+                                    onKeyDown={(event) => {
+                                        if (event.key === ' ' || event.key === 'Enter') {
+                                            event.preventDefault();
+                                            setShowTerminalQuickKeysOnDesktop(!showTerminalQuickKeysOnDesktop);
+                                        }
+                                    }}
+                                >
+                                    <Checkbox
+                                        checked={showTerminalQuickKeysOnDesktop}
+                                        onChange={setShowTerminalQuickKeysOnDesktop}
+                                        ariaLabel="Terminal quick keys"
+                                    />
+                                    <div className="flex min-w-0 items-center gap-1.5">
+                                        <span className="typography-ui-label text-foreground">Terminal Quick Keys</span>
+                                        <Tooltip delayDuration={1000}>
+                                            <TooltipTrigger asChild>
+                                                <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+                                            </TooltipTrigger>
+                                            <TooltipContent sideOffset={8} className="max-w-xs">
+                                                Show Esc, Ctrl, Arrows in terminal view
+                                            </TooltipContent>
+                                        </Tooltip>
+                                    </div>
+                                </div>
+                            )}
                         </section>
                     </div>
                 )}
@@ -733,40 +782,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 </section>
                             )}
 
-                            {shouldShow('terminalQuickKeys') && !isMobile && (
-                                <section className="p-2">
-                                    <div
-                                        className="group flex cursor-pointer items-center gap-2 rounded-md py-1.5 transition-colors hover:bg-[var(--interactive-hover)]/30"
-                                        role="button"
-                                        tabIndex={0}
-                                        aria-pressed={showTerminalQuickKeysOnDesktop}
-                                        onClick={() => setShowTerminalQuickKeysOnDesktop(!showTerminalQuickKeysOnDesktop)}
-                                        onKeyDown={(event) => {
-                                            if (event.key === ' ' || event.key === 'Enter') {
-                                                event.preventDefault();
-                                                setShowTerminalQuickKeysOnDesktop(!showTerminalQuickKeysOnDesktop);
-                                            }
-                                        }}
-                                    >
-                                        <Checkbox
-                                            checked={showTerminalQuickKeysOnDesktop}
-                                            onChange={setShowTerminalQuickKeysOnDesktop}
-                                            ariaLabel="Terminal quick keys"
-                                        />
-                                        <div className="flex min-w-0 items-center gap-1.5">
-                                            <span className="typography-ui-label text-foreground">Terminal Quick Keys</span>
-                                            <Tooltip delayDuration={1000}>
-                                                <TooltipTrigger asChild>
-                                                    <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
-                                                </TooltipTrigger>
-                                                <TooltipContent sideOffset={8} className="max-w-xs">
-                                                    Show Esc, Ctrl, Arrows in terminal view
-                                                </TooltipContent>
-                                            </Tooltip>
-                                        </div>
-                                    </div>
-                                </section>
-                            )}
                     </div>
                 )}
 
