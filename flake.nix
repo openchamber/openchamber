@@ -187,9 +187,16 @@
 
             # Runtime third-party node_modules
             cp -r ${bunDeps}/root $out/lib/openchamber/node_modules
+            chmod -R u+w $out/lib/openchamber/node_modules
 
-            # Wrapper: run with node, bun optional on user PATH
-            makeWrapper ${pkgs.nodejs_22}/bin/node $out/bin/openchamber \
+            # Merge workspace-local deps that bun didn't hoist to root
+            # (e.g. web-push lives in packages/web/node_modules/)
+            if [ -d "${bunDeps}/workspaces/web" ]; then
+              cp -rn ${bunDeps}/workspaces/web/. $out/lib/openchamber/node_modules/ 2>/dev/null || true
+            fi
+
+            # Wrapper: run with bun (the project runtime)
+            makeWrapper ${pkgs.bun}/bin/bun $out/bin/openchamber \
               --add-flags "$out/lib/openchamber/bin/cli.js"
           '';
 
