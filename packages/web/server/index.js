@@ -6929,6 +6929,45 @@ async function main(options = {}) {
     }
   });
 
+  app.post('/api/config/agents/batch-update', async (req, res) => {
+    try {
+      const { agents } = req.body;
+      const { directory, error } = await resolveProjectDirectory(req);
+      if (!directory) {
+        return res.status(400).json({ error });
+      }
+      if (!agents || typeof agents !== 'object' || Array.isArray(agents)) {
+        return res.status(400).json({ error: 'agents must be an object mapping agent names to updates' });
+      }
+
+      const updated = [];
+      const failed = [];
+      for (const [agentName, updates] of Object.entries(agents)) {
+        try {
+          updateAgent(agentName, updates, directory);
+          updated.push(agentName);
+        } catch (agentError) {
+          failed.push({ name: agentName, error: agentError.message || String(agentError) });
+        }
+      }
+
+      await refreshOpenCodeAfterConfigChange('batch agent update');
+
+      console.log(`[Server] Batch agent update complete: ${updated.length} updated, ${failed.length} failed`);
+
+      res.json({
+        success: true,
+        updated,
+        failed,
+        requiresReload: true,
+        reloadDelayMs: CLIENT_RELOAD_DELAY_MS,
+      });
+    } catch (error) {
+      console.error('[Server] Failed to batch-update agents:', error);
+      res.status(500).json({ error: error.message || 'Failed to batch-update agents' });
+    }
+  });
+
   app.patch('/api/config/agents/:name', async (req, res) => {
     try {
       const agentName = req.params.name;
