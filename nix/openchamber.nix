@@ -65,12 +65,36 @@ stdenvNoCC.mkDerivation (finalAttrs: {
     # Runtime third-party node_modules
     cp -r node_modules $out/lib/openchamber/node_modules
 
-    # Merge workspace-local deps
+    # Merge workspace-local deps (dereference bun symlinks)
     if [ -d "packages/web/node_modules" ]; then
-      cp -rn packages/web/node_modules/. $out/lib/openchamber/node_modules/ 2>/dev/null || true
+      cp -rLn packages/web/node_modules/. $out/lib/openchamber/node_modules/ 2>/dev/null || true
     fi
 
-    # Remove workspace symlinks that would dangle in the output
+    # Hoist all deps from bun's canonical store to root node_modules.
+    # Bun keeps transitive deps in .bun/node_modules/ as symlinks that
+    # are not on Node/bun's standard resolution path from the root.
+    bunStore="$out/lib/openchamber/node_modules/.bun/node_modules"
+    if [ -d "$bunStore" ]; then
+      for entry in "$bunStore"/*; do
+        name="$(basename "$entry")"
+        if [ -d "$entry" ] && [ "''${name#@}" != "$name" ]; then
+          # Scoped package directory (@scope/name)
+          mkdir -p "$out/lib/openchamber/node_modules/$name"
+          for sub in "$entry"/*; do
+            subname="$(basename "$sub")"
+            dest="$out/lib/openchamber/node_modules/$name/$subname"
+            [ -e "$dest" ] && continue
+            cp -rL "$sub" "$dest"
+          done
+        else
+          dest="$out/lib/openchamber/node_modules/$name"
+          [ -e "$dest" ] && continue
+          cp -rL "$entry" "$dest"
+        fi
+      done
+    fi
+
+    # Remove dangling symlinks and empty dirs
     find $out/lib/openchamber/node_modules -type l | while IFS= read -r link; do
       if [ ! -e "$link" ]; then
         rm "$link"
