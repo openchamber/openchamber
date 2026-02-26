@@ -1,6 +1,7 @@
 import React from 'react';
-import { Button } from '@/components/ui/button';
+import { ButtonSmall } from '@/components/ui/button-small';
 import { Input } from '@/components/ui/input';
+import { NumberInput } from '@/components/ui/number-input';
 import { Switch } from '@/components/ui/switch';
 import {
   Select,
@@ -11,6 +12,7 @@ import {
 } from '@/components/ui/select';
 import {
   RiAddLine,
+  RiArrowDownSLine,
   RiArrowRightLine,
   RiComputerLine,
   RiExternalLinkLine,
@@ -19,6 +21,7 @@ import {
   RiPlug2Line,
   RiRefreshLine,
   RiServerLine,
+  RiShuffleLine,
   RiTerminalWindowLine,
   RiDeleteBinLine,
   RiStopLine,
@@ -31,8 +34,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
-import { SettingsSection } from '@/components/sections/shared/SettingsSection';
 import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { toast } from '@/components/ui';
@@ -160,11 +163,11 @@ const HintLabel: React.FC<{ label: string; hint: React.ReactNode }> = ({ label, 
 const forwardTypeDescription = (type: DesktopSshPortForwardType): string => {
   switch (type) {
     case 'remote':
-      return 'Remote (-R): opens a port on the remote machine and forwards it back to your local machine.';
+      return 'Remote (-R): expose a port on the remote machine and send that traffic back to this laptop.';
     case 'dynamic':
-      return 'Dynamic (-D): opens a local SOCKS5 proxy for flexible routing through SSH.';
+      return 'Dynamic (-D): create a local SOCKS5 proxy on this laptop (for apps that support SOCKS proxy settings).';
     default:
-      return 'Local (-L): opens a local port and forwards traffic to a remote host/port over SSH.';
+      return 'Local (-L): open a port on this laptop and send it to a remote host:port over SSH (use this to access remote services locally).';
   }
 };
 
@@ -313,6 +316,7 @@ export const RemoteInstancesPage: React.FC = () => {
   const [patternHost, setPatternHost] = React.useState<string | null>(null);
   const [patternDestination, setPatternDestination] = React.useState('');
   const [patternCreating, setPatternCreating] = React.useState(false);
+  const [expandedForwards, setExpandedForwards] = React.useState<Record<string, boolean>>({});
   const [isPrimaryActionPending, setIsPrimaryActionPending] = React.useState(false);
   const [isRetryPending, setIsRetryPending] = React.useState(false);
   const [clockMs, setClockMs] = React.useState(() => Date.now());
@@ -667,11 +671,21 @@ export const RemoteInstancesPage: React.FC = () => {
   if (!draft) {
     return (
       <SettingsPageLayout>
-        <SettingsSection title="Remote Instances" description="Manage SSH-backed OpenChamber instances.">
-          <p className="typography-meta text-muted-foreground">Select an instance from the sidebar or import one from SSH config.</p>
-        </SettingsSection>
+        <div className="mb-8">
+          <div className="mb-1 px-1 space-y-0.5">
+            <h3 className="typography-ui-header font-medium text-foreground">Remote Instances</h3>
+            <p className="typography-meta text-muted-foreground">Manage SSH-backed OpenChamber instances.</p>
+          </div>
+          <section className="px-2 pb-2 pt-0 space-y-3">
+            <p className="typography-meta text-muted-foreground">Select an instance from the sidebar or import one from SSH config.</p>
+          </section>
+        </div>
 
-        <SettingsSection title="Import from SSH config" divider>
+        <div className="mb-8 border-t border-[var(--surface-subtle)] pt-8">
+          <div className="mb-1 px-1 space-y-0.5">
+            <h3 className="typography-ui-header font-medium text-foreground">Import from SSH config</h3>
+          </div>
+          <section className="px-2 pb-2 pt-0">
           {isImportsLoading ? (
             <p className="typography-meta text-muted-foreground">Loading SSH hosts...</p>
           ) : importCandidates.length === 0 ? (
@@ -687,19 +701,21 @@ export const RemoteInstancesPage: React.FC = () => {
                     </div>
                     <div className="typography-micro text-muted-foreground">{candidate.source} config</div>
                   </div>
-                  <Button
+                  <ButtonSmall
                     type="button"
                     variant="outline"
-                    size="sm"
+                    size="xs"
+                    className="!font-normal"
                     onClick={() => void handleImportCandidate(candidate.host, candidate.pattern)}
                   >
                     Create
-                  </Button>
+                  </ButtonSmall>
                 </div>
               ))}
             </div>
           )}
-        </SettingsSection>
+        </section>
+        </div>
 
         <Dialog
           open={Boolean(patternHost)}
@@ -730,12 +746,12 @@ export const RemoteInstancesPage: React.FC = () => {
                 autoFocus
               />
               <div className="flex items-center justify-end gap-2">
-                <Button type="button" variant="outline" size="sm" onClick={closePatternDialog} disabled={patternCreating}>
+                <ButtonSmall type="button" variant="outline" size="xs" className="!font-normal" onClick={closePatternDialog} disabled={patternCreating}>
                   Cancel
-                </Button>
-                <Button type="submit" size="sm" disabled={patternCreating}>
+                </ButtonSmall>
+                <ButtonSmall type="submit" size="xs" className="!font-normal" disabled={patternCreating}>
                   Create
-                </Button>
+                </ButtonSmall>
               </div>
             </form>
           </DialogContent>
@@ -745,47 +761,104 @@ export const RemoteInstancesPage: React.FC = () => {
   }
 
   const isManagedMode = draft.remoteOpenchamber.mode === 'managed';
+  const instanceTitle = draft.nickname?.trim() || draft.sshParsed?.destination || draft.id;
 
   return (
     <SettingsPageLayout>
-      <SettingsSection title="Connection" description="SSH command and lifecycle settings.">
-        <div className="space-y-3">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="space-y-1">
-              <span className="typography-meta text-muted-foreground">Nickname</span>
-              <Input
-                value={draft.nickname || ''}
-                onChange={(event) =>
-                  updateDraft((current) => ({
-                    ...current,
-                    nickname: event.target.value,
-                  }))
-                }
-                placeholder="Production Host"
-              />
-            </label>
+      <div className="mb-6 px-1">
+        <h2 className="typography-ui-header font-semibold text-foreground truncate">{instanceTitle}</h2>
+        <div className="mt-1 flex flex-wrap items-center gap-2 typography-meta text-muted-foreground">
+          <span className={`h-2.5 w-2.5 rounded-full ${phaseDotClass(statusPhase)}`} />
+          <span>{phaseLabel(statusPhase)}</span>
+          {status?.localUrl ? <span className="font-mono text-foreground/80">{status.localUrl}</span> : null}
+          {reconnectAppearsStuck ? <span>reconnect stale</span> : null}
+        </div>
+      </div>
 
-            <label className="space-y-1">
-              <span className="typography-meta text-muted-foreground">Connection timeout (sec)</span>
-              <Input
-                type="number"
-                min={5}
-                max={240}
-                value={draft.connectionTimeoutSec}
-                onChange={(event) => {
-                  const next = Number(event.target.value);
-                  updateDraft((current) => ({
-                    ...current,
-                    connectionTimeoutSec: Number.isFinite(next) ? next : current.connectionTimeoutSec,
-                  }));
-                }}
-              />
-            </label>
+      <div className="mb-8">
+        <div className="mb-1 px-1 space-y-0.5">
+          <h3 className="typography-ui-header font-medium text-foreground">Actions</h3>
+          <p className="typography-meta text-muted-foreground">Connect, inspect logs, and manage this instance.</p>
+        </div>
+        <section className="px-2 pb-2 pt-0 space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <ButtonSmall
+              type="button"
+              variant={canDisconnect ? 'outline' : 'default'}
+              size="xs"
+              className="!font-normal"
+              onClick={handlePrimaryConnectionAction}
+              disabled={isPrimaryActionPending || isRetryPending}
+            >
+              {canDisconnect ? <RiStopLine className="h-3.5 w-3.5" /> : <RiPlug2Line className="h-3.5 w-3.5" />}
+              {primaryButtonLabel}
+            </ButtonSmall>
+            <ButtonSmall
+              type="button"
+              variant="outline"
+              size="xs"
+              className="!font-normal"
+              onClick={handleRetryAction}
+              disabled={!canRetry}
+            >
+              <RiRefreshLine className={`h-3.5 w-3.5 ${isConnecting || (isReconnecting && !reconnectAppearsStuck) ? 'animate-spin' : ''}`} />
+              {retryButtonLabel}
+            </ButtonSmall>
+            <ButtonSmall
+              type="button"
+              variant="outline"
+              size="xs"
+              className="!font-normal"
+              onClick={() => {
+                void handleOpenLogs();
+              }}
+            >
+              <RiTerminalWindowLine className="h-3.5 w-3.5" />
+              Logs
+            </ButtonSmall>
+            <ButtonSmall
+              type="button"
+              variant="outline"
+              size="xs"
+              className="!font-normal text-[var(--status-error)] border-[var(--status-error)]/30 hover:text-[var(--status-error)]"
+              onClick={() => {
+                const ok = window.confirm('Remove this SSH instance?');
+                if (!ok) return;
+                void removeInstance(draft.id)
+                  .then(() => {
+                    setSelectedId(null);
+                    toast.success('SSH instance removed');
+                  })
+                  .catch((err) => {
+                    toast.error('Failed to remove SSH instance', {
+                      description: err instanceof Error ? err.message : String(err),
+                    });
+                  });
+              }}
+            >
+              <RiDeleteBinLine className="h-3.5 w-3.5" />
+              Remove
+            </ButtonSmall>
           </div>
+          {status?.localUrl ? (
+            <div className="flex flex-wrap items-center gap-2 typography-meta text-muted-foreground">
+              <span>Current local URL:</span>
+              <span className="font-mono text-foreground/90">{status.localUrl}</span>
+            </div>
+          ) : null}
+        </section>
+      </div>
 
-          <label className="space-y-1 block">
-            <span className="typography-meta text-muted-foreground">SSH command</span>
+      <div className="mb-8">
+        <div className="mb-1 px-1 space-y-0.5">
+          <h3 className="typography-ui-header font-medium text-foreground">Instance</h3>
+          <p className="typography-meta text-muted-foreground">Core SSH settings.</p>
+        </div>
+        <section className="px-2 pb-2 pt-0 space-y-3">
+          <div className="flex flex-col gap-1.5 py-1.5 md:flex-row md:items-center md:gap-8">
+            <span className="typography-ui-label text-foreground w-56 shrink-0">SSH command</span>
             <Input
+              className="h-7 md:max-w-xl"
               value={draft.sshCommand}
               onChange={(event) =>
                 updateDraft((current) => ({
@@ -795,299 +868,285 @@ export const RemoteInstancesPage: React.FC = () => {
               }
               placeholder="ssh -J jump user@host"
             />
-          </label>
-
-          <div className="space-y-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                type="button"
-                variant={canDisconnect ? 'outline' : 'default'}
-                size="sm"
-                onClick={handlePrimaryConnectionAction}
-                disabled={isPrimaryActionPending || isRetryPending}
-              >
-                {canDisconnect ? <RiStopLine className="h-4 w-4" /> : <RiPlug2Line className="h-4 w-4" />}
-                {primaryButtonLabel}
-              </Button>
-
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={handleRetryAction}
-                disabled={!canRetry}
-              >
-                <RiRefreshLine className={`h-4 w-4 ${isConnecting || (isReconnecting && !reconnectAppearsStuck) ? 'animate-spin' : ''}`} />
-                {retryButtonLabel}
-              </Button>
-
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  void handleOpenLogs();
-                }}
-              >
-                <RiTerminalWindowLine className="h-4 w-4" />
-                Open Logs
-              </Button>
-
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="text-[var(--status-error)] border-[var(--status-error)]/30 hover:text-[var(--status-error)]"
-                onClick={() => {
-                  const ok = window.confirm('Remove this SSH instance?');
-                  if (!ok) return;
-                  void removeInstance(draft.id)
-                    .then(() => {
-                      setSelectedId(null);
-                      toast.success('SSH instance removed');
-                    })
-                    .catch((err) => {
-                      toast.error('Failed to remove SSH instance', {
-                        description: err instanceof Error ? err.message : String(err),
-                      });
-                    });
-                }}
-              >
-                <RiDeleteBinLine className="h-4 w-4" />
-                Remove
-              </Button>
-            </div>
-
-            <div className="flex items-center justify-end gap-2 typography-meta text-muted-foreground min-h-5">
-              <span className={`h-2.5 w-2.5 rounded-full ${phaseDotClass(statusPhase)}`} />
-              <span>{phaseLabel(statusPhase)}</span>
-              {status?.localUrl ? <span>· {status.localUrl}</span> : null}
-              {reconnectAppearsStuck ? <span>· reconnect stale</span> : null}
-            </div>
           </div>
-        </div>
-      </SettingsSection>
+          <div className="flex flex-col gap-1.5 py-1.5 md:flex-row md:items-center md:gap-8">
+            <span className="typography-ui-label text-foreground w-56 shrink-0">Nickname</span>
+            <Input
+              className="h-7 md:max-w-sm"
+              value={draft.nickname || ''}
+              onChange={(event) =>
+                updateDraft((current) => ({
+                  ...current,
+                  nickname: event.target.value,
+                }))
+              }
+              placeholder="Production Host"
+            />
+          </div>
+          <div className="flex flex-col gap-1.5 py-1.5 md:flex-row md:items-center md:gap-8">
+            <span className="typography-ui-label text-foreground w-56 shrink-0">Connection timeout (sec)</span>
+            <NumberInput
+              containerClassName="w-fit"
+              min={5}
+              max={240}
+              step={1}
+              className="w-16 tabular-nums"
+              value={draft.connectionTimeoutSec}
+              onValueChange={(next) => {
+                updateDraft((current) => ({
+                  ...current,
+                  connectionTimeoutSec: Number.isFinite(next) ? next : current.connectionTimeoutSec,
+                }));
+              }}
+            />
+          </div>
+        </section>
+      </div>
 
-      <SettingsSection
-        title="Remote OpenChamber"
-        description="Controls how OpenChamber is discovered and run on the remote machine."
-        divider
-      >
-        <div className="space-y-2">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="space-y-1">
+      <div className="mb-8 border-t border-[var(--surface-subtle)] pt-8">
+        <div className="mb-1 px-1 space-y-0.5">
+          <h3 className="typography-ui-header font-medium text-foreground">Remote server</h3>
+          <p className="typography-meta text-muted-foreground">How OpenChamber is discovered or started on the remote machine.</p>
+        </div>
+        <section className="px-2 pb-2 pt-0 space-y-3">
+          <div className="flex flex-col gap-1.5 py-1.5 md:flex-row md:items-center md:gap-8">
+            <div className="w-56 shrink-0">
               <HintLabel
                 label="Mode"
                 hint="Managed installs/updates and starts OpenChamber remotely. External assumes it is already running."
               />
+            </div>
+            <Select
+              value={draft.remoteOpenchamber.mode}
+              onValueChange={(value) =>
+                updateDraft((current) => ({
+                  ...current,
+                  remoteOpenchamber: {
+                    ...current.remoteOpenchamber,
+                    mode: value === 'external' ? 'external' : 'managed',
+                  },
+                }))
+              }
+            >
+              <SelectTrigger className="h-7 w-fit min-w-[140px]">
+                <SelectValue placeholder="Select mode" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="managed">Managed (auto start)</SelectItem>
+                <SelectItem value="external">External (already running)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex flex-col gap-1.5 py-1.5 md:flex-row md:items-center md:gap-8">
+            <div className="w-56 shrink-0">
+              <HintLabel
+                label="Preferred remote port"
+                hint="Port OpenChamber should use on the remote host. Leave empty to let the runtime choose."
+              />
+            </div>
+            <NumberInput
+              containerClassName="w-fit"
+              min={1}
+              max={65535}
+              step={1}
+              className="w-20 tabular-nums"
+              value={draft.remoteOpenchamber.preferredPort}
+              onValueChange={(next) => {
+                updateDraft((current) => ({
+                  ...current,
+                  remoteOpenchamber: {
+                    ...current.remoteOpenchamber,
+                    preferredPort: Number.isFinite(next) && next > 0 ? next : undefined,
+                  },
+                }));
+              }}
+              onClear={() => {
+                updateDraft((current) => ({
+                  ...current,
+                  remoteOpenchamber: {
+                    ...current.remoteOpenchamber,
+                    preferredPort: undefined,
+                  },
+                }));
+              }}
+              emptyLabel="Auto"
+            />
+          </div>
+
+          {isManagedMode ? (
+            <div className="flex flex-col gap-1.5 py-1.5 md:flex-row md:items-center md:gap-8">
+              <div className="w-56 shrink-0">
+                <HintLabel
+                  label="Install method"
+                  hint="How OpenChamber gets installed/updated remotely when mode is Managed."
+                />
+              </div>
               <Select
-                value={draft.remoteOpenchamber.mode}
+                value={draft.remoteOpenchamber.installMethod}
                 onValueChange={(value) =>
                   updateDraft((current) => ({
                     ...current,
                     remoteOpenchamber: {
                       ...current.remoteOpenchamber,
-                      mode: value === 'external' ? 'external' : 'managed',
+                      installMethod:
+                        value === 'npm' || value === 'download_release' || value === 'upload_bundle'
+                          ? value
+                          : 'bun',
                     },
                   }))
                 }
               >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select mode" />
+                <SelectTrigger className="h-7 w-fit min-w-[140px]">
+                  <SelectValue placeholder="Select install method" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="managed">Managed (auto start)</SelectItem>
-                  <SelectItem value="external">External (already running)</SelectItem>
+                  <SelectItem value="bun">bun</SelectItem>
+                  <SelectItem value="npm">npm</SelectItem>
+                  <SelectItem value="download_release">download release</SelectItem>
+                  <SelectItem value="upload_bundle">upload bundle</SelectItem>
                 </SelectContent>
               </Select>
-            </label>
+            </div>
+          ) : null}
 
-            <label className="space-y-1">
-              <HintLabel
-                label="Preferred remote port"
-                hint="Port OpenChamber should use on the remote host. Leave empty to let the runtime choose."
-              />
-              <Input
-                type="number"
-                min={1}
-                max={65535}
-                value={draft.remoteOpenchamber.preferredPort ?? ''}
-                onChange={(event) => {
-                  const next = Number(event.target.value);
-                  updateDraft((current) => ({
-                    ...current,
-                    remoteOpenchamber: {
-                      ...current.remoteOpenchamber,
-                      preferredPort: Number.isFinite(next) && next > 0 ? next : undefined,
-                    },
-                  }));
-                }}
-                placeholder="Auto"
-              />
-            </label>
-
-            {isManagedMode ? (
-              <label className="space-y-1">
-                <HintLabel
-                  label="Install method"
-                  hint="How OpenChamber gets installed/updated remotely when mode is Managed."
-                />
-                <Select
-                  value={draft.remoteOpenchamber.installMethod}
-                  onValueChange={(value) =>
-                    updateDraft((current) => ({
-                      ...current,
-                      remoteOpenchamber: {
-                        ...current.remoteOpenchamber,
-                        installMethod:
-                          value === 'npm' || value === 'download_release' || value === 'upload_bundle'
-                            ? value
-                            : 'bun',
-                      },
-                    }))
-                  }
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Select install method" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="bun">bun</SelectItem>
-                    <SelectItem value="npm">npm</SelectItem>
-                    <SelectItem value="download_release">download release</SelectItem>
-                    <SelectItem value="upload_bundle">upload bundle</SelectItem>
-                  </SelectContent>
-                </Select>
-              </label>
-            ) : null}
-
-            {isManagedMode ? (
-              <label className="space-y-1">
+          {isManagedMode ? (
+            <div className="flex flex-col gap-1.5 py-1.5 md:flex-row md:items-center md:gap-8">
+              <div className="w-56 shrink-0">
                 <HintLabel
                   label="Keep server running"
                   hint="If enabled, OpenChamber daemon is left running remotely when you disconnect."
                 />
-                <div className="h-10 px-3 rounded-md border border-[var(--interactive-border)] bg-[var(--surface-elevated)] flex items-center justify-between">
-                  <span className="typography-ui-label text-foreground">Keep remote daemon alive</span>
-                  <Switch
-                    checked={draft.remoteOpenchamber.keepRunning}
-                    onCheckedChange={(checked) =>
-                      updateDraft((current) => ({
-                        ...current,
-                        remoteOpenchamber: {
-                          ...current.remoteOpenchamber,
-                          keepRunning: checked,
-                        },
-                      }))
-                    }
-                  />
-                </div>
-              </label>
-            ) : null}
-          </div>
-
-          {!isManagedMode ? (
-            <p className="typography-micro text-muted-foreground/80">
-              External mode expects OpenChamber to already be running remotely. Install method and keep-alive settings do not apply.
-            </p>
+              </div>
+              <div className="flex w-full items-center gap-2 md:max-w-xs">
+                <Switch
+                  checked={draft.remoteOpenchamber.keepRunning}
+                  onCheckedChange={(checked) =>
+                    updateDraft((current) => ({
+                      ...current,
+                      remoteOpenchamber: {
+                        ...current.remoteOpenchamber,
+                        keepRunning: checked,
+                      },
+                    }))
+                  }
+                />
+              </div>
+            </div>
           ) : null}
-        </div>
-      </SettingsSection>
+        </section>
+      </div>
 
-      <SettingsSection
-        title="Primary Local Tunnel"
-        description="Main tunnel that maps the remote OpenChamber server to a local URL on your machine."
-        divider
-      >
-        <div className="space-y-2">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="space-y-1">
+      <div className="mb-8 border-t border-[var(--surface-subtle)] pt-8">
+        <div className="mb-1 px-1 space-y-0.5">
+          <h3 className="typography-ui-header font-medium text-foreground">Main tunnel</h3>
+          <p className="typography-meta text-muted-foreground">Primary local URL that points to the remote OpenChamber server.</p>
+        </div>
+        <section className="px-2 pb-2 pt-0 space-y-3">
+          <div className="flex flex-col gap-1.5 py-1.5 md:flex-row md:items-center md:gap-8">
+            <div className="w-56 shrink-0">
               <HintLabel
                 label="Bind host"
                 hint="Network interface for the main local URL. Use 127.0.0.1/localhost for local-only access."
               />
-              <Select
-                value={draft.localForward.bindHost}
-                onValueChange={(value) => {
-                  if (value === '0.0.0.0') {
-                    const allow = window.confirm(
-                      'Binding to 0.0.0.0 exposes forwarded ports to your local network. Continue?',
-                    );
-                    if (!allow) return;
-                  }
-                  updateDraft((current) => ({
-                    ...current,
-                    localForward: {
-                      ...current.localForward,
-                      bindHost: value === 'localhost' || value === '0.0.0.0' ? value : '127.0.0.1',
-                    },
-                  }));
-                }}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select bind host" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="127.0.0.1">127.0.0.1</SelectItem>
-                  <SelectItem value="localhost">localhost</SelectItem>
-                  <SelectItem value="0.0.0.0">0.0.0.0</SelectItem>
-                </SelectContent>
-              </Select>
-            </label>
+            </div>
+            <Select
+              value={draft.localForward.bindHost}
+              onValueChange={(value) => {
+                if (value === '0.0.0.0') {
+                  const allow = window.confirm(
+                    'Binding to 0.0.0.0 exposes forwarded ports to your local network. Continue?',
+                  );
+                  if (!allow) return;
+                }
+                updateDraft((current) => ({
+                  ...current,
+                  localForward: {
+                    ...current.localForward,
+                    bindHost: value === 'localhost' || value === '0.0.0.0' ? value : '127.0.0.1',
+                  },
+                }));
+              }}
+            >
+              <SelectTrigger className="h-7 w-fit min-w-[140px]">
+                <SelectValue placeholder="Select bind host" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="127.0.0.1">127.0.0.1</SelectItem>
+                <SelectItem value="localhost">localhost</SelectItem>
+                <SelectItem value="0.0.0.0">0.0.0.0</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
 
-            <label className="space-y-1">
+          <div className="flex flex-col gap-1.5 py-1.5 md:flex-row md:items-center md:gap-8">
+            <div className="w-56 shrink-0">
               <HintLabel
                 label="Preferred local port"
                 hint="Preferred local port for the main OpenChamber tunnel. Leave empty for auto-select."
               />
-              <div className="flex items-center gap-2">
-                <Input
-                  type="number"
-                  min={1}
-                  max={65535}
-                  value={draft.localForward.preferredLocalPort ?? ''}
-                  onChange={(event) => {
-                    const next = Number(event.target.value);
-                    updateDraft((current) => ({
-                      ...current,
-                      localForward: {
-                        ...current.localForward,
-                        preferredLocalPort: Number.isFinite(next) && next > 0 ? next : undefined,
-                      },
-                    }));
-                  }}
-                  placeholder="Auto"
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() =>
-                    updateDraft((current) => ({
-                      ...current,
-                      localForward: {
-                        ...current.localForward,
-                        preferredLocalPort: randomPort(),
-                      },
-                    }))
-                  }
-                >
-                  Pick random
-                </Button>
-              </div>
-            </label>
+            </div>
+            <div className="flex w-full items-center gap-2 md:max-w-sm">
+              <NumberInput
+                containerClassName="w-fit"
+                min={1}
+                max={65535}
+                step={1}
+                className="w-20 tabular-nums"
+                value={draft.localForward.preferredLocalPort}
+                onValueChange={(next) => {
+                  updateDraft((current) => ({
+                    ...current,
+                    localForward: {
+                      ...current.localForward,
+                      preferredLocalPort: Number.isFinite(next) && next > 0 ? next : undefined,
+                    },
+                  }));
+                }}
+                onClear={() => {
+                  updateDraft((current) => ({
+                    ...current,
+                    localForward: {
+                      ...current.localForward,
+                      preferredLocalPort: undefined,
+                    },
+                  }));
+                }}
+                emptyLabel="Auto"
+              />
+              <ButtonSmall
+                type="button"
+                variant="outline"
+                size="xs"
+                className="!font-normal h-7 w-7 px-0"
+                title="Pick random port"
+                onClick={() =>
+                  updateDraft((current) => ({
+                    ...current,
+                    localForward: {
+                      ...current.localForward,
+                      preferredLocalPort: randomPort(),
+                    },
+                  }))
+                }
+              >
+                <RiShuffleLine className="h-3.5 w-3.5" />
+              </ButtonSmall>
+            </div>
           </div>
+        </section>
+      </div>
 
-          <p className="typography-micro text-muted-foreground/80">
-            This is separate from optional extra forwards below. It always carries the main OpenChamber UI/API traffic.
-          </p>
+      <div className="mb-8 border-t border-[var(--surface-subtle)] pt-8">
+        <div className="mb-1 px-1 space-y-0.5">
+          <h3 className="typography-ui-header font-medium text-foreground">Authentication</h3>
+          <p className="typography-meta text-muted-foreground">Optional credentials for SSH and remote UI.</p>
         </div>
-      </SettingsSection>
-
-      <SettingsSection title="Passwords" divider>
-        <div className="space-y-3">
-          <label className="space-y-1 block">
-            <span className="typography-meta text-muted-foreground">SSH password (optional)</span>
+        <section className="px-2 pb-2 pt-0 space-y-3">
+          <div className="flex flex-col gap-1.5 py-1.5 md:flex-row md:items-center md:gap-8">
+            <span className="typography-ui-label text-foreground w-56 shrink-0">SSH password (optional)</span>
             <Input
+              className="h-7 md:max-w-sm"
               type="password"
               value={draft.auth.sshPassword?.value || ''}
               onChange={(event) =>
@@ -1105,11 +1164,12 @@ export const RemoteInstancesPage: React.FC = () => {
               }
               placeholder="Password or key passphrase"
             />
-          </label>
+          </div>
 
-          <label className="space-y-1 block">
-            <span className="typography-meta text-muted-foreground">OpenChamber UI password (optional)</span>
+          <div className="flex flex-col gap-1.5 py-1.5 md:flex-row md:items-center md:gap-8">
+            <span className="typography-ui-label text-foreground w-56 shrink-0">OpenChamber UI password (optional)</span>
             <Input
+              className="h-7 md:max-w-sm"
               type="password"
               value={draft.auth.openchamberPassword?.value || ''}
               onChange={(event) =>
@@ -1127,16 +1187,16 @@ export const RemoteInstancesPage: React.FC = () => {
               }
               placeholder="Protect remote UI with password"
             />
-          </label>
-        </div>
-      </SettingsSection>
+          </div>
+        </section>
+      </div>
 
-      <SettingsSection
-        title="Port Forwards"
-        description="Optional extra SSH forwards in addition to the primary OpenChamber tunnel."
-        divider
-      >
-        <div className="space-y-2">
+      <div className="mb-8 border-t border-[var(--surface-subtle)] pt-8">
+        <div className="mb-1 px-1 space-y-0.5">
+          <h3 className="typography-ui-header font-medium text-foreground">Port Forwards</h3>
+          <p className="typography-meta text-muted-foreground">Optional extra SSH forwards in addition to the primary OpenChamber tunnel.</p>
+        </div>
+        <section className="px-2 pb-2 pt-0 space-y-2">
           {draft.portForwards.length === 0 ? (
             <p className="typography-micro text-muted-foreground/80">No extra forwards configured yet.</p>
           ) : null}
@@ -1151,30 +1211,14 @@ export const RemoteInstancesPage: React.FC = () => {
               }));
             };
 
-            const localHostLabel =
-              forward.type === 'remote' ? 'Local target host' : 'Local listen host';
-            const localPortLabel =
-              forward.type === 'remote' ? 'Local target port' : 'Local listen port';
-            const localHostHint =
-              forward.type === 'remote'
-                ? 'Local host on your machine that receives traffic from remote -R listener.'
-                : 'Local host/interface where this forward listens on your machine.';
-            const localPortHint =
-              forward.type === 'remote'
-                ? 'Local port on your machine that receives traffic from remote -R listener.'
-                : 'Local port where this forward listens on your machine.';
-            const remoteHostLabel =
-              forward.type === 'remote' ? 'Remote listen host' : 'Remote target host';
-            const remotePortLabel =
-              forward.type === 'remote' ? 'Remote listen port' : 'Remote target port';
-            const remoteHostHint =
-              forward.type === 'remote'
-                ? 'Remote host/interface where SSH creates the -R listener.'
-                : 'Remote host that receives traffic forwarded by local -L listener.';
-            const remotePortHint =
-              forward.type === 'remote'
-                ? 'Remote port where SSH creates the -R listener.'
-                : 'Remote target port that receives traffic from local -L listener.';
+            const localLabel = forward.type === 'remote' ? 'Local target' : 'Local listen';
+            const localHint = forward.type === 'remote'
+              ? 'Local host and port on your machine that receives traffic from remote -R listener.'
+              : 'Local host and port where this forward listens on your machine.';
+            const remoteLabel = forward.type === 'remote' ? 'Remote listen' : 'Remote target';
+            const remoteHint = forward.type === 'remote'
+              ? 'Remote host and port where SSH creates the -R listener.'
+              : 'Remote host and port that receives traffic from local -L listener.';
 
             const localEndpoint = formatEndpoint(forward.localHost || 'localhost', forward.localPort);
             const remoteEndpoint = formatEndpoint(forward.remoteHost || 'localhost', forward.remotePort);
@@ -1184,20 +1228,37 @@ export const RemoteInstancesPage: React.FC = () => {
               ? `http://${toBrowserHost(forward.localHost)}:${forward.localPort}`
               : '';
 
+            const isForwardOpen = Boolean(expandedForwards[forward.id]);
+
+            const typeLabel = forward.type === 'local' ? 'Local (-L)' : forward.type === 'remote' ? 'Remote (-R)' : 'Dynamic (-D)';
+
             return (
-              <div key={forward.id} className="rounded-md border border-[var(--interactive-border)] px-3 py-3 space-y-3">
+              <Collapsible
+                key={forward.id}
+                open={isForwardOpen}
+                onOpenChange={(open) => {
+                  setExpandedForwards((current) => ({
+                    ...current,
+                    [forward.id]: open,
+                  }));
+                }}
+                className={`${index > 0 ? 'border-t border-[var(--surface-subtle)]' : ''} py-2`}
+              >
                 <div className="flex items-center justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="typography-ui-label text-foreground truncate">{buildForwardLabel(forward)}</div>
-                    <div className="typography-micro text-muted-foreground/80">{forwardTypeDescription(forward.type)}</div>
+                  <div className="min-w-0 flex items-center gap-2">
+                    <CollapsibleTrigger className="flex items-center gap-2 group">
+                      <RiArrowDownSLine className={`h-4 w-4 text-muted-foreground transition-transform ${isForwardOpen ? 'rotate-180' : ''}`} />
+                      <span className="typography-ui-label text-foreground truncate">{buildForwardLabel(forward)}</span>
+                      <span className="typography-micro text-muted-foreground/70 shrink-0">{typeLabel}</span>
+                    </CollapsibleTrigger>
                   </div>
                   <div className="flex items-center gap-2">
-                    <Switch checked={forward.enabled} onCheckedChange={(checked) => updateForward((item) => ({ ...item, enabled: checked }))} />
-                    <Button
+                    <Switch checked={forward.enabled} onCheckedChange={(checked) => updateForward((item) => ({ ...item, enabled: checked }))} aria-label="Enable forward" />
+                    <ButtonSmall
                       type="button"
                       variant="ghost"
-                      size="sm"
-                      className="text-[var(--status-error)]"
+                      size="xs"
+                      className="!font-normal h-6 w-6 px-0 text-[var(--status-error)] hover:text-[var(--status-error)]"
                       onClick={() =>
                         updateDraft((current) => ({
                           ...current,
@@ -1205,15 +1266,20 @@ export const RemoteInstancesPage: React.FC = () => {
                         }))
                       }
                     >
-                      <RiDeleteBinLine className="h-4 w-4" />
-                    </Button>
+                      <RiDeleteBinLine className="h-3.5 w-3.5" />
+                    </ButtonSmall>
                   </div>
                 </div>
-
-                <div className="space-y-3">
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <label className="space-y-1 block">
-                      <HintLabel label="Forward type" hint="-L local, -R remote, -D dynamic (SOCKS5 proxy)." />
+                <CollapsibleContent className="pt-2">
+                  <div className="space-y-0 pb-2">
+                    <p className="typography-meta text-muted-foreground mb-3">{forwardTypeDescription(forward.type)}</p>
+                    <div className="flex flex-col gap-1.5 py-1.5 md:flex-row md:items-center md:gap-8">
+                      <div className="w-56 shrink-0">
+                        <HintLabel
+                          label="Forward type"
+                          hint="Local (-L): laptop -> remote service. Remote (-R): remote machine -> this laptop. Dynamic (-D): local SOCKS5 proxy."
+                        />
+                      </div>
                       <Select
                         value={forward.type}
                         onValueChange={(value) =>
@@ -1223,7 +1289,7 @@ export const RemoteInstancesPage: React.FC = () => {
                           }))
                         }
                       >
-                        <SelectTrigger className="w-full">
+                        <SelectTrigger className="h-7 w-fit min-w-[140px]">
                           <SelectValue placeholder="Type" />
                         </SelectTrigger>
                         <SelectContent>
@@ -1232,171 +1298,187 @@ export const RemoteInstancesPage: React.FC = () => {
                           <SelectItem value="dynamic">Dynamic (-D)</SelectItem>
                         </SelectContent>
                       </Select>
-                    </label>
-                  </div>
+                    </div>
 
-                  <div className={`grid gap-3 ${forward.type === 'dynamic' ? '' : 'lg:grid-cols-2'}`}>
-                    <div className="rounded-md border border-[var(--interactive-border)] bg-[var(--surface-elevated)] p-3 space-y-2">
-                      <div className="typography-micro text-muted-foreground/80">
-                        {forward.type === 'remote' ? 'Local target' : 'Local side'}
+                    <div className="flex flex-col gap-1.5 py-1.5 md:flex-row md:items-center md:gap-8">
+                      <div className="w-56 shrink-0">
+                        <HintLabel label={localLabel} hint={localHint} />
                       </div>
-                      <div className="grid gap-2 sm:grid-cols-2">
-                        <label className="space-y-1 block">
-                          <HintLabel label={localHostLabel} hint={localHostHint} />
-                          <Input
-                            value={forward.localHost || '127.0.0.1'}
-                            onChange={(event) =>
-                              updateForward((item) => ({
-                                ...item,
-                                localHost: event.target.value,
-                              }))
-                            }
-                            placeholder="127.0.0.1"
-                          />
-                        </label>
-
-                        <label className="space-y-1 block">
-                          <HintLabel label={localPortLabel} hint={localPortHint} />
-                          <Input
-                            type="number"
-                            min={1}
-                            max={65535}
-                            value={forward.localPort ?? ''}
-                            onChange={(event) => {
-                              const next = Number(event.target.value);
-                              updateForward((item) => ({
-                                ...item,
-                                localPort: Number.isFinite(next) && next > 0 ? next : undefined,
-                              }));
-                            }}
-                            placeholder="8080"
-                          />
-                        </label>
+                      <div className="flex items-center gap-1.5">
+                        <Input
+                          className="h-7 w-32"
+                          value={forward.localHost || '127.0.0.1'}
+                          onChange={(event) =>
+                            updateForward((item) => ({
+                              ...item,
+                              localHost: event.target.value,
+                            }))
+                          }
+                          placeholder="127.0.0.1"
+                        />
+                        <span className="text-muted-foreground">:</span>
+                        <NumberInput
+                          containerClassName="w-fit"
+                          min={1}
+                          max={65535}
+                          step={1}
+                          className="w-16 tabular-nums"
+                          value={forward.localPort}
+                          onValueChange={(next) => {
+                            updateForward((item) => ({
+                              ...item,
+                              localPort: Number.isFinite(next) && next > 0 ? next : undefined,
+                            }));
+                          }}
+                          onClear={() => {
+                            updateForward((item) => ({
+                              ...item,
+                              localPort: undefined,
+                            }));
+                          }}
+                          emptyLabel="Auto"
+                        />
                       </div>
                     </div>
 
                     {forward.type !== 'dynamic' ? (
-                      <div className="rounded-md border border-[var(--interactive-border)] bg-[var(--surface-elevated)] p-3 space-y-2">
-                        <div className="typography-micro text-muted-foreground/80">
-                          {forward.type === 'remote' ? 'Remote listen' : 'Remote target'}
+                      <div className="flex flex-col gap-1.5 py-1.5 md:flex-row md:items-center md:gap-8">
+                        <div className="w-56 shrink-0">
+                          <HintLabel label={remoteLabel} hint={remoteHint} />
                         </div>
-                        <div className="grid gap-2 sm:grid-cols-2">
-                          <label className="space-y-1 block">
-                            <HintLabel label={remoteHostLabel} hint={remoteHostHint} />
-                            <Input
-                              value={forward.remoteHost || ''}
-                              onChange={(event) =>
-                                updateForward((item) => ({
-                                  ...item,
-                                  remoteHost: event.target.value,
-                                }))
-                              }
-                              placeholder="127.0.0.1"
-                            />
-                          </label>
-
-                          <label className="space-y-1 block">
-                            <HintLabel label={remotePortLabel} hint={remotePortHint} />
-                            <Input
-                              type="number"
-                              min={1}
-                              max={65535}
-                              value={forward.remotePort ?? ''}
-                              onChange={(event) => {
-                                const next = Number(event.target.value);
-                                updateForward((item) => ({
-                                  ...item,
-                                  remotePort: Number.isFinite(next) && next > 0 ? next : undefined,
-                                }));
-                              }}
-                              placeholder="80"
-                            />
-                          </label>
+                        <div className="flex items-center gap-1.5">
+                          <Input
+                            className="h-7 w-32"
+                            value={forward.remoteHost || ''}
+                            onChange={(event) =>
+                              updateForward((item) => ({
+                                ...item,
+                                remoteHost: event.target.value,
+                              }))
+                            }
+                            placeholder="127.0.0.1"
+                          />
+                          <span className="text-muted-foreground">:</span>
+                          <NumberInput
+                            containerClassName="w-fit"
+                            min={1}
+                            max={65535}
+                            step={1}
+                            className="w-16 tabular-nums"
+                            value={forward.remotePort}
+                            onValueChange={(next) => {
+                              updateForward((item) => ({
+                                ...item,
+                                remotePort: Number.isFinite(next) && next > 0 ? next : undefined,
+                              }));
+                            }}
+                            onClear={() => {
+                              updateForward((item) => ({
+                                ...item,
+                                remotePort: undefined,
+                              }));
+                            }}
+                            emptyLabel="Auto"
+                          />
                         </div>
                       </div>
                     ) : null}
-                  </div>
-                </div>
 
-                <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-[var(--interactive-border)] bg-[var(--surface-elevated)] px-2 py-1.5">
-                  <div className="flex flex-wrap items-center gap-1 typography-micro text-muted-foreground/80">
-                    {forward.type === 'dynamic' ? (
-                      <>
-                        <RiComputerLine className="h-3.5 w-3.5" />
-                        <span className="font-mono text-foreground">{localEndpoint}</span>
-                        <span>(local SOCKS5)</span>
-                      </>
-                    ) : forward.type === 'remote' ? (
-                      <>
-                        <RiServerLine className="h-3.5 w-3.5" />
-                        <span className="font-mono text-foreground">{remoteEndpoint}</span>
-                        <span>(remote)</span>
-                        <RiArrowRightLine className="h-3.5 w-3.5" />
-                        <RiComputerLine className="h-3.5 w-3.5" />
-                        <span className="font-mono text-foreground">{localEndpoint}</span>
-                        <span>(local)</span>
-                      </>
-                    ) : (
-                      <>
-                        <RiComputerLine className="h-3.5 w-3.5" />
-                        <span className="font-mono text-foreground">{localEndpoint}</span>
-                        <span>(local)</span>
-                        <RiArrowRightLine className="h-3.5 w-3.5" />
-                        <RiServerLine className="h-3.5 w-3.5" />
-                        <span className="font-mono text-foreground">{remoteEndpoint}</span>
-                        <span>(remote)</span>
-                      </>
-                    )}
-                  </div>
+                    <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-md bg-[var(--surface-subtle)] p-2">
+                      <div className="flex flex-wrap items-center gap-1 typography-micro text-muted-foreground/80">
+                        {forward.type === 'dynamic' ? (
+                          <>
+                            <RiComputerLine className="h-3.5 w-3.5" />
+                            <span className="font-mono text-foreground">{localEndpoint}</span>
+                            <span>(local SOCKS5)</span>
+                          </>
+                        ) : forward.type === 'remote' ? (
+                          <>
+                            <RiServerLine className="h-3.5 w-3.5" />
+                            <span className="font-mono text-foreground">{remoteEndpoint}</span>
+                            <span>(remote)</span>
+                            <RiArrowRightLine className="h-3.5 w-3.5" />
+                            <RiComputerLine className="h-3.5 w-3.5" />
+                            <span className="font-mono text-foreground">{localEndpoint}</span>
+                            <span>(local)</span>
+                          </>
+                        ) : (
+                          <>
+                            <RiComputerLine className="h-3.5 w-3.5" />
+                            <span className="font-mono text-foreground">{localEndpoint}</span>
+                            <span>(local)</span>
+                            <RiArrowRightLine className="h-3.5 w-3.5" />
+                            <RiServerLine className="h-3.5 w-3.5" />
+                            <span className="font-mono text-foreground">{remoteEndpoint}</span>
+                            <span>(remote)</span>
+                          </>
+                        )}
+                      </div>
 
-                  {canOpenLocalEndpoint ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        void openExternalUrl(localEndpointUrl).then((opened) => {
-                          if (!opened) {
-                            toast.error('Failed to open local endpoint');
-                          }
-                        });
-                      }}
-                    >
-                      <RiExternalLinkLine className="h-4 w-4" />
-                      Open local
-                    </Button>
-                  ) : null}
-                </div>
-              </div>
+                      {canOpenLocalEndpoint ? (
+                        <ButtonSmall
+                          type="button"
+                          variant="outline"
+                          size="xs"
+                          className="!font-normal"
+                          onClick={() => {
+                            void openExternalUrl(localEndpointUrl).then((opened) => {
+                              if (!opened) {
+                                toast.error('Failed to open local endpoint');
+                              }
+                            });
+                          }}
+                        >
+                          <RiExternalLinkLine className="h-3.5 w-3.5" />
+                          Open local
+                        </ButtonSmall>
+                      ) : null}
+                    </div>
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
             );
           })}
 
-          <Button
+          <ButtonSmall
             type="button"
             variant="outline"
-            size="sm"
-            onClick={() =>
+            size="xs"
+            className="!font-normal mt-1"
+            onClick={() => {
+              const nextForward = makeForward();
               updateDraft((current) => ({
                 ...current,
-                portForwards: [...current.portForwards, makeForward()],
-              }))
-            }
+                portForwards: [...current.portForwards, nextForward],
+              }));
+              setExpandedForwards((current) => ({
+                ...current,
+                [nextForward.id]: true,
+              }));
+            }}
           >
-            <RiAddLine className="h-4 w-4" />
+            <RiAddLine className="h-3.5 w-3.5" />
             Add forward
-          </Button>
-        </div>
-      </SettingsSection>
+          </ButtonSmall>
+        </section>
+      </div>
 
-      <SettingsSection title="Import from SSH config" divider>
+      <div className="mb-8 border-t border-[var(--surface-subtle)] pt-8">
+        <div className="mb-1 px-1 space-y-0.5">
+          <h3 className="typography-ui-header font-medium text-foreground">Import from SSH config</h3>
+        </div>
+        <section className="px-2 pb-2 pt-0">
         {isImportsLoading ? (
           <p className="typography-meta text-muted-foreground">Loading SSH hosts...</p>
         ) : importCandidates.length === 0 ? (
           <p className="typography-meta text-muted-foreground">No SSH hosts available.</p>
         ) : (
-          <div className="space-y-2">
-            {importCandidates.slice(0, 8).map((candidate) => (
-              <div key={`${candidate.source}:${candidate.host}`} className="flex items-center justify-between gap-2 rounded-md border border-[var(--interactive-border)] px-3 py-2">
+          <div>
+            {importCandidates.slice(0, 8).map((candidate, index) => (
+              <div
+                key={`${candidate.source}:${candidate.host}`}
+                className={`flex items-center justify-between gap-2 px-1 py-2 ${index > 0 ? 'border-t border-[var(--surface-subtle)]' : ''}`}
+              >
                 <div className="min-w-0">
                   <div className="typography-ui-label text-foreground truncate">
                     {candidate.host}
@@ -1404,31 +1486,34 @@ export const RemoteInstancesPage: React.FC = () => {
                   </div>
                   <div className="typography-micro text-muted-foreground truncate">{candidate.sshCommand}</div>
                 </div>
-                <Button
+                <ButtonSmall
                   type="button"
                   variant="outline"
-                  size="sm"
+                  size="xs"
+                  className="!font-normal"
                   onClick={() => void handleImportCandidate(candidate.host, candidate.pattern)}
                 >
                   Import
-                </Button>
+                </ButtonSmall>
               </div>
             ))}
           </div>
         )}
-      </SettingsSection>
+      </section>
+      </div>
 
       <div className="sticky bottom-0 z-10 -mx-3 sm:-mx-6 bg-[var(--surface-background)] border-t border-[var(--interactive-border)] px-3 sm:px-6 py-3">
         <div className="flex items-center gap-2">
-          <Button type="button" size="sm" onClick={() => void handleSave()} disabled={!hasChanges || isSaving}>
+          <ButtonSmall type="button" size="xs" className="!font-normal" onClick={() => void handleSave()} disabled={!hasChanges || isSaving}>
             Save changes
-          </Button>
+          </ButtonSmall>
           {status?.localUrl ? (
             <>
-              <Button
+              <ButtonSmall
                 type="button"
                 variant="outline"
-                size="sm"
+                size="xs"
+                className="!font-normal"
                 onClick={() => {
                   void copyTextToClipboard(status.localUrl || '').then((result) => {
                     if (result.ok) {
@@ -1437,20 +1522,21 @@ export const RemoteInstancesPage: React.FC = () => {
                   });
                 }}
               >
-                <RiFileCopyLine className="h-4 w-4" />
+                <RiFileCopyLine className="h-3.5 w-3.5" />
                 Copy local URL
-              </Button>
-              <Button
+              </ButtonSmall>
+              <ButtonSmall
                 type="button"
                 variant="outline"
-                size="sm"
+                size="xs"
+                className="!font-normal"
                 onClick={() => {
                   void handleOpenCurrentInstance();
                 }}
               >
-                <RiExternalLinkLine className="h-4 w-4" />
+                <RiExternalLinkLine className="h-3.5 w-3.5" />
                 Open
-              </Button>
+              </ButtonSmall>
             </>
           ) : null}
           {error ? <div className="ml-auto typography-meta text-[var(--status-error)]">{error}</div> : null}
@@ -1466,14 +1552,14 @@ export const RemoteInstancesPage: React.FC = () => {
             </DialogDescription>
           </DialogHeader>
           <div className="flex items-center justify-end gap-2">
-            <Button type="button" variant="outline" size="sm" onClick={handleCopyAllLogs} disabled={logDialogLoading || !logLinesText.trim()}>
-              <RiFileCopyLine className="h-4 w-4" />
+            <ButtonSmall type="button" variant="outline" size="xs" className="!font-normal" onClick={handleCopyAllLogs} disabled={logDialogLoading || !logLinesText.trim()}>
+              <RiFileCopyLine className="h-3.5 w-3.5" />
               Copy all
-            </Button>
-            <Button type="button" variant="outline" size="sm" onClick={() => void handleClearLogs()} disabled={logDialogLoading}>
-              <RiDeleteBinLine className="h-4 w-4" />
+            </ButtonSmall>
+            <ButtonSmall type="button" variant="outline" size="xs" className="!font-normal" onClick={() => void handleClearLogs()} disabled={logDialogLoading}>
+              <RiDeleteBinLine className="h-3.5 w-3.5" />
               Clear
-            </Button>
+            </ButtonSmall>
           </div>
           {logDialogLoading ? (
             <div className="typography-meta text-muted-foreground">Loading logs...</div>
@@ -1516,12 +1602,12 @@ export const RemoteInstancesPage: React.FC = () => {
               autoFocus
             />
             <div className="flex items-center justify-end gap-2">
-              <Button type="button" variant="outline" size="sm" onClick={closePatternDialog} disabled={patternCreating}>
+              <ButtonSmall type="button" variant="outline" size="xs" className="!font-normal" onClick={closePatternDialog} disabled={patternCreating}>
                 Cancel
-              </Button>
-              <Button type="submit" size="sm" disabled={patternCreating}>
+              </ButtonSmall>
+              <ButtonSmall type="submit" size="xs" className="!font-normal" disabled={patternCreating}>
                 Create
-              </Button>
+              </ButtonSmall>
             </div>
           </form>
         </DialogContent>

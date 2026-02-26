@@ -23,6 +23,7 @@ import {
   RiLoader4Line,
   RiMore2Line,
   RiPencilLine,
+  RiPlug2Line,
   RiRefreshLine,
   RiServerLine,
   RiSettings3Line,
@@ -645,6 +646,32 @@ export function DesktopHostSwitcherDialog({
     void handleSwitch(host);
   }, [allHosts, handleSwitch, sshSwitchModal.hostId]);
 
+  const connectSshHostInPlace = React.useCallback(async (host: DesktopHost) => {
+    if (!isTauriShell()) return;
+    setSwitchingHostId(host.id);
+    try {
+      await desktopSshConnect(host.id);
+      const readyStatus = await waitForSshReady(host.id, SSH_CONNECT_TIMEOUT_MS, (status) => {
+        setSshStatusesById((prev) => ({
+          ...prev,
+          [status.id]: status,
+        }));
+      });
+      if (readyStatus.phase === 'ready') {
+        toast.success(`SSH instance "${redactSensitiveUrl(host.label)}" connected`);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (message !== SSH_CONNECT_CANCELLED_ERROR) {
+        toast.error(`SSH instance "${redactSensitiveUrl(host.label)}" failed to connect`, {
+          description: message,
+        });
+      }
+    } finally {
+      setSwitchingHostId(null);
+    }
+  }, []);
+
   if (!isDesktopShell()) {
     return null;
   }
@@ -837,11 +864,35 @@ export function DesktopHostSwitcherDialog({
                         </DropdownMenu>
                       )}
 
-                      {(isLocal || isSsh) && (
+                      {isLocal && (
                         <div
                           className="h-8 w-8 opacity-0 pointer-events-none"
                           aria-hidden="true"
                         />
+                      )}
+
+                      {isSsh && !isLocal && (
+                        (sshStatus?.phase === 'idle' || !sshStatus?.phase) ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-8 px-2.5"
+                            disabled={switchingHostId === host.id}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void connectSshHostInPlace(host);
+                            }}
+                          >
+                            {switchingHostId === host.id ? <RiLoader4Line className="h-3.5 w-3.5 animate-spin" /> : <RiPlug2Line className="h-3.5 w-3.5" />}
+                            Connect
+                          </Button>
+                        ) : (
+                          <div
+                            className="h-8 w-8 opacity-0 pointer-events-none"
+                            aria-hidden="true"
+                          />
+                        )
                       )}
 
                       <Tooltip delayDuration={700}>

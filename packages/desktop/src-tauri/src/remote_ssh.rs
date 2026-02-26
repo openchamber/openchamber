@@ -5,7 +5,7 @@ use std::{
     collections::{HashMap, HashSet},
     fs,
     io::Read,
-    net::TcpListener,
+    net::{TcpListener, TcpStream},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::{Arc, Mutex},
@@ -30,7 +30,9 @@ pub struct DesktopSshInstancesConfig {
 
 impl Default for DesktopSshInstancesConfig {
     fn default() -> Self {
-        Self { instances: Vec::new() }
+        Self {
+            instances: Vec::new(),
+        }
     }
 }
 
@@ -261,6 +263,7 @@ struct SshSession {
     parsed: DesktopSshParsedCommand,
     session_dir: PathBuf,
     control_path: PathBuf,
+    local_port: u16,
     remote_port: u16,
     started_by_us: bool,
     master: Child,
@@ -428,7 +431,13 @@ fn sanitize_forward(forward: &DesktopSshPortForward) -> Option<DesktopSshPortFor
             if normalized.local_port.is_none() || normalized.remote_port.is_none() {
                 return None;
             }
-            if normalized.remote_host.as_ref().map(|v| v.trim()).unwrap_or("").is_empty() {
+            if normalized
+                .remote_host
+                .as_ref()
+                .map(|v| v.trim())
+                .unwrap_or("")
+                .is_empty()
+            {
                 normalized.remote_host = Some("127.0.0.1".to_string());
             }
         }
@@ -436,10 +445,22 @@ fn sanitize_forward(forward: &DesktopSshPortForward) -> Option<DesktopSshPortFor
             if normalized.local_port.is_none() || normalized.remote_port.is_none() {
                 return None;
             }
-            if normalized.remote_host.as_ref().map(|v| v.trim()).unwrap_or("").is_empty() {
+            if normalized
+                .remote_host
+                .as_ref()
+                .map(|v| v.trim())
+                .unwrap_or("")
+                .is_empty()
+            {
                 normalized.remote_host = Some("127.0.0.1".to_string());
             }
-            if normalized.local_host.as_ref().map(|v| v.trim()).unwrap_or("").is_empty() {
+            if normalized
+                .local_host
+                .as_ref()
+                .map(|v| v.trim())
+                .unwrap_or("")
+                .is_empty()
+            {
                 normalized.local_host = Some("127.0.0.1".to_string());
             }
         }
@@ -488,7 +509,11 @@ fn sanitize_instance(mut instance: DesktopSshInstance) -> Result<DesktopSshInsta
     Ok(instance)
 }
 
-fn sync_desktop_hosts_for_ssh(root: &mut Value, previous_ids: &HashSet<String>, instances: &[DesktopSshInstance]) {
+fn sync_desktop_hosts_for_ssh(
+    root: &mut Value,
+    previous_ids: &HashSet<String>,
+    instances: &[DesktopSshInstance],
+) {
     let next_ids: HashSet<String> = instances.iter().map(|item| item.id.clone()).collect();
 
     let mut hosts = root
@@ -530,7 +555,10 @@ fn sync_desktop_hosts_for_ssh(root: &mut Value, previous_ids: &HashSet<String>, 
                     .map(|value| value.trim().is_empty())
                     .unwrap_or(true);
                 if should_set_default_url {
-                    obj.insert("url".to_string(), Value::String("http://127.0.0.1/".to_string()));
+                    obj.insert(
+                        "url".to_string(),
+                        Value::String("http://127.0.0.1/".to_string()),
+                    );
                 }
             }
             found = true;
@@ -553,12 +581,18 @@ fn sync_desktop_hosts_for_ssh(root: &mut Value, previous_ids: &HashSet<String>, 
         .and_then(Value::as_str)
         .map(|value| value.trim().to_string())
         .unwrap_or_default();
-    if !default_id.is_empty() && previous_ids.contains(default_id.as_str()) && !next_ids.contains(default_id.as_str()) {
+    if !default_id.is_empty()
+        && previous_ids.contains(default_id.as_str())
+        && !next_ids.contains(default_id.as_str())
+    {
         root["desktopDefaultHostId"] = Value::String(LOCAL_HOST_ID.to_string());
     }
 }
 
-fn write_desktop_ssh_instances_to_path(path: &Path, config: DesktopSshInstancesConfig) -> Result<DesktopSshInstancesConfig> {
+fn write_desktop_ssh_instances_to_path(
+    path: &Path,
+    config: DesktopSshInstancesConfig,
+) -> Result<DesktopSshInstancesConfig> {
     let mut root = read_settings_root(path);
     let previous = read_desktop_ssh_instances_from_path(path);
     let previous_ids: HashSet<String> = previous
@@ -633,7 +667,10 @@ fn persist_local_port_for_instance(instance_id: &str, local_port: u16) -> Result
     let mut root = read_settings_root(&path);
     let mut changed = false;
 
-    if let Some(items) = root.get_mut("desktopSshInstances").and_then(Value::as_array_mut) {
+    if let Some(items) = root
+        .get_mut("desktopSshInstances")
+        .and_then(Value::as_array_mut)
+    {
         for item in items {
             let Some(id) = item.get("id").and_then(Value::as_str) else {
                 continue;
@@ -641,7 +678,11 @@ fn persist_local_port_for_instance(instance_id: &str, local_port: u16) -> Result
             if id.trim() != instance_id {
                 continue;
             }
-            if item.get("localForward").and_then(Value::as_object).is_none() {
+            if item
+                .get("localForward")
+                .and_then(Value::as_object)
+                .is_none()
+            {
                 item["localForward"] = json!({});
             }
             item["localForward"]["preferredLocalPort"] = Value::Number(local_port.into());
@@ -699,8 +740,8 @@ fn split_shell_words(input: &str) -> Result<Vec<String>> {
 
 fn is_disallowed_primary_flag(token: &str) -> bool {
     const DISALLOWED: [&str; 17] = [
-        "-M", "-S", "-O", "-N", "-t", "-T", "-f", "-G", "-W", "-v", "-V", "-q", "-n",
-        "-s", "-e", "-E", "-g",
+        "-M", "-S", "-O", "-N", "-t", "-T", "-f", "-G", "-W", "-v", "-V", "-q", "-n", "-s", "-e",
+        "-E", "-g",
     ];
     DISALLOWED.contains(&token)
 }
@@ -732,7 +773,9 @@ fn parse_ssh_command(raw: &str) -> Result<DesktopSshParsedCommand> {
         return Err(anyhow!("SSH command must include destination"));
     }
 
-    const ALLOWED_FLAGS: [&str; 11] = ["-4", "-6", "-A", "-a", "-C", "-K", "-k", "-X", "-x", "-Y", "-y"];
+    const ALLOWED_FLAGS: [&str; 11] = [
+        "-4", "-6", "-A", "-a", "-C", "-K", "-k", "-X", "-x", "-Y", "-y",
+    ];
     const ALLOWED_WITH_VALUES: [&str; 14] = [
         "-B", "-b", "-c", "-D", "-F", "-I", "-i", "-J", "-l", "-m", "-o", "-P", "-p", "-R",
     ];
@@ -744,7 +787,9 @@ fn parse_ssh_command(raw: &str) -> Result<DesktopSshParsedCommand> {
     while idx < tokens.len() {
         let token = tokens[idx].clone();
         if destination.is_some() {
-            return Err(anyhow!("SSH command has unsupported trailing argument: {token}"));
+            return Err(anyhow!(
+                "SSH command has unsupported trailing argument: {token}"
+            ));
         }
 
         if token.starts_with('-') {
@@ -798,7 +843,10 @@ fn parse_ssh_command(raw: &str) -> Result<DesktopSshParsedCommand> {
         idx += 1;
     }
 
-    let Some(destination) = destination.map(|d| d.trim().to_string()).filter(|d| !d.is_empty()) else {
+    let Some(destination) = destination
+        .map(|d| d.trim().to_string())
+        .filter(|d| !d.is_empty())
+    else {
         return Err(anyhow!("SSH command must include destination"));
     };
 
@@ -964,9 +1012,12 @@ fn spawn_master_process(
         command.env("OPENCHAMBER_SSH_ASKPASS_VALUE", secret.trim());
     }
 
-    command
-        .spawn()
-        .with_context(|| format!("failed to start SSH ControlMaster for {}", parsed.destination))
+    command.spawn().with_context(|| {
+        format!(
+            "failed to start SSH ControlMaster for {}",
+            parsed.destination
+        )
+    })
 }
 
 fn wait_for_master_ready(
@@ -1069,11 +1120,18 @@ fn run_remote_command(
     Ok(stdout)
 }
 
-fn remote_command_exists(parsed: &DesktopSshParsedCommand, control_path: &Path, command_name: &str) -> bool {
+fn remote_command_exists(
+    parsed: &DesktopSshParsedCommand,
+    control_path: &Path,
+    command_name: &str,
+) -> bool {
     run_remote_command(
         parsed,
         control_path,
-        &format!("command -v {} >/dev/null 2>&1 && echo yes || echo no", command_name),
+        &format!(
+            "command -v {} >/dev/null 2>&1 && echo yes || echo no",
+            command_name
+        ),
         DEFAULT_CONNECTION_TIMEOUT_SEC,
     )
     .map(|output| output.trim() == "yes")
@@ -1158,7 +1216,12 @@ fn install_openchamber_managed(
 
     let mut last_error: Option<anyhow::Error> = None;
     for command in commands {
-        match run_remote_command(parsed, control_path, &command, DEFAULT_CONNECTION_TIMEOUT_SEC) {
+        match run_remote_command(
+            parsed,
+            control_path,
+            &command,
+            DEFAULT_CONNECTION_TIMEOUT_SEC,
+        ) {
             Ok(_) => return Ok(()),
             Err(err) => {
                 last_error = Some(err);
@@ -1169,23 +1232,104 @@ fn install_openchamber_managed(
     Err(last_error.unwrap_or_else(|| anyhow!("Failed to install OpenChamber on remote host")))
 }
 
+fn parse_probe_status_line(line: Option<&str>, prefix: &str) -> Option<u16> {
+    let value = line?.strip_prefix(prefix)?.trim();
+    value.parse::<u16>().ok()
+}
+
+fn is_auth_http_status(status: u16) -> bool {
+    status == 401 || status == 403
+}
+
+fn is_liveness_http_status(status: u16) -> bool {
+    (200..=299).contains(&status) || is_auth_http_status(status)
+}
+
+fn configured_openchamber_password(instance: &DesktopSshInstance) -> Option<&str> {
+    instance
+        .auth
+        .openchamber_password
+        .as_ref()
+        .and_then(|secret| {
+            if secret.enabled {
+                secret.value.as_deref()
+            } else {
+                None
+            }
+        })
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
 fn probe_remote_system_info(
     parsed: &DesktopSshParsedCommand,
     control_path: &Path,
     port: u16,
+    openchamber_password: Option<&str>,
 ) -> Result<RemoteSystemInfo> {
+    let auth_payload = if let Some(password) = openchamber_password {
+        serde_json::to_string(&json!({ "password": password })).unwrap_or_else(|_| "{}".to_string())
+    } else {
+        "{}".to_string()
+    };
+
+    let auth_enabled = if openchamber_password.is_some() {
+        "1"
+    } else {
+        "0"
+    };
     let script = format!(
-        "if command -v curl >/dev/null 2>&1; then curl -fsS --max-time 3 http://127.0.0.1:{port}/api/system/info; elif command -v wget >/dev/null 2>&1; then wget -qO- http://127.0.0.1:{port}/api/system/info; else exit 127; fi"
+        "AUTH_STATUS=0; INFO_STATUS=0; HEALTH_STATUS=0; BODY_FILE=\"$(mktemp)\"; COOKIE_FILE=\"$(mktemp)\"; cleanup() {{ rm -f \"$BODY_FILE\" \"$COOKIE_FILE\"; }}; trap cleanup EXIT; if command -v curl >/dev/null 2>&1; then if [ \"{auth_enabled}\" = \"1\" ]; then AUTH_STATUS=\"$(curl -sS --max-time 3 -o /dev/null -w '%{{http_code}}' -c \"$COOKIE_FILE\" -H 'content-type: application/json' --data {auth_payload} http://127.0.0.1:{port}/auth/session || true)\"; if [ \"$AUTH_STATUS\" = \"200\" ]; then INFO_STATUS=\"$(curl -sS --max-time 3 -b \"$COOKIE_FILE\" -o \"$BODY_FILE\" -w '%{{http_code}}' http://127.0.0.1:{port}/api/system/info || true)\"; else INFO_STATUS=\"$(curl -sS --max-time 3 -o \"$BODY_FILE\" -w '%{{http_code}}' http://127.0.0.1:{port}/api/system/info || true)\"; fi; else INFO_STATUS=\"$(curl -sS --max-time 3 -o \"$BODY_FILE\" -w '%{{http_code}}' http://127.0.0.1:{port}/api/system/info || true)\"; fi; HEALTH_STATUS=\"$(curl -sS --max-time 3 -o /dev/null -w '%{{http_code}}' http://127.0.0.1:{port}/health || true)\"; elif command -v wget >/dev/null 2>&1; then wget -qO \"$BODY_FILE\" http://127.0.0.1:{port}/api/system/info >/dev/null 2>&1; if [ $? -eq 0 ]; then INFO_STATUS=200; fi; wget -qO- http://127.0.0.1:{port}/health >/dev/null 2>&1; if [ $? -eq 0 ]; then HEALTH_STATUS=200; fi; else exit 127; fi; printf 'INFO_STATUS=%s\\nAUTH_STATUS=%s\\nHEALTH_STATUS=%s\\n' \"$INFO_STATUS\" \"$AUTH_STATUS\" \"$HEALTH_STATUS\"; cat \"$BODY_FILE\" 2>/dev/null || true",
+        auth_payload = shell_quote(&auth_payload),
     );
-    let output = run_remote_command(parsed, control_path, &script, DEFAULT_CONNECTION_TIMEOUT_SEC)?;
-    let mut info = serde_json::from_str::<RemoteSystemInfo>(&output).unwrap_or_default();
+    let output = run_remote_command(
+        parsed,
+        control_path,
+        &script,
+        DEFAULT_CONNECTION_TIMEOUT_SEC,
+    )?;
+
+    let mut lines = output.lines();
+    let info_status = parse_probe_status_line(lines.next(), "INFO_STATUS=").unwrap_or(0);
+    let auth_status = parse_probe_status_line(lines.next(), "AUTH_STATUS=").unwrap_or(0);
+    let health_status = parse_probe_status_line(lines.next(), "HEALTH_STATUS=").unwrap_or(0);
+    let body = lines.collect::<Vec<&str>>().join("\n");
+
+    if is_liveness_http_status(info_status) {
+        if is_auth_http_status(info_status) {
+            if openchamber_password.is_some() && auth_status != 200 {
+                return Err(anyhow!(format!(
+                    "Remote OpenChamber requires UI authentication and configured password was rejected (auth status {auth_status})"
+                )));
+            }
+
+            if is_liveness_http_status(health_status) {
+                return Ok(RemoteSystemInfo::default());
+            }
+
+            return Err(anyhow!(
+                "Remote OpenChamber requires UI authentication on /api/system/info; configure OpenChamber UI password"
+            ));
+        }
+    } else if is_liveness_http_status(health_status) {
+        return Ok(RemoteSystemInfo::default());
+    } else {
+        return Err(anyhow!(format!(
+            "Remote OpenChamber probe failed (info status {info_status}, health status {health_status})"
+        )));
+    }
+
+    let mut info = serde_json::from_str::<RemoteSystemInfo>(&body).unwrap_or_default();
     if info.openchamber_version.is_none() {
-        if let Ok(value) = serde_json::from_str::<Value>(&output) {
+        if let Ok(value) = serde_json::from_str::<Value>(&body) {
             info.openchamber_version = value
                 .get("openchamberVersion")
                 .and_then(Value::as_str)
                 .map(|v| v.to_string());
-            info.runtime = value.get("runtime").and_then(Value::as_str).map(|v| v.to_string());
+            info.runtime = value
+                .get("runtime")
+                .and_then(Value::as_str)
+                .map(|v| v.to_string());
             info.pid = value.get("pid").and_then(Value::as_u64);
             info.started_at = value
                 .get("startedAt")
@@ -1200,8 +1344,9 @@ fn remote_server_running(
     parsed: &DesktopSshParsedCommand,
     control_path: &Path,
     port: u16,
+    openchamber_password: Option<&str>,
 ) -> bool {
-    probe_remote_system_info(parsed, control_path, port).is_ok()
+    probe_remote_system_info(parsed, control_path, port, openchamber_password).is_ok()
 }
 
 fn random_port_candidate(seed: &str) -> u16 {
@@ -1237,7 +1382,12 @@ fn start_remote_server_managed(
     let script = format!(
         "{env_prefix} openchamber serve --daemon --hostname 127.0.0.1 --port {desired_port}"
     );
-    let output = run_remote_command(parsed, control_path, &script, DEFAULT_CONNECTION_TIMEOUT_SEC)?;
+    let output = run_remote_command(
+        parsed,
+        control_path,
+        &script,
+        DEFAULT_CONNECTION_TIMEOUT_SEC,
+    )?;
 
     if let Some(port) = output
         .split_whitespace()
@@ -1248,11 +1398,20 @@ fn start_remote_server_managed(
     Ok(desired_port)
 }
 
-fn stop_remote_server_best_effort(parsed: &DesktopSshParsedCommand, control_path: &Path, remote_port: u16) {
+fn stop_remote_server_best_effort(
+    parsed: &DesktopSshParsedCommand,
+    control_path: &Path,
+    remote_port: u16,
+) {
     let script = format!(
         "if command -v curl >/dev/null 2>&1; then curl -fsS -X POST http://127.0.0.1:{remote_port}/api/system/shutdown >/dev/null 2>&1 || true; elif command -v wget >/dev/null 2>&1; then wget -qO- --method=POST http://127.0.0.1:{remote_port}/api/system/shutdown >/dev/null 2>&1 || true; fi"
     );
-    let _ = run_remote_command(parsed, control_path, &script, DEFAULT_CONNECTION_TIMEOUT_SEC);
+    let _ = run_remote_command(
+        parsed,
+        control_path,
+        &script,
+        DEFAULT_CONNECTION_TIMEOUT_SEC,
+    );
 }
 
 fn spawn_main_forward(
@@ -1284,13 +1443,14 @@ fn spawn_extra_forward(
     parsed: &DesktopSshParsedCommand,
     control_path: &Path,
     forward: &DesktopSshPortForward,
-) -> Result<Child> {
+) -> Result<()> {
     let mut args = vec![
         "-o".to_string(),
         "ControlMaster=no".to_string(),
         "-o".to_string(),
         format!("ControlPath={}", control_path.display()),
-        "-N".to_string(),
+        "-O".to_string(),
+        "forward".to_string(),
     ];
 
     match forward.forward_type {
@@ -1353,12 +1513,25 @@ fn spawn_extra_forward(
     }
 
     let mut command = build_ssh_command(parsed, &args, None);
-    command
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
-        .with_context(|| format!("Failed to start extra SSH forward {}", forward.id))
+    let (code, stdout, stderr) = run_output(&mut command)
+        .with_context(|| format!("Failed to configure extra SSH forward {}", forward.id))?;
+    if code != 0 {
+        let detail = if stderr.trim().is_empty() {
+            stdout.trim()
+        } else {
+            stderr.trim()
+        };
+        return Err(anyhow!(format!(
+            "Failed to configure extra SSH forward {}: {}",
+            forward.id,
+            if detail.is_empty() {
+                "unknown error"
+            } else {
+                detail
+            }
+        )));
+    }
+    Ok(())
 }
 
 fn is_local_port_available(bind_host: &str, port: u16) -> bool {
@@ -1368,6 +1541,14 @@ fn is_local_port_available(bind_host: &str, port: u16) -> bool {
 fn pick_unused_local_port() -> Result<u16> {
     let listener = TcpListener::bind("127.0.0.1:0")?;
     Ok(listener.local_addr()?.port())
+}
+
+fn is_local_tunnel_reachable(local_port: u16) -> bool {
+    let addr = format!("127.0.0.1:{local_port}");
+    let Ok(parsed) = addr.parse() else {
+        return false;
+    };
+    TcpStream::connect_timeout(&parsed, Duration::from_millis(500)).is_ok()
 }
 
 fn wait_local_forward_ready(local_port: u16) -> Result<()> {
@@ -1385,7 +1566,9 @@ fn wait_local_forward_ready(local_port: u16) -> Result<()> {
         }
         std::thread::sleep(Duration::from_millis(250));
     }
-    Err(anyhow!("Timed out waiting for forwarded OpenChamber health"))
+    Err(anyhow!(
+        "Timed out waiting for forwarded OpenChamber health"
+    ))
 }
 
 fn kill_child(child: &mut Child) {
@@ -1399,11 +1582,7 @@ fn parse_ssh_config_candidates(path: &Path, source: &str) -> Vec<DesktopSshImpor
     };
     let mut candidates = Vec::new();
     for line in content.lines() {
-        let trimmed = line
-            .split('#')
-            .next()
-            .map(|part| part.trim())
-            .unwrap_or("");
+        let trimmed = line.split('#').next().map(|part| part.trim()).unwrap_or("");
         if trimmed.is_empty() {
             continue;
         }
@@ -1568,7 +1747,10 @@ impl DesktopSshManagerInner {
     }
 
     fn next_connect_attempt(&self, id: &str) -> u32 {
-        let mut guard = self.connect_attempts.lock().expect("ssh connect-attempt mutex");
+        let mut guard = self
+            .connect_attempts
+            .lock()
+            .expect("ssh connect-attempt mutex");
         let next = guard.get(id).copied().unwrap_or(0).saturating_add(1);
         guard.insert(id.to_string(), next);
         next
@@ -1643,7 +1825,19 @@ impl DesktopSshManagerInner {
 
         if session.master_detached {
             if !is_control_master_alive(&session.parsed, &session.control_path) {
-                self.append_log_with_level(id, "WARN", "Existing SSH ControlMaster is not reachable");
+                if is_local_tunnel_reachable(session.local_port) {
+                    self.append_log_with_level(
+                        id,
+                        "WARN",
+                        "SSH ControlMaster check failed but local tunnel is still reachable",
+                    );
+                    return true;
+                }
+                self.append_log_with_level(
+                    id,
+                    "WARN",
+                    "Existing SSH ControlMaster is not reachable",
+                );
                 return false;
             }
         } else if let Some(status) = session.master.try_wait().ok().flatten() {
@@ -1682,17 +1876,19 @@ impl DesktopSshManagerInner {
         self.cancel_connect_task(id);
         self.cancel_monitor_task(id);
 
-        if let Some(mut session) = self
-            .sessions
-            .lock()
-            .expect("ssh sessions mutex")
-            .remove(id)
-        {
+        if let Some(mut session) = self.sessions.lock().expect("ssh sessions mutex").remove(id) {
             if session.started_by_us
-                && matches!(session.instance.remote_openchamber.mode, DesktopSshRemoteMode::Managed)
+                && matches!(
+                    session.instance.remote_openchamber.mode,
+                    DesktopSshRemoteMode::Managed
+                )
                 && !session.instance.remote_openchamber.keep_running
             {
-                stop_remote_server_best_effort(&session.parsed, &session.control_path, session.remote_port);
+                stop_remote_server_best_effort(
+                    &session.parsed,
+                    &session.control_path,
+                    session.remote_port,
+                );
             }
 
             stop_control_master_best_effort(&session.parsed, &session.control_path);
@@ -1753,11 +1949,17 @@ impl DesktopSshManagerInner {
                     0,
                     false,
                 );
-                if !remote_server_running(parsed, control_path, port) {
-                    return Err(anyhow!(
-                        "External OpenChamber server is not reachable on configured remote port"
-                    ));
-                }
+                probe_remote_system_info(
+                    parsed,
+                    control_path,
+                    port,
+                    configured_openchamber_password(instance),
+                )
+                .map_err(|err| {
+                    anyhow!(format!(
+                        "External OpenChamber server probe failed on configured remote port: {err}"
+                    ))
+                })?;
                 Ok((port, false))
             }
             DesktopSshRemoteMode::Managed => {
@@ -1801,7 +2003,9 @@ impl DesktopSshManagerInner {
                         DesktopSshPhase::Updating,
                         Some(format!(
                             "Updating remote OpenChamber from {} to {}",
-                            installed_version.clone().unwrap_or_else(|| "unknown".to_string()),
+                            installed_version
+                                .clone()
+                                .unwrap_or_else(|| "unknown".to_string()),
                             app_version
                         )),
                         None,
@@ -1836,7 +2040,12 @@ impl DesktopSshManagerInner {
                 let mut remote_port = instance.remote_openchamber.preferred_port;
 
                 if let Some(port) = remote_port {
-                    if !remote_server_running(parsed, control_path, port) {
+                    if !remote_server_running(
+                        parsed,
+                        control_path,
+                        port,
+                        configured_openchamber_password(instance),
+                    ) {
                         remote_port = None;
                     }
                 }
@@ -1858,12 +2067,8 @@ impl DesktopSshManagerInner {
                         .remote_openchamber
                         .preferred_port
                         .unwrap_or_else(|| random_port_candidate(&instance.id));
-                    let started_port = start_remote_server_managed(
-                        parsed,
-                        control_path,
-                        instance,
-                        desired_port,
-                    )?;
+                    let started_port =
+                        start_remote_server_managed(parsed, control_path, instance, desired_port)?;
                     remote_port = Some(started_port);
                     started_by_us = true;
                 }
@@ -1872,7 +2077,12 @@ impl DesktopSshManagerInner {
                     return Err(anyhow!("Failed to determine remote OpenChamber port"));
                 };
 
-                if !remote_server_running(parsed, control_path, port) {
+                if !remote_server_running(
+                    parsed,
+                    control_path,
+                    port,
+                    configured_openchamber_password(instance),
+                ) {
                     return Err(anyhow!(
                         "Managed OpenChamber server failed to become reachable"
                     ));
@@ -1883,7 +2093,11 @@ impl DesktopSshManagerInner {
         }
     }
 
-    fn connect_blocking(self: &Arc<Self>, app: &AppHandle, instance: DesktopSshInstance) -> Result<()> {
+    fn connect_blocking(
+        self: &Arc<Self>,
+        app: &AppHandle,
+        instance: DesktopSshInstance,
+    ) -> Result<()> {
         let id = instance.id.clone();
         self.set_status(
             app,
@@ -1942,14 +2156,21 @@ impl DesktopSshManagerInner {
             &parsed,
             &control_path,
             &askpass_path,
-            instance
-                .auth
-                .ssh_password
-                .as_ref()
-                .and_then(|secret| if secret.enabled { secret.value.as_deref() } else { None }),
+            instance.auth.ssh_password.as_ref().and_then(|secret| {
+                if secret.enabled {
+                    secret.value.as_deref()
+                } else {
+                    None
+                }
+            }),
         )?;
 
-        if let Err(err) = wait_for_master_ready(&parsed, &control_path, instance.connection_timeout_sec, &mut master) {
+        if let Err(err) = wait_for_master_ready(
+            &parsed,
+            &control_path,
+            instance.connection_timeout_sec,
+            &mut master,
+        ) {
             kill_child(&mut master);
             return Err(err);
         }
@@ -1980,13 +2201,14 @@ impl DesktopSshManagerInner {
             return Err(anyhow!("Unsupported remote OS: {remote_os}"));
         }
 
-        let (remote_port, started_by_us) = match self.ensure_remote_server(app, &instance, &parsed, &control_path) {
-            Ok(result) => result,
-            Err(err) => {
-                kill_child(&mut master);
-                return Err(err);
-            }
-        };
+        let (remote_port, started_by_us) =
+            match self.ensure_remote_server(app, &instance, &parsed, &control_path) {
+                Ok(result) => result,
+                Err(err) => {
+                    kill_child(&mut master);
+                    return Err(err);
+                }
+            };
 
         self.set_status(
             app,
@@ -2010,32 +2232,59 @@ impl DesktopSshManagerInner {
             local_port = pick_unused_local_port()?;
         }
 
-        let mut main_forward = match spawn_main_forward(&parsed, &control_path, &bind_host, local_port, remote_port) {
-            Ok(child) => child,
-            Err(err) => {
-                kill_child(&mut master);
-                return Err(err);
-            }
-        };
+        let mut main_forward =
+            match spawn_main_forward(&parsed, &control_path, &bind_host, local_port, remote_port) {
+                Ok(child) => child,
+                Err(err) => {
+                    kill_child(&mut master);
+                    return Err(err);
+                }
+            };
+        let mut main_forward_detached = false;
 
         std::thread::sleep(Duration::from_millis(250));
         if let Some(status) = main_forward.try_wait().ok().flatten() {
-            let mut stderr = String::new();
-            if let Some(mut stream) = main_forward.stderr.take() {
-                let _ = stream.read_to_string(&mut stderr);
+            if status.success() {
+                main_forward_detached = true;
+                self.append_log_with_level(
+                    &id,
+                    "INFO",
+                    "Main tunnel helper exited after ControlMaster handoff",
+                );
+            } else {
+                let mut stderr = String::new();
+                if let Some(mut stream) = main_forward.stderr.take() {
+                    let _ = stream.read_to_string(&mut stderr);
+                }
+                kill_child(&mut master);
+                return Err(anyhow!(format!(
+                    "Failed to start main port forward (status: {status}): {}",
+                    stderr.trim()
+                )));
             }
-            kill_child(&mut master);
-            return Err(anyhow!(format!(
-                "Failed to start main port forward (status: {status}): {}",
-                stderr.trim()
-            )));
         }
 
         let mut extra_forwards = Vec::new();
         let mut extra_errors = Vec::new();
-        for forward in instance.port_forwards.iter().filter(|forward| forward.enabled) {
+        for forward in instance
+            .port_forwards
+            .iter()
+            .filter(|forward| forward.enabled)
+        {
             match spawn_extra_forward(&parsed, &control_path, forward) {
-                Ok(child) => extra_forwards.push(child),
+                Ok(()) => {
+                    if matches!(forward.forward_type, DesktopSshPortForwardType::Local) {
+                        if let Some(local_port) = forward.local_port {
+                            std::thread::sleep(Duration::from_millis(100));
+                            if !is_local_tunnel_reachable(local_port) {
+                                extra_errors.push(format!(
+                                    "{}: local listener 127.0.0.1:{} is not reachable",
+                                    forward.id, local_port
+                                ));
+                            }
+                        }
+                    }
+                }
                 Err(err) => extra_errors.push(format!("{}: {}", forward.id, err)),
             }
         }
@@ -2056,25 +2305,23 @@ impl DesktopSshManagerInner {
             let _ = persist_local_port_for_instance(&id, local_port);
         }
 
-        self.sessions
-            .lock()
-            .expect("ssh sessions mutex")
-            .insert(
-                id.clone(),
-                SshSession {
-                    instance: instance.clone(),
-                    parsed,
-                    session_dir,
-                    control_path,
-                    remote_port,
-                    started_by_us,
-                    master,
-                    master_detached: false,
-                    main_forward,
-                    main_forward_detached: false,
-                    extra_forwards,
-                },
-            );
+        self.sessions.lock().expect("ssh sessions mutex").insert(
+            id.clone(),
+            SshSession {
+                instance: instance.clone(),
+                parsed,
+                session_dir,
+                control_path,
+                local_port,
+                remote_port,
+                started_by_us,
+                master,
+                master_detached: false,
+                main_forward,
+                main_forward_detached,
+                extra_forwards,
+            },
+        );
 
         self.clear_retry_attempt(&id);
         self.set_status(
@@ -2147,7 +2394,12 @@ impl DesktopSshManagerInner {
                         if main_anchor_alive {
                             if !session.master_detached {
                                 if let Some(status) = session.master.try_wait().ok().flatten() {
-                                    if status.success() && is_control_master_alive(&session.parsed, &session.control_path) {
+                                    if status.success()
+                                        && is_control_master_alive(
+                                            &session.parsed,
+                                            &session.control_path,
+                                        )
+                                    {
                                         session.master_detached = true;
                                         if detached_notice.is_none() {
                                             detached_notice = Some(
@@ -2162,7 +2414,10 @@ impl DesktopSshManagerInner {
                                         );
                                     }
                                 }
-                            } else if !is_control_master_alive(&session.parsed, &session.control_path) {
+                            } else if !is_control_master_alive(
+                                &session.parsed,
+                                &session.control_path,
+                            ) {
                                 detached_notice = Some(
                                     "SSH ControlMaster is not reachable; main tunnel remains active"
                                         .to_string(),
@@ -2170,10 +2425,22 @@ impl DesktopSshManagerInner {
                             }
                         } else if session.master_detached {
                             if !is_control_master_alive(&session.parsed, &session.control_path) {
-                                dropped_reason = Some("SSH ControlMaster is not reachable".to_string());
+                                if is_local_tunnel_reachable(session.local_port) {
+                                    if detached_notice.is_none() {
+                                        detached_notice = Some(
+                                            "SSH ControlMaster check failed but local tunnel is still reachable"
+                                                .to_string(),
+                                        );
+                                    }
+                                } else {
+                                    dropped_reason =
+                                        Some("SSH ControlMaster is not reachable".to_string());
+                                }
                             }
                         } else if let Some(status) = session.master.try_wait().ok().flatten() {
-                            if status.success() && is_control_master_alive(&session.parsed, &session.control_path) {
+                            if status.success()
+                                && is_control_master_alive(&session.parsed, &session.control_path)
+                            {
                                 session.master_detached = true;
                                 if detached_notice.is_none() {
                                     detached_notice = Some(
@@ -2189,7 +2456,10 @@ impl DesktopSshManagerInner {
                                 dropped_reason = Some(if stderr.trim().is_empty() {
                                     format!("SSH ControlMaster exited ({status})")
                                 } else {
-                                    format!("SSH ControlMaster exited ({status}): {}", stderr.trim())
+                                    format!(
+                                        "SSH ControlMaster exited ({status}): {}",
+                                        stderr.trim()
+                                    )
                                 });
                             }
                         }
@@ -2204,7 +2474,8 @@ impl DesktopSshManagerInner {
                     continue;
                 }
 
-                let dropped_reason = dropped_reason.unwrap_or_else(|| "SSH connection dropped".to_string());
+                let dropped_reason =
+                    dropped_reason.unwrap_or_else(|| "SSH connection dropped".to_string());
                 inner.append_log_with_level(&id_for_task, "WARN", dropped_reason.clone());
 
                 inner.disconnect_internal(&app, &id_for_task, false);
@@ -2215,9 +2486,7 @@ impl DesktopSshManagerInner {
                         &app,
                         &id_for_task,
                         DesktopSshPhase::Error,
-                        Some(format!(
-                            "{dropped_reason}. Retry limit reached"
-                        )),
+                        Some(format!("{dropped_reason}. Retry limit reached")),
                         None,
                         None,
                         None,
@@ -2232,9 +2501,7 @@ impl DesktopSshManagerInner {
                     &app,
                     &id_for_task,
                     DesktopSshPhase::Degraded,
-                    Some(format!(
-                        "{dropped_reason}. Reconnecting"
-                    )),
+                    Some(format!("{dropped_reason}. Reconnecting")),
                     None,
                     None,
                     None,
@@ -2243,9 +2510,13 @@ impl DesktopSshManagerInner {
                     false,
                 );
 
-                let delay_ms = (2u64.saturating_pow(attempt.saturating_sub(1))).saturating_mul(1000);
+                let delay_ms =
+                    (2u64.saturating_pow(attempt.saturating_sub(1))).saturating_mul(1000);
                 let jitter = (now_millis() % 700).saturating_add(100);
-                tokio::time::sleep(Duration::from_millis(delay_ms.min(30_000).saturating_add(jitter))).await;
+                tokio::time::sleep(Duration::from_millis(
+                    delay_ms.min(30_000).saturating_add(jitter),
+                ))
+                .await;
 
                 if let Err(err) = inner.start_connect(app.clone(), id_for_task.clone()) {
                     inner.set_status(
@@ -2306,7 +2577,11 @@ impl DesktopSshManagerInner {
                 snapshot.retry_attempt,
                 false,
             );
-            self.append_log_with_level(&id, "INFO", "Connection already active; reusing existing SSH session");
+            self.append_log_with_level(
+                &id,
+                "INFO",
+                "Connection already active; reusing existing SSH session",
+            );
             return Ok(());
         }
 
@@ -2483,7 +2758,10 @@ pub fn desktop_ssh_import_hosts() -> Result<Vec<DesktopSshImportCandidate>, Stri
         let user_config = PathBuf::from(home).join(".ssh").join("config");
         candidates.extend(parse_ssh_config_candidates(&user_config, "user"));
     }
-    candidates.extend(parse_ssh_config_candidates(Path::new("/etc/ssh/ssh_config"), "global"));
+    candidates.extend(parse_ssh_config_candidates(
+        Path::new("/etc/ssh/ssh_config"),
+        "global",
+    ));
 
     let mut seen = HashSet::new();
     candidates.retain(|item| seen.insert(item.host.clone()));
@@ -2523,7 +2801,10 @@ pub fn desktop_ssh_status(
     state: State<'_, DesktopSshManagerState>,
     id: Option<String>,
 ) -> Result<Vec<DesktopSshInstanceStatus>, String> {
-    if let Some(instance_id) = id.map(|value| value.trim().to_string()).filter(|value| !value.is_empty()) {
+    if let Some(instance_id) = id
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
         return Ok(vec![state.inner.status_snapshot_for_instance(&instance_id)]);
     }
 
@@ -2550,8 +2831,10 @@ mod tests {
 
     #[test]
     fn parse_ssh_command_accepts_supported_options() {
-        let parsed = parse_ssh_command("ssh -J jump.example.com -o StrictHostKeyChecking=accept-new user@example.com")
-            .expect("parsed");
+        let parsed = parse_ssh_command(
+            "ssh -J jump.example.com -o StrictHostKeyChecking=accept-new user@example.com",
+        )
+        .expect("parsed");
         assert_eq!(parsed.destination, "user@example.com");
         assert_eq!(
             parsed.args,
@@ -2580,8 +2863,8 @@ mod tests {
 
     #[test]
     fn parse_ssh_command_keeps_ipv6_destination() {
-        let parsed = parse_ssh_command("ssh user@[2001:db8::1]:2222")
-            .expect("parsed ipv6 destination");
+        let parsed =
+            parse_ssh_command("ssh user@[2001:db8::1]:2222").expect("parsed ipv6 destination");
         assert_eq!(parsed.destination, "user@[2001:db8::1]:2222");
     }
 
@@ -2606,8 +2889,12 @@ mod tests {
             .and_then(Value::as_array)
             .expect("hosts array");
         assert_eq!(hosts.len(), 2);
-        assert!(hosts.iter().any(|item| item.get("id") == Some(&Value::String("http-1".to_string()))));
-        assert!(hosts.iter().any(|item| item.get("id") == Some(&Value::String("ssh-new".to_string()))));
+        assert!(hosts
+            .iter()
+            .any(|item| item.get("id") == Some(&Value::String("http-1".to_string()))));
+        assert!(hosts
+            .iter()
+            .any(|item| item.get("id") == Some(&Value::String("ssh-new".to_string()))));
         assert_eq!(
             root.get("desktopDefaultHostId").and_then(Value::as_str),
             Some("local")
@@ -2616,10 +2903,8 @@ mod tests {
 
     #[test]
     fn parse_ssh_config_candidates_extracts_host_entries() {
-        let temp = std::env::temp_dir().join(format!(
-            "openchamber-ssh-import-{}.txt",
-            now_millis()
-        ));
+        let temp =
+            std::env::temp_dir().join(format!("openchamber-ssh-import-{}.txt", now_millis()));
         fs::write(
             &temp,
             "\nHost prod\n  HostName 10.0.0.1\nHost *.dev !skip\nHost *\n",
@@ -2629,8 +2914,12 @@ mod tests {
         let candidates = parse_ssh_config_candidates(&temp, "user");
         let _ = fs::remove_file(&temp);
 
-        assert!(candidates.iter().any(|item| item.host == "prod" && !item.pattern));
-        assert!(candidates.iter().any(|item| item.host == "*.dev" && item.pattern));
+        assert!(candidates
+            .iter()
+            .any(|item| item.host == "prod" && !item.pattern));
+        assert!(candidates
+            .iter()
+            .any(|item| item.host == "*.dev" && item.pattern));
         assert!(!candidates.iter().any(|item| item.host == "*"));
     }
 
@@ -2641,14 +2930,40 @@ mod tests {
         instance.local_forward.bind_host = "".to_string();
 
         let normalized = sanitize_instance(instance).expect("sanitize instance");
-        assert_eq!(normalized.connection_timeout_sec, DEFAULT_CONNECTION_TIMEOUT_SEC);
+        assert_eq!(
+            normalized.connection_timeout_sec,
+            DEFAULT_CONNECTION_TIMEOUT_SEC
+        );
         assert_eq!(normalized.local_forward.bind_host, "127.0.0.1");
         assert_eq!(
-            normalized
-                .ssh_parsed
-                .expect("parsed")
-                .destination,
+            normalized.ssh_parsed.expect("parsed").destination,
             "user@example.com"
         );
+    }
+
+    #[test]
+    fn parse_probe_status_line_extracts_numeric_status() {
+        assert_eq!(
+            parse_probe_status_line(Some("INFO_STATUS=401"), "INFO_STATUS="),
+            Some(401)
+        );
+        assert_eq!(
+            parse_probe_status_line(Some("INFO_STATUS=abc"), "INFO_STATUS="),
+            None
+        );
+        assert_eq!(
+            parse_probe_status_line(Some("WRONG=200"), "INFO_STATUS="),
+            None
+        );
+    }
+
+    #[test]
+    fn liveness_status_accepts_success_and_auth_challenges() {
+        assert!(is_liveness_http_status(200));
+        assert!(is_liveness_http_status(204));
+        assert!(is_liveness_http_status(401));
+        assert!(is_liveness_http_status(403));
+        assert!(!is_liveness_http_status(500));
+        assert!(!is_liveness_http_status(0));
     }
 }
