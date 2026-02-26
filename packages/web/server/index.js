@@ -7023,6 +7023,123 @@ async function main(options = {}) {
   });
 
   // ============================================================
+  // Profile Routes
+  // ============================================================
+
+  app.get('/api/config/profiles', async (req, res) => {
+    try {
+      const profiles = settings.profiles || [];
+      res.json({ profiles });
+    } catch (error) {
+      console.error('[Server] Failed to get profiles:', error);
+      res.status(500).json({ error: error.message || 'Failed to get profiles' });
+    }
+  });
+
+  app.post('/api/config/profiles', async (req, res) => {
+    try {
+      const { name, agentModels } = req.body;
+
+      const trimmedName = typeof name === 'string' ? name.trim() : '';
+      if (trimmedName.length === 0 || trimmedName.length > 64) {
+        return res.status(400).json({ error: 'name must be a string of 1–64 characters' });
+      }
+      if (!agentModels || typeof agentModels !== 'object' || Array.isArray(agentModels)) {
+        return res.status(400).json({ error: 'agentModels must be an object with string values' });
+      }
+      for (const [key, val] of Object.entries(agentModels)) {
+        if (typeof key !== 'string' || typeof val !== 'string') {
+          return res.status(400).json({ error: 'agentModels must be an object with string values' });
+        }
+      }
+
+      const now = new Date().toISOString();
+      const profile = {
+        id: crypto.randomUUID(),
+        name: trimmedName,
+        agentModels,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      const profiles = [...(settings.profiles || []), profile];
+      console.log(`[Server] Creating profile: ${profile.name} (${profile.id})`);
+      await persistSettings({ profiles });
+
+      res.json({ success: true, profile });
+    } catch (error) {
+      console.error('[Server] Failed to create profile:', error);
+      res.status(500).json({ error: error.message || 'Failed to create profile' });
+    }
+  });
+
+  app.patch('/api/config/profiles/:id', async (req, res) => {
+    try {
+      const profileId = req.params.id;
+      const { name, agentModels } = req.body;
+      const profiles = settings.profiles || [];
+      const index = profiles.findIndex((p) => p.id === profileId);
+      if (index === -1) {
+        return res.status(404).json({ error: 'Profile not found' });
+      }
+
+      const existing = profiles[index];
+      const updatedProfile = { ...existing };
+
+      if (name !== undefined) {
+        const trimmedName = typeof name === 'string' ? name.trim() : '';
+        if (trimmedName.length === 0 || trimmedName.length > 64) {
+          return res.status(400).json({ error: 'name must be a string of 1–64 characters' });
+        }
+        updatedProfile.name = trimmedName;
+      }
+      if (agentModels !== undefined) {
+        if (!agentModels || typeof agentModels !== 'object' || Array.isArray(agentModels)) {
+          return res.status(400).json({ error: 'agentModels must be an object with string values' });
+        }
+        for (const [key, val] of Object.entries(agentModels)) {
+          if (typeof key !== 'string' || typeof val !== 'string') {
+            return res.status(400).json({ error: 'agentModels must be an object with string values' });
+          }
+        }
+        updatedProfile.agentModels = agentModels;
+      }
+      updatedProfile.updatedAt = new Date().toISOString();
+
+      const updatedProfiles = [...profiles];
+      updatedProfiles[index] = updatedProfile;
+
+      console.log(`[Server] Updating profile: ${updatedProfile.name} (${profileId})`);
+      await persistSettings({ profiles: updatedProfiles });
+
+      res.json({ success: true, profile: updatedProfile });
+    } catch (error) {
+      console.error('[Server] Failed to update profile:', error);
+      res.status(500).json({ error: error.message || 'Failed to update profile' });
+    }
+  });
+
+  app.delete('/api/config/profiles/:id', async (req, res) => {
+    try {
+      const profileId = req.params.id;
+      const profiles = settings.profiles || [];
+      const index = profiles.findIndex((p) => p.id === profileId);
+      if (index === -1) {
+        return res.status(404).json({ error: 'Profile not found' });
+      }
+
+      const updatedProfiles = profiles.filter((p) => p.id !== profileId);
+      console.log(`[Server] Deleting profile: ${profileId}`);
+      await persistSettings({ profiles: updatedProfiles });
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error('[Server] Failed to delete profile:', error);
+      res.status(500).json({ error: error.message || 'Failed to delete profile' });
+    }
+  });
+
+  // ============================================================
   // MCP Config Routes
   // ============================================================
 
