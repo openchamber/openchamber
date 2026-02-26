@@ -20,6 +20,16 @@ bun run vscode:build && code --extensionDevelopmentPath="$(pwd)/packages/vscode"
 bun run build
 ```
 
+### Alternative: Nix Flake
+
+If you use Nix, the flake provides a complete dev shell with all dependencies (bun, node, rust, cargo-tauri, native build tools):
+
+```bash
+nix develop   # enters the dev shell
+bun install   # install JS dependencies
+bun run dev:web:full
+```
+
 ## Before Submitting
 
 ```bash

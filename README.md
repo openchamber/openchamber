@@ -140,6 +140,37 @@ chown -R 1000:1000 data/
 
 Without proper permissions, the container may fail to start or encounter permission denied errors when writing to these directories.
 
+### Nix Flake
+
+OpenChamber provides a Nix flake for both installation and development.
+
+```bash
+# Run directly without installing
+nix run github:btriapitsyn/openchamber
+
+# Install into your profile
+nix profile install github:btriapitsyn/openchamber
+
+# Enter a development shell with all dependencies
+nix develop github:btriapitsyn/openchamber
+```
+
+**Use as a flake input** (NixOS / Home Manager):
+
+```nix
+# flake.nix
+{
+  inputs.openchamber.url = "github:btriapitsyn/openchamber";
+
+  # Then in your config:
+  # environment.systemPackages = [ inputs.openchamber.packages.${system}.default ];
+  # or with Home Manager:
+  # home.packages = [ inputs.openchamber.packages.${system}.default ];
+}
+```
+
+**Maintaining the flake:** When `bun.lock` or `patches/` change, the fixed-output derivation hash must be updated. Set the hash to `pkgs.lib.fakeHash` in `flake.nix`, run `nix build`, and replace with the correct hash from the error message.
+
 ## Prerequisites
 
 - [OpenCode CLI](https://opencode.ai) installed
