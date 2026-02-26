@@ -10,7 +10,6 @@ import { useFontPreferences } from '@/hooks/useFontPreferences';
 import { CODE_FONT_OPTION_MAP, DEFAULT_MONO_FONT } from '@/lib/fontOptions';
 import { convertThemeToXterm } from '@/lib/terminalTheme';
 import { TerminalViewport, type TerminalController } from '@/components/terminal/TerminalViewport';
-import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 import { Button } from '@/components/ui/button';
@@ -86,6 +85,8 @@ export const TerminalView: React.FC = () => {
     const { currentTheme } = useThemeSystem();
     const { monoFont } = useFontPreferences();
     const terminalFontSize = useUIStore(state => state.terminalFontSize);
+    const bottomTerminalHeight = useUIStore((state) => state.bottomTerminalHeight);
+    const isBottomTerminalExpanded = useUIStore((state) => state.isBottomTerminalExpanded);
     const { isMobile, hasTouchInput } = useDeviceInfo();
     // Tabs are supported for web + desktop runtimes (not VSCode).
     const enableTabs = !isMobile && runtime.platform !== 'vscode';
@@ -137,6 +138,7 @@ export const TerminalView: React.FC = () => {
     const [isFatalError, setIsFatalError] = React.useState(false);
     const [activeModifier, setActiveModifier] = React.useState<Modifier | null>(null);
     const [isRestarting, setIsRestarting] = React.useState(false);
+    const [viewportLayoutVersion, setViewportLayoutVersion] = React.useState(0);
     const keyboardAvoidTargetId = React.useId();
 
     const streamCleanupRef = React.useRef<(() => void) | null>(null);
@@ -150,6 +152,13 @@ export const TerminalView: React.FC = () => {
     const nudgeOnConnectTerminalIdRef = React.useRef<string | null>(null);
     const rehydratedTerminalIdsRef = React.useRef<Set<string>>(new Set());
     const rehydratedSnapshotTakenRef = React.useRef(false);
+
+    const focusTerminalWhenWindowActive = React.useCallback(() => {
+        if (typeof document !== 'undefined' && !document.hasFocus()) {
+            return;
+        }
+        terminalControllerRef.current?.focus();
+    }, []);
 
     React.useEffect(() => {
         if (!terminalHydrated) {
@@ -263,7 +272,7 @@ export const TerminalView: React.FC = () => {
                                 setConnecting(directory, tabId, false);
                                 setConnectionError(null);
                                 setIsFatalError(false);
-                                terminalControllerRef.current?.focus();
+                                focusTerminalWhenWindowActive();
 
                                 // After a reload, buffer is empty and a reused PTY can look "stuck"
                                 // until the first output arrives. Nudge with a newline once.
@@ -292,6 +301,10 @@ export const TerminalView: React.FC = () => {
                                 const exitCode =
                                     typeof event.exitCode === 'number' ? event.exitCode : null;
                                 const signal = typeof event.signal === 'number' ? event.signal : null;
+                                const currentTab = useTerminalStore.getState()
+                                    .getDirectoryState(directory)
+                                    ?.tabs.find((t) => t.id === tabId);
+                                const isActionTab = Boolean(currentTab?.label?.startsWith('Action:'));
                                 appendToBuffer(
                                     directory,
                                     tabId,
@@ -301,7 +314,7 @@ export const TerminalView: React.FC = () => {
                                 );
                                 setTabSessionId(directory, tabId, null);
                                 setConnecting(directory, tabId, false);
-                                setConnectionError('Terminal session ended');
+                                setConnectionError(isActionTab ? null : 'Terminal session ended');
                                 setIsFatalError(false);
                                 disconnectStream();
                                 break;
@@ -335,7 +348,7 @@ export const TerminalView: React.FC = () => {
                 activeTerminalIdRef.current = null;
             };
         },
-        [appendToBuffer, disconnectStream, setConnecting, setTabSessionId, terminal]
+        [appendToBuffer, disconnectStream, focusTerminalWhenWindowActive, setConnecting, setTabSessionId, terminal]
     );
 
     React.useEffect(() => {
@@ -375,6 +388,8 @@ export const TerminalView: React.FC = () => {
 
             const tab = state.tabs.find((t) => t.id === tabId) ?? state.tabs[0];
             let terminalId = tab?.terminalSessionId ?? null;
+            const isActionTab = Boolean(tab?.label?.startsWith('Action:'));
+            const hasBufferedOutput = (tab?.bufferLength ?? 0) > 0 || (tab?.bufferChunks?.length ?? 0) > 0;
 
             const shouldNudgeExisting =
                 Boolean(terminalId) &&
@@ -386,6 +401,11 @@ export const TerminalView: React.FC = () => {
                 Boolean(terminalId) && rehydratedTerminalIdsRef.current.has(terminalId as string);
 
             if (!terminalId) {
+                if (isActionTab && hasBufferedOutput) {
+                    setConnecting(directory, tabId, false);
+                    return;
+                }
+
                 setConnectionError(null);
                 setIsFatalError(false);
                 setConnecting(directory, tabId, true);
@@ -473,18 +493,18 @@ export const TerminalView: React.FC = () => {
         }
 
         if (typeof window === 'undefined') {
-            terminalControllerRef.current?.focus();
+            focusTerminalWhenWindowActive();
             return;
         }
 
         const rafId = window.requestAnimationFrame(() => {
-            terminalControllerRef.current?.focus();
+            focusTerminalWhenWindowActive();
         });
 
         return () => {
             window.cancelAnimationFrame(rafId);
         };
-    }, [activeTabId, isTerminalVisible]);
+    }, [activeTabId, focusTerminalWhenWindowActive, isTerminalVisible]);
 
     const handleRestart = React.useCallback(async () => {
         if (!effectiveDirectory) return;
@@ -735,7 +755,29 @@ export const TerminalView: React.FC = () => {
         return `${directoryPart}::${tabPart}::${terminalPart}`;
     }, [effectiveDirectory, activeTabId, terminalSessionId]);
 
-    const viewportSessionKey = terminalSessionId ?? terminalSessionKey;
+    const viewportSessionKey = React.useMemo(() => {
+        const base = terminalSessionId ?? terminalSessionKey;
+        return `${base}::layout-${viewportLayoutVersion}`;
+    }, [terminalSessionId, terminalSessionKey, viewportLayoutVersion]);
+
+    React.useEffect(() => {
+        if (isMobile || !isBottomTerminalOpen || !isTerminalVisible) {
+            return;
+        }
+
+        if (typeof window === 'undefined') {
+            setViewportLayoutVersion((value) => value + 1);
+            return;
+        }
+
+        const timeoutId = window.setTimeout(() => {
+            setViewportLayoutVersion((value) => value + 1);
+        }, 140);
+
+        return () => {
+            window.clearTimeout(timeoutId);
+        };
+    }, [bottomTerminalHeight, isBottomTerminalExpanded, isBottomTerminalOpen, isMobile, isTerminalVisible]);
 
     React.useEffect(() => {
         if (!isTerminalVisible) {
@@ -751,7 +793,7 @@ export const TerminalView: React.FC = () => {
         if (typeof window !== 'undefined') {
             const rafId = window.requestAnimationFrame(() => {
                 fitOnce();
-                controller.focus();
+                focusTerminalWhenWindowActive();
             });
             const timeoutIds = [220, 400].map((delay) => window.setTimeout(fitOnce, delay));
             return () => {
@@ -760,7 +802,35 @@ export const TerminalView: React.FC = () => {
             };
         }
         fitOnce();
-    }, [isTerminalVisible, terminalSessionKey, terminalSessionId]);
+    }, [focusTerminalWhenWindowActive, isTerminalVisible, terminalSessionKey, terminalSessionId]);
+
+    React.useEffect(() => {
+        if (isMobile || !isTerminalVisible || !isBottomTerminalOpen) {
+            return;
+        }
+
+        const controller = terminalControllerRef.current;
+        if (!controller) {
+            return;
+        }
+
+        const fitOnce = () => {
+            controller.fit();
+        };
+
+        if (typeof window !== 'undefined') {
+            const rafId = window.requestAnimationFrame(() => {
+                fitOnce();
+            });
+            const timeoutIds = [0, 80, 180, 320].map((delay) => window.setTimeout(fitOnce, delay));
+            return () => {
+                window.cancelAnimationFrame(rafId);
+                timeoutIds.forEach((id) => window.clearTimeout(id));
+            };
+        }
+
+        fitOnce();
+    }, [bottomTerminalHeight, isBottomTerminalExpanded, isBottomTerminalOpen, isMobile, isTerminalVisible]);
 
     if (!hasActiveContext) {
         return (
@@ -978,43 +1048,22 @@ export const TerminalView: React.FC = () => {
             >
                 <div className="h-full w-full box-border pl-7 pr-5 pt-3 pb-4">
                     {shouldRenderViewport ? (
-                        isMobile ? (
-                            <TerminalViewport
-                                key={viewportSessionKey}
-                                ref={(controller) => {
-                                    terminalControllerRef.current = controller;
-                                }}
-                                sessionKey={viewportSessionKey}
-                                chunks={bufferChunks}
-                                onInput={handleViewportInput}
-                                onResize={handleViewportResize}
-                                theme={xtermTheme}
-                                fontFamily={resolvedFontStack}
-                                fontSize={terminalFontSize}
-                                enableTouchScroll={hasTouchInput}
-                                autoFocus={isTerminalVisible}
-                                keyboardAvoidTargetId={keyboardAvoidTargetId}
-                            />
-                        ) : (
-                            <ScrollableOverlay outerClassName="h-full" className="h-full w-full" disableHorizontal>
-                                <TerminalViewport
-                                    key={viewportSessionKey}
-                                    ref={(controller) => {
-                                        terminalControllerRef.current = controller;
-                                    }}
-                                    sessionKey={viewportSessionKey}
-                                    chunks={bufferChunks}
-                                    onInput={handleViewportInput}
-                                    onResize={handleViewportResize}
-                                    theme={xtermTheme}
-                                    fontFamily={resolvedFontStack}
-                                    fontSize={terminalFontSize}
-                                    enableTouchScroll={hasTouchInput}
-                                    autoFocus={isTerminalVisible}
-                                    keyboardAvoidTargetId={keyboardAvoidTargetId}
-                                />
-                            </ScrollableOverlay>
-                        )
+                        <TerminalViewport
+                            key={viewportSessionKey}
+                            ref={(controller) => {
+                                terminalControllerRef.current = controller;
+                            }}
+                            sessionKey={viewportSessionKey}
+                            chunks={bufferChunks}
+                            onInput={handleViewportInput}
+                            onResize={handleViewportResize}
+                            theme={xtermTheme}
+                            fontFamily={resolvedFontStack}
+                            fontSize={terminalFontSize}
+                            enableTouchScroll={hasTouchInput}
+                            autoFocus={isTerminalVisible}
+                            keyboardAvoidTargetId={keyboardAvoidTargetId}
+                        />
                     ) : null}
                 </div>
                 {connectionError && (

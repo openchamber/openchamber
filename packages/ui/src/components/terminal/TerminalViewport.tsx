@@ -55,6 +55,16 @@ type TerminalController = {
   fit: () => void;
 };
 
+type TerminalWithViewport = {
+  scrollToBottom?: () => void;
+  getViewportY?: () => number;
+  hasSelection?: () => boolean;
+};
+
+type FitAddonWithObserveResize = FitAddon & {
+  observeResize?: () => void;
+};
+
 interface TerminalViewportProps {
   sessionKey: string;
   chunks: TerminalChunk[];
@@ -97,6 +107,7 @@ const TerminalViewport = React.forwardRef<TerminalController, TerminalViewportPr
     const writeScheduledRef = React.useRef<number | null>(null);
     const isWritingRef = React.useRef(false);
     const lastProcessedChunkIdRef = React.useRef<number | null>(null);
+    const followOutputRef = React.useRef(true);
     const touchScrollCleanupRef = React.useRef<(() => void) | null>(null);
     const viewportDiscoveryTimeoutRef = React.useRef<number | null>(null);
     const viewportDiscoveryAttemptsRef = React.useRef(0);
@@ -918,6 +929,7 @@ const TerminalViewport = React.forwardRef<TerminalController, TerminalViewportPr
       let localResizeObserver: ResizeObserver | null = null;
       let localTextareaObserver: MutationObserver | null = null;
       let localDisposables: Array<{ dispose: () => void }> = [];
+      let restorePatchedScrollToBottom: (() => void) | null = null;
 
       const container = containerRef.current;
       if (!container) {
@@ -959,6 +971,20 @@ const TerminalViewport = React.forwardRef<TerminalController, TerminalViewportPr
           const options = getGhosttyTerminalOptions(fontFamily, fontSize, theme, ghostty, useHiddenInputOverlay);
 
           const terminal = new GhosttyTerminal(options);
+          followOutputRef.current = true;
+
+          const terminalWithViewport = terminal as unknown as TerminalWithViewport;
+          if (typeof terminalWithViewport.scrollToBottom === 'function') {
+            const originalScrollToBottom = terminalWithViewport.scrollToBottom.bind(terminalWithViewport);
+            terminalWithViewport.scrollToBottom = () => {
+              if (followOutputRef.current) {
+                originalScrollToBottom();
+              }
+            };
+            restorePatchedScrollToBottom = () => {
+              terminalWithViewport.scrollToBottom = originalScrollToBottom;
+            };
+          }
 
           const fitAddon = new FitAddon();
 
@@ -999,10 +1025,30 @@ const TerminalViewport = React.forwardRef<TerminalController, TerminalViewportPr
           }
 
           fitTerminal();
+          const fitAddonWithResize = fitAddon as FitAddonWithObserveResize;
+          if (typeof fitAddonWithResize.observeResize === 'function') {
+            fitAddonWithResize.observeResize();
+          }
           setupTouchScroll();
           localDisposables = [
             terminal.onData((data: string) => {
               inputHandlerRef.current(data);
+            }),
+            terminal.onScroll((viewportY: number) => {
+              if (typeof viewportY === 'number' && Number.isFinite(viewportY)) {
+                const hasSelection = typeof terminal.hasSelection === 'function' && terminal.hasSelection();
+                followOutputRef.current = !hasSelection && viewportY <= 0.5;
+              }
+            }),
+            terminal.onSelectionChange(() => {
+              const hasSelection = typeof terminal.hasSelection === 'function' && terminal.hasSelection();
+              if (hasSelection) {
+                followOutputRef.current = false;
+                return;
+              }
+
+              const viewportY = typeof terminal.getViewportY === 'function' ? terminal.getViewportY() : 0;
+              followOutputRef.current = viewportY <= 0.5;
             }),
           ];
 
@@ -1035,6 +1081,8 @@ const TerminalViewport = React.forwardRef<TerminalController, TerminalViewportPr
         window.removeEventListener('blur', handleWindowBlur);
 
         localDisposables.forEach((disposable) => disposable.dispose());
+        restorePatchedScrollToBottom?.();
+        restorePatchedScrollToBottom = null;
         if (localTerminalTextarea) {
           localTerminalTextarea.removeEventListener('focus', handleTerminalTextareaFocus);
           localTerminalTextarea.removeEventListener('blur', handleTerminalTextareaBlur);
@@ -1429,18 +1477,6 @@ const TerminalViewport = React.forwardRef<TerminalController, TerminalViewportPr
         onClick={(event) => {
           if (useHiddenInputOverlay) {
             focusHiddenInput(event.clientX, event.clientY);
-          } else {
-            terminalRef.current?.focus();
-          }
-        }}
-        onMouseUp={() => {
-          if (!enableTouchScroll) {
-            void copySelectionToClipboard();
-          }
-        }}
-        onTouchEnd={() => {
-          if (!enableTouchScroll) {
-            void copySelectionToClipboard();
           }
         }}
       >
