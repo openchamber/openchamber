@@ -10952,6 +10952,94 @@ async function main(options = {}) {
     return ptyProviderPromise;
   };
 
+  const getTerminalShellCandidates = () => {
+    if (process.platform === 'win32') {
+      const windowsCandidates = [
+        process.env.OPENCHAMBER_TERMINAL_SHELL,
+        process.env.SHELL,
+        process.env.ComSpec,
+        path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+        'pwsh.exe',
+        'powershell.exe',
+        'cmd.exe',
+      ].filter(Boolean);
+
+      const resolved = [];
+      const seen = new Set();
+      for (const candidateRaw of windowsCandidates) {
+        const candidate = String(candidateRaw).trim();
+        if (!candidate) continue;
+
+        const lookedUp = candidate.includes('\\') || candidate.includes('/')
+          ? candidate
+          : searchPathFor(candidate);
+        const executable = lookedUp && isExecutable(lookedUp) ? lookedUp : (isExecutable(candidate) ? candidate : null);
+        if (!executable || seen.has(executable)) continue;
+        seen.add(executable);
+        resolved.push(executable);
+      }
+      return resolved;
+    }
+
+    const unixCandidates = [
+      process.env.OPENCHAMBER_TERMINAL_SHELL,
+      process.env.SHELL,
+      '/bin/zsh',
+      '/bin/bash',
+      '/bin/sh',
+      'zsh',
+      'bash',
+      'sh',
+    ].filter(Boolean);
+
+    const resolved = [];
+    const seen = new Set();
+    for (const candidateRaw of unixCandidates) {
+      const candidate = String(candidateRaw).trim();
+      if (!candidate) continue;
+
+      const lookedUp = candidate.includes('/') ? candidate : searchPathFor(candidate);
+      const executable = lookedUp && isExecutable(lookedUp) ? lookedUp : (isExecutable(candidate) ? candidate : null);
+      if (!executable || seen.has(executable)) continue;
+      seen.add(executable);
+      resolved.push(executable);
+    }
+
+    return resolved;
+  };
+
+  const spawnTerminalPtyWithFallback = (pty, { cols, rows, cwd, env }) => {
+    const shellCandidates = getTerminalShellCandidates();
+    if (shellCandidates.length === 0) {
+      throw new Error('No executable shell found for terminal session');
+    }
+
+    let lastError = null;
+    for (const shell of shellCandidates) {
+      try {
+        const ptyProcess = pty.spawn(shell, [], {
+          name: 'xterm-256color',
+          cols: cols || 80,
+          rows: rows || 24,
+          cwd,
+          env: {
+            ...env,
+            TERM: 'xterm-256color',
+            COLORTERM: 'truecolor',
+          },
+        });
+
+        return { ptyProcess, shell };
+      } catch (error) {
+        lastError = error;
+        console.warn(`Failed to spawn PTY using shell ${shell}:`, error && error.message ? error.message : error);
+      }
+    }
+
+    const baseMessage = lastError && lastError.message ? lastError.message : 'PTY spawn failed';
+    throw new Error(`Failed to spawn terminal PTY with available shells (${shellCandidates.join(', ')}): ${baseMessage}`);
+  };
+
   const terminalSessions = new Map();
   const MAX_TERMINAL_SESSIONS = 20;
   const TERMINAL_IDLE_TIMEOUT = 30 * 60 * 1000;
@@ -11174,8 +11262,6 @@ async function main(options = {}) {
         return res.status(400).json({ error: 'Invalid working directory' });
       }
 
-      const shell = process.env.SHELL || (process.platform === 'win32' ? 'powershell.exe' : '/bin/zsh');
-
       const sessionId = Math.random().toString(36).substring(2, 15) +
                         Math.random().toString(36).substring(2, 15);
 
@@ -11183,16 +11269,11 @@ async function main(options = {}) {
       const resolvedEnv = { ...process.env, PATH: envPath };
 
       const pty = await getPtyProvider();
-      const ptyProcess = pty.spawn(shell, [], {
-        name: 'xterm-256color',
-        cols: cols || 80,
-        rows: rows || 24,
-        cwd: cwd,
-        env: {
-          ...resolvedEnv,
-          TERM: 'xterm-256color',
-          COLORTERM: 'truecolor',
-        },
+      const { ptyProcess, shell } = spawnTerminalPtyWithFallback(pty, {
+        cols,
+        rows,
+        cwd,
+        env: resolvedEnv,
       });
 
       const session = {
@@ -11210,7 +11291,7 @@ async function main(options = {}) {
         terminalSessions.delete(sessionId);
       });
 
-      console.log(`Created terminal session: ${sessionId} in ${cwd}`);
+      console.log(`Created terminal session: ${sessionId} in ${cwd} using shell ${shell}`);
       res.json({ sessionId, cols: cols || 80, rows: rows || 24, capabilities: terminalInputCapabilities });
     } catch (error) {
       console.error('Failed to create terminal session:', error);
@@ -11395,8 +11476,6 @@ async function main(options = {}) {
         return res.status(400).json({ error: 'Invalid working directory: not accessible' });
       }
 
-      const shell = process.env.SHELL || (process.platform === 'win32' ? 'powershell.exe' : '/bin/zsh');
-
       const newSessionId = Math.random().toString(36).substring(2, 15) +
                           Math.random().toString(36).substring(2, 15);
 
@@ -11404,16 +11483,11 @@ async function main(options = {}) {
       const resolvedEnv = { ...process.env, PATH: envPath };
 
       const pty = await getPtyProvider();
-      const ptyProcess = pty.spawn(shell, [], {
-        name: 'xterm-256color',
-        cols: cols || 80,
-        rows: rows || 24,
-        cwd: cwd,
-        env: {
-          ...resolvedEnv,
-          TERM: 'xterm-256color',
-          COLORTERM: 'truecolor',
-        },
+      const { ptyProcess, shell } = spawnTerminalPtyWithFallback(pty, {
+        cols,
+        rows,
+        cwd,
+        env: resolvedEnv,
       });
 
       const session = {
@@ -11431,7 +11505,7 @@ async function main(options = {}) {
         terminalSessions.delete(newSessionId);
       });
 
-      console.log(`Restarted terminal session: ${sessionId} -> ${newSessionId} in ${cwd}`);
+      console.log(`Restarted terminal session: ${sessionId} -> ${newSessionId} in ${cwd} using shell ${shell}`);
       res.json({ sessionId: newSessionId, cols: cols || 80, rows: rows || 24, capabilities: terminalInputCapabilities });
     } catch (error) {
       console.error('Failed to restart terminal session:', error);
