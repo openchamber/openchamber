@@ -7,6 +7,7 @@ import { useCommandsStore } from '@/stores/useCommandsStore';
 import { useMcpConfigStore } from '@/stores/useMcpConfigStore';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useSkillsCatalogStore } from '@/stores/useSkillsCatalogStore';
+import { useModelProfilesStore } from '@/stores/useModelProfilesStore';
 import {
   RiAiAgentLine,
   RiArrowLeftSLine,
@@ -28,11 +29,16 @@ import {
   RiRobot2Line,
   RiRestartLine,
   RiSlashCommands2,
+  RiAppsLine,
 } from '@remixicon/react';
+
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { AgentsSidebar } from '@/components/sections/agents/AgentsSidebar';
 import { AgentsPage } from '@/components/sections/agents/AgentsPage';
+import { ProfilesSidebar } from '@/components/sections/profiles/ProfilesSidebar';
+import { ProfilesPage } from '@/components/sections/profiles/ProfilesPage';
+
 import { CommandsSidebar } from '@/components/sections/commands/CommandsSidebar';
 import { CommandsPage } from '@/components/sections/commands/CommandsPage';
 import { McpSidebar } from '@/components/sections/mcp/McpSidebar';
@@ -86,6 +92,7 @@ const pageOrder: SettingsPageSlug[] = [
   'git',
   'projects',
   'agents',
+  'profiles',
   'commands',
   'mcp',
   'providers',
@@ -126,6 +133,9 @@ function getSettingsNavIcon(slug: SettingsPageSlug): React.ComponentType<{ class
     case 'providers':
       return RiCloudLine;
     case 'agents':
+      return RiAiAgentLine;
+    case 'profiles':
+      return RiAppsLine;
       return RiAiAgentLine;
     case 'commands':
       return RiSlashCommands2;
@@ -318,6 +328,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       setTimeout(() => void useAgentsStore.getState().loadAgents(), 0);
       return;
     }
+    if (settingsSlug === 'profiles') {
+      setTimeout(() => void useModelProfilesStore.getState().loadProfiles(), 0);
+      return;
+    }
+
     if (settingsSlug === 'commands') {
       setTimeout(() => void useCommandsStore.getState().loadCommands(), 0);
       return;
@@ -381,6 +396,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return <ProjectsSidebar onItemSelect={opts.onItemSelect} />;
       case 'agents':
         return <AgentsSidebar onItemSelect={opts.onItemSelect} />;
+      case 'profiles':
+        return <ProfilesSidebar onItemSelect={opts.onItemSelect} />;
+        return <AgentsSidebar onItemSelect={opts.onItemSelect} />;
       case 'commands':
         return <CommandsSidebar onItemSelect={opts.onItemSelect} />;
       case 'mcp':
@@ -408,6 +426,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       case 'projects':
         return <ProjectsPage />;
       case 'agents':
+        return <AgentsPage />;
+      case 'profiles':
+        return <ProfilesPage />;
         return <AgentsPage />;
       case 'commands':
         return <CommandsPage />;
