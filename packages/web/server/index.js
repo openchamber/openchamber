@@ -1369,6 +1369,35 @@ const sanitizeSettingsUpdate = (payload) => {
   if (Array.isArray(candidate.pinnedDirectories)) {
     result.pinnedDirectories = normalizeStringArray(candidate.pinnedDirectories);
   }
+  if (Array.isArray(candidate.profiles)) {
+    const sanitizedProfiles = candidate.profiles.reduce((acc, p) => {
+      if (
+        p &&
+        typeof p === 'object' &&
+        typeof p.id === 'string' && p.id.length > 0 &&
+        typeof p.name === 'string' && p.name.length > 0 && p.name.length <= 64 &&
+        p.agentModels && typeof p.agentModels === 'object' &&
+        typeof p.createdAt === 'string' &&
+        typeof p.updatedAt === 'string'
+      ) {
+        const agentModels = {};
+        for (const [key, val] of Object.entries(p.agentModels)) {
+          if (typeof key === 'string' && typeof val === 'string') {
+            agentModels[key] = val;
+          }
+        }
+        acc.push({
+          id: p.id,
+          name: p.name.trim().slice(0, 64),
+          agentModels,
+          createdAt: p.createdAt,
+          updatedAt: p.updatedAt,
+        });
+      }
+      return acc;
+    }, []);
+    result.profiles = sanitizedProfiles;
+  }
 
 
   if (typeof candidate.uiFont === 'string' && candidate.uiFont.length > 0) {
@@ -1744,6 +1773,7 @@ const formatSettingsResponse = (settings) => {
     approvedDirectories: approved,
     securityScopedBookmarks: bookmarks,
     pinnedDirectories: normalizeStringArray(settings.pinnedDirectories),
+    profiles: Array.isArray(settings.profiles) ? settings.profiles : [],
     typographySizes: sanitizeTypographySizesPartial(settings.typographySizes),
     showReasoningTraces:
       typeof settings.showReasoningTraces === 'boolean'
