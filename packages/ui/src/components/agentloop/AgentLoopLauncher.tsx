@@ -13,6 +13,34 @@ import { AgentSelector } from '@/components/multirun/AgentSelector';
 
 type LauncherStep = 'choose-source' | 'select-file' | 'configure';
 
+/** Prompt template for AI-assisted workpackage plan generation */
+const PLAN_GENERATION_PROMPT = `You are a project planning assistant. The user wants to accomplish the following:
+
+{USER_GOAL}
+
+Analyze the codebase and create a workpackage plan as a JSON file. The JSON must follow this exact schema:
+{
+  "name": "Short name for the plan",
+  "workpackages": [
+    {
+      "id": "unique-id-1",
+      "title": "Short task title",
+      "description": "Detailed description of what needs to be done for this specific task. Include enough context so an AI agent can complete it independently.",
+      "status": "pending"
+    }
+  ]
+}
+
+Rules:
+- Break the work into small, focused tasks that can each be completed independently
+- Each task should be self-contained with all necessary context
+- Order tasks logically (dependencies first)
+- Use descriptive IDs (e.g., "setup-database", "add-auth-middleware")
+- Keep tasks focused on a single concern
+- Output ONLY the JSON, no explanation
+
+Output the JSON now:`;
+
 interface AgentLoopLauncherProps {
   onCreated?: () => void;
   onCancel?: () => void;
@@ -108,32 +136,7 @@ export const AgentLoopLauncher: React.FC<AgentLoopLauncherProps> = ({
         title: '🔄 Generate Workpackage Plan',
       });
 
-      const planPrompt = `You are a project planning assistant. The user wants to accomplish the following:
-
-${generatePrompt.trim()}
-
-Analyze the codebase and create a workpackage plan as a JSON file. The JSON must follow this exact schema:
-{
-  "name": "Short name for the plan",
-  "workpackages": [
-    {
-      "id": "unique-id-1",
-      "title": "Short task title",
-      "description": "Detailed description of what needs to be done for this specific task. Include enough context so an AI agent can complete it independently.",
-      "status": "pending"
-    }
-  ]
-}
-
-Rules:
-- Break the work into small, focused tasks that can each be completed independently
-- Each task should be self-contained with all necessary context
-- Order tasks logically (dependencies first)
-- Use descriptive IDs (e.g., "setup-database", "add-auth-middleware")
-- Keep tasks focused on a single concern
-- Output ONLY the JSON, no explanation
-
-Output the JSON now:`;
+      const planPrompt = PLAN_GENERATION_PROMPT.replace('{USER_GOAL}', generatePrompt.trim());
 
       await opencodeClient.sendMessage({
         id: session.id,
@@ -168,7 +171,7 @@ Output the JSON now:`;
 
       // Switch to the generation session so the user can see the output
       setCurrentSession(session.id);
-      toast.info('Generating workpackage plan... Watch the chat for the output, then copy the JSON into a file and use "Select existing file".');
+      toast.info('Generating workpackage plan — once complete, save the JSON response as a .json file and use "Select existing file" to start the loop.');
       onCreated?.();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to generate workpackage plan');

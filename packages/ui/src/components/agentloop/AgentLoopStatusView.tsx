@@ -112,10 +112,13 @@ export const AgentLoopStatusView: React.FC<AgentLoopStatusViewProps> = ({ loopId
                     <span className="typography-meta text-foreground-muted shrink-0">
                       {idx + 1}.
                     </span>
-                    <span className={cn(
-                      'typography-label truncate',
-                      wp.status === 'completed' ? 'text-foreground-muted line-through' : 'text-foreground',
-                    )}>
+                    <span
+                      className={cn(
+                        'typography-label truncate',
+                        wp.status === 'completed' ? 'text-foreground-muted line-through' : 'text-foreground',
+                      )}
+                      aria-label={wp.status === 'completed' ? `${wp.title} (completed)` : wp.title}
+                    >
                       {wp.title}
                     </span>
                     <span className={cn('typography-meta shrink-0', config.color)}>

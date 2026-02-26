@@ -7,12 +7,16 @@ import { useAgentLoopStore } from '@/stores/useAgentLoopStore';
 
 export const ChatView: React.FC = () => {
     const currentSessionId = useSessionStore((state) => state.currentSessionId);
-    const agentLoop = useAgentLoopStore((state) =>
-        currentSessionId ? state.getLoopByParentSession(currentSessionId) : undefined
-    );
+    const agentLoopId = useAgentLoopStore((state) => {
+        if (!currentSessionId) return undefined;
+        for (const loop of state.loops.values()) {
+            if (loop.parentSessionId === currentSessionId) return loop.id;
+        }
+        return undefined;
+    });
 
-    if (agentLoop) {
-        return <AgentLoopStatusView loopId={agentLoop.id} />;
+    if (agentLoopId) {
+        return <AgentLoopStatusView loopId={agentLoopId} />;
     }
 
     return (

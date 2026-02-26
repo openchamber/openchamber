@@ -57,6 +57,11 @@ type AgentLoopStore = AgentLoopState & AgentLoopActions;
 const generateLoopId = (): string =>
   `loop_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 
+/** Delay before advancing to the next workpackage to avoid overwhelming the server */
+const TASK_ADVANCEMENT_DELAY_MS = 2000;
+
+const VALID_PRESERVED_STATUSES = new Set<string>(['completed', 'failed', 'skipped']);
+
 /**
  * Build the prompt for a single workpackage, optionally prepending
  * a system prompt.
@@ -72,11 +77,13 @@ const buildTaskPrompt = (wp: Workpackage, systemPrompt?: string): string => {
 
 /**
  * Normalise a workpackage file's tasks so they all have valid statuses.
+ * Preserves completed/failed/skipped statuses from previously-run files;
+ * everything else (including 'running') resets to 'pending'.
  */
 const normalizeWorkpackages = (file: WorkpackageFile): Workpackage[] =>
   file.workpackages.map((wp) => ({
     ...wp,
-    status: wp.status && wp.status !== 'pending' ? wp.status : 'pending',
+    status: wp.status && VALID_PRESERVED_STATUSES.has(wp.status) ? wp.status : 'pending',
     sessionId: wp.sessionId ?? undefined,
     error: wp.error ?? undefined,
   }));
@@ -264,6 +271,8 @@ export const useAgentLoopStore = create<AgentLoopStore>()(
 
         if (!targetLoop || targetWpIndex === -1) return;
 
+        const loopId = targetLoop.id;
+
         // Mark the workpackage as completed
         const updatedWps = [...targetLoop.workpackages];
         updatedWps[targetWpIndex] = {
@@ -281,8 +290,8 @@ export const useAgentLoopStore = create<AgentLoopStore>()(
 
         set((prev) => {
           const updated = new Map(prev.loops);
-          updated.set(targetLoop!.id, {
-            ...targetLoop!,
+          updated.set(loopId, {
+            ...targetLoop,
             workpackages: updatedWps,
             currentIndex: nextIndex !== -1 ? nextIndex : targetWpIndex,
             status: newStatus,
@@ -292,10 +301,9 @@ export const useAgentLoopStore = create<AgentLoopStore>()(
 
         // Advance to the next workpackage
         if (nextIndex !== -1) {
-          // Small delay before starting the next task to avoid overwhelming the server
           setTimeout(() => {
-            void executeWorkpackage(targetLoop!.id, nextIndex);
-          }, 2000);
+            void executeWorkpackage(loopId, nextIndex);
+          }, TASK_ADVANCEMENT_DELAY_MS);
         }
       },
     }),

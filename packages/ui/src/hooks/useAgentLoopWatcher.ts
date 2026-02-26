@@ -37,10 +37,11 @@ export function useAgentLoopWatcher(): void {
     for (const sessionId of watchedSessionIds) {
       const currentStatus = sessionStatus.get(sessionId);
       const currentType = currentStatus?.type ?? 'idle';
-      const prevType = prev.get(sessionId) ?? 'unknown';
+      const prevType = prev.get(sessionId);
 
-      // Detect busy/retry → idle transition
+      // Detect busy/retry → idle transition (skip if no previous status recorded)
       if (
+        prevType !== undefined &&
         (prevType === 'busy' || prevType === 'retry') &&
         currentType === 'idle'
       ) {
