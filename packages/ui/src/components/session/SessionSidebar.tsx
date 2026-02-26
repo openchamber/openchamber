@@ -62,6 +62,7 @@ import {
   RiGitBranchLine,
   RiGitPullRequestLine,
   RiGitRepositoryLine,
+  RiLoopLeftLine,
   RiNodeTree,
   RiStickyNoteLine,
   RiLinkUnlinkM,
@@ -406,6 +407,7 @@ interface SortableProjectItemProps {
   onNewSessionFromGitHubIssue?: () => void;
   onNewSessionFromGitHubPR?: () => void;
   onOpenMultiRunLauncher: () => void;
+  onOpenAgentLoopLauncher: () => void;
   onRenameStart: () => void;
   onRenameSave: () => void;
   onRenameCancel: () => void;
@@ -439,6 +441,7 @@ const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   onNewSessionFromGitHubIssue,
   onNewSessionFromGitHubPR,
   onOpenMultiRunLauncher,
+  onOpenAgentLoopLauncher,
   onRenameStart,
   onRenameSave,
   onRenameCancel,
@@ -617,6 +620,12 @@ const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                   <DropdownMenuItem onClick={onOpenMultiRunLauncher}>
                     <ArrowsMerge className="mr-1.5 h-4 w-4" />
                     New Multi-Run
+                  </DropdownMenuItem>
+                )}
+                {showCreateButtons && !hideDirectoryControls && (
+                  <DropdownMenuItem onClick={onOpenAgentLoopLauncher}>
+                    <RiLoopLeftLine className="mr-1.5 h-4 w-4" />
+                    New Agent Loop
                   </DropdownMenuItem>
                 )}
                 <DropdownMenuItem onClick={onRenameStart}>
@@ -862,6 +871,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const deviceInfo = useDeviceInfo();
   const setSessionSwitcherOpen = useUIStore((state) => state.setSessionSwitcherOpen);
   const openMultiRunLauncher = useUIStore((state) => state.openMultiRunLauncher);
+  const openAgentLoopLauncher = useUIStore((state) => state.openAgentLoopLauncher);
   const notifyOnSubtasks = useUIStore((state) => state.notifyOnSubtasks);
   const showDeletionDialog = useUIStore((state) => state.showDeletionDialog);
   const setShowDeletionDialog = useUIStore((state) => state.setShowDeletionDialog);
@@ -3200,6 +3210,19 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                 </TooltipTrigger>
                 <TooltipContent side="bottom" sideOffset={4}><p>New multi-run</p></TooltipContent>
               </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={openAgentLoopLauncher}
+                    className={headerActionButtonClass}
+                    aria-label="New agent loop"
+                  >
+                    <RiLoopLeftLine className={headerActionIconClass} />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" sideOffset={4}><p>New agent loop</p></TooltipContent>
+              </Tooltip>
                 </>
               ) : null}
               {stableActiveProjectIsRepo && branchPickerProject ? (
@@ -3366,6 +3389,12 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                         setActiveProjectIdOnly(projectKey);
                       }
                       openMultiRunLauncher();
+                    }}
+                    onOpenAgentLoopLauncher={() => {
+                      if (projectKey !== activeProjectId) {
+                        setActiveProjectIdOnly(projectKey);
+                      }
+                      openAgentLoopLauncher();
                     }}
                     onRenameStart={() => {
                       setEditingProjectId(projectKey);

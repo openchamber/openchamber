@@ -133,6 +133,7 @@ interface UIStore {
   theme: 'light' | 'dark' | 'system';
   isMultiRunLauncherOpen: boolean;
   multiRunLauncherPrefillPrompt: string;
+  isAgentLoopLauncherOpen: boolean;
   isSidebarOpen: boolean;
   sidebarWidth: number;
   hasManuallyResizedLeftSidebar: boolean;
@@ -325,6 +326,8 @@ interface UIStore {
   setExpandedInput: (value: boolean) => void;
   openMultiRunLauncher: () => void;
   openMultiRunLauncherWithPrompt: (prompt: string) => void;
+  openAgentLoopLauncher: () => void;
+  setAgentLoopLauncherOpen: (open: boolean) => void;
   setShortcutOverride: (actionId: string, combo: ShortcutCombo) => void;
   clearShortcutOverride: (actionId: string) => void;
   resetAllShortcutOverrides: () => void;
@@ -339,6 +342,7 @@ export const useUIStore = create<UIStore>()(
         theme: 'system',
         isMultiRunLauncherOpen: false,
         multiRunLauncherPrefillPrompt: '',
+        isAgentLoopLauncherOpen: false,
         isSidebarOpen: true,
         sidebarWidth: LEFT_SIDEBAR_MIN_WIDTH,
         hasManuallyResizedLeftSidebar: false,
@@ -1173,6 +1177,17 @@ export const useUIStore = create<UIStore>()(
             multiRunLauncherPrefillPrompt: prompt,
             isSessionSwitcherOpen: false,
           });
+        },
+
+        openAgentLoopLauncher: () => {
+          set({
+            isAgentLoopLauncherOpen: true,
+            isSessionSwitcherOpen: false,
+          });
+        },
+
+        setAgentLoopLauncherOpen: (open) => {
+          set({ isAgentLoopLauncherOpen: open });
         },
 
         setTimelineDialogOpen: (open) => {
