@@ -166,10 +166,16 @@ nix develop github:btriapitsyn/openchamber
   # environment.systemPackages = [ inputs.openchamber.packages.${system}.default ];
   # or with Home Manager:
   # home.packages = [ inputs.openchamber.packages.${system}.default ];
+
+  # Or use the overlay to make openchamber available in pkgs:
+  # nixpkgs.overlays = [ inputs.openchamber.overlays.default ];
+  # environment.systemPackages = [ pkgs.openchamber ];
 }
 ```
 
-**Maintaining the flake:** When `bun.lock` or `patches/` change, the fixed-output derivation hash must be updated. Set the hash to `pkgs.lib.fakeHash` in `flake.nix`, run `nix build`, and replace with the correct hash from the error message.
+**Available packages:** `openchamber` (web CLI, default), `desktop` (Tauri app), `node_modules_updater` (hash helper).
+
+**Maintaining the flake:** When `bun.lock`, `package.json`, or `patches/` change, the per-platform hashes in `nix/hashes.json` must be updated. The `nix-hashes` GitHub Actions workflow does this automatically on push to `main`. To update manually: run `nix build .#node_modules_updater`, grab the correct hash from the error, and update `nix/hashes.json`.
 
 ## Prerequisites
 
