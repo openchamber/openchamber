@@ -153,12 +153,6 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
   React.useEffect(() => {
     if (!branchDropdownOpen) {
       setBranchSearch('');
-    } else {
-      // Focus the search input when dropdown opens
-      const timer = setTimeout(() => {
-        searchInputRef.current?.focus();
-      }, 0);
-      return () => clearTimeout(timer);
     }
   }, [branchDropdownOpen]);
 
@@ -288,7 +282,7 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
         <p className="typography-meta text-muted-foreground">
           {operation === 'merge' ? `Branch to merge into ${targetBranchLabel}` : 'Branch to rebase onto'}
         </p>
-        <DropdownMenu open={branchDropdownOpen} onOpenChange={setBranchDropdownOpen}>
+        <DropdownMenu open={branchDropdownOpen} onOpenChange={setBranchDropdownOpen} modal={false}>
           <DropdownMenuTrigger asChild>
             <Button variant="outline" className="w-full justify-between h-10">
               <span className={cn('truncate', !selectedBranch && 'text-muted-foreground')}>
