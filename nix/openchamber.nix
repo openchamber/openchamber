@@ -70,6 +70,14 @@ stdenvNoCC.mkDerivation (finalAttrs: {
       cp -rn packages/web/node_modules/. $out/lib/openchamber/node_modules/ 2>/dev/null || true
     fi
 
+    # Remove workspace symlinks that would dangle in the output
+    find $out/lib/openchamber/node_modules -type l | while IFS= read -r link; do
+      if [ ! -e "$link" ]; then
+        rm "$link"
+      fi
+    done
+    find $out/lib/openchamber/node_modules -type d -empty -delete 2>/dev/null || true
+
     # Wrapper: run with bun (the project runtime)
     makeBinaryWrapper ${bun}/bin/bun $out/bin/openchamber \
       --add-flags "$out/lib/openchamber/bin/cli.js"
