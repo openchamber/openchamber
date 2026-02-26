@@ -8,7 +8,9 @@ export type QuotaProviderId =
   | 'kimi-for-coding'
   | 'nano-gpt'
   | 'openrouter'
-  | 'zai-coding-plan';
+  | 'zai-coding-plan'
+  | 'minimax-coding-plan'
+  | 'minimax-cn-coding-plan';
 
 export interface UsageWindow {
   usedPercent: number | null;

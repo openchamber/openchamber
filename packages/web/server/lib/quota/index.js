@@ -17,5 +17,7 @@ export {
   fetchKimiQuota,
   fetchOpenRouterQuota,
   fetchZaiQuota,
-  fetchNanoGptQuota
+  fetchNanoGptQuota,
+  fetchMinimaxCodingPlanQuota,
+  fetchMinimaxCnCodingPlanQuota
 } from './providers/index.js';
