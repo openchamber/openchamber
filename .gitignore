@@ -52,3 +52,6 @@ packages/intellij/
 Thumbs.db
 .worktrees/
 .worktrees
+
+# Sisyphus (oh-my-opencode plugin)
+.sisyphus/
