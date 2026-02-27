@@ -554,7 +554,8 @@ const TaskToolSummary: React.FC<{
     output?: string;
     sessionId?: string;
     onShowPopup?: (content: ToolPopupContent) => void;
-}> = ({ entries, isExpanded, hasPrevTool, hasNextTool, output, sessionId, onShowPopup }) => {
+    input?: Record<string, unknown>;
+}> = ({ entries, isExpanded, hasPrevTool, hasNextTool, output, sessionId, onShowPopup, input }) => {
     const setCurrentSession = useSessionStore((state) => state.setCurrentSession);
     const displayEntries = React.useMemo(() => {
         const nonPending = entries.filter((entry) => entry.state?.status !== 'pending');
@@ -573,6 +574,10 @@ const TaskToolSummary: React.FC<{
             setCurrentSession(sessionId);
         }
     };
+
+    const agentType = typeof input?.subagent_type === 'string'
+        ? input.subagent_type
+        : 'subagent';
 
     if (displayEntries.length === 0 && !hasOutput && !sessionId) {
         return null;
@@ -627,7 +632,7 @@ const TaskToolSummary: React.FC<{
                     onClick={handleOpenSession}
                 >
                     <RiExternalLinkLine className="h-3.5 w-3.5 flex-shrink-0" />
-                    <span className="typography-meta text-primary font-medium">Open subAgent session</span>
+                    <span className="typography-meta text-primary font-medium">Open {agentType.charAt(0).toUpperCase() + agentType.slice(1)} subtask</span>
                 </button>
             )}
 
@@ -1569,6 +1574,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
                     output={taskOutputString}
                     sessionId={taskSessionId}
                     onShowPopup={onShowPopup}
+                    input={input}
                 />
             ) : null}
 
