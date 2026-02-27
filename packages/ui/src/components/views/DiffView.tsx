@@ -24,6 +24,7 @@ import { DiffViewToggle } from '@/components/chat/message/DiffViewToggle';
 import type { DiffViewMode } from '@/components/chat/message/types';
 import { PierreDiffViewer } from './PierreDiffViewer';
 import { useDeviceInfo } from '@/lib/device';
+import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 
 // Minimum width for side-by-side diff view (px)
 const SIDE_BY_SIDE_MIN_WIDTH = 1100;
@@ -157,6 +158,7 @@ const FileSelector = React.memo<FileSelectorProps>(({
                 <button className="flex h-8 items-center gap-2 rounded-lg border border-input bg-transparent px-2 typography-ui-label text-foreground outline-none hover:bg-interactive-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
                     {selectedFileEntry ? (
                         <div className="flex min-w-0 items-center gap-3">
+                            <FileTypeIcon filePath={selectedFileEntry.path} className="h-3.5 w-3.5 flex-shrink-0" />
                             <span className="min-w-0 flex-1 truncate typography-meta">
                                 {getLabel(selectedFileEntry.path)}
                             </span>
@@ -197,6 +199,7 @@ const FileSelector = React.memo<FileSelectorProps>(({
                     {changedFiles.map((file) => (
                         <DropdownMenuRadioItem key={file.path} value={file.path}>
                             <div className="flex w-full min-w-0 items-center gap-3">
+                                <FileTypeIcon filePath={file.path} className="h-3.5 w-3.5 flex-shrink-0" />
                                 <span className="min-w-0 flex-1 truncate typography-meta">
                                     {getLabel(file.path)}
                                 </span>
@@ -286,6 +289,7 @@ const FileList = React.memo<FileListProps>(({
                                         : 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground'
                                 )}
                             >
+                                <FileTypeIcon filePath={file.path} className="h-3.5 w-3.5 flex-shrink-0" />
                                 <span
                                     className="typography-micro font-semibold w-4 text-center uppercase"
                                     style={{ color: descriptor.color }}
@@ -723,7 +727,10 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                             style={{ direction: 'rtl', textAlign: 'left' }}
                             title={file.path}
                         >
-                            {file.path}
+                            <span className="inline-flex min-w-0 items-center gap-2">
+                                <FileTypeIcon filePath={file.path} className="h-3.5 w-3.5 flex-shrink-0" />
+                                <span className="min-w-0 truncate" style={{ direction: 'rtl', textAlign: 'left' }}>{file.path}</span>
+                            </span>
                         </span>
                     </div>
                     <div className="relative flex items-center gap-2">

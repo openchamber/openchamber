@@ -40,7 +40,7 @@ import { Button } from '@/components/ui/button';
 import { CodeMirrorEditor } from '@/components/ui/CodeMirrorEditor';
 import { PreviewToggleButton } from './PreviewToggleButton';
 import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
-import { languageByExtension, loadLanguageByFilePath } from '@/lib/codemirror/languageByExtension';
+import { languageByExtension } from '@/lib/codemirror/languageByExtension';
 import { createFlexokiCodeMirrorTheme } from '@/lib/codemirror/flexokiTheme';
 import { generateSyntaxTheme } from '@/lib/theme/syntaxThemeGenerator';
 import {
@@ -58,7 +58,6 @@ import { cn, getModifierLabel, hasModifier } from '@/lib/utils';
 import { getLanguageFromExtension, getImageMimeType, isImageFile } from '@/lib/toolHelpers';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { EditorView } from '@codemirror/view';
-import type { Extension } from '@codemirror/state';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useUIStore } from '@/stores/useUIStore';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
@@ -1461,32 +1460,6 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const canCopy = Boolean(selectedFile && (!isSelectedImage || isSelectedSvg) && fileContent.length > 0);
   const canCopyPath = Boolean(selectedFile && displaySelectedPath.length > 0);
   const canEdit = Boolean(selectedFile && !isSelectedImage && files.writeFile && fileContent.length <= MAX_VIEW_CHARS);
-  const staticLanguageExtension = React.useMemo(
-    () => (selectedFile?.path ? languageByExtension(selectedFile.path) : null),
-    [selectedFile?.path],
-  );
-  const [loadedLanguageExtension, setLoadedLanguageExtension] = React.useState<Extension | null>(null);
-
-  React.useEffect(() => {
-    let cancelled = false;
-    const filePath = selectedFile?.path;
-
-    if (!filePath || staticLanguageExtension) {
-      setLoadedLanguageExtension(null);
-      return;
-    }
-
-    setLoadedLanguageExtension(null);
-    void loadLanguageByFilePath(filePath).then((extension) => {
-      if (!cancelled) {
-        setLoadedLanguageExtension(extension);
-      }
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedFile?.path, staticLanguageExtension]);
 
   const nudgeEditorSelectionAboveKeyboard = React.useCallback((view: EditorView | null) => {
     if (!isMobile || !view || !view.hasFocus || typeof window === 'undefined') {
@@ -1551,7 +1524,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     }
 
     const extensions = [createFlexokiCodeMirrorTheme(currentTheme)];
-    const language = staticLanguageExtension ?? loadedLanguageExtension;
+    const language = languageByExtension(selectedFile.path);
     if (language) {
       extensions.push(language);
     }
@@ -1573,7 +1546,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       }));
     }
     return extensions;
-  }, [currentTheme, selectedFile?.path, staticLanguageExtension, loadedLanguageExtension, wrapLines, isMobile, nudgeEditorSelectionAboveKeyboard]);
+  }, [currentTheme, selectedFile?.path, wrapLines, isMobile, nudgeEditorSelectionAboveKeyboard]);
 
   const imageSrc = selectedFile?.path && isSelectedImage
     ? (runtime.isDesktop

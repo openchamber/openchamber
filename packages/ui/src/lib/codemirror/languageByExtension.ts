@@ -24,7 +24,6 @@ import { dockerFile } from '@codemirror/legacy-modes/mode/dockerfile';
 import { ruby } from '@codemirror/legacy-modes/mode/ruby';
 import { properties } from '@codemirror/legacy-modes/mode/properties';
 import { erlang } from '@codemirror/legacy-modes/mode/erlang';
-import { getLanguageFromExtension } from '@/lib/toolHelpers';
 
 const shellLanguage = StreamLanguage.define(shell);
 const tomlLanguage = StreamLanguage.define(toml);
@@ -121,20 +120,6 @@ const markdownHighlight = () => syntaxHighlighting(HighlightStyle.define([
   { tag: t.list, color: 'color-mix(in srgb, var(--muted-foreground) 40%, var(--foreground) 60%)' },
   { tag: t.heading, color: 'var(--markdown-heading1, currentColor)' },
 ]));
-
-const getLanguageDescriptionForFile = (filePath: string): LanguageDescription | null => {
-  const byFilename = LanguageDescription.matchFilename(languages, filePath);
-  if (byFilename) {
-    return byFilename;
-  }
-
-  const hintedLanguage = getLanguageFromExtension(filePath);
-  if (!hintedLanguage) {
-    return null;
-  }
-
-  return LanguageDescription.matchLanguageName(languages, hintedLanguage, true);
-};
 
 export function languageByExtension(filePath: string): Extension | null {
   const normalized = filePath.toLowerCase();
@@ -262,23 +247,6 @@ export function languageByExtension(filePath: string): Extension | null {
       return html();
 
     default:
-      return getLanguageDescriptionForFile(filePath)?.support ?? null;
-  }
-}
-
-export async function loadLanguageByFilePath(filePath: string): Promise<Extension | null> {
-  const description = getLanguageDescriptionForFile(filePath);
-  if (!description) {
-    return null;
-  }
-
-  if (description.support) {
-    return description.support;
-  }
-
-  try {
-    return await description.load();
-  } catch {
-    return null;
+      return null;
   }
 }
