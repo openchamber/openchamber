@@ -27,6 +27,7 @@ These provider IDs are currently dispatchable via `fetchQuotaForProvider(provide
 | `zai-coding-plan` | z.ai | `providers/zai.js` | `zai-coding-plan`, `zai`, `z.ai` |
 | `minimax-coding-plan` | MiniMax Coding Plan (minimax.io) | `providers/minimax-coding-plan.js` | `minimax-coding-plan` |
 | `minimax-cn-coding-plan` | MiniMax Coding Plan (minimaxi.com) | `providers/minimax-cn-coding-plan.js` | `minimax-cn-coding-plan` |
+| `ollama-cloud` | Ollama Cloud | `providers/ollama-cloud.js` | Cookie file at `~/.config/ollama-quota/cookie` (raw session cookie string) |
 
 ## Internal-only provider module
 - `providers/openai.js` exists for logic parity/reuse but is intentionally not registered for dispatcher ID routing.
