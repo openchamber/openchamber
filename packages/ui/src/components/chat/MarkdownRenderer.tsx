@@ -1,7 +1,7 @@
 import React from 'react';
 import { Streamdown } from 'streamdown';
 import { code } from '@streamdown/code';
-import { mermaid } from '@streamdown/mermaid';
+import { renderMermaidASCII, renderMermaidSVG } from 'beautiful-mermaid';
 import 'streamdown/styles.css';
 import { FadeInOnReveal } from './message/FadeInOnReveal';
 import type { Part } from '@opencode-ai/sdk/v2';
@@ -15,6 +15,8 @@ import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
 import { getStreamdownThemePair } from '@/lib/shiki/appThemeRegistry';
 import { getDefaultTheme } from '@/lib/theme/themes';
 import type { ToolPopupContent } from './message/types';
+import { useUIStore } from '@/stores/useUIStore';
+import { useDeviceInfo } from '@/lib/device';
 
 const withStableStringId = <T extends object>(value: T, id: string): T => {
   const existingPrimitive = (value as Record<symbol, unknown>)[Symbol.toPrimitive];
@@ -122,47 +124,15 @@ const useMarkdownShikiThemes = (): readonly [string | object, string | object] =
   return isVSCode ? themes : fallbackThemes;
 };
 
-const useStreamdownMermaidOptions = () => {
+const useCurrentMermaidTheme = () => {
   const themeSystem = useOptionalThemeSystem();
   const fallbackLight = getDefaultTheme(false);
   const fallbackDark = getDefaultTheme(true);
 
-  const currentTheme = themeSystem?.currentTheme
+  return themeSystem?.currentTheme
     ?? (typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches
       ? fallbackDark
       : fallbackLight);
-
-  const MERMAID_CONFIG_VERSION = 'sequence-nowrap-v1';
-  const mermaidRenderKey = `${currentTheme.metadata.id}:${currentTheme.metadata.variant}:${themeSystem?.themeMode ?? 'fallback'}:${MERMAID_CONFIG_VERSION}`;
-
-  const options = React.useMemo(() => {
-    const isDark = currentTheme.metadata.variant === 'dark';
-    return {
-      config: {
-        theme: isDark ? 'dark' : 'base',
-        sequence: {
-          useMaxWidth: false,
-        },
-        themeVariables: {
-          primaryColor: currentTheme.colors.surface.elevated,
-          primaryTextColor: currentTheme.colors.surface.foreground,
-          primaryBorderColor: currentTheme.colors.interactive.border,
-          lineColor: currentTheme.colors.interactive.border,
-          secondaryColor: currentTheme.colors.surface.muted,
-          tertiaryColor: currentTheme.colors.surface.subtle,
-          background: currentTheme.colors.surface.background,
-          mainBkg: currentTheme.colors.surface.elevated,
-          nodeTextColor: currentTheme.colors.surface.foreground,
-          edgeLabelBackground: currentTheme.colors.surface.background,
-        },
-      },
-    };
-  }, [currentTheme]);
-
-  return React.useMemo(
-    () => ({ options, mermaidRenderKey }),
-    [mermaidRenderKey, options],
-  );
 };
 
 // Table utility functions
@@ -423,10 +393,159 @@ const getMermaidInfo = (children: React.ReactNode): { isMermaid: boolean; source
   return { isMermaid: true, source };
 };
 
+const MermaidBlock: React.FC<{ source: string; mode: 'svg' | 'ascii' }> = ({ source, mode }) => {
+  const currentTheme = useCurrentMermaidTheme();
+  const { isMobile } = useDeviceInfo();
+  const [copied, setCopied] = React.useState(false);
+  const [downloaded, setDownloaded] = React.useState(false);
+
+  const svg = React.useMemo(() => {
+    if (mode !== 'svg') return '';
+    try {
+      return renderMermaidSVG(source, {
+        bg: currentTheme.colors.surface.elevated,
+        fg: currentTheme.colors.surface.foreground,
+        line: currentTheme.colors.interactive.border,
+        accent: currentTheme.colors.primary.base,
+        muted: currentTheme.colors.surface.mutedForeground,
+        surface: currentTheme.colors.surface.muted,
+        border: currentTheme.colors.interactive.border,
+        transparent: true,
+        font: 'IBM Plex Sans, sans-serif',
+      });
+    } catch {
+      return '';
+    }
+  }, [currentTheme, mode, source]);
+
+  const ascii = React.useMemo(() => {
+    if (mode !== 'ascii') return '';
+    try {
+      return renderMermaidASCII(source);
+    } catch {
+      return '';
+    }
+  }, [mode, source]);
+
+  const copyVisibilityClass = isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100';
+
+  const handleCopyAscii = async (asciiText: string) => {
+    if (!asciiText) return;
+    const result = await copyTextToClipboard(asciiText);
+    if (result.ok) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  const handleCopyMermaidSource = async () => {
+    if (!source) return;
+    const result = await copyTextToClipboard(source);
+    if (result.ok) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  const handleDownloadSvg = () => {
+    if (!svg) return;
+    try {
+      const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `diagram-${Date.now()}.svg`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      setDownloaded(true);
+      setTimeout(() => setDownloaded(false), 2000);
+    } catch {
+      toast.error('Failed to download diagram');
+    }
+  };
+
+  if (mode === 'ascii') {
+    const asciiText = ascii || source;
+
+    return (
+      <div data-streamdown="mermaid-block" className="group">
+        <pre data-streamdown="mermaid-ascii">{asciiText}</pre>
+        <div
+          className={cn(
+            'absolute top-1 right-2 transition-opacity',
+            copyVisibilityClass,
+          )}
+        >
+          <button
+            onClick={() => handleCopyAscii(asciiText)}
+            className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
+            title="Copy"
+          >
+            {copied ? <RiCheckLine className="size-3.5" /> : <RiFileCopyLine className="size-3.5" />}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!svg) {
+    return (
+      <div data-streamdown="mermaid-block" className="group">
+        <pre data-streamdown="mermaid-ascii">{source}</pre>
+        <div
+          className={cn(
+            'absolute top-1 right-2 transition-opacity',
+            copyVisibilityClass,
+          )}
+        >
+          <button
+            onClick={() => handleCopyAscii(source)}
+            className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
+            title="Copy"
+          >
+            {copied ? <RiCheckLine className="size-3.5" /> : <RiFileCopyLine className="size-3.5" />}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div data-streamdown="mermaid-block" className="group">
+      <div data-streamdown="mermaid" dangerouslySetInnerHTML={{ __html: svg }} />
+      <div
+        className={cn(
+          'absolute top-1 right-2 flex items-center gap-1 transition-opacity',
+          copyVisibilityClass,
+        )}
+      >
+        <button
+          onClick={handleCopyMermaidSource}
+          className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
+          title="Copy source"
+        >
+          {copied ? <RiCheckLine className="size-3.5" /> : <RiFileCopyLine className="size-3.5" />}
+        </button>
+        <button
+          onClick={handleDownloadSvg}
+          className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
+          title="Download SVG"
+        >
+          {downloaded ? <RiCheckLine className="size-3.5" /> : <RiDownloadLine className="size-3.5" />}
+        </button>
+      </div>
+    </div>
+  );
+};
+
 const CodeBlockWrapper: React.FC<CodeBlockWrapperProps> = ({ children, className, style, ...props }) => {
   const [copied, setCopied] = React.useState(false);
   const codeRef = React.useRef<HTMLDivElement>(null);
+  const { isMobile } = useDeviceInfo();
   const mermaidInfo = getMermaidInfo(children);
+  const mermaidRenderingMode = useUIStore((state) => state.mermaidRenderingMode);
   const codeChild = React.useMemo(
     () => (
       React.isValidElement(children)
@@ -480,9 +599,8 @@ const CodeBlockWrapper: React.FC<CodeBlockWrapperProps> = ({ children, className
     return next;
   }, [style]);
 
-  // Mermaid blocks are handled by Streamdown Mermaid controls.
   if (mermaidInfo.isMermaid) {
-    return codeChild;
+    return <MermaidBlock source={mermaidInfo.source} mode={mermaidRenderingMode} />;
   }
 
   const getCodeContent = (): string => {
@@ -513,7 +631,12 @@ const CodeBlockWrapper: React.FC<CodeBlockWrapperProps> = ({ children, className
       >
         {codeChild}
       </pre>
-      <div className="absolute top-1 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+      <div
+        className={cn(
+          'absolute top-1 right-2 transition-opacity',
+          isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
+        )}
+      >
         <button
           onClick={handleCopy}
           className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
@@ -533,18 +656,11 @@ const streamdownComponents = {
 
 const streamdownPlugins = {
   code,
-  mermaid,
 };
 
 const streamdownControls = {
   code: false,
   table: false,
-  mermaid: {
-    download: true,
-    copy: true,
-    fullscreen: false,
-    panZoom: false,
-  },
 };
 
 type MermaidControlOptions = {
@@ -703,7 +819,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
   useMermaidInlineInteractions({ containerRef: streamdownContainerRef, mermaidBlocks, onShowPopup });
 
   const shikiThemes = useMarkdownShikiThemes();
-  const { options: mermaidOptions, mermaidRenderKey } = useStreamdownMermaidOptions();
+  const currentMermaidTheme = useCurrentMermaidTheme();
   const componentKey = React.useMemo(() => {
     const signature = part?.id ? `part-${part.id}` : `message-${messageId}`;
     return `markdown-${signature}`;
@@ -716,13 +832,12 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
   const markdownContent = (
     <div className={cn('break-words', className)} ref={streamdownContainerRef}>
       <Streamdown
-         key={`streamdown-${componentKey}-${mermaidRenderKey}`}
+         key={`streamdown-${componentKey}-${currentMermaidTheme.metadata.id}:${currentMermaidTheme.metadata.variant}`}
          mode={isStreaming ? 'streaming' : 'static'}
          shikiTheme={shikiThemes}
          className={streamdownClassName}
          controls={streamdownControls}
          plugins={streamdownPlugins}
-         mermaid={mermaidOptions}
          components={streamdownComponents}
        >
         {content}
@@ -757,7 +872,6 @@ export const SimpleMarkdownRenderer: React.FC<{
   disableLinkSafety,
   stripFrontmatter = false,
   onShowPopup,
-  mermaidControls,
   allowMermaidWheelZoom = false,
 }) => {
   const renderedContent = React.useMemo(
@@ -774,7 +888,7 @@ export const SimpleMarkdownRenderer: React.FC<{
   });
 
   const shikiThemes = useMarkdownShikiThemes();
-  const { options: mermaidOptions, mermaidRenderKey } = useStreamdownMermaidOptions();
+  const currentMermaidTheme = useCurrentMermaidTheme();
 
   const streamdownClassName = variant === 'tool'
     ? 'streamdown-content streamdown-tool'
@@ -783,16 +897,12 @@ export const SimpleMarkdownRenderer: React.FC<{
   return (
     <div className={cn('break-words', className)} ref={streamdownContainerRef}>
       <Streamdown
-        key={`streamdown-simple-${mermaidRenderKey}`}
+        key={`streamdown-simple-${currentMermaidTheme.metadata.id}:${currentMermaidTheme.metadata.variant}`}
         mode="static"
         shikiTheme={shikiThemes}
         className={streamdownClassName}
-        controls={{
-          ...streamdownControls,
-          mermaid: mermaidControls ?? streamdownControls.mermaid,
-        }}
+        controls={streamdownControls}
         plugins={streamdownPlugins}
-        mermaid={mermaidOptions}
         components={streamdownComponents}
         // @ts-expect-error Streamdown type missing linkSafety in older minor
         linkSafety={disableLinkSafety ? { enabled: false } : undefined}
