@@ -424,6 +424,18 @@ export const SidebarFilesTree: React.FC = () => {
     void loadDirectory(root);
   }, [loadDirectory, root, showHidden, showGitignored]);
 
+  React.useEffect(() => {
+    if (!root || expandedPaths.length === 0) return;
+
+    for (const expandedPath of expandedPaths) {
+      const normalized = normalizePath(expandedPath);
+      if (!normalized || normalized === root) continue;
+      if (!normalized.startsWith(`${root}/`)) continue;
+      if (loadedDirsRef.current.has(normalized) || inFlightDirsRef.current.has(normalized)) continue;
+      void loadDirectory(normalized);
+    }
+  }, [expandedPaths, loadDirectory, root]);
+
   // --- Fuzzy search scoring (matching FilesView) ---
 
   const fuzzyScore = React.useCallback((query: string, candidate: string): number | null => {
