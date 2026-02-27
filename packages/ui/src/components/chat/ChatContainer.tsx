@@ -1,5 +1,5 @@
 import React from 'react';
-import { RiArrowDownLine } from '@remixicon/react';
+import { RiArrowDownLine, RiArrowLeftLine } from '@remixicon/react';
 import { useShallow } from 'zustand/react/shallow';
 import type { Message, Part } from '@opencode-ai/sdk/v2';
 
@@ -14,6 +14,7 @@ import { useChatScrollManager } from '@/hooks/useChatScrollManager';
 import { useDeviceInfo } from '@/lib/device';
 import { getMemoryLimits } from '@/stores/types/sessionTypes';
 import { Button } from '@/components/ui/button';
+import { ButtonSmall } from '@/components/ui/button-small';
 import { OverlayScrollbar } from '@/components/ui/OverlayScrollbar';
 import { TimelineDialog } from './TimelineDialog';
 import type { PermissionRequest } from '@/types/permission';
@@ -76,6 +77,7 @@ export const ChatContainer: React.FC = () => {
         loadMoreMessages,
         updateViewportAnchor,
         openNewSessionDraft,
+        setCurrentSession,
         trimToViewportWindow,
         newSessionDraft,
     } = useSessionStore(
@@ -86,6 +88,7 @@ export const ChatContainer: React.FC = () => {
             loadMoreMessages: state.loadMoreMessages,
             updateViewportAnchor: state.updateViewportAnchor,
             openNewSessionDraft: state.openNewSessionDraft,
+            setCurrentSession: state.setCurrentSession,
             trimToViewportWindow: state.trimToViewportWindow,
             newSessionDraft: state.newSessionDraft,
         }))
@@ -111,6 +114,8 @@ export const ChatContainer: React.FC = () => {
             [currentSessionId]
         )
     );
+
+    const sessions = useSessionStore((state) => state.sessions);
 
     const blockingRequestState = useSessionStore(
         useShallow((state) => ({
@@ -166,6 +171,42 @@ export const ChatContainer: React.FC = () => {
     const { isMobile } = useDeviceInfo();
     const draftOpen = Boolean(newSessionDraft?.open);
     const isDesktopExpandedInput = isExpandedInput && !isMobile;
+
+    const parentSession = React.useMemo(() => {
+        if (!currentSessionId) {
+            return null;
+        }
+
+        const current = sessions.find((session) => session.id === currentSessionId);
+        const parentID = current?.parentID;
+        if (!parentID) {
+            return null;
+        }
+
+        return sessions.find((session) => session.id === parentID) ?? null;
+    }, [currentSessionId, sessions]);
+
+    const handleReturnToParentSession = React.useCallback(() => {
+        if (!parentSession) {
+            return;
+        }
+        void setCurrentSession(parentSession.id);
+    }, [parentSession, setCurrentSession]);
+
+    const returnToParentButton = parentSession ? (
+        <ButtonSmall
+            type="button"
+            variant="outline"
+            size="xs"
+            onClick={handleReturnToParentSession}
+            className="absolute left-3 top-3 z-20 !font-normal bg-[var(--surface-background)]/95"
+            aria-label="Return to parent session"
+            title={parentSession.title?.trim() ? `Return to: ${parentSession.title}` : 'Return to parent session'}
+        >
+            <RiArrowLeftLine className="h-4 w-4" />
+            Parent
+        </ButtonSmall>
+    ) : null;
 
     React.useEffect(() => {
         if (!currentSessionId && !draftOpen) {
@@ -464,9 +505,10 @@ export const ChatContainer: React.FC = () => {
         if (!hasMessagesEntry) {
             return (
                 <div
-                    className="flex flex-col h-full bg-background gap-0"
+                    className="relative flex flex-col h-full bg-background gap-0"
                     style={isMobile ? { paddingBottom: 'var(--oc-keyboard-inset, 0px)' } : undefined}
                 >
+                    {returnToParentButton}
                     <div className="flex-1 overflow-y-auto p-4 bg-background">
                         <div className="chat-message-column space-y-4">
                             {[1, 2, 3].map((i) => (
@@ -492,6 +534,7 @@ export const ChatContainer: React.FC = () => {
                 className="relative flex flex-col h-full bg-background transform-gpu"
                 style={isMobile ? { paddingBottom: 'var(--oc-keyboard-inset, 0px)' } : undefined}
             >
+                {returnToParentButton}
                 {!isDesktopExpandedInput ? (
                 <div className="flex-1 flex items-center justify-center">
                     <ChatEmptyState />
@@ -516,6 +559,7 @@ export const ChatContainer: React.FC = () => {
             className="relative flex flex-col h-full bg-background"
             style={isMobile ? { paddingBottom: 'var(--oc-keyboard-inset, 0px)' } : undefined}
         >
+            {returnToParentButton}
             <div
                 className={cn(
                     'relative min-h-0',
