@@ -31,6 +31,7 @@ import {
     formatInputForDisplay,
     parseReadToolOutput,
 } from '../toolRenderers';
+import { DiffViewToggle, type DiffViewMode } from '../DiffViewToggle';
 import { VirtualizedCodeBlock, type CodeLine } from './VirtualizedCodeBlock';
 
 type ToolStateWithMetadata = ToolStateUnion & { metadata?: Record<string, unknown>; input?: Record<string, unknown>; output?: string; error?: string; time?: { start: number; end?: number } };
@@ -666,15 +667,21 @@ interface DiffPreviewProps {
     diff: string;
     pierreTheme: { light: string; dark: string };
     pierreThemeType: 'light' | 'dark';
+    diffViewMode: DiffViewMode;
 }
 
-const DiffPreview: React.FC<DiffPreviewProps> = React.memo(({ diff, pierreTheme, pierreThemeType }) => {
+const DiffPreview: React.FC<DiffPreviewProps> = React.memo(({ diff, pierreTheme, pierreThemeType, diffViewMode }) => {
     return (
         <div className="typography-code px-1 pb-1 pt-0">
             <PatchDiff
                 patch={diff}
                 options={{
-                    diffStyle: 'unified',
+                    diffStyle: diffViewMode === 'side-by-side' ? 'split' : 'unified',
+                    diffIndicators: 'none',
+                    hunkSeparators: 'line-info-basic',
+                    lineDiffType: 'none',
+                    maxLineDiffLength: 1000,
+                    expansionLineCount: 20,
                     overflow: 'wrap',
                     theme: pierreTheme,
                     themeType: pierreThemeType,
@@ -878,6 +885,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     hasNextTool,
 }) => {
     const { pierreTheme, pierreThemeType } = usePierreThemeConfig();
+    const [diffViewMode, setDiffViewMode] = React.useState<DiffViewMode>('unified');
     const stateWithData = state as ToolStateWithMetadata;
     const metadata = stateWithData.metadata;
     const input = stateWithData.input;
@@ -924,6 +932,10 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         return formatInputForDisplay(input, part.tool);
     }, [input, part.tool]);
     const hasInputText = part.tool !== 'apply_patch' && inputTextContent.trim().length > 0;
+
+    React.useEffect(() => {
+        setDiffViewMode('unified');
+    }, [part.id]);
 
     const renderScrollableBlock = (
         content: React.ReactNode,
@@ -1075,7 +1087,12 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
 
         if ((part.tool === 'edit' || part.tool === 'multiedit' || part.tool === 'apply_patch') && diffContent) {
             return renderScrollableBlock(
-                <DiffPreview diff={diffContent} pierreTheme={pierreTheme} pierreThemeType={pierreThemeType} />,
+                <DiffPreview
+                    diff={diffContent}
+                    pierreTheme={pierreTheme}
+                    pierreThemeType={pierreThemeType}
+                    diffViewMode={diffViewMode}
+                />,
                 { className: 'p-1' }
             );
         }
@@ -1177,8 +1194,17 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
 
                     {part.tool !== 'write' && state.status === 'completed' && 'output' in state && (
                         <div>
-                            <div className="typography-meta font-medium text-muted-foreground/80 mb-1">
-                                Result:
+                            <div className="mb-1 flex items-center justify-between gap-2">
+                                <div className="typography-meta font-medium text-muted-foreground/80">
+                                    Result:
+                                </div>
+                                {(part.tool === 'edit' || part.tool === 'multiedit' || part.tool === 'apply_patch') && diffContent ? (
+                                    <DiffViewToggle
+                                        mode={diffViewMode}
+                                        onModeChange={setDiffViewMode}
+                                        className="h-5 w-5 p-0"
+                                    />
+                                ) : null}
                             </div>
                             {renderResultContent()}
                         </div>

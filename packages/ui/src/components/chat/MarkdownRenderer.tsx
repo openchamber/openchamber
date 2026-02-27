@@ -467,7 +467,9 @@ const MermaidBlock: React.FC<{ source: string; mode: 'svg' | 'ascii' }> = ({ sou
 
     return (
       <div data-streamdown="mermaid-block" className="group">
-        <pre data-streamdown="mermaid-ascii">{asciiText}</pre>
+        <div data-streamdown="mermaid-scroll">
+          <pre data-streamdown="mermaid-ascii">{asciiText}</pre>
+        </div>
         <div
           className={cn(
             'absolute top-1 right-2 transition-opacity',
@@ -489,7 +491,9 @@ const MermaidBlock: React.FC<{ source: string; mode: 'svg' | 'ascii' }> = ({ sou
   if (!svg) {
     return (
       <div data-streamdown="mermaid-block" className="group">
-        <pre data-streamdown="mermaid-ascii">{source}</pre>
+        <div data-streamdown="mermaid-scroll">
+          <pre data-streamdown="mermaid-ascii">{source}</pre>
+        </div>
         <div
           className={cn(
             'absolute top-1 right-2 transition-opacity',
@@ -510,7 +514,9 @@ const MermaidBlock: React.FC<{ source: string; mode: 'svg' | 'ascii' }> = ({ sou
 
   return (
     <div data-streamdown="mermaid-block" className="group">
-      <div data-streamdown="mermaid" dangerouslySetInnerHTML={{ __html: svg }} />
+      <div data-streamdown="mermaid-scroll">
+        <div data-streamdown="mermaid" dangerouslySetInnerHTML={{ __html: svg }} />
+      </div>
       <div
         className={cn(
           'absolute top-1 right-2 flex items-center gap-1 transition-opacity',

@@ -714,7 +714,7 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                             )}
                         </span>
                         <span
-                            className="typography-micro font-semibold w-4 text-center uppercase"
+                            className="typography-micro font-semibold leading-none w-4 text-center uppercase"
                             style={{ color: descriptor.color }}
                             title={descriptor.description}
                             aria-label={descriptor.description}
@@ -722,13 +722,42 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                             {descriptor.code}
                         </span>
                         <span
-                            className="min-w-0 flex-1 truncate typography-ui-label"
-                            style={{ direction: 'rtl', textAlign: 'left' }}
+                            className="min-w-0 flex-1 overflow-hidden typography-ui-label"
                             title={file.path}
                         >
-                            <span className="inline-flex min-w-0 items-center gap-2">
-                                <FileTypeIcon filePath={file.path} className="h-3.5 w-3.5 flex-shrink-0" />
-                                <span className="min-w-0 truncate" style={{ direction: 'rtl', textAlign: 'left' }}>{file.path}</span>
+                            <span className="flex min-w-0 items-center gap-2">
+                                <FileTypeIcon filePath={file.path} className="h-3.5 w-3.5 flex-shrink-0 align-middle" />
+                                {(() => {
+                                    const lastSlash = file.path.lastIndexOf('/');
+                                    if (lastSlash === -1) {
+                                        return (
+                                            <span
+                                                className="block min-w-0 truncate typography-ui-label text-foreground"
+                                                style={{ direction: 'rtl', textAlign: 'left' }}
+                                            >
+                                                {file.path}
+                                            </span>
+                                        );
+                                    }
+
+                                    const dir = file.path.slice(0, lastSlash);
+                                    const name = file.path.slice(lastSlash + 1);
+
+                                    return (
+                                        <span className="flex min-w-0 items-baseline overflow-hidden">
+                                            <span
+                                                className="min-w-0 truncate typography-ui-label text-muted-foreground"
+                                                style={{ direction: 'rtl', textAlign: 'left' }}
+                                            >
+                                                {dir}
+                                            </span>
+                                            <span className="flex-shrink-0 typography-ui-label">
+                                                <span className="text-muted-foreground">/</span>
+                                                <span className="text-foreground">{name}</span>
+                                            </span>
+                                        </span>
+                                    );
+                                })()}
                             </span>
                         </span>
                     </div>

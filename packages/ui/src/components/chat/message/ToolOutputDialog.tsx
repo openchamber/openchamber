@@ -502,6 +502,11 @@ const DialogUnifiedDiff: React.FC<{
                 patch={patchContent}
                 options={{
                     diffStyle: diffViewMode === 'unified' ? 'unified' : 'split',
+                    diffIndicators: 'none',
+                    hunkSeparators: 'line-info-basic',
+                    lineDiffType: 'none',
+                    maxLineDiffLength: 1000,
+                    expansionLineCount: 20,
                     overflow: 'wrap',
                     theme: pierreThemeConfig.theme,
                     themeType: pierreThemeConfig.themeType,
@@ -956,8 +961,13 @@ const MermaidPreviewDialog: React.FC<{
 };
 
 const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange, syntaxTheme, isMobile }) => {
-    const [diffViewMode, setDiffViewMode] = React.useState<DiffViewMode>(isMobile ? 'unified' : 'side-by-side');
+    const [diffViewMode, setDiffViewMode] = React.useState<DiffViewMode>('unified');
     const pierreThemeConfig = usePierreThemeConfig();
+
+    React.useEffect(() => {
+        if (!popup.open) return;
+        setDiffViewMode('unified');
+    }, [popup.open, popup.title]);
 
     if (popup.image) {
         return <ImagePreviewDialog popup={popup} onOpenChange={onOpenChange} isMobile={isMobile} />;
