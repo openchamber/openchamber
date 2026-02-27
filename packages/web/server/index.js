@@ -7028,6 +7028,7 @@ async function main(options = {}) {
 
   app.get('/api/config/profiles', async (req, res) => {
     try {
+      const settings = await readSettingsFromDiskMigrated();
       const profiles = settings.profiles || [];
       res.json({ profiles });
     } catch (error) {
@@ -7038,6 +7039,7 @@ async function main(options = {}) {
 
   app.post('/api/config/profiles', async (req, res) => {
     try {
+      const settings = await readSettingsFromDiskMigrated();
       const { name, agentModels } = req.body;
 
       const trimmedName = typeof name === 'string' ? name.trim() : '';
@@ -7075,6 +7077,7 @@ async function main(options = {}) {
 
   app.patch('/api/config/profiles/:id', async (req, res) => {
     try {
+      const settings = await readSettingsFromDiskMigrated();
       const profileId = req.params.id;
       const { name, agentModels } = req.body;
       const profiles = settings.profiles || [];
@@ -7121,6 +7124,7 @@ async function main(options = {}) {
 
   app.delete('/api/config/profiles/:id', async (req, res) => {
     try {
+      const settings = await readSettingsFromDiskMigrated();
       const profileId = req.params.id;
       const profiles = settings.profiles || [];
       const index = profiles.findIndex((p) => p.id === profileId);

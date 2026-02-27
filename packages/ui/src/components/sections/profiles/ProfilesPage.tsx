@@ -1,6 +1,7 @@
 import React from 'react';
 import { useModelProfilesStore } from '@/stores/useModelProfilesStore';
 import { useAgentsStore, isAgentHidden } from '@/stores/useAgentsStore';
+import { useConfigStore } from '@/stores/useConfigStore';
 import type { AgentModelMapping } from '@/types/profiles';
 import { toast } from '@/components/ui';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
@@ -8,6 +9,7 @@ import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Input } from '@/components/ui/input';
 import { ButtonSmall } from '@/components/ui/button-small';
 import { cn } from '@/lib/utils';
+import { RiAlertLine } from '@remixicon/react';
 
 function splitModel(s: string): { providerId: string; modelId: string } {
   const idx = s.indexOf('/');
@@ -18,6 +20,7 @@ function splitModel(s: string): { providerId: string; modelId: string } {
 export const ProfilesPage: React.FC = () => {
   const { selectedProfileId, profiles, updateProfile, deleteProfile, createProfile, applyProfile } = useModelProfilesStore();
   const { agents } = useAgentsStore();
+  const { providers } = useConfigStore();
   
   const visibleAgents = React.useMemo(() => agents.filter(a => !isAgentHidden(a)), [agents]);
   
@@ -210,6 +213,8 @@ export const ProfilesPage: React.FC = () => {
             {visibleAgents.map((agent, index) => {
               const modelString = agentModels[agent.name] || '';
               const { providerId, modelId } = splitModel(modelString);
+              const isModelUnavailable = !!(providerId && modelId &&
+                !providers.some(p => p.id === providerId && p.models.some(m => m.id === modelId)));
 
               return (
                 <div key={agent.name} className={cn("flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8", index > 0 && "border-t border-[var(--surface-subtle)]")}>
@@ -227,6 +232,11 @@ export const ProfilesPage: React.FC = () => {
                         }));
                       }}
                     />
+                    {isModelUnavailable && (
+                      <span title="Model not available" className="flex shrink-0 items-center text-[var(--status-warning)]">
+                        <RiAlertLine size={14} />
+                      </span>
+                    )}
                   </div>
                 </div>
               );

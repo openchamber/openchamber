@@ -45,6 +45,7 @@ export const useModelProfilesStore = create<ModelProfilesState>()(
           const created: ModelProfile = payload.profile;
           set({ isLoading: false, error: null });
           await get().loadProfiles();
+          set({ selectedProfileId: created.id });
           return created;
         } catch (error) {
           const message = error instanceof Error ? error.message : "Failed to create profile";
@@ -133,6 +134,10 @@ export const useModelProfilesStore = create<ModelProfilesState>()(
           if (!response.ok) {
             const message = payload?.error || "Failed to apply profile";
             throw new Error(message);
+          }
+          if (Array.isArray(payload?.failed) && payload.failed.length > 0) {
+            const names = payload.failed.map((f: { name: string }) => f.name).join(", ");
+            throw new Error(`Some agents could not be updated: ${names}`);
           }
           set({ isLoading: false, error: null });
           await reloadOpenCodeConfiguration();
