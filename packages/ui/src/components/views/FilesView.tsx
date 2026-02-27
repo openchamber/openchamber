@@ -2142,7 +2142,11 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                   </div>
                 }
               >
-                <SimpleMarkdownRenderer content={fileContent} className="typography-markdown-body" />
+                <SimpleMarkdownRenderer
+                  content={fileContent}
+                  className="typography-markdown-body"
+                  stripFrontmatter
+                />
               </ErrorBoundary>
             </div>
           ) : selectedFile && canUseShikiFileView && textViewMode === 'view' ? (
@@ -2537,7 +2541,11 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                   </div>
                 }
               >
-                <SimpleMarkdownRenderer content={fileContent} className="typography-markdown-body" />
+                <SimpleMarkdownRenderer
+                  content={fileContent}
+                  className="typography-markdown-body"
+                  stripFrontmatter
+                />
               </ErrorBoundary>
             </div>
           ) : canUseShikiFileView && textViewMode === 'view' ? (

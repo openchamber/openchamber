@@ -568,6 +568,18 @@ const extractMermaidBlocks = (markdown: string): string[] => {
   return blocks;
 };
 
+const stripLeadingFrontmatter = (markdown: string): string => {
+  const frontmatterMatch = markdown.match(
+    /^(?:\uFEFF)?(---|\+\+\+)[^\S\r\n]*\r?\n[\s\S]*?\r?\n\1[^\S\r\n]*(?:\r?\n|$)/,
+  );
+
+  if (!frontmatterMatch) {
+    return markdown;
+  }
+
+  return markdown.slice(frontmatterMatch[0].length);
+};
+
 export type MarkdownVariant = 'assistant' | 'tool';
 
 interface MarkdownRendererProps {
@@ -734,12 +746,26 @@ export const SimpleMarkdownRenderer: React.FC<{
   className?: string;
   variant?: MarkdownVariant;
   disableLinkSafety?: boolean;
+  stripFrontmatter?: boolean;
   onShowPopup?: (content: ToolPopupContent) => void;
   mermaidControls?: MermaidControlOptions;
   allowMermaidWheelZoom?: boolean;
-}> = ({ content, className, variant = 'assistant', disableLinkSafety, onShowPopup, mermaidControls, allowMermaidWheelZoom = false }) => {
+}> = ({
+  content,
+  className,
+  variant = 'assistant',
+  disableLinkSafety,
+  stripFrontmatter = false,
+  onShowPopup,
+  mermaidControls,
+  allowMermaidWheelZoom = false,
+}) => {
+  const renderedContent = React.useMemo(
+    () => (stripFrontmatter ? stripLeadingFrontmatter(content) : content),
+    [content, stripFrontmatter],
+  );
   const streamdownContainerRef = React.useRef<HTMLDivElement>(null);
-  const mermaidBlocks = React.useMemo(() => extractMermaidBlocks(content), [content]);
+  const mermaidBlocks = React.useMemo(() => extractMermaidBlocks(renderedContent), [renderedContent]);
   useMermaidInlineInteractions({
     containerRef: streamdownContainerRef,
     mermaidBlocks,
@@ -771,7 +797,7 @@ export const SimpleMarkdownRenderer: React.FC<{
         // @ts-expect-error Streamdown type missing linkSafety in older minor
         linkSafety={disableLinkSafety ? { enabled: false } : undefined}
       >
-        {content}
+        {renderedContent}
       </Streamdown>
     </div>
   );
