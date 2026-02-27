@@ -486,6 +486,15 @@ const handleLocalApiRequest = async (url: URL, init?: RequestInit) => {
     return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
   }
 
+  if (pathname.startsWith('/api/vscode/drop-files') && method === 'POST') {
+    const body = init?.body ? JSON.parse(init.body as string) : {};
+    const uris = Array.isArray((body as { uris?: unknown[] }).uris)
+      ? (body as { uris: unknown[] }).uris.filter((value): value is string => typeof value === 'string')
+      : [];
+    const data = await sendBridgeMessage('api:files/drop', { uris });
+    return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }
+
   if (pathname.startsWith('/api/config/agents/')) {
     const encodedName = pathname.slice('/api/config/agents/'.length);
     const name = decodeURIComponent(encodedName);

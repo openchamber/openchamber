@@ -1729,6 +1729,94 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
         return { id, type, success: true, data: { files, skipped } };
       }
 
+      case 'api:files/drop': {
+        const MAX_SIZE = 10 * 1024 * 1024;
+        const uris = Array.isArray((payload as { uris?: unknown[] })?.uris)
+          ? (payload as { uris: unknown[] }).uris.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+          : [];
+
+        if (uris.length === 0) {
+          return { id, type, success: true, data: { files: [], skipped: [] } };
+        }
+
+        const files: Array<{ name: string; mimeType: string; size: number; dataUrl: string }> = [];
+        const skipped: Array<{ name: string; reason: string }> = [];
+
+        const guessMime = (ext: string) => {
+          switch (ext) {
+            case '.png':
+            case '.jpg':
+            case '.jpeg':
+            case '.gif':
+            case '.bmp':
+            case '.webp':
+              return `image/${ext.replace('.', '')}`;
+            case '.pdf':
+              return 'application/pdf';
+            case '.txt':
+            case '.log':
+              return 'text/plain';
+            case '.json':
+              return 'application/json';
+            case '.md':
+            case '.markdown':
+              return 'text/markdown';
+            default:
+              return 'application/octet-stream';
+          }
+        };
+
+        const dedupedUris = Array.from(new Set(uris.map((value) => value.trim())));
+
+        for (const rawUri of dedupedUris) {
+          let uri: vscode.Uri;
+          try {
+            uri = vscode.Uri.parse(rawUri, true);
+          } catch (error) {
+            skipped.push({
+              name: rawUri,
+              reason: error instanceof Error ? error.message : 'Invalid URI',
+            });
+            continue;
+          }
+
+          if (uri.scheme !== 'file') {
+            skipped.push({
+              name: rawUri,
+              reason: `Unsupported URI scheme: ${uri.scheme}`,
+            });
+            continue;
+          }
+
+          const name = path.basename(uri.fsPath || uri.path || rawUri);
+
+          try {
+            const stat = await vscode.workspace.fs.stat(uri);
+            if ((stat.type & vscode.FileType.Directory) !== 0) {
+              skipped.push({ name, reason: 'Folders are not supported' });
+              continue;
+            }
+
+            const size = stat.size ?? 0;
+            if (size > MAX_SIZE) {
+              skipped.push({ name, reason: 'File exceeds 10MB limit' });
+              continue;
+            }
+
+            const bytes = await vscode.workspace.fs.readFile(uri);
+            const ext = path.extname(name).toLowerCase();
+            const mimeType = guessMime(ext);
+            const base64 = Buffer.from(bytes).toString('base64');
+            const dataUrl = `data:${mimeType};base64,${base64}`;
+            files.push({ name, mimeType, size, dataUrl });
+          } catch (error) {
+            skipped.push({ name, reason: error instanceof Error ? error.message : 'Failed to read file' });
+          }
+        }
+
+        return { id, type, success: true, data: { files, skipped } };
+      }
+
       case 'api:config/settings:get': {
         const settings = readSettings(ctx);
         return { id, type, success: true, data: settings };
