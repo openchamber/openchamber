@@ -65,9 +65,16 @@ export const useModelProfilesStore = create<ModelProfilesState>()(
       createFromCurrent: async (name: string) => {
         const agents = useAgentsStore.getState().agents;
         const agentModelSelections = useConfigStore.getState().agentModelSelections;
+        const omoState = useOhMyOpencodeStore.getState();
+
+        // Exclude omo agents from agentModels — captured separately in omoAgentModels
+        const omoAgentNamesSet = new Set(
+          omoState.installed && omoState.agents ? Object.keys(omoState.agents) : [],
+        );
 
         const agentModels: AgentModelMapping = {};
         for (const agent of agents) {
+          if (omoAgentNamesSet.has(agent.name)) continue;
           const selection = agentModelSelections[agent.name];
           if (selection?.providerId && selection?.modelId) {
             agentModels[agent.name] = `${selection.providerId}/${selection.modelId}`;
@@ -76,7 +83,6 @@ export const useModelProfilesStore = create<ModelProfilesState>()(
 
         // Capture oh-my-opencode category models if installed
         let categoryModels: CategoryModelMapping | undefined;
-        const omoState = useOhMyOpencodeStore.getState();
         if (omoState.installed && omoState.categories) {
           categoryModels = {};
           for (const [catName, catConfig] of Object.entries(omoState.categories)) {
