@@ -83,7 +83,20 @@ const DIFF_VIEW_MODE_OPTIONS: Option<'single' | 'stacked'>[] = [
     },
 ];
 
-export type VisibleSetting = 'theme' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'cornerRadius' | 'inputBarOffset' | 'navRail' | 'toolOutput' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'reasoning' | 'queueMode' | 'textJustificationActivity' | 'terminalQuickKeys' | 'persistDraft';
+const MERMAID_RENDERING_OPTIONS: Option<'svg' | 'ascii'>[] = [
+    {
+        id: 'svg',
+        label: 'SVG',
+        description: 'Render diagrams as scalable graphics.',
+    },
+    {
+        id: 'ascii',
+        label: 'ASCII',
+        description: 'Render diagrams as text blocks.',
+    },
+];
+
+export type VisibleSetting = 'theme' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'cornerRadius' | 'inputBarOffset' | 'navRail' | 'toolOutput' | 'mermaidRendering' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'reasoning' | 'queueMode' | 'textJustificationActivity' | 'terminalQuickKeys' | 'persistDraft';
 
 interface OpenChamberVisualSettingsProps {
     /** Which settings to show. If undefined, shows all. */
@@ -99,6 +112,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setShowTextJustificationActivity = useUIStore(state => state.setShowTextJustificationActivity);
     const toolCallExpansion = useUIStore(state => state.toolCallExpansion);
     const setToolCallExpansion = useUIStore(state => state.setToolCallExpansion);
+    const mermaidRenderingMode = useUIStore(state => state.mermaidRenderingMode);
+    const setMermaidRenderingMode = useUIStore(state => state.setMermaidRenderingMode);
     const fontSize = useUIStore(state => state.fontSize);
     const setFontSize = useUIStore(state => state.setFontSize);
     const terminalFontSize = useUIStore(state => state.terminalFontSize);
@@ -174,6 +189,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const hasLayoutSettings = shouldShow('fontSize') || shouldShow('terminalFontSize') || shouldShow('spacing') || shouldShow('cornerRadius') || shouldShow('inputBarOffset');
     const hasNavigationSettings = (!isMobile && shouldShow('navRail')) || (shouldShow('terminalQuickKeys') && !isMobile);
     const hasBehaviorSettings = shouldShow('toolOutput')
+        || shouldShow('mermaidRendering')
         || shouldShow('diffLayout')
         || (shouldShow('mobileStatusBar') && isMobile)
         || shouldShow('dotfiles')
@@ -249,20 +265,19 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 <button
                                     type="button"
                                     disabled={customThemesLoading || themesReloading}
-                                    onClick={async () => {
+                                    onClick={() => {
                                         const startedAt = Date.now();
                                         setThemesReloading(true);
-                                        try {
-                                            await reloadCustomThemes();
-                                        } finally {
+                                        void reloadCustomThemes().finally(() => {
                                             const elapsed = Date.now() - startedAt;
                                             if (elapsed < 500) {
-                                                await new Promise<void>((resolve) => {
-                                                    window.setTimeout(resolve, 500 - elapsed);
-                                                });
+                                                window.setTimeout(() => {
+                                                    setThemesReloading(false);
+                                                }, 500 - elapsed);
+                                                return;
                                             }
                                             setThemesReloading(false);
-                                        }
+                                        });
                                     }}
                                     className="inline-flex items-center typography-ui-label font-normal text-foreground underline decoration-[1px] underline-offset-2 hover:text-foreground/80 disabled:cursor-not-allowed disabled:text-muted-foreground/60"
                                 >
@@ -552,6 +567,42 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 >
                                                     {option.label}
                                                 </ButtonSmall>
+                                            );
+                                        })}
+                                    </div>
+                                </section>
+                            )}
+
+                            {shouldShow('mermaidRendering') && (
+                                <section className="p-2">
+                                    <h4 className="typography-ui-header font-medium text-foreground">Mermaid Rendering</h4>
+                                    <div role="radiogroup" aria-label="Mermaid rendering mode" className="mt-1 space-y-0">
+                                        {MERMAID_RENDERING_OPTIONS.map((option) => {
+                                            const selected = mermaidRenderingMode === option.id;
+                                            return (
+                                                <div
+                                                    key={option.id}
+                                                    role="button"
+                                                    tabIndex={0}
+                                                    aria-pressed={selected}
+                                                    onClick={() => setMermaidRenderingMode(option.id)}
+                                                    onKeyDown={(event) => {
+                                                        if (event.key === ' ' || event.key === 'Enter') {
+                                                            event.preventDefault();
+                                                            setMermaidRenderingMode(option.id);
+                                                        }
+                                                    }}
+                                                    className="flex w-full items-center gap-2 py-0.5 text-left"
+                                                >
+                                                    <Radio
+                                                        checked={selected}
+                                                        onChange={() => setMermaidRenderingMode(option.id)}
+                                                        ariaLabel={`Mermaid rendering: ${option.label}`}
+                                                    />
+                                                    <span className={cn('typography-ui-label font-normal', selected ? 'text-foreground' : 'text-foreground/50')}>
+                                                        {option.label}
+                                                    </span>
+                                                </div>
                                             );
                                         })}
                                     </div>

@@ -42,7 +42,10 @@ interface ProjectsStore {
   setActiveProject: (id: string) => void;
   setActiveProjectIdOnly: (id: string) => void;
   renameProject: (id: string, label: string) => void;
-  updateProjectMeta: (id: string, meta: { label?: string; icon?: string | null; color?: string | null }) => void;
+  updateProjectMeta: (id: string, meta: { label?: string; icon?: string | null; color?: string | null; iconBackground?: string | null }) => void;
+  uploadProjectIcon: (id: string, file: File) => Promise<{ ok: boolean; error?: string }>;
+  removeProjectIcon: (id: string) => Promise<{ ok: boolean; error?: string }>;
+  discoverProjectIcon: (id: string, options?: { force?: boolean }) => Promise<{ ok: boolean; skipped?: boolean; reason?: string; error?: string }>;
   reorderProjects: (fromIndex: number, toIndex: number) => void;
   validateProjectPath: (path: string) => ProjectPathValidationResult;
   synchronizeFromSettings: (settings: DesktopSettings) => void;
@@ -68,6 +71,19 @@ const resolveTildePath = (value: string, homeDir?: string | null): string => {
     return `${homeDir}${trimmed.slice(1)}`;
   }
   return trimmed;
+};
+
+const HEX_COLOR_PATTERN = /^#(?:[\da-fA-F]{3}|[\da-fA-F]{6})$/;
+
+const normalizeIconBackground = (value: unknown): string | null => {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  return HEX_COLOR_PATTERN.test(trimmed) ? trimmed.toLowerCase() : null;
 };
 
 const normalizeProjectPath = (value: string): string => {
@@ -101,6 +117,59 @@ const createProjectId = (): string => {
     return crypto.randomUUID();
   }
   return `proj_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+};
+
+const sanitizeProjectIconImage = (value: unknown): ProjectEntry['iconImage'] | undefined => {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  const mime = typeof candidate.mime === 'string' ? candidate.mime.trim() : '';
+  const updatedAt = typeof candidate.updatedAt === 'number' && Number.isFinite(candidate.updatedAt)
+    ? Math.max(0, Math.round(candidate.updatedAt))
+    : 0;
+  const source = candidate.source === 'custom' || candidate.source === 'auto'
+    ? candidate.source
+    : null;
+
+  if (!mime || !updatedAt || !source) {
+    return undefined;
+  }
+
+  return { mime, updatedAt, source };
+};
+
+const resolveUploadMime = (file: File): 'image/png' | 'image/jpeg' | 'image/svg+xml' | null => {
+  const rawType = typeof file.type === 'string' ? file.type.trim().toLowerCase() : '';
+  if (rawType === 'image/png' || rawType === 'image/jpeg' || rawType === 'image/svg+xml') {
+    return rawType;
+  }
+
+  const lowerName = file.name.toLowerCase();
+  if (lowerName.endsWith('.png')) return 'image/png';
+  if (lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg')) return 'image/jpeg';
+  if (lowerName.endsWith('.svg')) return 'image/svg+xml';
+
+  return null;
+};
+
+const readFileAsDataUrl = async (file: File): Promise<string> => {
+  return await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => {
+      reject(new Error('Failed to read icon file'));
+    };
+    reader.onload = () => {
+      const result = typeof reader.result === 'string' ? reader.result : '';
+      if (!result) {
+        reject(new Error('Failed to read icon file'));
+        return;
+      }
+      resolve(result);
+    };
+    reader.readAsDataURL(file);
+  });
 };
 
 const sanitizeProjects = (value: unknown): ProjectEntry[] => {
@@ -138,8 +207,24 @@ const sanitizeProjects = (value: unknown): ProjectEntry[] => {
     if (typeof candidate.icon === 'string' && candidate.icon.trim().length > 0) {
       project.icon = candidate.icon.trim();
     }
+    if (candidate.iconImage === null) {
+      project.iconImage = null;
+    } else {
+      const iconImage = sanitizeProjectIconImage(candidate.iconImage);
+      if (iconImage) {
+        project.iconImage = iconImage;
+      }
+    }
     if (typeof candidate.color === 'string' && candidate.color.trim().length > 0) {
       project.color = candidate.color.trim();
+    }
+    if (candidate.iconBackground === null) {
+      project.iconBackground = null;
+    } else {
+      const iconBackground = normalizeIconBackground(candidate.iconBackground);
+      if (iconBackground) {
+        project.iconBackground = iconBackground;
+      }
     }
     if (typeof candidate.addedAt === 'number' && Number.isFinite(candidate.addedAt) && candidate.addedAt >= 0) {
       project.addedAt = candidate.addedAt;
@@ -312,6 +397,7 @@ export const useProjectsStore = create<ProjectsStore>()(
       }
 
       get().setActiveProject(entry.id);
+      void get().discoverProjectIcon(entry.id);
       return entry;
     },
 
@@ -405,7 +491,7 @@ export const useProjectsStore = create<ProjectsStore>()(
       persistProjects(nextProjects, activeProjectId);
     },
 
-    updateProjectMeta: (id: string, meta: { label?: string; icon?: string | null; color?: string | null }) => {
+    updateProjectMeta: (id: string, meta: { label?: string; icon?: string | null; color?: string | null; iconBackground?: string | null }) => {
       if (vscodeWorkspace) {
         return;
       }
@@ -419,10 +505,128 @@ export const useProjectsStore = create<ProjectsStore>()(
         }
         if (meta.icon !== undefined) updated.icon = meta.icon;
         if (meta.color !== undefined) updated.color = meta.color;
+        if (meta.iconBackground !== undefined) {
+          updated.iconBackground = normalizeIconBackground(meta.iconBackground);
+        }
         return updated;
       });
       set({ projects: nextProjects });
       persistProjects(nextProjects, activeProjectId);
+    },
+
+    uploadProjectIcon: async (id: string, file: File) => {
+      if (vscodeWorkspace) {
+        return { ok: false, error: 'Custom icons are not supported in this runtime' };
+      }
+
+      const mime = resolveUploadMime(file);
+      if (!mime) {
+        return { ok: false, error: 'Only PNG, JPEG, and SVG are supported' };
+      }
+      if (!Number.isFinite(file.size) || file.size <= 0) {
+        return { ok: false, error: 'Icon file is empty' };
+      }
+      if (file.size > 5 * 1024 * 1024) {
+        return { ok: false, error: 'Icon exceeds size limit (5 MB)' };
+      }
+
+      try {
+        const dataUrl = await readFileAsDataUrl(file);
+        const normalizedDataUrl = dataUrl.replace(/^data:[^;]+;/i, `data:${mime};`);
+
+        const response = await fetch(`/api/projects/${encodeURIComponent(id)}/icon`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          body: JSON.stringify({ dataUrl: normalizedDataUrl }),
+        });
+
+        if (!response.ok) {
+          const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+          return { ok: false, error: payload?.error || 'Failed to upload project icon' };
+        }
+
+        const payload = (await response.json().catch(() => null)) as { settings?: DesktopSettings } | null;
+        if (payload?.settings) {
+          get().synchronizeFromSettings(payload.settings);
+        }
+        return { ok: true };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return { ok: false, error: message || 'Failed to upload project icon' };
+      }
+    },
+
+    removeProjectIcon: async (id: string) => {
+      if (vscodeWorkspace) {
+        return { ok: false, error: 'Custom icons are not supported in this runtime' };
+      }
+
+      try {
+        const response = await fetch(`/api/projects/${encodeURIComponent(id)}/icon`, {
+          method: 'DELETE',
+          headers: {
+            Accept: 'application/json',
+          },
+        });
+
+        if (!response.ok) {
+          const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+          return { ok: false, error: payload?.error || 'Failed to remove project icon' };
+        }
+
+        const payload = (await response.json().catch(() => null)) as { settings?: DesktopSettings } | null;
+        if (payload?.settings) {
+          get().synchronizeFromSettings(payload.settings);
+        }
+        return { ok: true };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return { ok: false, error: message || 'Failed to remove project icon' };
+      }
+    },
+
+    discoverProjectIcon: async (id: string, options?: { force?: boolean }) => {
+      if (vscodeWorkspace) {
+        return { ok: false, error: 'Custom icons are not supported in this runtime' };
+      }
+
+      try {
+        const response = await fetch(`/api/projects/${encodeURIComponent(id)}/icon/discover`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          body: JSON.stringify({ force: options?.force === true }),
+        });
+
+        const payload = (await response.json().catch(() => null)) as {
+          error?: string;
+          skipped?: boolean;
+          reason?: string;
+          settings?: DesktopSettings;
+        } | null;
+
+        if (!response.ok) {
+          return { ok: false, error: payload?.error || 'Failed to discover project icon' };
+        }
+
+        if (payload?.settings) {
+          get().synchronizeFromSettings(payload.settings);
+        }
+
+        return {
+          ok: true,
+          skipped: payload?.skipped === true,
+          reason: typeof payload?.reason === 'string' ? payload.reason : undefined,
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return { ok: false, error: message || 'Failed to discover project icon' };
+      }
     },
 
     reorderProjects: (fromIndex: number, toIndex: number) => {

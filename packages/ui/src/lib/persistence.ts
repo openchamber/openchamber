@@ -115,6 +115,19 @@ const sanitizeSkillCatalogs = (value: unknown): DesktopSettings['skillCatalogs']
   return result;
 };
 
+const HEX_COLOR_PATTERN = /^#(?:[\da-fA-F]{3}|[\da-fA-F]{6})$/;
+
+const normalizeIconBackground = (value: unknown): string | null => {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  return HEX_COLOR_PATTERN.test(trimmed) ? trimmed.toLowerCase() : null;
+};
+
 const sanitizeProjects = (value: unknown): DesktopSettings['projects'] | undefined => {
   if (!Array.isArray(value)) {
     return undefined;
@@ -150,8 +163,31 @@ const sanitizeProjects = (value: unknown): DesktopSettings['projects'] | undefin
     if (typeof candidate.icon === 'string' && candidate.icon.trim().length > 0) {
       project.icon = candidate.icon.trim();
     }
+    if (candidate.iconImage === null) {
+      (project as unknown as Record<string, unknown>).iconImage = null;
+    } else if (candidate.iconImage && typeof candidate.iconImage === 'object') {
+      const iconImage = candidate.iconImage as Record<string, unknown>;
+      const mime = typeof iconImage.mime === 'string' ? iconImage.mime.trim() : '';
+      const updatedAt = typeof iconImage.updatedAt === 'number' && Number.isFinite(iconImage.updatedAt)
+        ? Math.max(0, Math.round(iconImage.updatedAt))
+        : 0;
+      const source = iconImage.source === 'custom' || iconImage.source === 'auto'
+        ? iconImage.source
+        : null;
+      if (mime && updatedAt > 0 && source) {
+        (project as unknown as Record<string, unknown>).iconImage = { mime, updatedAt, source };
+      }
+    }
     if (typeof candidate.color === 'string' && candidate.color.trim().length > 0) {
       project.color = candidate.color.trim();
+    }
+    if (candidate.iconBackground === null) {
+      (project as unknown as Record<string, unknown>).iconBackground = null;
+    } else {
+      const iconBackground = normalizeIconBackground(candidate.iconBackground);
+      if (iconBackground) {
+        (project as unknown as Record<string, unknown>).iconBackground = iconBackground;
+      }
     }
     if (typeof candidate.addedAt === 'number' && Number.isFinite(candidate.addedAt) && candidate.addedAt >= 0) {
       project.addedAt = candidate.addedAt;

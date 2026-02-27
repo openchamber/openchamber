@@ -6,6 +6,7 @@ import {
   RiLoader4Line,
 } from '@remixicon/react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import type { GitStatus } from '@/lib/api/types';
 
 type ChangeDescriptor = {
@@ -124,6 +125,7 @@ export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
         >
           {descriptor.code}
         </span>
+        <FileTypeIcon filePath={file.path} className="h-3.5 w-3.5 shrink-0" />
         {(() => {
           const lastSlash = file.path.lastIndexOf('/');
           if (lastSlash === -1) {

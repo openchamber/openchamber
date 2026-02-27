@@ -25,9 +25,7 @@ function Tooltip({
   ...props
 }: TooltipProps) {
   return (
-    <TooltipProvider delayDuration={delayDuration}>
-      <TooltipPrimitive.Root data-slot="tooltip" {...props} />
-    </TooltipProvider>
+    <TooltipPrimitive.Root data-slot="tooltip" delayDuration={delayDuration} {...props} />
   )
 }
 

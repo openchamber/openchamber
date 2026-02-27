@@ -1021,6 +1021,109 @@ const OPENCHAMBER_DATA_DIR = process.env.OPENCHAMBER_DATA_DIR
   : path.join(os.homedir(), '.config', 'openchamber');
 const SETTINGS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'settings.json');
 const PUSH_SUBSCRIPTIONS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'push-subscriptions.json');
+const PROJECT_ICONS_DIR_PATH = path.join(OPENCHAMBER_DATA_DIR, 'project-icons');
+const PROJECT_ICON_MIME_TO_EXTENSION = {
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/svg+xml': 'svg',
+  'image/webp': 'webp',
+  'image/x-icon': 'ico',
+};
+const PROJECT_ICON_EXTENSION_TO_MIME = Object.fromEntries(
+  Object.entries(PROJECT_ICON_MIME_TO_EXTENSION).map(([mime, ext]) => [ext, mime])
+);
+const PROJECT_ICON_SUPPORTED_MIMES = new Set(Object.keys(PROJECT_ICON_MIME_TO_EXTENSION));
+const PROJECT_ICON_MAX_BYTES = 5 * 1024 * 1024;
+
+const normalizeProjectIconMime = (value) => {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'image/jpg') {
+    return 'image/jpeg';
+  }
+  if (PROJECT_ICON_SUPPORTED_MIMES.has(normalized)) {
+    return normalized;
+  }
+  return null;
+};
+
+const projectIconBaseName = (projectId) => {
+  const hash = crypto.createHash('sha1').update(projectId).digest('hex');
+  return `project-${hash}`;
+};
+
+const projectIconPathForMime = (projectId, mime) => {
+  const normalizedMime = normalizeProjectIconMime(mime);
+  if (!normalizedMime) {
+    return null;
+  }
+  const ext = PROJECT_ICON_MIME_TO_EXTENSION[normalizedMime];
+  return path.join(PROJECT_ICONS_DIR_PATH, `${projectIconBaseName(projectId)}.${ext}`);
+};
+
+const projectIconPathCandidates = (projectId) => {
+  const base = projectIconBaseName(projectId);
+  return Object.values(PROJECT_ICON_MIME_TO_EXTENSION).map((ext) => path.join(PROJECT_ICONS_DIR_PATH, `${base}.${ext}`));
+};
+
+const removeProjectIconFiles = async (projectId, keepPath) => {
+  const candidates = projectIconPathCandidates(projectId);
+  await Promise.all(candidates.map(async (candidatePath) => {
+    if (keepPath && candidatePath === keepPath) {
+      return;
+    }
+    try {
+      await fsPromises.unlink(candidatePath);
+    } catch (error) {
+      if (!error || typeof error !== 'object' || error.code !== 'ENOENT') {
+        throw error;
+      }
+    }
+  }));
+};
+
+const parseProjectIconDataUrl = (value) => {
+  if (typeof value !== 'string') {
+    return { ok: false, error: 'dataUrl is required' };
+  }
+
+  const trimmed = value.trim();
+  const match = trimmed.match(/^data:([^;,]+);base64,([A-Za-z0-9+/=\s]+)$/i);
+  if (!match) {
+    return { ok: false, error: 'Invalid dataUrl format' };
+  }
+
+  const mime = normalizeProjectIconMime(match[1]);
+  if (!mime || !['image/png', 'image/jpeg', 'image/svg+xml'].includes(mime)) {
+    return { ok: false, error: 'Icon must be PNG, JPEG, or SVG' };
+  }
+
+  try {
+    const base64 = match[2].replace(/\s+/g, '');
+    const bytes = Buffer.from(base64, 'base64');
+    if (bytes.length === 0) {
+      return { ok: false, error: 'Icon content is empty' };
+    }
+    if (bytes.length > PROJECT_ICON_MAX_BYTES) {
+      return { ok: false, error: 'Icon exceeds size limit (5 MB)' };
+    }
+    return { ok: true, mime, bytes };
+  } catch {
+    return { ok: false, error: 'Failed to decode icon data' };
+  }
+};
+
+const findProjectById = (settings, projectId) => {
+  const projects = sanitizeProjects(settings?.projects) || [];
+  const index = projects.findIndex((project) => project.id === projectId);
+  if (index === -1) {
+    return { projects, index: -1, project: null };
+  }
+  return { projects, index, project: projects[index] };
+};
 
 const readSettingsFromDisk = async () => {
   try {
@@ -1284,6 +1387,18 @@ const sanitizeProjects = (input) => {
     return undefined;
   }
 
+  const hexColorPattern = /^#(?:[\da-fA-F]{3}|[\da-fA-F]{6})$/;
+  const normalizeIconBackground = (value) => {
+    if (typeof value !== 'string') {
+      return null;
+    }
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return null;
+    }
+    return hexColorPattern.test(trimmed) ? trimmed.toLowerCase() : null;
+  };
+
   const result = [];
   const seenIds = new Set();
   const seenPaths = new Set();
@@ -1297,6 +1412,10 @@ const sanitizeProjects = (input) => {
     const normalizedPath = rawPath ? path.resolve(normalizeDirectoryPath(rawPath)) : '';
     const label = typeof candidate.label === 'string' ? candidate.label.trim() : '';
     const icon = typeof candidate.icon === 'string' ? candidate.icon.trim() : '';
+    const iconImage = candidate.iconImage && typeof candidate.iconImage === 'object'
+      ? candidate.iconImage
+      : null;
+    const iconBackground = normalizeIconBackground(candidate.iconBackground);
     const color = typeof candidate.color === 'string' ? candidate.color.trim() : '';
     const addedAt = Number.isFinite(candidate.addedAt) ? Number(candidate.addedAt) : null;
     const lastOpenedAt = Number.isFinite(candidate.lastOpenedAt)
@@ -1315,10 +1434,30 @@ const sanitizeProjects = (input) => {
       path: normalizedPath,
       ...(label ? { label } : {}),
       ...(icon ? { icon } : {}),
+      ...(iconBackground ? { iconBackground } : {}),
       ...(color ? { color } : {}),
       ...(Number.isFinite(addedAt) && addedAt >= 0 ? { addedAt } : {}),
       ...(Number.isFinite(lastOpenedAt) && lastOpenedAt >= 0 ? { lastOpenedAt } : {}),
     };
+
+    if (candidate.iconImage === null) {
+      project.iconImage = null;
+    } else if (iconImage) {
+      const mime = typeof iconImage.mime === 'string' ? iconImage.mime.trim() : '';
+      const updatedAt = typeof iconImage.updatedAt === 'number' && Number.isFinite(iconImage.updatedAt)
+        ? Math.max(0, Math.round(iconImage.updatedAt))
+        : 0;
+      const source = iconImage.source === 'custom' || iconImage.source === 'auto'
+        ? iconImage.source
+        : null;
+      if (mime && updatedAt > 0 && source) {
+        project.iconImage = { mime, updatedAt, source };
+      }
+    }
+
+    if (candidate.iconBackground === null) {
+      project.iconBackground = null;
+    }
 
     if (typeof candidate.sidebarCollapsed === 'boolean') {
       project.sidebarCollapsed = candidate.sidebarCollapsed;
@@ -5856,6 +5995,7 @@ async function main(options = {}) {
       req.path.startsWith('/api/config/mcp') ||
       req.path.startsWith('/api/config/settings') ||
       req.path.startsWith('/api/config/skills') ||
+      req.path.startsWith('/api/projects') ||
       req.path.startsWith('/api/fs') ||
       req.path.startsWith('/api/git') ||
       req.path.startsWith('/api/prompts') ||
@@ -6940,6 +7080,202 @@ async function main(options = {}) {
       console.error(`[API:PUT /api/config/settings] Failed to save settings:`, error);
       console.error(`[API:PUT /api/config/settings] Error stack:`, error.stack);
       res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to save settings' });
+    }
+  });
+
+  app.get('/api/projects/:projectId/icon', async (req, res) => {
+    const projectId = typeof req.params.projectId === 'string' ? req.params.projectId.trim() : '';
+    if (!projectId) {
+      return res.status(400).json({ error: 'projectId is required' });
+    }
+
+    try {
+      const settings = await readSettingsFromDiskMigrated();
+      const { project } = findProjectById(settings, projectId);
+      if (!project) {
+        return res.status(404).json({ error: 'Project not found' });
+      }
+
+      const metadataMime = normalizeProjectIconMime(project.iconImage?.mime);
+      const preferredPath = metadataMime ? projectIconPathForMime(projectId, metadataMime) : null;
+      const candidates = preferredPath
+        ? [preferredPath, ...projectIconPathCandidates(projectId).filter((candidate) => candidate !== preferredPath)]
+        : projectIconPathCandidates(projectId);
+
+      for (const iconPath of candidates) {
+        try {
+          const data = await fsPromises.readFile(iconPath);
+          const ext = path.extname(iconPath).slice(1).toLowerCase();
+          const contentType = metadataMime || PROJECT_ICON_EXTENSION_TO_MIME[ext] || 'application/octet-stream';
+          res.setHeader('Content-Type', contentType);
+          res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+          return res.send(data);
+        } catch (error) {
+          if (!error || typeof error !== 'object' || error.code !== 'ENOENT') {
+            console.warn('Failed to read project icon:', error);
+            return res.status(500).json({ error: 'Failed to read project icon' });
+          }
+        }
+      }
+
+      return res.status(404).json({ error: 'Project icon not found' });
+    } catch (error) {
+      console.warn('Failed to load project icon:', error);
+      return res.status(500).json({ error: 'Failed to load project icon' });
+    }
+  });
+
+  app.put('/api/projects/:projectId/icon', async (req, res) => {
+    const projectId = typeof req.params.projectId === 'string' ? req.params.projectId.trim() : '';
+    if (!projectId) {
+      return res.status(400).json({ error: 'projectId is required' });
+    }
+
+    const parsed = parseProjectIconDataUrl(req.body?.dataUrl);
+    if (!parsed.ok) {
+      return res.status(400).json({ error: parsed.error });
+    }
+
+    try {
+      const settings = await readSettingsFromDiskMigrated();
+      const { projects, project } = findProjectById(settings, projectId);
+      if (!project) {
+        return res.status(404).json({ error: 'Project not found' });
+      }
+
+      const iconPath = projectIconPathForMime(projectId, parsed.mime);
+      if (!iconPath) {
+        return res.status(400).json({ error: 'Unsupported icon format' });
+      }
+
+      await fsPromises.mkdir(PROJECT_ICONS_DIR_PATH, { recursive: true });
+      await fsPromises.writeFile(iconPath, parsed.bytes);
+      await removeProjectIconFiles(projectId, iconPath);
+
+      const updatedAt = Date.now();
+      const nextProjects = projects.map((entry) => (
+        entry.id === projectId
+          ? { ...entry, iconImage: { mime: parsed.mime, updatedAt, source: 'custom' } }
+          : entry
+      ));
+      const updatedSettings = await persistSettings({ projects: nextProjects });
+      const updatedProject = (updatedSettings.projects || []).find((entry) => entry.id === projectId) || null;
+
+      return res.json({ project: updatedProject, settings: updatedSettings });
+    } catch (error) {
+      console.warn('Failed to upload project icon:', error);
+      return res.status(500).json({ error: 'Failed to upload project icon' });
+    }
+  });
+
+  app.delete('/api/projects/:projectId/icon', async (req, res) => {
+    const projectId = typeof req.params.projectId === 'string' ? req.params.projectId.trim() : '';
+    if (!projectId) {
+      return res.status(400).json({ error: 'projectId is required' });
+    }
+
+    try {
+      const settings = await readSettingsFromDiskMigrated();
+      const { projects, project } = findProjectById(settings, projectId);
+      if (!project) {
+        return res.status(404).json({ error: 'Project not found' });
+      }
+
+      await removeProjectIconFiles(projectId);
+
+      const nextProjects = projects.map((entry) => (
+        entry.id === projectId
+          ? { ...entry, iconImage: null }
+          : entry
+      ));
+      const updatedSettings = await persistSettings({ projects: nextProjects });
+      const updatedProject = (updatedSettings.projects || []).find((entry) => entry.id === projectId) || null;
+
+      return res.json({ project: updatedProject, settings: updatedSettings });
+    } catch (error) {
+      console.warn('Failed to remove project icon:', error);
+      return res.status(500).json({ error: 'Failed to remove project icon' });
+    }
+  });
+
+  app.post('/api/projects/:projectId/icon/discover', async (req, res) => {
+    const projectId = typeof req.params.projectId === 'string' ? req.params.projectId.trim() : '';
+    if (!projectId) {
+      return res.status(400).json({ error: 'projectId is required' });
+    }
+
+    try {
+      const settings = await readSettingsFromDiskMigrated();
+      const { projects, project } = findProjectById(settings, projectId);
+      if (!project) {
+        return res.status(404).json({ error: 'Project not found' });
+      }
+
+      const force = req.body?.force === true;
+      if (project.iconImage?.source === 'custom' && !force) {
+        return res.json({
+          project,
+          skipped: true,
+          reason: 'custom-icon-present',
+        });
+      }
+
+      const faviconCandidates = await searchFilesystemFiles(project.path, {
+        limit: 200,
+        query: 'favicon',
+        includeHidden: true,
+        respectGitignore: false,
+      });
+
+      const filtered = faviconCandidates
+        .filter((entry) => /(^|\/)favicon\.(ico|png|svg|jpg|jpeg|webp)$/i.test(entry.path))
+        .sort((a, b) => a.path.length - b.path.length);
+
+      const selected = filtered[0];
+      if (!selected) {
+        return res.status(404).json({ error: 'No favicon found in project' });
+      }
+
+      const ext = path.extname(selected.path).slice(1).toLowerCase();
+      const mime = PROJECT_ICON_EXTENSION_TO_MIME[ext] || null;
+      if (!mime) {
+        return res.status(415).json({ error: 'Unsupported favicon format' });
+      }
+
+      const bytes = await fsPromises.readFile(selected.path);
+      if (bytes.length === 0) {
+        return res.status(400).json({ error: 'Discovered icon is empty' });
+      }
+      if (bytes.length > PROJECT_ICON_MAX_BYTES) {
+        return res.status(400).json({ error: 'Discovered icon exceeds size limit (5 MB)' });
+      }
+
+      const iconPath = projectIconPathForMime(projectId, mime);
+      if (!iconPath) {
+        return res.status(415).json({ error: 'Unsupported favicon format' });
+      }
+
+      await fsPromises.mkdir(PROJECT_ICONS_DIR_PATH, { recursive: true });
+      await fsPromises.writeFile(iconPath, bytes);
+      await removeProjectIconFiles(projectId, iconPath);
+
+      const updatedAt = Date.now();
+      const nextProjects = projects.map((entry) => (
+        entry.id === projectId
+          ? { ...entry, iconImage: { mime, updatedAt, source: 'auto' } }
+          : entry
+      ));
+      const updatedSettings = await persistSettings({ projects: nextProjects });
+      const updatedProject = (updatedSettings.projects || []).find((entry) => entry.id === projectId) || null;
+
+      return res.json({
+        project: updatedProject,
+        settings: updatedSettings,
+        discoveredPath: selected.path,
+      });
+    } catch (error) {
+      console.warn('Failed to discover project icon:', error);
+      return res.status(500).json({ error: 'Failed to discover project icon' });
     }
   });
 

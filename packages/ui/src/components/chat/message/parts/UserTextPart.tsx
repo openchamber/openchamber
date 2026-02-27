@@ -1,8 +1,8 @@
 import React from 'react';
-
 import { cn } from '@/lib/utils';
 import type { Part } from '@opencode-ai/sdk/v2';
 import type { AgentMentionInfo } from '../types';
+import { SimpleMarkdownRenderer } from '../../MarkdownRenderer';
 
 type PartWithText = Part & { text?: string; content?: string; value?: string };
 
@@ -53,10 +53,10 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
             }
 
             const styles = window.getComputedStyle(el);
-            const lineHeight = Number.parseFloat(styles.lineHeight);
-            const fontSize = Number.parseFloat(styles.fontSize);
-            const fallbackLineHeight = Number.isFinite(fontSize) ? fontSize * 1.4 : 20;
-            const resolvedLineHeight = Number.isFinite(lineHeight) ? lineHeight : fallbackLineHeight;
+            const lineHeight = parseFloat(styles.lineHeight);
+            const fontSize = parseFloat(styles.fontSize);
+            const fallbackLineHeight = isFinite(fontSize) ? fontSize * 1.4 : 20;
+            const resolvedLineHeight = isFinite(lineHeight) ? lineHeight : fallbackLineHeight;
             setCollapseZoneHeight(Math.max(1, Math.round(resolvedLineHeight * CLAMP_LINES)));
         };
 
@@ -91,47 +91,34 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
         }
     }, [collapseZoneHeight, hasActiveSelectionInElement, isExpanded, isTruncated]);
 
-    if (!textContent || textContent.trim().length === 0) {
-        return null;
-    }
-
-    // Render content with optional agent mention link
-    const renderContent = () => {
+    const processedContent = React.useMemo(() => {
         if (!agentMention?.token || !textContent.includes(agentMention.token)) {
             return textContent;
         }
-        const idx = textContent.indexOf(agentMention.token);
-        const before = textContent.slice(0, idx);
-        const after = textContent.slice(idx + agentMention.token.length);
-        return (
-            <>
-                {before}
-                <a
-                    href={buildMentionUrl(agentMention.name)}
-                    className="text-primary hover:underline"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onClick={(e) => e.stopPropagation()}
-                >
-                    {agentMention.token}
-                </a>
-                {after}
-            </>
-        );
-    };
+        
+        const mentionHtml = `<a href="${buildMentionUrl(agentMention.name)}" class="text-primary hover:underline" target="_blank" rel="noopener noreferrer">${agentMention.token}</a>`;
+        return textContent.replace(agentMention.token, mentionHtml);
+    }, [agentMention, textContent]);
+
+    if (!textContent || textContent.trim().length === 0) {
+        return null;
+    }
 
     return (
         <div className="relative" key={part.id || `${messageId}-user-text`}>
             <div
                 className={cn(
-                    "break-words whitespace-pre-wrap font-sans typography-markdown",
+                    "break-words font-sans typography-markdown",
                     !isExpanded && "line-clamp-2",
                     isTruncated && !isExpanded && "cursor-pointer"
                 )}
                 ref={textRef}
                 onClick={handleClick}
             >
-                {renderContent()}
+                <SimpleMarkdownRenderer 
+                    content={processedContent} 
+                    disableLinkSafety 
+                />
             </div>
         </div>
     );

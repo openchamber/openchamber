@@ -24,6 +24,7 @@ import { DiffViewToggle } from '@/components/chat/message/DiffViewToggle';
 import type { DiffViewMode } from '@/components/chat/message/types';
 import { PierreDiffViewer } from './PierreDiffViewer';
 import { useDeviceInfo } from '@/lib/device';
+import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 
 // Minimum width for side-by-side diff view (px)
 const SIDE_BY_SIDE_MIN_WIDTH = 1100;
@@ -157,6 +158,7 @@ const FileSelector = React.memo<FileSelectorProps>(({
                 <button className="flex h-8 items-center gap-2 rounded-lg border border-input bg-transparent px-2 typography-ui-label text-foreground outline-none hover:bg-interactive-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
                     {selectedFileEntry ? (
                         <div className="flex min-w-0 items-center gap-3">
+                            <FileTypeIcon filePath={selectedFileEntry.path} className="h-3.5 w-3.5 flex-shrink-0" />
                             <span className="min-w-0 flex-1 truncate typography-meta">
                                 {getLabel(selectedFileEntry.path)}
                             </span>
@@ -197,6 +199,7 @@ const FileSelector = React.memo<FileSelectorProps>(({
                     {changedFiles.map((file) => (
                         <DropdownMenuRadioItem key={file.path} value={file.path}>
                             <div className="flex w-full min-w-0 items-center gap-3">
+                                <FileTypeIcon filePath={file.path} className="h-3.5 w-3.5 flex-shrink-0" />
                                 <span className="min-w-0 flex-1 truncate typography-meta">
                                     {getLabel(file.path)}
                                 </span>
@@ -286,6 +289,7 @@ const FileList = React.memo<FileListProps>(({
                                         : 'text-muted-foreground hover:bg-interactive-hover hover:text-foreground'
                                 )}
                             >
+                                <FileTypeIcon filePath={file.path} className="h-3.5 w-3.5 flex-shrink-0" />
                                 <span
                                     className="typography-micro font-semibold w-4 text-center uppercase"
                                     style={{ color: descriptor.color }}
@@ -649,15 +653,14 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
         setIsLoading(true);
 
         let cancelled = false;
-        void (async () => {
-            try {
-                const fetchPromise = git.getGitFileDiff(directory, { path: file.path });
-                const timeoutMs = DIFF_REQUEST_TIMEOUT_MS;
-                const timeoutPromise = new Promise<never>((_, reject) => {
-                    setTimeout(() => reject(new Error(`Timed out after ${timeoutMs}ms`)), timeoutMs);
-                });
+        const fetchPromise = git.getGitFileDiff(directory, { path: file.path });
+        const timeoutMs = DIFF_REQUEST_TIMEOUT_MS;
+        const timeoutPromise = new Promise<never>((_, reject) => {
+            setTimeout(() => reject(new Error(`Timed out after ${timeoutMs}ms`)), timeoutMs);
+        });
 
-                const response = await Promise.race([fetchPromise, timeoutPromise]);
+        void Promise.race([fetchPromise, timeoutPromise])
+            .then((response) => {
                 if (cancelled) return;
 
                 setDiff(directory, file.path, {
@@ -666,13 +669,13 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                     isBinary: response.isBinary,
                 });
                 setIsLoading(false);
-            } catch (error) {
+            })
+            .catch((error) => {
                 if (cancelled) return;
                 const message = error instanceof Error ? error.message : String(error);
                 setDiffLoadError(message);
                 setIsLoading(false);
-            }
-        })();
+            });
 
         return () => {
             cancelled = true;
@@ -711,7 +714,7 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                             )}
                         </span>
                         <span
-                            className="typography-micro font-semibold w-4 text-center uppercase"
+                            className="typography-micro font-semibold leading-none w-4 text-center uppercase"
                             style={{ color: descriptor.color }}
                             title={descriptor.description}
                             aria-label={descriptor.description}
@@ -719,11 +722,43 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                             {descriptor.code}
                         </span>
                         <span
-                            className="min-w-0 flex-1 truncate typography-ui-label"
-                            style={{ direction: 'rtl', textAlign: 'left' }}
+                            className="min-w-0 flex-1 overflow-hidden typography-ui-label"
                             title={file.path}
                         >
-                            {file.path}
+                            <span className="flex min-w-0 items-center gap-2">
+                                <FileTypeIcon filePath={file.path} className="h-3.5 w-3.5 flex-shrink-0 align-middle" />
+                                {(() => {
+                                    const lastSlash = file.path.lastIndexOf('/');
+                                    if (lastSlash === -1) {
+                                        return (
+                                            <span
+                                                className="block min-w-0 truncate typography-ui-label text-foreground"
+                                                style={{ direction: 'rtl', textAlign: 'left' }}
+                                            >
+                                                {file.path}
+                                            </span>
+                                        );
+                                    }
+
+                                    const dir = file.path.slice(0, lastSlash);
+                                    const name = file.path.slice(lastSlash + 1);
+
+                                    return (
+                                        <span className="flex min-w-0 items-baseline overflow-hidden">
+                                            <span
+                                                className="min-w-0 truncate typography-ui-label text-muted-foreground"
+                                                style={{ direction: 'rtl', textAlign: 'left' }}
+                                            >
+                                                {dir}
+                                            </span>
+                                            <span className="flex-shrink-0 typography-ui-label">
+                                                <span className="text-muted-foreground">/</span>
+                                                <span className="text-foreground">{name}</span>
+                                            </span>
+                                        </span>
+                                    );
+                                })()}
+                            </span>
                         </span>
                     </div>
                     <div className="relative flex items-center gap-2">
@@ -1275,15 +1310,14 @@ export const DiffView: React.FC<DiffViewProps> = ({
         lastDiffRequestRef.current = requestKey;
 
         let cancelled = false;
-        void (async () => {
-            try {
-                const fetchPromise = git.getGitFileDiff(effectiveDirectory, { path: selectedFile });
-                const timeoutMs = DIFF_REQUEST_TIMEOUT_MS;
-                const timeoutPromise = new Promise<never>((_, reject) => {
-                    setTimeout(() => reject(new Error(`Timed out after ${timeoutMs}ms`)), timeoutMs);
-                });
+        const fetchPromise = git.getGitFileDiff(effectiveDirectory, { path: selectedFile });
+        const timeoutMs = DIFF_REQUEST_TIMEOUT_MS;
+        const timeoutPromise = new Promise<never>((_, reject) => {
+            setTimeout(() => reject(new Error(`Timed out after ${timeoutMs}ms`)), timeoutMs);
+        });
 
-                const response = await Promise.race([fetchPromise, timeoutPromise]);
+        void Promise.race([fetchPromise, timeoutPromise])
+            .then((response) => {
                 if (cancelled) return;
 
                 setDiff(effectiveDirectory, selectedFile, {
@@ -1291,12 +1325,12 @@ export const DiffView: React.FC<DiffViewProps> = ({
                     modified: response.modified ?? '',
                     isBinary: response.isBinary,
                 });
-            } catch (error) {
+            })
+            .catch((error) => {
                 if (cancelled) return;
                 const message = error instanceof Error ? error.message : String(error);
                 setDiffLoadError(message);
-            }
-        })();
+            });
 
         return () => {
             cancelled = true;

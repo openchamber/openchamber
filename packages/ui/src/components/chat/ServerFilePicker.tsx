@@ -8,7 +8,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { RiCloseLine, RiCodeLine, RiFileImageLine, RiFileTextLine, RiFolder6Line, RiSearchLine } from '@remixicon/react';
+import { RiCloseLine, RiFolder6Line, RiSearchLine } from '@remixicon/react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn, truncatePathMiddle } from '@/lib/utils';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -19,6 +19,7 @@ import { useFileSearchStore } from '@/stores/useFileSearchStore';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useDirectoryShowHidden } from '@/lib/directoryShowHidden';
 import { useFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
+import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 interface FileInfo {
   name: string;
   path: string;
@@ -62,6 +63,7 @@ export const ServerFilePicker: React.FC<ServerFilePickerProps> = ({
   const [childrenByDir, setChildrenByDir] = React.useState<Record<string, FileInfo[]>>({});
   const loadedDirsRef = React.useRef<Set<string>>(new Set());
   const inFlightDirsRef = React.useRef<Set<string>>(new Set());
+  const [inFlightDirs, setInFlightDirs] = React.useState<Set<string>>(new Set());
   const [searchResults, setSearchResults] = React.useState<FileInfo[]>([]);
   const [searching, setSearching] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
@@ -70,6 +72,11 @@ export const ServerFilePicker: React.FC<ServerFilePickerProps> = ({
 
   const open = controlledOpen ?? uncontrolledOpen;
   const setOpen = onOpenChange ?? setUncontrolledOpen;
+
+  const updateInFlightDirs = React.useCallback((next: Set<string>) => {
+    inFlightDirsRef.current = next;
+    setInFlightDirs(next);
+  }, []);
 
   const sortDirectoryItems = React.useCallback((items: FileInfo[]) => (
     items.slice().sort((a, b) => {
@@ -101,28 +108,30 @@ export const ServerFilePicker: React.FC<ServerFilePickerProps> = ({
   const loadDirectory = React.useCallback(async (dirPath: string) => {
     setLoading(true);
     setError(null);
-    try {
-      const entries = await opencodeClient.listLocalDirectory(dirPath, { respectGitignore: !showGitignored });
-      const items = mapFilesystemEntries(dirPath, entries.map((entry) => ({
-        name: entry.name,
-        path: entry.path,
-        isDirectory: entry.isDirectory,
-      })));
+    await opencodeClient.listLocalDirectory(dirPath, { respectGitignore: !showGitignored })
+      .then((entries) => {
+        const items = mapFilesystemEntries(dirPath, entries.map((entry) => ({
+          name: entry.name,
+          path: entry.path,
+          isDirectory: entry.isDirectory,
+        })));
 
-      loadedDirsRef.current = new Set([dirPath]);
-      inFlightDirsRef.current = new Set();
-      setChildrenByDir({ [dirPath]: items });
-      setExpandedDirs(new Set());
-    } catch {
-      setError('Failed to load directory contents');
-      loadedDirsRef.current = new Set([dirPath]);
-      inFlightDirsRef.current = new Set();
-      setChildrenByDir({ [dirPath]: [] });
-      setExpandedDirs(new Set());
-    } finally {
-      setLoading(false);
-    }
-  }, [mapFilesystemEntries, showGitignored]);
+        loadedDirsRef.current = new Set([dirPath]);
+        updateInFlightDirs(new Set());
+        setChildrenByDir({ [dirPath]: items });
+        setExpandedDirs(new Set());
+      })
+      .catch(() => {
+        setError('Failed to load directory contents');
+        loadedDirsRef.current = new Set([dirPath]);
+        updateInFlightDirs(new Set());
+        setChildrenByDir({ [dirPath]: [] });
+        setExpandedDirs(new Set());
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+  }, [mapFilesystemEntries, showGitignored, updateInFlightDirs]);
 
   const loadDirectoryChildren = React.useCallback(async (dirPath: string) => {
     const normalizedDir = dirPath.trim();
@@ -137,39 +146,42 @@ export const ServerFilePicker: React.FC<ServerFilePickerProps> = ({
       return;
     }
 
-    inFlightDirsRef.current = new Set(inFlightDirsRef.current);
-    inFlightDirsRef.current.add(cacheKey);
+    const nextInFlight = new Set(inFlightDirsRef.current);
+    nextInFlight.add(cacheKey);
+    updateInFlightDirs(nextInFlight);
 
-    try {
-      const entries = await opencodeClient.listLocalDirectory(normalizedDir, { respectGitignore: !showGitignored });
-      const items = mapFilesystemEntries(normalizedDir, entries.map((entry) => ({
-        name: entry.name,
-        path: entry.path,
-        isDirectory: entry.isDirectory,
-      })));
+    await opencodeClient.listLocalDirectory(normalizedDir, { respectGitignore: !showGitignored })
+      .then((entries) => {
+        const items = mapFilesystemEntries(normalizedDir, entries.map((entry) => ({
+          name: entry.name,
+          path: entry.path,
+          isDirectory: entry.isDirectory,
+        })));
 
-      loadedDirsRef.current = new Set(loadedDirsRef.current);
-      loadedDirsRef.current.add(cacheKey);
-      setChildrenByDir((prev) => ({
-        ...prev,
-        [normalizedDir]: items,
-      }));
-    } catch {
-      // Keep it unloadded so the user can retry expanding the directory.
-      setChildrenByDir((prev) => {
-        if (prev[normalizedDir]) {
-          return prev;
-        }
-        return {
+        loadedDirsRef.current = new Set(loadedDirsRef.current);
+        loadedDirsRef.current.add(cacheKey);
+        setChildrenByDir((prev) => ({
           ...prev,
-          [normalizedDir]: [],
-        };
+          [normalizedDir]: items,
+        }));
+      })
+      .catch(() => {
+        setChildrenByDir((prev) => {
+          if (prev[normalizedDir]) {
+            return prev;
+          }
+          return {
+            ...prev,
+            [normalizedDir]: [],
+          };
+        });
+      })
+      .finally(() => {
+        const updatedInFlightDirs = new Set(inFlightDirsRef.current);
+        updatedInFlightDirs.delete(cacheKey);
+        updateInFlightDirs(updatedInFlightDirs);
       });
-    } finally {
-      inFlightDirsRef.current = new Set(inFlightDirsRef.current);
-      inFlightDirsRef.current.delete(cacheKey);
-    }
-  }, [mapFilesystemEntries, showGitignored, cacheNonce]);
+  }, [mapFilesystemEntries, showGitignored, cacheNonce, updateInFlightDirs]);
 
   React.useEffect(() => {
     if ((open || mobileOpen) && currentDirectory) {
@@ -244,11 +256,11 @@ export const ServerFilePicker: React.FC<ServerFilePickerProps> = ({
       setSearchResults([]);
       setSearching(false);
       loadedDirsRef.current = new Set();
-      inFlightDirsRef.current = new Set();
+      updateInFlightDirs(new Set());
       setChildrenByDir({});
       setExpandedDirs(new Set());
     }
-  }, [open, mobileOpen]);
+  }, [open, mobileOpen, updateInFlightDirs]);
 
   const getFileIcon = (file: FileInfo) => {
     if (file.type === 'directory') {
@@ -259,31 +271,7 @@ export const ServerFilePicker: React.FC<ServerFilePickerProps> = ({
       );
     }
 
-    const ext = file.extension?.toLowerCase();
-    switch (ext) {
-      case 'ts':
-      case 'tsx':
-      case 'js':
-      case 'jsx':
-      case 'html':
-      case 'css':
-      case 'scss':
-      case 'less':
-        return <RiCodeLine className="h-3.5 w-3.5 text-[var(--status-info)]" />;
-      case 'json':
-        return <RiCodeLine className="h-3.5 w-3.5 text-[var(--status-warning)]" />;
-      case 'md':
-      case 'mdx':
-        return <RiFileTextLine className="h-3.5 w-3.5 text-muted-foreground" />;
-      case 'png':
-      case 'jpg':
-      case 'jpeg':
-      case 'gif':
-      case 'svg':
-        return <RiFileImageLine className="h-3.5 w-3.5 text-[var(--status-success)]" />;
-      default:
-        return <RiFileTextLine className="h-3.5 w-3.5 text-muted-foreground" />;
-    }
+    return <FileTypeIcon filePath={file.path} extension={file.extension} className="h-3.5 w-3.5" />;
   };
 
   const toggleDirectory = async (dirPath: string) => {
@@ -338,14 +326,15 @@ export const ServerFilePicker: React.FC<ServerFilePickerProps> = ({
       .filter((file): file is FileInfo => Boolean(file));
 
     setAttaching(true);
-    try {
-      await onFilesSelected(selected);
-      setSelectedFiles(new Set());
-      setOpen(false);
-      setMobileOpen(false);
-    } finally {
-      setAttaching(false);
-    }
+    await Promise.resolve(onFilesSelected(selected))
+      .then(() => {
+        setSelectedFiles(new Set());
+        setOpen(false);
+        setMobileOpen(false);
+      })
+      .finally(() => {
+        setAttaching(false);
+      });
   };
 
   const rootItems = React.useMemo(() => {
@@ -425,7 +414,7 @@ export const ServerFilePicker: React.FC<ServerFilePickerProps> = ({
     const isDirectory = file.type === 'directory';
     const children = isDirectory ? getChildItems(file.path) : [];
     const isExpanded = expandedDirs.has(file.path);
-    const isLoadingChildren = isDirectory && isExpanded && inFlightDirsRef.current.has(file.path) && children.length === 0;
+    const isLoadingChildren = isDirectory && isExpanded && inFlightDirs.has(file.path) && children.length === 0;
 
     return (
       <div key={file.path}>

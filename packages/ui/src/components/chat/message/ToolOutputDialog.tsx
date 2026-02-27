@@ -1,6 +1,7 @@
 import React from 'react';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { RiArrowLeftSLine, RiArrowRightSLine, RiBrainAi3Line, RiCloseLine, RiFileImageLine, RiFileList2Line, RiFilePdfLine, RiFileSearchLine, RiFolder6Line, RiGitBranchLine, RiGlobalLine, RiListCheck3, RiLoader4Line, RiPencilAiLine, RiSearchLine, RiTaskLine, RiTerminalBoxLine, RiToolsLine } from '@remixicon/react';
+import { File as PierreFile, PatchDiff } from '@pierre/diffs/react';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { createPortal } from 'react-dom';
 
@@ -8,6 +9,9 @@ import { cn } from '@/lib/utils';
 import { SimpleMarkdownRenderer } from '../MarkdownRenderer';
 import { toolDisplayStyles } from '@/lib/typography';
 import { getLanguageFromExtension } from '@/lib/toolHelpers';
+import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
+import { ensurePierreThemeRegistered } from '@/lib/shiki/appThemeRegistry';
+import { getDefaultTheme } from '@/lib/theme/themes';
 import {
     renderTodoOutput,
     renderListOutput,
@@ -15,11 +19,7 @@ import {
     renderGlobOutput,
     renderWebSearchOutput,
     formatInputForDisplay,
-    parseDiffToUnified,
     parseReadToolOutput,
-    type UnifiedDiffHunk,
-    type SideBySideDiffHunk,
-    type SideBySideDiffLine,
 } from './toolRenderers';
 import type { ToolPopupContent, DiffViewMode } from './types';
 import { DiffViewToggle } from './DiffViewToggle';
@@ -91,6 +91,45 @@ const PREVIEW_ANIMATION_MS = 150;
 const MERMAID_DIALOG_HEADER_HEIGHT = 40;
 const MERMAID_ASPECT_RETRY_DELAY_MS = 120;
 const MERMAID_ASPECT_MAX_RETRIES = 3;
+
+type PierreThemeConfig = {
+    theme: { light: string; dark: string };
+    themeType: 'light' | 'dark';
+};
+
+const usePierreThemeConfig = (): PierreThemeConfig => {
+    const themeSystem = useOptionalThemeSystem();
+    const fallbackLightTheme = React.useMemo(() => getDefaultTheme(false), []);
+    const fallbackDarkTheme = React.useMemo(() => getDefaultTheme(true), []);
+
+    const availableThemes = React.useMemo(
+        () => themeSystem?.availableThemes ?? [fallbackLightTheme, fallbackDarkTheme],
+        [fallbackDarkTheme, fallbackLightTheme, themeSystem?.availableThemes],
+    );
+    const lightThemeId = themeSystem?.lightThemeId ?? fallbackLightTheme.metadata.id;
+    const darkThemeId = themeSystem?.darkThemeId ?? fallbackDarkTheme.metadata.id;
+
+    const lightTheme = React.useMemo(
+        () => availableThemes.find((theme) => theme.metadata.id === lightThemeId) ?? fallbackLightTheme,
+        [availableThemes, fallbackLightTheme, lightThemeId],
+    );
+    const darkTheme = React.useMemo(
+        () => availableThemes.find((theme) => theme.metadata.id === darkThemeId) ?? fallbackDarkTheme,
+        [availableThemes, darkThemeId, fallbackDarkTheme],
+    );
+
+    React.useEffect(() => {
+        ensurePierreThemeRegistered(lightTheme);
+        ensurePierreThemeRegistered(darkTheme);
+    }, [darkTheme, lightTheme]);
+
+    const currentVariant = themeSystem?.currentTheme.metadata.variant ?? 'light';
+
+    return {
+        theme: { light: lightTheme.metadata.id, dark: darkTheme.metadata.id },
+        themeType: currentVariant === 'dark' ? 'dark' : 'light',
+    };
+};
 
 type ViewportSize = { width: number; height: number };
 
@@ -452,48 +491,28 @@ const ImagePreviewDialog: React.FC<{
 
 const DialogUnifiedDiff: React.FC<{
     popup: ToolPopupContent;
-    syntaxTheme: Record<string, React.CSSProperties>;
-    isMobile: boolean;
-}> = React.memo(({ popup, syntaxTheme, isMobile }) => {
-    const hunks = React.useMemo(() => parseDiffToUnified(popup.content), [popup.content]);
+    diffViewMode: DiffViewMode;
+    pierreThemeConfig: PierreThemeConfig;
+}> = React.memo(({ popup, diffViewMode, pierreThemeConfig }) => {
+    const patchContent = popup.content || '';
 
     return (
         <div className="typography-code">
-            {hunks.map((hunk, hunkIdx) => {
-                const inputFile = (typeof popup.metadata?.input === 'object' && popup.metadata.input !== null)
-                    ? ((popup.metadata.input as Record<string, unknown>).file_path || (popup.metadata.input as Record<string, unknown>).filePath)
-                    : null;
-                const fileStr = typeof inputFile === 'string' ? inputFile : '';
-                const hunkFileStr = typeof hunk.file === 'string' ? hunk.file : '';
-                const lang = getLanguageFromExtension(fileStr || hunkFileStr || '') || 'text';
-
-                const codeLines: CodeLine[] = hunk.lines.map((line) => ({
-                    text: line.content,
-                    lineNumber: line.lineNumber || null,
-                    type: line.type as CodeLine['type'],
-                }));
-
-                return (
-                    <div key={hunkIdx} className="border-b border-border/20 last:border-b-0">
-                        <div className={cn('bg-muted/20 px-3 py-2 font-medium text-muted-foreground border-b border-border/10 sticky top-0 z-10 break-words -mx-3', isMobile ? 'typography-micro' : 'typography-markdown')}>
-                            {`${hunk.file} (line ${hunk.oldStart})`}
-                        </div>
-                        <VirtualizedCodeBlock
-                            lines={codeLines}
-                            language={lang}
-                            syntaxTheme={syntaxTheme}
-                            maxHeight="70vh"
-                            lineStyles={(line) =>
-                                line.type === 'removed'
-                                    ? { backgroundColor: 'var(--tools-edit-removed-bg)', color: 'var(--tools-edit-removed)' }
-                                    : line.type === 'added'
-                                        ? { backgroundColor: 'var(--tools-edit-added-bg)', color: 'var(--tools-edit-added)' }
-                                        : undefined
-                            }
-                        />
-                    </div>
-                );
-            })}
+            <PatchDiff
+                patch={patchContent}
+                options={{
+                    diffStyle: diffViewMode === 'unified' ? 'unified' : 'split',
+                    diffIndicators: 'none',
+                    hunkSeparators: 'line-info-basic',
+                    lineDiffType: 'none',
+                    maxLineDiffLength: 1000,
+                    expansionLineCount: 20,
+                    overflow: 'wrap',
+                    theme: pierreThemeConfig.theme,
+                    themeType: pierreThemeConfig.themeType,
+                }}
+                className="block w-full"
+            />
         </div>
     );
 });
@@ -503,19 +522,36 @@ DialogUnifiedDiff.displayName = 'DialogUnifiedDiff';
 const DialogReadContent: React.FC<{
     popup: ToolPopupContent;
     syntaxTheme: Record<string, React.CSSProperties>;
-}> = React.memo(({ popup, syntaxTheme }) => {
+    pierreThemeConfig: PierreThemeConfig;
+}> = React.memo(({ popup, syntaxTheme, pierreThemeConfig }) => {
     const parsedReadOutput = React.useMemo(() => parseReadToolOutput(popup.content), [popup.content]);
 
-    const codeLines: CodeLine[] = React.useMemo(() => {
-        const inputMeta = popup.metadata?.input;
-        const inputObj = typeof inputMeta === 'object' && inputMeta !== null ? (inputMeta as Record<string, unknown>) : {};
-        const offset = typeof inputObj.offset === 'number' ? inputObj.offset : 0;
-        const hasExplicitLineNumbers = parsedReadOutput.lines.some((line) => line.lineNumber !== null);
-        let fallbackLineCursor = offset;
+    const inputMeta = popup.metadata?.input;
+    const inputObj = typeof inputMeta === 'object' && inputMeta !== null ? (inputMeta as Record<string, unknown>) : {};
+    const offset = typeof inputObj.offset === 'number' ? inputObj.offset : 0;
+    const filePath =
+        typeof inputObj.file_path === 'string'
+            ? inputObj.file_path
+            : typeof inputObj.filePath === 'string'
+                ? inputObj.filePath
+                : typeof inputObj.path === 'string'
+                    ? inputObj.path
+                    : 'read-output';
 
-        return parsedReadOutput.lines.map((line) => {
+    const fileContents = React.useMemo(() => parsedReadOutput.lines.map((line) => line.text).join('\n'), [parsedReadOutput]);
+    const detectedLanguage = React.useMemo(
+        () => popup.language || getLanguageFromExtension(filePath) || 'text',
+        [filePath, popup.language],
+    );
+
+    const codeLines: CodeLine[] = React.useMemo(() => {
+        const hasExplicitLineNumbers = parsedReadOutput.lines.some((line) => line.lineNumber !== null);
+        const result: CodeLine[] = [];
+        let nextLineNumber = offset;
+
+        for (const line of parsedReadOutput.lines) {
             if (line.lineNumber !== null) {
-                fallbackLineCursor = line.lineNumber;
+                nextLineNumber = line.lineNumber;
             }
             const shouldAssignFallback =
                 parsedReadOutput.type === 'file'
@@ -523,21 +559,45 @@ const DialogReadContent: React.FC<{
                 && line.lineNumber === null
                 && !line.isInfo;
             const effectiveLineNumber = line.lineNumber ?? (shouldAssignFallback
-                ? (fallbackLineCursor += 1)
+                ? (nextLineNumber + 1)
                 : null);
+            if (typeof effectiveLineNumber === 'number') {
+                nextLineNumber = effectiveLineNumber;
+            }
 
-            return {
+            result.push({
                 text: line.text,
                 lineNumber: effectiveLineNumber,
                 isInfo: line.isInfo,
-            };
-        });
-    }, [parsedReadOutput, popup.metadata?.input]);
+            });
+        }
+
+        return result;
+    }, [offset, parsedReadOutput]);
+
+    if (parsedReadOutput.type === 'file') {
+        return (
+            <PierreFile
+                file={{
+                    name: filePath,
+                    contents: fileContents,
+                    lang: detectedLanguage || undefined,
+                }}
+                options={{
+                    disableFileHeader: true,
+                    overflow: 'wrap',
+                    theme: pierreThemeConfig.theme,
+                    themeType: pierreThemeConfig.themeType,
+                }}
+                className="block w-full"
+            />
+        );
+    }
 
     return (
         <VirtualizedCodeBlock
             lines={codeLines}
-            language={popup.language || 'text'}
+            language={detectedLanguage}
             syntaxTheme={syntaxTheme}
             maxHeight="70vh"
         />
@@ -583,21 +643,28 @@ const MermaidPreviewDialog: React.FC<{
             return /^[A-Za-z]:\//.test(normalized);
         };
 
-        try {
-            let pathname = decodeURIComponent(new URL(input).pathname || '');
+        const decodeLoose = (value: string): string => {
+            return value.replace(/%([0-9A-Fa-f]{2})/g, (_match, hex: string) => {
+                const codePoint = Number.parseInt(hex, 16);
+                return Number.isFinite(codePoint) ? String.fromCharCode(codePoint) : `%${hex}`;
+            });
+        };
+
+        const canParse = typeof URL.canParse === 'function'
+            ? URL.canParse(input)
+            : false;
+
+        if (canParse) {
+            let pathname = decodeLoose(new URL(input).pathname || '');
             if (/^\/[A-Za-z]:\//.test(pathname)) {
                 pathname = pathname.slice(1);
             }
             return isSafeLocalPath(pathname) ? pathname : null;
-        } catch {
-            const stripped = input.replace(/^file:\/\//i, '');
-            try {
-                const decoded = decodeURIComponent(stripped);
-                return isSafeLocalPath(decoded) ? decoded : null;
-            } catch {
-                return isSafeLocalPath(stripped) ? stripped : null;
-            }
         }
+
+        const stripped = input.replace(/^file:\/\//i, '');
+        const decoded = decodeLoose(stripped);
+        return isSafeLocalPath(decoded) ? decoded : (isSafeLocalPath(stripped) ? stripped : null);
     }, []);
 
     const decodeDataUrl = React.useCallback((value: string): string => {
@@ -635,46 +702,57 @@ const MermaidPreviewDialog: React.FC<{
         setStatus('loading');
         setErrorMessage('');
 
-        try {
-            let resolvedSource = '';
-            if (target.url.startsWith('data:')) {
-                resolvedSource = decodeDataUrl(target.url);
-            } else if (target.url.toLowerCase().startsWith('file://')) {
-                const normalizedPath = normalizeFilePath(target.url);
-                if (!normalizedPath) {
-                    throw new Error('Invalid local file path for Mermaid preview.');
-                }
-                const response = await fetch(`/api/fs/raw?path=${encodeURIComponent(normalizedPath)}`);
-                if (!response.ok) {
-                    throw new Error(`Failed to read diagram file (${response.status})`);
-                }
-                resolvedSource = await response.text();
+        let sourcePromise: Promise<string>;
+        if (target.url.startsWith('data:')) {
+            sourcePromise = Promise.resolve(decodeDataUrl(target.url));
+        } else if (target.url.toLowerCase().startsWith('file://')) {
+            const normalizedPath = normalizeFilePath(target.url);
+            if (!normalizedPath) {
+                sourcePromise = Promise.reject(new Error('Invalid local file path for Mermaid preview.'));
             } else {
-                const resolvedUrl = new URL(target.url, window.location.origin);
-                if (resolvedUrl.protocol !== 'http:' && resolvedUrl.protocol !== 'https:') {
-                    throw new Error('Unsupported Mermaid URL protocol.');
-                }
-
-                const response = await fetch(resolvedUrl.toString());
-                if (!response.ok) {
-                    throw new Error(`Failed to load diagram (${response.status})`);
-                }
-                resolvedSource = await response.text();
+                sourcePromise = fetch(`/api/fs/raw?path=${encodeURIComponent(normalizedPath)}`)
+                    .then((response) => {
+                        if (!response.ok) {
+                            return Promise.reject(new Error(`Failed to read diagram file (${response.status})`));
+                        }
+                        return response.text();
+                    });
             }
+        } else {
+            const canParse = typeof URL.canParse === 'function'
+                ? URL.canParse(target.url, window.location.origin)
+                : false;
+            const resolvedUrl = canParse ? new URL(target.url, window.location.origin) : null;
 
-            if (requestIdRef.current !== requestId) {
-                return;
+            if (!resolvedUrl || (resolvedUrl.protocol !== 'http:' && resolvedUrl.protocol !== 'https:')) {
+                sourcePromise = Promise.reject(new Error('Unsupported Mermaid URL protocol.'));
+            } else {
+                sourcePromise = fetch(resolvedUrl.toString())
+                    .then((response) => {
+                        if (!response.ok) {
+                            return Promise.reject(new Error(`Failed to load diagram (${response.status})`));
+                        }
+                        return response.text();
+                    });
             }
-
-            setSource(resolvedSource);
-            setStatus('ready');
-        } catch (error) {
-            if (requestIdRef.current !== requestId) {
-                return;
-            }
-            setStatus('error');
-            setErrorMessage(error instanceof Error ? error.message : 'Unable to load Mermaid diagram.');
         }
+
+        await sourcePromise
+            .then((resolvedSource) => {
+                if (requestIdRef.current !== requestId) {
+                    return;
+                }
+
+                setSource(resolvedSource);
+                setStatus('ready');
+            })
+            .catch((error) => {
+                if (requestIdRef.current !== requestId) {
+                    return;
+                }
+                setStatus('error');
+                setErrorMessage(error instanceof Error ? error.message : 'Unable to load Mermaid diagram.');
+            });
     }, [decodeDataUrl, normalizeFilePath, popup.mermaid]);
 
     React.useEffect(() => {
@@ -883,7 +961,13 @@ const MermaidPreviewDialog: React.FC<{
 };
 
 const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange, syntaxTheme, isMobile }) => {
-    const [diffViewMode, setDiffViewMode] = React.useState<DiffViewMode>(isMobile ? 'unified' : 'side-by-side');
+    const [diffViewMode, setDiffViewMode] = React.useState<DiffViewMode>('unified');
+    const pierreThemeConfig = usePierreThemeConfig();
+
+    React.useEffect(() => {
+        if (!popup.open) return;
+        setDiffViewMode('unified');
+    }, [popup.open, popup.title]);
 
     if (popup.image) {
         return <ImagePreviewDialog popup={popup} onOpenChange={onOpenChange} isMobile={isMobile} />;
@@ -966,16 +1050,20 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
                                         </div>
                                     ) : meta.tool === 'write' && getInputValue('content') ? (
                                         <div className="tool-input-surface bg-transparent rounded-xl border border-border/20 mx-3">
-                                            <SyntaxHighlighter
-                                                style={syntaxTheme}
-                                                language={getLanguageFromExtension(getInputValue('filePath') || getInputValue('file_path') || '') || 'text'}
-                                                PreTag="div"
-                                                customStyle={toolDisplayStyles.getPopupStyles()}
-                                                codeTagProps={{ style: { background: 'transparent', backgroundColor: 'transparent', fontSize: 'inherit' } }}
-                                                wrapLongLines
-                                            >
-                                                {getInputValue('content')!}
-                                            </SyntaxHighlighter>
+                                            <PierreFile
+                                                file={{
+                                                    name: getInputValue('filePath') || getInputValue('file_path') || 'new-file',
+                                                    contents: getInputValue('content')!,
+                                                    lang: getLanguageFromExtension(getInputValue('filePath') || getInputValue('file_path') || '') || undefined,
+                                                }}
+                                                options={{
+                                                    disableFileHeader: true,
+                                                    overflow: 'wrap',
+                                                    theme: pierreThemeConfig.theme,
+                                                    themeType: pierreThemeConfig.themeType,
+                                                }}
+                                                className="block w-full"
+                                            />
                                         </div>
                                     ) : (
                                         <div
@@ -990,136 +1078,12 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
                             })() : null}
 
                         {popup.isDiff ? (
-                            diffViewMode === 'unified' ? (
-                            <DialogUnifiedDiff popup={popup} syntaxTheme={syntaxTheme} isMobile={isMobile} />
-                        ) : popup.diffHunks ? (
-                            <div className="typography-code">
-                                {popup.diffHunks.map((hunk, hunkIdx) => (
-                                    <div key={hunkIdx} className="border-b border-border/20 last:border-b-0">
-                                        <div
-                                            className={cn('bg-muted/20 px-3 py-2 font-medium text-muted-foreground border-b border-border/10 sticky top-0 z-10 break-words -mx-3', isMobile ? 'typography-micro' : 'typography-markdown')}
-                                        >
-                                            {`${hunk.file} (line ${hunk.oldStart})`}
-                                        </div>
-                                        <div>
-                                            {(hunk as unknown as SideBySideDiffHunk).lines.map((line: SideBySideDiffLine, lineIdx: number) => (
-                                                <div key={lineIdx} className="grid grid-cols-2 divide-x divide-border/20">
-                                                    <div
-                                                        className={cn(
-                                                            'typography-code font-mono px-3 py-0.5 overflow-hidden',
-                                                            line.leftLine.type === 'context' && 'bg-transparent',
-                                                            line.leftLine.type === 'empty' && 'bg-transparent'
-                                                        )}
-                                                        style={{
-                                                            lineHeight: '1.1',
-                                                            ...(line.leftLine.type === 'removed' ? { backgroundColor: 'var(--tools-edit-removed-bg)' } : {}),
-                                                        }}
-                                                    >
-                                                        <div className="flex">
-                                                            <span className="w-12 flex-shrink-0 text-right pr-3 select-none border-r mr-3 -my-0.5 py-0.5" style={{ color: 'var(--tools-edit-line-number)', borderColor: 'var(--tools-border)' }}>
-                                                                {line.leftLine.lineNumber || ''}
-                                                            </span>
-                                                            <div className="flex-1 min-w-0">
-                                                                {line.leftLine.content && (
-                                                                    <SyntaxHighlighter
-                                                                        style={syntaxTheme}
-                                                                        language={(() => {
-                                                                          const input = popup.metadata?.input;
-                                                                          const inputObj = typeof input === 'object' && input !== null ? (input as Record<string, unknown>) : {};
-                                                                          const filePath = inputObj.file_path || inputObj.filePath;
-                                                                          const hunkFile = (hunk as unknown as UnifiedDiffHunk).file;
-                                                                          return getLanguageFromExtension(typeof filePath === 'string' ? filePath : hunkFile) || 'text';
-                                                                        })()}
-                                                                        PreTag="div"
-                                                                        wrapLines
-                                                                        wrapLongLines
-                                                                        customStyle={{
-                                                                            margin: 0,
-                                                                            padding: 0,
-                                                                            fontSize: 'inherit',
-                                                                                        background: 'transparent',
-                                                                                        backgroundColor: 'transparent',
-                                                                            borderRadius: 0,
-                                                                            overflow: 'visible',
-                                                                            whiteSpace: 'pre-wrap',
-                                                                            wordBreak: 'break-all',
-                                                                            overflowWrap: 'anywhere',
-                                                                        }}
-                                                                        codeTagProps={{
-                                                                            style: {
-                                                                                background: 'transparent',
-                                                                                backgroundColor: 'transparent',
-                                                                            },
-                                                                        }}
-                                                                    >
-                                                                        {line.leftLine.content}
-                                                                    </SyntaxHighlighter>
-                                                                )}
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                    <div
-                                                        className={cn(
-                                                            'typography-code font-mono px-3 py-0.5 overflow-hidden',
-                                                            line.rightLine.type === 'context' && 'bg-transparent',
-                                                            line.rightLine.type === 'empty' && 'bg-transparent'
-                                                        )}
-                                                        style={{
-                                                            lineHeight: '1.1',
-                                                            ...(line.rightLine.type === 'added' ? { backgroundColor: 'var(--tools-edit-added-bg)' } : {}),
-                                                        }}
-                                                    >
-                                                        <div className="flex">
-                                                            <span className="w-12 flex-shrink-0 text-right pr-3 select-none border-r mr-3 -my-0.5 py-0.5" style={{ color: 'var(--tools-edit-line-number)', borderColor: 'var(--tools-border)' }}>
-                                                                {line.rightLine.lineNumber || ''}
-                                                            </span>
-                                                            <div className="flex-1 min-w-0">
-                                                                {line.rightLine.content && (
-                                                                    <SyntaxHighlighter
-                                                                        style={syntaxTheme}
-                                                                        language={(() => {
-                                                                          const input = popup.metadata?.input;
-                                                                          const inputObj = typeof input === 'object' && input !== null ? (input as Record<string, unknown>) : {};
-                                                                          const filePath = inputObj.file_path || inputObj.filePath;
-                                                                          const hunkFile = (hunk as unknown as UnifiedDiffHunk).file;
-                                                                          return getLanguageFromExtension(typeof filePath === 'string' ? filePath : hunkFile) || 'text';
-                                                                        })()}
-                                                                        PreTag="div"
-                                                                        wrapLines
-                                                                        wrapLongLines
-                                                                        customStyle={{
-                                                                            margin: 0,
-                                                                            padding: 0,
-                                                                            fontSize: 'inherit',
-                                                                                        background: 'transparent',
-                                                                                        backgroundColor: 'transparent',
-                                                                            borderRadius: 0,
-                                                                            overflow: 'visible',
-                                                                            whiteSpace: 'pre-wrap',
-                                                                            wordBreak: 'break-all',
-                                                                            overflowWrap: 'anywhere',
-                                                                        }}
-                                                                        codeTagProps={{
-                                                                            style: {
-                                                                                background: 'transparent',
-                                                                                backgroundColor: 'transparent',
-                                                                            },
-                                                                        }}
-                                                                    >
-                                                                        {line.rightLine.content}
-                                                                    </SyntaxHighlighter>
-                                                                )}
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        ) : null
-                    ) : popup.content ? (
+                            <DialogUnifiedDiff
+                                popup={popup}
+                                diffViewMode={diffViewMode}
+                                pierreThemeConfig={pierreThemeConfig}
+                            />
+                        ) : popup.content ? (
                         <div className="p-4">
                             {(() => {
                                 const tool = popup.metadata?.tool;
@@ -1197,7 +1161,7 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
                                 }
 
                                 if (tool === 'read') {
-                                    return <DialogReadContent popup={popup} syntaxTheme={syntaxTheme} />;
+                                    return <DialogReadContent popup={popup} syntaxTheme={syntaxTheme} pierreThemeConfig={pierreThemeConfig} />;
                                 }
 
                                 return (

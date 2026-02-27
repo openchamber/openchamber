@@ -32,6 +32,7 @@ local-dev*
 # Build outputs
 build/
 .gradle/
+.*.bun-build
 
 # Built webview assets (generated during build)
 src/main/resources/webview/

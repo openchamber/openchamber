@@ -15,6 +15,7 @@ import { useSessionAutoCleanup } from '@/hooks/useSessionAutoCleanup';
 import { useQueuedMessageAutoSend } from '@/hooks/useQueuedMessageAutoSend';
 import { useRouter } from '@/hooks/useRouter';
 import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
+import { useWindowTitle } from '@/hooks/useWindowTitle';
 import { GitPollingProvider } from '@/hooks/useGitPolling';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { hasModifier } from '@/lib/utils';
@@ -33,6 +34,7 @@ import { VoiceProvider } from '@/components/voice';
 import { useUIStore } from '@/stores/useUIStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import type { RuntimeAPIs } from '@/lib/api/types';
+import { TooltipProvider } from '@/components/ui/tooltip';
 
 const AboutDialogWrapper: React.FC = () => {
   const { isAboutDialogOpen, setAboutDialogOpen } = useUIStore();
@@ -177,6 +179,8 @@ function App({ apis }: AppProps) {
 
   usePushVisibilityBeacon();
 
+  useWindowTitle();
+
   useRouter();
 
   useKeyboardShortcuts();
@@ -232,20 +236,16 @@ function App({ apis }: AppProps) {
 
     let cancelled = false;
     const run = async () => {
-      try {
-        const res = await fetch('/health', { method: 'GET' });
-        if (!res.ok) return;
-        const data = (await res.json().catch(() => null)) as null | { openCodeRunning?: unknown; lastOpenCodeError?: unknown };
-        if (!data || cancelled) return;
-        const openCodeRunning = data.openCodeRunning === true;
-        const err = typeof data.lastOpenCodeError === 'string' ? data.lastOpenCodeError : '';
-        const cliMissing =
-          !openCodeRunning &&
-          /ENOENT|spawn\s+opencode|Unable\s+to\s+locate\s+the\s+opencode\s+CLI|OpenCode\s+CLI\s+not\s+found|opencode(\.exe)?\s+not\s+found|env:\s*(node|bun):\s*No\s+such\s+file\s+or\s+directory|(node|bun):\s*No\s+such\s+file\s+or\s+directory/i.test(err);
-        setShowCliOnboarding(cliMissing);
-      } catch {
-        // ignore
-      }
+      const res = await fetch('/health', { method: 'GET' }).catch(() => null);
+      if (!res || !res.ok) return;
+      const data = (await res.json().catch(() => null)) as null | { openCodeRunning?: unknown; lastOpenCodeError?: unknown };
+      if (!data || cancelled) return;
+      const openCodeRunning = data.openCodeRunning === true;
+      const err = typeof data.lastOpenCodeError === 'string' ? data.lastOpenCodeError : '';
+      const cliMissing =
+        !openCodeRunning &&
+        /ENOENT|spawn\s+opencode|Unable\s+to\s+locate\s+the\s+opencode\s+CLI|OpenCode\s+CLI\s+not\s+found|opencode(\.exe)?\s+not\s+found|env:\s*(node|bun):\s*No\s+such\s+file\s+or\s+directory|(node|bun):\s*No\s+such\s+file\s+or\s+directory/i.test(err);
+      setShowCliOnboarding(cliMissing);
     };
 
     void run();
@@ -277,26 +277,30 @@ function App({ apis }: AppProps) {
       : 'chat';
     
     if (panelType === 'agentManager') {
-      return (
-        <ErrorBoundary>
-          <RuntimeAPIProvider apis={apis}>
+    return (
+      <ErrorBoundary>
+        <RuntimeAPIProvider apis={apis}>
+          <TooltipProvider delayDuration={700} skipDelayDuration={150}>
             <div className="h-full text-foreground bg-background">
               <AgentManagerView />
               <Toaster />
             </div>
-          </RuntimeAPIProvider>
-        </ErrorBoundary>
-      );
+          </TooltipProvider>
+        </RuntimeAPIProvider>
+      </ErrorBoundary>
+    );
     }
     
     return (
       <ErrorBoundary>
         <RuntimeAPIProvider apis={apis}>
           <FireworksProvider>
-            <div className="h-full text-foreground bg-background">
-              <VSCodeLayout />
-              <Toaster />
-            </div>
+            <TooltipProvider delayDuration={700} skipDelayDuration={150}>
+              <div className="h-full text-foreground bg-background">
+                <VSCodeLayout />
+                <Toaster />
+              </div>
+            </TooltipProvider>
           </FireworksProvider>
         </RuntimeAPIProvider>
       </ErrorBoundary>
@@ -309,15 +313,17 @@ function App({ apis }: AppProps) {
         <GitPollingProvider>
           <FireworksProvider>
             <VoiceProvider>
-              <div className="h-full text-foreground bg-background">
-                <MainLayout />
-                <Toaster />
-                <ConfigUpdateOverlay />
-                <AboutDialogWrapper />
-                {showMemoryDebug && (
-                  <MemoryDebugPanel onClose={() => setShowMemoryDebug(false)} />
-                )}
-              </div>
+              <TooltipProvider delayDuration={700} skipDelayDuration={150}>
+                <div className="h-full text-foreground bg-background">
+                  <MainLayout />
+                  <Toaster />
+                  <ConfigUpdateOverlay />
+                  <AboutDialogWrapper />
+                  {showMemoryDebug && (
+                    <MemoryDebugPanel onClose={() => setShowMemoryDebug(false)} />
+                  )}
+                </div>
+              </TooltipProvider>
             </VoiceProvider>
           </FireworksProvider>
         </GitPollingProvider>

@@ -43,8 +43,8 @@ import { useSessionStore } from '@/stores/useSessionStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { cn, formatDirectoryName, hasModifier } from '@/lib/utils';
-import { PROJECT_ICON_MAP, PROJECT_COLOR_MAP } from '@/lib/projectMeta';
-import { isDesktopLocalOriginActive, isDesktopShell, isTauriShell } from '@/lib/desktop';
+import { PROJECT_ICON_MAP, PROJECT_COLOR_MAP, getProjectIconImageUrl } from '@/lib/projectMeta';
+import { isDesktopLocalOriginActive, isDesktopShell, isTauriShell, requestDirectoryAccess } from '@/lib/desktop';
 import { useLongPress } from '@/hooks/useLongPress';
 import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { sessionEvents } from '@/lib/sessionEvents';
@@ -61,6 +61,75 @@ const NAV_RAIL_EXPANDED_WIDTH = 200;
 const NAV_RAIL_TEXT_FADE_MS = 180;
 const PROJECT_TEXT_FADE_IN_DELAY_MS = 24;
 const ACTION_TEXT_FADE_IN_DELAY_MS = 60;
+
+type NavRailActionButtonProps = {
+  onClick: () => void;
+  ariaLabel: string;
+  icon: React.ReactNode;
+  tooltipLabel: string;
+  shortcutHint?: string;
+  showExpandedShortcutHint?: boolean;
+  buttonClassName: string;
+  showExpandedContent: boolean;
+  actionTextVisible: boolean;
+};
+
+const NavRailActionButton: React.FC<NavRailActionButtonProps> = ({
+  onClick,
+  ariaLabel,
+  icon,
+  tooltipLabel,
+  shortcutHint,
+  showExpandedShortcutHint = true,
+  buttonClassName,
+  showExpandedContent,
+  actionTextVisible,
+}) => {
+  const btn = (
+    <button
+      type="button"
+      onClick={onClick}
+      className={buttonClassName}
+      aria-label={ariaLabel}
+    >
+      {showExpandedContent && (
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-y-0 left-[6px] right-[5px] rounded-lg bg-transparent transition-colors group-hover:bg-[var(--interactive-hover)]/50"
+        />
+      )}
+      <span className="relative z-10 flex size-8 basis-8 shrink-0 grow-0 items-center justify-center">
+        {icon}
+      </span>
+      <span
+        aria-hidden={!actionTextVisible}
+        className={cn(
+          'relative z-10 min-w-0 flex items-center justify-between gap-1 overflow-hidden transition-opacity duration-[180ms] ease-in-out',
+          showExpandedContent ? 'flex-1' : 'w-0 flex-none',
+          actionTextVisible ? 'opacity-100' : 'opacity-0',
+        )}
+      >
+        <span className="truncate text-left text-[13px]">{tooltipLabel}</span>
+        {shortcutHint && showExpandedShortcutHint && (
+          <span className="shrink-0 text-[10px] text-[var(--surface-mutedForeground)] opacity-70">
+            {shortcutHint}
+          </span>
+        )}
+      </span>
+    </button>
+  );
+
+  return (
+    <Tooltip delayDuration={400}>
+      <TooltipTrigger asChild>{btn}</TooltipTrigger>
+      {!showExpandedContent && (
+        <TooltipContent side="right" sideOffset={8}>
+          <p>{shortcutHint ? `${tooltipLabel} (${shortcutHint})` : tooltipLabel}</p>
+        </TooltipContent>
+      )}
+    </Tooltip>
+  );
+};
 
 /** Tinted background for project tiles — uses project color at low opacity, or neutral fallback */
 const TileBackground: React.FC<{ colorVar: string | null; children: React.ReactNode }> = ({
@@ -143,10 +212,16 @@ const ProjectTile: React.FC<{
   onClose: () => void;
 }> = ({ project, isActive, hasStreaming, hasUnread, label, expanded, projectTextVisible, onClick, onEdit, onClose }) => {
   const [menuOpen, setMenuOpen] = React.useState(false);
+  const [iconImageFailed, setIconImageFailed] = React.useState(false);
   const ProjectIcon = project.icon ? PROJECT_ICON_MAP[project.icon] : null;
+  const projectIconImageUrl = !iconImageFailed ? getProjectIconImageUrl(project) : null;
   const projectColorVar = project.color ? (PROJECT_COLOR_MAP[project.color] ?? null) : null;
   const showStreamingDots = hasStreaming;
   const showAttentionDots = !hasStreaming && hasUnread;
+
+  React.useEffect(() => {
+    setIconImageFailed(false);
+  }, [project.id, project.iconImage?.updatedAt]);
 
   const longPressHandlers = useLongPress({
     onLongPress: () => setMenuOpen(true),
@@ -157,7 +232,20 @@ const ProjectTile: React.FC<{
     <TileBackground colorVar={projectColorVar}>
       <span className="relative h-full w-full leading-none">
         <span className="pointer-events-none absolute inset-0 flex items-center justify-center">
-          {ProjectIcon ? (
+          {projectIconImageUrl ? (
+            <span
+              className="inline-flex h-4 w-4 shrink-0 items-center justify-center overflow-hidden rounded-[2px]"
+              style={project.iconBackground ? { backgroundColor: project.iconBackground } : undefined}
+            >
+              <img
+                src={projectIconImageUrl}
+                alt=""
+                className="h-full w-full object-contain"
+                draggable={false}
+                onError={() => setIconImageFailed(true)}
+              />
+            </span>
+          ) : ProjectIcon ? (
             <ProjectIcon
               className="h-4 w-4 shrink-0"
               style={projectColorVar ? { color: projectColorVar } : { color: 'var(--surface-foreground)' }}
@@ -392,6 +480,7 @@ export const NavRail: React.FC<NavRailProps> = ({ className, mobile }) => {
     path: string;
     icon?: string | null;
     color?: string | null;
+    iconBackground?: string | null;
   } | null>(null);
 
   const isDesktopApp = React.useMemo(() => isDesktopShell(), []);
@@ -480,8 +569,7 @@ export const NavRail: React.FC<NavRailProps> = ({ className, mobile }) => {
       sessionEvents.requestDirectoryDialog();
       return;
     }
-    import('@/lib/desktop')
-      .then(({ requestDirectoryAccess }) => requestDirectoryAccess(''))
+    requestDirectoryAccess('')
       .then((result) => {
         if (result.success && result.path) {
           const added = addProject(result.path, { id: result.projectId });
@@ -504,19 +592,20 @@ export const NavRail: React.FC<NavRailProps> = ({ className, mobile }) => {
     (projectId: string) => {
       const project = projects.find((p) => p.id === projectId);
       if (!project) return;
-      setEditingProject({
-        id: project.id,
-        name: formatLabel(project),
-        path: project.path,
-        icon: project.icon,
-        color: project.color,
-      });
+        setEditingProject({
+          id: project.id,
+          name: formatLabel(project),
+          path: project.path,
+          icon: project.icon,
+          color: project.color,
+          iconBackground: project.iconBackground,
+        });
     },
     [projects, formatLabel],
   );
 
   const handleSaveProjectEdit = React.useCallback(
-    (data: { label: string; icon: string | null; color: string | null }) => {
+    (data: { label: string; icon: string | null; color: string | null; iconBackground: string | null }) => {
       if (!editingProject) return;
       updateProjectMeta(editingProject.id, data);
       setEditingProject(null);
@@ -581,60 +670,6 @@ export const NavRail: React.FC<NavRailProps> = ({ className, mobile }) => {
 
   const navRailActionIconClass = 'h-4.5 w-4.5 shrink-0';
 
-  const ActionButton: React.FC<{
-    onClick: () => void;
-    ariaLabel: string;
-    icon: React.ReactNode;
-    tooltipLabel: string;
-    shortcutHint?: string;
-    showExpandedShortcutHint?: boolean;
-  }> = ({ onClick, ariaLabel, icon, tooltipLabel, shortcutHint, showExpandedShortcutHint = true }) => {
-    const btn = (
-      <button
-        type="button"
-        onClick={onClick}
-        className={navRailActionButtonClass}
-        aria-label={ariaLabel}
-      >
-        {showExpandedContent && (
-          <span
-            aria-hidden="true"
-            className="pointer-events-none absolute inset-y-0 left-[6px] right-[5px] rounded-lg bg-transparent transition-colors group-hover:bg-[var(--interactive-hover)]/50"
-          />
-        )}
-        <span className="relative z-10 flex size-8 basis-8 shrink-0 grow-0 items-center justify-center">
-          {icon}
-        </span>
-        <span
-          aria-hidden={!actionTextVisible}
-          className={cn(
-            'relative z-10 min-w-0 flex items-center justify-between gap-1 overflow-hidden transition-opacity duration-[180ms] ease-in-out',
-            showExpandedContent ? 'flex-1' : 'w-0 flex-none',
-            actionTextVisible ? 'opacity-100' : 'opacity-0',
-          )}
-        >
-          <span className="truncate text-left text-[13px]">{tooltipLabel}</span>
-          {shortcutHint && showExpandedShortcutHint && (
-              <span className="shrink-0 text-[10px] text-[var(--surface-mutedForeground)] opacity-70">
-                {shortcutHint}
-              </span>
-          )}
-        </span>
-      </button>
-    );
-
-    return (
-      <Tooltip delayDuration={400}>
-        <TooltipTrigger asChild>{btn}</TooltipTrigger>
-        {!showExpandedContent && (
-          <TooltipContent side="right" sideOffset={8}>
-            <p>{shortcutHint ? `${tooltipLabel} (${shortcutHint})` : tooltipLabel}</p>
-          </TooltipContent>
-        )}
-      </Tooltip>
-    );
-  };
-
   return (
     <>
       <nav
@@ -687,11 +722,14 @@ export const NavRail: React.FC<NavRailProps> = ({ className, mobile }) => {
 
             {/* Add project button */}
             <div className={cn('flex flex-col pb-3', showExpandedContent ? 'items-stretch px-1' : 'items-center px-1')}>
-              <ActionButton
+              <NavRailActionButton
                 onClick={handleAddProject}
                 ariaLabel="Add project"
                 icon={<RiFolderAddLine className={navRailActionIconClass} />}
                 tooltipLabel="Add project"
+                buttonClassName={navRailActionButtonClass}
+                showExpandedContent={showExpandedContent}
+                actionTextVisible={actionTextVisible}
               />
             </div>
         </div>
@@ -702,46 +740,58 @@ export const NavRail: React.FC<NavRailProps> = ({ className, mobile }) => {
           showExpandedContent ? 'items-stretch px-1' : 'items-center',
         )}>
           {(updateAvailable || updateDownloaded) && (
-            <ActionButton
+            <NavRailActionButton
               onClick={() => setUpdateDialogOpen(true)}
               ariaLabel="Update available"
               icon={<RiDownloadLine className={navRailActionIconClass} />}
               tooltipLabel="Update available"
+              buttonClassName={navRailActionButtonClass}
+              showExpandedContent={showExpandedContent}
+              actionTextVisible={actionTextVisible}
             />
           )}
 
           {!isDesktopApp && !(updateAvailable || updateDownloaded) && (
-            <ActionButton
+            <NavRailActionButton
               onClick={() => setAboutDialogOpen(true)}
               ariaLabel="About"
               icon={<RiInformationLine className={navRailActionIconClass} />}
               tooltipLabel="About OpenChamber"
+              buttonClassName={navRailActionButtonClass}
+              showExpandedContent={showExpandedContent}
+              actionTextVisible={actionTextVisible}
             />
           )}
 
           {!mobile && (
-            <ActionButton
+            <NavRailActionButton
               onClick={toggleHelpDialog}
               ariaLabel="Keyboard shortcuts"
               icon={<RiQuestionLine className={navRailActionIconClass} />}
               tooltipLabel="Shortcuts"
               shortcutHint={shortcutLabel('open_help')}
               showExpandedShortcutHint={false}
+              buttonClassName={navRailActionButtonClass}
+              showExpandedContent={showExpandedContent}
+              actionTextVisible={actionTextVisible}
             />
           )}
 
-          <ActionButton
+          <NavRailActionButton
             onClick={() => setSettingsDialogOpen(true)}
             ariaLabel="Settings"
             icon={<RiSettings3Line className={navRailActionIconClass} />}
             tooltipLabel="Settings"
             shortcutHint={shortcutLabel('open_settings')}
             showExpandedShortcutHint={false}
+            buttonClassName={navRailActionButtonClass}
+            showExpandedContent={showExpandedContent}
+            actionTextVisible={actionTextVisible}
           />
 
           {/* Toggle expand/collapse (desktop only) */}
           {!mobile && (
-            <ActionButton
+            <NavRailActionButton
               onClick={toggleNavRail}
               ariaLabel={expanded ? 'Collapse sidebar' : 'Expand sidebar'}
               icon={expanded
@@ -751,6 +801,9 @@ export const NavRail: React.FC<NavRailProps> = ({ className, mobile }) => {
               tooltipLabel={expanded ? 'Collapse' : 'Expand'}
               shortcutHint={shortcutLabel('toggle_nav_rail')}
               showExpandedShortcutHint={false}
+              buttonClassName={navRailActionButtonClass}
+              showExpandedContent={showExpandedContent}
+              actionTextVisible={actionTextVisible}
             />
           )}
         </div>
@@ -763,10 +816,12 @@ export const NavRail: React.FC<NavRailProps> = ({ className, mobile }) => {
           onOpenChange={(open) => {
             if (!open) setEditingProject(null);
           }}
+          projectId={editingProject.id}
           projectName={editingProject.name}
           projectPath={editingProject.path}
           initialIcon={editingProject.icon}
           initialColor={editingProject.color}
+          initialIconBackground={editingProject.iconBackground}
           onSave={handleSaveProjectEdit}
         />
       )}

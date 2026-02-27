@@ -664,13 +664,13 @@ html:not(.dark) .chat-scroll {
 }
 
 /* Commit actions: collapse labels when narrow. */
-@container commit-actions (max-width: 28rem) {
+@container commit-actions (max-width: 21rem) {
   .commit-actions__label--long {
     display: none;
   }
 }
 
-@container commit-actions (max-width: 22rem) {
+@container commit-actions (max-width: 19rem) {
   .commit-actions__label {
     display: none;
   }
@@ -875,15 +875,29 @@ html:not(.dark) .chat-scroll {
   padding: 0.5rem;
 }
 
+[data-streamdown="mermaid-block"] [data-streamdown="mermaid-scroll"] {
+  overflow: auto;
+}
+
 [data-streamdown="mermaid-block"] [data-streamdown="mermaid"] {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  width: max-content;
+  min-width: 100%;
+  display: block;
+}
+
+[data-streamdown="mermaid-block"] [data-streamdown="mermaid-ascii"] {
+  margin: 0;
+  white-space: pre;
+  width: max-content;
+  min-width: 100%;
+  font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  color: var(--surface-foreground);
+  background: transparent;
 }
 
 [data-streamdown="mermaid-block"] [data-streamdown="mermaid"] svg {
-  width: 100% !important;
+  width: auto !important;
+  min-width: 100%;
   max-width: none !important;
   height: auto !important;
 }
@@ -908,28 +922,42 @@ html:not(.dark) .chat-scroll {
   width: 100%;
   height: 100%;
   min-height: 100%;
-  padding: 0;
+  padding: 0.75rem;
   border: 0;
   border-radius: 0;
   background: var(--surface-elevated);
-  display: flex;
-  align-items: center;
-  justify-content: center;
+}
+
+.streamdown-mermaid-fullscreen [data-streamdown="mermaid-block"] [data-streamdown="mermaid-scroll"] {
+  width: 100%;
+  height: 100%;
+  overflow: auto;
 }
 
 .streamdown-mermaid-fullscreen [data-streamdown="mermaid-block"] [data-streamdown="mermaid"] {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  width: max-content;
+  min-width: 100%;
+  min-height: 100%;
+  display: block;
+}
+
+.streamdown-mermaid-fullscreen [data-streamdown="mermaid-block"] [data-streamdown="mermaid-ascii"] {
+  margin: 0;
+  white-space: pre;
+  width: max-content;
+  min-width: 100%;
+  min-height: 100%;
+  font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  color: var(--surface-foreground);
+  background: transparent;
 }
 
 .streamdown-mermaid-fullscreen [data-streamdown="mermaid-block"] svg {
-  width: 100% !important;
-  height: 100% !important;
-  max-width: 100% !important;
-  max-height: 100% !important;
+  width: auto !important;
+  height: auto !important;
+  max-width: none !important;
+  max-height: none !important;
+  min-width: 100%;
   display: block;
   background: transparent;
 }

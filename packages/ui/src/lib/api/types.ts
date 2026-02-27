@@ -489,6 +489,12 @@ export interface ProjectEntry {
   path: string;
   label?: string;
   icon?: string | null;
+  iconImage?: {
+    mime: string;
+    updatedAt: number;
+    source: 'custom' | 'auto';
+  } | null;
+  iconBackground?: string | null;
   color?: string | null;
   addedAt?: number;
   lastOpenedAt?: number;

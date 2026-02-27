@@ -20,6 +20,7 @@ import {
   RiHeartLine,
   type RemixiconComponentType,
 } from '@remixicon/react';
+import type { ProjectEntry } from '@/lib/api/types';
 
 export const PROJECT_ICONS: Array<{ key: string; Icon: RemixiconComponentType; label: string }> = [
   { key: 'code',       Icon: RiCodeBoxLine,      label: 'Code' },
@@ -62,3 +63,11 @@ export const PROJECT_COLORS: Array<{ key: string; label: string; cssVar: string 
 export const PROJECT_COLOR_MAP: Record<string, string> = Object.fromEntries(
   PROJECT_COLORS.map((c) => [c.key, c.cssVar])
 );
+
+export const getProjectIconImageUrl = (project: Pick<ProjectEntry, 'id' | 'iconImage'>): string | null => {
+  if (!project.iconImage || typeof project.iconImage.updatedAt !== 'number' || project.iconImage.updatedAt <= 0) {
+    return null;
+  }
+
+  return `/api/projects/${encodeURIComponent(project.id)}/icon?v=${project.iconImage.updatedAt}`;
+};

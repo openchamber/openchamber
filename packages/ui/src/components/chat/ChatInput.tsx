@@ -1442,8 +1442,14 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
     const hasDraggedFiles = React.useCallback((dataTransfer: DataTransfer | null | undefined): boolean => {
         if (!dataTransfer) return false;
         if (dataTransfer.files && dataTransfer.files.length > 0) return true;
-        if (!dataTransfer.types) return false;
-        return Array.from(dataTransfer.types).includes('Files');
+        if (dataTransfer.types) {
+            const types = Array.from(dataTransfer.types);
+            if (types.includes('Files')) return true;
+            if (types.includes('text/uri-list')) return true;
+        }
+
+        const uriList = dataTransfer.getData('text/uri-list') || dataTransfer.getData('text/plain');
+        return typeof uriList === 'string' && uriList.toLowerCase().includes('file://');
     }, []);
 
     const collectDroppedFiles = React.useCallback((dataTransfer: DataTransfer | null | undefined): File[] => {
@@ -1461,6 +1467,87 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
 
         return fromItems;
     }, []);
+
+    const collectDroppedFileUris = React.useCallback((dataTransfer: DataTransfer | null | undefined): string[] => {
+        if (!dataTransfer || typeof dataTransfer.getData !== 'function') return [];
+
+        const rawUriList = dataTransfer.getData('text/uri-list') || dataTransfer.getData('text/plain');
+        if (!rawUriList) return [];
+
+        const candidates = rawUriList
+            .split(/\r?\n/)
+            .map((value) => value.trim())
+            .filter((value) => value.length > 0 && !value.startsWith('#'))
+            .filter((value) => value.toLowerCase().startsWith('file://'));
+
+        return Array.from(new Set(candidates));
+    }, []);
+
+    const attachVSCodeDroppedUris = React.useCallback(async (uris: string[]) => {
+        if (uris.length === 0) return;
+
+        try {
+            const response = await fetch('/api/vscode/drop-files', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ uris }),
+            });
+
+            if (!response.ok) {
+                throw new Error(`Failed to attach dropped files (${response.status})`);
+            }
+
+            const data = await response.json();
+            const picked = Array.isArray(data?.files) ? data.files : [];
+            const skipped = Array.isArray(data?.skipped) ? data.skipped : [];
+
+            if (skipped.length > 0) {
+                const summary = skipped
+                    .map((entry: { name?: string; reason?: string }) => `${entry?.name || 'file'}: ${entry?.reason || 'skipped'}`)
+                    .join('\n');
+                toast.error(`Some dropped files were skipped:\n${summary}`);
+            }
+
+            let attachedCount = 0;
+            for (const file of picked as Array<{ name: string; mimeType?: string; dataUrl?: string }>) {
+                if (!file?.dataUrl) continue;
+
+                const sizeBefore = useSessionStore.getState().attachedFiles.length;
+                try {
+                    const [meta, base64] = file.dataUrl.split(',');
+                    const mime = file.mimeType || (meta?.match(/data:(.*);base64/)?.[1] || 'application/octet-stream');
+                    if (!base64) continue;
+
+                    const binary = atob(base64);
+                    const bytes = new Uint8Array(binary.length);
+                    for (let i = 0; i < binary.length; i++) {
+                        bytes[i] = binary.charCodeAt(i);
+                    }
+
+                    const blob = new Blob([bytes], { type: mime });
+                    const localFile = new File([blob], file.name || 'file', { type: mime });
+                    await addAttachedFile(localFile);
+
+                    const sizeAfter = useSessionStore.getState().attachedFiles.length;
+                    if (sizeAfter > sizeBefore) {
+                        attachedCount += 1;
+                    }
+                } catch (error) {
+                    console.error('Dropped file attach failed', error);
+                    toast.error(error instanceof Error ? error.message : 'Failed to attach dropped file');
+                }
+            }
+
+            if (attachedCount > 0) {
+                toast.success(`Attached ${attachedCount} file${attachedCount > 1 ? 's' : ''}`);
+            }
+        } catch (error) {
+            console.error('VS Code dropped file attach failed', error);
+            toast.error(error instanceof Error ? error.message : 'Failed to attach dropped files');
+        }
+    }, [addAttachedFile]);
 
     const normalizeDroppedPath = React.useCallback((rawPath: string): string => {
         const input = rawPath.trim();
@@ -1526,6 +1613,15 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
         if (!currentSessionId && !newSessionDraftOpen) return;
 
         const files = collectDroppedFiles(e.dataTransfer);
+
+        if (files.length === 0 && isVSCodeRuntime()) {
+            const droppedUris = collectDroppedFileUris(e.dataTransfer);
+            if (droppedUris.length > 0) {
+                await attachVSCodeDroppedUris(droppedUris);
+            }
+            return;
+        }
+
         let attachedCount = 0;
 
         if (files.length > 0) {
