@@ -225,10 +225,47 @@ export function createFlexokiCodeMirrorTheme(theme: Theme): Extension {
     { tag: [t.heading, t.heading1, t.heading2, t.heading3, t.heading4, t.heading5, t.heading6], class: 'cm-keyword' },
   ]);
 
+  const directSyntax = HighlightStyle.define([
+    { tag: [t.comment, t.docComment, t.meta, t.documentMeta], color: theme.colors.syntax.base.comment },
+    { tag: [t.keyword, t.controlKeyword, t.moduleKeyword, t.definitionKeyword, t.modifier], color: theme.colors.syntax.base.keyword },
+    {
+      tag: [
+        t.operatorKeyword,
+        t.operator,
+        t.derefOperator,
+        t.updateOperator,
+        t.definitionOperator,
+        t.typeOperator,
+        t.controlOperator,
+        t.logicOperator,
+        t.bitwiseOperator,
+        t.arithmeticOperator,
+        t.compareOperator,
+      ],
+      color: theme.colors.syntax.base.operator,
+    },
+    { tag: [t.string, t.regexp, t.attributeValue, t.special(t.string), t.monospace], color: theme.colors.syntax.base.string },
+    { tag: t.escape, color: tokens.stringEscape || theme.colors.syntax.base.string },
+    { tag: [t.number, t.bool, t.atom, t.null, t.self], color: theme.colors.syntax.base.number },
+    { tag: [t.function(t.variableName), t.function(t.definition(t.variableName)), t.function(t.propertyName), t.standard(t.variableName), t.special(t.variableName)], color: theme.colors.syntax.base.function },
+    { tag: t.definition(t.variableName), color: tokens.variableGlobal || theme.colors.syntax.base.variable },
+    { tag: [t.variableName, t.local(t.variableName), t.constant(t.variableName), t.literal], color: theme.colors.syntax.base.variable },
+    { tag: t.propertyName, color: tokens.variableProperty || theme.colors.syntax.base.variable },
+    { tag: t.attributeName, color: tokens.variableOther || theme.colors.syntax.base.variable },
+    { tag: [t.className, t.typeName, t.namespace], color: theme.colors.syntax.base.type },
+    { tag: [t.tagName, t.labelName, t.annotation, t.macroName], color: tokens.tag || theme.colors.syntax.base.keyword },
+    { tag: t.link, color: tokens.url || theme.colors.syntax.base.function, textDecoration: 'underline' },
+    {
+      tag: [t.punctuation, t.separator, t.bracket, t.paren, t.brace, t.squareBracket, t.angleBracket],
+      color: tokens.punctuation || theme.colors.syntax.base.comment,
+    },
+  ]);
+
   return [
     ui,
     syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
     syntaxHighlighting(classHighlighter),
     syntaxHighlighting(syntax),
+    syntaxHighlighting(directSyntax),
   ];
 }
