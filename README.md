@@ -128,17 +128,45 @@ docker compose up -d
 
 The service will be available at `http://localhost:3000`.
 
+**UI Password (optional):** To enable password-protected access, uncomment and set the `UI_PASSWORD` environment variable in `docker-compose.yml`:
+
+```yaml
+environment:
+  UI_PASSWORD: your_secure_password
+```
+
+Or pass it via command line:
+
+```bash
+UI_PASSWORD=secret docker compose up -d
+```
+
+**Cloudflare Tunnel (optional):** To enable Cloudflare Quick Tunnel for remote access, set the `CF_TUNNEL` environment variable:
+
+```yaml
+environment:
+  CF_TUNNEL: "true" # Options: true, qr, password, full
+```
+
+| Value      | Description                     |
+| ---------- | ------------------------------- |
+| `true`     | Enable tunnel only              |
+| `qr`       | Enable tunnel + QR code         |
+| `password` | Enable tunnel + password in URL |
+
 **Data Directory Permission Note:** The `data/` directory is mounted into the container for persistent storage (config, sessions, SSH keys, workspaces). Before running, ensure the directory exists and has proper permissions:
 
 ```bash
 # Create data directories with correct ownership
-mkdir -p data/openchamber data/opencode/share data/opencode/config data/ssh data/workspaces
+mkdir -p data/openchamber data/opencode/share data/opencode/config data/ssh
 
 # Fix permissions (replace $USER with your username)
 chown -R 1000:1000 data/
 ```
 
 Without proper permissions, the container may fail to start or encounter permission denied errors when writing to these directories.
+
+**SSH/Git Authentication Note:** If git pull/push fails. Run `ssh -T git@github.com` in terminal.
 
 ## Prerequisites
 

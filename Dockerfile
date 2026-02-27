@@ -1,41 +1,50 @@
-FROM oven/bun:1.3.9 AS base
+# syntax=docker/dockerfile:1
+FROM archlinux:latest AS base
 WORKDIR /app
-RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ && rm -rf /var/lib/apt/lists/*
+
+# Install build dependencies in base stage
+RUN pacman -Sy --noconfirm --needed bun  && \
+  pacman -Scc --noconfirm
 
 FROM base AS deps
-COPY . .
+WORKDIR /app
+COPY package.json bun.lock ./
+COPY packages/ui/package.json ./packages/ui/
+COPY packages/web/package.json ./packages/web/
+COPY packages/desktop/package.json ./packages/desktop/
+COPY packages/vscode/package.json ./packages/vscode/
 RUN bun install --frozen-lockfile --ignore-scripts
 
 FROM deps AS builder
+WORKDIR /app
+COPY . .
 RUN bun run build:web
 
-FROM oven/bun:1.3.9 AS runtime
-WORKDIR /app
+FROM base AS runtime
+
+RUN pacman -Sy --noconfirm --needed base-devel python openssh cloudflared git nodejs npm && \
+  pacman -Scc --noconfirm
 
 ENV NODE_ENV=production
-ENV OPENCHAMBER_PORT=3000
-ENV BUN_INSTALL=/home/bun/.bun
-ENV PATH=${BUN_INSTALL}/bin:${PATH}
 
-USER root
+# Create openchamber user
+RUN useradd -m -s /bin/bash openchamber
 
-RUN apt-get update && apt-get install -y --no-install-recommends git npm openssh-client && rm -rf /var/lib/apt/lists/*
+# Switch to openchamber user
+USER openchamber
 
-# 配置 npm 全局安装到用户可写目录
-RUN npm config set prefix /home/bun/.npm-global && mkdir -p /home/bun/.npm-global
-
-ENV NPM_CONFIG_PREFIX=/home/bun/.npm-global
+RUN npm config set prefix /home/openchamber/.npm-global && mkdir -p /home/openchamber/.npm-global
+ENV NPM_CONFIG_PREFIX=/home/openchamber/.npm-global
 ENV PATH=${NPM_CONFIG_PREFIX}/bin:${PATH}
 
-# 确保 bun 用户对全局 npm 目录有写权限
-RUN chown -R bun:bun /home/bun/.npm-global
 
-USER bun
+# Create necessary directories and set ownership
+RUN mkdir -p /home/openchamber/.local /home/openchamber/.config /home/openchamber/.ssh
 
+# Install npm packages as root
 RUN npm install -g opencode-ai
 
-RUN mkdir -p /home/bun/.local /home/bun/.config /home/bun/.ssh
-
+WORKDIR /home/openchamber
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/packages/web/node_modules ./packages/web/node_modules
 COPY --from=builder /app/package.json ./package.json

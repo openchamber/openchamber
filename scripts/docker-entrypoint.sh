@@ -1,13 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-if [ -z "${HOME:-}" ]; then
-  HOME="$(getent passwd "$(id -u)" | cut -d: -f6 2>/dev/null || true)"
-fi
-
-if [ -z "${HOME:-}" ]; then
-  HOME="/home/bun"
-fi
+HOME="/home/openchamber"
 
 OPENCODE_CONFIG_DIR="${OPENCODE_CONFIG_DIR:-${HOME}/.config/opencode}"
 export OPENCODE_CONFIG_DIR
@@ -42,7 +36,31 @@ fi
 echo "[entrypoint] SSH public key:"
 cat "${SSH_PUBLIC_KEY_PATH}"
 
-OMO_INSTALL_ARGS="--no-tui --claude=no --openai=no --gemini=no --copilot=no --opencode-zen=no --zai-coding-plan=no --kimi-for-coding=no --skip-auth"
+# Handle UI_PASSWORD environment variable
+OPENCHAMBER_ARGS=""
+
+if [ -n "${UI_PASSWORD:-}" ]; then
+  echo "[entrypoint] UI password set, enabling authentication"
+  OPENCHAMBER_ARGS="${OPENCHAMBER_ARGS} --ui-password ${UI_PASSWORD}"
+fi
+
+# Handle Cloudflare Tunnel (CF_TUNNEL: true/qr/password/full)
+if [ -n "${CF_TUNNEL:-}" ] && [ "${CF_TUNNEL:-false}" != "false" ]; then
+  echo "[entrypoint] Cloudflare Tunnel enabled (${CF_TUNNEL})"
+  OPENCHAMBER_ARGS="${OPENCHAMBER_ARGS} --try-cf-tunnel"
+
+  case "${CF_TUNNEL}" in
+  "qr")
+    OPENCHAMBER_ARGS="${OPENCHAMBER_ARGS} --tunnel-qr"
+    ;;
+  esac
+
+  case "${CF_TUNNEL}" in
+  "password")
+    OPENCHAMBER_ARGS="${OPENCHAMBER_ARGS} --tunnel-password-url"
+    ;;
+  esac
+fi
 
 if [ "${OH_MY_OPENCODE:-false}" = "true" ]; then
 
@@ -50,6 +68,8 @@ if [ "${OH_MY_OPENCODE:-false}" = "true" ]; then
   npm install -g oh-my-opencode
 
   OMO_CONFIG_FILE="${OPENCODE_CONFIG_DIR}/oh-my-opencode.json"
+
+  OMO_INSTALL_ARGS="--no-tui --claude=no --openai=no --gemini=no --copilot=no --opencode-zen=no --zai-coding-plan=no --kimi-for-coding=no --skip-auth"
 
   if [ ! -f "${OMO_CONFIG_FILE}" ]; then
     echo "[entrypoint] oh-my-opencode installing..."
@@ -63,4 +83,4 @@ if [ "$#" -gt 0 ]; then
   exec "$@"
 fi
 
-exec bun packages/web/server/index.js --port "${OPENCHAMBER_PORT:-3000}"
+exec bun packages/web/bin/cli.js ${OPENCHAMBER_ARGS}
