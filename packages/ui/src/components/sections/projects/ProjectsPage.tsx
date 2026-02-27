@@ -308,10 +308,15 @@ export const ProjectsPage: React.FC = () => {
                   />
                   <ButtonSmall
                     type="button"
+                    size="xs"
+                    variant="outline"
                     onClick={() => setIconBackground(null)}
-                    className="h-7"
+                    className="h-7 w-7 p-0"
+                    aria-label="Clear icon background"
+                    title="Clear background"
+                    disabled={!iconBackground}
                   >
-                    Clear BG
+                    <RiCloseLine className="h-3.5 w-3.5" />
                   </ButtonSmall>
                 </div>
               )}
@@ -320,7 +325,7 @@ export const ProjectsPage: React.FC = () => {
                   <>
                     <ButtonSmall
                       size="xs"
-                      className="!font-normal"
+                      className="h-6 !font-normal"
                       onClick={() => fileInputRef.current?.click()}
                       disabled={isUploadingIcon}
                     >
@@ -328,7 +333,7 @@ export const ProjectsPage: React.FC = () => {
                     </ButtonSmall>
                     <ButtonSmall
                       size="xs"
-                      className="!font-normal"
+                      className="h-6 !font-normal"
                       variant="outline"
                       onClick={() => void handleDiscoverIcon()}
                       disabled={isDiscoveringIcon}
