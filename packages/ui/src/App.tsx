@@ -236,20 +236,16 @@ function App({ apis }: AppProps) {
 
     let cancelled = false;
     const run = async () => {
-      try {
-        const res = await fetch('/health', { method: 'GET' });
-        if (!res.ok) return;
-        const data = (await res.json().catch(() => null)) as null | { openCodeRunning?: unknown; lastOpenCodeError?: unknown };
-        if (!data || cancelled) return;
-        const openCodeRunning = data.openCodeRunning === true;
-        const err = typeof data.lastOpenCodeError === 'string' ? data.lastOpenCodeError : '';
-        const cliMissing =
-          !openCodeRunning &&
-          /ENOENT|spawn\s+opencode|Unable\s+to\s+locate\s+the\s+opencode\s+CLI|OpenCode\s+CLI\s+not\s+found|opencode(\.exe)?\s+not\s+found|env:\s*(node|bun):\s*No\s+such\s+file\s+or\s+directory|(node|bun):\s*No\s+such\s+file\s+or\s+directory/i.test(err);
-        setShowCliOnboarding(cliMissing);
-      } catch {
-        // ignore
-      }
+      const res = await fetch('/health', { method: 'GET' }).catch(() => null);
+      if (!res || !res.ok) return;
+      const data = (await res.json().catch(() => null)) as null | { openCodeRunning?: unknown; lastOpenCodeError?: unknown };
+      if (!data || cancelled) return;
+      const openCodeRunning = data.openCodeRunning === true;
+      const err = typeof data.lastOpenCodeError === 'string' ? data.lastOpenCodeError : '';
+      const cliMissing =
+        !openCodeRunning &&
+        /ENOENT|spawn\s+opencode|Unable\s+to\s+locate\s+the\s+opencode\s+CLI|OpenCode\s+CLI\s+not\s+found|opencode(\.exe)?\s+not\s+found|env:\s*(node|bun):\s*No\s+such\s+file\s+or\s+directory|(node|bun):\s*No\s+such\s+file\s+or\s+directory/i.test(err);
+      setShowCliOnboarding(cliMissing);
     };
 
     void run();

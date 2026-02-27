@@ -52,15 +52,15 @@ const isDetailedDefaultTool = (toolName: unknown): boolean =>
     typeof toolName === 'string' && DETAILED_DEFAULT_TOOLS.has(toolName.toLowerCase());
 
 function useStickyDisplayValue<T>(value: T | null | undefined): T | null | undefined {
-    const ref = React.useRef<{ hasValue: boolean; value: T | null | undefined }>({ hasValue: false, value: undefined as T | null | undefined });
+    const [stickyValue, setStickyValue] = React.useState<T | null | undefined>(value);
 
-    if (value !== undefined && value !== null) {
-        if (!ref.current.hasValue || ref.current.value !== value) {
-            ref.current = { hasValue: true, value };
+    React.useEffect(() => {
+        if (value !== undefined && value !== null) {
+            setStickyValue(value);
         }
-    }
+    }, [value]);
 
-    return ref.current.hasValue ? ref.current.value : value;
+    return value ?? stickyValue;
 }
 
 const getMessageInfoProp = (info: unknown, key: string): unknown => {
@@ -539,8 +539,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         return freshnessDetector.shouldAnimateMessage(message.info, currentSessionId || message.info.sessionID);
     }, [message.info, currentSessionId, isUser]);
 
-    // Track if this message should show header to prevent flickering
-    const shouldShowHeaderRef = React.useRef(false);
+    const [hasStartedStreamingHeader, setHasStartedStreamingHeader] = React.useState(false);
 
     const previousRole = React.useMemo(() => {
         if (!previousMessage) return null;
@@ -568,6 +567,22 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         return isStreamingMessage ? 'streaming' : 'completed';
     }, [isMessageCompleted, lifecyclePhase, isStreamingMessage]);
 
+    React.useEffect(() => {
+        setHasStartedStreamingHeader(false);
+    }, [message.info.id]);
+
+    React.useEffect(() => {
+        const headerMessageId = turnGroupingContext?.headerMessageId;
+        if (isUser || !headerMessageId || headerMessageId !== message.info.id) {
+            return;
+        }
+
+        const isCurrentlyStreaming = streamPhase === 'streaming' || streamPhase === 'cooldown';
+        if (isCurrentlyStreaming) {
+            setHasStartedStreamingHeader(true);
+        }
+    }, [isUser, message.info.id, streamPhase, turnGroupingContext?.headerMessageId]);
+
     const shouldShowHeader = React.useMemo(() => {
         if (isUser) return true;
 
@@ -585,15 +600,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
 
                 // For streaming messages: show header when streaming starts and keep it visible
                 const isCurrentlyStreaming = streamPhase === 'streaming' || streamPhase === 'cooldown';
-                const hasStartedStreaming = shouldShowHeaderRef.current;
-
-                // Update the ref when streaming starts
-                if (isCurrentlyStreaming && !hasStartedStreaming) {
-                    shouldShowHeaderRef.current = true;
-                }
-
-                // Show header if streaming has started or is currently active
-                return hasStartedStreaming || isCurrentlyStreaming;
+                return hasStartedStreamingHeader || isCurrentlyStreaming;
             }
 
             // For non-first assistant messages, don't show header
@@ -603,7 +610,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         // Fallback to original logic when turn grouping is not available
         if (!previousRole) return true;
         return previousRole.isUser;
-    }, [isUser, previousRole, turnGroupingContext, streamPhase, message.info]);
+    }, [hasStartedStreamingHeader, isUser, previousRole, turnGroupingContext, streamPhase, message.info]);
 
     const handleCopyCode = React.useCallback((code: string) => {
         void copyTextToClipboard(code).then((result) => {
@@ -648,16 +655,17 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
             ? turnGroupingContext.summaryBody
             : assistantSummaryFromStore;
 
-    const assistantSummaryRef = React.useRef<string | undefined>(undefined);
-    if (assistantSummaryCandidate && assistantSummaryCandidate.trim().length > 0) {
-        assistantSummaryRef.current = assistantSummaryCandidate;
-    }
-    const prevUserMessageIdForCopy = React.useRef(userMessageIdForTurn);
-    if (prevUserMessageIdForCopy.current !== userMessageIdForTurn) {
-        prevUserMessageIdForCopy.current = userMessageIdForTurn;
-        assistantSummaryRef.current = undefined;
-    }
-    const assistantSummaryForCopy = assistantSummaryRef.current;
+    const [assistantSummaryForCopy, setAssistantSummaryForCopy] = React.useState<string | undefined>(undefined);
+
+    React.useEffect(() => {
+        setAssistantSummaryForCopy(undefined);
+    }, [userMessageIdForTurn]);
+
+    React.useEffect(() => {
+        if (assistantSummaryCandidate && assistantSummaryCandidate.trim().length > 0) {
+            setAssistantSummaryForCopy(assistantSummaryCandidate);
+        }
+    }, [assistantSummaryCandidate]);
 
     const assistantErrorText = React.useMemo(() => {
         if (isUser) {

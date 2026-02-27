@@ -308,21 +308,17 @@ const TableDownloadButton: React.FC<{ tableRef: React.RefObject<HTMLDivElement |
   }, []);
 
    const handleDownload = (format: 'csv' | 'markdown') => {
-     const tableEl = tableRef.current?.querySelector('table');
-     if (!tableEl) return;
-     
-     try {
-       const data = extractTableData(tableEl);
-       const content = format === 'csv' ? tableToCSV(data) : tableToMarkdown(data);
-       const filename = format === 'csv' ? 'table.csv' : 'table.md';
-       const mimeType = format === 'csv' ? 'text/csv' : 'text/markdown';
-       downloadFile(filename, content, mimeType);
-       setShowMenu(false);
-       toast.success(`Table downloaded as ${format.toUpperCase()}`);
-     } catch (err) {
-       console.error('Failed to download table:', err);
-     }
-   };
+      const tableEl = tableRef.current?.querySelector('table');
+      if (!tableEl) return;
+
+      const data = extractTableData(tableEl);
+      const content = format === 'csv' ? tableToCSV(data) : tableToMarkdown(data);
+      const filename = format === 'csv' ? 'table.csv' : 'table.md';
+      const mimeType = format === 'csv' ? 'text/csv' : 'text/markdown';
+      downloadFile(filename, content, mimeType);
+      setShowMenu(false);
+      toast.success(`Table downloaded as ${format.toUpperCase()}`);
+    };
 
   return (
     <div className="relative" ref={menuRef}>
@@ -820,10 +816,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
 
   const shikiThemes = useMarkdownShikiThemes();
   const currentMermaidTheme = useCurrentMermaidTheme();
-  const componentKey = React.useMemo(() => {
-    const signature = part?.id ? `part-${part.id}` : `message-${messageId}`;
-    return `markdown-${signature}`;
-  }, [messageId, part?.id]);
+  const componentKey = `markdown-${part?.id ? `part-${part.id}` : `message-${messageId}`}`;
 
   const streamdownClassName = variant === 'tool'
     ? 'streamdown-content streamdown-tool'

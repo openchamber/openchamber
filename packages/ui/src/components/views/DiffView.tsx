@@ -653,15 +653,14 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
         setIsLoading(true);
 
         let cancelled = false;
-        void (async () => {
-            try {
-                const fetchPromise = git.getGitFileDiff(directory, { path: file.path });
-                const timeoutMs = DIFF_REQUEST_TIMEOUT_MS;
-                const timeoutPromise = new Promise<never>((_, reject) => {
-                    setTimeout(() => reject(new Error(`Timed out after ${timeoutMs}ms`)), timeoutMs);
-                });
+        const fetchPromise = git.getGitFileDiff(directory, { path: file.path });
+        const timeoutMs = DIFF_REQUEST_TIMEOUT_MS;
+        const timeoutPromise = new Promise<never>((_, reject) => {
+            setTimeout(() => reject(new Error(`Timed out after ${timeoutMs}ms`)), timeoutMs);
+        });
 
-                const response = await Promise.race([fetchPromise, timeoutPromise]);
+        void Promise.race([fetchPromise, timeoutPromise])
+            .then((response) => {
                 if (cancelled) return;
 
                 setDiff(directory, file.path, {
@@ -670,13 +669,13 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                     isBinary: response.isBinary,
                 });
                 setIsLoading(false);
-            } catch (error) {
+            })
+            .catch((error) => {
                 if (cancelled) return;
                 const message = error instanceof Error ? error.message : String(error);
                 setDiffLoadError(message);
                 setIsLoading(false);
-            }
-        })();
+            });
 
         return () => {
             cancelled = true;
@@ -1282,15 +1281,14 @@ export const DiffView: React.FC<DiffViewProps> = ({
         lastDiffRequestRef.current = requestKey;
 
         let cancelled = false;
-        void (async () => {
-            try {
-                const fetchPromise = git.getGitFileDiff(effectiveDirectory, { path: selectedFile });
-                const timeoutMs = DIFF_REQUEST_TIMEOUT_MS;
-                const timeoutPromise = new Promise<never>((_, reject) => {
-                    setTimeout(() => reject(new Error(`Timed out after ${timeoutMs}ms`)), timeoutMs);
-                });
+        const fetchPromise = git.getGitFileDiff(effectiveDirectory, { path: selectedFile });
+        const timeoutMs = DIFF_REQUEST_TIMEOUT_MS;
+        const timeoutPromise = new Promise<never>((_, reject) => {
+            setTimeout(() => reject(new Error(`Timed out after ${timeoutMs}ms`)), timeoutMs);
+        });
 
-                const response = await Promise.race([fetchPromise, timeoutPromise]);
+        void Promise.race([fetchPromise, timeoutPromise])
+            .then((response) => {
                 if (cancelled) return;
 
                 setDiff(effectiveDirectory, selectedFile, {
@@ -1298,12 +1296,12 @@ export const DiffView: React.FC<DiffViewProps> = ({
                     modified: response.modified ?? '',
                     isBinary: response.isBinary,
                 });
-            } catch (error) {
+            })
+            .catch((error) => {
                 if (cancelled) return;
                 const message = error instanceof Error ? error.message : String(error);
                 setDiffLoadError(message);
-            }
-        })();
+            });
 
         return () => {
             cancelled = true;

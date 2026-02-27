@@ -1226,49 +1226,53 @@ const ToolPart: React.FC<ToolPartProps> = ({
 
 
 
-    const previousExpandedRef = React.useRef<boolean | undefined>(isExpanded);
+    const shouldNotifyStructuralChange = isFinalized || isTaskTool;
 
     React.useEffect(() => {
-        if (!isFinalized && !isTaskTool) {
+        if (!shouldNotifyStructuralChange) {
             return;
         }
-        if (previousExpandedRef.current === isExpanded) {
-            return;
-        }
-        previousExpandedRef.current = isExpanded;
         if (typeof isExpanded === 'boolean') {
             onContentChange?.('structural');
         }
-    }, [isExpanded, isFinalized, isTaskTool, onContentChange]);
+    }, [isExpanded, onContentChange, shouldNotifyStructuralChange]);
 
     const stateWithData = state as ToolStateWithMetadata;
     const metadata = stateWithData.metadata;
     const input = stateWithData.input;
     const time = stateWithData.time;
 
-    // Pin start/end so a server-side time reset doesn't reset UI duration.
-    const pinnedTaskTimeRef = React.useRef<{ start?: number; end?: number }>({});
-    const lastPinnedTaskIdRef = React.useRef<string>(part.id);
+    const [pinnedTaskTime, setPinnedTaskTime] = React.useState<{ start?: number; end?: number }>({});
 
-    if (lastPinnedTaskIdRef.current !== part.id) {
-        lastPinnedTaskIdRef.current = part.id;
-        pinnedTaskTimeRef.current = {};
-    }
+    React.useEffect(() => {
+        setPinnedTaskTime({});
+    }, [part.id]);
 
-    if (isTaskTool) {
-        if (typeof time?.start === 'number') {
-            const pinnedStart = pinnedTaskTimeRef.current.start;
-            if (typeof pinnedStart !== 'number' || time.start < pinnedStart) {
-                pinnedTaskTimeRef.current.start = time.start;
+    React.useEffect(() => {
+        if (!isTaskTool) {
+            return;
+        }
+
+        setPinnedTaskTime((prev) => {
+            const next = { ...prev };
+            let changed = false;
+
+            if (typeof time?.start === 'number' && (typeof prev.start !== 'number' || time.start < prev.start)) {
+                next.start = time.start;
+                changed = true;
             }
-        }
-        if (typeof time?.end === 'number') {
-            pinnedTaskTimeRef.current.end = time.end;
-        }
-    }
 
-    const effectiveTimeStart = isTaskTool ? (pinnedTaskTimeRef.current.start ?? time?.start) : time?.start;
-    const effectiveTimeEnd = isTaskTool ? (pinnedTaskTimeRef.current.end ?? time?.end) : time?.end;
+            if (typeof time?.end === 'number' && prev.end !== time.end) {
+                next.end = time.end;
+                changed = true;
+            }
+
+            return changed ? next : prev;
+        });
+    }, [isTaskTool, time?.end, time?.start]);
+
+    const effectiveTimeStart = isTaskTool ? (pinnedTaskTime.start ?? time?.start) : time?.start;
+    const effectiveTimeEnd = isTaskTool ? (pinnedTaskTime.end ?? time?.end) : time?.end;
 
     const taskOutputString = React.useMemo(() => {
         return typeof stateWithData.output === 'string' ? stateWithData.output : undefined;
@@ -1407,7 +1411,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
 
     const runtime = React.useContext(RuntimeAPIContext);
 
-    const handleMainClick = (e: React.MouseEvent) => {
+    const handleMainClick = (e: { stopPropagation: () => void }) => {
         if (isTaskTool || !runtime?.editor) {
             onToggle(part.id);
             return;
@@ -1436,6 +1440,14 @@ const ToolPart: React.FC<ToolPartProps> = ({
         }
     };
 
+    const handleMainKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+        if (event.key !== 'Enter' && event.key !== ' ') {
+            return;
+        }
+        event.preventDefault();
+        handleMainClick(event);
+    };
+
     if (!isFinalized && !isTaskTool) {
         return null;
     }
@@ -1448,10 +1460,18 @@ const ToolPart: React.FC<ToolPartProps> = ({
                     'group/tool flex items-center gap-2 pr-2 pl-px py-1.5 rounded-xl cursor-pointer'
                 )}
                 onClick={handleMainClick}
+                onKeyDown={handleMainKeyDown}
+                role="button"
+                tabIndex={0}
             >
                 <div className="flex items-center gap-2 flex-shrink-0">
                     {}
-                    <div className="relative h-3.5 w-3.5 flex-shrink-0" onClick={(e) => { e.stopPropagation(); onToggle(part.id); }}>
+                    <button
+                        type="button"
+                        className="relative h-3.5 w-3.5 flex-shrink-0"
+                        onClick={(event) => { event.stopPropagation(); onToggle(part.id); }}
+                        aria-label={isExpanded ? 'Collapse tool details' : 'Expand tool details'}
+                    >
                         {}
                         <div
                             className={cn(
@@ -1474,7 +1494,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
                         >
                             {isExpanded ? <RiArrowDownSLine className="h-3.5 w-3.5" /> : <RiArrowRightSLine className="h-3.5 w-3.5" />}
                         </div>
-                    </div>
+                    </button>
                     <span
                         className="typography-meta font-medium"
                         style={!isTaskTool && isError ? { color: 'var(--status-error)' } : { color: 'var(--tools-title)' }}

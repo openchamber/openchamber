@@ -541,11 +541,12 @@ const DialogReadContent: React.FC<{
 
     const codeLines: CodeLine[] = React.useMemo(() => {
         const hasExplicitLineNumbers = parsedReadOutput.lines.some((line) => line.lineNumber !== null);
-        let fallbackLineCursor = offset;
+        const result: CodeLine[] = [];
+        let nextLineNumber = offset;
 
-        return parsedReadOutput.lines.map((line) => {
+        for (const line of parsedReadOutput.lines) {
             if (line.lineNumber !== null) {
-                fallbackLineCursor = line.lineNumber;
+                nextLineNumber = line.lineNumber;
             }
             const shouldAssignFallback =
                 parsedReadOutput.type === 'file'
@@ -553,15 +554,20 @@ const DialogReadContent: React.FC<{
                 && line.lineNumber === null
                 && !line.isInfo;
             const effectiveLineNumber = line.lineNumber ?? (shouldAssignFallback
-                ? (fallbackLineCursor += 1)
+                ? (nextLineNumber + 1)
                 : null);
+            if (typeof effectiveLineNumber === 'number') {
+                nextLineNumber = effectiveLineNumber;
+            }
 
-            return {
+            result.push({
                 text: line.text,
                 lineNumber: effectiveLineNumber,
                 isInfo: line.isInfo,
-            };
-        });
+            });
+        }
+
+        return result;
     }, [offset, parsedReadOutput]);
 
     if (parsedReadOutput.type === 'file') {
@@ -632,21 +638,28 @@ const MermaidPreviewDialog: React.FC<{
             return /^[A-Za-z]:\//.test(normalized);
         };
 
-        try {
-            let pathname = decodeURIComponent(new URL(input).pathname || '');
+        const decodeLoose = (value: string): string => {
+            return value.replace(/%([0-9A-Fa-f]{2})/g, (_match, hex: string) => {
+                const codePoint = Number.parseInt(hex, 16);
+                return Number.isFinite(codePoint) ? String.fromCharCode(codePoint) : `%${hex}`;
+            });
+        };
+
+        const canParse = typeof URL.canParse === 'function'
+            ? URL.canParse(input)
+            : false;
+
+        if (canParse) {
+            let pathname = decodeLoose(new URL(input).pathname || '');
             if (/^\/[A-Za-z]:\//.test(pathname)) {
                 pathname = pathname.slice(1);
             }
             return isSafeLocalPath(pathname) ? pathname : null;
-        } catch {
-            const stripped = input.replace(/^file:\/\//i, '');
-            try {
-                const decoded = decodeURIComponent(stripped);
-                return isSafeLocalPath(decoded) ? decoded : null;
-            } catch {
-                return isSafeLocalPath(stripped) ? stripped : null;
-            }
         }
+
+        const stripped = input.replace(/^file:\/\//i, '');
+        const decoded = decodeLoose(stripped);
+        return isSafeLocalPath(decoded) ? decoded : (isSafeLocalPath(stripped) ? stripped : null);
     }, []);
 
     const decodeDataUrl = React.useCallback((value: string): string => {
@@ -684,46 +697,57 @@ const MermaidPreviewDialog: React.FC<{
         setStatus('loading');
         setErrorMessage('');
 
-        try {
-            let resolvedSource = '';
-            if (target.url.startsWith('data:')) {
-                resolvedSource = decodeDataUrl(target.url);
-            } else if (target.url.toLowerCase().startsWith('file://')) {
-                const normalizedPath = normalizeFilePath(target.url);
-                if (!normalizedPath) {
-                    throw new Error('Invalid local file path for Mermaid preview.');
-                }
-                const response = await fetch(`/api/fs/raw?path=${encodeURIComponent(normalizedPath)}`);
-                if (!response.ok) {
-                    throw new Error(`Failed to read diagram file (${response.status})`);
-                }
-                resolvedSource = await response.text();
+        let sourcePromise: Promise<string>;
+        if (target.url.startsWith('data:')) {
+            sourcePromise = Promise.resolve(decodeDataUrl(target.url));
+        } else if (target.url.toLowerCase().startsWith('file://')) {
+            const normalizedPath = normalizeFilePath(target.url);
+            if (!normalizedPath) {
+                sourcePromise = Promise.reject(new Error('Invalid local file path for Mermaid preview.'));
             } else {
-                const resolvedUrl = new URL(target.url, window.location.origin);
-                if (resolvedUrl.protocol !== 'http:' && resolvedUrl.protocol !== 'https:') {
-                    throw new Error('Unsupported Mermaid URL protocol.');
-                }
-
-                const response = await fetch(resolvedUrl.toString());
-                if (!response.ok) {
-                    throw new Error(`Failed to load diagram (${response.status})`);
-                }
-                resolvedSource = await response.text();
+                sourcePromise = fetch(`/api/fs/raw?path=${encodeURIComponent(normalizedPath)}`)
+                    .then((response) => {
+                        if (!response.ok) {
+                            return Promise.reject(new Error(`Failed to read diagram file (${response.status})`));
+                        }
+                        return response.text();
+                    });
             }
+        } else {
+            const canParse = typeof URL.canParse === 'function'
+                ? URL.canParse(target.url, window.location.origin)
+                : false;
+            const resolvedUrl = canParse ? new URL(target.url, window.location.origin) : null;
 
-            if (requestIdRef.current !== requestId) {
-                return;
+            if (!resolvedUrl || (resolvedUrl.protocol !== 'http:' && resolvedUrl.protocol !== 'https:')) {
+                sourcePromise = Promise.reject(new Error('Unsupported Mermaid URL protocol.'));
+            } else {
+                sourcePromise = fetch(resolvedUrl.toString())
+                    .then((response) => {
+                        if (!response.ok) {
+                            return Promise.reject(new Error(`Failed to load diagram (${response.status})`));
+                        }
+                        return response.text();
+                    });
             }
-
-            setSource(resolvedSource);
-            setStatus('ready');
-        } catch (error) {
-            if (requestIdRef.current !== requestId) {
-                return;
-            }
-            setStatus('error');
-            setErrorMessage(error instanceof Error ? error.message : 'Unable to load Mermaid diagram.');
         }
+
+        await sourcePromise
+            .then((resolvedSource) => {
+                if (requestIdRef.current !== requestId) {
+                    return;
+                }
+
+                setSource(resolvedSource);
+                setStatus('ready');
+            })
+            .catch((error) => {
+                if (requestIdRef.current !== requestId) {
+                    return;
+                }
+                setStatus('error');
+                setErrorMessage(error instanceof Error ? error.message : 'Unable to load Mermaid diagram.');
+            });
     }, [decodeDataUrl, normalizeFilePath, popup.mermaid]);
 
     React.useEffect(() => {

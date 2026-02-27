@@ -60,6 +60,7 @@ import { getLanguageFromExtension, getImageMimeType, isImageFile } from '@/lib/t
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { EditorView } from '@codemirror/view';
 import type { Extension } from '@codemirror/state';
+import { convertFileSrc } from '@tauri-apps/api/core';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useUIStore } from '@/stores/useUIStore';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
@@ -153,6 +154,20 @@ const getAncestorPaths = (filePath: string, root: string): string[] => {
     ancestors.push(current);
   }
   return ancestors;
+};
+
+const getDisplayPath = (root: string | null, path: string): string => {
+  if (!path) {
+    return '';
+  }
+
+  const normalizedFilePath = normalizePath(path);
+  if (!root || !isPathWithinRoot(normalizedFilePath, root)) {
+    return normalizedFilePath;
+  }
+
+  const relative = normalizedFilePath.slice(root.length);
+  return relative.startsWith('/') ? relative.slice(1) : relative;
 };
 
 const DEFAULT_IGNORED_DIR_NAMES = new Set(['node_modules']);
@@ -666,39 +681,37 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     inFlightDirsRef.current = new Set(inFlightDirsRef.current);
     inFlightDirsRef.current.add(normalizedDir);
 
-    try {
-      const respectGitignore = !showGitignored;
-      let entries: Array<{ name: string; path: string; isDirectory: boolean }>;
-      if (runtime.isDesktop) {
-        const result = await files.listDirectory(normalizedDir, { respectGitignore });
-        entries = result.entries.map((entry) => ({
-          name: entry.name,
-          path: entry.path,
-          isDirectory: entry.isDirectory,
-        }));
-      } else {
-        const result = await opencodeClient.listLocalDirectory(normalizedDir, { respectGitignore });
-        entries = result.map((entry) => ({
-          name: entry.name,
-          path: entry.path,
-          isDirectory: entry.isDirectory,
-        }));
-      }
-      
-      const mapped = mapDirectoryEntries(normalizedDir, entries);
+    const respectGitignore = !showGitignored;
+    const listPromise = runtime.isDesktop
+      ? files.listDirectory(normalizedDir, { respectGitignore }).then((result) => result.entries.map((entry) => ({
+        name: entry.name,
+        path: entry.path,
+        isDirectory: entry.isDirectory,
+      })))
+      : opencodeClient.listLocalDirectory(normalizedDir, { respectGitignore }).then((result) => result.map((entry) => ({
+        name: entry.name,
+        path: entry.path,
+        isDirectory: entry.isDirectory,
+      })));
 
-      loadedDirsRef.current = new Set(loadedDirsRef.current);
-      loadedDirsRef.current.add(normalizedDir);
-      setChildrenByDir((prev) => ({ ...prev, [normalizedDir]: mapped }));
-    } catch {
-      setChildrenByDir((prev) => ({
-        ...prev,
-        [normalizedDir]: prev[normalizedDir] ?? [],
-      }));
-    } finally {
-      inFlightDirsRef.current = new Set(inFlightDirsRef.current);
-      inFlightDirsRef.current.delete(normalizedDir);
-    }
+    await listPromise
+      .then((entries) => {
+        const mapped = mapDirectoryEntries(normalizedDir, entries);
+
+        loadedDirsRef.current = new Set(loadedDirsRef.current);
+        loadedDirsRef.current.add(normalizedDir);
+        setChildrenByDir((prev) => ({ ...prev, [normalizedDir]: mapped }));
+      })
+      .catch(() => {
+        setChildrenByDir((prev) => ({
+          ...prev,
+          [normalizedDir]: prev[normalizedDir] ?? [],
+        }));
+      })
+      .finally(() => {
+        inFlightDirsRef.current = new Set(inFlightDirsRef.current);
+        inFlightDirsRef.current.delete(normalizedDir);
+      });
   }, [files, mapDirectoryEntries, runtime.isDesktop, showGitignored]);
 
   const refreshRoot = React.useCallback(async () => {
@@ -753,11 +766,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   React.useEffect(() => {
     try {
       const stored = localStorage.getItem(MD_VIEWER_MODE_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (parsed === 'preview' || parsed === 'edit') {
-          setMdViewMode(parsed);
-        }
+      if (stored === 'preview') {
+        setMdViewMode('preview');
+      } else if (stored === 'edit') {
+        setMdViewMode('edit');
       }
     } catch {
       // Ignore localStorage errors
@@ -765,14 +777,14 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   }, []);
 
   // Save markdown view mode preference to localStorage
-  const saveMdViewMode = React.useCallback((mode: 'preview' | 'edit') => {
-    setMdViewMode(mode);
-    try {
-      localStorage.setItem(MD_VIEWER_MODE_KEY, JSON.stringify(mode));
-    } catch {
-      // Ignore localStorage errors
-    }
-  }, []);
+const saveMdViewMode = React.useCallback((mode: 'preview' | 'edit') => {
+  setMdViewMode(mode);
+  try {
+    localStorage.setItem(MD_VIEWER_MODE_KEY, mode);
+  } catch {
+    // Ignore localStorage errors
+  }
+}, []);
 
   // Get the view mode for a markdown file (from state, default to 'edit')
   const getMdViewMode = React.useCallback((): 'preview' | 'edit' => {
@@ -784,94 +796,151 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     if (!dialogData || !activeDialog) return;
 
     setIsDialogSubmitting(true);
-    try {
-      if (activeDialog === 'createFile') {
-        if (!dialogInputValue.trim()) throw new Error('Filename is required');
-        const parentPath = dialogData.path;
-        // Handle root path or empty path
-        const prefix = parentPath ? `${parentPath}/` : '';
-        const newPath = normalizePath(`${prefix}${dialogInputValue.trim()}`);
-
-        if (!files.writeFile) throw new Error('Write not supported');
-        const result = await files.writeFile(newPath, '');
-        if (result.success) {
-          toast.success('File created');
-          await refreshRoot();
-        }
-      } else if (activeDialog === 'createFolder') {
-        if (!dialogInputValue.trim()) throw new Error('Folder name is required');
-        const parentPath = dialogData.path;
-        const prefix = parentPath ? `${parentPath}/` : '';
-        const newPath = normalizePath(`${prefix}${dialogInputValue.trim()}`);
-
-        const result = await files.createDirectory(newPath);
-        if (result.success) {
-          toast.success('Folder created');
-          await refreshRoot();
-        }
-      } else if (activeDialog === 'rename') {
-        if (!dialogInputValue.trim()) throw new Error('Name is required');
-        const oldPath = dialogData.path;
-        const parentDir = oldPath.split('/').slice(0, -1).join('/');
-        const prefix = parentDir ? `${parentDir}/` : '';
-        const newPath = normalizePath(`${prefix}${dialogInputValue.trim()}`);
-
-        if (files.rename) {
-             const result = await files.rename(oldPath, newPath);
-             if (result.success) {
-                 toast.success('Renamed successfully');
-                 await refreshRoot();
-                 if (root) {
-                   removeOpenPathsByPrefix(root, oldPath);
-                 }
-                 if (selectedFile?.path === oldPath || selectedFile?.path.startsWith(`${oldPath}/`)) {
-                     if (root) {
-                       setSelectedPath(root, null);
-                     }
-                     setFileContent('');
-                     setFileError(null);
-                     setDesktopImageSrc('');
-                     setLoadedFilePath(null);
-                     if (isMobile) {
-                       setShowMobilePageContent(false);
-                     }
-                 }
-             }
-        } else {
-            toast.error("Rename not supported");
-        }
-      } else if (activeDialog === 'delete') {
-        if (files.delete) {
-             const result = await files.delete(dialogData.path);
-             if (result.success) {
-                 toast.success('Deleted successfully');
-                 await refreshRoot();
-                 if (root) {
-                   removeOpenPathsByPrefix(root, dialogData.path);
-                 }
-                 if (selectedFile?.path === dialogData.path || selectedFile?.path.startsWith(dialogData.path + '/')) {
-                     if (root) {
-                       setSelectedPath(root, null);
-                     }
-                     setFileContent('');
-                     setFileError(null);
-                     setDesktopImageSrc('');
-                     setLoadedFilePath(null);
-                     if (isMobile) {
-                       setShowMobilePageContent(false);
-                     }
-                 }
-             }
-        } else {
-             toast.error("Delete not supported");
-        }
-      }
+    const finishDialogOperation = () => {
       setActiveDialog(null);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Operation failed');
-    } finally {
+    };
+
+    const failDialogOperation = (message: string) => {
+      toast.error(message);
+    };
+
+    const done = () => {
       setIsDialogSubmitting(false);
+    };
+
+    if (activeDialog === 'createFile') {
+      if (!dialogInputValue.trim()) {
+        failDialogOperation('Filename is required');
+        done();
+        return;
+      }
+      if (!files.writeFile) {
+        failDialogOperation('Write not supported');
+        done();
+        return;
+      }
+
+      const parentPath = dialogData.path;
+      const prefix = parentPath ? `${parentPath}/` : '';
+      const newPath = normalizePath(`${prefix}${dialogInputValue.trim()}`);
+      await files.writeFile(newPath, '')
+        .then(async (result) => {
+          if (result.success) {
+            toast.success('File created');
+            await refreshRoot();
+          }
+          finishDialogOperation();
+        })
+        .catch(() => failDialogOperation('Operation failed'))
+        .finally(done);
+      return;
     }
+
+    if (activeDialog === 'createFolder') {
+      if (!dialogInputValue.trim()) {
+        failDialogOperation('Folder name is required');
+        done();
+        return;
+      }
+
+      const parentPath = dialogData.path;
+      const prefix = parentPath ? `${parentPath}/` : '';
+      const newPath = normalizePath(`${prefix}${dialogInputValue.trim()}`);
+      await files.createDirectory(newPath)
+        .then(async (result) => {
+          if (result.success) {
+            toast.success('Folder created');
+            await refreshRoot();
+          }
+          finishDialogOperation();
+        })
+        .catch(() => failDialogOperation('Operation failed'))
+        .finally(done);
+      return;
+    }
+
+    if (activeDialog === 'rename') {
+      if (!dialogInputValue.trim()) {
+        failDialogOperation('Name is required');
+        done();
+        return;
+      }
+
+      if (!files.rename) {
+        failDialogOperation('Rename not supported');
+        done();
+        return;
+      }
+
+      const oldPath = dialogData.path;
+      const parentDir = oldPath.split('/').slice(0, -1).join('/');
+      const prefix = parentDir ? `${parentDir}/` : '';
+      const newPath = normalizePath(`${prefix}${dialogInputValue.trim()}`);
+
+      await files.rename(oldPath, newPath)
+        .then(async (result) => {
+          if (result.success) {
+            toast.success('Renamed successfully');
+            await refreshRoot();
+            if (root) {
+              removeOpenPathsByPrefix(root, oldPath);
+            }
+            if (selectedFile?.path === oldPath || selectedFile?.path.startsWith(`${oldPath}/`)) {
+              if (root) {
+                setSelectedPath(root, null);
+              }
+              setFileContent('');
+              setFileError(null);
+              setDesktopImageSrc('');
+              setLoadedFilePath(null);
+              if (isMobile) {
+                setShowMobilePageContent(false);
+              }
+            }
+          }
+          finishDialogOperation();
+        })
+        .catch(() => failDialogOperation('Operation failed'))
+        .finally(done);
+      return;
+    }
+
+    if (activeDialog === 'delete') {
+      if (!files.delete) {
+        failDialogOperation('Delete not supported');
+        done();
+        return;
+      }
+
+      await files.delete(dialogData.path)
+        .then(async (result) => {
+          if (result.success) {
+            toast.success('Deleted successfully');
+            await refreshRoot();
+            if (root) {
+              removeOpenPathsByPrefix(root, dialogData.path);
+            }
+            if (selectedFile?.path === dialogData.path || selectedFile?.path.startsWith(`${dialogData.path}/`)) {
+              if (root) {
+                setSelectedPath(root, null);
+              }
+              setFileContent('');
+              setFileError(null);
+              setDesktopImageSrc('');
+              setLoadedFilePath(null);
+              if (isMobile) {
+                setShowMobilePageContent(false);
+              }
+            }
+          }
+          finishDialogOperation();
+        })
+        .catch(() => failDialogOperation('Operation failed'))
+        .finally(done);
+      return;
+    }
+
+    done();
   }, [activeDialog, dialogData, dialogInputValue, files, refreshRoot, isMobile, removeOpenPathsByPrefix, root, selectedFile?.path, setSelectedPath]);
 
   const fuzzyScore = React.useCallback((query: string, candidate: string): number | null => {
@@ -1028,17 +1097,20 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
     setIsSaving(true);
 
-    try {
-      const result = await files.writeFile(selectedFile.path, draftContent);
-      if (!result?.success) {
-        throw new Error('Failed to write file');
-      }
-      setFileContent(draftContent);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Save failed');
-    } finally {
-      setIsSaving(false);
-    }
+    await files.writeFile(selectedFile.path, draftContent)
+      .then((result) => {
+        if (!result?.success) {
+          toast.error('Failed to write file');
+          return;
+        }
+        setFileContent(draftContent);
+      })
+      .catch((error) => {
+        toast.error(error instanceof Error ? error.message : 'Save failed');
+      })
+      .finally(() => {
+        setIsSaving(false);
+      });
   }, [draftContent, files, isDirty, selectedFile]);
 
   React.useEffect(() => {
@@ -1118,47 +1190,49 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
     setFileLoading(true);
 
-    try {
-      const content = await readFile(node.path);
-      setFileContent(content);
-      setDraftContent(content.length > MAX_VIEW_CHARS
-        ? `${content.slice(0, MAX_VIEW_CHARS)}\n\n… truncated …`
-        : content);
-    } catch (error) {
-      if (isDirectoryReadError(error)) {
-        if (root) {
-          setSelectedPath(root, null);
-        }
-        setFileError(null);
-        setFileContent('');
-        setDraftContent('');
-        setLoadedFilePath(null);
-        if (searchQuery.trim().length > 0) {
-          setSearchQuery('');
-        }
-        if (isMobile) {
-          setShowMobilePageContent(false);
-        }
-        if (root) {
-          const ancestors = getAncestorPaths(node.path, root);
-          const pathsToExpand = [...ancestors, node.path];
-          if (pathsToExpand.length > 0) {
-            expandPaths(root, pathsToExpand);
+    await readFile(node.path)
+      .then((content) => {
+        setFileContent(content);
+        setDraftContent(content.length > MAX_VIEW_CHARS
+          ? `${content.slice(0, MAX_VIEW_CHARS)}\n\n… truncated …`
+          : content);
+      })
+      .catch((error) => {
+        if (isDirectoryReadError(error)) {
+          if (root) {
+            setSelectedPath(root, null);
           }
-          for (const path of pathsToExpand) {
-            if (!loadedDirsRef.current.has(path)) {
-              void loadDirectory(path);
+          setFileError(null);
+          setFileContent('');
+          setDraftContent('');
+          setLoadedFilePath(null);
+          if (searchQuery.trim().length > 0) {
+            setSearchQuery('');
+          }
+          if (isMobile) {
+            setShowMobilePageContent(false);
+          }
+          if (root) {
+            const ancestors = getAncestorPaths(node.path, root);
+            const pathsToExpand = [...ancestors, node.path];
+            if (pathsToExpand.length > 0) {
+              expandPaths(root, pathsToExpand);
+            }
+            for (const path of pathsToExpand) {
+              if (!loadedDirsRef.current.has(path)) {
+                void loadDirectory(path);
+              }
             }
           }
+          return;
         }
-        return;
-      }
-      setFileContent('');
-      setDraftContent('');
-      setFileError(error instanceof Error ? error.message : 'Failed to read file');
-    } finally {
-      setFileLoading(false);
-    }
+        setFileContent('');
+        setDraftContent('');
+        setFileError(error instanceof Error ? error.message : 'Failed to read file');
+      })
+      .finally(() => {
+        setFileLoading(false);
+      });
   }, [expandPaths, isMobile, loadDirectory, readFile, root, runtime.isDesktop, searchQuery, setSelectedPath]);
 
   const ensurePathVisible = React.useCallback(async (targetPath: string, includeTarget: boolean) => {
@@ -1414,7 +1488,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     }
   }, [loadDirectory, root, toggleExpandedPath]);
 
-  const renderTree = React.useCallback((dirPath: string, depth: number): React.ReactNode => {
+  function renderTree(dirPath: string, depth: number): React.ReactNode {
     const nodes = childrenByDir[dirPath] ?? [];
 
     return nodes.map((node, index) => {
@@ -1456,24 +1530,15 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         </li>
       );
     });
-  }, [childrenByDir, expandedPaths, handleSelectFile, selectedFile?.path, toggleDirectory, handleOpenDialog, handleRevealPath, canCreateFile, canCreateFolder, canRename, canDelete, canReveal, contextMenuPath, setContextMenuPath, isMobile, getFileStatus, getFolderBadge]);
+  }
 
   const isSelectedImage = Boolean(selectedFile?.path && isImageFile(selectedFile.path));
   const isSelectedSvg = Boolean(selectedFile?.path && selectedFile.path.toLowerCase().endsWith('.svg'));
-  const getDisplayPath = React.useCallback((path: string): string => {
-    if (!path) return '';
-    const normalizedFilePath = normalizePath(path);
-    if (root && isPathWithinRoot(normalizedFilePath, root)) {
-      const relative = normalizedFilePath.slice(root.length);
-      return relative.startsWith('/') ? relative.slice(1) : relative;
-    }
-    return normalizedFilePath;
-  }, [root]);
+  const selectedFilePath = selectedFile?.path ?? '';
 
   const displaySelectedPath = React.useMemo(() => {
-    if (!selectedFile?.path) return '';
-    return getDisplayPath(selectedFile.path);
-  }, [getDisplayPath, selectedFile?.path]);
+    return getDisplayPath(root, selectedFilePath);
+  }, [selectedFilePath, root]);
 
   const canCopy = Boolean(selectedFile && (!isSelectedImage || isSelectedSvg) && fileContent.length > 0);
   const canCopyPath = Boolean(selectedFile && displaySelectedPath.length > 0);
@@ -1482,8 +1547,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const isTextFile = Boolean(selectedFile && !isSelectedImage);
   const canUseShikiFileView = isTextFile && !isMarkdown;
   const staticLanguageExtension = React.useMemo(
-    () => (selectedFile?.path ? languageByExtension(selectedFile.path) : null),
-    [selectedFile?.path],
+    () => (selectedFilePath ? languageByExtension(selectedFilePath) : null),
+    [selectedFilePath],
   );
   const [dynamicLanguageExtension, setDynamicLanguageExtension] = React.useState<Extension | null>(null);
 
@@ -1634,35 +1699,27 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
       setFileError(null);
 
-      try {
-        if (files.readFileBinary) {
-          const result = await files.readFileBinary(selectedFile.path);
+      const srcPromise = files.readFileBinary
+        ? files.readFileBinary(selectedFile.path).then((result) => result.dataUrl)
+        : Promise.resolve(convertFileSrc(selectedFile.path, 'asset'));
+
+      await srcPromise
+        .then((src) => {
           if (!cancelled) {
-            setDesktopImageSrc(result.dataUrl);
+            setDesktopImageSrc(src);
           }
-          return;
-        }
-
-        const core = await import('@tauri-apps/api/core');
-        const convertFileSrc = (core as { convertFileSrc?: (path: string, protocol?: string) => string }).convertFileSrc;
-        if (!convertFileSrc) {
-          return;
-        }
-
-        const src = convertFileSrc(selectedFile.path, 'asset');
-        if (!cancelled) {
-          setDesktopImageSrc(src);
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setDesktopImageSrc('');
-          setFileError(error instanceof Error ? error.message : 'Failed to read file');
-        }
-      } finally {
-        if (!cancelled) {
-          setFileLoading(false);
-        }
-      }
+        })
+        .catch((error) => {
+          if (!cancelled) {
+            setDesktopImageSrc('');
+            setFileError(error instanceof Error ? error.message : 'Failed to read file');
+          }
+        })
+        .finally(() => {
+          if (!cancelled) {
+            setFileLoading(false);
+          }
+        });
     };
 
     void resolveDesktopImage();
@@ -1896,7 +1953,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                     return (
                       <div
                         key={file.path}
-                        title={getDisplayPath(file.path)}
+                        title={getDisplayPath(root, file.path)}
                         className={cn(
                           'group inline-flex items-center gap-1 rounded-md border px-2 py-1 typography-ui-label transition-colors whitespace-nowrap',
                           isActive

@@ -12,7 +12,7 @@ import type { SessionContextUsage } from '@/stores/types/sessionTypes';
 import { PROJECT_ICON_MAP, PROJECT_COLOR_MAP, getProjectIconImageUrl } from '@/lib/projectMeta';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { toast } from '@/components/ui';
-import { isTauriShell, isDesktopLocalOriginActive } from '@/lib/desktop';
+import { isTauriShell, isDesktopLocalOriginActive, requestDirectoryAccess } from '@/lib/desktop';
 import { sessionEvents } from '@/lib/sessionEvents';
 import {
   Dialog,
@@ -184,72 +184,61 @@ function useProjectStatus(
   const sessionsByDirectory = useSessionStore((state) => state.sessionsByDirectory);
   const getSessionsByDirectory = useSessionStore((state) => state.getSessionsByDirectory);
 
-  const projectStatusMap = React.useMemo(() => {
-    const result = new Map<string, { hasRunning: boolean; hasUnread: boolean }>();
-
+  const projectStatusMap = React.useCallback((projectPath: string): { hasRunning: boolean; hasUnread: boolean } => {
     const getStatusType = (sessionId: string): 'busy' | 'retry' | 'idle' => {
       const status = sessionStatus?.get(sessionId);
       if (status?.type === 'busy' || status?.type === 'retry') return status.type;
       return 'idle';
     };
 
-    return (projectPath: string): { hasRunning: boolean; hasUnread: boolean } => {
-      const cached = result.get(projectPath);
-      if (cached) return cached;
+    const projectRoot = normalize(projectPath);
+    if (!projectRoot) {
+      return { hasRunning: false, hasUnread: false };
+    }
 
-      const projectRoot = normalize(projectPath);
-      if (!projectRoot) {
-        const empty = { hasRunning: false, hasUnread: false };
-        result.set(projectPath, empty);
-        return empty;
-      }
-
-      const dirs: string[] = [projectRoot];
-      const worktrees = availableWorktreesByProject.get(projectRoot) ?? [];
-      for (const meta of worktrees) {
-        const p = (meta && typeof meta === 'object' && 'path' in meta) ? (meta as { path?: unknown }).path : null;
-        if (typeof p === 'string' && p.trim()) {
-          const normalized = normalize(p);
-          if (normalized && normalized !== projectRoot) {
-            dirs.push(normalized);
-          }
+    const dirs: string[] = [projectRoot];
+    const worktrees = availableWorktreesByProject.get(projectRoot) ?? [];
+    for (const meta of worktrees) {
+      const p = (meta && typeof meta === 'object' && 'path' in meta) ? (meta as { path?: unknown }).path : null;
+      if (typeof p === 'string' && p.trim()) {
+        const normalized = normalize(p);
+        if (normalized && normalized !== projectRoot) {
+          dirs.push(normalized);
         }
       }
+    }
 
-      const seen = new Set<string>();
-      let hasRunning = false;
-      let hasUnread = false;
+    const seen = new Set<string>();
+    let hasRunning = false;
+    let hasUnread = false;
 
-      for (const dir of dirs) {
-        const list = sessionsByDirectory.get(dir) ?? getSessionsByDirectory(dir);
-        for (const session of list) {
-          if (!session?.id || seen.has(session.id)) {
-            continue;
-          }
-          seen.add(session.id);
-
-          const statusType = getStatusType(session.id);
-          if (statusType === 'busy' || statusType === 'retry') {
-            hasRunning = true;
-          }
-
-          if (session.id !== currentSessionId && sessionAttentionStates?.get(session.id)?.needsAttention === true) {
-            hasUnread = true;
-          }
-
-          if (hasRunning && hasUnread) {
-            break;
-          }
+    for (const dir of dirs) {
+      const list = sessionsByDirectory.get(dir) ?? getSessionsByDirectory(dir);
+      for (const session of list) {
+        if (!session?.id || seen.has(session.id)) {
+          continue;
         }
+        seen.add(session.id);
+
+        const statusType = getStatusType(session.id);
+        if (statusType === 'busy' || statusType === 'retry') {
+          hasRunning = true;
+        }
+
+        if (session.id !== currentSessionId && sessionAttentionStates?.get(session.id)?.needsAttention === true) {
+          hasUnread = true;
+        }
+
         if (hasRunning && hasUnread) {
           break;
         }
       }
+      if (hasRunning && hasUnread) {
+        break;
+      }
+    }
 
-      const status = { hasRunning, hasUnread };
-      result.set(projectPath, status);
-      return status;
-    };
+    return { hasRunning, hasUnread };
   }, [sessionsByDirectory, getSessionsByDirectory, availableWorktreesByProject, sessionStatus, sessionAttentionStates, currentSessionId]);
 
   return projectStatusMap;
@@ -1153,8 +1142,7 @@ export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
       sessionEvents.requestDirectoryDialog();
       return;
     }
-    import('@/lib/desktop')
-      .then(({ requestDirectoryAccess }) => requestDirectoryAccess(''))
+    requestDirectoryAccess('')
       .then((result) => {
         if (result.success && result.path) {
           const added = addProject(result.path, { id: result.projectId });

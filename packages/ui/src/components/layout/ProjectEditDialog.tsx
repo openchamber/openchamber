@@ -96,16 +96,17 @@ export const ProjectEditDialog: React.FC<ProjectEditDialogProps> = ({
     }
 
     setIsUploadingIcon(true);
-    try {
-      const result = await uploadProjectIcon(projectId, file);
-      if (!result.ok) {
-        toast.error(result.error || 'Failed to upload project icon');
-        return;
-      }
-      toast.success('Project icon updated');
-    } finally {
-      setIsUploadingIcon(false);
-    }
+    void uploadProjectIcon(projectId, file)
+      .then((result) => {
+        if (!result.ok) {
+          toast.error(result.error || 'Failed to upload project icon');
+          return;
+        }
+        toast.success('Project icon updated');
+      })
+      .finally(() => {
+        setIsUploadingIcon(false);
+      });
   }, [isUploadingIcon, projectId, uploadProjectIcon]);
 
   const handleRemoveCustomIcon = React.useCallback(async () => {
@@ -114,16 +115,17 @@ export const ProjectEditDialog: React.FC<ProjectEditDialogProps> = ({
     }
 
     setIsRemovingCustomIcon(true);
-    try {
-      const result = await removeProjectIcon(projectId);
-      if (!result.ok) {
-        toast.error(result.error || 'Failed to remove project icon');
-        return;
-      }
-      toast.success('Custom project icon removed');
-    } finally {
-      setIsRemovingCustomIcon(false);
-    }
+    void removeProjectIcon(projectId)
+      .then((result) => {
+        if (!result.ok) {
+          toast.error(result.error || 'Failed to remove project icon');
+          return;
+        }
+        toast.success('Custom project icon removed');
+      })
+      .finally(() => {
+        setIsRemovingCustomIcon(false);
+      });
   }, [hasCustomIcon, isRemovingCustomIcon, projectId, removeProjectIcon]);
 
   const handleDiscoverIcon = React.useCallback(async () => {
@@ -132,20 +134,21 @@ export const ProjectEditDialog: React.FC<ProjectEditDialogProps> = ({
     }
 
     setIsDiscoveringIcon(true);
-    try {
-      const result = await discoverProjectIcon(projectId);
-      if (!result.ok) {
-        toast.error(result.error || 'Failed to discover project icon');
-        return;
-      }
-      if (result.skipped) {
-        toast.success('Custom icon already set for this project');
-        return;
-      }
-      toast.success('Project icon discovered');
-    } finally {
-      setIsDiscoveringIcon(false);
-    }
+    void discoverProjectIcon(projectId)
+      .then((result) => {
+        if (!result.ok) {
+          toast.error(result.error || 'Failed to discover project icon');
+          return;
+        }
+        if (result.skipped) {
+          toast.success('Custom icon already set for this project');
+          return;
+        }
+        toast.success('Project icon discovered');
+      })
+      .finally(() => {
+        setIsDiscoveringIcon(false);
+      });
   }, [discoverProjectIcon, isDiscoveringIcon, projectId]);
 
   return (

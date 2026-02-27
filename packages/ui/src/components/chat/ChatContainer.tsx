@@ -368,16 +368,17 @@ export const ChatContainer: React.FC = () => {
         const prevTop = container?.scrollTop ?? null;
 
         setIsLoadingOlder(true);
-        try {
-            await loadMoreMessages(currentSessionId, 'up');
-            const restored = anchor ? (messageListRef.current?.restoreViewportAnchor(anchor) ?? false) : false;
-            if (!restored && container && prevHeight !== null && prevTop !== null) {
-                const heightDiff = container.scrollHeight - prevHeight;
-                scrollToPosition(prevTop + heightDiff, { instant: true });
-            }
-        } finally {
-            setIsLoadingOlder(false);
-        }
+        void loadMoreMessages(currentSessionId, 'up')
+            .then(() => {
+                const restored = anchor ? (messageListRef.current?.restoreViewportAnchor(anchor) ?? false) : false;
+                if (!restored && container && prevHeight !== null && prevTop !== null) {
+                    const heightDiff = container.scrollHeight - prevHeight;
+                    scrollToPosition(prevTop + heightDiff, { instant: true });
+                }
+            })
+            .finally(() => {
+                setIsLoadingOlder(false);
+            });
     }, [cancelTurnBackfill, currentSessionId, isLoadingOlder, loadMoreMessages, scrollRef, scrollToPosition]);
 
     const handleRenderEarlier = React.useCallback(() => {
@@ -421,12 +422,9 @@ export const ChatContainer: React.FC = () => {
         }
 
         const load = async () => {
-            try {
-                await loadMessages(currentSessionId);
-            } finally {
+            await loadMessages(currentSessionId).finally(() => {
                 const statusType = sessionStatusForCurrent.type ?? 'idle';
                 const isActivePhase = statusType === 'busy' || statusType === 'retry';
-                // When pinned and active, scroll is already maintained automatically
                 const shouldSkipScroll = isActivePhase && isPinned;
 
                 if (!shouldSkipScroll) {
@@ -438,7 +436,7 @@ export const ChatContainer: React.FC = () => {
                         });
                     }
                 }
-            }
+            });
         };
 
         void load();

@@ -265,20 +265,19 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 <button
                                     type="button"
                                     disabled={customThemesLoading || themesReloading}
-                                    onClick={async () => {
+                                    onClick={() => {
                                         const startedAt = Date.now();
                                         setThemesReloading(true);
-                                        try {
-                                            await reloadCustomThemes();
-                                        } finally {
+                                        void reloadCustomThemes().finally(() => {
                                             const elapsed = Date.now() - startedAt;
                                             if (elapsed < 500) {
-                                                await new Promise<void>((resolve) => {
-                                                    window.setTimeout(resolve, 500 - elapsed);
-                                                });
+                                                window.setTimeout(() => {
+                                                    setThemesReloading(false);
+                                                }, 500 - elapsed);
+                                                return;
                                             }
                                             setThemesReloading(false);
-                                        }
+                                        });
                                     }}
                                     className="inline-flex items-center typography-ui-label font-normal text-foreground underline decoration-[1px] underline-offset-2 hover:text-foreground/80 disabled:cursor-not-allowed disabled:text-muted-foreground/60"
                                 >
