@@ -88,8 +88,8 @@ export const TerminalView: React.FC = () => {
     const bottomTerminalHeight = useUIStore((state) => state.bottomTerminalHeight);
     const isBottomTerminalExpanded = useUIStore((state) => state.isBottomTerminalExpanded);
     const { isMobile, hasTouchInput } = useDeviceInfo();
-    // Tabs are supported for web + desktop runtimes (not VSCode).
-    const enableTabs = !isMobile && runtime.platform !== 'vscode';
+    // Tabs are supported for web + desktop runtimes, including mobile (not VSCode).
+    const enableTabs = runtime.platform !== 'vscode';
     const showTerminalQuickKeysOnDesktop = useUIStore((state) => state.showTerminalQuickKeysOnDesktop);
     const showQuickKeys = isMobile || showTerminalQuickKeysOnDesktop;
 
@@ -511,9 +511,9 @@ export const TerminalView: React.FC = () => {
         if (isRestarting) return;
 
         const state = useTerminalStore.getState().getDirectoryState(effectiveDirectory);
-        const tabId = isMobile
-            ? (state?.tabs[0]?.id ?? null)
-            : (activeTabId ?? state?.activeTabId ?? state?.tabs[0]?.id ?? null);
+        const tabId = enableTabs
+            ? (activeTabId ?? state?.activeTabId ?? state?.tabs[0]?.id ?? null)
+            : (state?.tabs[0]?.id ?? null);
         if (!tabId) return;
 
         setIsRestarting(true);
@@ -530,7 +530,7 @@ export const TerminalView: React.FC = () => {
         } finally {
             setIsRestarting(false);
         }
-    }, [activeTabId, closeTab, disconnectStream, effectiveDirectory, isMobile, isRestarting]);
+    }, [activeTabId, closeTab, disconnectStream, effectiveDirectory, enableTabs, isRestarting]);
 
     const handleHardRestart = React.useCallback(async () => {
         // Keep semantics: “close tab -> new clean tab”.
@@ -971,18 +971,19 @@ export const TerminalView: React.FC = () => {
 
     return (
         <div className="flex h-full flex-col overflow-hidden bg-[var(--surface-background)]">
-            <div className="sticky top-0 z-20 shrink-0 bg-[var(--surface-background)] px-5 py-2 text-xs">
+            <div className={cn('sticky top-0 z-20 shrink-0 bg-[var(--surface-background)] text-xs', isMobile ? 'px-4 py-1.5' : 'px-5 py-2')}>
                 {enableTabs && directoryTerminalState ? (
-                    <div className="mt-2 pl-1 pr-1 flex items-center gap-2">
-                        <div className="min-w-0 flex-1 overflow-x-auto pb-1">
-                            <div className="flex w-max items-center gap-1 pr-1">
+                    <div className={cn('pl-1 pr-1 flex items-center gap-2', isMobile ? 'mt-1' : 'mt-2')}>
+                        <div className={cn('min-w-0 flex-1 overflow-x-auto', isMobile ? 'pb-0.5' : 'pb-1')}>
+                            <div className={cn('flex w-max items-center pr-1', isMobile ? 'gap-1' : 'gap-1')}>
                                 {directoryTerminalState.tabs.map((tab) => {
                                     const isActive = tab.id === activeTabId;
                                     return (
                                         <div
                                             key={tab.id}
                                             className={cn(
-                                                'group flex items-center gap-1 rounded-md border px-2 py-1 text-xs whitespace-nowrap',
+                                                'group flex items-center rounded-md border whitespace-nowrap',
+                                                isMobile ? 'h-8 gap-0.5 pl-2 pr-1.5 text-sm leading-none' : 'gap-1 pl-2 pr-1 py-1 text-xs',
                                                 isActive
                                                     ? 'bg-[var(--interactive-selection)] border-[var(--primary-muted)] text-[var(--interactive-selection-foreground)]'
                                                     : 'bg-transparent border-[var(--interactive-border)] text-[var(--surface-muted-foreground)] hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)]'
@@ -991,7 +992,10 @@ export const TerminalView: React.FC = () => {
                                             <button
                                                 type="button"
                                                 onClick={() => handleSelectTab(tab.id)}
-                                                className="max-w-[10rem] truncate text-left"
+                                                className={cn(
+                                                    'truncate text-left',
+                                                    isMobile ? '!min-h-0 !min-w-0 max-w-[9.5rem]' : 'max-w-[10rem]'
+                                                )}
                                                 title={tab.label}
                                             >
                                                 {tab.label}
@@ -999,8 +1003,9 @@ export const TerminalView: React.FC = () => {
                                             <button
                                                 type="button"
                                                 className={cn(
-                                                    'rounded-sm p-0.5 text-[var(--surface-muted-foreground)] hover:text-[var(--surface-foreground)]',
-                                                    !isActive && 'opacity-0 group-hover:opacity-100'
+                                                    'flex items-center justify-center rounded-sm text-[var(--surface-muted-foreground)] hover:text-[var(--surface-foreground)]',
+                                                    isMobile ? '!min-h-0 !min-w-0 h-3.5 w-3.5 p-0 leading-none' : 'h-4 w-4 p-0 leading-none',
+                                                    !isMobile && !isActive && 'opacity-0 group-hover:opacity-100'
                                                 )}
                                                 onClick={(e) => {
                                                     e.stopPropagation();
@@ -1008,7 +1013,7 @@ export const TerminalView: React.FC = () => {
                                                 }}
                                                 title="Close tab"
                                             >
-                                                <RiCloseLine size={14} />
+                                                {isMobile ? <span aria-hidden>×</span> : <RiCloseLine size={12} />}
                                             </button>
                                         </div>
                                     );
@@ -1017,10 +1022,13 @@ export const TerminalView: React.FC = () => {
                                 <button
                                     type="button"
                                     onClick={handleCreateTab}
-                                    className="ml-1 flex h-7 w-7 items-center justify-center rounded-md border border-[var(--interactive-border)] bg-transparent text-[var(--surface-muted-foreground)] hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)]"
+                                    className={cn(
+                                        'ml-1 flex items-center justify-center rounded-md border border-[var(--interactive-border)] bg-transparent text-[var(--surface-muted-foreground)] hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)]',
+                                        isMobile ? '!min-h-0 !min-w-0 h-8 w-8' : 'h-6.5 w-6.5'
+                                    )}
                                     title="New tab"
                                 >
-                                    <RiAddLine size={16} />
+                                    <RiAddLine size={isMobile ? 18 : 16} />
                                 </button>
                             </div>
                         </div>

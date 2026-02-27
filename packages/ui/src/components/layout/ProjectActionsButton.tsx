@@ -59,6 +59,8 @@ interface ProjectActionsButtonProps {
   projectRef: ProjectRef | null;
   directory: string;
   className?: string;
+  compact?: boolean;
+  allowMobile?: boolean;
 }
 
 const ANSI_ESCAPE_PREFIX = String.fromCharCode(27);
@@ -151,7 +153,13 @@ const extractBestUrl = (value: string): string | null => {
   return normalized[0] ?? null;
 };
 
-export const ProjectActionsButton = ({ projectRef, directory, className }: ProjectActionsButtonProps) => {
+export const ProjectActionsButton = ({
+  projectRef,
+  directory,
+  className,
+  compact = false,
+  allowMobile = false,
+}: ProjectActionsButtonProps) => {
   const { terminal, runtime } = useRuntimeAPIs();
   const { isMobile } = useDeviceInfo();
   const isDesktopShellApp = React.useMemo(() => isDesktopShell(), []);
@@ -336,6 +344,7 @@ export const ProjectActionsButton = ({ projectRef, directory, className }: Proje
         delete urlWatchByRunKeyRef.current[runKey];
       }
     }
+
   }, [actions, openExternal, runningByKey, terminalSessions]);
 
   const normalizedDirectory = React.useMemo(() => {
@@ -359,6 +368,7 @@ export const ProjectActionsButton = ({ projectRef, directory, className }: Proje
 
     const currentStore = useTerminalStore.getState();
     const existingDirectoryState = currentStore.getDirectoryState(normalizedDirectory);
+
     let tabId = tabByKeyRef.current[key] || null;
     const hasTab = tabId
       ? Boolean(existingDirectoryState?.tabs.some((entry) => entry.id === tabId))
@@ -382,10 +392,17 @@ export const ProjectActionsButton = ({ projectRef, directory, className }: Proje
       tabId,
       sessionId: tab?.terminalSessionId ?? null,
     };
-  }, [ensureDirectory, normalizedDirectory, setActiveMainTab, setActiveTab, setBottomTerminalOpen, setTabLabel]);
+  }, [
+    ensureDirectory,
+    normalizedDirectory,
+    setActiveMainTab,
+    setActiveTab,
+    setBottomTerminalOpen,
+    setTabLabel,
+  ]);
 
   const runAction = React.useCallback(async (action: OpenChamberProjectAction) => {
-    if (runtime.isVSCode || isMobile) {
+    if (runtime.isVSCode || (!allowMobile && isMobile)) {
       return;
     }
 
@@ -465,7 +482,7 @@ export const ProjectActionsButton = ({ projectRef, directory, className }: Proje
       };
 
       const normalizedCommand = stripControlChars(action.command.trim().replace(/\r\n|\r/g, '\n'));
-      await terminal.sendInput(activeSessionId, `${normalizedCommand}\n`);
+      await terminal.sendInput(activeSessionId, `${normalizedCommand}\n\u0004`);
     } catch (error) {
       setRunningByKey((prev) => {
         const next = { ...prev };
@@ -478,6 +495,7 @@ export const ProjectActionsButton = ({ projectRef, directory, className }: Proje
   }, [
     desktopSshInstances,
     getOrCreateActionTab,
+    allowMobile,
     isMobile,
     isDesktopShellApp,
     normalizedDirectory,
@@ -560,10 +578,25 @@ export const ProjectActionsButton = ({ projectRef, directory, className }: Proje
     void runAction(selectedAction);
   }, [normalizedDirectory, runAction, runningByKey, selectedAction, stopAction]);
 
-  const handleSelectAction = React.useCallback((action: OpenChamberProjectAction) => {
+  const handleSelectAction = React.useCallback((action: OpenChamberProjectAction, toggleStopIfRunning = false) => {
     setSelectedActionId(action.id);
+
+    if (!toggleStopIfRunning) {
+      void runAction(action);
+      return;
+    }
+
+    const runKey = toProjectActionRunKey(normalizedDirectory, action.id);
+    const runningEntry = runningByKey[runKey];
+    if (runningEntry?.status === 'stopping') {
+      return;
+    }
+    if (runningEntry) {
+      void stopAction(action);
+      return;
+    }
     void runAction(action);
-  }, [runAction]);
+  }, [normalizedDirectory, runAction, runningByKey, stopAction]);
 
   const openProjectActionsSettings = React.useCallback(() => {
     if (!stableProjectRef?.id) {
@@ -574,7 +607,7 @@ export const ProjectActionsButton = ({ projectRef, directory, className }: Proje
     setSettingsDialogOpen(true);
   }, [setSettingsDialogOpen, setSettingsPage, setSettingsProjectsSelectedId, stableProjectRef?.id]);
 
-  if (runtime.isVSCode || isMobile || !stableProjectRef || actions.length === 0 || !normalizedDirectory) {
+  if (runtime.isVSCode || (!allowMobile && isMobile) || !stableProjectRef || actions.length === 0 || !normalizedDirectory) {
     return null;
   }
 
@@ -589,11 +622,72 @@ export const ProjectActionsButton = ({ projectRef, directory, className }: Proje
   const selectedRunning = runningByKey[selectedRunKey];
   const isStoppingSelected = selectedRunning?.status === 'stopping';
 
+  if (compact) {
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            disabled={isLoading || isStoppingSelected}
+            className={cn(
+              'app-region-no-drag inline-flex h-9 w-9 items-center justify-center rounded-md p-2',
+              'typography-ui-label font-medium text-muted-foreground hover:bg-interactive-hover hover:text-foreground transition-colors',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+              'disabled:opacity-50',
+              className
+            )}
+            aria-label={selectedRunning ? `Stop ${resolvedSelected.name}` : `Run ${resolvedSelected.name}`}
+          >
+            {isStoppingSelected
+              ? <RiLoader4Line className="h-5 w-5 animate-spin text-[var(--status-warning)]" />
+              : selectedRunning
+                ? <RiStopLine className="h-5 w-5 text-[var(--status-warning)]" />
+                : <SelectedIcon className="h-5 w-5" />}
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-52 max-h-[70vh] overflow-y-auto">
+          <DropdownMenuItem className="flex items-center gap-2" onClick={openProjectActionsSettings}>
+            <RiAddLine className="h-4 w-4" />
+            <span className="typography-ui-label text-foreground">Add new action</span>
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          {actions.map((entry) => {
+            const iconKey = (entry.icon || 'play') as keyof typeof PROJECT_ACTION_ICON_MAP;
+            const Icon = PROJECT_ACTION_ICON_MAP[iconKey] || RiPlayLine;
+            const runKey = toProjectActionRunKey(normalizedDirectory, entry.id);
+            const runState = runningByKey[runKey];
+            const isRunning = Boolean(runState);
+            const isStopping = runState?.status === 'stopping';
+
+            return (
+              <DropdownMenuItem
+                key={entry.id}
+                className="flex items-center gap-2"
+                onClick={() => {
+                  handleSelectAction(entry, true);
+                }}
+              >
+                <Icon className="h-4 w-4" />
+                <span className="typography-ui-label text-foreground truncate">{entry.name}</span>
+                {isStopping
+                  ? <RiLoader4Line className="ml-auto h-4 w-4 animate-spin text-[var(--status-warning)]" />
+                  : isRunning
+                    ? <RiStopLine className="ml-auto h-4 w-4 text-[var(--status-warning)]" />
+                    : null}
+              </DropdownMenuItem>
+            );
+          })}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
+  }
+
   return (
     <div
       className={cn(
-        'app-region-no-drag inline-flex h-7 items-center self-center rounded-md border border-[var(--interactive-border)]',
+        'app-region-no-drag inline-flex items-center self-center rounded-md border border-[var(--interactive-border)]',
         'bg-[var(--surface-elevated)] shadow-none overflow-hidden',
+        compact ? 'h-9' : 'h-7',
         className
       )}
     >
@@ -602,7 +696,8 @@ export const ProjectActionsButton = ({ projectRef, directory, className }: Proje
         onClick={handlePrimaryClick}
         disabled={isLoading || isStoppingSelected}
         className={cn(
-          'inline-flex h-full items-center gap-2 pl-2 pr-3 typography-ui-label font-medium text-foreground hover:bg-interactive-hover',
+          'inline-flex h-full items-center typography-ui-label font-medium text-foreground hover:bg-interactive-hover',
+          compact ? 'w-9 justify-center px-0' : 'gap-2 pl-2 pr-3',
           'transition-colors disabled:opacity-50'
         )}
         aria-label={selectedRunning ? `Stop ${resolvedSelected.name}` : `Run ${resolvedSelected.name}`}
@@ -614,7 +709,7 @@ export const ProjectActionsButton = ({ projectRef, directory, className }: Proje
               ? <RiStopLine className="h-4 w-4 text-[var(--status-warning)]" />
               : <SelectedIcon className="h-4 w-4" />}
         </span>
-        <span className="header-open-label">{resolvedSelected.name}</span>
+        {!compact ? <span className="header-open-label">{resolvedSelected.name}</span> : null}
       </button>
 
       <DropdownMenu>
@@ -622,7 +717,7 @@ export const ProjectActionsButton = ({ projectRef, directory, className }: Proje
           <button
             type="button"
             className={cn(
-              'inline-flex h-full w-7 items-center justify-center',
+              compact ? 'inline-flex h-full w-8 items-center justify-center' : 'inline-flex h-full w-7 items-center justify-center',
               'border-l border-[var(--interactive-border)] text-muted-foreground',
               'hover:bg-interactive-hover hover:text-foreground transition-colors'
             )}

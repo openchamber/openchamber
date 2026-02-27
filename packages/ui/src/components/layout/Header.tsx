@@ -1526,6 +1526,15 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
 
           <div className="flex items-center gap-1 shrink-0">
+            {activeProjectRef && actionDirectory && (
+              <ProjectActionsButton
+                projectRef={activeProjectRef}
+                directory={actionDirectory}
+                compact
+                allowMobile
+                className="h-9"
+              />
+            )}
 
             {/* Mobile Services Menu (Usage + MCP) */}
             <DropdownMenu
