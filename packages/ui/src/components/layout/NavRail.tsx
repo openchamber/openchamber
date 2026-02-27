@@ -64,6 +64,7 @@ const ACTION_TEXT_FADE_IN_DELAY_MS = 60;
 
 type NavRailActionButtonProps = {
   onClick: () => void;
+  disabled?: boolean;
   ariaLabel: string;
   icon: React.ReactNode;
   tooltipLabel: string;
@@ -76,6 +77,7 @@ type NavRailActionButtonProps = {
 
 const NavRailActionButton: React.FC<NavRailActionButtonProps> = ({
   onClick,
+  disabled = false,
   ariaLabel,
   icon,
   tooltipLabel,
@@ -85,12 +87,56 @@ const NavRailActionButton: React.FC<NavRailActionButtonProps> = ({
   showExpandedContent,
   actionTextVisible,
 }) => {
+  const pointerTriggeredRef = React.useRef(false);
+  const pointerPressRef = React.useRef<{ active: boolean; pointerId: number | null }>({
+    active: false,
+    pointerId: null,
+  });
+
+  const handlePointerDown = React.useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+    if (disabled || event.button !== 0) {
+      pointerPressRef.current = { active: false, pointerId: null };
+      return;
+    }
+    pointerPressRef.current = { active: true, pointerId: event.pointerId };
+  }, [disabled]);
+
+  const clearPointerPress = React.useCallback(() => {
+    pointerPressRef.current = { active: false, pointerId: null };
+  }, []);
+
+  const handlePointerUp = React.useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+    if (disabled) return;
+    if (event.button !== 0) return;
+    const pointerPress = pointerPressRef.current;
+    if (!pointerPress.active || pointerPress.pointerId !== event.pointerId) {
+      return;
+    }
+    clearPointerPress();
+    pointerTriggeredRef.current = true;
+    onClick();
+  }, [clearPointerPress, disabled, onClick]);
+
+  const handleClick = React.useCallback(() => {
+    if (disabled) return;
+    if (pointerTriggeredRef.current) {
+      pointerTriggeredRef.current = false;
+      return;
+    }
+    onClick();
+  }, [disabled, onClick]);
+
   const btn = (
     <button
       type="button"
-      onClick={onClick}
+      onPointerDown={handlePointerDown}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={clearPointerPress}
+      onPointerLeave={clearPointerPress}
+      onClick={handleClick}
       className={buttonClassName}
       aria-label={ariaLabel}
+      disabled={disabled}
     >
       {showExpandedContent && (
         <span
@@ -423,6 +469,19 @@ export const NavRail: React.FC<NavRailProps> = ({ className, mobile }) => {
   const setSettingsDialogOpen = useUIStore((s) => s.setSettingsDialogOpen);
   const setAboutDialogOpen = useUIStore((s) => s.setAboutDialogOpen);
   const toggleHelpDialog = useUIStore((s) => s.toggleHelpDialog);
+  const isOverlayBlockingNavRailActions = useUIStore((s) => (
+    s.isSettingsDialogOpen
+    || s.isHelpDialogOpen
+    || s.isCommandPaletteOpen
+    || s.isSessionSwitcherOpen
+    || s.isAboutDialogOpen
+    || s.isOpenCodeStatusDialogOpen
+    || s.isSessionCreateDialogOpen
+    || s.isModelSelectorOpen
+    || s.isTimelineDialogOpen
+    || s.isMultiRunLauncherOpen
+    || s.isImagePreviewOpen
+  ));
   const isNavRailExpanded = useUIStore((s) => s.isNavRailExpanded);
   const toggleNavRail = useUIStore((s) => s.toggleNavRail);
   const shortcutOverrides = useUIStore((s) => s.shortcutOverrides);
@@ -473,6 +532,7 @@ export const NavRail: React.FC<NavRailProps> = ({ className, mobile }) => {
   const updateStore = useUpdateStore();
   const { available: updateAvailable, downloaded: updateDownloaded } = updateStore;
   const [updateDialogOpen, setUpdateDialogOpen] = React.useState(false);
+  const navRailInteractionBlocked = isOverlayBlockingNavRailActions || updateDialogOpen;
 
   const [editingProject, setEditingProject] = React.useState<{
     id: string;
@@ -676,6 +736,7 @@ export const NavRail: React.FC<NavRailProps> = ({ className, mobile }) => {
         className={cn(
           'flex h-full shrink-0 flex-col bg-[var(--surface-background)] overflow-hidden',
           showExpandedContent ? 'items-stretch' : 'items-center',
+          navRailInteractionBlocked && 'pointer-events-none',
           className,
         )}
         style={{ width: expanded ? NAV_RAIL_EXPANDED_WIDTH : NAV_RAIL_WIDTH }}
@@ -724,6 +785,7 @@ export const NavRail: React.FC<NavRailProps> = ({ className, mobile }) => {
             <div className={cn('flex flex-col pb-3', showExpandedContent ? 'items-stretch px-1' : 'items-center px-1')}>
               <NavRailActionButton
                 onClick={handleAddProject}
+                disabled={navRailInteractionBlocked}
                 ariaLabel="Add project"
                 icon={<RiFolderAddLine className={navRailActionIconClass} />}
                 tooltipLabel="Add project"
@@ -742,6 +804,7 @@ export const NavRail: React.FC<NavRailProps> = ({ className, mobile }) => {
           {(updateAvailable || updateDownloaded) && (
             <NavRailActionButton
               onClick={() => setUpdateDialogOpen(true)}
+              disabled={navRailInteractionBlocked}
               ariaLabel="Update available"
               icon={<RiDownloadLine className={navRailActionIconClass} />}
               tooltipLabel="Update available"
@@ -754,6 +817,7 @@ export const NavRail: React.FC<NavRailProps> = ({ className, mobile }) => {
           {!isDesktopApp && !(updateAvailable || updateDownloaded) && (
             <NavRailActionButton
               onClick={() => setAboutDialogOpen(true)}
+              disabled={navRailInteractionBlocked}
               ariaLabel="About"
               icon={<RiInformationLine className={navRailActionIconClass} />}
               tooltipLabel="About OpenChamber"
@@ -766,6 +830,7 @@ export const NavRail: React.FC<NavRailProps> = ({ className, mobile }) => {
           {!mobile && (
             <NavRailActionButton
               onClick={toggleHelpDialog}
+              disabled={navRailInteractionBlocked}
               ariaLabel="Keyboard shortcuts"
               icon={<RiQuestionLine className={navRailActionIconClass} />}
               tooltipLabel="Shortcuts"
@@ -779,6 +844,7 @@ export const NavRail: React.FC<NavRailProps> = ({ className, mobile }) => {
 
           <NavRailActionButton
             onClick={() => setSettingsDialogOpen(true)}
+            disabled={navRailInteractionBlocked}
             ariaLabel="Settings"
             icon={<RiSettings3Line className={navRailActionIconClass} />}
             tooltipLabel="Settings"
@@ -793,6 +859,7 @@ export const NavRail: React.FC<NavRailProps> = ({ className, mobile }) => {
           {!mobile && (
             <NavRailActionButton
               onClick={toggleNavRail}
+              disabled={navRailInteractionBlocked}
               ariaLabel={expanded ? 'Collapse sidebar' : 'Expand sidebar'}
               icon={expanded
                 ? <RiMenuFoldLine className={navRailActionIconClass} />
