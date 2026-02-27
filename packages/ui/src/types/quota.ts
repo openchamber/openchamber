@@ -10,7 +10,8 @@ export type QuotaProviderId =
   | 'openrouter'
   | 'zai-coding-plan'
   | 'minimax-coding-plan'
-  | 'minimax-cn-coding-plan';
+  | 'minimax-cn-coding-plan'
+  | 'ollama-cloud';
 
 export interface UsageWindow {
   usedPercent: number | null;

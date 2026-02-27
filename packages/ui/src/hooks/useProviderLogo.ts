@@ -22,6 +22,7 @@ const LOGO_ALIAS = new Map<string, string>([
     ['gemini', 'google'],
     ['evroc-ai', 'evroc'],
     ['evrocai', 'evroc'],
+    ['ollama-cloud', 'ollama'],
 ]);
 
 const normalizeProviderId = (providerId: string | null | undefined) => {

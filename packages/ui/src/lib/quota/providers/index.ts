@@ -16,6 +16,7 @@ export const QUOTA_PROVIDERS: QuotaProviderMeta[] = [
   { id: 'zai-coding-plan', name: 'z.ai' },
   { id: 'minimax-cn-coding-plan', name: 'MiniMax Coding Plan (minimaxi.com)' },
   { id: 'minimax-coding-plan', name: 'MiniMax Coding Plan (minimax.io)' },
+  { id: 'ollama-cloud', name: 'Ollama Cloud' },
 ];
 
 export const QUOTA_PROVIDER_MAP = QUOTA_PROVIDERS.reduce<
