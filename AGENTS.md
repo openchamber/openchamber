@@ -57,6 +57,10 @@ Notification message preparation utilities for system notifications, including t
 WebSocket protocol utilities for terminal input handling including message normalization, control frame parsing, and rate limiting.
 - Module docs: `packages/web/server/lib/terminal/DOCUMENTATION.md`
 
+##### skills-catalog
+Skills catalog management including discovery, installation, and configuration of agent skill packages.
+- Module docs: `packages/web/server/lib/skills-catalog/DOCUMENTATION.md`
+
 ## Build / dev commands (verified)
 All scripts are in `package.json`.
 - Validate: `bun run type-check`, `bun run lint`
