@@ -7474,12 +7474,18 @@ async function main(options = {}) {
 
   // ============== SKILLS CATALOG + INSTALL ENDPOINTS ==============
 
-  const { getCuratedSkillsSources } = await import('./lib/skills-catalog/curated-sources.js');
-  const { getCacheKey, getCachedScan, setCachedScan } = await import('./lib/skills-catalog/cache.js');
-  const { parseSkillRepoSource } = await import('./lib/skills-catalog/source.js');
-  const { scanSkillsRepository } = await import('./lib/skills-catalog/scan.js');
-  const { installSkillsFromRepository } = await import('./lib/skills-catalog/install.js');
-  const { scanClawdHubPage, installSkillsFromClawdHub, isClawdHubSource } = await import('./lib/skills-catalog/clawdhub/index.js');
+  const {
+    getCuratedSkillsSources,
+    getCacheKey,
+    getCachedScan,
+    setCachedScan,
+    parseSkillRepoSource,
+    scanSkillsRepository,
+    installSkillsFromRepository,
+    scanClawdHubPage,
+    installSkillsFromClawdHub,
+    isClawdHubSource,
+  } = await import('./lib/skills-catalog/index.js');
   const { getProfiles, getProfile } = await import('./lib/git/index.js');
 
   const listGitIdentitiesForResponse = () => {
