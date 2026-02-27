@@ -18,7 +18,7 @@ const buildMentionUrl = (name: string): string => {
     return `https://opencode.ai/docs/agents/#${encoded}`;
 };
 
-const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, isMobile, agentMention }) => {
+const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMention }) => {
     const CLAMP_LINES = 2;
     const partWithText = part as PartWithText;
     const rawText = partWithText.text;
@@ -91,10 +91,6 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, isMobile, 
         }
     }, [collapseZoneHeight, hasActiveSelectionInElement, isExpanded, isTruncated]);
 
-    if (!textContent || textContent.trim().length === 0) {
-        return null;
-    }
-
     const processedContent = React.useMemo(() => {
         if (!agentMention?.token || !textContent.includes(agentMention.token)) {
             return textContent;
@@ -103,6 +99,10 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, isMobile, 
         const mentionHtml = `<a href="${buildMentionUrl(agentMention.name)}" class="text-primary hover:underline" target="_blank" rel="noopener noreferrer">${agentMention.token}</a>`;
         return textContent.replace(agentMention.token, mentionHtml);
     }, [agentMention, textContent]);
+
+    if (!textContent || textContent.trim().length === 0) {
+        return null;
+    }
 
     return (
         <div className="relative" key={part.id || `${messageId}-user-text`}>
