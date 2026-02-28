@@ -2,9 +2,13 @@ import React from 'react';
 import QRCode from 'qrcode';
 import {
   RiAddLine,
+  RiArrowDownSLine,
+  RiArrowRightSLine,
   RiCheckboxBlankCircleFill,
   RiCheckLine,
+  RiDeleteBinLine,
   RiErrorWarningLine,
+  RiExternalLinkLine,
   RiFileCopyLine,
   RiInformationLine,
   RiLoader4Line,
@@ -12,6 +16,7 @@ import {
 } from '@remixicon/react';
 import { toast } from '@/components/ui';
 import { ButtonSmall } from '@/components/ui/button-small';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { GridLoader } from '@/components/ui/grid-loader';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -38,23 +43,23 @@ interface NamedTunnelPreset {
 }
 
 const BOOTSTRAP_TTL_OPTIONS: TtlOption[] = [
-  { value: '180000', label: '3 minutes (recommended)', ms: 3 * 60 * 1000 },
-  { value: '1800000', label: '30 minutes', ms: 30 * 60 * 1000 },
-  { value: '7200000', label: '2 hours', ms: 2 * 60 * 60 * 1000 },
-  { value: '28800000', label: '8 hours', ms: 8 * 60 * 60 * 1000 },
-  { value: '86400000', label: '24 hours', ms: 24 * 60 * 60 * 1000 },
-  { value: 'never', label: 'Never expires (risky)', ms: null },
+  { value: '1800000', label: '30m', ms: 30 * 60 * 1000 },
+  { value: '180000', label: '3m', ms: 3 * 60 * 1000 },
+  { value: '7200000', label: '2h', ms: 2 * 60 * 60 * 1000 },
+  { value: '28800000', label: '8h', ms: 8 * 60 * 60 * 1000 },
+  { value: '86400000', label: '24h', ms: 24 * 60 * 60 * 1000 },
 ];
 
 const SESSION_TTL_OPTIONS: TtlOption[] = [
-  { value: '3600000', label: '1 hour', ms: 60 * 60 * 1000 },
-  { value: '28800000', label: '8 hours (workday)', ms: 8 * 60 * 60 * 1000 },
-  { value: '43200000', label: '12 hours', ms: 12 * 60 * 60 * 1000 },
-  { value: '86400000', label: '24 hours', ms: 24 * 60 * 60 * 1000 },
+  { value: '3600000', label: '1h', ms: 60 * 60 * 1000 },
+  { value: '28800000', label: '8h', ms: 8 * 60 * 60 * 1000 },
+  { value: '43200000', label: '12h', ms: 12 * 60 * 60 * 1000 },
+  { value: '86400000', label: '24h', ms: 24 * 60 * 60 * 1000 },
 ];
 
 const QUICK_TUNNEL_TOOLTIP = 'Quick Tunnel is best effort and Cloudflare does not guarantee uptime. For more reliable long-lived access, switch to Named Tunnel mode.';
 const NAMED_TUNNEL_TOOLTIP = 'Named Tunnel mode uses your Cloudflare account and custom hostname for more reliable remote access.';
+const NAMED_TUNNEL_DOC_URL = 'https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/get-started/create-remote-tunnel/';
 
 interface TunnelInfo {
   url: string;
@@ -81,8 +86,10 @@ interface TunnelStatusResponse {
   namedTunnelHostname?: string | null;
   hasBootstrapToken?: boolean;
   bootstrapExpiresAt?: number | null;
+  namedTunnelTokenPresetIds?: string[];
   activeTunnelMode?: TunnelMode | null;
   activeSessions?: TunnelSessionRecord[];
+  localPort?: number;
   policy?: string;
   ttlConfig?: {
     bootstrapTtlMs?: number | null;
@@ -179,22 +186,25 @@ export const TunnelSettings: React.FC = () => {
   const [isSavingMode, setIsSavingMode] = React.useState(false);
   const [tunnelMode, setTunnelMode] = React.useState<TunnelMode>('quick');
   const [namedTunnelPresets, setNamedTunnelPresets] = React.useState<NamedTunnelPreset[]>([]);
+  const [expandedNamedTunnels, setExpandedNamedTunnels] = React.useState<Record<string, boolean>>({});
   const [selectedPresetId, setSelectedPresetId] = React.useState<string>('');
   const [sessionTokensByPresetId, setSessionTokensByPresetId] = React.useState<Record<string, string>>({});
+  const [savedTokenPresetIds, setSavedTokenPresetIds] = React.useState<Set<string>>(new Set());
   const [isAddingPreset, setIsAddingPreset] = React.useState(false);
   const [newPresetName, setNewPresetName] = React.useState('');
   const [newPresetHostname, setNewPresetHostname] = React.useState('');
-  const [bootstrapTtlMs, setBootstrapTtlMs] = React.useState<number | null>(3 * 60 * 1000);
+  const [newPresetToken, setNewPresetToken] = React.useState('');
+  const [bootstrapTtlMs, setBootstrapTtlMs] = React.useState<number | null>(30 * 60 * 1000);
   const [sessionTtlMs, setSessionTtlMs] = React.useState<number>(8 * 60 * 60 * 1000);
   const [remainingText, setRemainingText] = React.useState<string>('');
   const [sessionRecords, setSessionRecords] = React.useState<TunnelSessionRecord[]>([]);
   const [nowTs, setNowTs] = React.useState<number>(() => Date.now());
+  const [localPort, setLocalPort] = React.useState<number | null>(null);
 
   const selectedPreset = React.useMemo(
-    () => namedTunnelPresets.find((preset) => preset.id === selectedPresetId) || null,
+    () => namedTunnelPresets.find((preset) => preset.id === selectedPresetId) || namedTunnelPresets[0] || null,
     [namedTunnelPresets, selectedPresetId]
   );
-  const selectedPresetToken = selectedPreset ? (sessionTokensByPresetId[selectedPreset.id] || '') : '';
   const renderedSessionRecords = React.useMemo(() => {
     return sessionRecords.map((record) => {
       const isExpired = record.expiresAt <= nowTs;
@@ -234,6 +244,41 @@ export const TunnelSettings: React.FC = () => {
     }
     return activeTunnelMode === tunnelMode;
   }, [activeTunnelMode, state, tunnelInfo, tunnelMode]);
+  const suggestedConnectorPort = React.useMemo(() => {
+    if (typeof localPort === 'number' && Number.isFinite(localPort) && localPort > 0) {
+      return localPort;
+    }
+    if (typeof window === 'undefined') {
+      return null;
+    }
+    const parsed = Number(window.location.port);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return parsed;
+    }
+    return null;
+  }, [localPort]);
+  const openExternal = React.useCallback(async (url: string) => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    type TauriShell = { shell?: { open?: (url: string) => Promise<unknown> } };
+    const tauri = (window as unknown as { __TAURI__?: TauriShell }).__TAURI__;
+    if (tauri?.shell?.open) {
+      try {
+        await tauri.shell.open(url);
+        return;
+      } catch {
+        // fall through
+      }
+    }
+
+    try {
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } catch {
+      // ignore
+    }
+  }, []);
 
   const checkAvailabilityAndStatus = React.useCallback(async (signal: AbortSignal) => {
     try {
@@ -252,7 +297,7 @@ export const TunnelSettings: React.FC = () => {
           ? null
           : typeof settingsData?.tunnelBootstrapTtlMs === 'number'
             ? settingsData.tunnelBootstrapTtlMs
-            : 3 * 60 * 1000);
+            : 30 * 60 * 1000);
       const loadedSessionTtl = typeof statusData.ttlConfig?.sessionTtlMs === 'number'
         ? statusData.ttlConfig.sessionTtlMs
         : typeof settingsData?.tunnelSessionTtlMs === 'number'
@@ -293,6 +338,8 @@ export const TunnelSettings: React.FC = () => {
       setSelectedPresetId(selectedId);
       setSessionRecords(Array.isArray(statusData.activeSessions) ? statusData.activeSessions : []);
       setActiveTunnelMode(statusData.activeTunnelMode || (statusData.active && statusData.mode ? statusData.mode : null));
+      setSavedTokenPresetIds(new Set(Array.isArray(statusData.namedTunnelTokenPresetIds) ? statusData.namedTunnelTokenPresetIds : []));
+      setLocalPort(typeof statusData.localPort === 'number' ? statusData.localPort : null);
 
       if (statusData.active && statusData.url) {
         setTunnelInfo({
@@ -387,6 +434,8 @@ export const TunnelSettings: React.FC = () => {
           return;
         }
         setSessionRecords(Array.isArray(statusData.activeSessions) ? statusData.activeSessions : []);
+        setSavedTokenPresetIds(new Set(Array.isArray(statusData.namedTunnelTokenPresetIds) ? statusData.namedTunnelTokenPresetIds : []));
+        setLocalPort(typeof statusData.localPort === 'number' ? statusData.localPort : null);
       } catch {
         // ignore transient refresh failures
       }
@@ -407,6 +456,7 @@ export const TunnelSettings: React.FC = () => {
     namedTunnelHostname?: string;
     namedTunnelPresets?: NamedTunnelPreset[];
     namedTunnelSelectedPresetId?: string;
+    namedTunnelPresetTokens?: Record<string, string>;
     tunnelBootstrapTtlMs?: number | null;
     tunnelSessionTtlMs?: number;
   }) => {
@@ -443,6 +493,35 @@ export const TunnelSettings: React.FC = () => {
     }
   }, []);
 
+  const persistNamedTunnelToken = React.useCallback(async (payload: {
+    presetId: string;
+    presetName: string;
+    hostname: string;
+    token: string;
+  }) => {
+    const token = payload.token.trim();
+    if (!token) {
+      return;
+    }
+
+    try {
+      const tokenMap = {
+        ...sessionTokensByPresetId,
+        [payload.presetId]: token,
+      };
+      await updateDesktopSettings({
+        namedTunnelPresetTokens: tokenMap,
+      });
+      setSavedTokenPresetIds((prev) => {
+        const next = new Set(prev);
+        next.add(payload.presetId);
+        return next;
+      });
+    } catch {
+      toast.error('Failed to save named tunnel token');
+    }
+  }, [sessionTokensByPresetId]);
+
   const handleStart = React.useCallback(async () => {
     setState('starting');
     setErrorMessage(null);
@@ -463,13 +542,6 @@ export const TunnelSettings: React.FC = () => {
         namedTunnelHostname = selectedPreset.hostname;
         namedTunnelToken = (sessionTokensByPresetId[selectedPreset.id] || '').trim();
 
-        if (!namedTunnelToken) {
-          setState('idle');
-          setNamedValidationError('Named tunnel token is required before starting');
-          toast.error('Add a named tunnel token before starting');
-          return;
-        }
-
         await saveTunnelSettings({
           tunnelMode: 'named',
           namedTunnelHostname,
@@ -483,6 +555,10 @@ export const TunnelSettings: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           mode: tunnelMode,
+          ...(tunnelMode === 'named' && selectedPreset ? {
+            namedTunnelPresetId: selectedPreset.id,
+            namedTunnelPresetName: selectedPreset.name,
+          } : {}),
           ...(tunnelMode === 'named' && namedTunnelHostname ? { namedTunnelHostname } : {}),
           ...(tunnelMode === 'named' && namedTunnelToken ? { namedTunnelToken } : {}),
         }),
@@ -511,6 +587,12 @@ export const TunnelSettings: React.FC = () => {
         ? data.activeTunnelMode
         : (data.mode === 'named' || data.mode === 'quick' ? data.mode : tunnelMode));
       setSessionRecords(Array.isArray(data.activeSessions) ? data.activeSessions : []);
+      if (Array.isArray(data.namedTunnelTokenPresetIds)) {
+        setSavedTokenPresetIds(new Set(data.namedTunnelTokenPresetIds));
+      }
+      if (typeof data.localPort === 'number') {
+        setLocalPort(data.localPort);
+      }
       if (data.mode === 'named' || data.mode === 'quick') {
         setTunnelMode(data.mode);
       }
@@ -538,6 +620,8 @@ export const TunnelSettings: React.FC = () => {
       if (statusRes.ok) {
         const statusData = (await statusRes.json()) as TunnelStatusResponse;
         setSessionRecords(Array.isArray(statusData.activeSessions) ? statusData.activeSessions : []);
+        setSavedTokenPresetIds(new Set(Array.isArray(statusData.namedTunnelTokenPresetIds) ? statusData.namedTunnelTokenPresetIds : []));
+        setLocalPort(typeof statusData.localPort === 'number' ? statusData.localPort : null);
       }
       setTunnelInfo(null);
       setActiveTunnelMode(null);
@@ -571,12 +655,6 @@ export const TunnelSettings: React.FC = () => {
     if (!option) {
       return;
     }
-    if (option.ms === null) {
-      const confirmed = window.confirm('Never-expiring connect links are less secure. Continue?');
-      if (!confirmed) {
-        return;
-      }
-    }
     setBootstrapTtlMs(option.ms);
     await saveTtlSettings(option.ms, sessionTtlMs);
   }, [saveTtlSettings, sessionTtlMs]);
@@ -606,7 +684,19 @@ export const TunnelSettings: React.FC = () => {
     });
   }, [namedTunnelPresets, saveTunnelSettings, selectedPreset, selectedPresetId, state]);
 
-  const handleSelectPreset = React.useCallback(async (presetId: string) => {
+  const persistSelectedPreset = React.useCallback(async (preset: NamedTunnelPreset, presets: NamedTunnelPreset[]) => {
+    try {
+      await updateDesktopSettings({
+        namedTunnelSelectedPresetId: preset.id,
+        namedTunnelHostname: preset.hostname,
+        namedTunnelPresets: presets,
+      });
+    } catch {
+      toast.error('Failed to save selected named tunnel');
+    }
+  }, []);
+
+  const handleSelectPreset = React.useCallback((presetId: string) => {
     const preset = namedTunnelPresets.find((entry) => entry.id === presetId);
     if (!preset) {
       return;
@@ -614,16 +704,13 @@ export const TunnelSettings: React.FC = () => {
 
     setSelectedPresetId(preset.id);
     setNamedValidationError(null);
-    await saveTunnelSettings({
-      namedTunnelSelectedPresetId: preset.id,
-      namedTunnelHostname: preset.hostname,
-      namedTunnelPresets,
-    });
-  }, [namedTunnelPresets, saveTunnelSettings]);
+    void persistSelectedPreset(preset, namedTunnelPresets);
+  }, [namedTunnelPresets, persistSelectedPreset]);
 
   const handleSaveNewPreset = React.useCallback(async () => {
     const name = newPresetName.trim();
     const hostname = normalizePresetHostname(newPresetHostname);
+    const token = newPresetToken.trim();
 
     if (!name) {
       toast.error('Tunnel name is required');
@@ -631,6 +718,10 @@ export const TunnelSettings: React.FC = () => {
     }
     if (!hostname) {
       toast.error('Named tunnel hostname is required');
+      return;
+    }
+    if (!token) {
+      toast.error('Named tunnel token is required');
       return;
     }
 
@@ -648,19 +739,77 @@ export const TunnelSettings: React.FC = () => {
 
     setNamedTunnelPresets(nextPresets);
     setSelectedPresetId(nextPreset.id);
+    setExpandedNamedTunnels((prev) => ({ ...prev, [nextPreset.id]: true }));
+    setSessionTokensByPresetId((prev) => ({ ...prev, [nextPreset.id]: token }));
     setNamedValidationError(null);
     setIsAddingPreset(false);
     setNewPresetName('');
     setNewPresetHostname('');
+    setNewPresetToken('');
 
     await saveTunnelSettings({
       tunnelMode: 'named',
       namedTunnelHostname: nextPreset.hostname,
       namedTunnelPresets: nextPresets,
       namedTunnelSelectedPresetId: nextPreset.id,
+      namedTunnelPresetTokens: {
+        ...sessionTokensByPresetId,
+        [nextPreset.id]: token,
+      },
+    });
+    await persistNamedTunnelToken({
+      presetId: nextPreset.id,
+      presetName: nextPreset.name,
+      hostname: nextPreset.hostname,
+      token,
     });
     toast.success('Named tunnel saved');
-  }, [namedTunnelPresets, newPresetHostname, newPresetName, saveTunnelSettings]);
+  }, [namedTunnelPresets, newPresetHostname, newPresetName, newPresetToken, persistNamedTunnelToken, saveTunnelSettings, sessionTokensByPresetId]);
+
+  const handleRemovePreset = React.useCallback(async (presetId: string) => {
+    const preset = namedTunnelPresets.find((entry) => entry.id === presetId);
+    if (!preset) {
+      return;
+    }
+
+    const nextPresets = namedTunnelPresets.filter((entry) => entry.id !== preset.id);
+    const fallbackSelectedId = nextPresets[0]?.id || '';
+    const nextSelectedId = selectedPresetId === preset.id ? fallbackSelectedId : selectedPresetId;
+    const nextSelectedPreset = nextPresets.find((entry) => entry.id === nextSelectedId) || null;
+    const nextHostname = nextSelectedPreset?.hostname;
+    const nextTokenMap = Object.fromEntries(
+      Object.entries(sessionTokensByPresetId)
+        .filter(([id, tokenValue]) => id !== preset.id && tokenValue.trim().length > 0)
+    );
+
+    setNamedTunnelPresets(nextPresets);
+    setSelectedPresetId(nextSelectedId);
+    setExpandedNamedTunnels((prev) => {
+      const next = { ...prev };
+      delete next[preset.id];
+      return next;
+    });
+    setSessionTokensByPresetId((prev) => {
+      const next = { ...prev };
+      delete next[preset.id];
+      return next;
+    });
+    setSavedTokenPresetIds((prev) => {
+      const next = new Set(prev);
+      next.delete(preset.id);
+      return next;
+    });
+    setNamedValidationError(null);
+
+    await saveTunnelSettings({
+      namedTunnelPresets: nextPresets,
+      namedTunnelSelectedPresetId: nextSelectedId || undefined,
+      namedTunnelHostname: nextHostname,
+      namedTunnelPresetTokens: nextTokenMap,
+    });
+
+    toast.success('Named tunnel removed');
+  }, [namedTunnelPresets, saveTunnelSettings, selectedPresetId, sessionTokensByPresetId]);
 
   const primaryCtaClass = 'gap-2 border-[var(--primary-base)] bg-[var(--primary-base)] text-[var(--primary-foreground)] hover:bg-[var(--primary-hover)] hover:text-[var(--primary-foreground)]';
 
@@ -673,14 +822,17 @@ export const TunnelSettings: React.FC = () => {
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       <div>
         <h3 className="typography-ui-header font-semibold text-foreground">Remote Tunnel</h3>
-        <p className="typography-meta mt-1 text-muted-foreground/70">
+        <p className="typography-meta mt-0 text-muted-foreground/70">
           Configure secure remote access with quick links or your own named Cloudflare tunnel.
         </p>
-        <p className="typography-meta mt-1 text-muted-foreground/60">
-          Tunnel access is enforced server-side. Connect links are one-time and are revoked when tunnel stops.
+        <p className="typography-meta mt-0 text-muted-foreground/60">
+          Secure Tunnel access is enforced server-side.
+        </p>
+        <p className="typography-meta mt-0 text-muted-foreground/60">
+          Connect links are one-time and are revoked when tunnel stops or Connect link TTL expired.
         </p>
       </div>
 
@@ -800,14 +952,14 @@ export const TunnelSettings: React.FC = () => {
             <div className="flex min-w-0 items-center gap-2">
               <span className="typography-ui-label shrink-0 text-foreground">Connect link TTL</span>
               <Select
-                value={ttlOptionValue(BOOTSTRAP_TTL_OPTIONS, bootstrapTtlMs, '180000')}
+                value={ttlOptionValue(BOOTSTRAP_TTL_OPTIONS, bootstrapTtlMs, '1800000')}
                 onValueChange={(value) => {
                   void handleBootstrapTtlChange(value);
                 }}
                 disabled={isSavingTtl || isSavingMode || state === 'starting' || state === 'stopping'}
               >
-                <SelectTrigger className="w-fit">
-                  <SelectValue />
+                <SelectTrigger className="max-w-[11rem] min-w-0">
+                  <SelectValue className="truncate" />
                 </SelectTrigger>
                 <SelectContent>
                   {BOOTSTRAP_TTL_OPTIONS.map((option) => (
@@ -826,8 +978,8 @@ export const TunnelSettings: React.FC = () => {
                 }}
                 disabled={isSavingTtl || isSavingMode || state === 'starting' || state === 'stopping'}
               >
-                <SelectTrigger className="w-fit">
-                  <SelectValue />
+                <SelectTrigger className="max-w-[11rem] min-w-0">
+                  <SelectValue className="truncate" />
                 </SelectTrigger>
                 <SelectContent>
                   {SESSION_TTL_OPTIONS.map((option) => (
@@ -838,39 +990,32 @@ export const TunnelSettings: React.FC = () => {
             </div>
           </div>
 
-          {(tunnelMode === 'quick' || bootstrapTtlMs === null) && (
-            <div className="space-y-1">
-              {tunnelMode === 'quick' && (
-                <div className="rounded-lg border border-[var(--status-warning)]/35 bg-[var(--status-warning)]/10 p-3">
-                  <div className="flex items-start gap-2">
-                    <RiErrorWarningLine className="mt-0.5 size-4 shrink-0 text-[var(--status-warning)]" />
-                    <div>
-                      <p className="typography-meta text-[var(--status-warning)]">
-                        Quick Tunnel is best effort and Cloudflare does not guarantee uptime.
-                      </p>
-                      <p className="typography-meta mt-1 text-[var(--status-warning)]">
-                        For more reliable long-lived access, switch to Named Tunnel mode.
-                      </p>
-                    </div>
-                  </div>
+          {tunnelMode === 'quick' && (
+            <div className="rounded-lg border border-[var(--status-warning)]/35 bg-[var(--status-warning)]/10 p-3">
+              <div className="flex items-start gap-2">
+                <RiErrorWarningLine className="mt-0.5 size-4 shrink-0 text-[var(--status-warning)]" />
+                <div>
+                  <p className="typography-meta text-[var(--status-warning)]">
+                    Quick Tunnel is best effort and Cloudflare does not guarantee uptime.
+                  </p>
+                  <p className="typography-meta mt-1 text-[var(--status-warning)]">
+                    For more reliable long-lived access, switch to Named Tunnel mode.
+                  </p>
                 </div>
-              )}
-
-              {bootstrapTtlMs === null && (
-                <div className="rounded-lg border border-[var(--status-warning)]/35 bg-[var(--status-warning)]/10 p-2.5">
-                  <div className="flex items-start gap-2">
-                    <RiErrorWarningLine className="mt-0.5 size-4 shrink-0 text-[var(--status-warning)]" />
-                    <p className="typography-meta text-[var(--status-warning)]">
-                      Warning: never-expiring connect links increase risk if the URL leaks. Prefer a shorter connect-link TTL.
-                    </p>
-                  </div>
-                </div>
-              )}
+              </div>
             </div>
           )}
 
           {tunnelMode === 'named' && (
             <div className="space-y-2 rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)] p-3">
+              {typeof suggestedConnectorPort === 'number' && (
+                <div className="rounded-md border border-[var(--status-info-border)] bg-[var(--status-info-background)]/35 px-2 py-1.5">
+                  <p className="typography-meta text-[var(--status-info)]">
+                    Cloudflare connector target: <code>http://localhost:{suggestedConnectorPort}</code>
+                  </p>
+                </div>
+              )}
+
               <div className="mb-1 flex items-center justify-between gap-3">
                 <p className="typography-ui-label text-foreground">Saved named tunnels</p>
                 <ButtonSmall
@@ -888,29 +1033,100 @@ export const TunnelSettings: React.FC = () => {
               {namedTunnelPresets.length > 0 ? (
                 <div className="overflow-hidden rounded-md border border-[var(--surface-subtle)]">
                   {namedTunnelPresets.map((preset, index) => {
-                    const selected = preset.id === selectedPresetId;
+                    const rowToken = sessionTokensByPresetId[preset.id] || '';
+                    const hasSavedToken = savedTokenPresetIds.has(preset.id);
+                    const isOpen = expandedNamedTunnels[preset.id] ?? false;
+
                     return (
-                      <button
+                      <div
                         key={preset.id}
-                        type="button"
-                        className={cn(
-                          'flex w-full items-center justify-between gap-3 px-3 py-2 text-left transition-colors',
-                          selected
-                            ? 'bg-[var(--interactive-selection)]/15 text-[var(--surface-foreground)]'
-                            : 'bg-transparent hover:bg-[var(--interactive-hover)]/40',
-                          index < namedTunnelPresets.length - 1 && 'border-b border-[var(--surface-subtle)]'
-                        )}
-                        onClick={() => {
-                          void handleSelectPreset(preset.id);
-                        }}
-                        disabled={state === 'starting' || state === 'stopping' || isSavingMode}
+                        className={cn(index < namedTunnelPresets.length - 1 && 'border-b border-[var(--surface-subtle)]')}
                       >
-                        <span className="min-w-0">
-                          <span className="typography-ui-label block truncate text-foreground">{preset.name}</span>
-                          <span className="typography-meta block truncate text-muted-foreground/70">{preset.hostname}</span>
-                        </span>
-                        {selected && <span className="typography-micro text-[var(--interactive-selection)]">selected</span>}
-                      </button>
+                        <Collapsible
+                          open={isOpen}
+                          onOpenChange={(open) => {
+                            setExpandedNamedTunnels((prev) => ({ ...prev, [preset.id]: open }));
+                            if (open) {
+                              void handleSelectPreset(preset.id);
+                            }
+                          }}
+                          className="py-1.5"
+                        >
+                          <div className="flex items-start gap-2 px-3">
+                            <CollapsibleTrigger
+                              type="button"
+                              className="group flex-1 justify-start gap-2 rounded-md px-0 py-1 pr-1 text-left hover:bg-[var(--interactive-hover)]"
+                              disabled={state === 'starting' || state === 'stopping' || isSavingMode}
+                            >
+                              {isOpen
+                                ? <RiArrowDownSLine className="h-4 w-4 text-muted-foreground" />
+                                : <RiArrowRightSLine className="h-4 w-4 text-muted-foreground" />}
+                              <span className="typography-ui-label min-w-0 flex-1 truncate text-foreground">{preset.name}</span>
+                            </CollapsibleTrigger>
+
+                            <ButtonSmall
+                              variant="ghost"
+                              size="xs"
+                              className="h-7 w-7 p-0 text-muted-foreground hover:text-[var(--status-error)]"
+                              aria-label={`Remove ${preset.name}`}
+                              onClick={() => {
+                                void handleRemovePreset(preset.id);
+                              }}
+                              disabled={state === 'starting' || state === 'stopping' || isSavingMode}
+                            >
+                              <RiDeleteBinLine className="h-3.5 w-3.5" />
+                            </ButtonSmall>
+                          </div>
+
+                          <CollapsibleContent className="pt-1.5">
+                            <div className="space-y-1 px-3 pb-2">
+                              <p className="typography-meta text-muted-foreground/70">Hostname: <code>{preset.hostname}</code></p>
+                              <Input
+                                type="password"
+                                value={rowToken}
+                                onChange={(event) => {
+                                  const nextValue = event.target.value;
+                                  setNamedValidationError(null);
+                                  setSessionTokensByPresetId((prev) => ({ ...prev, [preset.id]: nextValue }));
+                                }}
+                                onBlur={(event) => {
+                                  const tokenToSave = event.currentTarget.value.trim();
+                                  if (!tokenToSave) {
+                                    return;
+                                  }
+                                  void persistNamedTunnelToken({
+                                    presetId: preset.id,
+                                    presetName: preset.name,
+                                    hostname: preset.hostname,
+                                    token: tokenToSave,
+                                  });
+                                }}
+                                placeholder={hasSavedToken ? 'Saved token available (optional to replace)' : 'Paste token for this tunnel'}
+                                className="h-7"
+                                disabled={state === 'starting' || state === 'stopping'}
+                              />
+                              <div className="flex items-center justify-end">
+                                <ButtonSmall
+                                  variant="ghost"
+                                  size="xs"
+                                  className="!font-normal"
+                                  disabled={state === 'starting' || state === 'stopping' || rowToken.trim().length === 0}
+                                  onClick={() => {
+                                    void persistNamedTunnelToken({
+                                      presetId: preset.id,
+                                      presetName: preset.name,
+                                      hostname: preset.hostname,
+                                      token: rowToken,
+                                    });
+                                  }}
+                                >
+                                  Save token
+                                </ButtonSmall>
+                              </div>
+                            </div>
+                          </CollapsibleContent>
+                        </Collapsible>
+                      </div>
                     );
                   })}
                 </div>
@@ -934,6 +1150,19 @@ export const TunnelSettings: React.FC = () => {
                     className="h-7"
                     disabled={isSavingMode || state === 'starting' || state === 'stopping'}
                   />
+                  <Input
+                    type="password"
+                    value={newPresetToken}
+                    onChange={(event) => setNewPresetToken(event.target.value)}
+                    placeholder="Token"
+                    className="h-7"
+                    disabled={isSavingMode || state === 'starting' || state === 'stopping'}
+                  />
+                  {typeof suggestedConnectorPort === 'number' && (
+                    <p className="typography-meta text-muted-foreground/70">
+                      For Cloudflare connector target, use <code>http://localhost:{suggestedConnectorPort}</code>.
+                    </p>
+                  )}
                   <div className="flex items-center gap-2">
                     <ButtonSmall
                       variant="ghost"
@@ -954,6 +1183,7 @@ export const TunnelSettings: React.FC = () => {
                         setIsAddingPreset(false);
                         setNewPresetName('');
                         setNewPresetHostname('');
+                        setNewPresetToken('');
                       }}
                       disabled={isSavingMode || state === 'starting' || state === 'stopping'}
                     >
@@ -963,42 +1193,23 @@ export const TunnelSettings: React.FC = () => {
                 </div>
               )}
 
-              {selectedPreset && (
-                <div className="space-y-1">
-                  <div className="flex items-center gap-1.5">
-                    <p className="typography-meta text-muted-foreground/80">Session token for selected tunnel</p>
-                    <Tooltip delayDuration={700}>
-                      <TooltipTrigger asChild>
-                        <button
-                          type="button"
-                          className="rounded p-0.5 text-muted-foreground/70 hover:text-foreground"
-                          aria-label="Named tunnel token info"
-                        >
-                          <RiInformationLine className="h-3.5 w-3.5" />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent sideOffset={8} className="max-w-xs">
-                        Token is kept only in this app runtime. It is never written to disk.
-                      </TooltipContent>
-                    </Tooltip>
-                  </div>
-                  <Input
-                    type="password"
-                    value={selectedPresetToken}
-                    onChange={(event) => {
-                      const nextValue = event.target.value;
-                      setNamedValidationError(null);
-                      setSessionTokensByPresetId((prev) => ({ ...prev, [selectedPreset.id]: nextValue }));
-                    }}
-                    placeholder="Paste token"
-                    className="h-7"
-                    disabled={state === 'starting' || state === 'stopping'}
-                  />
-                  {namedValidationError && (
-                    <p className="typography-meta text-[var(--status-error)]">{namedValidationError}</p>
-                  )}
-                </div>
-              )}
+              <div className="flex items-center gap-1.5">
+                <p className="typography-meta text-muted-foreground/80">Tokens are saved per tunnel and reused from disk</p>
+                <Tooltip delayDuration={700}>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      className="rounded p-0.5 text-muted-foreground/70 hover:text-foreground"
+                      aria-label="Named tunnel token info"
+                    >
+                      <RiInformationLine className="h-3.5 w-3.5" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent sideOffset={8} className="max-w-xs">
+                    Tokens are saved in ~/.config/openchamber/cloudflare-named-tunnels.json.
+                  </TooltipContent>
+                </Tooltip>
+              </div>
 
               {!selectedPreset && namedValidationError && (
                 <p className="typography-meta text-[var(--status-error)]">{namedValidationError}</p>
@@ -1011,15 +1222,62 @@ export const TunnelSettings: React.FC = () => {
               <div className="rounded-lg border border-[var(--status-info-border)] bg-[var(--status-info-background)] p-3">
                 <div className="flex items-start gap-2">
                   <RiInformationLine className="mt-0.5 size-4 shrink-0 text-[var(--status-info)]" />
-                  <p className="typography-meta text-[var(--status-info)]">
-                    Start a {tunnelMode === 'named' ? 'named' : 'quick'} tunnel and generate a one-time connect link. Do not close the app while this tunnel is in use.
-                  </p>
+                  <div className="space-y-1">
+                    {tunnelMode === 'named' && (
+                      <>
+                        <p className="typography-meta text-[var(--status-info)]">
+                          Named tunnels require a bought domain in your Cloudflare account.
+                        </p>
+                        <button
+                          type="button"
+                          className="typography-meta inline-flex items-center gap-1 text-[var(--status-info)] underline underline-offset-2 hover:opacity-90"
+                          onClick={() => {
+                            void openExternal(NAMED_TUNNEL_DOC_URL);
+                          }}
+                        >
+                          Check the documentation on how to configure a named tunnel
+                          <RiExternalLinkLine className="size-3.5" />
+                        </button>
+                      </>
+                    )}
+                    <p className="typography-meta text-[var(--status-info)]">
+                      Start a {tunnelMode === 'named' ? 'named' : 'quick'} tunnel and generate a one-time connect link. Do not close the app while this tunnel is in use.
+                    </p>
+                  </div>
                 </div>
               </div>
+
+              {tunnelMode === 'named' && (
+                <div className="space-y-1.5">
+                  <p className="typography-ui-label text-foreground">Named tunnel to connect</p>
+                  <Select
+                    value={selectedPresetId || (namedTunnelPresets[0]?.id ?? '')}
+                    onValueChange={(presetId) => {
+                      void handleSelectPreset(presetId);
+                    }}
+                    disabled={
+                      isSavingMode
+                      || state === 'starting'
+                      || state === 'stopping'
+                      || namedTunnelPresets.length <= 1
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select saved tunnel" />
+                    </SelectTrigger>
+                    <SelectContent fitContent>
+                      {namedTunnelPresets.map((preset) => (
+                        <SelectItem key={preset.id} value={preset.id}>{preset.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
               <ButtonSmall
                 variant="outline"
                 onClick={handleStart}
-                disabled={state === 'starting' || isSavingMode}
+                disabled={state === 'starting' || isSavingMode || (tunnelMode === 'named' && !selectedPreset)}
                 className={cn(primaryCtaClass, state === 'starting' && 'opacity-70')}
               >
                 {state === 'starting'
@@ -1041,7 +1299,7 @@ export const TunnelSettings: React.FC = () => {
             </div>
 
             <div>
-              <p className="typography-meta mb-1 text-muted-foreground/70">Public URL</p>
+              <p className="typography-meta mb-1 text-muted-foreground/70">Public URL (Not accessible without a token)</p>
               <code className="typography-code block truncate rounded bg-muted/50 px-2 py-1 text-xs text-foreground">
                 {tunnelInfo.url}
               </code>

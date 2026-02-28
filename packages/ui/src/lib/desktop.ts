@@ -98,6 +98,7 @@ export type DesktopSettings = {
   hasNamedTunnelToken?: boolean;
   namedTunnelPresets?: NamedTunnelPreset[];
   namedTunnelSelectedPresetId?: string;
+  namedTunnelPresetTokens?: Record<string, string>;
   defaultModel?: string; // format: "provider/model"
   defaultVariant?: string;
   defaultAgent?: string;

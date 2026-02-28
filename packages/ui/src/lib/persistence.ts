@@ -236,6 +236,23 @@ const sanitizeNamedTunnelPresets = (value: unknown): DesktopSettings['namedTunne
   return result;
 };
 
+const sanitizeNamedTunnelPresetTokens = (value: unknown): DesktopSettings['namedTunnelPresetTokens'] | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  const result: Record<string, string> = {};
+  for (const [key, tokenValue] of Object.entries(candidate)) {
+    const id = key.trim();
+    const token = typeof tokenValue === 'string' ? tokenValue.trim() : '';
+    if (!id || !token) continue;
+    result[id] = token;
+  }
+
+  return Object.keys(result).length > 0 ? result : undefined;
+};
+
 const sanitizeModelRefs = (value: unknown, limit: number): Array<{ providerID: string; modelID: string }> | undefined => {
   if (!Array.isArray(value)) {
     return undefined;
@@ -501,6 +518,10 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.namedTunnelSelectedPresetId === 'string') {
     const trimmed = candidate.namedTunnelSelectedPresetId.trim();
     result.namedTunnelSelectedPresetId = trimmed.length > 0 ? trimmed : undefined;
+  }
+  const namedTunnelPresetTokens = sanitizeNamedTunnelPresetTokens(candidate.namedTunnelPresetTokens);
+  if (namedTunnelPresetTokens) {
+    result.namedTunnelPresetTokens = namedTunnelPresetTokens;
   }
   if (typeof candidate.defaultModel === 'string' && candidate.defaultModel.length > 0) {
     result.defaultModel = candidate.defaultModel;
