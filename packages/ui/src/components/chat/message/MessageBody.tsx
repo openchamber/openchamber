@@ -14,7 +14,7 @@ import { isEmptyTextPart, extractTextContent } from './partUtils';
 import { FadeInOnReveal } from './FadeInOnReveal';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { RiCheckLine, RiFileCopyLine, RiChatNewLine, RiArrowGoBackLine, RiGitBranchLine, RiHourglassLine, RiVolumeUpLine, RiStopLine, RiShare2Line, RiLoader4Line } from '@remixicon/react';
+import { RiCheckLine, RiFileCopyLine, RiChatNewLine, RiArrowGoBackLine, RiGitBranchLine, RiHourglassLine, RiTimeLine, RiVolumeUpLine, RiStopLine, RiShare2Line, RiLoader4Line } from '@remixicon/react';
 import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
 import type { ContentChangeReason } from '@/hooks/useChatScrollManager';
 
@@ -1365,7 +1365,10 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
                                                 </span>
                                             ) : null}
                                             {footerTimestamp ? (
-                                                <span className="text-sm text-muted-foreground/60 tabular-nums">{footerTimestamp}</span>
+                                                <span className="text-sm text-muted-foreground/60 tabular-nums flex items-center gap-1">
+                                                    <RiTimeLine className="h-3.5 w-3.5" />
+                                                    {footerTimestamp}
+                                                </span>
                                             ) : null}
                                         </div>
                                     </div>
@@ -1388,7 +1391,10 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
                                 </span>
                             ) : null}
                             {footerTimestamp ? (
-                                <span className="text-sm text-muted-foreground/60 tabular-nums">{footerTimestamp}</span>
+                                <span className="text-sm text-muted-foreground/60 tabular-nums flex items-center gap-1">
+                                    <RiTimeLine className="h-3.5 w-3.5" />
+                                    {footerTimestamp}
+                                </span>
                             ) : null}
                         </div>
                     </div>

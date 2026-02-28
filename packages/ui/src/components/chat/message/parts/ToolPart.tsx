@@ -157,12 +157,7 @@ const parseDiffStats = (metadata?: Record<string, unknown>): { added: number; re
     return { added, removed };
 };
 
-const getRelativePath = (absolutePath: string, currentDirectory: string, isMobile: boolean): string => {
-
-    if (isMobile) {
-        return absolutePath.split('/').pop() || absolutePath;
-    }
-
+const getRelativePath = (absolutePath: string, currentDirectory: string): string => {
     if (absolutePath.startsWith(currentDirectory)) {
         const relativePath = absolutePath.substring(currentDirectory.length);
 
@@ -227,9 +222,9 @@ const parseQuestionOutput = (output: string): Array<{ question: string; answer: 
     return pairs.length > 0 ? pairs : null;
 };
 
-const formatStructuredOutputDescription = (input: Record<string, unknown> | undefined, output: unknown, isMobile: boolean): string => {
+const formatStructuredOutputDescription = (input: Record<string, unknown> | undefined, output: unknown): string => {
     if (typeof output === 'string' && output.trim().length > 0) {
-        const maxLength = isMobile ? 50 : 100;
+        const maxLength = 100;
         const text = output.trim();
         return text.length > maxLength ? `${text.substring(0, maxLength)}...` : text;
     }
@@ -271,30 +266,63 @@ const formatStructuredOutputDescription = (input: Record<string, unknown> | unde
         return 'Result';
     }
 
-    const maxLength = isMobile ? 50 : 100;
+    const maxLength = 100;
     const truncated = preview.length > maxLength ? `${preview.substring(0, maxLength)}...` : preview;
     return truncated;
 };
 
-const getToolDescription = (part: ToolPartType, state: ToolStateUnion, isMobile: boolean, currentDirectory: string): string => {
+const getToolDescriptionPath = (part: ToolPartType, state: ToolStateUnion, currentDirectory: string): string | null => {
+    const stateWithData = state as ToolStateWithMetadata;
+    const metadata = stateWithData.metadata;
+    const input = stateWithData.input;
+
+    if (part.tool === 'apply_patch') {
+        const files = Array.isArray(metadata?.files) ? metadata?.files : [];
+        const firstFile = files[0] as { relativePath?: string; filePath?: string } | undefined;
+        const filePath = firstFile?.relativePath || firstFile?.filePath;
+        if (files.length > 1) return null;
+        if (typeof filePath === 'string') {
+            return getRelativePath(filePath, currentDirectory);
+        }
+        return null;
+    }
+
+    if ((part.tool === 'edit' || part.tool === 'multiedit') && input) {
+        const filePath = input?.filePath || input?.file_path || input?.path || metadata?.filePath || metadata?.file_path || metadata?.path;
+        if (typeof filePath === 'string') {
+            return getRelativePath(filePath, currentDirectory);
+        }
+    }
+
+    if (['write', 'create', 'file_write', 'read', 'view', 'file_read', 'cat'].includes(part.tool) && input) {
+        const filePath = input?.filePath || input?.file_path || input?.path;
+        if (typeof filePath === 'string') {
+            return getRelativePath(filePath, currentDirectory);
+        }
+    }
+
+    return null;
+};
+
+const getToolDescription = (part: ToolPartType, state: ToolStateUnion, currentDirectory: string): string => {
     const stateWithData = state as ToolStateWithMetadata;
     const metadata = stateWithData.metadata;
     const input = stateWithData.input;
     const tool = part.tool.toLowerCase();
 
     if (tool === 'structuredoutput' || tool === 'structured_output') {
-        return formatStructuredOutputDescription(input, stateWithData.output, isMobile);
+        return formatStructuredOutputDescription(input, stateWithData.output);
+    }
+
+    const filePathLabel = getToolDescriptionPath(part, state, currentDirectory);
+    if (filePathLabel) {
+        return filePathLabel;
     }
 
     if (part.tool === 'apply_patch') {
         const files = Array.isArray(metadata?.files) ? metadata?.files : [];
-        const firstFile = files[0] as { relativePath?: string; filePath?: string } | undefined;
-        const filePath = firstFile?.relativePath || firstFile?.filePath;
         if (files.length > 1) {
             return `${files.length} files`;
-        }
-        if (typeof filePath === 'string') {
-            return getRelativePath(filePath, currentDirectory, isMobile);
         }
         return 'Patch';
     }
@@ -305,27 +333,13 @@ const getToolDescription = (part: ToolPartType, state: ToolStateUnion, isMobile:
         return `Asked ${count} question${count !== 1 ? 's' : ''}`;
     }
 
-    if ((part.tool === 'edit' || part.tool === 'multiedit') && input) {
-        const filePath = input?.filePath || input?.file_path || input?.path || metadata?.filePath || metadata?.file_path || metadata?.path;
-        if (typeof filePath === 'string') {
-            return getRelativePath(filePath, currentDirectory, isMobile);
-        }
-    }
-
-    if ((part.tool === 'read' || part.tool === 'write') && input) {
-        const filePath = input?.filePath || input?.file_path || input?.path;
-        if (typeof filePath === 'string') {
-            return getRelativePath(filePath, currentDirectory, isMobile);
-        }
-    }
-
     if (part.tool === 'bash' && input?.command && typeof input.command === 'string') {
         const firstLine = input.command.split('\n')[0];
-        return isMobile ? firstLine.substring(0, 50) : firstLine.substring(0, 100);
+        return firstLine.substring(0, 100);
     }
 
     if (part.tool === 'task' && input?.description && typeof input.description === 'string') {
-        return isMobile ? input.description.substring(0, 40) : input.description.substring(0, 80);
+        return input.description.substring(0, 80);
     }
 
     if (part.tool === 'skill' && input?.name && typeof input.name === 'string') {
@@ -451,6 +465,32 @@ const getTaskSummaryLabel = (entry: TaskToolSummaryEntry): string => {
     return 'tool';
 };
 
+const FILE_PATH_LABEL_TOOLS = new Set([
+    'read',
+    'view',
+    'file_read',
+    'cat',
+    'write',
+    'create',
+    'file_write',
+    'edit',
+    'multiedit',
+    'apply_patch',
+]);
+
+const shouldRenderGitPathLabel = (toolName: string, label: string): boolean => {
+    if (!FILE_PATH_LABEL_TOOLS.has(toolName.toLowerCase())) {
+        return false;
+    }
+
+    const trimmed = label.trim();
+    if (!trimmed || trimmed === 'Patch' || /^\d+\s+files$/.test(trimmed)) {
+        return false;
+    }
+
+    return trimmed.includes('/') || trimmed.includes('\\');
+};
+
 const stripTaskMetadataFromOutput = (output: string): string => {
     // Strip only a trailing <task_metadata>...</task_metadata> block.
     return output.replace(/\n*<task_metadata>[\s\S]*?<\/task_metadata>\s*$/i, '').trimEnd();
@@ -550,13 +590,14 @@ const parseTaskMetadataBlock = (output: string | undefined): {
 const TaskToolSummary: React.FC<{
     entries: TaskToolSummaryEntry[];
     isExpanded: boolean;
+    isMobile: boolean;
     hasPrevTool: boolean;
     hasNextTool: boolean;
     output?: string;
     sessionId?: string;
     onShowPopup?: (content: ToolPopupContent) => void;
     input?: Record<string, unknown>;
-}> = ({ entries, isExpanded, hasPrevTool, hasNextTool, output, sessionId, onShowPopup, input }) => {
+}> = ({ entries, isExpanded, isMobile, hasPrevTool, hasNextTool, output, sessionId, onShowPopup, input }) => {
     const setCurrentSession = useSessionStore((state) => state.setCurrentSession);
     const displayEntries = React.useMemo(() => {
         const nonPending = entries.filter((entry) => entry.state?.status !== 'pending');
@@ -611,13 +652,18 @@ const TaskToolSummary: React.FC<{
                             const displayName = getToolMetadata(toolName).displayName;
 
                             return (
-                                <div key={entry.id ?? `${toolName}-${idx}`} className="flex items-center gap-2 min-w-0">
+                                <div key={entry.id ?? `${toolName}-${idx}`} className={cn("flex gap-2 min-w-0 w-full", isMobile ? 'items-start' : 'items-center')}>
                                     <span className="flex-shrink-0 text-foreground/80">{getToolIcon(toolName)}</span>
                                     <span className="typography-meta text-foreground/80 flex-shrink-0">{displayName}</span>
-                                    <span className={cn(
-                                        'typography-meta truncate',
-                                        status === 'error' ? 'text-[var(--status-error)]' : 'text-muted-foreground/70'
-                                    )}>{label}</span>
+                                    {status !== 'error' && shouldRenderGitPathLabel(toolName, label) ? (
+                                        renderPathLikeGitChanges(label)
+                                    ) : (
+                                        <span className={cn(
+                                            'typography-meta flex-1 min-w-0',
+                                            isMobile ? 'whitespace-normal break-words' : 'truncate',
+                                            status === 'error' ? 'text-[var(--status-error)]' : 'text-muted-foreground/70'
+                                        )}>{label}</span>
+                                    )}
                                 </div>
                             );
                         })}
@@ -699,17 +745,25 @@ type DiffPatchEntry = {
     patch: string;
 };
 
-const renderPathLikeGitChanges = (path: string) => {
+const renderPathLikeGitChanges = (path: string, grow = true) => {
     const lastSlash = path.lastIndexOf('/');
     if (lastSlash === -1) {
-        return <span className="truncate text-foreground">{path}</span>;
+        return (
+            <span
+                className={cn('min-w-0 truncate typography-ui-label text-foreground', grow && 'flex-1')}
+                style={{ direction: 'rtl', textAlign: 'left' }}
+                title={path}
+            >
+                {path}
+            </span>
+        );
     }
 
     const dir = path.slice(0, lastSlash);
     const name = path.slice(lastSlash + 1);
 
     return (
-        <span className="flex min-w-0 items-baseline overflow-hidden" title={path}>
+        <span className={cn('min-w-0 flex items-baseline overflow-hidden typography-ui-label', grow && 'flex-1')} title={path}>
             <span className="min-w-0 truncate text-muted-foreground" style={{ direction: 'rtl', textAlign: 'left' }}>
                 {dir}
             </span>
@@ -725,7 +779,6 @@ const getDiffPatchEntries = (
     metadata: Record<string, unknown> | undefined,
     fallbackDiff: string,
     currentDirectory: string,
-    isMobile: boolean,
 ): DiffPatchEntry[] => {
     const files = Array.isArray(metadata?.files) ? metadata.files : [];
 
@@ -748,7 +801,7 @@ const getDiffPatchEntries = (
                     : `File ${index + 1}`;
 
             const title = typeof rawPath === 'string'
-                ? getRelativePath(rawPath, currentDirectory, isMobile)
+                ? getRelativePath(rawPath, currentDirectory)
                 : `File ${index + 1}`;
 
             return {
@@ -824,8 +877,9 @@ const WriteInputPreview: React.FC<WriteInputPreviewProps> = React.memo(({
 
     return (
         <div className="w-full min-w-0">
-            <div className="bg-muted/20 px-2 py-1 typography-meta font-medium text-muted-foreground rounded-lg mb-1" style={{ borderWidth: '1px', borderColor: 'var(--tools-border)' }}>
-                {`${displayPath} (${headerLineLabel})`}
+            <div className="bg-muted/20 px-2 py-1 rounded-lg mb-1 flex items-center gap-2 min-w-0" style={{ borderWidth: '1px', borderColor: 'var(--tools-border)' }}>
+                {renderPathLikeGitChanges(displayPath)}
+                <span className="typography-meta text-muted-foreground/80 flex-shrink-0">({headerLineLabel})</span>
             </div>
             <PierreFile
                 file={{
@@ -853,6 +907,7 @@ interface ReadToolVirtualizedProps {
     input?: Record<string, unknown>;
     syntaxTheme: { [key: string]: React.CSSProperties };
     toolName: string;
+    currentDirectory: string;
     pierreTheme: { light: string; dark: string };
     pierreThemeType: 'light' | 'dark';
     renderScrollableBlock: (
@@ -866,6 +921,7 @@ const ReadToolVirtualized: React.FC<ReadToolVirtualizedProps> = React.memo(({
     input,
     syntaxTheme,
     toolName,
+    currentDirectory,
     pierreTheme,
     pierreThemeType,
     renderScrollableBlock,
@@ -877,7 +933,7 @@ const ReadToolVirtualized: React.FC<ReadToolVirtualizedProps> = React.memo(({
         return detectLanguageFromOutput(contentForLanguage, toolName, input as Record<string, unknown>);
     }, [parsedReadOutput, toolName, input]);
 
-    const filePath =
+    const rawFilePath =
         typeof input?.filePath === 'string'
             ? input.filePath
             : typeof input?.file_path === 'string'
@@ -885,6 +941,7 @@ const ReadToolVirtualized: React.FC<ReadToolVirtualizedProps> = React.memo(({
                 : typeof input?.path === 'string'
                     ? input.path
                     : 'read-output';
+    const displayPath = getRelativePath(rawFilePath, currentDirectory);
 
     const codeLines: CodeLine[] = React.useMemo(() => parsedReadOutput.lines.map((line) => ({
         text: line.text,
@@ -894,21 +951,29 @@ const ReadToolVirtualized: React.FC<ReadToolVirtualizedProps> = React.memo(({
 
     if (parsedReadOutput.type === 'file') {
         const fileContent = parsedReadOutput.lines.map((line) => line.text).join('\n');
+        const lineCount = Math.max(parsedReadOutput.lines.length, 1);
+        const headerLineLabel = lineCount === 1 ? 'line 1' : `lines 1-${lineCount}`;
         return renderScrollableBlock(
-            <PierreFile
-                file={{
-                    name: filePath,
-                    contents: fileContent,
-                    lang: language || undefined,
-                }}
-                options={{
-                    disableFileHeader: true,
-                    overflow: 'wrap',
-                    theme: pierreTheme,
-                    themeType: pierreThemeType,
-                }}
-                className="block w-full"
-            />,
+            <div className="w-full min-w-0">
+                <div className="bg-muted/20 px-2 py-1 rounded-lg mb-1 flex items-center gap-2 min-w-0" style={{ borderWidth: '1px', borderColor: 'var(--tools-border)' }}>
+                    {renderPathLikeGitChanges(displayPath)}
+                    <span className="typography-meta text-muted-foreground/80 flex-shrink-0">({headerLineLabel})</span>
+                </div>
+                <PierreFile
+                    file={{
+                        name: displayPath,
+                        contents: fileContent,
+                        lang: language || undefined,
+                    }}
+                    options={{
+                        disableFileHeader: true,
+                        overflow: 'wrap',
+                        theme: pierreTheme,
+                        themeType: pierreThemeType,
+                    }}
+                    className="block w-full"
+                />
+            </div>,
             { className: 'p-1' }
         ) as React.ReactElement;
     }
@@ -951,8 +1016,8 @@ const ImagePreview: React.FC<ImagePreviewProps> = React.memo(({ content, filePat
 
     return (
         <div className="w-full min-w-0">
-            <div className="bg-muted/20 px-2 py-1 typography-meta font-medium text-muted-foreground rounded-lg mb-2" style={{ borderWidth: '1px', borderColor: 'var(--tools-border)' }}>
-                {displayPath}
+            <div className="bg-muted/20 px-2 py-1 rounded-lg mb-2 flex items-center min-w-0" style={{ borderWidth: '1px', borderColor: 'var(--tools-border)' }}>
+                {renderPathLikeGitChanges(displayPath)}
             </div>
             <div className="flex justify-center p-4 bg-muted/10 rounded-lg" style={{ borderWidth: '1px', borderColor: 'var(--tools-border)' }}>
                 <img
@@ -1000,8 +1065,8 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
 
     const diffContent = typeof metadata?.diff === 'string' ? (metadata.diff as string) : null;
     const diffEntries = React.useMemo(
-        () => (diffContent ? getDiffPatchEntries(metadata, diffContent, currentDirectory, isMobile) : []),
-        [currentDirectory, diffContent, isMobile, metadata]
+        () => (diffContent ? getDiffPatchEntries(metadata, diffContent, currentDirectory) : []),
+        [currentDirectory, diffContent, metadata]
     );
     const writeFilePath = part.tool === 'write'
         ? typeof input?.filePath === 'string'
@@ -1022,7 +1087,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     const shouldShowWriteInputPreview = part.tool === 'write' && !!writeInputContent;
     const isWriteImageFile = writeFilePath ? isImageFile(writeFilePath) : false;
     const writeDisplayPath = shouldShowWriteInputPreview
-        ? (writeFilePath ? getRelativePath(writeFilePath, currentDirectory, isMobile) : 'New file')
+        ? (writeFilePath ? getRelativePath(writeFilePath, currentDirectory) : 'New file')
         : null;
 
     const inputTextContent = React.useMemo(() => {
@@ -1224,6 +1289,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                     input={input}
                     syntaxTheme={syntaxTheme}
                     toolName={part.tool}
+                    currentDirectory={currentDirectory}
                     pierreTheme={pierreTheme}
                     pierreThemeType={pierreThemeType}
                     renderScrollableBlock={renderScrollableBlock}
@@ -1543,7 +1609,8 @@ const ToolPart: React.FC<ToolPartProps> = ({
     }, [isTaskTool, onContentChange, taskSummaryEntries.length]);
 
     const diffStats = (part.tool === 'edit' || part.tool === 'multiedit' || part.tool === 'apply_patch') ? parseDiffStats(metadata) : null;
-    const description = getToolDescription(part, state, isMobile, currentDirectory);
+    const descriptionPath = getToolDescriptionPath(part, state, currentDirectory);
+    const description = getToolDescription(part, state, currentDirectory);
     const displayName = getToolMetadata(part.tool).displayName;
     
     // Get justification text (tool title/description) when setting is enabled
@@ -1621,18 +1688,16 @@ const ToolPart: React.FC<ToolPartProps> = ({
             >
                 <div className="flex items-center gap-2 flex-shrink-0">
                     {}
-                    <button
-                        type="button"
+                    <div
                         className="relative h-3.5 w-3.5 flex-shrink-0"
                         onClick={(event) => { event.stopPropagation(); onToggle(part.id); }}
-                        aria-label={isExpanded ? 'Collapse tool details' : 'Expand tool details'}
                     >
                         {}
                         <div
                             className={cn(
                                 'absolute inset-0 transition-opacity',
                                 isExpanded && 'opacity-0',
-                                !isExpanded && !isMobile && 'group-hover/tool:opacity-0'
+                                !isExpanded && 'group-hover/tool:opacity-0'
                             )}
                             style={!isTaskTool && isError ? { color: 'var(--status-error)' } : { color: 'var(--tools-icon)' }}
                         >
@@ -1643,13 +1708,12 @@ const ToolPart: React.FC<ToolPartProps> = ({
                             className={cn(
                                 'absolute inset-0 transition-opacity flex items-center justify-center',
                                 isExpanded && 'opacity-100',
-                                !isExpanded && isMobile && 'opacity-0',
-                                !isExpanded && !isMobile && 'opacity-0 group-hover/tool:opacity-100'
+                                !isExpanded && 'opacity-0 group-hover/tool:opacity-100'
                             )}
                         >
                             {isExpanded ? <RiArrowDownSLine className="h-3.5 w-3.5" /> : <RiArrowRightSLine className="h-3.5 w-3.5" />}
                         </div>
-                    </button>
+                    </div>
                     <span
                         className="typography-meta font-medium"
                         style={!isTaskTool && isError ? { color: 'var(--status-error)' } : { color: 'var(--tools-title)' }}
@@ -1659,39 +1723,57 @@ const ToolPart: React.FC<ToolPartProps> = ({
                 </div>
 
                 <div className="flex items-center gap-1 flex-1 min-w-0 typography-meta" style={{ color: 'var(--tools-description)' }}>
-                    {justificationText && (
-                        <span className={cn("truncate", isMobile && "max-w-[120px]")} style={{ color: 'var(--tools-description)', opacity: 0.8 }}>
-                            {justificationText}
+                    <div className="flex items-center gap-1 flex-1 min-w-0">
+                        {justificationText && (
+                            <span className="min-w-0 truncate" style={{ color: 'var(--tools-description)', opacity: 0.8 }}>
+                                {justificationText}
+                            </span>
+                        )}
+                        {!justificationText && description && (
+                            descriptionPath && description === descriptionPath ? (
+                                renderPathLikeGitChanges(descriptionPath, false)
+                            ) : (
+                                <span className="min-w-0 truncate">
+                                    {description}
+                                </span>
+                            )
+                        )}
+                        {diffStats && (
+                            <span className="text-muted-foreground/60 flex-shrink-0">
+                                <span style={{ color: 'var(--status-success)' }}>+{diffStats.added}</span>
+                                {' '}
+                                <span style={{ color: 'var(--status-error)' }}>-{diffStats.removed}</span>
+                            </span>
+                        )}
+                    </div>
+                    {typeof effectiveTimeStart === 'number' ? (
+                        <span className="ml-auto relative flex-shrink-0 tabular-nums text-right">
+                            <span
+                                className={cn(
+                                    'text-muted-foreground/80 transition-opacity duration-150',
+                                    !isMobile && endedTimestampText && 'group-hover/tool:opacity-0'
+                                )}
+                            >
+                                <LiveDuration
+                                    start={effectiveTimeStart}
+                                    end={typeof effectiveTimeEnd === 'number' ? effectiveTimeEnd : undefined}
+                                    active={Boolean(isTaskTool && isActive && typeof effectiveTimeEnd !== 'number')}
+                                />
+                            </span>
+                            {!isMobile && endedTimestampText ? (
+                                <span
+                                    className={cn(
+                                        'pointer-events-none absolute right-0 top-0 whitespace-nowrap text-muted-foreground/70 transition-opacity duration-150',
+                                        'opacity-0 group-hover/tool:opacity-100'
+                                    )}
+                                >
+                                    {endedTimestampText}
+                                </span>
+                            ) : null}
                         </span>
-                    )}
-                    {!justificationText && description && (
-                        <span className={cn("truncate", isMobile && "max-w-[120px]")}>
-                            {description}
-                        </span>
-                    )}
-                    {diffStats && (
-                        <span className="text-muted-foreground/60 flex-shrink-0">
-                            <span style={{ color: 'var(--status-success)' }}>+{diffStats.added}</span>
-                            {' '}
-                            <span style={{ color: 'var(--status-error)' }}>-{diffStats.removed}</span>
-                        </span>
-                    )}
-                    {typeof effectiveTimeStart === 'number' && (
-                        <span className="text-muted-foreground/80 flex-shrink-0 tabular-nums">
-                            <LiveDuration
-                                start={effectiveTimeStart}
-                                end={typeof effectiveTimeEnd === 'number' ? effectiveTimeEnd : undefined}
-                                active={Boolean(isTaskTool && isActive && typeof effectiveTimeEnd !== 'number')}
-                            />
-                        </span>
-                    )}
-                    {endedTimestampText ? (
-                        <span
-                            className={cn(
-                                'text-muted-foreground/70 flex-shrink-0 tabular-nums transition-opacity duration-150',
-                                'opacity-0 group-hover/tool:opacity-100'
-                            )}
-                        >
+                    ) : null}
+                    {typeof effectiveTimeStart !== 'number' && !isMobile && endedTimestampText ? (
+                        <span className="ml-auto text-muted-foreground/70 flex-shrink-0 tabular-nums">
                             {endedTimestampText}
                         </span>
                     ) : null}
@@ -1703,6 +1785,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
                 <TaskToolSummary
                     entries={taskSummaryEntries}
                     isExpanded={isExpanded}
+                    isMobile={isMobile}
                     hasPrevTool={hasPrevTool}
                     hasNextTool={hasNextTool}
                     output={taskOutputString}
