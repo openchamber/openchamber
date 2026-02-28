@@ -19,6 +19,11 @@ const CHANGELOG_URL = 'https://raw.githubusercontent.com/btriapitsyn/openchamber
  * 4. Fall back to npm
  */
 export function detectPackageManager() {
+  const forcedPm = process.env.OPENCHAMBER_PACKAGE_MANAGER?.trim();
+  if (forcedPm && ['npm', 'pnpm', 'yarn', 'bun'].includes(forcedPm) && isCommandAvailable(forcedPm)) {
+    return forcedPm;
+  }
+
   // Strategy 1: Check user agent (most reliable during install)
   const userAgent = process.env.npm_config_user_agent || '';
   let hintedPm = null;
@@ -37,15 +42,17 @@ export function detectPackageManager() {
   }
 
   // Strategy 3: Analyze package location for PM-specific patterns
-  if (!hintedPm) {
-    try {
-      const pkgPath = path.resolve(__dirname, '..', '..');
-      if (pkgPath.includes('.pnpm')) hintedPm = 'pnpm';
-      else if (pkgPath.includes('/.yarn/') || pkgPath.includes('\\.yarn\\')) hintedPm = 'yarn';
-      else if (pkgPath.includes('/.bun/') || pkgPath.includes('\\.bun\\')) hintedPm = 'bun';
-    } catch {
-      // Ignore path resolution errors
+  try {
+    const pkgPath = path.resolve(__dirname, '..', '..');
+    const pmFromPath = detectPackageManagerFromInstallPath(pkgPath);
+    if (pmFromPath && isCommandAvailable(pmFromPath)) {
+      return pmFromPath;
     }
+    if (!hintedPm) {
+      hintedPm = pmFromPath;
+    }
+  } catch {
+    // Ignore path resolution errors
   }
 
   // Validate the hinted PM actually owns the global install.
@@ -54,16 +61,12 @@ export function detectPackageManager() {
     return hintedPm;
   }
 
-  if (isCommandAvailable('npm') && isPackageInstalledWith('npm')) {
-    return 'npm';
-  }
-
   // Strategy 4: Check which PM binaries are available and preferred
   const pmChecks = [
-    { name: 'npm', check: () => isCommandAvailable('npm') },
     { name: 'pnpm', check: () => isCommandAvailable('pnpm') },
     { name: 'yarn', check: () => isCommandAvailable('yarn') },
     { name: 'bun', check: () => isCommandAvailable('bun') },
+    { name: 'npm', check: () => isCommandAvailable('npm') },
   ];
 
   for (const { name, check } of pmChecks) {
@@ -76,6 +79,16 @@ export function detectPackageManager() {
   }
 
   return 'npm';
+}
+
+function detectPackageManagerFromInstallPath(pkgPath) {
+  if (!pkgPath) return null;
+  const normalized = pkgPath.replace(/\\/g, '/').toLowerCase();
+  if (normalized.includes('/.pnpm/') || normalized.includes('/pnpm/')) return 'pnpm';
+  if (normalized.includes('/.yarn/')) return 'yarn';
+  if (normalized.includes('/.bun/') || normalized.includes('/bun/install/')) return 'bun';
+  if (normalized.includes('/node_modules/')) return 'npm';
+  return null;
 }
 
 function isCommandAvailable(command) {

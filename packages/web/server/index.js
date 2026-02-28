@@ -3367,27 +3367,30 @@ const ENV_CONFIGURED_OPENCODE_PORT = (() => {
 const ENV_CONFIGURED_OPENCODE_HOST = (() => {
   const raw = process.env.OPENCODE_HOST?.trim();
   if (!raw) return null;
+
+  const warnInvalidHost = (reason) => {
+    console.warn(`[config] Ignoring OPENCODE_HOST=${JSON.stringify(raw)}: ${reason}`);
+  };
+
   let url;
   try {
     url = new URL(raw);
   } catch {
-    console.error(`[fatal] OPENCODE_HOST is not a valid URL: ${JSON.stringify(raw)}`);
-    process.exit(1);
+    warnInvalidHost('not a valid URL');
+    return null;
   }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    console.error(`[fatal] OPENCODE_HOST must use http or https scheme, got: ${JSON.stringify(url.protocol)}`);
-    process.exit(1);
+    warnInvalidHost(`must use http or https scheme (got ${JSON.stringify(url.protocol)})`);
+    return null;
   }
   const port = parseInt(url.port, 10);
   if (!Number.isFinite(port) || port <= 0) {
-    console.error(`[fatal] OPENCODE_HOST must include an explicit port (e.g. http://hostname:4096), got: ${JSON.stringify(raw)}`);
-    process.exit(1);
+    warnInvalidHost('must include an explicit port (example: http://hostname:4096)');
+    return null;
   }
   if (url.pathname !== '/' || url.search || url.hash) {
-    console.error(
-      `[fatal] OPENCODE_HOST must not include a path, query, or hash; got: ${JSON.stringify(raw)}`
-    );
-    process.exit(1);
+    warnInvalidHost('must not include path, query, or hash');
+    return null;
   }
   return { origin: url.origin, port };
 })();
@@ -7240,19 +7243,39 @@ async function main(options = {}) {
 
       const isWindows = process.platform === 'win32';
 
-      // Build restart command with stored options
-      let restartCmd = `openchamber serve --port ${storedOptions.port} --daemon`;
+      const quotePosix = (value) => `'${String(value).replace(/'/g, "'\\''")}'`;
+      const quoteCmd = (value) => {
+        const stringValue = String(value);
+        return `"${stringValue.replace(/"/g, '""')}"`;
+      };
+
+      // Build restart command using explicit runtime + CLI path.
+      // Avoids relying on `openchamber` being in PATH for service environments.
+      const cliPath = path.resolve(__dirname, '..', 'bin', 'cli.js');
+      const restartParts = [
+        isWindows ? quoteCmd(process.execPath) : quotePosix(process.execPath),
+        isWindows ? quoteCmd(cliPath) : quotePosix(cliPath),
+        'serve',
+        '--port',
+        String(storedOptions.port),
+        '--daemon',
+      ];
+      let restartCmdPrimary = restartParts.join(' ');
+      let restartCmdFallback = `openchamber serve --port ${storedOptions.port} --daemon`;
       if (storedOptions.uiPassword) {
         if (isWindows) {
           // Escape for cmd.exe quoted argument
           const escapedPw = storedOptions.uiPassword.replace(/"/g, '""');
-          restartCmd += ` --ui-password "${escapedPw}"`;
+          restartCmdPrimary += ` --ui-password "${escapedPw}"`;
+          restartCmdFallback += ` --ui-password "${escapedPw}"`;
         } else {
           // Escape for POSIX single-quoted argument
           const escapedPw = storedOptions.uiPassword.replace(/'/g, "'\\''");
-          restartCmd += ` --ui-password '${escapedPw}'`;
+          restartCmdPrimary += ` --ui-password '${escapedPw}'`;
+          restartCmdFallback += ` --ui-password '${escapedPw}'`;
         }
       }
+      const restartCmd = `(${restartCmdPrimary}) || (${restartCmdFallback})`;
 
       // Respond immediately - update will happen after response
       res.json({
@@ -7298,13 +7321,31 @@ async function main(options = {}) {
             fi
           `;
 
-        // Spawn detached shell to run update after we exit
+        // Spawn detached shell to run update after we exit.
+        // Capture output to disk so restart failures are diagnosable.
+        const updateLogPath = path.join(OPENCHAMBER_DATA_DIR, 'update-install.log');
+        let logFd = null;
+        try {
+          fs.mkdirSync(path.dirname(updateLogPath), { recursive: true });
+          logFd = fs.openSync(updateLogPath, 'a');
+        } catch (logError) {
+          console.warn('Failed to open update log file, continuing without log capture:', logError);
+        }
+
         const child = spawnChild(shell, [shellFlag, script], {
           detached: true,
-          stdio: 'ignore',
+          stdio: logFd !== null ? ['ignore', logFd, logFd] : 'ignore',
           env: process.env,
         });
         child.unref();
+
+        if (logFd !== null) {
+          try {
+            fs.closeSync(logFd);
+          } catch {
+            // ignore
+          }
+        }
 
         console.log('Update process spawned, shutting down server...');
 
