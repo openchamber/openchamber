@@ -98,7 +98,7 @@
     },
     "packages/desktop": {
       "name": "@openchamber/desktop",
-      "version": "1.7.5",
+      "version": "1.8.0",
       "devDependencies": {
         "@tauri-apps/cli": "^2",
         "@types/node": "^24.3.1",
@@ -107,7 +107,7 @@
     },
     "packages/ui": {
       "name": "@openchamber/ui",
-      "version": "1.7.5",
+      "version": "1.8.0",
       "dependencies": {
         "@codemirror/autocomplete": "^6.20.0",
         "@codemirror/commands": "^6.10.1",
@@ -162,6 +162,7 @@
         "fuse.js": "^7.1.0",
         "ghostty-web": "^0.4.0",
         "heic2any": "^0.0.4",
+        "html-to-image": "^1.11.13",
         "http-proxy-middleware": "^3.0.5",
         "motion": "^12.23.24",
         "next-themes": "^0.4.6",
@@ -210,7 +211,7 @@
     },
     "packages/vscode": {
       "name": "openchamber",
-      "version": "1.7.5",
+      "version": "1.8.0",
       "dependencies": {
         "@openchamber/ui": "workspace:*",
         "@opencode-ai/sdk": "^1.2.10",
@@ -233,7 +234,7 @@
     },
     "packages/web": {
       "name": "@openchamber/web",
-      "version": "1.7.5",
+      "version": "1.8.0",
       "bin": {
         "openchamber": "./bin/cli.js",
       },
@@ -1858,6 +1859,8 @@
     "highlightjs-vue": ["highlightjs-vue@1.0.0", "", {}, "sha512-PDEfEF102G23vHmPhLyPboFCD+BkMGu+GuJe2d9/eH4FsCwvgBpnc9n0pGE+ffKdph38s6foEZiEjdgHdzp+IA=="],
 
     "hosted-git-info": ["hosted-git-info@4.1.0", "", { "dependencies": { "lru-cache": "^6.0.0" } }, "sha512-kyCuEOWjJqZuDbRHzL8V93NzQhwIB71oFWSyzVo+KPZI+pnQPPxucdkrOZvkLRnrf5URsQM+IJ09Dw29cRALIA=="],
+
+    "html-to-image": ["html-to-image@1.11.13", "", {}, "sha512-cuOPoI7WApyhBElTTb9oqsawRvZ0rHhaHwghRLlTuffoD1B2aDemlCruLeZrUIIdvG7gs9xeELEPm6PhuASqrg=="],
 
     "html-url-attributes": ["html-url-attributes@3.0.1", "", {}, "sha512-ol6UPyBWqsrO6EJySPz2O7ZSr856WDrEzM5zMqp+FJJLGMW35cLYmmZnl0vztAZxRUoNZJFTCohfjuIJ8I4QBQ=="],
 

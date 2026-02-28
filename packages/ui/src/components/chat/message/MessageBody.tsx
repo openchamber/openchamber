@@ -14,7 +14,7 @@ import { isEmptyTextPart, extractTextContent } from './partUtils';
 import { FadeInOnReveal } from './FadeInOnReveal';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { RiCheckLine, RiFileCopyLine, RiChatNewLine, RiArrowGoBackLine, RiGitBranchLine, RiHourglassLine, RiVolumeUpLine, RiStopLine } from '@remixicon/react';
+import { RiCheckLine, RiFileCopyLine, RiChatNewLine, RiArrowGoBackLine, RiGitBranchLine, RiHourglassLine, RiVolumeUpLine, RiStopLine, RiShare2Line, RiLoader4Line } from '@remixicon/react';
 import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
 import type { ContentChangeReason } from '@/hooks/useChatScrollManager';
 
@@ -28,6 +28,8 @@ import { useMessageTTS } from '@/hooks/useMessageTTS';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { TextSelectionMenu } from './TextSelectionMenu';
 import { copyTextToClipboard } from '@/lib/clipboard';
+import { toPng } from 'html-to-image';
+import { toast } from '@/components/ui';
 
 type SubtaskPartLike = Part & {
     type: 'subtask';
@@ -776,6 +778,66 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
         [assistantTextParts, isTTSPlaying, playTTS, stopTTS]
     );
 
+    const [isSharing, setIsSharing] = React.useState(false);
+
+    const handleShareImage = React.useCallback(
+        async (event: React.MouseEvent<HTMLButtonElement>) => {
+            event.stopPropagation();
+            event.preventDefault();
+
+            if (!messageContentRef.current || isSharing) return;
+
+            setIsSharing(true);
+            let wrapper: HTMLDivElement | null = null;
+            try {
+                const originalElement = messageContentRef.current;
+                const computedStyle = window.getComputedStyle(originalElement);
+                const paddingSize = 24;
+
+                wrapper = document.createElement('div');
+                wrapper.style.cssText = `
+                    padding: ${paddingSize}px;
+                    background-color: var(--surface-background);
+                    display: inline-block;
+                `;
+
+                const clone = originalElement.cloneNode(true) as HTMLElement;
+                clone.style.cssText = `
+                    ${computedStyle.cssText}
+                    transform: none;
+                    contain: none;
+                `;
+
+                wrapper.appendChild(clone);
+                document.body.appendChild(wrapper);
+
+                const dataUrl = await toPng(wrapper, {
+                    quality: 1,
+                    pixelRatio: 2,
+                    backgroundColor: 'var(--surface-background)',
+                });
+
+                const link = document.createElement('a');
+                link.download = `message-${messageId}.png`;
+                link.href = dataUrl;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+
+                toast.success('Image saved');
+            } catch (error) {
+                console.error('Failed to generate image:', error);
+                toast.error('Failed to generate image');
+            } finally {
+                if (wrapper && wrapper.parentNode) {
+                    wrapper.parentNode.removeChild(wrapper);
+                }
+                setIsSharing(false);
+            }
+        },
+        [messageId, isSharing]
+    );
+
     React.useEffect(() => {
         return () => {
             clearCopyHintTimeout();
@@ -1159,25 +1221,48 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
                                   <RiFileCopyLine className="h-3.5 w-3.5" />
                               )}
                           </Button>
-                      </TooltipTrigger>
-                      <TooltipContent sideOffset={6}>Copy answer</TooltipContent>
-                  </Tooltip>
-              )}
-              <Tooltip delayDuration={1000}>
-                  <TooltipTrigger asChild>
-                      <Button
-                          type="button"
-                          size="icon"
-                          variant="ghost"
-                          className="h-8 w-8 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-primary/50"
-                          onPointerDown={(event) => event.stopPropagation()}
-                          onClick={handleForkClick}
-                      >
-                          <RiChatNewLine className="h-4 w-4" />
-                      </Button>
-                  </TooltipTrigger>
-                  <TooltipContent sideOffset={6}>Start new session from this answer</TooltipContent>
-              </Tooltip>
+                       </TooltipTrigger>
+                       <TooltipContent sideOffset={6}>Copy answer</TooltipContent>
+                   </Tooltip>
+               )}
+               <Tooltip delayDuration={1000}>
+                   <TooltipTrigger asChild>
+                       <Button
+                           type="button"
+                           size="icon"
+                           variant="ghost"
+                           disabled={isSharing || !hasCopyableText}
+                           className={cn(
+                               'h-8 w-8 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-primary/50',
+                               (!hasCopyableText || isSharing) && 'opacity-50'
+                           )}
+                           onPointerDown={(event) => event.stopPropagation()}
+                           onClick={handleShareImage}
+                       >
+                            {isSharing ? (
+                                <RiLoader4Line className="h-4 w-4 animate-spin" />
+                            ) : (
+                                <RiShare2Line className="h-4 w-4" />
+                            )}
+                        </Button>
+                    </TooltipTrigger>
+                    <TooltipContent sideOffset={6}>{isSharing ? 'Saving image...' : 'Save as image'}</TooltipContent>
+                </Tooltip>
+               <Tooltip delayDuration={1000}>
+                   <TooltipTrigger asChild>
+                       <Button
+                           type="button"
+                           size="icon"
+                           variant="ghost"
+                           className="h-8 w-8 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-primary/50"
+                           onPointerDown={(event) => event.stopPropagation()}
+                           onClick={handleForkClick}
+                       >
+                           <RiChatNewLine className="h-4 w-4" />
+                       </Button>
+                   </TooltipTrigger>
+                   <TooltipContent sideOffset={6}>Start new session from this answer</TooltipContent>
+               </Tooltip>
               <Tooltip delayDuration={1000}>
                   <TooltipTrigger asChild>
                       <Button
