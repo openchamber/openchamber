@@ -516,7 +516,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
                         )}
                       >
                         <span className="typography-ui-label font-normal truncate">{page.title}</span>
-                        {page.slug === 'voice' && (
+                        {(page.slug === 'voice' || page.slug === 'tunnel') && (
                           <span className="shrink-0 typography-micro px-1 rounded leading-none pb-px text-[var(--status-warning)] bg-[var(--status-warning)]/10">
                             beta
                           </span>

@@ -61,6 +61,7 @@ function App({ apis }: AppProps) {
   const [isVSCodeRuntime, setIsVSCodeRuntime] = React.useState<boolean>(() => apis.runtime.isVSCode);
   const [showCliOnboarding, setShowCliOnboarding] = React.useState(false);
   const appReadyDispatchedRef = React.useRef(false);
+  const closePromptInFlightRef = React.useRef(false);
 
   React.useEffect(() => {
     setIsVSCodeRuntime(apis.runtime.isVSCode);
@@ -251,6 +252,76 @@ function App({ apis }: AppProps) {
     void run();
     return () => {
       cancelled = true;
+    };
+  }, []);
+
+  React.useEffect(() => {
+    if (!isTauriShell() || !isDesktopLocalOriginActive()) {
+      return;
+    }
+
+    const handler = () => {
+      if (closePromptInFlightRef.current) {
+        return;
+      }
+      closePromptInFlightRef.current = true;
+
+      const confirmed = window.confirm(
+        'Tunnel is active. Closing OpenChamber will stop remote access. Close app?'
+      );
+
+      if (!confirmed) {
+        closePromptInFlightRef.current = false;
+        return;
+      }
+
+      const tauri = (window as unknown as {
+        __TAURI__?: { core?: { invoke?: (cmd: string, args?: Record<string, unknown>) => Promise<unknown> } };
+      }).__TAURI__;
+
+      void (async () => {
+        try {
+          await fetch('/api/openchamber/tunnel/stop', { method: 'POST' });
+        } catch {
+          // best effort
+        }
+
+        try {
+          await tauri?.core?.invoke?.('desktop_close_current_window');
+        } finally {
+          closePromptInFlightRef.current = false;
+        }
+      })();
+    };
+
+    const tauri = (window as unknown as {
+      __TAURI__?: {
+        event?: {
+          listen?: (event: string, cb: (evt: { payload?: unknown }) => void) => Promise<() => void>;
+        };
+      };
+    }).__TAURI__;
+
+    let unlisten: null | (() => void | Promise<void>) = null;
+    if (typeof tauri?.event?.listen === 'function') {
+      tauri.event.listen('openchamber:desktop-close-requested-active-tunnel', () => {
+        handler();
+      }).then((fn) => {
+        unlisten = fn;
+      }).catch(() => {
+        // ignore
+      });
+    }
+
+    window.addEventListener('openchamber:desktop-close-requested-active-tunnel', handler);
+    return () => {
+      window.removeEventListener('openchamber:desktop-close-requested-active-tunnel', handler);
+      if (unlisten) {
+        const maybePromise = unlisten();
+        if (maybePromise instanceof Promise) {
+          void maybePromise;
+        }
+      }
     };
   }, []);
 

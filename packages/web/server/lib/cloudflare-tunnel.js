@@ -9,6 +9,8 @@ const __dirname = path.dirname(__filename);
 
 const TRY_CF_URL_REGEX = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/i;
 
+const DEFAULT_STARTUP_TIMEOUT_MS = 30000;
+
 async function searchPathFor(command) {
   const pathValue = process.env.PATH || '';
   const segments = pathValue.split(path.delimiter).filter(Boolean);
@@ -86,7 +88,17 @@ Or visit: https://developers.cloudflare.com/cloudflare-one/networks/connectors/c
 `);
 }
 
-export async function startCloudflareTunnel({ originUrl, port }) {
+const spawnCloudflared = (args, envOverrides = {}) => spawn('cloudflared', args, {
+  stdio: ['ignore', 'pipe', 'pipe'],
+  env: {
+    ...process.env,
+    CF_TELEMETRY_DISABLE: '1',
+    ...envOverrides,
+  },
+  killSignal: 'SIGINT',
+});
+
+export async function startCloudflareQuickTunnel({ originUrl }) {
   const cfCheck = await checkCloudflaredAvailable();
 
   if (!cfCheck.available) {
@@ -98,15 +110,7 @@ export async function startCloudflareTunnel({ originUrl, port }) {
 
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-cf-'));
 
-  const child = spawn('cloudflared', ['tunnel', '--url', originUrl], {
-    stdio: ['ignore', 'pipe', 'pipe'],
-    env: {
-      ...process.env,
-      HOME: tempDir,
-      CF_TELEMETRY_DISABLE: '1',
-    },
-    killSignal: 'SIGINT',
-  });
+  const child = spawnCloudflared(['tunnel', '--url', originUrl], { HOME: tempDir });
 
   let publicUrl = null;
   let tunnelReady = false;
@@ -148,7 +152,7 @@ export async function startCloudflareTunnel({ originUrl, port }) {
       if (!publicUrl) {
         reject(new Error('Tunnel URL not received within 30 seconds'));
       }
-    }, 30000);
+    }, DEFAULT_STARTUP_TIMEOUT_MS);
 
     const checkReady = setInterval(() => {
       if (publicUrl) {
@@ -169,6 +173,7 @@ export async function startCloudflareTunnel({ originUrl, port }) {
   });
 
   return {
+    mode: 'quick',
     stop: () => {
       try {
         child.kill('SIGINT');
@@ -179,6 +184,79 @@ export async function startCloudflareTunnel({ originUrl, port }) {
     process: child,
     getPublicUrl: () => publicUrl,
   };
+}
+
+export async function startCloudflareNamedTunnel({ token, hostname }) {
+  const cfCheck = await checkCloudflaredAvailable();
+
+  if (!cfCheck.available) {
+    printCloudflareTunnelInstallHelp();
+    throw new Error('cloudflared is not installed');
+  }
+
+  const normalizedToken = typeof token === 'string' ? token.trim() : '';
+  const normalizedHost = typeof hostname === 'string' ? hostname.trim().toLowerCase() : '';
+
+  if (!normalizedToken) {
+    throw new Error('Named tunnel token is required');
+  }
+  if (!normalizedHost) {
+    throw new Error('Named tunnel hostname is required');
+  }
+
+  const child = spawnCloudflared(['tunnel', 'run', '--token', normalizedToken]);
+  const publicUrl = `https://${normalizedHost}`;
+
+  let exitedEarly = false;
+  let earlyExitCode = null;
+
+  child.stdout.on('data', () => {
+    // Keep stream drained, but avoid logging potentially sensitive output.
+  });
+
+  child.stderr.on('data', (chunk) => {
+    const text = chunk.toString('utf8');
+    process.stderr.write(text);
+  });
+
+  child.on('error', (error) => {
+    console.error(`Cloudflared error: ${error.message}`);
+  });
+
+  await new Promise((resolve, reject) => {
+    const readyTimer = setTimeout(() => {
+      if (exitedEarly) {
+        reject(new Error(`Cloudflared exited early with code ${earlyExitCode ?? 'unknown'}`));
+      } else {
+        resolve(null);
+      }
+    }, 2000);
+
+    child.once('exit', (code) => {
+      exitedEarly = true;
+      earlyExitCode = code;
+      clearTimeout(readyTimer);
+      reject(new Error(`Cloudflared exited with code ${code ?? 'unknown'}`));
+    });
+  });
+
+  return {
+    mode: 'named',
+    stop: () => {
+      try {
+        child.kill('SIGINT');
+      } catch {
+        // Ignore
+      }
+    },
+    process: child,
+    getPublicUrl: () => publicUrl,
+  };
+}
+
+export async function startCloudflareTunnel({ originUrl, port }) {
+  void port;
+  return startCloudflareQuickTunnel({ originUrl });
 }
 
 export function printTunnelWarning() {

@@ -125,6 +125,8 @@ const rateLimitMaxForKey = (key) => {
 export const createTunnelAuth = () => {
   let activeTunnelId = null;
   let activeTunnelHost = null;
+  let activeTunnelMode = null;
+  let activeTunnelPublicUrl = null;
   let bootstrapRecord = null;
 
   const tunnelSessions = new Map();
@@ -181,11 +183,13 @@ export const createTunnelAuth = () => {
     return 1;
   };
 
-  const invalidateTunnelSessions = (tunnelId) => {
+  const invalidateTunnelSessions = (tunnelId, reason = 'tunnel-stopped') => {
+    const revokedAt = nowTs();
     let count = 0;
-    for (const [sessionId, record] of tunnelSessions.entries()) {
-      if (record.tunnelId === tunnelId) {
-        tunnelSessions.delete(sessionId);
+    for (const record of tunnelSessions.values()) {
+      if (record.tunnelId === tunnelId && !record.revokedAt) {
+        record.revokedAt = revokedAt;
+        record.revokedReason = reason;
         count += 1;
       }
     }
@@ -196,12 +200,14 @@ export const createTunnelAuth = () => {
     const revokedBootstrapCount = bootstrapRecord && bootstrapRecord.tunnelId === tunnelId
       ? revokeBootstrapToken()
       : 0;
-    const invalidatedSessionCount = invalidateTunnelSessions(tunnelId);
+    const invalidatedSessionCount = invalidateTunnelSessions(tunnelId, 'tunnel-revoked');
     return { revokedBootstrapCount, invalidatedSessionCount };
   };
 
-  const setActiveTunnel = ({ tunnelId, publicUrl }) => {
+  const setActiveTunnel = ({ tunnelId, publicUrl, mode = null }) => {
     activeTunnelId = tunnelId;
+    activeTunnelMode = mode;
+    activeTunnelPublicUrl = publicUrl || null;
     try {
       activeTunnelHost = normalizeHost(new URL(publicUrl).host);
     } catch {
@@ -215,6 +221,8 @@ export const createTunnelAuth = () => {
     }
     activeTunnelId = null;
     activeTunnelHost = null;
+    activeTunnelMode = null;
+    activeTunnelPublicUrl = null;
     bootstrapRecord = null;
   };
 
@@ -334,8 +342,13 @@ export const createTunnelAuth = () => {
     if (!session) {
       return null;
     }
+    if (session.revokedAt) {
+      return null;
+    }
     if (session.expiresAt <= nowTs()) {
-      tunnelSessions.delete(token);
+      if (!session.expiredAt) {
+        session.expiredAt = nowTs();
+      }
       return null;
     }
     if (session.tunnelId !== activeTunnelId) {
@@ -409,9 +422,14 @@ export const createTunnelAuth = () => {
     tunnelSessions.set(sessionId, {
       sessionId,
       tunnelId: activeTunnelId,
+      mode: activeTunnelMode,
+      publicUrl: activeTunnelPublicUrl,
       createdAt,
       lastSeenAt: createdAt,
       expiresAt,
+      revokedAt: null,
+      revokedReason: null,
+      expiredAt: null,
     });
 
     setTunnelSessionCookie(req, res, sessionId, sessionTtlMs);
@@ -420,6 +438,38 @@ export const createTunnelAuth = () => {
       ok: true,
       sessionExpiresAt: expiresAt,
     };
+  };
+
+  const listTunnelSessions = () => {
+    const now = nowTs();
+
+    const sessions = [];
+    for (const record of tunnelSessions.values()) {
+      const isExpired = record.expiresAt <= now;
+      if (isExpired && !record.expiredAt) {
+        record.expiredAt = now;
+      }
+
+      const active = !record.revokedAt && !isExpired && record.tunnelId === activeTunnelId;
+      const status = active ? 'active' : 'inactive';
+      const inactiveReason = record.revokedAt ? (record.revokedReason || 'revoked') : (isExpired ? 'expired' : 'inactive');
+
+      sessions.push({
+        sessionId: record.sessionId,
+        tunnelId: record.tunnelId,
+        mode: record.mode,
+        publicUrl: record.publicUrl,
+        createdAt: record.createdAt,
+        lastSeenAt: record.lastSeenAt,
+        expiresAt: record.expiresAt,
+        revokedAt: record.revokedAt,
+        status,
+        inactiveReason: status === 'inactive' ? inactiveReason : null,
+      });
+    }
+
+    sessions.sort((a, b) => b.createdAt - a.createdAt);
+    return sessions;
   };
 
   return {
@@ -432,8 +482,10 @@ export const createTunnelAuth = () => {
     requireTunnelSession,
     getTunnelSessionFromRequest,
     exchangeBootstrapToken,
+    listTunnelSessions,
     clearTunnelSessionCookie,
     getActiveTunnelId: () => activeTunnelId,
     getActiveTunnelHost: () => activeTunnelHost,
+    getActiveTunnelMode: () => activeTunnelMode,
   };
 };
