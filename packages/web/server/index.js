@@ -6219,7 +6219,7 @@ async function main(options = {}) {
       }
 
       // Dynamically import the TTS service (ESM)
-      const { ttsService } = await import('./lib/tts-service.js');
+      const { ttsService } = await import('./lib/tts/index.js');
 
       // Check availability - either server-configured or client-provided API key
       const hasServerKey = ttsService.isAvailable();
@@ -6236,7 +6236,7 @@ async function main(options = {}) {
       // Optionally summarize long text before speaking using zen API
       if (summarize && textToSpeak.length > threshold) {
         try {
-          const { summarizeText } = await import('./lib/summarization-service.js');
+          const { summarizeText } = await import('./lib/tts/index.js');
           const speakZenModel = await resolveZenModel(typeof req.body?.zenModel === 'string' ? req.body.zenModel : undefined);
           const result = await summarizeText({ text: textToSpeak, threshold, maxLength, zenModel: speakZenModel });
           
@@ -6296,7 +6296,7 @@ async function main(options = {}) {
   });
 
   // Import summarization service
-  const { summarizeText, sanitizeForTTS } = await import('./lib/summarization-service.js');
+  const { summarizeText, sanitizeForTTS } = await import('./lib/tts/index.js');
 
   app.post('/api/tts/summarize', async (req, res) => {
     try {
@@ -6321,7 +6321,7 @@ async function main(options = {}) {
   // TTS status endpoint
   app.get('/api/tts/status', async (_req, res) => {
     try {
-      const { ttsService } = await import('./lib/tts-service.js');
+      const { ttsService } = await import('./lib/tts/index.js');
       res.json({
         available: ttsService.isAvailable(),
         voices: [
