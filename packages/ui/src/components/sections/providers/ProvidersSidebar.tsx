@@ -8,6 +8,7 @@ import { RiAddLine, RiStackLine } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import { SettingsProjectSelector } from '@/components/sections/shared/SettingsProjectSelector';
 import { opencodeClient } from '@/lib/opencode/client';
+import { useLanguage } from '@/hooks/useLanguage';
 
 const ADD_PROVIDER_ID = '__add_provider__';
 
@@ -36,6 +37,7 @@ interface ProvidersSidebarProps {
 }
 
 export const ProvidersSidebar: React.FC<ProvidersSidebarProps> = ({ onItemSelect }) => {
+  const { t } = useLanguage();
   const providers = useConfigStore((state) => state.providers);
   const selectedProviderId = useConfigStore((state) => state.selectedProviderId);
   const setSelectedProvider = useConfigStore((state) => state.setSelectedProvider);
@@ -106,10 +108,10 @@ export const ProvidersSidebar: React.FC<ProvidersSidebarProps> = ({ onItemSelect
   return (
     <div className={cn('flex h-full flex-col', bgClass)}>
       <div className="border-b px-3 pt-4 pb-3">
-        <h2 className="text-base font-semibold text-foreground mb-3">Providers</h2>
+        <h2 className="text-base font-semibold text-foreground mb-3">{t('providersSidebar.title')}</h2>
         <SettingsProjectSelector className="mb-3" />
         <div className="flex items-center justify-between gap-2">
-          <span className="typography-meta text-muted-foreground">Total {providers.length}</span>
+          <span className="typography-meta text-muted-foreground">{t('providersSidebar.total', { count: providers.length })}</span>
           <ButtonSmall
             variant="ghost"
             className="h-7 w-7 px-0 -my-1 text-muted-foreground"
@@ -117,8 +119,8 @@ export const ProvidersSidebar: React.FC<ProvidersSidebarProps> = ({ onItemSelect
               setSelectedProvider(ADD_PROVIDER_ID);
               onItemSelect?.();
             }}
-            aria-label="Connect provider"
-            title="Connect provider"
+            aria-label={t('providersSidebar.connectProvider')}
+            title={t('providersSidebar.connectProvider')}
           >
             <RiAddLine className="h-3.5 w-3.5" />
           </ButtonSmall>
@@ -129,15 +131,15 @@ export const ProvidersSidebar: React.FC<ProvidersSidebarProps> = ({ onItemSelect
         {providers.length === 0 ? (
           <div className="py-12 px-4 text-center text-muted-foreground">
             <RiStackLine className="mx-auto mb-3 h-10 w-10 opacity-50" />
-            <p className="typography-ui-label font-medium">No providers found</p>
-            <p className="typography-meta mt-1 opacity-75">Check your OpenCode configuration</p>
+            <p className="typography-ui-label font-medium">{t('providersSidebar.emptyTitle')}</p>
+            <p className="typography-meta mt-1 opacity-75">{t('providersSidebar.emptyDescription')}</p>
           </div>
         ) : (
           <>
             {userProviders.length > 0 && (
               <>
                 <div className="px-2 pb-1.5 pt-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  User Providers
+                  {t('providersSidebar.userProviders')}
                 </div>
                 {userProviders.map((provider) => (
                   <ProviderListItem
@@ -156,7 +158,7 @@ export const ProvidersSidebar: React.FC<ProvidersSidebarProps> = ({ onItemSelect
             {projectProviders.length > 0 && (
               <>
                 <div className={cn('px-2 pb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground', userProviders.length > 0 ? 'pt-3' : 'pt-2')}>
-                  Project Providers
+                  {t('providersSidebar.projectProviders')}
                 </div>
                 {projectProviders.map((provider) => (
                   <ProviderListItem

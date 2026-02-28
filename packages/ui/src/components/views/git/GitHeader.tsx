@@ -25,6 +25,7 @@ import { BranchSelector } from './BranchSelector';
 import { WorktreeBranchDisplay } from './WorktreeBranchDisplay';
 import { SyncActions } from './SyncActions';
 import type { GitStatus, GitIdentityProfile, GitRemote } from '@/lib/api/types';
+import { useLanguage } from '@/hooks/useLanguage';
 import { useUIStore } from '@/stores/useUIStore';
 
 type SyncAction = 'fetch' | 'pull' | 'push' | null;
@@ -116,6 +117,7 @@ const IdentityDropdown: React.FC<IdentityDropdownProps> = ({
   tooltipDelayMs = 1000,
   iconOnly = false,
 }) => {
+  const { t } = useLanguage();
   const isDisabled = isApplying || identities.length === 0;
 
   return (
@@ -141,20 +143,20 @@ const IdentityDropdown: React.FC<IdentityDropdownProps> = ({
               )}
               {!iconOnly && (
                 <span className="git-identity-label min-w-0 flex-1 truncate text-left">
-                  {activeProfile?.name || 'No identity'}
+                  {activeProfile?.name || t('gitView.noIdentity')}
                 </span>
               )}
               <RiArrowDownSLine className="size-4 opacity-60" />
             </Button>
           </DropdownMenuTrigger>
         </TooltipTrigger>
-        <TooltipContent sideOffset={8}>Git identity</TooltipContent>
+        <TooltipContent sideOffset={8}>{t('gitView.gitIdentity')}</TooltipContent>
       </Tooltip>
       <DropdownMenuContent align="end" className="w-64">
         {identities.length === 0 ? (
           <div className="px-2 py-1.5">
             <p className="typography-meta text-muted-foreground">
-              No profiles available to apply.
+              {t('gitView.noProfilesAvailableToApply')}
             </p>
           </div>
         ) : (
@@ -211,6 +213,7 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
   onOpenHistory,
   onOpenBranchPicker,
 }) => {
+  const { t } = useLanguage();
   const isMobile = useUIStore((state) => state.isMobile);
 
   if (!status) {
@@ -231,10 +234,10 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
               onClick={onOpenBranchPicker}
             >
               <RiGitRepositoryLine className="size-4" />
-              {!isSidebarMode && <span className="git-header-label">Manage branches</span>}
+              {!isSidebarMode && <span className="git-header-label">{t('gitView.manageBranches')}</span>}
             </Button>
           </TooltipTrigger>
-          <TooltipContent sideOffset={8}>Manage branches</TooltipContent>
+          <TooltipContent sideOffset={8}>{t('gitView.manageBranches')}</TooltipContent>
         </Tooltip>
       ) : null}
 
@@ -248,10 +251,10 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
               onClick={onOpenHistory}
             >
               <RiHistoryLine className="size-4" />
-              {!isSidebarMode && <span className="git-header-label">History</span>}
+              {!isSidebarMode && <span className="git-header-label">{t('historySection.history')}</span>}
             </Button>
           </TooltipTrigger>
-          <TooltipContent sideOffset={8}>History</TooltipContent>
+          <TooltipContent sideOffset={8}>{t('historySection.history')}</TooltipContent>
         </Tooltip>
       ) : null}
     </div>

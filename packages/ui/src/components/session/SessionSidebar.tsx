@@ -99,6 +99,7 @@ import { ProjectNotesTodoPanel } from './ProjectNotesTodoPanel';
 import { BranchPickerDialog } from './BranchPickerDialog';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { SessionFolderItem } from './SessionFolderItem';
+import { useLanguage } from '@/hooks/useLanguage';
 
 const ATTENTION_DIAMOND_INDICES = new Set([1, 3, 4, 5, 7]);
 
@@ -741,6 +742,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   hideProjectSelector = true,
   showOnlyMainWorkspace = false,
 }) => {
+  const { t } = useLanguage();
   const [editingId, setEditingId] = React.useState<string | null>(null);
   const [editTitle, setEditTitle] = React.useState('');
   const [editingProjectId, setEditingProjectId] = React.useState<string | null>(null);
@@ -2217,7 +2219,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                   onChange={(event) => setEditTitle(event.target.value)}
                   className="flex-1 min-w-0 bg-transparent typography-ui-label outline-none placeholder:text-muted-foreground"
                   autoFocus
-                  placeholder="Rename session"
+                  placeholder={t('sessionSidebar.renameSession')}
                   onKeyDown={(event) => {
                     if (event.key === 'Escape') {
                       event.stopPropagation();
@@ -2322,7 +2324,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                       {isStreaming ? (
                         <GridLoader size="xs" className="text-primary" />
                       ) : (
-                        <span className="grid grid-cols-3 gap-[1px] text-[var(--status-info)]" aria-label="Unread updates" title="Unread updates">
+                        <span className="grid grid-cols-3 gap-[1px] text-[var(--status-info)]" aria-label={t('sessionSidebar.unreadUpdates')} title={t('sessionSidebar.unreadUpdates')}>
                           {Array.from({ length: 9 }, (_, i) => (
                             ATTENTION_DIAMOND_INDICES.has(i) ? (
                               <span
@@ -2339,7 +2341,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                     </span>
                   ) : null}
                   {isPinnedSession ? (
-                    <RiPushpinLine className="h-3 w-3 flex-shrink-0 text-primary" aria-label="Pinned session" />
+                    <RiPushpinLine className="h-3 w-3 flex-shrink-0 text-primary" aria-label={t('sessionSidebar.pinnedSession')} />
                   ) : null}
                   <div className="block min-w-0 flex-1 truncate typography-ui-label font-normal text-foreground">
                     {sessionTitle}
@@ -2348,8 +2350,8 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                   {pendingPermissionCount > 0 ? (
                     <span
                       className="inline-flex items-center gap-1 rounded bg-destructive/10 px-1 py-0.5 text-[0.7rem] text-destructive flex-shrink-0"
-                      title="Permission required"
-                      aria-label="Permission required"
+                      title={t('sessionSidebar.permissionRequired')}
+                      aria-label={t('sessionSidebar.permissionRequired')}
                     >
                       <RiShieldLine className="h-3 w-3" />
                       <span className="leading-none">{pendingPermissionCount}</span>
@@ -2375,7 +2377,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                         }
                       }}
                       className="inline-flex items-center justify-center text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 flex-shrink-0 rounded-sm"
-                      aria-label={isExpanded ? 'Collapse subsessions' : 'Expand subsessions'}
+                      aria-label={isExpanded ? t('sessionSidebar.collapseSubsessions') : t('sessionSidebar.expandSubsessions')}
                     >
                       {isExpanded ? (
                         <RiArrowDownSLine className="h-3 w-3" />
@@ -2420,7 +2422,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                         'inline-flex h-3.5 w-[18px] items-center justify-center rounded-md text-muted-foreground transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
                         mobileVariant ? 'opacity-70' : 'opacity-0 group-hover:opacity-100',
                       )}
-                      aria-label="Session menu"
+                      aria-label={t('sessionSidebar.sessionMenu')}
                       onClick={(event) => event.stopPropagation()}
                       onKeyDown={(event) => event.stopPropagation()}
                     >
@@ -2605,6 +2607,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       removeSessionFromFolder,
       createFolderAndStartRename,
       notifyOnSubtasks,
+      t,
     ],
   );
 
@@ -3060,7 +3063,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                     className="gap-2"
                   >
                     <RiPencilAiLine className="h-4 w-4" />
-                    Rename project
+                    {t('sessionSidebar.renameProject')}
                   </DropdownMenuItem>
                 ) : (
                   <div className="px-2 py-1.5">
@@ -3075,7 +3078,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                         value={projectRenameDraft}
                         onChange={(event) => setProjectRenameDraft(event.target.value)}
                         className="h-7 flex-1 rounded border border-border bg-transparent px-2 typography-ui-label text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-                        placeholder="Rename project"
+                        placeholder={t('sessionSidebar.renameProject')}
                         autoFocus
                         onKeyDown={(event) => {
                           if (event.key === 'Escape') {
@@ -3119,8 +3122,8 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
               type="button"
               onClick={handleOpenDirectoryDialog}
               className={addProjectButtonClass}
-              aria-label="Add project"
-              title="Add project"
+              aria-label={t('navigation.addProject')}
+              title={t('navigation.addProject')}
             >
               <RiFolderAddLine className={headerActionIconClass} />
             </button>
@@ -3154,12 +3157,12 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                       openNewSessionDraft({ directoryOverride: newWorktreePath });
                     }}
                     className={headerActionButtonClass}
-                    aria-label="New worktree"
+                    aria-label={t('sessionSidebar.newWorktree')}
                   >
                     <RiNodeTree className={headerActionIconClass} />
                   </button>
                 </TooltipTrigger>
-                <TooltipContent side="bottom" sideOffset={4}><p>New worktree</p></TooltipContent>
+                <TooltipContent side="bottom" sideOffset={4}><p>{t('sessionSidebar.newWorktree')}</p></TooltipContent>
               </Tooltip>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -3167,12 +3170,12 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                     type="button"
                     onClick={() => setIssuePickerOpen(true)}
                     className={headerActionButtonClass}
-                    aria-label="New from issue"
+                    aria-label={t('sessionSidebar.newFromIssue')}
                   >
                     <RiGithubLine className={headerActionIconClass} />
                   </button>
                 </TooltipTrigger>
-                <TooltipContent side="bottom" sideOffset={4}><p>New from issue</p></TooltipContent>
+                <TooltipContent side="bottom" sideOffset={4}><p>{t('sessionSidebar.newFromIssue')}</p></TooltipContent>
               </Tooltip>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -3180,12 +3183,12 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                     type="button"
                     onClick={() => setPullRequestPickerOpen(true)}
                     className={headerActionButtonClass}
-                    aria-label="New from PR"
+                    aria-label={t('sessionSidebar.newFromPr')}
                   >
                     <RiGitPullRequestLine className={headerActionIconClass} />
                   </button>
                 </TooltipTrigger>
-                <TooltipContent side="bottom" sideOffset={4}><p>New from PR</p></TooltipContent>
+                <TooltipContent side="bottom" sideOffset={4}><p>{t('sessionSidebar.newFromPr')}</p></TooltipContent>
               </Tooltip>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -3193,12 +3196,12 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                     type="button"
                     onClick={openMultiRunLauncher}
                     className={headerActionButtonClass}
-                    aria-label="New multi-run"
+                    aria-label={t('sessionSidebar.newMultiRun')}
                   >
                     <ArrowsMerge className={headerActionIconClass} />
                   </button>
                 </TooltipTrigger>
-                <TooltipContent side="bottom" sideOffset={4}><p>New multi-run</p></TooltipContent>
+                <TooltipContent side="bottom" sideOffset={4}><p>{t('sessionSidebar.newMultiRun')}</p></TooltipContent>
               </Tooltip>
                 </>
               ) : null}
@@ -3209,12 +3212,12 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                       type="button"
                       onClick={() => setIsBranchPickerOpen(true)}
                       className={headerActionButtonClass}
-                      aria-label="Manage branches"
+                      aria-label={t('sessionSidebar.manageBranches')}
                     >
                       <RiGitRepositoryLine className={headerActionIconClass} />
                     </button>
                   </TooltipTrigger>
-                  <TooltipContent side="bottom" sideOffset={4}><p>Manage branches</p></TooltipContent>
+                  <TooltipContent side="bottom" sideOffset={4}><p>{t('sessionSidebar.manageBranches')}</p></TooltipContent>
                 </Tooltip>
               ) : null}
               {useMobileNotesPanel ? (
@@ -3224,12 +3227,12 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                       type="button"
                       onClick={() => setProjectNotesPanelOpen(true)}
                       className={headerActionButtonClass}
-                      aria-label="Project notes and todos"
+                      aria-label={t('sessionSidebar.projectNotesAndTodos')}
                     >
                       <RiStickyNoteLine className={headerActionIconClass} />
                     </button>
                   </TooltipTrigger>
-                  <TooltipContent side="bottom" sideOffset={4}><p>Project notes</p></TooltipContent>
+                  <TooltipContent side="bottom" sideOffset={4}><p>{t('sessionSidebar.projectNotes')}</p></TooltipContent>
                 </Tooltip>
               ) : (
                 <DropdownMenu open={projectNotesPanelOpen} onOpenChange={setProjectNotesPanelOpen} modal={false}>
@@ -3239,13 +3242,13 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                         <button
                           type="button"
                           className={headerActionButtonClass}
-                          aria-label="Project notes and todos"
+                          aria-label={t('sessionSidebar.projectNotesAndTodos')}
                         >
                           <RiStickyNoteLine className={headerActionIconClass} />
                         </button>
                       </DropdownMenuTrigger>
                     </TooltipTrigger>
-                    <TooltipContent side="bottom" sideOffset={4}><p>Project notes</p></TooltipContent>
+                    <TooltipContent side="bottom" sideOffset={4}><p>{t('sessionSidebar.projectNotes')}</p></TooltipContent>
                   </Tooltip>
                   <DropdownMenuContent align="start" className="w-[340px] p-0">
                     <ProjectNotesTodoPanel
@@ -3467,7 +3470,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         <MobileOverlayPanel
           open={projectNotesPanelOpen}
           onClose={() => setProjectNotesPanelOpen(false)}
-          title="Project notes"
+          title={t('sessionSidebar.projectNotes')}
         >
           <ProjectNotesTodoPanel
             projectRef={activeProjectRefForHeader}

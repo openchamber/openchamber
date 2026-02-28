@@ -26,6 +26,7 @@ import {
   setDirectoryShowHidden,
   useDirectoryShowHidden,
 } from '@/lib/directoryShowHidden';
+import { useLanguage } from '@/hooks/useLanguage';
 
 interface DirectoryExplorerDialogProps {
   open: boolean;
@@ -36,6 +37,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
   open,
   onOpenChange,
 }) => {
+  const { t } = useLanguage();
   const { currentDirectory, homeDirectory, isHomeReady } = useDirectoryStore();
   const { addProject, getActiveProject } = useProjectsStore();
   const [pendingPath, setPendingPath] = React.useState<string | null>(null);
@@ -215,16 +217,16 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
       ) : (
         <RiCheckboxBlankLine className="h-4 w-4" />
       )}
-      Show hidden
+      {t('directoryExplorer.showHidden')}
     </button>
   );
 
   const dialogHeader = (
     <DialogHeader className="flex-shrink-0 px-4 pb-2 pt-[calc(var(--oc-safe-area-top,0px)+0.5rem)] sm:px-0 sm:pb-3 sm:pt-0">
-      <DialogTitle>Add project directory</DialogTitle>
+      <DialogTitle>{t('directoryExplorer.addProjectDirectory')}</DialogTitle>
       <div className="hidden sm:flex sm:items-center sm:justify-between sm:gap-4">
         <DialogDescription className="flex-1">
-          Choose a folder to add as a project.
+          {t('directoryExplorer.chooseFolderToAddProject')}
         </DialogDescription>
         {showHiddenToggle}
       </div>
@@ -237,7 +239,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
         value={pathInputValue}
         onChange={handlePathInputChange}
         onKeyDown={handlePathInputKeyDown}
-        placeholder="Enter path or select from tree..."
+        placeholder={t('directoryExplorer.enterPathOrSelect')}
         className="font-mono typography-meta"
         spellCheck={false}
         autoComplete="off"
@@ -311,14 +313,14 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
         disabled={isConfirming}
         className="flex-1 sm:flex-none sm:w-auto"
       >
-        Cancel
+        {t('common.cancel')}
       </Button>
       <Button
         onClick={handleConfirm}
         disabled={isConfirming || !hasUserSelection || (!pendingPath && !pathInputValue.trim())}
         className="flex-1 sm:flex-none sm:w-auto sm:min-w-[140px]"
       >
-        {isConfirming ? 'Adding...' : 'Add Project'}
+        {isConfirming ? t('directoryExplorer.adding') : t('navigation.addProject')}
       </Button>
     </>
   );
@@ -328,7 +330,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
       <MobileOverlayPanel
         open={open}
         onClose={() => onOpenChange(false)}
-        title="Add project directory"
+        title={t('directoryExplorer.addProjectDirectory')}
         className="max-w-full"
         contentMaxHeightClassName="max-h-[min(70vh,520px)] h-[min(70vh,520px)]"
         footer={<div className="flex flex-row gap-2">{renderActionButtons()}</div>}

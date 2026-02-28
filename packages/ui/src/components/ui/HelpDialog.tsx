@@ -32,6 +32,7 @@ import {
   getModifierLabel,
   formatShortcutForDisplay,
 } from "@/lib/shortcuts";
+import { useLanguage } from "@/hooks/useLanguage";
 
 type ShortcutIcon = React.ComponentType<{ className?: string }>;
 
@@ -53,162 +54,167 @@ const renderShortcut = (id: string, fallbackCombo: string, overrides: Record<str
 };
 
 export const HelpDialog: React.FC = () => {
+  const { t } = useLanguage();
   const { isHelpDialogOpen, setHelpDialogOpen, shortcutOverrides } = useUIStore();
   const settingsAutoCreateWorktree = useConfigStore((state) => state.settingsAutoCreateWorktree);
   const mod = getModifierLabel();
 
   const shortcuts: ShortcutSection[] = [
     {
-      category: "Navigation & Commands",
+      category: t('keyboardShortcutsDialog.sections.navigationCommands'),
       items: [
         {
           id: 'open_command_palette',
-          description: "Open Command Palette",
+          description: t('keyboardShortcutsDialog.items.openCommandPalette'),
           icon: RiCommandLine,
           keys: '',
         },
         {
           id: 'open_help',
-          description: "Show Keyboard Shortcuts (this dialog)",
+          description: t('keyboardShortcutsDialog.items.showKeyboardShortcuts'),
           icon: RiQuestionLine,
           keys: '',
         },
         {
           id: 'toggle_sidebar',
-          description: "Toggle Session Sidebar",
+          description: t('keyboardShortcutsDialog.items.toggleSessionSidebar'),
           icon: RiLayoutLeftLine,
           keys: '',
         },
         {
           keys: ["Tab"],
-          description: "Cycle Agent (chat input)",
+          description: t('keyboardShortcutsDialog.items.cycleAgent'),
           icon: RiAiAgentLine,
         },
         {
           id: 'open_model_selector',
-          description: "Open Model Selector",
+          description: t('keyboardShortcutsDialog.items.openModelSelector'),
           icon: RiAiGenerate2,
           keys: '',
         },
         {
           id: 'cycle_thinking_variant',
-          description: "Cycle Thinking Variant",
+          description: t('keyboardShortcutsDialog.items.cycleThinkingVariant'),
           icon: RiBrainAi3Line,
           keys: '',
         },
         {
           keys: [`Shift + Alt + ${mod} + N`],
-          description: "New Window (desktop only)",
+          description: t('keyboardShortcutsDialog.items.newWindowDesktopOnly'),
           icon: RiWindowLine,
         },
       ],
     },
     {
-      category: "Session Management",
+      category: t('keyboardShortcutsDialog.sections.sessionManagement'),
       items: [
         {
           id: 'new_chat',
-          description: settingsAutoCreateWorktree ? "Create New Session in Worktree" : "Create New Session",
+          description: settingsAutoCreateWorktree
+            ? t('keyboardShortcutsDialog.items.createNewSessionInWorktree')
+            : t('keyboardShortcutsDialog.items.createNewSession'),
           icon: settingsAutoCreateWorktree ? RiGitBranchLine : RiAddLine,
           keys: '',
         },
         {
           id: 'new_chat_worktree',
-          description: settingsAutoCreateWorktree ? "Create New Session" : "Create New Session in Worktree",
+          description: settingsAutoCreateWorktree
+            ? t('keyboardShortcutsDialog.items.createNewSession')
+            : t('keyboardShortcutsDialog.items.createNewSessionInWorktree'),
           icon: settingsAutoCreateWorktree ? RiAddLine : RiGitBranchLine,
           keys: '',
         },
-        { id: 'focus_input', description: "Focus Chat Input", icon: RiText, keys: '' },
+        { id: 'focus_input', description: t('keyboardShortcutsDialog.items.focusChatInput'), icon: RiText, keys: '' },
         {
           id: 'abort_run',
-          description: "Abort active run (double press)",
+          description: t('keyboardShortcutsDialog.items.abortActiveRun'),
           icon: RiCloseCircleLine,
           keys: '',
         },
       ],
     },
     {
-      category: "Panels",
+      category: t('keyboardShortcutsDialog.sections.panels'),
       items: [
         {
           id: 'toggle_right_sidebar',
-          description: 'Toggle Right Sidebar',
+          description: t('keyboardShortcutsDialog.items.toggleRightSidebar'),
           icon: RiLayoutRightLine,
           keys: '',
         },
         {
           id: 'open_right_sidebar_git',
-          description: 'Open Right Sidebar Git Tab',
+          description: t('keyboardShortcutsDialog.items.openRightSidebarGitTab'),
           icon: RiGitBranchLine,
           keys: '',
         },
         {
           id: 'open_right_sidebar_files',
-          description: 'Open Right Sidebar Files Tab',
+          description: t('keyboardShortcutsDialog.items.openRightSidebarFilesTab'),
           icon: RiLayoutRightLine,
           keys: '',
         },
         {
           id: 'cycle_right_sidebar_tab',
-          description: 'Cycle Right Sidebar Tab',
+          description: t('keyboardShortcutsDialog.items.cycleRightSidebarTab'),
           icon: RiLayoutRightLine,
           keys: '',
         },
         {
           id: 'toggle_terminal',
-          description: 'Toggle Terminal Dock',
+          description: t('keyboardShortcutsDialog.items.toggleTerminalDock'),
           icon: RiWindowLine,
           keys: '',
         },
         {
           id: 'toggle_terminal_expanded',
-          description: 'Toggle Terminal Expanded',
+          description: t('keyboardShortcutsDialog.items.toggleTerminalExpanded'),
           icon: RiWindowLine,
           keys: '',
         },
         {
           id: 'toggle_context_plan',
-          description: 'Toggle Plan Context Panel',
+          description: t('keyboardShortcutsDialog.items.togglePlanContextPanel'),
           icon: RiTimeLine,
           keys: '',
         },
       ],
     },
     {
-      category: "Interface",
+      category: t('keyboardShortcutsDialog.sections.interface'),
       items: [
         {
           id: 'cycle_theme',
-          description: "Cycle Theme (Light → Dark → System)",
+          description: t('keyboardShortcutsDialog.items.cycleTheme'),
           icon: RiPaletteLine,
           keys: '',
         },
         {
           keys: [`${mod} + 1...9`],
-          description: "Switch Project",
+          description: t('keyboardShortcutsDialog.items.switchProject'),
           icon: RiLayoutLeftLine,
         },
         {
           id: 'open_timeline',
-          description: "Open Timeline",
+          description: t('keyboardShortcutsDialog.items.openTimeline'),
           icon: RiTimeLine,
           keys: '',
         },
         {
           id: 'toggle_services_menu',
-          description: 'Toggle Services Menu',
+          description: t('keyboardShortcutsDialog.items.toggleServicesMenu'),
           icon: RiStackLine,
           keys: '',
         },
         {
           id: 'cycle_services_tab',
-          description: 'Cycle Services Tab',
+          description: t('keyboardShortcutsDialog.items.cycleServicesTab'),
           icon: RiStackLine,
           keys: '',
         },
         {
           id: 'open_settings',
-          description: "Open Settings",
+          description: t('keyboardShortcutsDialog.items.openSettings'),
           icon: RiSettings3Line,
           keys: '',
         },
@@ -222,10 +228,10 @@ export const HelpDialog: React.FC = () => {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <RiSettings3Line className="h-5 w-5" />
-            Keyboard Shortcuts
+            {t('keyboardShortcutsDialog.title')}
           </DialogTitle>
           <DialogDescription>
-            Use these keyboard shortcuts to navigate OpenChamber efficiently
+            {t('keyboardShortcutsDialog.description')}
           </DialogDescription>
         </DialogHeader>
 
@@ -260,7 +266,7 @@ export const HelpDialog: React.FC = () => {
                             <React.Fragment key={`${keyCombo}-${i}`}>
                               {i > 0 && (
                                 <span className="typography-meta text-muted-foreground mx-1">
-                                  or
+                                  {t('keyboardShortcutsDialog.connector.or')}
                                 </span>
                               )}
                               <kbd className="inline-flex items-center gap-1 px-1.5 py-0.5 typography-meta font-mono bg-muted rounded border border-border/20">
@@ -281,17 +287,18 @@ export const HelpDialog: React.FC = () => {
             <div className="flex items-start gap-2">
               <RiQuestionLine className="h-3.5 w-3.5 text-muted-foreground mt-0.5" />
               <div className="typography-meta text-muted-foreground">
-                <p className="font-medium mb-1">Pro Tips:</p>
+                <p className="font-medium mb-1">{t('keyboardShortcutsDialog.proTips.title')}</p>
                 <ul className="space-y-0.5 typography-meta">
                   <li>
-                    • Use Command Palette ({renderShortcut('open_command_palette', `${mod} K`, shortcutOverrides)}) to quickly access all
-                    actions
+                    • {t('keyboardShortcutsDialog.proTips.useCommandPalette', {
+                      shortcut: renderShortcut('open_command_palette', `${mod} K`, shortcutOverrides),
+                    })}
                   </li>
                   <li>
-                    • The 5 most recent sessions appear in the Command Palette
+                    • {t('keyboardShortcutsDialog.proTips.recentSessionsInPalette')}
                   </li>
                   <li>
-                    • Theme cycling remembers your preference across sessions
+                    • {t('keyboardShortcutsDialog.proTips.themeCyclingPersists')}
                   </li>
                 </ul>
               </div>

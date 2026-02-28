@@ -36,9 +36,15 @@ import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import type { RuntimeAPIs } from '@/lib/api/types';
 import { TooltipProvider } from '@/components/ui/tooltip';
 
+
 const CLI_MISSING_ERROR_REGEX =
   /ENOENT|spawn\s+opencode|Unable\s+to\s+locate\s+the\s+opencode\s+CLI|OpenCode\s+CLI\s+not\s+found|opencode(\.exe)?\s+not\s+found|opencode(\.exe)?:\s*command\s+not\s+found|not\s+recognized\s+as\s+an\s+internal\s+or\s+external\s+command|env:\s*['"]?(node|bun)['"]?:\s*No\s+such\s+file\s+or\s+directory|(node|bun):\s*No\s+such\s+file\s+or\s+directory/i;
 const CLI_ONBOARDING_HEALTH_POLL_MS = 1500;
+
+
+
+
+import { LanguageProvider } from '@/contexts/LanguageContext';
 
 const AboutDialogWrapper: React.FC = () => {
   const { isAboutDialogOpen, setAboutDialogOpen } = useUIStore();
@@ -279,9 +285,11 @@ function App({ apis }: AppProps) {
   if (showCliOnboarding) {
     return (
       <ErrorBoundary>
-        <div className="h-full text-foreground bg-transparent">
+        <LanguageProvider>
+          <div className="h-full text-foreground bg-transparent">
           <OnboardingScreen onCliAvailable={handleCliAvailable} />
-        </div>
+          </div>
+        </LanguageProvider>
       </ErrorBoundary>
     );
   }
@@ -296,21 +304,24 @@ function App({ apis }: AppProps) {
     if (panelType === 'agentManager') {
     return (
       <ErrorBoundary>
-        <RuntimeAPIProvider apis={apis}>
+        <LanguageProvider>
+          <RuntimeAPIProvider apis={apis}>
           <TooltipProvider delayDuration={700} skipDelayDuration={150}>
             <div className="h-full text-foreground bg-background">
               <AgentManagerView />
               <Toaster />
             </div>
           </TooltipProvider>
-        </RuntimeAPIProvider>
+          </RuntimeAPIProvider>
+        </LanguageProvider>
       </ErrorBoundary>
     );
     }
     
     return (
       <ErrorBoundary>
-        <RuntimeAPIProvider apis={apis}>
+        <LanguageProvider>
+          <RuntimeAPIProvider apis={apis}>
           <FireworksProvider>
             <TooltipProvider delayDuration={700} skipDelayDuration={150}>
               <div className="h-full text-foreground bg-background">
@@ -319,14 +330,16 @@ function App({ apis }: AppProps) {
               </div>
             </TooltipProvider>
           </FireworksProvider>
-        </RuntimeAPIProvider>
+          </RuntimeAPIProvider>
+        </LanguageProvider>
       </ErrorBoundary>
     );
   }
 
   return (
     <ErrorBoundary>
-      <RuntimeAPIProvider apis={apis}>
+      <LanguageProvider>
+        <RuntimeAPIProvider apis={apis}>
         <GitPollingProvider>
           <FireworksProvider>
             <VoiceProvider>
@@ -345,6 +358,7 @@ function App({ apis }: AppProps) {
           </FireworksProvider>
         </GitPollingProvider>
       </RuntimeAPIProvider>
+      </LanguageProvider>
     </ErrorBoundary>
   );
 }

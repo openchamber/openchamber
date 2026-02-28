@@ -18,6 +18,7 @@ import { ModelMultiSelect, generateInstanceId, type ModelSelectionWithId } from 
 import { BranchSelector, useBranchOptions } from './BranchSelector';
 import { AgentSelector } from './AgentSelector';
 import { isDesktopShell } from '@/lib/desktop';
+import { useLanguage } from '@/hooks/useLanguage';
 
 /** Max file size in bytes (10MB) */
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
@@ -52,6 +53,7 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
   onCreated,
   onCancel,
 }) => {
+  const { t } = useLanguage();
   const [name, setName] = React.useState('');
   const [prompt, setPrompt] = React.useState(() => initialPrompt ?? '');
   const [selectedModels, setSelectedModels] = React.useState<ModelSelectionWithId[]>([]);
@@ -256,7 +258,7 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       if (file.size > MAX_FILE_SIZE) {
-        toast.error(`File "${file.name}" is too large (max 10MB)`);
+        toast.error(t('multirun.fileTooLarge', { name: file.name }));
         continue;
       }
 
@@ -280,12 +282,12 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
         attachedCount++;
       } catch (error) {
         console.error('File attach failed', error);
-        toast.error(`Failed to attach "${file.name}"`);
+        toast.error(t('multirun.failedToAttachFile', { name: file.name }));
       }
     }
 
     if (attachedCount > 0) {
-      toast.success(`Attached ${attachedCount} file${attachedCount > 1 ? 's' : ''}`);
+      toast.success(t('multirun.attachedFilesCount', { count: attachedCount }));
     }
 
     if (fileInputRef.current) {
@@ -365,7 +367,7 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
         )}
         style={{ borderColor: 'var(--interactive-border)' }}
       >
-        <h1 className="typography-ui-label font-medium">New Multi-Run</h1>
+        <h1 className="typography-ui-label font-medium">{t('multirun.newMultiRun')}</h1>
         {onCancel && (
           <div className="absolute right-0 flex items-center pr-3">
             <Tooltip delayDuration={500}>
@@ -373,14 +375,14 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
                 <button
                   type="button"
                   onClick={onCancel}
-                  aria-label="Close (Esc)"
+                  aria-label={t('multirun.closeEsc')}
                   className="inline-flex h-9 w-9 items-center justify-center p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary app-region-no-drag"
                 >
                   <RiCloseLine className="h-5 w-5" />
                 </button>
               </TooltipTrigger>
               <TooltipContent>
-                <p>Close (Esc)</p>
+                <p>{t('multirun.closeEsc')}</p>
               </TooltipContent>
             </Tooltip>
           </div>
@@ -394,27 +396,27 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
             {/* Group name (required) */}
             <div className="space-y-2">
               <label htmlFor="group-name" className="typography-ui-label font-medium text-foreground">
-                Group name <span className="text-destructive">*</span>
+                {t('multirun.groupName')} <span className="text-destructive">*</span>
               </label>
               <Input
                 id="group-name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. feature-auth, bugfix-login"
+                placeholder={t('multirun.groupNamePlaceholder')}
                 className="typography-body max-w-full sm:max-w-xs"
                 required
               />
               <p className="typography-micro text-muted-foreground">
-                Used for worktree directory and branch names
+                {t('multirun.groupNameHelp')}
               </p>
             </div>
 
             {/* Worktree creation */}
             <div className="space-y-3">
               <div className="space-y-1">
-                <p className="typography-ui-label font-medium text-foreground">Worktrees</p>
+                <p className="typography-ui-label font-medium text-foreground">{t('multirun.worktrees')}</p>
                 <p className="typography-micro text-muted-foreground">
-                  Create one worktree per model by creating a new branch from a base branch.
+                  {t('multirun.worktreesHelp')}
                 </p>
               </div>
 
@@ -423,7 +425,7 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
                   className="typography-meta font-medium text-foreground"
                   htmlFor="multirun-worktree-base-branch"
                 >
-                  Base branch
+                  {t('multirun.baseBranch')}
                 </label>
                 <BranchSelector
                   directory={currentDirectory}
@@ -432,7 +434,7 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
                   id="multirun-worktree-base-branch"
                 />
                 <p className="typography-micro text-muted-foreground">
-                  Creates new branches from{' '}
+                  {t('multirun.createsNewBranchesFrom')}{' '}
                   <code className="font-mono text-xs text-muted-foreground">{worktreeBaseBranch || 'HEAD'}</code>.
                 </p>
               </div>
@@ -441,10 +443,10 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
               <Collapsible open={isSetupCommandsOpen} onOpenChange={setIsSetupCommandsOpen}>
                 <CollapsibleTrigger className="w-full flex items-center justify-between py-1 hover:bg-[var(--interactive-hover)] rounded-md px-1 -mx-1 transition-colors">
                   <p className="typography-ui-label font-medium text-foreground">
-                    Setup commands
+                    {t('multirun.setupCommands')}
                     {setupCommands.filter(cmd => cmd.trim()).length > 0 && (
                       <span className="font-normal text-muted-foreground/70">
-                        {' '}({setupCommands.filter(cmd => cmd.trim()).length} configured)
+                        {' '}({t('multirun.configuredCount', { count: setupCommands.filter(cmd => cmd.trim()).length })})
                       </span>
                     )}
                   </p>
@@ -456,10 +458,10 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
                 <CollapsibleContent>
                   <div className="pt-2 space-y-2">
                     <p className="typography-micro text-muted-foreground/70">
-                      Commands run in each new worktree. Use <code className="font-mono text-xs">$ROOT_PROJECT_PATH</code> for project root.
+                      {t('multirun.setupCommandsHelp')} <code className="font-mono text-xs">$ROOT_PROJECT_PATH</code> {t('multirun.forProjectRoot')}.
                     </p>
                     {isLoadingSetupCommands ? (
-                      <p className="typography-meta text-muted-foreground/70">Loading...</p>
+                      <p className="typography-meta text-muted-foreground/70">{t('filesView.loading')}</p>
                     ) : (
                       <div className="space-y-1.5">
                         {setupCommands.map((command, index) => (
@@ -471,7 +473,7 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
                                 newCommands[index] = e.target.value;
                                 setSetupCommands(newCommands);
                               }}
-                              placeholder="e.g., bun install"
+                              placeholder={t('multirun.setupCommandPlaceholder')}
                               className="h-8 flex-1 font-mono text-xs"
                             />
                             <button
@@ -481,7 +483,7 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
                                 setSetupCommands(newCommands);
                               }}
                               className="flex-shrink-0 flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-                              aria-label="Remove command"
+                              aria-label={t('multirun.removeCommand')}
                             >
                               <RiCloseLine className="h-4 w-4" />
                             </button>
@@ -493,7 +495,7 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
                           className="flex items-center gap-1.5 typography-meta text-muted-foreground hover:text-foreground transition-colors"
                         >
                           <RiAddLine className="h-3.5 w-3.5" />
-                          Add command
+                          {t('multirun.addCommand')}
                         </button>
                       </div>
                     )}
@@ -508,7 +510,7 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
                 className="typography-ui-label font-medium text-foreground"
                 htmlFor="multirun-agent"
               >
-                Agent
+                {t('multirun.agent')}
               </label>
               <AgentSelector
                 value={selectedAgent}
@@ -516,20 +518,20 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
                 id="multirun-agent"
               />
               <p className="typography-micro text-muted-foreground">
-                Defaults to your configured default agent.
+                {t('multirun.agentHelp')}
               </p>
             </div>
 
             {/* Prompt */}
             <div className="space-y-2">
               <label htmlFor="prompt" className="typography-ui-label font-medium text-foreground">
-                Prompt <span className="text-destructive">*</span>
+                {t('multirun.prompt')} <span className="text-destructive">*</span>
               </label>
               <Textarea
                 id="prompt"
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
-                placeholder="Enter the prompt to send to all models..."
+                placeholder={t('multirun.promptPlaceholder')}
                 className="typography-body min-h-[120px] max-h-[400px] resize-none overflow-y-auto field-sizing-content"
                 required
               />
@@ -539,9 +541,9 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
             <div className="space-y-2">
               <div className="flex items-center gap-2">
                 <label className="typography-ui-label font-medium text-foreground">
-                  Attachments
+                  {t('multirun.attachments')}
                 </label>
-                <span className="typography-micro text-muted-foreground">(optional, same files for all runs)</span>
+                <span className="typography-micro text-muted-foreground">({t('multirun.attachmentsHelp')})</span>
               </div>
               
               <input
@@ -562,7 +564,7 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
                   onClick={() => fileInputRef.current?.click()}
                 >
                   <RiAttachment2 className="h-3.5 w-3.5 mr-1.5" />
-                  Attach files
+                  {t('chatInput.attachFiles')}
                 </Button>
                 
                 {attachedFiles.map((file) => (
@@ -596,7 +598,7 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
             {/* Model selection */}
             <div className="space-y-2">
               <label className="typography-ui-label font-medium text-foreground">
-                Models <span className="text-destructive">*</span>
+                {t('multirun.models')} <span className="text-destructive">*</span>
               </label>
               <ModelMultiSelect
                 selectedModels={selectedModels}
@@ -622,17 +624,17 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
                 variant="outline"
                 onClick={onCancel}
               >
-                Cancel
+                {t('common.cancel')}
               </Button>
               <Button
                 type="submit"
                 disabled={!isValid || isSubmitting}
               >
                 {isSubmitting ? (
-                  'Creating...'
+                  t('multirun.creating')
                 ) : (
                   <>
-                    Start ({selectedModels.length} models)
+                    {t('multirun.startWithModels', { count: selectedModels.length })}
                   </>
                 )}
               </Button>

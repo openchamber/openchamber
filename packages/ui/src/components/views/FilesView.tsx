@@ -74,6 +74,7 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { ensurePierreThemeRegistered } from '@/lib/shiki/appThemeRegistry';
 import { getDefaultTheme } from '@/lib/theme/themes';
+import { useLanguage } from '@/hooks/useLanguage';
 
 type FileNode = {
   name: string;
@@ -391,6 +392,7 @@ interface FilesViewProps {
 }
 
 export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
+  const { t } = useLanguage();
   const { files, runtime } = useRuntimeAPIs();
   const { currentTheme, availableThemes, lightThemeId, darkThemeId } = useThemeSystem();
   const { isMobile, screenWidth } = useDeviceInfo();
@@ -1734,16 +1736,16 @@ const saveMdViewMode = React.useCallback((mode: 'preview' | 'edit') => {
       <DialogContent>
         <DialogHeader>
           <DialogTitle>
-            {activeDialog === 'createFile' && 'Create File'}
-            {activeDialog === 'createFolder' && 'Create Folder'}
-            {activeDialog === 'rename' && 'Rename'}
-            {activeDialog === 'delete' && 'Delete'}
+            {activeDialog === 'createFile' && t('filesView.createFile')}
+            {activeDialog === 'createFolder' && t('filesView.createFolder')}
+            {activeDialog === 'rename' && t('filesView.rename')}
+            {activeDialog === 'delete' && t('common.delete')}
           </DialogTitle>
           <DialogDescription>
-            {activeDialog === 'createFile' && `Create a new file in ${dialogData?.path ?? 'root'}`}
-            {activeDialog === 'createFolder' && `Create a new folder in ${dialogData?.path ?? 'root'}`}
-            {activeDialog === 'rename' && `Rename ${dialogData?.name}`}
-            {activeDialog === 'delete' && `Are you sure you want to delete ${dialogData?.name}? This action cannot be undone.`}
+            {activeDialog === 'createFile' && t('filesView.createFileIn', { path: dialogData?.path ?? t('filesView.root') })}
+            {activeDialog === 'createFolder' && t('filesView.createFolderIn', { path: dialogData?.path ?? t('filesView.root') })}
+            {activeDialog === 'rename' && t('filesView.renameTarget', { name: dialogData?.name ?? '' })}
+            {activeDialog === 'delete' && t('filesView.deleteConfirm', { name: dialogData?.name ?? '' })}
           </DialogDescription>
         </DialogHeader>
 
@@ -1752,7 +1754,7 @@ const saveMdViewMode = React.useCallback((mode: 'preview' | 'edit') => {
             <Input
               value={dialogInputValue}
               onChange={(e) => setDialogInputValue(e.target.value)}
-              placeholder={activeDialog === 'rename' ? 'New name' : 'Name'}
+              placeholder={activeDialog === 'rename' ? t('filesView.newName') : t('filesView.name')}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
                   void handleDialogSubmit();
@@ -1765,7 +1767,7 @@ const saveMdViewMode = React.useCallback((mode: 'preview' | 'edit') => {
 
         <DialogFooter>
           <Button variant="outline" onClick={() => setActiveDialog(null)} disabled={isDialogSubmitting}>
-            Cancel
+            {t('common.cancel')}
           </Button>
           <Button
             variant={activeDialog === 'delete' ? 'destructive' : 'default'}
@@ -1773,7 +1775,7 @@ const saveMdViewMode = React.useCallback((mode: 'preview' | 'edit') => {
             disabled={isDialogSubmitting || (activeDialog !== 'delete' && !dialogInputValue.trim())}
           >
             {isDialogSubmitting ? <RiLoader4Line className="animate-spin" /> : (
-                activeDialog === 'delete' ? 'Delete' : 'Confirm'
+                activeDialog === 'delete' ? t('common.delete') : t('common.confirm')
             )}
           </Button>
         </DialogFooter>
@@ -1838,9 +1840,9 @@ const saveMdViewMode = React.useCallback((mode: 'preview' | 'edit') => {
       }}>
         <DialogContent showCloseButton={false} className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Unsaved changes</DialogTitle>
+            <DialogTitle>{t('filesView.unsavedChanges')}</DialogTitle>
             <DialogDescription>
-              Save your edits before continuing?
+              {t('filesView.saveEditsBeforeContinuing')}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -1850,9 +1852,9 @@ const saveMdViewMode = React.useCallback((mode: 'preview' | 'edit') => {
               disabled={isSaving}
               className="border-[var(--status-success-border)] bg-[var(--status-success-background)] text-[var(--status-success)] hover:bg-[rgb(var(--status-success)/0.2)]"
             >
-              Save changes
+              {t('filesView.saveChanges')}
             </Button>
-            <Button variant="destructive" onClick={discardAndContinue}>Discard</Button>
+              <Button variant="destructive" onClick={discardAndContinue}>{t('filesView.discard')}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1863,7 +1865,7 @@ const saveMdViewMode = React.useCallback((mode: 'preview' | 'edit') => {
             <button
               type="button"
               onClick={() => setShowMobilePageContent(false)}
-              aria-label="Back"
+              aria-label={t('common.back')}
               className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center mr-1 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             >
               <RiArrowLeftSLine className="h-5 w-5" />
@@ -1877,7 +1879,7 @@ const saveMdViewMode = React.useCallback((mode: 'preview' | 'edit') => {
                   <button
                     type="button"
                     className="inline-flex min-w-0 max-w-full items-center gap-1 text-left typography-ui-label font-medium"
-                    aria-label="Open files"
+                    aria-label={t('filesView.openFiles')}
                   >
                     <FileTypeIcon filePath={selectedFile.path} extension={selectedFile.extension} className="h-3.5 w-3.5 flex-shrink-0" />
                     <span className="min-w-0 flex-1 truncate">{selectedFile.name}</span>
@@ -1932,7 +1934,7 @@ const saveMdViewMode = React.useCallback((mode: 'preview' | 'edit') => {
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : (
-              <div className="typography-ui-label font-medium truncate">Select a file</div>
+              <div className="typography-ui-label font-medium truncate">{t('filesView.selectAFile')}</div>
             )
           ) : (
             openFiles.length > 0 ? (
@@ -1993,7 +1995,7 @@ const saveMdViewMode = React.useCallback((mode: 'preview' | 'edit') => {
                 </div>
               </div>
             ) : (
-              <div className="typography-ui-label font-medium truncate">Select a file</div>
+              <div className="typography-ui-label font-medium truncate">{t('filesView.selectAFile')}</div>
             )
           )}
         </div>
@@ -2008,8 +2010,8 @@ const saveMdViewMode = React.useCallback((mode: 'preview' | 'edit') => {
                 onClick={() => void saveDraft()}
                 disabled={!isDirty || isSaving}
                 className="h-5 w-5 p-0 text-[color:var(--status-success)] opacity-70 hover:opacity-100"
-                title={`Save (${getModifierLabel()}+S)`}
-                aria-label={`Save (${getModifierLabel()}+S)`}
+                title={t('filesView.saveShortcut', { shortcut: `${getModifierLabel()}+S` })}
+                aria-label={t('filesView.saveShortcut', { shortcut: `${getModifierLabel()}+S` })}
               >
                 {isSaving ? (
                   <RiLoader4Line className="h-4 w-4 animate-spin" />
@@ -2032,7 +2034,7 @@ const saveMdViewMode = React.useCallback((mode: 'preview' | 'edit') => {
                   'h-5 w-5 p-0 transition-opacity',
                   textViewMode === 'edit' ? 'text-foreground opacity-100' : 'text-muted-foreground opacity-70 hover:opacity-100'
                 )}
-                title={textViewMode === 'view' ? 'Switch to edit mode' : 'Switch to highlighted view'}
+                title={textViewMode === 'view' ? t('filesView.switchToEditMode') : t('filesView.switchToHighlightedView')}
               >
                 {textViewMode === 'view' ? <RiEditLine className="size-4" /> : <RiEyeLine className="size-4" />}
               </Button>
@@ -2048,7 +2050,7 @@ const saveMdViewMode = React.useCallback((mode: 'preview' | 'edit') => {
                     'h-5 w-5 p-0 transition-opacity',
                     wrapLines ? 'text-foreground opacity-100' : 'text-muted-foreground opacity-60 hover:opacity-100'
                   )}
-                  title={wrapLines ? 'Disable line wrap' : 'Enable line wrap'}
+                  title={wrapLines ? t('filesView.disableLineWrap') : t('filesView.enableLineWrap')}
                 >
                   <RiTextWrap className="size-4" />
                 </Button>
@@ -2061,7 +2063,7 @@ const saveMdViewMode = React.useCallback((mode: 'preview' | 'edit') => {
                       'h-5 w-5 p-0 transition-opacity',
                       isSearchOpen ? 'text-foreground opacity-100' : 'text-muted-foreground opacity-60 hover:opacity-100'
                     )}
-                    title="Find in file"
+                    title={t('filesView.findInFile')}
                   >
                     <RiSearchLine className="size-4" />
                   </Button>
@@ -2095,12 +2097,12 @@ const saveMdViewMode = React.useCallback((mode: 'preview' | 'edit') => {
                       setCopiedContent(false);
                     }, 1200);
                   } else {
-                    toast.error('Copy failed');
+                    toast.error(t('filesView.copyFailed'));
                   }
                 }}
                 className="h-5 w-5 p-0"
-                title="Copy file contents"
-                aria-label="Copy file contents"
+                title={t('filesView.copyFileContents')}
+                aria-label={t('filesView.copyFileContents')}
               >
                 {copiedContent ? (
                   <RiCheckLine className="h-4 w-4 text-[color:var(--status-success)]" />
@@ -2125,12 +2127,12 @@ const saveMdViewMode = React.useCallback((mode: 'preview' | 'edit') => {
                       setCopiedPath(false);
                     }, 1200);
                   } else {
-                    toast.error('Copy failed');
+                    toast.error(t('filesView.copyFailed'));
                   }
                 }}
                 className="h-5 w-5 p-0"
-                title={`Copy file path (${displaySelectedPath})`}
-                aria-label={`Copy file path (${displaySelectedPath})`}
+                title={t('filesView.copyFilePath', { path: displaySelectedPath })}
+                aria-label={t('filesView.copyFilePath', { path: displaySelectedPath })}
               >
                 {copiedPath ? (
                   <RiCheckLine className="h-4 w-4 text-[color:var(--status-success)]" />
@@ -2148,8 +2150,8 @@ const saveMdViewMode = React.useCallback((mode: 'preview' | 'edit') => {
                   size="sm"
                   onClick={() => setIsFullscreen(!isFullscreen)}
                   className="h-5 w-5 p-0"
-                  title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
-                  aria-label={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+                  title={isFullscreen ? t('filesView.exitFullscreen') : t('filesView.fullscreen')}
+                  aria-label={isFullscreen ? t('filesView.exitFullscreen') : t('filesView.fullscreen')}
                 >
                   {isFullscreen ? (
                     <RiFullscreenExitLine className="h-4 w-4" />
@@ -2166,11 +2168,11 @@ const saveMdViewMode = React.useCallback((mode: 'preview' | 'edit') => {
       <div className="flex-1 min-h-0 min-w-0 relative">
         <ScrollableOverlay outerClassName="h-full min-w-0" className="h-full min-w-0">
           {!selectedFile ? (
-            <div className="p-3 typography-ui text-muted-foreground">Pick a file from the tree.</div>
+            <div className="p-3 typography-ui text-muted-foreground">{t('filesView.pickFileFromTree')}</div>
           ) : fileLoading ? (
             <div className="p-3 flex items-center gap-2 typography-ui text-muted-foreground">
               <RiLoader4Line className="h-4 w-4 animate-spin" />
-              Loading…
+              {t('filesView.loading')}
             </div>
           ) : fileError ? (
             <div className="p-3 typography-ui text-[color:var(--status-error)]">{fileError}</div>
@@ -2186,15 +2188,15 @@ const saveMdViewMode = React.useCallback((mode: 'preview' | 'edit') => {
             <div className="h-full overflow-auto p-3">
               {fileContent.length > 500 * 1024 && (
                 <div className="mb-3 rounded-md border border-status-warning/20 bg-status-warning/10 px-3 py-2 text-sm text-status-warning">
-                  ⚠️ This file is large ({Math.round(fileContent.length / 1024)}KB). Preview may be limited.
+                  {t('filesView.fileLargeWarning', { sizeKb: Math.round(fileContent.length / 1024) })}
                 </div>
               )}
               <ErrorBoundary
                 fallback={
                   <div className="rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2">
-                    <div className="mb-1 font-medium text-destructive">Preview unavailable</div>
+                    <div className="mb-1 font-medium text-destructive">{t('filesView.previewUnavailable')}</div>
                     <div className="text-sm text-muted-foreground">
-                      Switch to edit mode to fix the issue.
+                      {t('filesView.switchToEditModeToFix')}
                     </div>
                   </div>
                 }
@@ -2328,13 +2330,13 @@ const saveMdViewMode = React.useCallback((mode: 'preview' | 'edit') => {
               ref={searchInputRef}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search files…"
+              placeholder={t('filesView.searchFiles')}
               className="h-8 pl-8 pr-8 typography-meta"
             />
             {searchQuery.trim().length > 0 && (
               <button
                 type="button"
-                aria-label="Clear search"
+                aria-label={t('filesView.clearSearch')}
                 className="absolute right-2 top-2 inline-flex h-4 w-4 items-center justify-center text-muted-foreground hover:text-foreground"
                 onClick={() => {
                   setSearchQuery('');
@@ -2350,7 +2352,7 @@ const saveMdViewMode = React.useCallback((mode: 'preview' | 'edit') => {
             size="sm"
             onClick={() => handleOpenDialog('createFile', { path: currentDirectory, type: 'directory' })}
             className="h-8 w-8 p-0 flex-shrink-0"
-            title="New File"
+            title={t('filesView.newFile')}
           >
             <RiFileAddLine className="h-4 w-4" />
           </Button>
@@ -2359,7 +2361,7 @@ const saveMdViewMode = React.useCallback((mode: 'preview' | 'edit') => {
             size="sm"
             onClick={() => handleOpenDialog('createFolder', { path: currentDirectory, type: 'directory' })}
             className="h-8 w-8 p-0 flex-shrink-0"
-            title="New Folder"
+            title={t('filesView.newFolder')}
           >
             <RiFolderAddLine className="h-4 w-4" />
           </Button>
@@ -2374,7 +2376,7 @@ const saveMdViewMode = React.useCallback((mode: 'preview' | 'edit') => {
           {searching ? (
             <li className="flex items-center gap-1.5 px-2 py-1 typography-meta text-muted-foreground">
               <RiLoader4Line className="h-4 w-4 animate-spin" />
-              Searching…
+              {t('filesView.searching')}
             </li>
           ) : searchResults.length > 0 ? (
             searchResults.map((node) => {
@@ -2404,7 +2406,7 @@ const saveMdViewMode = React.useCallback((mode: 'preview' | 'edit') => {
           ) : hasTree ? (
             renderTree(root, 0)
           ) : (
-            <li className="px-2 py-1 typography-meta text-muted-foreground">Loading…</li>
+            <li className="px-2 py-1 typography-meta text-muted-foreground">{t('filesView.loading')}</li>
           )}
         </ul>
       </ScrollableOverlay>
@@ -2433,8 +2435,8 @@ const saveMdViewMode = React.useCallback((mode: 'preview' | 'edit') => {
               onClick={() => void saveDraft()}
               disabled={!isDirty || isSaving}
               className="h-6 w-6 p-0 text-[color:var(--status-success)] opacity-70 hover:opacity-100"
-              title={`Save (${getModifierLabel()}+S)`}
-              aria-label={`Save (${getModifierLabel()}+S)`}
+              title={t('filesView.saveShortcut', { shortcut: `${getModifierLabel()}+S` })}
+              aria-label={t('filesView.saveShortcut', { shortcut: `${getModifierLabel()}+S` })}
             >
               {isSaving ? (
                 <RiLoader4Line className="h-4 w-4 animate-spin" />
@@ -2457,7 +2459,7 @@ const saveMdViewMode = React.useCallback((mode: 'preview' | 'edit') => {
                 'h-6 w-6 p-0 transition-opacity',
                 textViewMode === 'edit' ? 'text-foreground opacity-100' : 'text-muted-foreground opacity-70 hover:opacity-100'
               )}
-              title={textViewMode === 'view' ? 'Switch to edit mode' : 'Switch to highlighted view'}
+              title={textViewMode === 'view' ? t('filesView.switchToEditMode') : t('filesView.switchToHighlightedView')}
             >
               {textViewMode === 'view' ? <RiEditLine className="size-4" /> : <RiEyeLine className="size-4" />}
             </Button>
@@ -2472,7 +2474,7 @@ const saveMdViewMode = React.useCallback((mode: 'preview' | 'edit') => {
                 'h-6 w-6 p-0 transition-opacity',
                 wrapLines ? 'text-foreground opacity-100' : 'text-muted-foreground opacity-60 hover:opacity-100'
               )}
-              title={wrapLines ? 'Disable line wrap' : 'Enable line wrap'}
+              title={wrapLines ? t('filesView.disableLineWrap') : t('filesView.enableLineWrap')}
             >
               <RiTextWrap className="size-4" />
             </Button>
@@ -2504,12 +2506,12 @@ const saveMdViewMode = React.useCallback((mode: 'preview' | 'edit') => {
                     setCopiedContent(false);
                   }, 1200);
                 } else {
-                  toast.error('Copy failed');
+                  toast.error(t('filesView.copyFailed'));
                 }
               }}
               className="h-6 w-6 p-0"
-              title="Copy file contents"
-              aria-label="Copy file contents"
+              title={t('filesView.copyFileContents')}
+              aria-label={t('filesView.copyFileContents')}
             >
               {copiedContent ? (
                 <RiCheckLine className="h-4 w-4 text-[color:var(--status-success)]" />
@@ -2534,12 +2536,12 @@ const saveMdViewMode = React.useCallback((mode: 'preview' | 'edit') => {
                     setCopiedPath(false);
                   }, 1200);
                 } else {
-                  toast.error('Copy failed');
+                  toast.error(t('filesView.copyFailed'));
                 }
               }}
               className="h-6 w-6 p-0"
-              title={`Copy file path (${displaySelectedPath})`}
-              aria-label={`Copy file path (${displaySelectedPath})`}
+              title={t('filesView.copyFilePath', { path: displaySelectedPath })}
+              aria-label={t('filesView.copyFilePath', { path: displaySelectedPath })}
             >
               {copiedPath ? (
                 <RiCheckLine className="h-4 w-4 text-[color:var(--status-success)]" />
@@ -2555,8 +2557,8 @@ const saveMdViewMode = React.useCallback((mode: 'preview' | 'edit') => {
             size="sm"
             onClick={() => setIsFullscreen(false)}
             className="h-6 w-6 p-0"
-            title="Exit fullscreen"
-            aria-label="Exit fullscreen"
+            title={t('filesView.exitFullscreen')}
+            aria-label={t('filesView.exitFullscreen')}
           >
             <RiFullscreenExitLine className="h-4 w-4" />
           </Button>
@@ -2569,7 +2571,7 @@ const saveMdViewMode = React.useCallback((mode: 'preview' | 'edit') => {
           {fileLoading ? (
             <div className="p-4 flex items-center gap-2 typography-ui text-muted-foreground">
               <RiLoader4Line className="h-4 w-4 animate-spin" />
-              Loading…
+              {t('filesView.loading')}
             </div>
           ) : fileError ? (
             <div className="p-4 typography-ui text-[color:var(--status-error)]">{fileError}</div>
@@ -2585,15 +2587,15 @@ const saveMdViewMode = React.useCallback((mode: 'preview' | 'edit') => {
             <div className="h-full overflow-auto p-4">
               {fileContent.length > 500 * 1024 && (
                 <div className="mb-3 rounded-md border border-status-warning/20 bg-status-warning/10 px-3 py-2 text-sm text-status-warning">
-                  This file is large ({Math.round(fileContent.length / 1024)}KB). Preview may be limited.
+                  {t('filesView.fileLargeWarning', { sizeKb: Math.round(fileContent.length / 1024) })}
                 </div>
               )}
               <ErrorBoundary
                 fallback={
                   <div className="rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2">
-                    <div className="mb-1 font-medium text-destructive">Preview unavailable</div>
+                    <div className="mb-1 font-medium text-destructive">{t('filesView.previewUnavailable')}</div>
                     <div className="text-sm text-muted-foreground">
-                      Switch to edit mode to fix the issue.
+                      {t('filesView.switchToEditModeToFix')}
                     </div>
                   </div>
                 }

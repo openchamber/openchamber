@@ -2,6 +2,7 @@ import React from 'react';
 import { RiLoader4Line, RiFileCopyLine } from '@remixicon/react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { useLanguage } from '@/hooks/useLanguage';
 import { cn } from '@/lib/utils';
 import type { GitLogEntry, CommitFileEntry } from '@/lib/api/types';
 
@@ -53,6 +54,8 @@ export const HistoryCommitRow: React.FC<HistoryCommitRowProps> = ({
   isLoadingFiles,
   onCopyHash,
 }) => {
+  const { t } = useLanguage();
+
   return (
     <li>
       <button
@@ -100,7 +103,7 @@ export const HistoryCommitRow: React.FC<HistoryCommitRowProps> = ({
                   <RiFileCopyLine className="size-3" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent sideOffset={8}>Copy SHA</TooltipContent>
+              <TooltipContent sideOffset={8}>{t('gitView.copySha')}</TooltipContent>
             </Tooltip>
           </div>
         </div>
@@ -111,10 +114,10 @@ export const HistoryCommitRow: React.FC<HistoryCommitRowProps> = ({
           {isLoadingFiles ? (
             <div className="flex items-center gap-2 py-2">
               <RiLoader4Line className="size-4 animate-spin text-muted-foreground" />
-              <span className="typography-micro text-muted-foreground">Loading files...</span>
+              <span className="typography-micro text-muted-foreground">{t('gitView.loadingFiles')}</span>
             </div>
           ) : files.length === 0 ? (
-            <p className="typography-micro text-muted-foreground py-2">No files</p>
+            <p className="typography-micro text-muted-foreground py-2">{t('gitView.noFiles')}</p>
           ) : (
             <ul className="space-y-0.5 py-2">
               {files.map((file) => (
@@ -146,7 +149,7 @@ export const HistoryCommitRow: React.FC<HistoryCommitRowProps> = ({
                   )}
                   {file.isBinary && (
                     <span className="typography-micro text-muted-foreground shrink-0">
-                      binary
+                      {t('gitView.binary')}
                     </span>
                   )}
                 </li>

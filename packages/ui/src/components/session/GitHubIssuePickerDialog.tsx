@@ -26,6 +26,7 @@ import { useMessageStore } from '@/stores/messageStore';
 import { useContextStore } from '@/stores/contextStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
+import { useLanguage } from '@/hooks/useLanguage';
 import { opencodeClient } from '@/lib/opencode/client';
 import { createWorktreeSessionForNewBranch } from '@/lib/worktreeSessionCreator';
 import { generateBranchSlug } from '@/lib/git/branchNameGenerator';
@@ -70,6 +71,7 @@ export function GitHubIssuePickerDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const { t } = useLanguage();
   const { github } = useRuntimeAPIs();
   const githubAuthStatus = useGitHubAuthStore((state) => state.status);
   const githubAuthChecked = useGitHubAuthStore((state) => state.hasChecked);
@@ -336,7 +338,7 @@ export function GitHubIssuePickerDialog({
       const modelID = defaultModel?.modelID || configState.currentModelId || lastUsedProvider?.modelID;
       const agentName = resolveDefaultAgentName() || configState.currentAgentName || undefined;
       if (!providerID || !modelID) {
-        toast.error('No model selected');
+        toast.error(t('pullRequest.noModelSelected'));
         return;
       }
 
@@ -444,7 +446,7 @@ Do not implement changes until I confirm; end with: “Next actions: <1 sentence
     } finally {
       setStartingIssueNumber(null);
     }
-  }, [createInWorktree, github, onOpenChange, projectDirectory, resolveDefaultAgentName, resolveDefaultModelSelection, resolveDefaultVariant, startingIssueNumber]);
+  }, [createInWorktree, github, onOpenChange, projectDirectory, resolveDefaultAgentName, resolveDefaultModelSelection, resolveDefaultVariant, startingIssueNumber, t]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

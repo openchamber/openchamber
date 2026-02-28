@@ -1,4 +1,5 @@
 import React from 'react';
+import { useLanguage } from '@/hooks/useLanguage';
 import { RiInformationLine } from '@remixicon/react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
@@ -26,6 +27,7 @@ const getDisplayModel = (
 };
 
 export const DefaultsSettings: React.FC = () => {
+  const { t } = useLanguage();
   const setProvider = useConfigStore((state) => state.setProvider);
   const setModel = useConfigStore((state) => state.setModel);
   const setAgent = useConfigStore((state) => state.setAgent);
@@ -230,20 +232,20 @@ export const DefaultsSettings: React.FC = () => {
     <div className="mb-6">
       <div className="mb-0.5 px-1">
         <div className="flex items-center gap-2">
-          <h3 className="typography-ui-header font-medium text-foreground">Session Defaults</h3>
+          <h3 className="typography-ui-header font-medium text-foreground">{t('defaultsSettings.title')}</h3>
         </div>
       </div>
 
       <section className="px-2 pb-2 pt-0 space-y-0">
         <div className="mt-0 mb-1 typography-meta text-muted-foreground">
-          New sessions will start with:{' '}
+          {t('defaultsSettings.newSessionsStartWith')}{' '}
           {parsedModel.providerId ? (
             <span className="text-foreground">
               {parsedModel.providerId}/{parsedModel.modelId}
-              {supportsVariants ? ` (${defaultVariant ?? 'default'})` : ''}
+              {supportsVariants ? ` (${defaultVariant ?? t('defaultsSettings.default')})` : ''}
             </span>
           ) : (
-            <span className="text-foreground">opencode agent default</span>
+            <span className="text-foreground">{t('defaultsSettings.opencodeAgentDefault')}</span>
           )}
           {defaultAgent && (
             <>
@@ -255,7 +257,7 @@ export const DefaultsSettings: React.FC = () => {
 
         <div className={cn('flex flex-col gap-2 py-1 sm:flex-row sm:items-center sm:gap-8')}>
           <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
-            <span className="typography-ui-label text-foreground">Default Model</span>
+            <span className="typography-ui-label text-foreground">{t('defaultsSettings.defaultModel')}</span>
           </div>
           <div className="flex min-w-0 flex-1 items-center gap-2 sm:w-fit sm:flex-initial">
             <ModelSelector providerId={parsedModel.providerId} modelId={parsedModel.modelId} onChange={handleModelChange} />
@@ -264,15 +266,15 @@ export const DefaultsSettings: React.FC = () => {
 
         <div className="flex flex-col gap-2 py-1 sm:flex-row sm:items-center sm:gap-8">
           <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
-            <span className="typography-ui-label text-foreground">Default Thinking</span>
+            <span className="typography-ui-label text-foreground">{t('defaultsSettings.defaultThinking')}</span>
           </div>
           <div className="flex items-center gap-2 sm:w-fit">
             <Select value={defaultVariant ?? DEFAULT_VARIANT_VALUE} onValueChange={handleVariantChange} disabled={!supportsVariants}>
               <SelectTrigger className="w-fit min-w-[120px]">
-                <SelectValue placeholder="Thinking" />
+                <SelectValue placeholder={t('defaultsSettings.thinking')} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value={DEFAULT_VARIANT_VALUE}>Default</SelectItem>
+                <SelectItem value={DEFAULT_VARIANT_VALUE}>{t('defaultsSettings.default')}</SelectItem>
                 {availableVariants.map((variant) => (
                   <SelectItem key={variant} value={variant}>
                     {variant}
@@ -285,7 +287,7 @@ export const DefaultsSettings: React.FC = () => {
 
         <div className="flex flex-col gap-2 py-1 sm:flex-row sm:items-center sm:gap-8">
           <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
-            <span className="typography-ui-label text-foreground">Default Agent</span>
+            <span className="typography-ui-label text-foreground">{t('defaultsSettings.defaultAgent')}</span>
           </div>
           <div className="flex min-w-0 flex-1 items-center gap-2 sm:w-fit sm:flex-initial">
             <AgentSelector agentName={defaultAgent || ''} onChange={handleAgentChange} />
@@ -305,8 +307,8 @@ export const DefaultsSettings: React.FC = () => {
             }
           }}
         >
-          <Checkbox checked={showDeletionDialog} onChange={setShowDeletionDialog} ariaLabel="Show deletion dialog" />
-          <span className="typography-ui-label text-foreground">Show Deletion Dialog</span>
+          <Checkbox checked={showDeletionDialog} onChange={setShowDeletionDialog} ariaLabel={t('defaultsSettings.showDeletionDialog')} />
+          <span className="typography-ui-label text-foreground">{t('defaultsSettings.showDeletionDialog')}</span>
         </div>
 
         {!isVSCode && (
@@ -330,19 +332,19 @@ export const DefaultsSettings: React.FC = () => {
               onChange={(checked) => {
                 void handleAutoWorktreeChange(checked);
               }}
-              ariaLabel="Always create worktree"
+              ariaLabel={t('defaultsSettings.alwaysCreateWorktree')}
             />
             <div className="flex min-w-0 flex-col">
               <div className="flex items-center gap-1.5">
-                <span className="typography-ui-label text-foreground">Always Create Worktree</span>
+                <span className="typography-ui-label text-foreground">{t('defaultsSettings.alwaysCreateWorktree')}</span>
                 <Tooltip delayDuration={1000}>
                   <TooltipTrigger asChild>
                     <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
                   </TooltipTrigger>
                   <TooltipContent sideOffset={8} className="max-w-xs">
                     {settingsAutoCreateWorktree
-                      ? `New session (Worktree): ${getModifierLabel()}+N\nStandard: Shift+${getModifierLabel()}+N`
-                      : `New session (Standard): ${getModifierLabel()}+N\nWorktree: Shift+${getModifierLabel()}+N`}
+                      ? t('defaultsSettings.shortcutHintWorktreeFirst', { modifier: getModifierLabel() })
+                      : t('defaultsSettings.shortcutHintStandardFirst', { modifier: getModifierLabel() })}
                   </TooltipContent>
                 </Tooltip>
               </div>

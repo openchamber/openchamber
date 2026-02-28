@@ -3,6 +3,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { Button } from '@/components/ui/button';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { OverlayScrollbar } from '@/components/ui/OverlayScrollbar';
+import { useLanguage } from '@/hooks/useLanguage';
 import { ChangeRow } from './ChangeRow';
 import type { GitStatus } from '@/lib/api/types';
 import { cn } from '@/lib/utils';
@@ -39,6 +40,7 @@ export const ChangesSection: React.FC<ChangesSectionProps> = ({
   maxListHeightClassName,
   onVisiblePathsChange,
 }) => {
+  const { t } = useLanguage();
   const scrollRef = React.useRef<HTMLDivElement | null>(null);
   const selectedCount = selectedPaths.size;
   const totalCount = changeEntries.length;
@@ -91,7 +93,7 @@ export const ChangesSection: React.FC<ChangesSectionProps> = ({
   return (
     <section className={containerClassName}>
       <header className={headerClassName}>
-        <h3 className="typography-ui-header font-semibold text-foreground">Changes</h3>
+        <h3 className="typography-ui-header font-semibold text-foreground">{t('changesSection.changes')}</h3>
         <div className="flex items-center gap-2">
           <span className="typography-meta text-muted-foreground">
             {selectedCount}/{totalCount}
@@ -104,7 +106,7 @@ export const ChangesSection: React.FC<ChangesSectionProps> = ({
                 className="h-6 px-2 text-xs"
                 onClick={onSelectAll}
               >
-                All
+                {t('changesSection.all')}
               </Button>
               <Button
                 variant="ghost"
@@ -113,7 +115,7 @@ export const ChangesSection: React.FC<ChangesSectionProps> = ({
                 onClick={onClearSelection}
                 disabled={selectedCount === 0}
               >
-                None
+                {t('changesSection.none')}
               </Button>
             </>
           )}
@@ -157,7 +159,7 @@ export const ChangesSection: React.FC<ChangesSectionProps> = ({
               })}
             </div>
           ) : (
-            <div className="divide-y divide-border/60" role="list" aria-label="Changed files">
+            <div className="divide-y divide-border/60" role="list" aria-label={t('gitView.changedFiles')}>
               {changeEntries.map((file) => (
                 <ChangeRow
                   key={file.path}

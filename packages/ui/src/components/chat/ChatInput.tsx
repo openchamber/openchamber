@@ -48,6 +48,7 @@ import {
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
+import { useLanguage } from '@/hooks/useLanguage';
 
 const MAX_VISIBLE_TEXTAREA_LINES = 8;
 const EMPTY_QUEUE: QueuedMessage[] = [];
@@ -91,6 +92,7 @@ const saveStoredDraft = (sessionId: string | null, draft: string): void => {
 };
 
 export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBottom }) => {
+    const { t } = useLanguage();
     // Track if we restored a draft on mount (for text selection)
     const initialDraftRef = React.useRef<string | null>(null);
     // Track initial session ID (captured at mount time for draft restoration)
@@ -1896,7 +1898,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                     ? 'text-primary hover:text-primary'
                     : 'opacity-30'
             )}
-            aria-label="Send message"
+            aria-label={t('chatInput.sendMessage')}
         >
             <RiSendPlane2Line className={cn(sendIconSizeClass)} />
         </button>
@@ -1920,7 +1922,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                     ? 'text-primary hover:text-primary'
                     : 'opacity-30'
             )}
-            aria-label="Queue message"
+            aria-label={t('chatInput.queueMessage')}
         >
             <RiSendPlane2Line className={cn(sendIconSizeClass, '-rotate-90')} />
         </button>
@@ -1935,7 +1937,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                 footerIconButtonClass,
                 'text-[var(--status-error)] hover:text-[var(--status-error)]'
             )}
-            aria-label="Stop generating"
+            aria-label={t('chatInput.stopGenerating')}
         >
             <StopIcon className={cn(stopIconSizeClass)} />
         </button>
@@ -1985,8 +1987,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                         <button
                             type="button"
                             className={footerIconButtonClass}
-                            title="Add attachment"
-                            aria-label="Add attachment"
+                            title={t('chatInput.addAttachment')}
+                            aria-label={t('chatInput.addAttachment')}
                         >
                             <RiAddCircleLine className={cn(iconSizeClass, 'text-current')} />
                         </button>
@@ -1998,7 +2000,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                             }}
                         >
                             <RiAttachment2 />
-                            Attach files
+                            {t('chatInput.attachFiles')}
                         </DropdownMenuItem>
                         <DropdownMenuItem
                             onSelect={() => {
@@ -2008,7 +2010,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                             }}
                         >
                             <RiFileUploadLine />
-                            Attach from project
+                            {t('chatInput.attachFromProject')}
                         </DropdownMenuItem>
                     </DropdownMenuContent>
                 </DropdownMenu>
@@ -2021,8 +2023,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
             type='button'
             onClick={onOpenSettings}
             className={footerIconButtonClass}
-            title='Model and agent settings'
-            aria-label='Model and agent settings'
+            title={t('chatInput.modelAndAgentSettings')}
+            aria-label={t('chatInput.modelAndAgentSettings')}
         >
             <RiAiAgentLine className={cn(iconSizeClass, 'text-current')} />
         </button>
@@ -2045,8 +2047,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                         }
                     }}
                     onClick={handleOpenCommandMenu}
-                    title="Commands"
-                    aria-label="Commands"
+                    title={t('chatInput.commands')}
+                    aria-label={t('chatInput.commands')}
                 >
                     <RiCommandLine className={cn(iconSizeClass)} />
                 </button>
@@ -2128,7 +2130,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                                 borderColor: currentTheme?.colors?.interactive?.border,
                             }}
                         >
-                            <span className="text-xs font-medium text-muted-foreground">Review comments:</span>
+                            <span className="text-xs font-medium text-muted-foreground">{t('chatInput.reviewComments')}</span>
                             <span className="text-xs font-semibold" style={{ color: currentTheme?.colors?.status?.info }}>
                                 {draftCount}
                             </span>
@@ -2164,13 +2166,13 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                                         type="button"
                                         className={iconButtonBaseClass}
                                         onClick={() => handlePickLocalFiles()}
-                                        title="Attach files"
-                                        aria-label="Attach files"
+                                        title={t('chatInput.attachFiles')}
+                                        aria-label={t('chatInput.attachFiles')}
                                     >
                                         <RiAttachment2 className={cn(iconSizeClass, 'text-current')} />
                                     </button>
                                 </div>
-                                <p className="mt-2 typography-ui-label text-muted-foreground">Drop files here to attach</p>
+                                <p className="mt-2 typography-ui-label text-muted-foreground">{t('chatInput.dropFilesHere')}</p>
                             </div>
                         </div>
                     )}
@@ -2256,9 +2258,9 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                         onSelect={updateAutocompleteOverlayPosition}
                         placeholder={currentSessionId || newSessionDraftOpen
                             ? inputMode === 'shell'
-                                ? "Enter shell command..."
-                                : "@ for files/agents; / for commands; ! for shell"
-                            : "Select or create a session to start chatting"}
+                                ? t('chatInput.shellPlaceholder')
+                                : t('chatInput.defaultPlaceholder')
+                            : t('chatInput.selectSessionPlaceholder')}
                         disabled={!currentSessionId && !newSessionDraftOpen}
                         autoCorrect={isMobile ? "on" : "off"}
                         autoCapitalize={isMobile ? "sentences" : "off"}

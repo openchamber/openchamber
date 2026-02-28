@@ -5,6 +5,7 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 
 import { deriveMessageRole } from '@/components/chat/message/messageRole';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
+import { useLanguage } from '@/hooks/useLanguage';
 import { generateSyntaxTheme } from '@/lib/theme/syntaxThemeGenerator';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useSessionStore } from '@/stores/useSessionStore';
@@ -231,14 +232,13 @@ const formatMoney = (value: number): string => {
 
 const formatDateTime = (timestamp: number | null): string => {
   if (!timestamp || !Number.isFinite(timestamp)) return '-';
-  const value = new Date(timestamp).toLocaleString(undefined, {
+  return new Date(timestamp).toLocaleString(undefined, {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
   });
-  return value.replace(/, (\d{1,2}:\d{2} [AP]M)$/, ' at $1');
 };
 
 const formatMessageDateMeta = (timestamp: number | null): string => {
@@ -272,6 +272,7 @@ const resolveProviderAndModel = (
 };
 
 export const ContextPanelContent: React.FC = () => {
+  const { t } = useLanguage();
   const { currentTheme } = useThemeSystem();
   const syntaxTheme = React.useMemo(() => generateSyntaxTheme(currentTheme), [currentTheme]);
   const [expandedRawMessages, setExpandedRawMessages] = React.useState<Record<string, boolean>>({});
@@ -371,7 +372,7 @@ export const ContextPanelContent: React.FC = () => {
       : null;
 
     return {
-      sessionTitle: currentSession?.title || 'Untitled Session',
+      sessionTitle: currentSession?.title || t('contextPanel.content.untitledSession'),
       messagesCount: sessionMessages.length,
       userMessagesCount: userMessages.length,
       assistantMessagesCount: assistantMessages.length,
@@ -390,21 +391,21 @@ export const ContextPanelContent: React.FC = () => {
       },
       breakdownTotal,
     };
-  }, [currentSessionId, providers, sessionMessages, sessions]);
+  }, [currentSessionId, providers, sessionMessages, sessions, t]);
 
   if (!currentSessionId) {
     return (
       <div className="flex h-full items-center justify-center p-6 text-center typography-ui-label text-muted-foreground">
-        Open a session to inspect context.
+        {t('contextPanel.content.emptySession')}
       </div>
     );
   }
 
   const segments: Array<{ key: string; label: string; value: number; color: string }> = [
-    { key: 'user', label: 'User', value: viewModel.breakdown.user, color: 'var(--status-success)' },
-    { key: 'assistant', label: 'Assistant', value: viewModel.breakdown.assistant, color: 'var(--primary-base)' },
-    { key: 'tool', label: 'Tool Calls', value: viewModel.breakdown.tool, color: 'var(--status-warning)' },
-    { key: 'other', label: 'Other', value: viewModel.breakdown.other, color: 'var(--surface-muted-foreground)' },
+    { key: 'user', label: t('contextPanel.content.role.user'), value: viewModel.breakdown.user, color: 'var(--status-success)' },
+    { key: 'assistant', label: t('contextPanel.content.role.assistant'), value: viewModel.breakdown.assistant, color: 'var(--primary-base)' },
+    { key: 'tool', label: t('contextPanel.content.role.tool'), value: viewModel.breakdown.tool, color: 'var(--status-warning)' },
+    { key: 'other', label: t('contextPanel.content.role.other'), value: viewModel.breakdown.other, color: 'var(--surface-muted-foreground)' },
   ];
 
   return (
@@ -428,7 +429,7 @@ export const ContextPanelContent: React.FC = () => {
         {/* ── Context usage ── */}
         <div className="mb-5 rounded-lg bg-[var(--surface-elevated)]/70 px-4 py-3.5">
           <div className="flex items-baseline justify-between">
-            <span className="typography-micro text-muted-foreground">Context</span>
+            <span className="typography-micro text-muted-foreground">{t('contextPanel.mode.context')}</span>
             <span className="typography-micro tabular-nums text-muted-foreground/70">
               {formatNumber(viewModel.tokenBreakdown.total)}
               {viewModel.contextLimit ? ` / ${formatNumber(viewModel.contextLimit)}` : ''}
@@ -446,17 +447,17 @@ export const ContextPanelContent: React.FC = () => {
             )}
           </div>
           <div className="mt-1.5 typography-micro font-medium tabular-nums text-foreground/80">
-            {viewModel.usagePercent.toFixed(1)}% used
+            {t('contextPanel.content.usagePercentUsed', { value: viewModel.usagePercent.toFixed(1) })}
           </div>
         </div>
 
         {/* ── Stat grid ── */}
         <div className="mb-5 grid grid-cols-2 gap-2">
           {([
-            { label: 'Messages', value: formatNumber(viewModel.messagesCount) },
-            { label: 'User', value: formatNumber(viewModel.userMessagesCount) },
-            { label: 'Assistant', value: formatNumber(viewModel.assistantMessagesCount) },
-            { label: 'Cost', value: formatMoney(viewModel.totalAssistantCost) },
+            { label: t('contextPanel.content.stats.messages'), value: formatNumber(viewModel.messagesCount) },
+            { label: t('contextPanel.content.stats.user'), value: formatNumber(viewModel.userMessagesCount) },
+            { label: t('contextPanel.content.stats.assistant'), value: formatNumber(viewModel.assistantMessagesCount) },
+            { label: t('contextPanel.content.stats.cost'), value: formatMoney(viewModel.totalAssistantCost) },
           ] as const).map((item) => (
             <div key={item.label} className="rounded-lg bg-[var(--surface-elevated)]/70 px-3 py-2.5">
               <div className="typography-micro text-muted-foreground/70">{item.label}</div>
@@ -467,14 +468,14 @@ export const ContextPanelContent: React.FC = () => {
 
         {/* ── Last turn tokens ── */}
         <div className="mb-5 rounded-lg bg-[var(--surface-elevated)]/70 px-4 py-3.5">
-          <div className="typography-micro text-muted-foreground">Last Assistant Message</div>
+          <div className="typography-micro text-muted-foreground">{t('contextPanel.content.lastAssistantMessage')}</div>
           <div className="mt-2.5 grid grid-cols-3 gap-x-4 gap-y-2.5">
             {([
-              { label: 'Input', value: viewModel.tokenBreakdown.input },
-              { label: 'Output', value: viewModel.tokenBreakdown.output },
-              { label: 'Reasoning', value: viewModel.tokenBreakdown.reasoning },
-              { label: 'Cache Read', value: viewModel.tokenBreakdown.cacheRead },
-              { label: 'Cache Write', value: viewModel.tokenBreakdown.cacheWrite },
+              { label: t('contextPanel.content.tokens.input'), value: viewModel.tokenBreakdown.input },
+              { label: t('contextPanel.content.tokens.output'), value: viewModel.tokenBreakdown.output },
+              { label: t('contextPanel.content.tokens.reasoning'), value: viewModel.tokenBreakdown.reasoning },
+              { label: t('contextPanel.content.tokens.cacheRead'), value: viewModel.tokenBreakdown.cacheRead },
+              { label: t('contextPanel.content.tokens.cacheWrite'), value: viewModel.tokenBreakdown.cacheWrite },
             ] as const).map((item) => (
               <div key={item.label}>
                 <div className="typography-micro text-muted-foreground/70">{item.label}</div>
@@ -517,7 +518,7 @@ export const ContextPanelContent: React.FC = () => {
 
         {/* ── Raw messages ── */}
         <div>
-          <div className="typography-micro text-muted-foreground">Raw Messages</div>
+          <div className="typography-micro text-muted-foreground">{t('contextPanel.content.rawMessages')}</div>
           <div className="mt-2.5 space-y-1">
             {[...sessionMessages].reverse().map((message) => {
               const role = deriveMessageRole(message.info).role;
@@ -547,7 +548,7 @@ export const ContextPanelContent: React.FC = () => {
                   >
                     <div className="flex items-center justify-between gap-2 whitespace-nowrap overflow-hidden">
                       <span className="min-w-0 inline-flex items-center gap-1.5">
-                        <span className="typography-ui-label text-foreground shrink-0">{capitalizeRole(role)}</span>
+                        <span className="typography-ui-label text-foreground shrink-0">{t(`contextPanel.content.role.${role}`, { defaultValue: capitalizeRole(role) })}</span>
                         <span className="min-w-0 truncate typography-micro text-muted-foreground">{message.info.id}</span>
                       </span>
                       <span className="typography-micro text-muted-foreground shrink-0">{formatMessageDateMeta(messageCreatedAt)}</span>
@@ -565,8 +566,8 @@ export const ContextPanelContent: React.FC = () => {
                               event.stopPropagation();
                               void handleCopyRawMessage(message.info.id, jsonValue);
                             }}
-                            aria-label={isCopied ? 'Copied' : 'Copy JSON'}
-                            title={isCopied ? 'Copied' : 'Copy'}
+                            aria-label={isCopied ? t('contextPanel.content.copied') : t('contextPanel.content.copyJson')}
+                            title={isCopied ? t('contextPanel.content.copied') : t('common.copy')}
                           >
                             {isCopied ? <RiCheckLine className="size-3.5" /> : <RiFileCopyLine className="size-3.5" />}
                           </button>

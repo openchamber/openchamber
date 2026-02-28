@@ -26,6 +26,7 @@ import { useMessageStore } from '@/stores/messageStore';
 import { useContextStore } from '@/stores/contextStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
+import { useLanguage } from '@/hooks/useLanguage';
 import { opencodeClient } from '@/lib/opencode/client';
 import { createWorktreeSessionForNewBranchExact } from '@/lib/worktreeSessionCreator';
 import { validateWorktreeCreate } from '@/lib/worktrees/worktreeManager';
@@ -106,6 +107,7 @@ export function GitHubPullRequestPickerDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const { t } = useLanguage();
   const { github } = useRuntimeAPIs();
   const githubAuthStatus = useGitHubAuthStore((state) => state.status);
   const githubAuthChecked = useGitHubAuthStore((state) => state.hasChecked);
@@ -515,7 +517,7 @@ export function GitHubPullRequestPickerDialog({
       const modelID = defaultModel?.modelID || configState.currentModelId || lastUsedProvider?.modelID;
       const agentName = resolveDefaultAgentName() || configState.currentAgentName || undefined;
       if (!providerID || !modelID) {
-        toast.error('No model selected');
+        toast.error(t('pullRequest.noModelSelected'));
         return;
       }
 
@@ -636,6 +638,7 @@ Nice-to-have:
     resolveDefaultModelSelection,
     resolveDefaultVariant,
     startingNumber,
+    t,
   ]);
 
   return (

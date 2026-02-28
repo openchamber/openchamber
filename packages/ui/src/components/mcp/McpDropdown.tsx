@@ -19,18 +19,26 @@ import { useDeviceInfo } from '@/lib/device';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { computeMcpHealth, useMcpStore } from '@/stores/useMcpStore';
 import { McpIcon } from '@/components/icons/McpIcon';
+import { useLanguage } from '@/hooks/useLanguage';
 
-const statusTooltip = (status: McpStatus | undefined): string => {
-  if (!status) return 'Unknown';
+const statusTooltip = (
+  status: McpStatus | undefined,
+  translate: (key: string, options?: Record<string, unknown>) => string,
+): string => {
+  if (!status) return translate('mcpDropdown.unknown');
   switch (status.status) {
     case 'connected':
-      return 'Connected';
+      return translate('mcpDropdown.connected');
     case 'failed':
-      return `Failed: ${(status as { error?: string }).error || 'Unknown error'}`;
+      return translate('mcpDropdown.failedWithError', {
+        error: (status as { error?: string }).error || translate('mcpDropdown.unknownError'),
+      });
     case 'needs_auth':
-      return 'Needs authentication';
+      return translate('mcpDropdown.needsAuthentication');
     case 'needs_client_registration':
-      return `Needs registration: ${(status as { error?: string }).error || ''}`;
+      return translate('mcpDropdown.needsRegistrationWithError', {
+        error: (status as { error?: string }).error || '',
+      });
     default:
       return status.status;
   }
@@ -60,6 +68,7 @@ interface McpDropdownContentProps {
 }
 
 export const McpDropdownContent: React.FC<McpDropdownContentProps> = ({ active, className }) => {
+  const { t } = useLanguage();
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const directory = currentDirectory ?? null;
   const status = useMcpStore((state) => state.getStatusForDirectory(directory));
@@ -97,7 +106,7 @@ export const McpDropdownContent: React.FC<McpDropdownContentProps> = ({ active, 
       <div className="sticky top-0 z-20 bg-[var(--surface-elevated)] border-b border-[var(--interactive-border)]">
         <div className="flex items-center justify-between gap-3 px-2 py-2.5">
           <div className="min-w-0 flex items-center gap-2">
-            <div className="typography-ui-header font-semibold text-foreground">MCP Servers</div>
+            <div className="typography-ui-header font-semibold text-foreground">{t('mcpDropdown.mcpServers')}</div>
             {directory && (
               <div className="truncate typography-ui-label text-muted-foreground">
                 {directory.split('/').pop() || directory}
@@ -109,7 +118,7 @@ export const McpDropdownContent: React.FC<McpDropdownContentProps> = ({ active, 
             className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             disabled={isSpinning}
             onClick={handleRefresh}
-            aria-label="Refresh"
+            aria-label={t('mcpDropdown.refresh')}
           >
             <RiRefreshLine className={cn('h-4 w-4', isSpinning && 'animate-spin')} />
           </button>
@@ -122,7 +131,7 @@ export const McpDropdownContent: React.FC<McpDropdownContentProps> = ({ active, 
           const tone = statusTone(serverStatus);
           const isConnected = serverStatus?.status === 'connected';
           const isBusy = busyName === serverName;
-          const tooltip = statusTooltip(serverStatus);
+          const tooltip = statusTooltip(serverStatus, t);
 
           return (
             <div
@@ -175,7 +184,7 @@ export const McpDropdownContent: React.FC<McpDropdownContentProps> = ({ active, 
 
         {sortedNames.length === 0 && (
           <div className="px-2 py-3 typography-ui-label text-muted-foreground text-center">
-            Configure MCP servers in Opencode config.
+            {t('mcpDropdown.configureServersHint')}
           </div>
         )}
       </div>
@@ -184,6 +193,7 @@ export const McpDropdownContent: React.FC<McpDropdownContentProps> = ({ active, 
 };
 
 export const McpDropdown: React.FC<McpDropdownProps> = ({ headerIconButtonClass }) => {
+  const { t } = useLanguage();
   const [open, setOpen] = React.useState(false);
   const [tooltipOpen, setTooltipOpen] = React.useState(false);
   const blockTooltipRef = React.useRef(false);
@@ -250,7 +260,7 @@ export const McpDropdown: React.FC<McpDropdownProps> = ({ headerIconButtonClass 
         const tone = statusTone(serverStatus);
         const isConnected = serverStatus?.status === 'connected';
         const isBusy = busyName === serverName;
-        const tooltip = statusTooltip(serverStatus);
+        const tooltip = statusTooltip(serverStatus, t);
 
         return (
           <div
@@ -325,7 +335,7 @@ export const McpDropdown: React.FC<McpDropdownProps> = ({ headerIconButtonClass 
   const triggerButton = (
     <button
       type="button"
-      aria-label="MCP servers"
+      aria-label={t('mcpDropdown.mcpServers')}
       className={cn(headerIconButtonClass, 'relative')}
       onClick={isMobile ? () => setOpen(true) : undefined}
     >
@@ -355,18 +365,18 @@ export const McpDropdown: React.FC<McpDropdownProps> = ({ headerIconButtonClass 
         {triggerButton}
         <MobileOverlayPanel
           open={open}
-          title="MCP Servers"
+          title={t('mcpDropdown.mcpServers')}
           onClose={() => setOpen(false)}
           renderHeader={(closeButton) => (
             <div className="flex items-center justify-between px-3 py-2 border-b border-border/40">
-              <h2 className="typography-ui-label font-semibold text-foreground">MCP Servers</h2>
+              <h2 className="typography-ui-label font-semibold text-foreground">{t('mcpDropdown.mcpServers')}</h2>
               <div className="flex items-center gap-1">
                 <button
                   type="button"
                   className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover transition-colors"
                   disabled={isSpinning}
                   onClick={handleRefresh}
-                  aria-label="Refresh"
+                  aria-label={t('mcpDropdown.refresh')}
                 >
                   <RiRefreshLine className={cn('h-4 w-4', isSpinning && 'animate-spin')} />
                 </button>
@@ -400,7 +410,7 @@ export const McpDropdown: React.FC<McpDropdownProps> = ({ headerIconButtonClass 
           </DropdownMenuTrigger>
         </TooltipTrigger>
         <TooltipContent>
-          <p>MCP Servers</p>
+          <p>{t('mcpDropdown.mcpServers')}</p>
         </TooltipContent>
       </Tooltip>
 

@@ -1,4 +1,5 @@
 import React from 'react';
+import { useLanguage } from '@/hooks/useLanguage';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { RiInformationLine, RiRestartLine } from '@remixicon/react';
 import { toast } from '@/components/ui';
@@ -13,6 +14,7 @@ const MAX_DAYS = 365;
 const DEFAULT_RETENTION_DAYS = 30;
 
 export const SessionRetentionSettings: React.FC = () => {
+  const { t } = useLanguage();
   const autoDeleteEnabled = useUIStore((state) => state.autoDeleteEnabled);
   const autoDeleteAfterDays = useUIStore((state) => state.autoDeleteAfterDays);
   const setAutoDeleteEnabled = useUIStore((state) => state.setAutoDeleteEnabled);
@@ -24,30 +26,30 @@ export const SessionRetentionSettings: React.FC = () => {
   const handleRunCleanup = React.useCallback(async () => {
     const result = await runCleanup({ force: true });
     if (result.deletedIds.length === 0 && result.failedIds.length === 0) {
-      toast.message('No sessions eligible for deletion');
+      toast.message(t('sessionRetentionSettings.noSessionsEligible'));
       return;
     }
     if (result.deletedIds.length > 0) {
-      toast.success(`Deleted ${result.deletedIds.length} session${result.deletedIds.length === 1 ? '' : 's'}`);
+      toast.success(t('sessionRetentionSettings.deletedSessions', { count: result.deletedIds.length }));
     }
     if (result.failedIds.length > 0) {
-      toast.error(`Failed to delete ${result.failedIds.length} session${result.failedIds.length === 1 ? '' : 's'}`);
+      toast.error(t('sessionRetentionSettings.failedToDeleteSessions', { count: result.failedIds.length }));
     }
-  }, [runCleanup]);
+  }, [runCleanup, t]);
 
   return (
     <div className="mb-8">
       <div className="mb-1 px-1">
         <div className="flex items-center gap-2">
           <h3 className="typography-ui-header font-medium text-foreground">
-            Session Retention
+            {t('sessionRetentionSettings.title')}
           </h3>
           <Tooltip delayDuration={1000}>
             <TooltipTrigger asChild>
               <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
             </TooltipTrigger>
             <TooltipContent sideOffset={8} className="max-w-xs">
-              Automatically delete inactive sessions based on their last activity. Keeps recent 5 sessions.
+              {t('sessionRetentionSettings.description')}
             </TooltipContent>
           </Tooltip>
         </div>
@@ -70,14 +72,14 @@ export const SessionRetentionSettings: React.FC = () => {
           <Checkbox
             checked={autoDeleteEnabled}
             onChange={setAutoDeleteEnabled}
-            ariaLabel="Enable auto-cleanup"
+            ariaLabel={t('sessionRetentionSettings.enableAutoCleanup')}
           />
-          <span className="typography-ui-label text-foreground">Enable Auto-Cleanup</span>
+          <span className="typography-ui-label text-foreground">{t('sessionRetentionSettings.enableAutoCleanup')}</span>
         </div>
 
         <div className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
           <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
-            <span className="typography-ui-label text-foreground">Retention Period</span>
+            <span className="typography-ui-label text-foreground">{t('sessionRetentionSettings.retentionPeriod')}</span>
           </div>
           <div className="flex items-center gap-2 sm:w-fit">
             <NumberInput
@@ -86,18 +88,18 @@ export const SessionRetentionSettings: React.FC = () => {
               min={MIN_DAYS}
               max={MAX_DAYS}
               step={1}
-              aria-label="Retention period in days"
+              aria-label={t('sessionRetentionSettings.retentionPeriodInDays')}
               className="w-20 tabular-nums"
             />
-            <span className="typography-ui-label text-muted-foreground">days</span>
+            <span className="typography-ui-label text-muted-foreground">{t('sessionRetentionSettings.days')}</span>
             <ButtonSmall
               type="button"
               variant="ghost"
               onClick={() => setAutoDeleteAfterDays(DEFAULT_RETENTION_DAYS)}
               disabled={autoDeleteAfterDays === DEFAULT_RETENTION_DAYS}
               className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
-              aria-label="Reset retention period"
-              title="Reset"
+              aria-label={t('common.resetButton')}
+              title={t('common.resetButton')}
             >
               <RiRestartLine className="h-3.5 w-3.5" />
             </ButtonSmall>
@@ -108,7 +110,7 @@ export const SessionRetentionSettings: React.FC = () => {
       <div className="mt-1 px-2 py-1.5 space-y-1">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-8">
           <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
-            <p className="typography-meta text-foreground font-medium">Manual Cleanup</p>
+            <p className="typography-meta text-foreground font-medium">{t('sessionRetentionSettings.manualCleanup')}</p>
           </div>
           <div className="flex items-center gap-2 sm:w-fit">
             <ButtonSmall
@@ -119,12 +121,12 @@ export const SessionRetentionSettings: React.FC = () => {
               disabled={isRunning}
               className="!font-normal"
             >
-              {isRunning ? 'Cleaning up...' : 'Run cleanup now'}
+              {isRunning ? t('sessionRetentionSettings.cleaningUp') : t('sessionRetentionSettings.runCleanupNow')}
             </ButtonSmall>
           </div>
         </div>
         <p className="typography-meta text-muted-foreground">
-          Eligible for deletion right now: <span className="tabular-nums">{pendingCount}</span>
+          {t('sessionRetentionSettings.eligibleNow')}: <span className="tabular-nums">{pendingCount}</span>
         </p>
       </div>
     </div>
