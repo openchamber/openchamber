@@ -57,6 +57,10 @@ Notification message preparation utilities for system notifications, including t
 WebSocket protocol utilities for terminal input handling including message normalization, control frame parsing, and rate limiting.
 - Module docs: `packages/web/server/lib/terminal/DOCUMENTATION.md`
 
+##### tts
+Server-side text-to-speech services and summarization helpers for `/api/tts/*` endpoints.
+- Module docs: `packages/web/server/lib/tts/DOCUMENTATION.md`
+
 ##### skills-catalog
 Skills catalog management including discovery, installation, and configuration of agent skill packages.
 - Module docs: `packages/web/server/lib/skills-catalog/DOCUMENTATION.md`

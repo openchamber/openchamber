@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.8.1] - 2026-02-28
+
+- Web/Auth: fixed an issue where non-tunnel browser sessions could incorrectly show a tunnel-only lock screen; normal auth flow now appears unless a tunnel is actually active.
+
+
 ## [1.8.0] - 2026-02-28
 
 - Desktop: added SSH remote instance support with dedicated lifecycle and UX flows, so you can work against remote machines more reliably (thanks to @shekohex).

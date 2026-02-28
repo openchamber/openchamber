@@ -445,3 +445,12 @@ jobs:
           draft: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Send release to Discord
+        uses: SethCohen/github-releases-to-discord@v1
+        with:
+          webhook_url: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          color: "2105893"
+          username: "OpenChamber Releases"
+          footer_title: "OpenChamber Changelog"
+          reduce_headings: true

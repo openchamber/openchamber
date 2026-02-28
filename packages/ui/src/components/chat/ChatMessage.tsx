@@ -389,6 +389,11 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         return typeof timeInfo?.completed === 'number' ? timeInfo.completed : null;
     }, [message.info.time]);
 
+    const messageCreatedAt = React.useMemo(() => {
+        const timeInfo = message.info.time as { created?: number } | undefined;
+        return typeof timeInfo?.created === 'number' ? timeInfo.created : null;
+    }, [message.info.time]);
+
     const isMessageCompleted = React.useMemo(() => {
         if (isUser) return true;
         return Boolean(messageCompletedAt && messageCompletedAt > 0);
@@ -1004,6 +1009,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                 isMessageCompleted={isMessageCompleted}
                                 messageFinish={messageFinish}
                                 messageCompletedAt={messageCompletedAt ?? undefined}
+                                messageCreatedAt={messageCreatedAt ?? undefined}
                                 syntaxTheme={syntaxTheme}
                                 isMobile={isMobile}
                                 hasTouchInput={hasTouchInput}

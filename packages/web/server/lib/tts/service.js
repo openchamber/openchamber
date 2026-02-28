@@ -6,7 +6,7 @@
  */
 
 import OpenAI from 'openai';
-import { readAuthFile } from './opencode/auth.js';
+import { readAuthFile } from '../opencode/auth.js';
 
 // Voice options from OpenAI
 export const TTS_VOICES = [

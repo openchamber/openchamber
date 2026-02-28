@@ -4,6 +4,7 @@ import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { RiAiAgentLine, RiArrowDownSLine, RiArrowRightSLine, RiBookLine, RiExternalLinkLine, RiFileEditLine, RiFileList2Line, RiFileSearchLine, RiFileTextLine, RiFolder6Line, RiGitBranchLine, RiGlobalLine, RiListCheck2, RiListCheck3, RiMenuSearchLine, RiPencilLine, RiSurveyLine, RiTaskLine, RiTerminalBoxLine, RiToolsLine } from '@remixicon/react';
 import { File as PierreFile, PatchDiff } from '@pierre/diffs/react';
 import { cn } from '@/lib/utils';
+import { formatTimestampForDisplay } from '../timeFormat';
 import { SimpleMarkdownRenderer } from '../../MarkdownRenderer';
 import { getToolMetadata, getLanguageFromExtension, isImageFile, getImageMimeType } from '@/lib/toolHelpers';
 import type { ToolPart as ToolPartType, ToolState as ToolStateUnion } from '@opencode-ai/sdk/v2';
@@ -1419,6 +1420,15 @@ const ToolPart: React.FC<ToolPartProps> = ({
     const effectiveTimeStart = isTaskTool ? (pinnedTaskTime.start ?? time?.start) : time?.start;
     const effectiveTimeEnd = isTaskTool ? (pinnedTaskTime.end ?? time?.end) : time?.end;
 
+    const endedTimestampText = React.useMemo(() => {
+        if (typeof effectiveTimeEnd !== 'number' || !Number.isFinite(effectiveTimeEnd)) {
+            return null;
+        }
+
+        const formatted = formatTimestampForDisplay(effectiveTimeEnd);
+        return formatted.length > 0 ? formatted : null;
+    }, [effectiveTimeEnd]);
+
     const taskOutputString = React.useMemo(() => {
         return typeof stateWithData.output === 'string' ? stateWithData.output : undefined;
     }, [stateWithData.output]);
@@ -1667,7 +1677,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
                         </span>
                     )}
                     {typeof effectiveTimeStart === 'number' && (
-                        <span className="text-muted-foreground/80 flex-shrink-0">
+                        <span className="text-muted-foreground/80 flex-shrink-0 tabular-nums">
                             <LiveDuration
                                 start={effectiveTimeStart}
                                 end={typeof effectiveTimeEnd === 'number' ? effectiveTimeEnd : undefined}
@@ -1675,6 +1685,16 @@ const ToolPart: React.FC<ToolPartProps> = ({
                             />
                         </span>
                     )}
+                    {endedTimestampText ? (
+                        <span
+                            className={cn(
+                                'text-muted-foreground/70 flex-shrink-0 tabular-nums transition-opacity duration-150',
+                                'opacity-0 group-hover/tool:opacity-100'
+                            )}
+                        >
+                            {endedTimestampText}
+                        </span>
+                    ) : null}
                 </div>
             </div>
 

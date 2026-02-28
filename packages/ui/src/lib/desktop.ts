@@ -166,9 +166,49 @@ const normalizeOrigin = (raw: string): string | null => {
   }
 };
 
+const parseUrl = (raw: string): URL | null => {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  try {
+    return new URL(trimmed);
+  } catch {
+    try {
+      return new URL(trimmed.endsWith('/') ? trimmed : `${trimmed}/`);
+    } catch {
+      return null;
+    }
+  }
+};
+
+const normalizeHost = (rawHost: string): string => rawHost.replace(/^\[|\]$/g, '').toLowerCase();
+
+const isLoopbackHost = (host: string): boolean => {
+  const normalized = normalizeHost(host);
+  return normalized === 'localhost' || normalized === '127.0.0.1' || normalized === '::1';
+};
+
 export const isDesktopLocalOriginActive = (): boolean => {
   if (typeof window === 'undefined') return false;
   const local = typeof window.__OPENCHAMBER_LOCAL_ORIGIN__ === 'string' ? window.__OPENCHAMBER_LOCAL_ORIGIN__ : '';
+  const localUrl = parseUrl(local);
+  const currentUrl = parseUrl(window.location.origin);
+
+  if (localUrl && currentUrl) {
+    if (localUrl.origin === currentUrl.origin) {
+      return true;
+    }
+
+    const localPort = localUrl.port || (localUrl.protocol === 'https:' ? '443' : '80');
+    const currentPort = currentUrl.port || (currentUrl.protocol === 'https:' ? '443' : '80');
+
+    return (
+      localUrl.protocol === currentUrl.protocol &&
+      localPort === currentPort &&
+      isLoopbackHost(localUrl.hostname) &&
+      isLoopbackHost(currentUrl.hostname)
+    );
+  }
+
   const localOrigin = normalizeOrigin(local);
   const currentOrigin = normalizeOrigin(window.location.origin) || window.location.origin;
   return Boolean(localOrigin && currentOrigin && localOrigin === currentOrigin);

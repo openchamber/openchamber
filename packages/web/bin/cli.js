@@ -4,7 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import net from 'net';
 import { spawn, spawnSync } from 'child_process';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -625,7 +625,7 @@ const commands = {
       return;
     }
 
-    const { startWebUiServer } = await import(serverPath);
+    const { startWebUiServer } = await import(pathToFileURL(serverPath).href);
     await startWebUiServer({
       port: options.port,
       attachSignals: true,

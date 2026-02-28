@@ -1,3 +1,7 @@
+## [1.8.1] - 2026-02-28
+
+- No notable changes.
+
 ## [1.8.0] - 2026-02-28
 
 - Chat: improved long-session performance with virtualized message rendering, smoother scrolling, and more stable behavior in large histories (thanks to @shekohex).

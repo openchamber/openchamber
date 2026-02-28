@@ -22,7 +22,7 @@ RUN bun run build:web
 
 FROM base AS runtime
 
-RUN pacman -Sy --noconfirm --needed base-devel python openssh cloudflared git nodejs npm && \
+RUN pacman -Sy --noconfirm --needed base-devel python openssh cloudflared git nodejs npm less && \
   pacman -Scc --noconfirm
 
 ENV NODE_ENV=production
@@ -33,16 +33,12 @@ RUN useradd -m -s /bin/bash openchamber
 # Switch to openchamber user
 USER openchamber
 
-RUN npm config set prefix /home/openchamber/.npm-global && mkdir -p /home/openchamber/.npm-global
 ENV NPM_CONFIG_PREFIX=/home/openchamber/.npm-global
 ENV PATH=${NPM_CONFIG_PREFIX}/bin:${PATH}
 
-
-# Create necessary directories and set ownership
-RUN mkdir -p /home/openchamber/.local /home/openchamber/.config /home/openchamber/.ssh
-
-# Install npm packages as root
-RUN npm install -g opencode-ai
+RUN npm config set prefix /home/openchamber/.npm-global && mkdir -p /home/openchamber/.npm-global && \
+  mkdir -p /home/openchamber/.local /home/openchamber/.config /home/openchamber/.ssh && \
+  npm install -g opencode-ai
 
 WORKDIR /home/openchamber
 COPY --from=deps /app/node_modules ./node_modules
