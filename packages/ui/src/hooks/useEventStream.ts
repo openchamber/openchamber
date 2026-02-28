@@ -18,6 +18,7 @@ import { useContextStore } from '@/stores/contextStore';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { isDesktopLocalOriginActive } from '@/lib/desktop';
 import { triggerSessionStatusPoll } from '@/hooks/useServerSessionStatus';
+import { PermissionToastActions } from '@/components/chat/PermissionToastActions';
 
 interface EventData {
   type: string;
@@ -32,6 +33,88 @@ const readStringProp = (obj: unknown, keys: string[]): string | null => {
     if (typeof value === 'string' && value.length > 0) return value;
   }
   return null;
+};
+
+const readPermissionMetadataPreview = (metadata: Record<string, unknown>): string => {
+  const preferredKeys = [
+    'command',
+    'cmd',
+    'script',
+    'path',
+    'filePath',
+    'filepath',
+    'file_path',
+    'directory',
+    'working_directory',
+    'cwd',
+    'url',
+    'uri',
+    'endpoint',
+    'description',
+    'action',
+    'operation',
+  ];
+
+  for (let i = 0; i < preferredKeys.length; i++) {
+    const value = metadata[preferredKeys[i]];
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (trimmed.length > 0) {
+        return trimmed;
+      }
+      continue;
+    }
+
+    if (typeof value === 'number' || typeof value === 'boolean') {
+      return String(value);
+    }
+
+    if (Array.isArray(value)) {
+      const joined = value
+        .filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+        .slice(0, 3)
+        .join(', ')
+        .trim();
+      if (joined.length > 0) {
+        return joined;
+      }
+    }
+  }
+
+  const metadataEntries = Object.entries(metadata);
+  if (metadataEntries.length === 0) {
+    return '';
+  }
+
+  try {
+    return JSON.stringify(metadata);
+  } catch {
+    return '';
+  }
+};
+
+const buildPermissionToastBody = (request: PermissionRequest): string => {
+  const patternSummary = request.patterns
+    .filter((pattern): pattern is string => typeof pattern === 'string' && pattern.trim().length > 0)
+    .join(', ')
+    .trim();
+
+  const metadataSummary = readPermissionMetadataPreview(request.metadata);
+
+  if (patternSummary.length > 0 && metadataSummary.length > 0) {
+    return `${patternSummary} | ${metadataSummary}`;
+  }
+
+  if (patternSummary.length > 0) {
+    return patternSummary;
+  }
+
+  if (metadataSummary.length > 0) {
+    return metadataSummary;
+  }
+
+  const fallback = request.permission.trim();
+  return fallback.length > 0 ? fallback : 'Permission details unavailable';
 };
 
 type MessageTracker = (messageId: string, event?: string, extraData?: Record<string, unknown>) => void;
@@ -1593,20 +1676,58 @@ export const useEventStream = () => {
             const sessionTitle =
               useSessionStore.getState().sessions.find((s) => s.id === request.sessionID)?.title ||
               'Session';
+            const permissionBody = buildPermissionToastBody(request);
 
               import('sonner').then(({ toast }) => {
-                toast.warning('Permission required', {
-                  id: toastKey,
-                  description: sessionTitle,
-                  duration: 30000,
-                  action: {
-                    label: 'Open',
-                    onClick: () => {
-                      useUIStore.getState().setActiveMainTab('chat');
-                      void useSessionStore.getState().setCurrentSession(request.sessionID);
+                const isMobile = useUIStore.getState().isMobile;
+
+                if (isMobile) {
+                  toast.warning('Permission required', {
+                    id: toastKey,
+                    description: sessionTitle,
+                    duration: 30000,
+                    action: {
+                      label: 'Open',
+                      onClick: () => {
+                        useUIStore.getState().setActiveMainTab('chat');
+                        void useSessionStore.getState().setCurrentSession(request.sessionID);
+                      },
                     },
-                  },
-                });
+                  });
+                } else {
+                  toast.warning('Permission required', {
+                    id: toastKey,
+                    description: React.createElement(PermissionToastActions, {
+                      sessionTitle,
+                      permissionBody,
+                      onOnce: async () => {
+                        try {
+                          await useSessionStore.getState().respondToPermission(request.sessionID, request.id, 'once');
+                          toast.dismiss(toastKey);
+                        } catch (error) {
+                          console.error('Failed to respond to permission:', error);
+                        }
+                      },
+                      onAlways: async () => {
+                        try {
+                          await useSessionStore.getState().respondToPermission(request.sessionID, request.id, 'always');
+                          toast.dismiss(toastKey);
+                        } catch (error) {
+                          console.error('Failed to respond to permission:', error);
+                        }
+                      },
+                      onDeny: async () => {
+                        try {
+                          await useSessionStore.getState().respondToPermission(request.sessionID, request.id, 'reject');
+                          toast.dismiss(toastKey);
+                        } catch (error) {
+                          console.error('Failed to respond to permission:', error);
+                        }
+                      },
+                    }),
+                    duration: 30000,
+                  });
+                }
               });
 
           }, 0);
