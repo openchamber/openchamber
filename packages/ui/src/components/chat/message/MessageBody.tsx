@@ -28,6 +28,7 @@ import { useMessageTTS } from '@/hooks/useMessageTTS';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { TextSelectionMenu } from './TextSelectionMenu';
 import { copyTextToClipboard } from '@/lib/clipboard';
+import { formatTimestampForDisplay } from './timeFormat';
 
 type SubtaskPartLike = Part & {
     type: 'subtask';
@@ -257,6 +258,7 @@ interface MessageBodyProps {
     isMessageCompleted: boolean;
     messageFinish?: string;
     messageCompletedAt?: number;
+    messageCreatedAt?: number;
 
     syntaxTheme: { [key: string]: React.CSSProperties };
 
@@ -508,6 +510,7 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
     isMessageCompleted,
     messageFinish,
     messageCompletedAt,
+    messageCreatedAt,
 
     syntaxTheme,
     isMobile,
@@ -1123,6 +1126,16 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
         return formatTurnDuration(messageCompletedAt - userCreatedAt);
     }, [isLastAssistantInTurn, hasStopFinish, turnGroupingContext?.userMessageCreatedAt, messageCompletedAt]);
 
+    const footerTimestamp = React.useMemo(() => {
+        const timestamp = typeof messageCompletedAt === 'number' && messageCompletedAt > 0
+            ? messageCompletedAt
+            : (typeof messageCreatedAt === 'number' && messageCreatedAt > 0 ? messageCreatedAt : null);
+        if (timestamp === null) return null;
+
+        const formatted = formatTimestampForDisplay(timestamp);
+        return formatted.length > 0 ? formatted : null;
+    }, [messageCompletedAt, messageCreatedAt]);
+
     const footerButtons = (
          <>
               {onCopyMessage && (
@@ -1259,12 +1272,17 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
                                         <div className="flex items-center gap-1.5">
                                             {footerButtons}
                                         </div>
-                                        {turnDurationText ? (
-                                            <span className="text-sm text-muted-foreground/60 tabular-nums flex items-center gap-1">
-                                                <RiHourglassLine className="h-3.5 w-3.5" />
-                                                {turnDurationText}
-                                            </span>
-                                        ) : null}
+                                        <div className="flex items-center gap-1.5">
+                                            {turnDurationText ? (
+                                                <span className="text-sm text-muted-foreground/60 tabular-nums flex items-center gap-1">
+                                                    <RiHourglassLine className="h-3.5 w-3.5" />
+                                                    {turnDurationText}
+                                                </span>
+                                            ) : null}
+                                            {footerTimestamp ? (
+                                                <span className="text-sm text-muted-foreground/60 tabular-nums">{footerTimestamp}</span>
+                                            ) : null}
+                                        </div>
                                     </div>
                                 )}
                             </div>
@@ -1277,12 +1295,17 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
                         <div className="flex items-center gap-1.5">
                             {footerButtons}
                         </div>
-                        {turnDurationText ? (
-                            <span className="text-sm text-muted-foreground/60 tabular-nums flex items-center gap-1">
-                                <RiHourglassLine className="h-3.5 w-3.5" />
-                                {turnDurationText}
-                            </span>
-                        ) : null}
+                        <div className="flex items-center gap-1.5">
+                            {turnDurationText ? (
+                                <span className="text-sm text-muted-foreground/60 tabular-nums flex items-center gap-1">
+                                    <RiHourglassLine className="h-3.5 w-3.5" />
+                                    {turnDurationText}
+                                </span>
+                            ) : null}
+                            {footerTimestamp ? (
+                                <span className="text-sm text-muted-foreground/60 tabular-nums">{footerTimestamp}</span>
+                            ) : null}
+                        </div>
                     </div>
                 )}
 
