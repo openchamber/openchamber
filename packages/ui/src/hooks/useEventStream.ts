@@ -35,6 +35,55 @@ const readStringProp = (obj: unknown, keys: string[]): string | null => {
   return null;
 };
 
+const readStringArrayProp = (value: unknown): string[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter((entry): entry is string => typeof entry === 'string')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+};
+
+const normalizePermissionRequest = (value: unknown): PermissionRequest | null => {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const id = readStringProp(record, ['id']);
+  const sessionID = readStringProp(record, ['sessionID']);
+  if (!id || !sessionID) {
+    return null;
+  }
+
+  const permission = typeof record.permission === 'string' ? record.permission : '';
+  const patterns = readStringArrayProp(record.patterns);
+  const metadata = typeof record.metadata === 'object' && record.metadata !== null
+    ? record.metadata as Record<string, unknown>
+    : {};
+  const always = readStringArrayProp(record.always);
+
+  const toolValue = record.tool;
+  const tool = (toolValue && typeof toolValue === 'object')
+    ? {
+        messageID: readStringProp(toolValue, ['messageID']) ?? '',
+        callID: readStringProp(toolValue, ['callID']) ?? '',
+      }
+    : undefined;
+
+  return {
+    id,
+    sessionID,
+    permission,
+    patterns,
+    metadata,
+    always,
+    tool: tool && tool.messageID.length > 0 && tool.callID.length > 0 ? tool : undefined,
+  };
+};
+
 const readPermissionMetadataPreview = (metadata: Record<string, unknown>): string => {
   const preferredKeys = [
     'command',
@@ -94,12 +143,14 @@ const readPermissionMetadataPreview = (metadata: Record<string, unknown>): strin
 };
 
 const buildPermissionToastBody = (request: PermissionRequest): string => {
-  const patternSummary = request.patterns
+  const patterns = Array.isArray(request.patterns) ? request.patterns : [];
+  const patternSummary = patterns
     .filter((pattern): pattern is string => typeof pattern === 'string' && pattern.trim().length > 0)
     .join(', ')
     .trim();
 
-  const metadataSummary = readPermissionMetadataPreview(request.metadata);
+  const metadata = typeof request.metadata === 'object' && request.metadata !== null ? request.metadata : {};
+  const metadataSummary = readPermissionMetadataPreview(metadata);
 
   if (patternSummary.length > 0 && metadataSummary.length > 0) {
     return `${patternSummary} | ${metadataSummary}`;
@@ -113,7 +164,7 @@ const buildPermissionToastBody = (request: PermissionRequest): string => {
     return metadataSummary;
   }
 
-  const fallback = request.permission.trim();
+  const fallback = typeof request.permission === 'string' ? request.permission.trim() : '';
   return fallback.length > 0 ? fallback : 'Permission details unavailable';
 };
 
@@ -295,7 +346,11 @@ export const useEventStream = () => {
       }
 
       for (const request of pending) {
-        addPermission(request as unknown as PermissionRequest);
+        const normalizedRequest = normalizePermissionRequest(request);
+        if (!normalizedRequest) {
+          continue;
+        }
+        addPermission(normalizedRequest);
       }
     } catch {
       // ignored
@@ -1620,11 +1675,10 @@ export const useEventStream = () => {
       }
 
       case 'permission.asked': {
-        if (!('sessionID' in props) || typeof props.sessionID !== 'string') {
+        const request = normalizePermissionRequest(props);
+        if (!request) {
           break;
         }
-
-        const request = props as unknown as PermissionRequest;
 
         addPermission(request);
 
