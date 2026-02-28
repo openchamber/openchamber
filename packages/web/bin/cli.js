@@ -24,6 +24,10 @@ function getBunBinary() {
 
 const BUN_BIN = getBunBinary();
 
+function importFromFilePath(filePath) {
+  return import(pathToFileURL(filePath).href);
+}
+
 function isBunRuntime() {
   return typeof globalThis.Bun !== 'undefined';
 }
@@ -625,7 +629,7 @@ const commands = {
       return;
     }
 
-    const { startWebUiServer } = await import(pathToFileURL(serverPath).href);
+    const { startWebUiServer } = await importFromFilePath(serverPath);
     await startWebUiServer({
       port: options.port,
       attachSignals: true,
@@ -926,7 +930,7 @@ const commands = {
       executeUpdate,
       detectPackageManager,
       getCurrentVersion,
-    } = await import(packageManagerPath);
+    } = await importFromFilePath(packageManagerPath);
 
     // Check for running instances before update
     let runningInstances = [];
