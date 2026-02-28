@@ -5,6 +5,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { RiChatNewLine, RiAddLine, RiFileCopyLine } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import { copyTextToClipboard } from '@/lib/clipboard';
+import { useLanguage } from '@/hooks/useLanguage';
 
 interface TextSelectionMenuProps {
   containerRef: React.RefObject<HTMLElement | null>;
@@ -19,6 +20,7 @@ interface MenuPosition {
 const MENU_TRANSITION_MS = 200;
 
 export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerRef }) => {
+  const { t } = useLanguage();
   const [position, setPosition] = React.useState<MenuPosition>({ x: 0, y: 0, show: false });
   const [selectedText, setSelectedText] = React.useState('');
   const [isDragging, setIsDragging] = React.useState(false);
@@ -269,7 +271,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
           type="button"
         >
           <RiAddLine className="h-5 w-5" />
-          <span>Add to chat</span>
+          <span>{t('textSelectionMenu.addToChat')}</span>
         </button>
         
         <button
@@ -284,7 +286,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
           type="button"
         >
           <RiChatNewLine className="h-5 w-5" />
-          <span>New session</span>
+          <span>{t('textSelectionMenu.newSession')}</span>
         </button>
         
         <button
@@ -299,7 +301,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
           type="button"
         >
           <RiFileCopyLine className="h-5 w-5" />
-          <span>Copy</span>
+          <span>{t('common.copy')}</span>
         </button>
       </div>,
       document.body
@@ -340,11 +342,11 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
             'hover:bg-[var(--interactive-hover)]',
             'transition-colors duration-150'
           )}
-          title="Add to current chat"
+          title={t('textSelectionMenu.addToCurrentChat')}
           type="button"
         >
           <RiAddLine className="h-4 w-4" />
-          <span>Add to chat</span>
+          <span>{t('textSelectionMenu.addToChat')}</span>
         </button>
       
         <div className="w-px h-4 bg-[var(--interactive-border)]" />
@@ -358,11 +360,11 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
             'hover:bg-[var(--interactive-hover)]',
             'transition-colors duration-150'
           )}
-          title="Create new session with selection"
+          title={t('textSelectionMenu.createSessionWithSelection')}
           type="button"
         >
           <RiChatNewLine className="h-4 w-4" />
-          <span>New session</span>
+          <span>{t('textSelectionMenu.newSession')}</span>
         </button>
       </div>
     </div>,

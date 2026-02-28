@@ -10,6 +10,7 @@ import type { ProjectFileSearchHit } from '@/lib/opencode/client';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { useDirectoryShowHidden } from '@/lib/directoryShowHidden';
 import { useFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
+import { useLanguage } from '@/hooks/useLanguage';
 
 type FileInfo = ProjectFileSearchHit;
 type AgentInfo = {
@@ -45,6 +46,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
   onTabSelect,
   style,
 }, ref) => {
+  const { t } = useLanguage();
   const { currentDirectory } = useDirectoryStore();
   const { addServerFile } = useSessionStore();
   const { getVisibleAgents } = useConfigStore();
@@ -375,9 +377,9 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
           <div className="px-2 pt-2 pb-1 border-b border-border/60">
             <div className="flex items-center gap-1 rounded-lg bg-[var(--surface-elevated)] p-1">
               {([
-                { id: 'commands' as const, label: 'Commands' },
-                { id: 'agents' as const, label: 'Agents' },
-                { id: 'files' as const, label: 'Files' },
+                { id: 'commands' as const, label: t('chatAutocomplete.commandsTab') },
+                { id: 'agents' as const, label: t('chatAutocomplete.agentsTab') },
+                { id: 'files' as const, label: t('chatAutocomplete.filesTab') },
               ]).map((tab) => (
                 <button
                   key={tab.id}
@@ -499,19 +501,19 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
             })}
             {visibleAgents.length === 2 && normalizedSearchQuery.length === 0 && agents.length > 2 && (
               <div className="px-3 py-1 typography-meta text-muted-foreground">
-                Type to search more agents
+                {t('chatAutocomplete.typeToSearchMoreAgents')}
               </div>
             )}
             {files.length === 0 && visibleAgents.length === 0 && (
               <div className="px-3 py-2 typography-ui-label text-muted-foreground">
-                No matches found
+                {t('chatAutocomplete.noMatchesFound')}
               </div>
             )}
           </div>
         )}
         </ScrollableOverlay>
         <div className="px-3 pt-1 pb-1.5 border-t typography-meta text-muted-foreground">
-        ↑↓ navigate • Enter select • Esc close
+        {t('chatAutocomplete.keyboardHints')}
       </div>
     </div>
   );

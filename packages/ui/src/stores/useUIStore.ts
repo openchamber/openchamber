@@ -453,8 +453,8 @@ const clampContextPanelRoots = (
 };
 
 interface UIStore {
-
   theme: 'light' | 'dark' | 'system';
+  language: 'en' | 'zh';
   isMultiRunLauncherOpen: boolean;
   multiRunLauncherPrefillPrompt: string;
   isSidebarOpen: boolean;
@@ -558,8 +558,8 @@ interface UIStore {
   isExpandedInput: boolean;
 
   shortcutOverrides: Record<string, ShortcutCombo>;
-
   setTheme: (theme: 'light' | 'dark' | 'system') => void;
+  setLanguage: (language: 'en' | 'zh') => void;
   toggleSidebar: () => void;
   setSidebarOpen: (open: boolean) => void;
   setSidebarWidth: (width: number) => void;
@@ -676,8 +676,8 @@ export const useUIStore = create<UIStore>()(
   devtools(
     persist(
       (set, get) => ({
-
         theme: 'system',
+        language: 'en',
         isMultiRunLauncherOpen: false,
         multiRunLauncherPrefillPrompt: '',
         isSidebarOpen: true,
@@ -775,6 +775,10 @@ export const useUIStore = create<UIStore>()(
         setTheme: (theme) => {
           set({ theme });
           get().applyTheme();
+        },
+
+        setLanguage: (language) => {
+          set({ language });
         },
 
         toggleSidebar: () => {
@@ -1784,6 +1788,7 @@ export const useUIStore = create<UIStore>()(
         },
         partialize: (state) => ({
           theme: state.theme,
+          language: state.language,
           isSidebarOpen: state.isSidebarOpen,
           sidebarWidth: state.sidebarWidth,
           isRightSidebarOpen: state.isRightSidebarOpen,

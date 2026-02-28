@@ -16,6 +16,7 @@ import type { DesktopSettings } from '@/lib/desktop';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { useFileSystemAccess } from '@/hooks/useFileSystemAccess';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { useLanguage } from '@/hooks/useLanguage';
 
 interface DirectoryItem {
   name: string;
@@ -53,6 +54,7 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
   isRootReady,
   alwaysShowActions = false,
 }) => {
+  const { t } = useLanguage();
   const { isMobile } = useDeviceInfo();
   const [directories, setDirectories] = React.useState<DirectoryItem[]>([]);
   const [expandedPaths, setExpandedPaths] = React.useState<Set<string>>(new Set());
@@ -678,7 +680,7 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
             isMobile ? "p-1.5" : "p-1",
             alwaysShowActions ? "opacity-60" : "opacity-0 group-hover:opacity-100"
           )}
-          title="Create new directory"
+          title={t('directoryTree.createNewDirectory')}
         >
           <RiAddLine className={cn("text-muted-foreground", isMobile ? "h-3.5 w-3.5" : "h-3 w-3")} />
         </button>
@@ -693,7 +695,7 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
             isMobile ? "p-1.5" : "p-1",
             alwaysShowActions ? "opacity-60" : "opacity-0 group-hover:opacity-100"
           )}
-          title={isPinned ? "Unpin directory" : "Pin directory"}
+          title={isPinned ? t('directoryTree.unpinDirectory') : t('directoryTree.pinDirectory')}
         >
           {isPinned ? (
             <RiPushpin2Line className={cn("text-primary", isMobile ? "h-3.5 w-3.5" : "h-3 w-3")} />
@@ -745,7 +747,7 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
                     }}
                     onBlur={createDirectory}
                     className="h-6 typography-meta flex-1 selection:bg-interactive-selection selection:text-interactive-selection-foreground"
-                    placeholder="new_directory"
+                    placeholder={t('directoryTree.newDirectory')}
                   />
                   <button
                     onClick={(e) => {
@@ -754,7 +756,7 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
                       createDirectory();
                     }}
                     className="p-1 hover:bg-interactive-hover rounded"
-                    title="Create directory"
+                    title={t('directoryTree.createDirectory')}
                   >
                     <RiCheckLine className="h-3 w-3 text-green-600" />
                   </button>
@@ -765,7 +767,7 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
                       cancelCreatingDirectory();
                     }}
                     className="p-1 hover:bg-interactive-hover rounded"
-                    title="Cancel"
+                    title={t('common.cancel')}
                   >
                     <RiCloseLine className="h-3 w-3 text-muted-foreground" />
                   </button>
@@ -834,7 +836,7 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
                   }}
                   onBlur={createDirectory}
                   className="h-6 typography-meta flex-1 selection:bg-interactive-selection selection:text-interactive-selection-foreground"
-                  placeholder="new_directory"
+                  placeholder={t('directoryTree.newDirectory')}
                 />
                 <button
                   onClick={(e) => {
@@ -843,7 +845,7 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
                     createDirectory();
                   }}
                   className="p-1 hover:bg-interactive-hover rounded"
-                  title="Create directory"
+                  title={t('directoryTree.createDirectory')}
                 >
                   <RiCheckLine className="h-3 w-3 text-green-600" />
                 </button>
@@ -854,7 +856,7 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
                     cancelCreatingDirectory();
                   }}
                   className="p-1 hover:bg-interactive-hover rounded"
-                  title="Cancel"
+                  title={t('common.cancel')}
                 >
                   <RiCloseLine className="h-3 w-3 text-muted-foreground" />
                 </button>
@@ -919,7 +921,7 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
               "hover:bg-interactive-hover rounded-md transition-opacity",
               isMobile ? "p-1.5 opacity-60" : "p-1 opacity-0 group-hover:opacity-100"
             )}
-            title="Unpin directory"
+            title={t('directoryTree.unpinDirectory')}
           >
             <RiPushpin2Line className={cn("text-primary", isMobile ? "h-3.5 w-3.5" : "h-3.5 w-3.5")} />
           </button>
@@ -956,7 +958,7 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
             togglePin(path);
           }}
           className="p-1 opacity-0 group-hover:opacity-100 hover:bg-interactive-hover rounded transition-opacity"
-          title="Unpin directory"
+          title={t('directoryTree.unpinDirectory')}
         >
           <RiPushpin2Line className="h-3 w-3 text-primary" />
         </button>
@@ -968,7 +970,7 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
     <>
       {!rootReady ? (
         <div className="px-3 py-2 typography-ui-label text-muted-foreground">
-          Locating home directory...
+          {t('directoryTree.locatingHomeDirectory')}
         </div>
       ) : (
         <>
@@ -987,7 +989,7 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
                 ) : (
                   <RiArrowRightSLine className={isMobile ? "h-3.5 w-3.5" : "h-3 w-3"} />
                 )}
-                <span>Pinned</span>
+                <span>{t('directoryTree.pinned')}</span>
                 <span className="ml-auto typography-micro text-muted-foreground/60 normal-case tracking-normal">
                   {pinnedDirectories.length}
                 </span>
@@ -1004,12 +1006,12 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
             "typography-meta font-medium text-muted-foreground/80 flex items-center gap-1.5 uppercase tracking-wide",
             isMobile ? "px-1.5 py-1" : "px-2 py-1.5"
           )}>
-            Browse
+            {t('directoryTree.browse')}
           </div>
 
           {isLoading ? (
             <div className="px-3 py-2 typography-ui-label text-muted-foreground">
-              Loading...
+              {t('filesView.loading')}
             </div>
           ) : (
             directories.map((item) => renderTreeItem(item))
@@ -1017,7 +1019,7 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
 
           {!isLoading && directories.length === 0 && (
             <div className="px-3 py-2 typography-ui-label text-muted-foreground">
-              No directories found
+              {t('directoryTree.noDirectoriesFound')}
             </div>
           )}
         </>
@@ -1044,7 +1046,7 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
             'w-full h-8 px-2.5 justify-between items-center rounded-lg border border-transparent bg-sidebar-accent/40 text-foreground/90 hover:bg-sidebar-accent/60 typography-meta',
             triggerClassName
           )}
-          aria-label="Select working directory"
+          aria-label={t('directoryTree.selectWorkingDirectory')}
         >
           <span className="flex items-center gap-1.5 min-w-0 flex-1">
             <RiFolder6Line className="h-3 w-3 flex-shrink-0 text-muted-foreground" />

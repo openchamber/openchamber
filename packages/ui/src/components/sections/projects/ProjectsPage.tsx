@@ -10,8 +10,10 @@ import { PROJECT_COLORS, PROJECT_ICONS, PROJECT_COLOR_MAP as COLOR_MAP, getProje
 import { RiCloseLine } from '@remixicon/react';
 import { WorktreeSectionContent } from '@/components/sections/openchamber/WorktreeSectionContent';
 import { ProjectActionsSection } from '@/components/sections/projects/ProjectActionsSection';
+import { useLanguage } from '@/hooks/useLanguage';
 
 export const ProjectsPage: React.FC = () => {
+  const { t } = useLanguage();
   const projects = useProjectsStore((state) => state.projects);
   const updateProjectMeta = useProjectsStore((state) => state.updateProjectMeta);
   const uploadProjectIcon = useProjectsStore((state) => state.uploadProjectIcon);
@@ -96,15 +98,15 @@ export const ProjectsPage: React.FC = () => {
     void uploadProjectIcon(selectedProject.id, file)
       .then((result) => {
         if (!result.ok) {
-          toast.error(result.error || 'Failed to upload project icon');
+          toast.error(result.error || t('projectsPage.failedToUploadProjectIcon'));
           return;
         }
-        toast.success('Project icon updated');
+        toast.success(t('projectsPage.projectIconUpdated'));
       })
       .finally(() => {
         setIsUploadingIcon(false);
       });
-  }, [isUploadingIcon, selectedProject, uploadProjectIcon]);
+  }, [isUploadingIcon, selectedProject, uploadProjectIcon, t]);
 
   const handleRemoveCustomIcon = React.useCallback(async () => {
     if (!selectedProject || !hasCustomIcon || isRemovingCustomIcon) {
@@ -115,15 +117,15 @@ export const ProjectsPage: React.FC = () => {
     void removeProjectIcon(selectedProject.id)
       .then((result) => {
         if (!result.ok) {
-          toast.error(result.error || 'Failed to remove project icon');
+          toast.error(result.error || t('projectsPage.failedToRemoveProjectIcon'));
           return;
         }
-        toast.success('Custom project icon removed');
+        toast.success(t('projectsPage.customProjectIconRemoved'));
       })
       .finally(() => {
         setIsRemovingCustomIcon(false);
       });
-  }, [hasCustomIcon, isRemovingCustomIcon, removeProjectIcon, selectedProject]);
+  }, [hasCustomIcon, isRemovingCustomIcon, removeProjectIcon, selectedProject, t]);
 
   const handleDiscoverIcon = React.useCallback(async () => {
     if (!selectedProject || isDiscoveringIcon) {
@@ -134,25 +136,25 @@ export const ProjectsPage: React.FC = () => {
     void discoverProjectIcon(selectedProject.id)
       .then((result) => {
         if (!result.ok) {
-          toast.error(result.error || 'Failed to discover project icon');
+          toast.error(result.error || t('projectsPage.failedToDiscoverProjectIcon'));
           return;
         }
         if (result.skipped) {
-          toast.success('Custom icon already set for this project');
+          toast.success(t('projectsPage.customIconAlreadySet'));
           return;
         }
-        toast.success('Project icon discovered');
+        toast.success(t('projectsPage.projectIconDiscovered'));
       })
       .finally(() => {
         setIsDiscoveringIcon(false);
       });
-  }, [discoverProjectIcon, isDiscoveringIcon, selectedProject]);
+  }, [discoverProjectIcon, isDiscoveringIcon, selectedProject, t]);
 
   if (!selectedProject) {
     return (
       <ScrollableOverlay keyboardAvoid outerClassName="h-full" className="w-full">
         <div className="mx-auto w-full max-w-4xl p-3 sm:p-6 sm:pt-8">
-          <p className="typography-meta text-muted-foreground">No projects available.</p>
+          <p className="typography-meta text-muted-foreground">{t('projectsSidebar.noProjectsAvailable')}</p>
         </div>
       </ScrollableOverlay>
     );
@@ -165,7 +167,7 @@ export const ProjectsPage: React.FC = () => {
         <div className="mb-4 flex items-center justify-between gap-4">
           <div className="min-w-0">
             <h2 className="typography-ui-header font-semibold text-foreground truncate">
-              {selectedProject.label ?? 'Project Settings'}
+              {selectedProject.label ?? t('projectsPage.projectSettings')}
             </h2>
             <p className="typography-meta text-muted-foreground truncate" title={selectedProject.path}>
               {selectedProject.path}
@@ -180,13 +182,13 @@ export const ProjectsPage: React.FC = () => {
             {/* Name */}
             <div className="py-1.5">
               <div className="flex min-w-0 flex-col">
-                <span className="typography-ui-label text-foreground">Project Name</span>
+                <span className="typography-ui-label text-foreground">{t('projectsPage.projectName')}</span>
               </div>
               <div className="mt-1.5 flex min-w-0 items-center gap-2">
                 <Input 
                   value={name} 
                   onChange={(e) => setName(e.target.value)} 
-                  placeholder="Project name" 
+                  placeholder={t('projectsPage.projectNamePlaceholder')} 
                   className="h-7 min-w-0 w-full sm:max-w-[19rem]" 
                 />
               </div>
@@ -195,7 +197,7 @@ export const ProjectsPage: React.FC = () => {
             {/* Color */}
             <div className="py-1.5">
               <div className="flex min-w-0 flex-col">
-                <span className="typography-ui-label text-foreground">Accent Color</span>
+                <span className="typography-ui-label text-foreground">{t('projectsPage.accentColor')}</span>
               </div>
               <div className="mt-1.5 flex flex-wrap items-center gap-2">
                 <button
@@ -207,7 +209,7 @@ export const ProjectsPage: React.FC = () => {
                       ? 'border-2 border-foreground bg-[var(--primary-base)]/10'
                       : 'border-border/40 hover:border-border hover:bg-[var(--surface-muted)]'
                   )}
-                  title="None"
+                  title={t('common.none')}
                 >
                   <RiCloseLine className="h-4 w-4 text-muted-foreground" />
                 </button>
@@ -232,7 +234,7 @@ export const ProjectsPage: React.FC = () => {
             {/* Icon */}
             <div className="py-1.5">
               <div className="flex min-w-0 flex-col">
-                <span className="typography-ui-label text-foreground">Project Icon</span>
+                <span className="typography-ui-label text-foreground">{t('projectsPage.projectIcon')}</span>
               </div>
               <input
                 ref={fileInputRef}
@@ -255,7 +257,7 @@ export const ProjectsPage: React.FC = () => {
                       ? 'border-2 border-foreground bg-[var(--primary-base)]/10'
                       : 'border-border/40 hover:border-border hover:bg-[var(--surface-muted)]'
                   )}
-                  title="None"
+                  title={t('common.none')}
                 >
                   <RiCloseLine className="h-4 w-4 text-muted-foreground" />
                 </button>
@@ -281,7 +283,7 @@ export const ProjectsPage: React.FC = () => {
               </div>
               {hasImageIcon && iconPreviewUrl && (
                 <div className="mt-2 flex items-center gap-2">
-                  <span className="typography-meta text-muted-foreground">Preview</span>
+                  <span className="typography-meta text-muted-foreground">{t('projectsPage.preview')}</span>
                   <span className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border/60 bg-[var(--surface-elevated)] p-1">
                     <span
                       className="inline-flex h-4 w-4 items-center justify-center overflow-hidden rounded-[2px]"
@@ -305,7 +307,7 @@ export const ProjectsPage: React.FC = () => {
                     value={iconBackground ?? '#000000'}
                     onChange={(event) => setIconBackground(event.target.value)}
                     className="h-7 w-9 cursor-pointer rounded border border-border bg-transparent p-1"
-                    aria-label="Project icon background color"
+                    aria-label={t('projectsPage.projectIconBackgroundColor')}
                   />
                   <Input
                     value={iconBackground ?? ''}
@@ -319,8 +321,8 @@ export const ProjectsPage: React.FC = () => {
                     variant="outline"
                     onClick={() => setIconBackground(null)}
                     className="h-7 w-7 p-0"
-                    aria-label="Clear icon background"
-                    title="Clear background"
+                    aria-label={t('projectsPage.clearIconBackground')}
+                    title={t('projectsPage.clearBackground')}
                     disabled={!iconBackground}
                   >
                     <RiCloseLine className="h-3.5 w-3.5" />
@@ -336,7 +338,7 @@ export const ProjectsPage: React.FC = () => {
                       onClick={() => fileInputRef.current?.click()}
                       disabled={isUploadingIcon}
                     >
-                      {isUploadingIcon ? 'Uploading...' : 'Upload Icon'}
+                      {isUploadingIcon ? t('projectsPage.uploading') : t('projectsPage.uploadIcon')}
                     </ButtonSmall>
                     <ButtonSmall
                       size="xs"
@@ -345,7 +347,7 @@ export const ProjectsPage: React.FC = () => {
                       onClick={() => void handleDiscoverIcon()}
                       disabled={isDiscoveringIcon}
                     >
-                      {isDiscoveringIcon ? 'Discovering...' : 'Discover Favicon'}
+                      {isDiscoveringIcon ? t('projectsPage.discovering') : t('projectsPage.discoverFavicon')}
                     </ButtonSmall>
                   </>
                 )}
@@ -357,7 +359,7 @@ export const ProjectsPage: React.FC = () => {
                     onClick={() => void handleRemoveCustomIcon()}
                     disabled={isRemovingCustomIcon}
                   >
-                    {isRemovingCustomIcon ? 'Removing...' : 'Remove Custom Icon'}
+                    {isRemovingCustomIcon ? t('projectsPage.removing') : t('projectsPage.removeCustomIcon')}
                   </ButtonSmall>
                 )}
               </div>
@@ -372,7 +374,7 @@ export const ProjectsPage: React.FC = () => {
               size="xs"
               className="!font-normal"
             >
-              Save Changes
+              {t('filesView.saveChanges')}
             </ButtonSmall>
           </div>
         </div>
@@ -388,7 +390,7 @@ export const ProjectsPage: React.FC = () => {
         <div className="mb-8">
           <div className="mb-1 px-1">
             <h3 className="typography-ui-header font-medium text-foreground">
-              Worktree
+              {t('projectsPage.worktree')}
             </h3>
           </div>
           <section className="px-2 pb-2 pt-0">

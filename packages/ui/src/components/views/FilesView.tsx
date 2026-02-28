@@ -68,6 +68,7 @@ import { useGitStatus } from '@/stores/useGitStore';
 import { buildCodeMirrorCommentWidgets, normalizeLineRange, useInlineCommentController } from '@/components/comments';
 import { opencodeClient } from '@/lib/opencode/client';
 import { useDirectoryShowHidden } from '@/lib/directoryShowHidden';
+import { useLanguage } from '@/hooks/useLanguage';
 import { useFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
@@ -300,6 +301,7 @@ const FileRow: React.FC<FileRowProps> = ({
   onRevealPath,
   onOpenDialog,
 }) => {
+  const { t } = useLanguage();
   const isDir = node.type === 'directory';
   const { canRename, canCreateFile, canCreateFolder, canDelete, canReveal } = permissions;
 
@@ -391,10 +393,10 @@ const FileRow: React.FC<FileRowProps> = ({
                 e.stopPropagation();
                 void copyTextToClipboard(node.path).then((result) => {
                   if (result.ok) {
-                    toast.success('Path copied');
+                    toast.success(t('sidebarFilesTree.pathCopied'));
                     return;
                   }
-                  toast.error('Copy failed');
+                  toast.error(t('filesView.copyFailed'));
                 });
               }}>
                 <RiFileCopyLine className="mr-2 h-4 w-4" /> Copy Path
@@ -443,6 +445,7 @@ interface FilesViewProps {
 }
 
 export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
+  const { t } = useLanguage();
   const { files, runtime } = useRuntimeAPIs();
   const { currentTheme, availableThemes, lightThemeId, darkThemeId } = useThemeSystem();
   const { isMobile, screenWidth } = useDeviceInfo();
@@ -597,7 +600,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const handleRevealPath = React.useCallback((targetPath: string) => {
     if (!files.revealPath) return;
     void files.revealPath(targetPath).catch(() => {
-      toast.error('Failed to reveal path');
+      toast.error(t('sidebarFilesTree.failedToRevealPath'));
     });
   }, [files]);
 
@@ -900,7 +903,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       await files.writeFile(newPath, '')
         .then(async (result) => {
           if (result.success) {
-            toast.success('File created');
+            toast.success(t('sidebarFilesTree.fileCreated'));
             await refreshRoot();
           }
           finishDialogOperation();
@@ -923,7 +926,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       await files.createDirectory(newPath)
         .then(async (result) => {
           if (result.success) {
-            toast.success('Folder created');
+            toast.success(t('sidebarFilesTree.folderCreated'));
             await refreshRoot();
           }
           finishDialogOperation();
@@ -954,7 +957,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       await files.rename(oldPath, newPath)
         .then(async (result) => {
           if (result.success) {
-            toast.success('Renamed successfully');
+            toast.success(t('sidebarFilesTree.renamedSuccessfully'));
             await refreshRoot();
             if (root) {
               removeOpenPathsByPrefix(root, oldPath);
@@ -989,7 +992,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       await files.delete(dialogData.path)
         .then(async (result) => {
           if (result.success) {
-            toast.success('Deleted successfully');
+            toast.success(t('sidebarFilesTree.deletedSuccessfully'));
             await refreshRoot();
             if (root) {
               removeOpenPathsByPrefix(root, dialogData.path);
@@ -1146,7 +1149,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     const response = await fetch(`/api/fs/read?path=${encodeURIComponent(path)}`);
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: response.statusText }));
-      throw new Error((error as { error?: string }).error || 'Failed to read file');
+      throw new Error((error as { error?: string }).error || t('filesView.failedToReadFile'));
     }
     return response.text();
   }, [files]);
@@ -1161,7 +1164,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
   const saveDraft = React.useCallback(async () => {
     if (!selectedFile || !files.writeFile) {
-      toast.error('Saving not supported');
+      toast.error(t('filesView.savingNotSupported'));
       return;
     }
 
@@ -1174,13 +1177,13 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     await files.writeFile(selectedFile.path, draftContent)
       .then((result) => {
         if (!result?.success) {
-          toast.error('Failed to write file');
+          toast.error(t('filesView.failedToWriteFile'));
           return;
         }
         setFileContent(draftContent);
       })
       .catch((error) => {
-        toast.error(error instanceof Error ? error.message : 'Save failed');
+        toast.error(error instanceof Error ? error.message : t('filesView.saveFailed'));
       })
       .finally(() => {
         setIsSaving(false);
@@ -1304,7 +1307,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         }
         setFileContent('');
         setDraftContent('');
-        setFileError(error instanceof Error ? error.message : 'Failed to read file');
+        setFileError(error instanceof Error ? error.message : t('filesView.failedToReadFile'));
       })
       .finally(() => {
         setFileLoading(false);
@@ -1972,7 +1975,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         .catch((error) => {
           if (!cancelled) {
             setDesktopImageSrc('');
-            setFileError(error instanceof Error ? error.message : 'Failed to read file');
+            setFileError(error instanceof Error ? error.message : t('filesView.failedToReadFile'));
             setLoadedFilePath(null);
           }
         })
@@ -2099,9 +2102,9 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       }}>
         <DialogContent showCloseButton={false} className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Unsaved changes</DialogTitle>
+            <DialogTitle>{t('filesView.unsavedChanges')}</DialogTitle>
             <DialogDescription>
-              Save your edits before continuing?
+              {t('filesView.saveEditsBeforeContinuing')}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -2113,7 +2116,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
             >
               Save changes
             </Button>
-            <Button variant="destructive" onClick={discardAndContinue}>Discard</Button>
+            <Button variant="destructive" onClick={discardAndContinue}>{t('filesView.discard')}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -2125,7 +2128,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
             <button
               type="button"
               onClick={() => setShowMobilePageContent(false)}
-              aria-label="Back"
+              aria-label={t('common.back')}
               className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center mr-1 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             >
               <RiArrowLeftSLine className="h-5 w-5" />
@@ -2139,7 +2142,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                   <button
                     type="button"
                     className="inline-flex min-w-0 max-w-full items-center gap-1 text-left typography-ui-label font-medium"
-                    aria-label="Open files"
+                    aria-label={t('filesView.openFiles')}
                   >
                     <FileTypeIcon filePath={selectedFile.path} extension={selectedFile.extension} className="h-3.5 w-3.5 flex-shrink-0" />
                     <span className="min-w-0 flex-1 truncate">{selectedFile.name}</span>
@@ -2194,7 +2197,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : (
-              <div className="typography-ui-label font-medium truncate">Select a file</div>
+              <div className="typography-ui-label font-medium truncate">{t('filesView.selectAFile')}</div>
             )
           ) : (
             openFiles.length > 0 ? (
@@ -2255,7 +2258,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                 </div>
               </div>
             ) : (
-              <div className="typography-ui-label font-medium truncate">Select a file</div>
+              <div className="typography-ui-label font-medium truncate">{t('filesView.selectAFile')}</div>
             )
           )}
         </div>
@@ -2288,8 +2291,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                   variant="ghost"
                   size="sm"
                   className="h-5 w-5 p-0 text-muted-foreground opacity-70 hover:opacity-100"
-                  title="Open in desktop app"
-                  aria-label="Open in desktop app"
+                  title={t('filesView.openInDesktopApp')}
+                  aria-label={t('filesView.openInDesktopApp')}
                 >
                   <RiFileTransferLine className="h-4 w-4" />
                 </Button>
@@ -2311,7 +2314,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                     onClick={() => void loadOpenInApps(true)}
                   >
                     <RiRefreshLine className="h-4 w-4" />
-                    <span className="typography-ui-label text-foreground">Refresh Apps</span>
+                    <span className="typography-ui-label text-foreground">{t('openInAppButton.refreshApps')}</span>
                   </DropdownMenuItem>
                 ) : null}
               </DropdownMenuContent>
@@ -2344,7 +2347,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                       'h-5 w-5 p-0 transition-opacity',
                       isSearchOpen ? 'text-foreground opacity-100' : 'text-muted-foreground opacity-60 hover:opacity-100'
                     )}
-                    title="Find in file"
+                    title={t('filesView.findInFile')}
                   >
                     <RiSearchLine className="size-4" />
                   </Button>
@@ -2378,12 +2381,12 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                       setCopiedContent(false);
                     }, 1200);
                   } else {
-                    toast.error('Copy failed');
+                    toast.error(t('filesView.copyFailed'));
                   }
                 }}
                 className="h-5 w-5 p-0"
-                title="Copy file contents"
-                aria-label="Copy file contents"
+                title={t('filesView.copyFileContents')}
+                aria-label={t('filesView.copyFileContents')}
               >
                 {copiedContent ? (
                   <RiCheckLine className="h-4 w-4 text-[color:var(--status-success)]" />
@@ -2408,7 +2411,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                       setCopiedPath(false);
                     }, 1200);
                   } else {
-                    toast.error('Copy failed');
+                    toast.error(t('filesView.copyFailed'));
                   }
                 }}
                 className="h-5 w-5 p-0"
@@ -2449,7 +2452,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       <div className="flex-1 min-h-0 min-w-0 relative">
         <ScrollableOverlay outerClassName="h-full min-w-0" className="h-full min-w-0">
           {!selectedFile ? (
-            <div className="p-3 typography-ui text-muted-foreground">Pick a file from the tree.</div>
+            <div className="p-3 typography-ui text-muted-foreground">{t('filesView.pickFileFromTree')}</div>
           ) : fileLoading ? (
             suppressFileLoadingIndicator
               ? <div className="p-3" />
@@ -2479,9 +2482,9 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
               <ErrorBoundary
                 fallback={
                   <div className="rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2">
-                    <div className="mb-1 font-medium text-destructive">Preview unavailable</div>
+                    <div className="mb-1 font-medium text-destructive">{t('filesView.previewUnavailable')}</div>
                     <div className="text-sm text-muted-foreground">
-                      Switch to edit mode to fix the issue.
+                      {t('filesView.switchToEditModeToFix')}
                     </div>
                   </div>
                 }
@@ -2627,13 +2630,13 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
               ref={searchInputRef}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search files…"
+              placeholder={t('filesView.searchFiles')}
               className="h-8 pl-8 pr-8 typography-meta"
             />
             {searchQuery.trim().length > 0 && (
               <button
                 type="button"
-                aria-label="Clear search"
+                aria-label={t('common.clear')}
                 className="absolute right-2 top-2 inline-flex h-4 w-4 items-center justify-center text-muted-foreground hover:text-foreground"
                 onClick={() => {
                   setSearchQuery('');
@@ -2649,7 +2652,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
             size="sm"
             onClick={() => handleOpenDialog('createFile', { path: currentDirectory, type: 'directory' })}
             className="h-8 w-8 p-0 flex-shrink-0"
-            title="New File"
+            title={t('filesView.newFile')}
           >
             <RiFileAddLine className="h-4 w-4" />
           </Button>
@@ -2658,7 +2661,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
             size="sm"
             onClick={() => handleOpenDialog('createFolder', { path: currentDirectory, type: 'directory' })}
             className="h-8 w-8 p-0 flex-shrink-0"
-            title="New Folder"
+            title={t('filesView.newFolder')}
           >
             <RiFolderAddLine className="h-4 w-4" />
           </Button>
@@ -2703,7 +2706,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           ) : hasTree ? (
             renderTree(root, 0)
           ) : (
-            <li className="px-2 py-1 typography-meta text-muted-foreground">Loading…</li>
+            <li className="px-2 py-1 typography-meta text-muted-foreground">{t('filesView.loading')}</li>
           )}
         </ul>
       </ScrollableOverlay>
@@ -2749,8 +2752,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                 variant="ghost"
                 size="sm"
                 className="h-6 w-6 p-0 text-muted-foreground opacity-70 hover:opacity-100"
-                title="Open in desktop app"
-                aria-label="Open in desktop app"
+                title={t('filesView.openInDesktopApp')}
+                aria-label={t('filesView.openInDesktopApp')}
               >
                 <RiFileTransferLine className="h-4 w-4" />
               </Button>
@@ -2772,7 +2775,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                   onClick={() => void loadOpenInApps(true)}
                 >
                   <RiRefreshLine className="h-4 w-4" />
-                  <span className="typography-ui-label text-foreground">Refresh Apps</span>
+                  <span className="typography-ui-label text-foreground">{t('openInAppButton.refreshApps')}</span>
                 </DropdownMenuItem>
               ) : null}
             </DropdownMenuContent>
@@ -2823,12 +2826,12 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                     setCopiedContent(false);
                   }, 1200);
                 } else {
-                  toast.error('Copy failed');
+                  toast.error(t('filesView.copyFailed'));
                 }
               }}
               className="h-6 w-6 p-0"
-              title="Copy file contents"
-              aria-label="Copy file contents"
+              title={t('filesView.copyFileContents')}
+              aria-label={t('filesView.copyFileContents')}
             >
               {copiedContent ? (
                 <RiCheckLine className="h-4 w-4 text-[color:var(--status-success)]" />
@@ -2853,7 +2856,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                     setCopiedPath(false);
                   }, 1200);
                 } else {
-                  toast.error('Copy failed');
+                  toast.error(t('filesView.copyFailed'));
                 }
               }}
               className="h-6 w-6 p-0"
@@ -2874,8 +2877,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
             size="sm"
             onClick={() => setIsFullscreen(false)}
             className="h-6 w-6 p-0"
-            title="Exit fullscreen"
-            aria-label="Exit fullscreen"
+            title={t('filesView.exitFullscreen')}
+            aria-label={t('filesView.exitFullscreen')}
           >
             <RiFullscreenExitLine className="h-4 w-4" />
           </Button>
@@ -2891,7 +2894,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
               : (
                 <div className="p-4 flex items-center gap-2 typography-ui text-muted-foreground">
                   <RiLoader4Line className="h-4 w-4 animate-spin" />
-                  Loading…
+                  {t('filesView.loading')}
                 </div>
               )
           ) : fileError ? (
@@ -2914,9 +2917,9 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
               <ErrorBoundary
                 fallback={
                   <div className="rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2">
-                    <div className="mb-1 font-medium text-destructive">Preview unavailable</div>
+                    <div className="mb-1 font-medium text-destructive">{t('filesView.previewUnavailable')}</div>
                     <div className="text-sm text-muted-foreground">
-                      Switch to edit mode to fix the issue.
+                      {t('filesView.switchToEditModeToFix')}
                     </div>
                   </div>
                 }

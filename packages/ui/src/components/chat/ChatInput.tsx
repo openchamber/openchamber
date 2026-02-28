@@ -52,6 +52,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { GitHubIssuePickerDialog } from '@/components/session/GitHubIssuePickerDialog';
+import { useLanguage } from '@/hooks/useLanguage';
 
 const MAX_VISIBLE_TEXTAREA_LINES = 8;
 const EMPTY_QUEUE: QueuedMessage[] = [];
@@ -95,6 +96,7 @@ const saveStoredDraft = (sessionId: string | null, draft: string): void => {
 };
 
 export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBottom }) => {
+    const { t } = useLanguage();
     // Track if we restored a draft on mount (for text selection)
     const initialDraftRef = React.useRef<string | null>(null);
     // Track initial session ID (captured at mount time for draft restoration)
@@ -676,7 +678,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                 normalized === 'failed to send message';
 
             if (normalized.includes('payload too large') || normalized.includes('413') || normalized.includes('entity too large')) {
-                toast.error('Attachments are too large to send. Please try reducing the number or size of images.');
+                toast.error(t('chatInput.attachmentsTooLargeToSend'));
                 if (allAttachments.length > 0) {
                     useFileStore.setState({ attachedFiles: allAttachments });
                 }
@@ -686,7 +688,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
             if (isSoftNetworkError) {
                 if (allAttachments.length > 0) {
                     useFileStore.setState({ attachedFiles: allAttachments });
-                    toast.error('Failed to send attachments. Try fewer files or smaller images.');
+                    toast.error(t('chatInput.failedToSendAttachments'));
                 }
                 return;
             }
@@ -1294,14 +1296,14 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                 }
             } catch (error) {
                 console.error('Clipboard image attach failed', error);
-                toast.error(error instanceof Error ? error.message : 'Failed to attach image from clipboard');
+                toast.error(error instanceof Error ? error.message : t('chatInput.failedToAttachImageFromClipboard'));
             }
         }
 
         if (attachedCount > 0) {
             toast.success(`Attached ${attachedCount} image${attachedCount > 1 ? 's' : ''} from clipboard`);
         }
-    }, [addAttachedFile, currentSessionId, newSessionDraftOpen, insertTextAtSelection]);
+    }, [addAttachedFile, currentSessionId, newSessionDraftOpen, insertTextAtSelection, t]);
 
     const handleFileSelect = (file: { name: string; path: string }) => {
 
@@ -1565,7 +1567,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                     }
                 } catch (error) {
                     console.error('Dropped file attach failed', error);
-                    toast.error(error instanceof Error ? error.message : 'Failed to attach dropped file');
+                    toast.error(error instanceof Error ? error.message : t('chatInput.failedToAttachDroppedFile'));
                 }
             }
 
@@ -1574,9 +1576,9 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
             }
         } catch (error) {
             console.error('VS Code dropped file attach failed', error);
-            toast.error(error instanceof Error ? error.message : 'Failed to attach dropped files');
+            toast.error(error instanceof Error ? error.message : t('chatInput.failedToAttachDroppedFiles'));
         }
-    }, [addAttachedFile]);
+    }, [addAttachedFile, t]);
 
     const normalizeDroppedPath = React.useCallback((rawPath: string): string => {
         const input = rawPath.trim();
@@ -1664,7 +1666,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                     }
                 } catch (error) {
                     console.error('File attach failed', error);
-                    toast.error(error instanceof Error ? error.message : 'Failed to attach file');
+                    toast.error(error instanceof Error ? error.message : t('chatInput.failedToAttachFile'));
                 }
             }
         }
@@ -1801,14 +1803,14 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                 }
             } catch (error) {
                 console.error('Server file attach failed', error);
-                toast.error(error instanceof Error ? error.message : 'Failed to attach file');
+                toast.error(error instanceof Error ? error.message : t('chatInput.failedToAttachFile'));
             }
         }
 
         if (attachedCount > 0) {
             toast.success(`Attached ${attachedCount} file${attachedCount > 1 ? 's' : ''}`);
         }
-    }, [addServerFile]);
+    }, [addServerFile, t]);
 
     const fileInputRef = React.useRef<HTMLInputElement>(null);
     const [projectFilePickerOpen, setProjectFilePickerOpen] = React.useState(false);
@@ -1827,14 +1829,14 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                 }
             } catch (error) {
                 console.error('File attach failed', error);
-                toast.error(error instanceof Error ? error.message : 'Failed to attach file');
+                toast.error(error instanceof Error ? error.message : t('chatInput.failedToAttachFile'));
             }
         }
 
         if (attachedCount > 0) {
             toast.success(`Attached ${attachedCount} file${attachedCount > 1 ? 's' : ''}`);
         }
-    }, [addAttachedFile]);
+    }, [addAttachedFile, t]);
 
     const handleVSCodePickFiles = React.useCallback(async () => {
         try {
@@ -1876,9 +1878,9 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
             }
         } catch (error) {
             console.error('VS Code file pick failed', error);
-            toast.error(error instanceof Error ? error.message : 'Failed to pick files in VS Code');
+            toast.error(error instanceof Error ? error.message : t('chatInput.failedToPickFilesInVSCode'));
         }
-    }, [attachFiles]);
+    }, [attachFiles, t]);
 
     const handlePickLocalFiles = React.useCallback(() => {
         if (isVSCodeRuntime()) {
@@ -1925,7 +1927,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                     ? 'text-primary hover:text-primary'
                     : 'opacity-30'
             )}
-            aria-label="Send message"
+            aria-label={t('chatInput.sendMessage')}
         >
             <RiSendPlane2Line className={cn(sendIconSizeClass)} />
         </button>
@@ -1949,7 +1951,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                     ? 'text-primary hover:text-primary'
                     : 'opacity-30'
             )}
-            aria-label="Queue message"
+            aria-label={t('chatInput.queueMessage')}
         >
             <RiSendPlane2Line className={cn(sendIconSizeClass, '-rotate-90')} />
         </button>
@@ -1964,7 +1966,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                 footerIconButtonClass,
                 'text-[var(--status-error)] hover:text-[var(--status-error)]'
             )}
-            aria-label="Stop generating"
+            aria-label={t('chatInput.stopGenerating')}
         >
             <StopIcon className={cn(stopIconSizeClass)} />
         </button>
@@ -2014,8 +2016,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                         <button
                             type="button"
                             className={footerIconButtonClass}
-                            title="Add attachment"
-                            aria-label="Add attachment"
+                            title={t('chatInput.addAttachment')}
+                            aria-label={t('chatInput.addAttachment')}
                         >
                             <RiAddCircleLine className={cn(iconSizeClass, 'text-current')} />
                         </button>
@@ -2027,7 +2029,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                             }}
                         >
                             <RiAttachment2 />
-                            Attach files
+                            {t('chatInput.attachFiles')}
                         </DropdownMenuItem>
                         <DropdownMenuItem
                             onSelect={() => {
@@ -2050,8 +2052,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
             type='button'
             onClick={onOpenSettings}
             className={footerIconButtonClass}
-            title='Model and agent settings'
-            aria-label='Model and agent settings'
+            title={t('chatInput.modelAndAgentSettings')}
+            aria-label={t('chatInput.modelAndAgentSettings')}
         >
             <RiAiAgentLine className={cn(iconSizeClass, 'text-current')} />
         </button>
@@ -2074,8 +2076,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                         }
                     }}
                     onClick={handleOpenCommandMenu}
-                    title="Commands"
-                    aria-label="Commands"
+                    title={t('chatInput.commands')}
+                    aria-label={t('chatInput.commands')}
                 >
                     <RiCommandLine className={cn(iconSizeClass)} />
                 </button>
@@ -2157,7 +2159,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                                 borderColor: currentTheme?.colors?.interactive?.border,
                             }}
                         >
-                            <span className="text-xs font-medium text-muted-foreground">Review comments:</span>
+                            <span className="text-xs font-medium text-muted-foreground">{t('chatInput.reviewComments')}:</span>
                             <span className="text-xs font-semibold" style={{ color: currentTheme?.colors?.status?.info }}>
                                 {draftCount}
                             </span>
@@ -2197,7 +2199,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                                         rel="noopener noreferrer"
                                         onClick={(e) => e.stopPropagation()}
                                         className="flex items-center justify-center h-6 w-6 hover:bg-[var(--interactive-hover)] rounded-full transition-colors"
-                                        aria-label="Open issue in browser"
+                                        aria-label={t('chatInput.openIssueInBrowser')}
                                     >
                                         <RiExternalLinkLine className="h-4 w-4 text-muted-foreground" />
                                     </a>
@@ -2207,7 +2209,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                                             setLinkedIssue(null);
                                         }}
                                         className="flex items-center justify-center h-6 w-6 hover:bg-[var(--interactive-hover)] rounded-full transition-colors cursor-pointer"
-                                        aria-label="Remove linked issue"
+                                        aria-label={t('chatInput.removeLinkedIssue')}
                                     >
                                         <RiCloseLine className="h-4 w-4 text-muted-foreground" />
                                     </span>
@@ -2223,7 +2225,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                                     className="h-4 w-4 flex-shrink-0" 
                                     style={{ color: currentTheme?.colors?.status?.success }} 
                                 />
-                                <span className="text-muted-foreground">Link GitHub Issue</span>
+                                <span className="text-muted-foreground">{t('chatInput.linkGithubIssue')}</span>
                             </button>
                         )}
                     </div>
@@ -2257,13 +2259,13 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                                         type="button"
                                         className={iconButtonBaseClass}
                                         onClick={() => handlePickLocalFiles()}
-                                        title="Attach files"
-                                        aria-label="Attach files"
+                                        title={t('chatInput.attachFiles')}
+                                        aria-label={t('chatInput.attachFiles')}
                                     >
                                         <RiAttachment2 className={cn(iconSizeClass, 'text-current')} />
                                     </button>
                                 </div>
-                                <p className="mt-2 typography-ui-label text-muted-foreground">Drop files here to attach</p>
+                                <p className="mt-2 typography-ui-label text-muted-foreground">{t('chatInput.dropFilesHere')}</p>
                             </div>
                         </div>
                     )}
@@ -2441,7 +2443,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                                                     event.preventDefault();
                                                 }}
                                                 onClick={() => setExpandedInput(!isExpandedInput)}
-                                                aria-label="Toggle focus mode"
+                                                aria-label={t('chatInput.toggleFocusMode')}
                                                 aria-pressed={isExpandedInput}
                                             >
                                                 <RiFullscreenLine className={cn(iconSizeClass)} />
@@ -2449,7 +2451,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                                         </TooltipTrigger>
                                         <TooltipContent side="top" sideOffset={8}>
                                             <div className="flex flex-col gap-0.5 text-center">
-                                                <span>Focus mode</span>
+                                                <span>{t('chatInput.focusMode')}</span>
                                                 <span className="font-mono opacity-60">
                                                     {isMacOS() ? '⌘⇧E' : 'Ctrl+Shift+E'}
                                                 </span>

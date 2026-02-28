@@ -3,6 +3,7 @@ import { RiAddLine, RiSubtractLine } from "@remixicon/react"
 
 import { useDeviceInfo } from "@/lib/device"
 import { cn } from "@/lib/utils"
+import { useLanguage } from '@/hooks/useLanguage';
 
 export interface NumberInputProps
   extends Omit<React.ComponentProps<"input">, "value" | "onChange" | "type"> {
@@ -57,6 +58,7 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
     },
     ref
   ) => {
+    const { t } = useLanguage();
     const [draft, setDraft] = React.useState(() => (value === undefined ? '' : String(value)))
     const { isMobile } = useDeviceInfo()
     const ignoreNextClickRef = React.useRef(false)
@@ -211,7 +213,7 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
         >
           <button
             type="button"
-            aria-label="Decrease value"
+            aria-label={t('numberInput.decreaseValue')}
             disabled={decrementDisabled}
             onTouchStart={handleMobileTouchActivate(handleMobileDecrement)}
             onClick={handleMobileClickActivate(handleMobileDecrement)}
@@ -238,7 +240,7 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
 
           <button
             type="button"
-            aria-label="Increase value"
+            aria-label={t('numberInput.increaseValue')}
             disabled={incrementDisabled}
             onTouchStart={handleMobileTouchActivate(handleMobileIncrement)}
             onClick={handleMobileClickActivate(handleMobileIncrement)}
@@ -265,7 +267,7 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
       >
         <button
           type="button"
-          aria-label="Decrease value"
+          aria-label={t('numberInput.decreaseValue')}
           disabled={decrementDisabled}
           onClick={() => commitValue(baseValue - step)}
           className={cn(
@@ -299,7 +301,7 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
         />
         <button
           type="button"
-          aria-label="Increase value"
+          aria-label={t('numberInput.increaseValue')}
           disabled={incrementDisabled}
           onClick={() => commitValue(baseValue + step)}
           className={cn(

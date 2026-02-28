@@ -25,6 +25,7 @@ import { getWorktreeSetupCommands } from '@/lib/openchamberConfig';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import type { ProjectRef } from '@/lib/openchamberConfig';
 import type { CreateMultiRunParams, MultiRunFileAttachment } from '@/types/multirun';
+import { useLanguage } from '@/hooks/useLanguage';
 
 /** Max file size in bytes (10MB) */
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
@@ -53,6 +54,7 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
   onCreateGroup,
   isCreating = false,
 }) => {
+  const { t } = useLanguage();
   const [groupName, setGroupName] = React.useState('');
   const [prompt, setPrompt] = React.useState('');
   const [selectedModels, setSelectedModels] = React.useState<ModelSelectionWithId[]>([]);
@@ -282,7 +284,7 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
         {/* Group Name Input */}
         <div className="space-y-1.5">
           <label htmlFor="group-name" className="typography-ui-label font-medium text-foreground">
-            Group Name
+            {t('multirun.groupName')}
           </label>
           <Input
             id="group-name"
@@ -292,7 +294,7 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
             className="typography-body"
           />
           <p className="typography-micro text-muted-foreground">
-            Used for worktree directory and branch naming
+            {t('multirun.groupNameHelp')}
           </p>
         </div>
 
@@ -379,21 +381,21 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
         {/* Agent Selection */}
         <div className="space-y-1.5">
           <label className="typography-ui-label font-medium text-foreground">
-            Agent
+            {t('multirun.agent')}
           </label>
           <AgentSelector
             value={selectedAgent}
             onChange={setSelectedAgent}
           />
           <p className="typography-micro text-muted-foreground">
-            Defaults to your configured default agent
+            {t('multirun.agentHelp')}
           </p>
         </div>
 
         {/* Model Selection */}
         <div className="space-y-1.5">
           <label className="typography-ui-label font-medium text-foreground">
-            Models
+            {t('agentManagerEmptyState.models')}
           </label>
           <ModelMultiSelect
             selectedModels={selectedModels}
@@ -409,7 +411,7 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
         {/* Chat Input Style Prompt */}
         <div className="space-y-1.5">
           <label htmlFor="prompt" className="typography-ui-label font-medium text-foreground">
-            Prompt
+            {t('multirun.prompt')}
           </label>
           <div
             className="rounded-xl border border-border/80 overflow-hidden focus-within:ring-1 focus-within:ring-primary/50"

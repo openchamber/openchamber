@@ -4,28 +4,29 @@ import { RiGitBranchLine } from '@remixicon/react';
 import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
 import { TextLoop } from '@/components/ui/TextLoop';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
+import { useLanguage } from '@/hooks/useLanguage';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useGitStatus, useGitStore } from '@/stores/useGitStore';
 
-const phrases = [
-    "Fix the failing tests",
-    "Refactor this to be more readable",
-    "Add form validation",
-    "Optimize this function",
-    "Write tests for this",
-    "Explain how this works",
-    "Add a new feature",
-    "Help me debug this",
-    "Review my code",
-    "Simplify this logic",
-    "Add error handling",
-    "Create a new component",
-    "Update the documentation",
-    "Find the bug here",
-    "Improve performance",
-    "Add type definitions",
-];
+const phraseKeys = [
+    'chatEmptyState.phrases.fixFailingTests',
+    'chatEmptyState.phrases.refactorReadable',
+    'chatEmptyState.phrases.addFormValidation',
+    'chatEmptyState.phrases.optimizeFunction',
+    'chatEmptyState.phrases.writeTests',
+    'chatEmptyState.phrases.explainHowWorks',
+    'chatEmptyState.phrases.addFeature',
+    'chatEmptyState.phrases.helpDebug',
+    'chatEmptyState.phrases.reviewCode',
+    'chatEmptyState.phrases.simplifyLogic',
+    'chatEmptyState.phrases.addErrorHandling',
+    'chatEmptyState.phrases.createComponent',
+    'chatEmptyState.phrases.updateDocs',
+    'chatEmptyState.phrases.findBug',
+    'chatEmptyState.phrases.improvePerformance',
+    'chatEmptyState.phrases.addTypeDefinitions',
+] as const;
 
 interface ChatEmptyStateProps {
     showDraftContext?: boolean;
@@ -34,6 +35,7 @@ interface ChatEmptyStateProps {
 const ChatEmptyState: React.FC<ChatEmptyStateProps> = ({
     showDraftContext = false,
 }) => {
+    const { t } = useLanguage();
     const { currentTheme } = useThemeSystem();
     const { git } = useRuntimeAPIs();
     const effectiveDirectory = useEffectiveDirectory();
@@ -77,8 +79,8 @@ const ChatEmptyState: React.FC<ChatEmptyStateProps> = ({
                 interval={4}
                 transition={{ duration: 0.5 }}
             >
-                {phrases.map((phrase) => (
-                    <span key={phrase} style={{ color: textColor }}>"{phrase}…"</span>
+                {phraseKeys.map((phraseKey) => (
+                    <span key={phraseKey} style={{ color: textColor }}>"{t(phraseKey)}…"</span>
                 ))}
             </TextLoop>
         </div>

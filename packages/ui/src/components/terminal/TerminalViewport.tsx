@@ -9,6 +9,7 @@ import type { TerminalChunk } from '@/stores/useTerminalStore';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { cn } from '@/lib/utils';
 import { OverlayScrollbar } from '@/components/ui/OverlayScrollbar';
+import { useLanguage } from '@/hooks/useLanguage';
 
 let ghosttyPromise: Promise<Ghostty> | null = null;
 
@@ -96,6 +97,7 @@ const TerminalViewport = React.forwardRef<TerminalController, TerminalViewportPr
     },
     ref
   ) => {
+    const { t } = useLanguage();
     const containerRef = React.useRef<HTMLDivElement>(null);
     const viewportRef = React.useRef<HTMLElement | null>(null);
     const terminalRef = React.useRef<GhosttyTerminal | null>(null);
@@ -1515,7 +1517,7 @@ const TerminalViewport = React.forwardRef<TerminalController, TerminalViewportPr
                 enterKeyHint="send"
                 data-terminal-hidden-input="true"
                 data-keyboard-avoid-target-id={keyboardAvoidTargetId}
-                aria-label="Terminal input"
+                aria-label={t('terminalViewport.terminalInput')}
                 aria-hidden="true"
                 style={{
                   ...hiddenInputStyle,
@@ -1543,7 +1545,7 @@ const TerminalViewport = React.forwardRef<TerminalController, TerminalViewportPr
                 enterKeyHint="send"
                 data-terminal-hidden-input="true"
                 data-keyboard-avoid-target-id={keyboardAvoidTargetId}
-                aria-label="Terminal input"
+                aria-label={t('terminalViewport.terminalInput')}
                 aria-hidden="true"
                 style={{
                   ...hiddenInputStyle,

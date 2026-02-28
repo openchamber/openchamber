@@ -20,6 +20,7 @@ import { TimelineDialog } from './TimelineDialog';
 import type { PermissionRequest } from '@/types/permission';
 import type { QuestionRequest } from '@/types/question';
 import { cn } from '@/lib/utils';
+import { useLanguage } from '@/hooks/useLanguage';
 
 const EMPTY_MESSAGES: Array<{ info: Message; parts: Part[] }> = [];
 const EMPTY_PERMISSIONS: PermissionRequest[] = [];
@@ -70,6 +71,7 @@ const flattenBlockingRequests = <T extends { id: string }>(
 };
 
 export const ChatContainer: React.FC = () => {
+    const { t } = useLanguage();
     const {
         currentSessionId,
         isLoading,
@@ -202,8 +204,8 @@ export const ChatContainer: React.FC = () => {
             size="xs"
             onClick={handleReturnToParentSession}
             className="absolute left-3 top-3 z-20 !font-normal bg-[var(--surface-background)]/95"
-            aria-label="Return to parent session"
-            title={parentSession.title?.trim() ? `Return to: ${parentSession.title}` : 'Return to parent session'}
+            aria-label={t('chatContainer.returnToParentSession')}
+            title={parentSession.title?.trim() ? t('chatContainer.returnToSession', { title: parentSession.title }) : t('chatContainer.returnToParentSession')}
         >
             <RiArrowLeftLine className="h-4 w-4" />
             Parent
@@ -639,7 +641,7 @@ export const ChatContainer: React.FC = () => {
                                   size="sm"
                                   onClick={() => scrollToBottom({ force: true })}
                                   className="rounded-full h-8 w-8 p-0 shadow-none bg-background/95 hover:bg-interactive-hover"
-                                  aria-label="Scroll to bottom"
+                                  aria-label={t('chatContainer.scrollToBottom')}
                                 >
 
                             <RiArrowDownLine className="h-4 w-4" />

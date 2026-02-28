@@ -16,6 +16,7 @@ import {
 import { toast } from '@/components/ui';
 import { cn } from '@/lib/utils';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { useLanguage } from '@/hooks/useLanguage';
 import { useDeviceInfo } from '@/lib/device';
 import { isDesktopShell } from '@/lib/desktop';
 import { useUIStore } from '@/stores/useUIStore';
@@ -160,6 +161,7 @@ export const ProjectActionsButton = ({
   compact = false,
   allowMobile = false,
 }: ProjectActionsButtonProps) => {
+  const { t } = useLanguage();
   const { terminal, runtime } = useRuntimeAPIs();
   const { isMobile } = useDeviceInfo();
   const isDesktopShellApp = React.useMemo(() => isDesktopShell(), []);
@@ -351,7 +353,7 @@ export const ProjectActionsButton = ({
       if (maybeUrl) {
         watch.openedUrl = true;
         void openExternal(maybeUrl);
-        toast.success('Opened URL from action output');
+        toast.success(t('projectActions.openedUrlFromActionOutput'));
       }
       urlWatchByRunKeyRef.current[runKey] = watch;
     }
@@ -362,7 +364,7 @@ export const ProjectActionsButton = ({
       }
     }
 
-  }, [actions, openExternal, runningByKey, terminalSessions]);
+  }, [actions, openExternal, runningByKey, t, terminalSessions]);
 
   const normalizedDirectory = React.useMemo(() => {
     return normalizeProjectActionDirectory(directory || stableProjectRef?.path || '');
@@ -377,7 +379,7 @@ export const ProjectActionsButton = ({
 
   const getOrCreateActionTab = React.useCallback(async (action: OpenChamberProjectAction) => {
     if (!normalizedDirectory) {
-      throw new Error('No active directory');
+      throw new Error(t('projectActions.noActiveDirectory'));
     }
 
     const key = toProjectActionRunKey(normalizedDirectory, action.id);
@@ -396,7 +398,7 @@ export const ProjectActionsButton = ({
       tabByKeyRef.current[key] = tabId;
     }
 
-    setTabLabel(normalizedDirectory, tabId, `Action: ${action.name}`);
+    setTabLabel(normalizedDirectory, tabId, t('projectActions.actionTabLabel', { name: action.name }));
     setActiveTab(normalizedDirectory, tabId);
 
     setBottomTerminalOpen(true);
@@ -416,6 +418,7 @@ export const ProjectActionsButton = ({
     setActiveTab,
     setBottomTerminalOpen,
     setTabLabel,
+    t,
   ]);
 
   const runAction = React.useCallback(async (action: OpenChamberProjectAction) => {
@@ -424,7 +427,7 @@ export const ProjectActionsButton = ({
     }
 
     if (!normalizedDirectory) {
-      toast.error('No active directory for action');
+      toast.error(t('projectActions.noActiveDirectoryForAction'));
       return;
     }
 
@@ -452,7 +455,7 @@ export const ProjectActionsButton = ({
       }
 
       if (!activeSessionId) {
-        throw new Error('Failed to create terminal session');
+        throw new Error(t('projectActions.failedToCreateTerminalSession'));
       }
 
       if (createdSession) {
@@ -482,14 +485,14 @@ export const ProjectActionsButton = ({
 
       if (desktopForwardUrl) {
         void openExternal(desktopForwardUrl);
-        toast.success('Opened forwarded URL');
+        toast.success(t('projectActions.openedForwardedUrl'));
       } else if (manualOpenUrl) {
         void openExternal(manualOpenUrl);
-        toast.success('Opened action URL');
+        toast.success(t('projectActions.openedActionUrl'));
       } else if (hasCustomOpenUrl) {
-        toast.error('Invalid custom URL format');
+        toast.error(t('projectActions.invalidCustomUrlFormat'));
       } else if (hasDesktopForwardSelection) {
-        toast.error('Selected desktop SSH forward is unavailable');
+        toast.error(t('projectActions.desktopSshForwardUnavailable'));
       }
 
       urlWatchByRunKeyRef.current[key] = {
@@ -507,7 +510,7 @@ export const ProjectActionsButton = ({
         return next;
       });
       delete urlWatchByRunKeyRef.current[runKey];
-      toast.error(error instanceof Error ? error.message : 'Failed to run action');
+      toast.error(error instanceof Error ? error.message : t('projectActions.failedToRunAction'));
     }
   }, [
     desktopSshInstances,
@@ -522,6 +525,7 @@ export const ProjectActionsButton = ({
     setConnecting,
     setTabSessionId,
     terminal,
+    t,
   ]);
 
   const stopAction = React.useCallback(async (action: OpenChamberProjectAction) => {
@@ -639,7 +643,7 @@ export const ProjectActionsButton = ({
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
             className
           )}
-          aria-label="Add action"
+          aria-label={t('projectActions.addAction')}
           onClick={openProjectActionsSettings}
         >
           <RiAddLine className="h-5 w-5" />
@@ -659,7 +663,7 @@ export const ProjectActionsButton = ({
         onClick={openProjectActionsSettings}
       >
         <RiAddLine className="h-4 w-4 text-muted-foreground" />
-        <span className="header-open-label">Add action</span>
+        <span className="header-open-label">{t('projectActions.addAction')}</span>
       </button>
     );
   }
@@ -689,7 +693,7 @@ export const ProjectActionsButton = ({
               'disabled:cursor-not-allowed',
               className
             )}
-            aria-label={selectedRunning ? `Stop ${resolvedSelected.name}` : `Run ${resolvedSelected.name}`}
+            aria-label={selectedRunning ? t('projectActions.stopActionAria', { name: resolvedSelected.name }) : t('projectActions.runActionAria', { name: resolvedSelected.name })}
           >
             {isStoppingSelected
               ? <RiLoader4Line className="h-5 w-5 animate-spin text-[var(--status-warning)]" />
@@ -701,7 +705,7 @@ export const ProjectActionsButton = ({
         <DropdownMenuContent align="end" className="w-52 max-h-[70vh] overflow-y-auto">
           <DropdownMenuItem className="flex items-center gap-2" onClick={openProjectActionsSettings}>
             <RiAddLine className="h-4 w-4" />
-            <span className="typography-ui-label text-foreground">Add new action</span>
+            <span className="typography-ui-label text-foreground">{t('projectActions.addNewAction')}</span>
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           {actions.map((entry) => {
@@ -753,7 +757,7 @@ export const ProjectActionsButton = ({
           compact ? 'w-9 justify-center px-0' : 'gap-2 pl-2 pr-3',
           'transition-colors disabled:cursor-not-allowed'
         )}
-        aria-label={selectedRunning ? `Stop ${resolvedSelected.name}` : `Run ${resolvedSelected.name}`}
+        aria-label={selectedRunning ? t('projectActions.stopActionAria', { name: resolvedSelected.name }) : t('projectActions.runActionAria', { name: resolvedSelected.name })}
       >
         <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center">
           {isStoppingSelected
@@ -774,7 +778,7 @@ export const ProjectActionsButton = ({
               'border-l border-[var(--interactive-border)] text-muted-foreground',
               'hover:bg-interactive-hover hover:text-foreground transition-colors'
             )}
-            aria-label="Choose project action"
+            aria-label={t('projectActions.chooseProjectAction')}
           >
             <RiArrowDownSLine className="h-4 w-4" />
           </button>
@@ -782,7 +786,7 @@ export const ProjectActionsButton = ({
         <DropdownMenuContent align="center" alignOffset={8} className="w-52 max-h-[70vh] overflow-y-auto">
           <DropdownMenuItem className="flex items-center gap-2" onClick={openProjectActionsSettings}>
             <RiAddLine className="h-4 w-4" />
-            <span className="typography-ui-label text-foreground">Add new action</span>
+            <span className="typography-ui-label text-foreground">{t('projectActions.addNewAction')}</span>
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           {actions.map((entry) => {

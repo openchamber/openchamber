@@ -163,7 +163,7 @@ export const OpenChamberLogo: React.FC<OpenChamberLogoProps> = ({
       xmlns="http://www.w3.org/2000/svg"
       className={className}
       role="img"
-      aria-label="OpenChamber logo"
+      aria-label="OpenChamber logo" // i18n-scan-ignore
     >
       {/* Left face - base fill */}
       <path

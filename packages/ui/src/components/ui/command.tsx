@@ -13,6 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { useLanguage } from '@/hooks/useLanguage';
 
 function Command({
   className,
@@ -35,8 +36,8 @@ function Command({
 }
 
 function CommandDialog({
-  title = "Command Palette",
-  description = "Search for a command to run...",
+  title,
+  description,
   children,
   className,
   showCloseButton = true,
@@ -47,11 +48,14 @@ function CommandDialog({
   className?: string
   showCloseButton?: boolean
 }) {
+  const { t } = useLanguage();
+  const resolvedTitle = title ?? t('commandDialog.commandPalette');
+  const resolvedDescription = description ?? t('commandDialog.searchForCommand');
   return (
     <Dialog {...props}>
       <DialogHeader className="sr-only">
-        <DialogTitle>{title}</DialogTitle>
-        <DialogDescription>{description}</DialogDescription>
+        <DialogTitle>{resolvedTitle}</DialogTitle>
+        <DialogDescription>{resolvedDescription}</DialogDescription>
       </DialogHeader>
       <DialogContent
         className={cn("overflow-hidden p-0 transform-gpu will-change-transform", className)}
@@ -172,13 +176,14 @@ function CommandShortcut({
   className,
   ...props
 }: React.ComponentProps<"span">) {
+  const { t } = useLanguage();
   const renderKey = (keyLabel: string) => {
     const normalized = keyLabel.trim().toLowerCase();
 
     if (normalized === 'ctrl' || normalized === 'control') {
       return (
         <span className="text-xs font-medium">
-          ctrl
+          {t('terminalView.ctrl')}
         </span>
       );
     }

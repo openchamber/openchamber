@@ -9,6 +9,7 @@ import {
 } from '@remixicon/react';
 import { Button } from '@/components/ui/button';
 import type { GitMergeInProgress, GitRebaseInProgress } from '@/lib/api/types';
+import { useLanguage } from '@/hooks/useLanguage';
 
 interface InProgressOperationBannerProps {
   mergeInProgress: GitMergeInProgress | null | undefined;
@@ -29,6 +30,7 @@ export const InProgressOperationBanner: React.FC<InProgressOperationBannerProps>
   hasUnresolvedConflicts = false,
   isLoading = false,
 }) => {
+  const { t } = useLanguage();
   const [processingAction, setProcessingAction] = React.useState<'continue' | 'abort' | null>(null);
 
   // Only show banner if we have actual in-progress operation data
@@ -60,19 +62,19 @@ export const InProgressOperationBanner: React.FC<InProgressOperationBannerProps>
 
   const isProcessing = processingAction !== null;
 
-  const operationLabel = operation === 'merge' ? 'Merge' : 'Rebase';
+  const operationLabel = operation === 'merge' ? t('inProgressOperation.merge') : t('inProgressOperation.rebase');
   const OperationIcon = operation === 'merge' ? RiGitMergeLine : RiGitBranchLine;
 
   // Build description
   let description = '';
   if (mergeInProgress) {
     description = mergeInProgress.message 
-      ? `Merging: ${mergeInProgress.message}` 
-      : `Merge in progress (${mergeInProgress.head})`;
+      ? t('inProgressOperation.mergingWithMessage', { message: mergeInProgress.message })
+      : t('inProgressOperation.mergeInProgressWithHead', { head: mergeInProgress.head });
   } else if (rebaseInProgress) {
     description = rebaseInProgress.headName 
-      ? `Rebasing ${rebaseInProgress.headName} onto ${rebaseInProgress.onto}` 
-      : `Rebase in progress`;
+      ? t('inProgressOperation.rebasingOnto', { headName: rebaseInProgress.headName, onto: rebaseInProgress.onto || '' })
+      : t('inProgressOperation.rebaseInProgress');
   }
 
   return (
@@ -82,7 +84,7 @@ export const InProgressOperationBanner: React.FC<InProgressOperationBannerProps>
           <OperationIcon className="size-4 text-[var(--status-warning)] shrink-0" />
           <div className="min-w-0">
             <p className="typography-label text-[var(--status-warning)]">
-              {operationLabel} in Progress
+              {t('inProgressOperation.operationInProgress', { operation: operationLabel })}
             </p>
             {description && (
               <p className="typography-micro text-muted-foreground truncate">
@@ -102,7 +104,7 @@ export const InProgressOperationBanner: React.FC<InProgressOperationBannerProps>
               className="gap-1.5"
             >
               <RiSparklingLine className="size-4" />
-              Resolve with AI
+              {t('inProgressOperation.resolveWithAi')}
             </Button>
           )}
 
@@ -119,7 +121,7 @@ export const InProgressOperationBanner: React.FC<InProgressOperationBannerProps>
               ) : (
                 <RiCloseLine className="size-4" />
               )}
-              Abort
+              {t('inProgressOperation.abort')}
             </Button>
           )}
 
@@ -136,7 +138,7 @@ export const InProgressOperationBanner: React.FC<InProgressOperationBannerProps>
               ) : (
                 <RiCheckLine className="size-4" />
               )}
-              Continue
+              {t('inProgressOperation.continue')}
             </Button>
           )}
         </div>
@@ -144,7 +146,7 @@ export const InProgressOperationBanner: React.FC<InProgressOperationBannerProps>
 
       {hasUnresolvedConflicts && (
         <p className="typography-micro text-[var(--status-warning)] mt-2">
-          Conflicts must be resolved before continuing. Use &quot;Resolve with AI&quot; or resolve manually, then stage changes and click Continue.
+          {t('inProgressOperation.conflictsMustBeResolved')}
         </p>
       )}
     </div>

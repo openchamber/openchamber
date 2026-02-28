@@ -24,6 +24,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { useDrawerSwipe } from '@/hooks/useDrawerSwipe';
+import { useLanguage } from '@/hooks/useLanguage';
 
 interface MobileSessionStatusBarProps {
   onSessionSwitch?: (sessionId: string) => void;
@@ -638,6 +639,7 @@ function ProjectBar({
   onRemoveProject,
   homeDirectory
 }: ProjectBarProps) {
+  const { t } = useLanguage();
   const scrollRef = React.useRef<HTMLDivElement>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
   const [projectToDelete, setProjectToDelete] = React.useState<ProjectEntry | null>(null);
@@ -668,12 +670,12 @@ function ProjectBar({
   if (projects.length === 0) {
     return (
       <div className="flex items-center gap-2 px-2 py-1 border-b border-[var(--interactive-border)] bg-transparent">
-        <span className="text-[11px] text-[var(--surface-mutedForeground)]">No projects</span>
+        <span className="text-[11px] text-[var(--surface-mutedForeground)]">{t('mobileSessionBar.noProjects')}</span>
         <button
           type="button"
           onClick={onAddProject}
           className="flex items-center justify-center !py-1.5 px-2 rounded-md border border-[var(--primary-base)]/60 bg-[var(--primary-base)]/5 text-[var(--primary-base)]/80 hover:text-[var(--primary-base)] hover:bg-[var(--primary-base)]/10 !min-h-0"
-          aria-label="Add project"
+          aria-label={t('navigation.addProject')}
         >
           <RiAddLine className="h-3 w-3" />
         </button>
@@ -749,7 +751,7 @@ function ProjectBar({
         type="button"
         onClick={onAddProject}
         className="flex items-center justify-center !py-1.5 px-2 rounded-md border border-[var(--primary-base)]/60 bg-[var(--primary-base)]/5 text-[var(--primary-base)]/80 hover:text-[var(--primary-base)] hover:bg-[var(--primary-base)]/10 shrink-0 !min-h-0"
-        aria-label="Add project"
+        aria-label={t('navigation.addProject')}
       >
         <RiAddLine className="h-3.5 w-3.5" />
       </button>
@@ -758,17 +760,17 @@ function ProjectBar({
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>Remove Project</DialogTitle>
+            <DialogTitle>{t('mobileSessionBar.removeProject')}</DialogTitle>
             <DialogDescription>
-              Are you sure you want to remove <span className="font-medium text-foreground">{projectToDelete?.label || formatDirectoryName(projectToDelete?.path || '', homeDirectory)}</span>?
+              {t('mobileSessionBar.removeProjectConfirmPrefix')} <span className="font-medium text-foreground">{projectToDelete?.label || formatDirectoryName(projectToDelete?.path || '', homeDirectory)}</span>?
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="flex gap-2">
             <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>
-              Cancel
+              {t('common.cancel')}
             </Button>
             <Button variant="destructive" onClick={handleConfirmDelete}>
-              Remove
+              {t('mobileSessionBar.remove')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -915,6 +917,7 @@ function ExpandedView({
   homeDirectory: string | null;
   childIndicators?: Array<{ session: Session; isRunning: boolean }>;
 }) {
+  const { t } = useLanguage();
   const containerRef = React.useRef<HTMLDivElement>(null);
   const [collapsedHeight, setCollapsedHeight] = React.useState<number | null>(null);
   const [hasMeasured, setHasMeasured] = React.useState(false);
@@ -1032,7 +1035,7 @@ function ExpandedView({
       >
         {displaySessions.length === 0 ? (
           <div className="flex items-center justify-center py-3 text-[11px] text-[var(--surface-mutedForeground)]">
-            <span>No sessions in this project</span>
+            <span>{t('mobileSessionBar.noSessionsInProject')}</span>
           </div>
         ) : (
           displaySessions.map((session) => (
@@ -1057,6 +1060,7 @@ export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
   onSessionSwitch,
   cornerRadius,
 }) => {
+  const { t } = useLanguage();
   const sessions = useSessionStore((state) => state.sessions);
   const currentSessionId = useSessionStore((state) => state.currentSessionId);
   const sessionStatus = useSessionStore((state) => state.sessionStatus);
@@ -1147,19 +1151,19 @@ export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
         if (result.success && result.path) {
           const added = addProject(result.path, { id: result.projectId });
           if (!added) {
-            toast.error('Failed to add project', {
-              description: 'Please select a valid directory.',
+            toast.error(t('projectsSidebar.failedToAddProject'), {
+              description: t('projectsSidebar.selectValidDirectory'),
             });
           }
         } else if (result.error && result.error !== 'Directory selection cancelled') {
-          toast.error('Failed to select directory', {
+          toast.error(t('projectsSidebar.failedToSelectDirectory'), {
             description: result.error,
           });
         }
       })
       .catch((error) => {
         console.error('Failed to select directory:', error);
-        toast.error('Failed to select directory');
+        toast.error(t('projectsSidebar.failedToSelectDirectory'));
       });
   };
 

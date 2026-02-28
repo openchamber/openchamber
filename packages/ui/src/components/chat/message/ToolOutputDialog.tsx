@@ -24,6 +24,7 @@ import {
 import type { ToolPopupContent, DiffViewMode } from './types';
 import { DiffViewToggle } from './DiffViewToggle';
 import { VirtualizedCodeBlock, type CodeLine } from './parts/VirtualizedCodeBlock';
+import { useLanguage } from '@/hooks/useLanguage';
 
 interface ToolOutputDialogProps {
     popup: ToolPopupContent;
@@ -300,6 +301,7 @@ const ImagePreviewDialog: React.FC<{
     onOpenChange: (open: boolean) => void;
     isMobile: boolean;
 }> = ({ popup, onOpenChange, isMobile }) => {
+    const { t } = useLanguage();
     const gallery = React.useMemo(() => {
         const baseImage = popup.image;
         if (!baseImage) return [] as Array<{ url: string; mimeType?: string; filename?: string; size?: number }>;
@@ -432,7 +434,7 @@ const ImagePreviewDialog: React.FC<{
                         onMouseDown={(event) => event.stopPropagation()}
                         onClick={showPrevious}
                         className="absolute left-3 top-1/2 -translate-y-1/2 z-10 h-10 w-10 flex items-center justify-center rounded-full bg-black/25 text-foreground/90 backdrop-blur-sm hover:bg-black/35 focus:outline-none focus:ring-2 focus:ring-primary/60"
-                        aria-label="Previous image"
+                        aria-label={t('toolOutputDialog.previousImage')}
                     >
                         <RiArrowLeftSLine className="h-6 w-6" />
                     </button>
@@ -441,7 +443,7 @@ const ImagePreviewDialog: React.FC<{
                         onMouseDown={(event) => event.stopPropagation()}
                         onClick={showNext}
                         className="absolute right-3 top-1/2 -translate-y-1/2 z-10 h-10 w-10 flex items-center justify-center rounded-full bg-black/25 text-foreground/90 backdrop-blur-sm hover:bg-black/35 focus:outline-none focus:ring-2 focus:ring-primary/60"
-                        aria-label="Next image"
+                        aria-label={t('toolOutputDialog.nextImage')}
                     >
                         <RiArrowRightSLine className="h-6 w-6" />
                     </button>
@@ -470,7 +472,7 @@ const ImagePreviewDialog: React.FC<{
                             type="button"
                             className="h-8 w-8 flex items-center justify-center rounded-lg text-muted-foreground/80 hover:text-foreground focus:outline-none focus:ring-2 focus:ring-primary/60"
                             onClick={() => onOpenChange(false)}
-                            aria-label="Close image preview"
+                            aria-label={t('toolOutputDialog.closeImagePreview')}
                         >
                             <RiCloseLine className="h-4 w-4" />
                         </button>
@@ -630,6 +632,7 @@ const MermaidPreviewDialog: React.FC<{
     onOpenChange: (open: boolean) => void;
     isMobile: boolean;
 }> = ({ popup, onOpenChange, isMobile }) => {
+    const { t } = useLanguage();
     const [source, setSource] = React.useState<string>(popup.mermaid?.source || '');
     const [status, setStatus] = React.useState<'idle' | 'loading' | 'ready' | 'error'>(popup.mermaid?.source ? 'ready' : 'idle');
     const [errorMessage, setErrorMessage] = React.useState<string>('');
@@ -771,9 +774,9 @@ const MermaidPreviewDialog: React.FC<{
                     return;
                 }
                 setStatus('error');
-                setErrorMessage(error instanceof Error ? error.message : 'Unable to load Mermaid diagram.');
+                setErrorMessage(error instanceof Error ? error.message : t('toolOutputDialog.unableToLoadMermaidDiagram'));
             });
-    }, [decodeDataUrl, normalizeFilePath, popup.mermaid]);
+    }, [decodeDataUrl, normalizeFilePath, popup.mermaid, t]);
 
     React.useEffect(() => {
         if (!popup.open || !popup.mermaid) {
@@ -916,7 +919,7 @@ const MermaidPreviewDialog: React.FC<{
                             type="button"
                             className="h-8 w-8 flex items-center justify-center rounded-lg text-muted-foreground/80 hover:text-foreground focus:outline-none focus:ring-2 focus:ring-primary/60"
                             onClick={() => onOpenChange(false)}
-                            aria-label="Close diagram preview"
+                            aria-label={t('toolOutputDialog.closeDiagramPreview')}
                         >
                             <RiCloseLine className="h-4 w-4" />
                         </button>
@@ -929,7 +932,7 @@ const MermaidPreviewDialog: React.FC<{
                             {status === 'loading' && (
                                 <div className="h-full min-h-28 flex items-center justify-center gap-2 text-muted-foreground typography-meta">
                                     <RiLoader4Line className="h-4 w-4 animate-spin" />
-                                    <span>Loading diagram...</span>
+                                    <span>{t('toolOutputDialog.loadingDiagram')}</span>
                                 </div>
                             )}
 
@@ -981,6 +984,7 @@ const MermaidPreviewDialog: React.FC<{
 };
 
 const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange, syntaxTheme, isMobile }) => {
+    const { t } = useLanguage();
     const [diffViewMode, setDiffViewMode] = React.useState<DiffViewMode>('unified');
     const pierreThemeConfig = usePierreThemeConfig();
 
@@ -1200,8 +1204,8 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
                         </div>
                     ) : (
                         <div className="p-8 text-muted-foreground typography-ui-header">
-                            <div className="mb-2">Command completed successfully</div>
-                            <div className="typography-meta">No output was produced</div>
+                            <div className="mb-2">{t('toolOutputDialog.commandCompletedSuccessfully')}</div>
+                            <div className="typography-meta">{t('toolOutputDialog.noOutputProduced')}</div>
                         </div>
                     )}
                     </div>

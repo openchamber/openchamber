@@ -2,6 +2,7 @@ import React from 'react';
 import { RiChat3Line, RiRestartLine } from '@remixicon/react';
 import { Button } from '../ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
+import { useLanguage } from '@/hooks/useLanguage';
 
 interface ChatErrorBoundaryState {
   hasError: boolean;
@@ -14,8 +15,12 @@ interface ChatErrorBoundaryProps {
   sessionId?: string;
 }
 
-export class ChatErrorBoundary extends React.Component<ChatErrorBoundaryProps, ChatErrorBoundaryState> {
-  constructor(props: ChatErrorBoundaryProps) {
+interface InternalChatErrorBoundaryProps extends ChatErrorBoundaryProps {
+  t: (key: string) => string;
+}
+
+class InternalChatErrorBoundary extends React.Component<InternalChatErrorBoundaryProps, ChatErrorBoundaryState> {
+  constructor(props: InternalChatErrorBoundaryProps) {
     super(props);
     this.state = { hasError: false };
   }
@@ -44,23 +49,23 @@ export class ChatErrorBoundary extends React.Component<ChatErrorBoundaryProps, C
             <CardHeader className="text-center">
               <CardTitle className="flex items-center justify-center gap-2 text-destructive">
                 <RiChat3Line className="h-5 w-5" />
-                Chat Error
+                {this.props.t('chatErrorBoundary.chatError')}
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <p className="text-sm text-muted-foreground text-center">
-                The chat interface encountered an error. This might be due to a temporary network issue or corrupted message data.
+                {this.props.t('chatErrorBoundary.description')}
               </p>
 
               {this.props.sessionId && (
                 <div className="text-xs text-muted-foreground text-center">
-                  Session: {this.props.sessionId}
+                  {this.props.t('chatErrorBoundary.session')}: {this.props.sessionId}
                 </div>
               )}
 
               {this.state.error && (
                 <details className="text-xs font-mono bg-muted p-3 rounded">
-                  <summary className="cursor-pointer hover:bg-interactive-hover/80">Error details</summary>
+                  <summary className="cursor-pointer hover:bg-interactive-hover/80">{this.props.t('chatErrorBoundary.errorDetails')}</summary>
                   <pre className="mt-2 overflow-x-auto">
                     {this.state.error.toString()}
                   </pre>
@@ -70,12 +75,12 @@ export class ChatErrorBoundary extends React.Component<ChatErrorBoundaryProps, C
               <div className="flex gap-2">
                 <Button onClick={this.handleReset} variant="outline" className="flex-1">
                   <RiRestartLine className="h-4 w-4 mr-2" />
-                  Reset Chat
+                  {this.props.t('chatErrorBoundary.resetChat')}
                 </Button>
               </div>
 
               <div className="text-xs text-muted-foreground text-center">
-                If the problem persists, try refreshing the page.
+                {this.props.t('chatErrorBoundary.refreshHint')}
               </div>
             </CardContent>
           </Card>
@@ -86,3 +91,8 @@ export class ChatErrorBoundary extends React.Component<ChatErrorBoundaryProps, C
     return this.props.children;
   }
 }
+
+export const ChatErrorBoundary: React.FC<ChatErrorBoundaryProps> = (props) => {
+  const { t } = useLanguage();
+  return <InternalChatErrorBoundary {...props} t={t} />;
+};
