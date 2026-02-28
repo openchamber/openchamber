@@ -61,6 +61,7 @@ const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
                 variant="justification"
                 onContentChange={onContentChange}
                 blockId={part.id || `${messageId}-reasoning-text`}
+                time={time}
             />
         );
     }
