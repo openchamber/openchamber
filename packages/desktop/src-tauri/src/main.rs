@@ -1107,11 +1107,6 @@ struct MenuRuntimeState {
     auto_worktree: Mutex<bool>,
 }
 
-#[derive(Default)]
-struct PendingCloseApprovalState {
-    labels: Mutex<HashSet<String>>,
-}
-
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct DesktopHost {
@@ -1656,59 +1651,6 @@ fn kill_sidecar(app: tauri::AppHandle) {
         let _ = child.kill();
     }
     *state.url.lock().expect("sidecar url mutex") = None;
-}
-
-fn is_tunnel_active_for_close_guard(app: &tauri::AppHandle) -> bool {
-    let Some(state) = app.try_state::<SidecarState>() else {
-        return false;
-    };
-
-    let sidecar_url = state.url.lock().expect("sidecar url mutex").clone();
-    let Some(url) = sidecar_url else {
-        return false;
-    };
-
-    let status_url = format!("{}/api/openchamber/tunnel/status", url.trim_end_matches('/'));
-    let client = match reqwest::blocking::Client::builder()
-        .no_proxy()
-        .timeout(Duration::from_millis(800))
-        .build()
-    {
-        Ok(client) => client,
-        Err(_) => return false,
-    };
-
-    let response = match client.get(status_url).send() {
-        Ok(response) => response,
-        Err(_) => return false,
-    };
-
-    let payload: serde_json::Value = match response.json() {
-        Ok(payload) => payload,
-        Err(_) => return false,
-    };
-
-    payload
-        .get("active")
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false)
-}
-
-#[tauri::command]
-fn desktop_close_current_window(
-    window: tauri::WebviewWindow,
-    app: tauri::AppHandle,
-) -> Result<(), String> {
-    let label = window.label().to_string();
-    if let Some(state) = app.try_state::<PendingCloseApprovalState>() {
-        state
-            .labels
-            .lock()
-            .expect("close approval mutex")
-            .insert(label);
-    }
-
-    window.close().map_err(|err| err.to_string())
 }
 
 fn build_local_url(port: u16) -> String {
@@ -2561,7 +2503,6 @@ fn main() {
         .manage(WindowFocusState::default())
         .manage(WindowGeometryDebounceState::default())
         .manage(MenuRuntimeState::default())
-        .manage(PendingCloseApprovalState::default())
         .manage(DesktopSshManagerState::default())
         .manage(PendingUpdate(Mutex::new(None)))
         .plugin(tauri_plugin_shell::init())
@@ -2757,28 +2698,7 @@ fn main() {
                 schedule_window_state_persist(window.clone(), false);
             }
 
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                let is_last_window = app.webview_windows().len() == 1;
-
-                if is_last_window {
-                    let allow_close_without_prompt = app
-                        .try_state::<PendingCloseApprovalState>()
-                        .map(|state| {
-                            state
-                                .labels
-                                .lock()
-                                .expect("close approval mutex")
-                                .remove(&label)
-                        })
-                        .unwrap_or(false);
-
-                    if !allow_close_without_prompt && is_tunnel_active_for_close_guard(&app) {
-                        api.prevent_close();
-                        let _ = app.emit("openchamber:desktop-close-requested-active-tunnel", ());
-                        return;
-                    }
-                }
-
+            if let tauri::WindowEvent::CloseRequested { .. } = event {
                 schedule_window_state_persist(window.clone(), true);
             }
         })
@@ -2792,7 +2712,6 @@ fn main() {
             desktop_set_auto_worktree_menu,
             desktop_clear_cache,
             desktop_open_path,
-            desktop_close_current_window,
             desktop_filter_installed_apps,
             desktop_get_installed_apps,
             desktop_fetch_app_icons,
