@@ -128,11 +128,11 @@ createRoot(rootElement).render(
   <StrictMode>
     <ThemeSystemProvider>
       <ThemeProvider>
-        <SessionAuthGate>
-          <DeviceLoginGate>
+        <DeviceLoginGate>
+          <SessionAuthGate>
             <App apis={runtimeAPIs} />
-          </DeviceLoginGate>
-        </SessionAuthGate>
+          </SessionAuthGate>
+        </DeviceLoginGate>
       </ThemeProvider>
     </ThemeSystemProvider>
   </StrictMode>,

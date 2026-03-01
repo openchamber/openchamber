@@ -66,7 +66,18 @@ export function useRouter(): void {
 
         // 2. Handle settings (takes precedence over tabs - it's a full-screen overlay)
         if (route.settingsPath) {
-          setSettingsPage(resolveSettingsSlug(route.settingsPath));
+          let resolved = resolveSettingsSlug(route.settingsPath);
+          if (resolved === 'home' && typeof window !== 'undefined') {
+            const params = new URLSearchParams(window.location.search);
+            const wantsDevices =
+              (params.get('devices') || '').trim() === '1' ||
+              (params.get('user_code') || '').trim().length > 0;
+            if (wantsDevices) {
+              resolved = 'devices';
+            }
+          }
+
+          setSettingsPage(resolved);
           setSettingsDialogOpen(true);
           // Don't process tab when settings is open
           return;
@@ -143,18 +154,18 @@ export function useRouter(): void {
     const initializeRoute = async () => {
       await applyRoute(route);
 
-      // After applying, update URL to normalized form (use replaceState)
-      if (!isVSCode) {
-        const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
-        const hasOpenChamberDeepLinkParams =
-          route.settingsPath === 'settings' &&
-          Boolean(params && (params.has('section') || params.has('devices') || params.has('user_code')));
+        // After applying, update URL to normalized form (use replaceState)
+        if (!isVSCode) {
+          const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+          const hasOpenChamberDeepLinkParams =
+            (route.settingsPath === 'settings' || route.settingsPath === 'devices') &&
+            Boolean(params && (params.has('section') || params.has('devices') || params.has('user_code')));
 
-        if (!hasOpenChamberDeepLinkParams) {
-          syncURLFromState({ replace: true });
+          if (!hasOpenChamberDeepLinkParams) {
+            syncURLFromState({ replace: true });
+          }
         }
-      }
-    };
+      };
 
     void initializeRoute();
   }, [applyRoute, isVSCode, syncURLFromState]);
