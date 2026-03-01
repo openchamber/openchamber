@@ -8,6 +8,7 @@ const DEFAULT_API_BASE_URL = import.meta.env.VITE_OPENCODE_URL || '/api';
 const trimTrailingSlashes = (value: string): string => value.replace(/\/+$/, '');
 const ensureLeadingSlash = (value: string): string => (value.startsWith('/') ? value : `/${value}`);
 const INSTANCES_STORE_KEY = 'instances-store';
+const DEV_PROXY_PORTS = new Set(['5173', '4173']);
 
 type PersistedInstancesShape = {
   state?: {
@@ -70,6 +71,42 @@ const resolvePersistedInstanceApiBaseUrl = (): string | null => {
   }
 };
 
+const isLoopbackHost = (value: string): boolean => {
+  const host = value.toLowerCase();
+  return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
+};
+
+const shouldUseDevProxyApiBase = (candidateApiBaseUrl: string): boolean => {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  let currentOrigin: URL;
+  try {
+    currentOrigin = new URL(window.location.origin);
+  } catch {
+    return false;
+  }
+
+  if ((currentOrigin.protocol !== 'http:' && currentOrigin.protocol !== 'https:') || !isLoopbackHost(currentOrigin.hostname)) {
+    return false;
+  }
+
+  if (!DEV_PROXY_PORTS.has(currentOrigin.port)) {
+    return false;
+  }
+
+  try {
+    const parsedCandidate = new URL(candidateApiBaseUrl);
+    if ((parsedCandidate.protocol !== 'http:' && parsedCandidate.protocol !== 'https:') || !isLoopbackHost(parsedCandidate.hostname)) {
+      return false;
+    }
+    return parsedCandidate.pathname.replace(/\/+$/, '').endsWith('/api');
+  } catch {
+    return false;
+  }
+};
+
 const resolveDesktopApiBaseUrl = (): string | null => {
   if (typeof window === 'undefined') {
     return null;
@@ -94,12 +131,19 @@ export const resolveRuntimeApiBaseUrl = (): string => {
 
   const selectedInstance = resolveSelectedInstance();
   if (selectedInstance && typeof selectedInstance.apiBaseUrl === 'string' && selectedInstance.apiBaseUrl.trim().length > 0) {
-    return selectedInstance.apiBaseUrl.trim();
+    const selectedApiBaseUrl = selectedInstance.apiBaseUrl.trim();
+    if (shouldUseDevProxyApiBase(selectedApiBaseUrl)) {
+      return DEFAULT_API_BASE_URL;
+    }
+    return selectedApiBaseUrl;
   }
 
   if (isMobileRuntime()) {
     const persistedMobileApiBase = resolvePersistedInstanceApiBaseUrl();
     if (persistedMobileApiBase) {
+      if (shouldUseDevProxyApiBase(persistedMobileApiBase)) {
+        return DEFAULT_API_BASE_URL;
+      }
       return persistedMobileApiBase;
     }
   }
