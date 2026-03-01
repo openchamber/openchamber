@@ -158,11 +158,12 @@
     overflow: hidden;
   }
 
+  /* Fix for Tauri WKWebView returning a broken -webkit-fill-available */
   :root.tauri-mobile-runtime.mobile-pointer:not(.desktop-runtime),
   :root.tauri-mobile-runtime.mobile-pointer:not(.desktop-runtime) body,
   :root.tauri-mobile-runtime.mobile-pointer:not(.desktop-runtime) #root {
-    height: 100%;
-    min-height: 100%;
+    height: 100vh !important;
+    min-height: 100vh !important;
   }
 
   /* Prevent iOS keyboard from scrolling the page */
@@ -192,6 +193,8 @@
     height: -webkit-fill-available;
     min-height: 0;
   }
+
+
 
   /* Fix header positioning */
   :root.device-mobile:not(.desktop-runtime) .header-safe-area,
@@ -336,10 +339,10 @@
       padding-bottom: var(--oc-safe-area-bottom-visual, 0px) !important;
     }
 
-    /* Drawer safe area - only top/bottom padding, no positioning */
+    /* Mobile drawer inner spacing - primitive fallback test */
     .drawer-safe-area {
-      padding-top: var(--oc-safe-area-top);
-      padding-bottom: var(--oc-safe-area-bottom-visual);
+      padding-top: 48px !important;
+      padding-bottom: 34px !important;
     }
 
     /* iOS keyboard home indicator safe area - used when keyboard is open */
@@ -370,6 +373,13 @@
     .flex.flex-col.h-screen {
       min-height: 100vh;
       min-height: -webkit-fill-available;
+    }
+
+    /* Force Tauri Webview to use 100vh instead of broken -webkit-fill-available */
+    :root.tauri-mobile-runtime body,
+    :root.tauri-mobile-runtime .flex.flex-col.h-screen {
+      min-height: 100vh !important;
+      height: 100vh !important;
     }
 
     /* Prevent content overlap in iOS */

@@ -1,29 +1,29 @@
-import React, { useRef, useEffect } from 'react';
-import { motion, useMotionValue, animate } from 'motion/react';
-import { Header } from './Header';
+import { MultiRunLauncher } from '@/components/multirun';
+import { SessionDialogs } from '@/components/session/SessionDialogs';
+import { SessionSidebar } from '@/components/session/SessionSidebar';
+import { DiffWorkerProvider } from '@/contexts/DiffWorkerProvider';
+import { DrawerProvider } from '@/contexts/DrawerContext';
+import { animate, motion, useMotionValue } from 'motion/react';
+import React, { useEffect, useRef } from 'react';
+import { CommandPalette } from '../ui/CommandPalette';
+import { ErrorBoundary } from '../ui/ErrorBoundary';
+import { HelpDialog } from '../ui/HelpDialog';
+import { OpenCodeStatusDialog } from '../ui/OpenCodeStatusDialog';
 import { BottomTerminalDock } from './BottomTerminalDock';
-import { Sidebar } from './Sidebar';
+import { ContextPanel } from './ContextPanel';
+import { Header } from './Header';
 import { NavRail } from './NavRail';
 import { RightSidebar } from './RightSidebar';
 import { RightSidebarTabs } from './RightSidebarTabs';
-import { ContextPanel } from './ContextPanel';
-import { ErrorBoundary } from '../ui/ErrorBoundary';
-import { CommandPalette } from '../ui/CommandPalette';
-import { HelpDialog } from '../ui/HelpDialog';
-import { OpenCodeStatusDialog } from '../ui/OpenCodeStatusDialog';
-import { SessionSidebar } from '@/components/session/SessionSidebar';
-import { SessionDialogs } from '@/components/session/SessionDialogs';
-import { DiffWorkerProvider } from '@/contexts/DiffWorkerProvider';
-import { MultiRunLauncher } from '@/components/multirun';
-import { DrawerProvider } from '@/contexts/DrawerContext';
+import { Sidebar } from './Sidebar';
 
+import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { useDeviceInfo } from '@/lib/device';
+import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 import { useUpdateStore } from '@/stores/useUpdateStore';
-import { useDeviceInfo } from '@/lib/device';
-import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
-import { cn } from '@/lib/utils';
 
-import { ChatView, PlanView, GitView, DiffView, TerminalView, FilesView, SettingsView, SettingsWindow } from '@/components/views';
+import { ChatView, DiffView, FilesView, GitView, PlanView, SettingsView, SettingsWindow, TerminalView } from '@/components/views';
 
 // Mobile drawer width as screen percentage
 const MOBILE_DRAWER_WIDTH_PERCENT = 85;
@@ -710,12 +710,18 @@ export const MainLayout: React.FC = () => {
                             }
                         }}
                         className={cn(
-                            'fixed left-0 top-0 z-50 h-full bg-transparent',
+                            'fixed left-0 top-0 z-50 h-full bg-transparent mobile-drawer-panel',
                             'cursor-grab active:cursor-grabbing'
                         )}
                         aria-hidden={!mobileLeftDrawerOpen}
                     >
-                        <div className="h-full overflow-hidden flex bg-sidebar shadow-none drawer-safe-area">
+                        <div
+                            className="h-full overflow-hidden flex bg-sidebar shadow-none drawer-safe-area"
+                            style={{
+                                paddingTop: 'max(env(safe-area-inset-top, 0px), 48px)',
+                                paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 34px)'
+                            }}
+                        >
                             <div onPointerDownCapture={(e) => e.stopPropagation()}>
                               <NavRail className="shrink-0" mobile />
                             </div>
@@ -761,12 +767,18 @@ export const MainLayout: React.FC = () => {
                             }
                         }}
                         className={cn(
-                            'fixed right-0 top-0 z-50 h-full bg-transparent',
+                            'fixed right-0 top-0 z-50 h-full bg-transparent mobile-drawer-panel',
                             'cursor-grab active:cursor-grabbing'
                         )}
                         aria-hidden={!isRightSidebarOpen}
                     >
-                        <div className="h-full overflow-hidden flex flex-col bg-background shadow-none drawer-safe-area">
+                        <div 
+                            className="h-full overflow-hidden flex flex-col bg-background shadow-none drawer-safe-area"
+                            style={{
+                                paddingTop: 'max(env(safe-area-inset-top, 0px), 48px)',
+                                paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 34px)'
+                            }}
+                        >
                             <ErrorBoundary>
                                 <GitView mode="sidebar" />
                             </ErrorBoundary>
