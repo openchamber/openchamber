@@ -685,8 +685,6 @@ export const MainLayout: React.FC = () => {
                         style={{
                             width: `${MOBILE_DRAWER_WIDTH_PERCENT}%`,
                             x: leftDrawerX,
-                            top: 'var(--oc-header-height, 56px)',
-                            height: 'calc(100% - var(--oc-header-height, 56px))',
                         }}
                         onDragEnd={(_, info) => {
                             const drawerWidthPx = leftDrawerWidth.current || window.innerWidth * 0.85;
@@ -712,12 +710,12 @@ export const MainLayout: React.FC = () => {
                             }
                         }}
                         className={cn(
-                            'fixed left-0 z-50 bg-transparent',
+                            'fixed left-0 top-0 z-50 h-full bg-transparent',
                             'cursor-grab active:cursor-grabbing'
                         )}
                         aria-hidden={!mobileLeftDrawerOpen}
                     >
-                        <div className="h-full overflow-hidden flex bg-sidebar shadow-none">
+                        <div className="h-full overflow-hidden flex bg-sidebar shadow-none drawer-safe-area">
                             <div onPointerDownCapture={(e) => e.stopPropagation()}>
                               <NavRail className="shrink-0" mobile />
                             </div>
@@ -738,8 +736,6 @@ export const MainLayout: React.FC = () => {
                         style={{
                             width: `${MOBILE_DRAWER_WIDTH_PERCENT}%`,
                             x: rightDrawerX,
-                            top: 'var(--oc-header-height, 56px)',
-                            height: 'calc(100% - var(--oc-header-height, 56px))',
                         }}
                         onDragEnd={(_, info) => {
                             const drawerWidthPx = rightDrawerWidth.current || window.innerWidth * 0.85;
@@ -765,12 +761,12 @@ export const MainLayout: React.FC = () => {
                             }
                         }}
                         className={cn(
-                            'fixed right-0 z-50 bg-transparent',
+                            'fixed right-0 top-0 z-50 h-full bg-transparent',
                             'cursor-grab active:cursor-grabbing'
                         )}
                         aria-hidden={!isRightSidebarOpen}
                     >
-                        <div className="h-full overflow-hidden flex flex-col bg-background shadow-none">
+                        <div className="h-full overflow-hidden flex flex-col bg-background shadow-none drawer-safe-area">
                             <ErrorBoundary>
                                 <GitView mode="sidebar" />
                             </ErrorBoundary>
