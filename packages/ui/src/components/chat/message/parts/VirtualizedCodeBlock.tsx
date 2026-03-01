@@ -194,7 +194,7 @@ export const VirtualizedCodeBlock: React.FC<VirtualizedCodeBlockProps> = React.m
     return (
       <div
         className="typography-code font-mono w-full min-w-0 oc-virtualized-prism"
-        style={{ maxHeight, overflowY: 'auto' }}
+        style={{ maxHeight, overflow: 'auto' }}
       >
         {prismThemeCss ? <style>{prismThemeCss}</style> : null}
         {lines.map((line, idx) => (
@@ -256,7 +256,7 @@ const VirtualizedRows: React.FC<VirtualizedRowsProps> = React.memo(({
     <div
       ref={parentRef}
       className="typography-code font-mono w-full min-w-0 oc-virtualized-prism"
-      style={{ maxHeight, overflowY: 'auto' }}
+      style={{ maxHeight, overflow: 'auto' }}
     >
       {prismThemeCss ? <style>{prismThemeCss}</style> : null}
       <div
@@ -327,8 +327,7 @@ const Row: React.FC<RowProps> = React.memo(({ line, language, showLineNumbers, s
           </div>
         ) : (
           <div
-            className="whitespace-pre-wrap break-all"
-            style={{ overflowWrap: 'anywhere' }}
+            className="whitespace-pre"
             dangerouslySetInnerHTML={{ __html: html }}
           />
         )}
