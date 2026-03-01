@@ -47,6 +47,7 @@ import {
 import { generatePullRequestDescription } from '@/lib/gitApi';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useDeviceInfo } from '@/lib/device';
+import { openExternalUrl } from '@/lib/desktop';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { useUIStore } from '@/stores/useUIStore';
@@ -237,32 +238,6 @@ type ChatDispatchTarget = {
 
 const pullRequestDraftSnapshots = new Map<string, PullRequestDraftSnapshot>();
 const pullRequestStatusSnapshots = new Map<string, GitHubPullRequestStatus>();
-
-type TauriShell = {
-  shell?: {
-    open?: (url: string) => Promise<unknown>;
-  };
-};
-
-const openExternal = async (url: string) => {
-  if (typeof window === 'undefined') return;
-
-  const tauri = (window as unknown as { __TAURI__?: TauriShell }).__TAURI__;
-  if (tauri?.shell?.open) {
-    try {
-      await tauri.shell.open(url);
-      return;
-    } catch {
-      // fall through
-    }
-  }
-
-  try {
-    window.open(url, '_blank', 'noopener,noreferrer');
-  } catch {
-    // ignore
-  }
-};
 
 export const PullRequestSection: React.FC<{
   directory: string;
@@ -1215,7 +1190,7 @@ export const PullRequestSection: React.FC<{
       const message = e instanceof Error ? e.message : String(e);
       toast.error('Merge failed', { description: message });
       if (pr.url) {
-        void openExternal(pr.url);
+        void openExternalUrl(pr.url);
       }
     } finally {
       setIsMerging(false);
@@ -1236,7 +1211,7 @@ export const PullRequestSection: React.FC<{
       const message = e instanceof Error ? e.message : String(e);
       toast.error('Failed to mark ready', { description: message });
       if (pr.url) {
-        void openExternal(pr.url);
+        void openExternalUrl(pr.url);
       }
     } finally {
       setIsMarkingReady(false);
@@ -1323,7 +1298,7 @@ export const PullRequestSection: React.FC<{
                   <button
                     type="button"
                     className="inline-flex size-6 shrink-0 items-center justify-center rounded-md border border-border/60 bg-background/70 hover:bg-interactive-hover/60"
-                    onClick={() => void openExternal(pr.url)}
+                    onClick={() => void openExternalUrl(pr.url)}
                     aria-label="Open PR on GitHub"
                   >
                     <PrStateIcon className="size-4 shrink-0" style={{ color: prColorVar }} />

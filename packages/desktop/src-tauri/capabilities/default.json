@@ -2,6 +2,11 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Default capabilities for OpenChamber desktop runtime",
+  "platforms": [
+    "linux",
+    "macOS",
+    "windows"
+  ],
   "remote": {
     "urls": [
       "http://127.0.0.1:*/*",
@@ -12,7 +17,10 @@
       "https://*/*"
     ]
   },
-  "windows": ["main", "main-*"],
+  "windows": [
+    "main",
+    "main-*"
+  ],
   "permissions": [
     "core:default",
     "core:window:default",
@@ -25,17 +33,22 @@
     "core:webview:allow-webview-close",
     "shell:allow-open",
     "shell:allow-execute",
+    "opener:default",
     "dialog:allow-open",
     "dialog:allow-save",
     "dialog:allow-message",
     "dialog:allow-ask",
     "dialog:allow-confirm",
+    "clipboard-manager:allow-read-text",
+    "clipboard-manager:allow-write-text",
     "notification:default",
     "notification:allow-is-permission-granted",
     "notification:allow-request-permission",
     "notification:allow-notify",
+    "window-state:default",
     "updater:default",
     "updater:allow-check",
-    "updater:allow-download-and-install"
+    "updater:allow-download-and-install",
+    "os:default"
   ]
 }

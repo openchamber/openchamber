@@ -543,7 +543,7 @@ export const NavRail: React.FC<NavRailProps> = ({ className, mobile }) => {
     iconBackground?: string | null;
   } | null>(null);
 
-  const isDesktopApp = React.useMemo(() => isDesktopShell(), []);
+  const isDesktopApp = isDesktopShell();
   const tauriIpcAvailable = React.useMemo(() => isTauriShell(), []);
 
   const formatLabel = React.useCallback(

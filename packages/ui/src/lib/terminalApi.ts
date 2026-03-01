@@ -1,5 +1,9 @@
 
 
+import { buildRuntimeApiHeaders, resolveRuntimeApiBaseUrl, resolveRuntimeApiEndpoint } from '@/lib/instances/runtimeApiBaseUrl';
+import { resolveSelectedInstance } from '@/stores/useInstancesStore';
+import { getAccessToken } from '@/lib/auth/tokenStorage';
+
 export interface TerminalSession {
   sessionId: string;
   cols: number;
@@ -63,15 +67,50 @@ const GLOBAL_TERMINAL_INPUT_STATE_KEY = '__openchamberTerminalInputWsState';
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
+const getSelectedAccessToken = (): string | null => {
+  const selected = resolveSelectedInstance();
+  if (!selected?.id) {
+    return null;
+  }
+  return getAccessToken(selected.id);
+};
+
+const appendAccessTokenQuery = (rawUrl: string): string => {
+  const token = getSelectedAccessToken();
+  if (!token) {
+    return rawUrl;
+  }
+
+  try {
+    const parsed = new URL(rawUrl, typeof window !== 'undefined' ? window.location.href : 'http://localhost');
+    parsed.searchParams.set('access_token', token);
+    return parsed.toString();
+  } catch {
+    return rawUrl;
+  }
+};
+
+const resolveRuntimeApiOrigin = (): string => {
+  if (typeof window === 'undefined') {
+    return '';
+  }
+
+  try {
+    return new URL(resolveRuntimeApiBaseUrl(), window.location.href).origin;
+  } catch {
+    return window.location.origin;
+  }
+};
+
 const normalizeWebSocketPath = (pathValue: string): string => {
   if (/^wss?:\/\//i.test(pathValue)) {
-    return pathValue;
+    return appendAccessTokenQuery(pathValue);
   }
 
   if (/^https?:\/\//i.test(pathValue)) {
     const url = new URL(pathValue);
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-    return url.toString();
+    return appendAccessTokenQuery(url.toString());
   }
 
   if (typeof window === 'undefined') {
@@ -79,8 +118,14 @@ const normalizeWebSocketPath = (pathValue: string): string => {
   }
 
   const normalizedPath = pathValue.startsWith('/') ? pathValue : `/${pathValue}`;
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return `${protocol}//${window.location.host}${normalizedPath}`;
+  const runtimeApiOrigin = resolveRuntimeApiOrigin();
+  if (!runtimeApiOrigin) {
+    return '';
+  }
+
+  const origin = new URL(runtimeApiOrigin);
+  const protocol = origin.protocol === 'https:' ? 'wss:' : 'ws:';
+  return appendAccessTokenQuery(`${protocol}//${origin.host}${normalizedPath}`);
 };
 
 const encodeControlFrame = (payload: TerminalInputControlMessage): Uint8Array => {
@@ -477,9 +522,11 @@ const applyTerminalInputCapability = (capability: TerminalInputCapability | unde
 };
 
 const sendTerminalInputHttp = async (sessionId: string, data: string): Promise<void> => {
-  const response = await fetch(`/api/terminal/${sessionId}/input`, {
+  const response = await fetch(resolveRuntimeApiEndpoint(`/terminal/${sessionId}/input`), {
     method: 'POST',
-    headers: { 'Content-Type': 'text/plain' },
+    headers: buildRuntimeApiHeaders({
+      'Content-Type': 'text/plain',
+    }),
     body: data,
   });
 
@@ -492,9 +539,11 @@ const sendTerminalInputHttp = async (sessionId: string, data: string): Promise<v
 export async function createTerminalSession(
   options: CreateTerminalOptions
 ): Promise<TerminalSession> {
-  const response = await fetch('/api/terminal/create', {
+  const response = await fetch(resolveRuntimeApiEndpoint('/terminal/create'), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: buildRuntimeApiHeaders({
+      'Content-Type': 'application/json',
+    }),
     body: JSON.stringify({
       cwd: options.cwd,
       cols: options.cols || 80,
@@ -564,7 +613,9 @@ export function connectTerminalStream(
     }
 
     hasDispatchedOpen = false;
-    eventSource = new EventSource(`/api/terminal/${sessionId}/stream`);
+    eventSource = new EventSource(
+      appendAccessTokenQuery(resolveRuntimeApiEndpoint(`/terminal/${sessionId}/stream`))
+    );
 
     connectionTimeoutId = setTimeout(() => {
       if (!hasDispatchedOpen && eventSource?.readyState !== EventSource.OPEN) {
@@ -669,9 +720,11 @@ export async function resizeTerminal(
   cols: number,
   rows: number
 ): Promise<void> {
-  const response = await fetch(`/api/terminal/${sessionId}/resize`, {
+  const response = await fetch(resolveRuntimeApiEndpoint(`/terminal/${sessionId}/resize`), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: buildRuntimeApiHeaders({
+      'Content-Type': 'application/json',
+    }),
     body: JSON.stringify({ cols, rows }),
   });
 
@@ -684,8 +737,9 @@ export async function resizeTerminal(
 export async function closeTerminal(sessionId: string): Promise<void> {
   getTerminalInputWsGlobalState().manager?.unbindSession(sessionId);
 
-  const response = await fetch(`/api/terminal/${sessionId}`, {
+  const response = await fetch(resolveRuntimeApiEndpoint(`/terminal/${sessionId}`), {
     method: 'DELETE',
+    headers: buildRuntimeApiHeaders(),
   });
 
   if (!response.ok) {
@@ -700,9 +754,11 @@ export async function restartTerminalSession(
 ): Promise<TerminalSession> {
   getTerminalInputWsGlobalState().manager?.unbindSession(currentSessionId);
 
-  const response = await fetch(`/api/terminal/${currentSessionId}/restart`, {
+  const response = await fetch(resolveRuntimeApiEndpoint(`/terminal/${currentSessionId}/restart`), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: buildRuntimeApiHeaders({
+      'Content-Type': 'application/json',
+    }),
     body: JSON.stringify({
       cwd: options.cwd,
       cols: options.cols ?? 80,
@@ -724,9 +780,11 @@ export async function forceKillTerminal(options: {
   sessionId?: string;
   cwd?: string;
 }): Promise<void> {
-  const response = await fetch('/api/terminal/force-kill', {
+  const response = await fetch(resolveRuntimeApiEndpoint('/terminal/force-kill'), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: buildRuntimeApiHeaders({
+      'Content-Type': 'application/json',
+    }),
     body: JSON.stringify(options),
   });
 

@@ -16,6 +16,7 @@ import type { DesktopSettings } from '@/lib/desktop';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { useFileSystemAccess } from '@/hooks/useFileSystemAccess';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { buildRuntimeApiHeaders, resolveRuntimeApiEndpoint } from '@/lib/instances/runtimeApiBaseUrl';
 
 interface DirectoryItem {
   name: string;
@@ -245,9 +246,9 @@ export const DirectoryTree: React.FC<DirectoryTreeProps> = ({
           try {
             let pinned: string[] = [];
 
-        const response = await fetch('/api/config/settings', {
+        const response = await fetch(resolveRuntimeApiEndpoint('/config/settings'), {
           method: 'GET',
-          headers: { Accept: 'application/json' },
+          headers: buildRuntimeApiHeaders(),
         });
         if (response.ok) {
           const data = await response.json();

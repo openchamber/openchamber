@@ -5,6 +5,7 @@ import { toast } from '@/components/ui';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import type { GitHubAuthStatus } from '@/lib/api/types';
+import { openExternalUrl } from '@/lib/desktop';
 import { useDeviceInfo } from '@/lib/device';
 import { cn } from '@/lib/utils';
 import { RiGithubFill, RiInformationLine } from '@remixicon/react';
@@ -42,26 +43,7 @@ export const GitHubSettings: React.FC = () => {
   const setStatus = useGitHubAuthStore((state) => state.setStatus);
 
   const openExternal = React.useCallback(async (url: string) => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    type TauriShell = { shell?: { open?: (url: string) => Promise<unknown> } };
-    const tauri = (window as unknown as { __TAURI__?: TauriShell }).__TAURI__;
-    if (tauri?.shell?.open) {
-      try {
-        await tauri.shell.open(url);
-        return;
-      } catch {
-        // fall through
-      }
-    }
-
-    try {
-      window.open(url, '_blank', 'noopener,noreferrer');
-    } catch {
-      // ignore
-    }
+    await openExternalUrl(url);
   }, []);
 
   const [isBusy, setIsBusy] = React.useState(false);

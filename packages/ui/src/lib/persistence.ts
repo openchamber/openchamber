@@ -5,6 +5,7 @@ import { setDirectoryShowHidden } from '@/lib/directoryShowHidden';
 import { setFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
 import { loadAppearancePreferences, applyAppearancePreferences } from '@/lib/appearancePersistence';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { buildRuntimeApiHeaders, resolveRuntimeApiEndpoint } from '@/lib/instances/runtimeApiBaseUrl';
 
 const persistToLocalStorage = (settings: DesktopSettings) => {
   if (typeof window === 'undefined') {
@@ -330,6 +331,12 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
       store.setNotificationMode(settings.notificationMode);
     }
   }
+  if (typeof settings.mobileHapticsEnabled === 'boolean' && settings.mobileHapticsEnabled !== store.mobileHapticsEnabled) {
+    store.setMobileHapticsEnabled(settings.mobileHapticsEnabled);
+  }
+  if (typeof settings.biometricLockEnabled === 'boolean' && settings.biometricLockEnabled !== store.biometricLockEnabled) {
+    store.setBiometricLockEnabled(settings.biometricLockEnabled);
+  }
   if (typeof settings.notifyOnSubtasks === 'boolean' && settings.notifyOnSubtasks !== store.notifyOnSubtasks) {
     store.setNotifyOnSubtasks(settings.notifyOnSubtasks);
   }
@@ -552,6 +559,12 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (typeof candidate.notificationMode === 'string' && (candidate.notificationMode === 'always' || candidate.notificationMode === 'hidden-only')) {
     result.notificationMode = candidate.notificationMode;
+  }
+  if (typeof candidate.mobileHapticsEnabled === 'boolean') {
+    result.mobileHapticsEnabled = candidate.mobileHapticsEnabled;
+  }
+  if (typeof candidate.biometricLockEnabled === 'boolean') {
+    result.biometricLockEnabled = candidate.biometricLockEnabled;
   }
   if (typeof candidate.notifyOnSubtasks === 'boolean') {
     result.notifyOnSubtasks = candidate.notifyOnSubtasks;
@@ -794,9 +807,9 @@ const fetchWebSettings = async (): Promise<DesktopSettings | null> => {
   }
 
   try {
-    const response = await fetch('/api/config/settings', {
+    const response = await fetch(resolveRuntimeApiEndpoint('/config/settings'), {
       method: 'GET',
-      headers: { Accept: 'application/json' },
+      headers: buildRuntimeApiHeaders(),
     });
     if (!response.ok) {
       return null;
@@ -869,12 +882,11 @@ export const updateDesktopSettings = async (changes: Partial<DesktopSettings>): 
   }
 
   try {
-    const response = await fetch('/api/config/settings', {
+    const response = await fetch(resolveRuntimeApiEndpoint('/config/settings'), {
       method: 'PUT',
-      headers: {
+      headers: buildRuntimeApiHeaders({
         'Content-Type': 'application/json',
-        Accept: 'application/json',
-      },
+      }),
       body: JSON.stringify(changes),
     });
 

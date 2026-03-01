@@ -16,6 +16,7 @@ export type SettingsPageSlug =
   | 'chat'
   | 'shortcuts'
   | 'sessions'
+  | 'devices'
   | 'notifications'
   | 'voice'
   | 'tunnel';
@@ -165,6 +166,15 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     group: 'general',
     kind: 'single',
     keywords: ['defaults', 'default agent', 'default model', 'retention', 'memory', 'limits', 'zen'],
+  },
+
+  {
+    slug: 'devices',
+    title: 'Devices',
+    group: 'general',
+    kind: 'single',
+    keywords: ['devices', 'device login', 'mobile', 'remote', 'auth', 'authentication', 'user code'],
+    isAvailable: (ctx) => !ctx.isVSCode,
   },
 
   { slug: 'notifications', title: 'Notifications', group: 'general', kind: 'single', keywords: ['alerts', 'native', 'summary', 'summarization'], },

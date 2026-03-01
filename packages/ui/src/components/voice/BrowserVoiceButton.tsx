@@ -13,8 +13,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useBrowserVoice } from '@/hooks/useBrowserVoice';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { useUIStore } from '@/stores/useUIStore';
 import { browserVoiceService } from '@/lib/voice/browserVoiceService';
-import { isVSCodeRuntime } from '@/lib/desktop';
+import { isVSCodeRuntime, runHapticFeedback } from '@/lib/desktop';
 import { Button } from '@/components/ui/button';
 import {
     Tooltip,
@@ -71,6 +72,7 @@ const normalizeVoiceErrorMessage = (error: string): string => {
  */
 export function BrowserVoiceButton() {
     const voiceModeEnabled = useConfigStore((s) => s.voiceModeEnabled);
+    const mobileHapticsEnabled = useUIStore((s) => s.mobileHapticsEnabled);
     
     const {
         status,
@@ -221,13 +223,10 @@ export function BrowserVoiceButton() {
         longPressTimerRef.current = setTimeout(() => {
             longPressTriggeredRef.current = true;
             toggleConversationMode();
-            // Haptic feedback if available
-            if (navigator.vibrate) {
-                navigator.vibrate(50);
-            }
+            void runHapticFeedback('impact-medium', mobileHapticsEnabled);
             setIsPressing(false);
         }, 500);
-    }, [toggleConversationMode]);
+    }, [mobileHapticsEnabled, toggleConversationMode]);
 
     // Handle touch end
     const handleTouchEnd = useCallback(() => {

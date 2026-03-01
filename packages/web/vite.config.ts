@@ -29,10 +29,30 @@ export default defineConfig({
         return [
           {
             tag: 'script',
-            attrs: {
-              crossorigin: 'anonymous',
-              src: '//unpkg.com/react-scan/dist/auto.global.js',
-            },
+            children: `(function () {
+  var ua = typeof navigator !== 'undefined' ? String(navigator.userAgent || '').toLowerCase() : '';
+  var isTouchMac = typeof navigator !== 'undefined' && navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1;
+  var hasCoarsePointer = typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+    ? window.matchMedia('(pointer: coarse)').matches
+    : false;
+  var isMobile = /iphone|ipad|ipod|android/.test(ua) || isTouchMac || hasCoarsePointer;
+  if (isMobile) {
+    return;
+  }
+
+  var script = document.createElement('script');
+  script.crossOrigin = 'anonymous';
+  script.src = '//unpkg.com/react-scan/dist/auto.global.js';
+  script.onload = function () {
+    if (window.__REACT_SCAN__ && typeof window.__REACT_SCAN__.setOptions === 'function') {
+      window.__REACT_SCAN__.setOptions({
+        showFPS: false,
+        showNotificationCount: false,
+      });
+    }
+  };
+  document.head.appendChild(script);
+})();`,
             injectTo: 'head-prepend',
           },
         ];

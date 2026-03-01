@@ -1844,6 +1844,12 @@ const sanitizeSettingsUpdate = (payload) => {
       result.notificationMode = mode;
     }
   }
+  if (typeof candidate.mobileHapticsEnabled === 'boolean') {
+    result.mobileHapticsEnabled = candidate.mobileHapticsEnabled;
+  }
+  if (typeof candidate.biometricLockEnabled === 'boolean') {
+    result.biometricLockEnabled = candidate.biometricLockEnabled;
+  }
   if (typeof candidate.notifyOnSubtasks === 'boolean') {
     result.notifyOnSubtasks = candidate.notifyOnSubtasks;
   }
@@ -2599,15 +2605,466 @@ const isRequestOriginAllowed = async (req) => {
     return false;
   }
 
-  let normalizedOrigin = '';
+  let parsedOrigin;
   try {
-    normalizedOrigin = new URL(originHeader).origin;
+    parsedOrigin = new URL(originHeader);
   } catch {
     return false;
   }
 
+  const protocol = parsedOrigin.protocol.toLowerCase();
+  const hostname = parsedOrigin.hostname.toLowerCase();
+  const isLocalTauriOrigin = (protocol === 'tauri:' || protocol === 'app:')
+    && (hostname === 'localhost' || hostname === 'tauri.localhost' || hostname === 'app.localhost');
+  if (isLocalTauriOrigin) {
+    return true;
+  }
+
+  const normalizedOrigin = parsedOrigin.origin;
+  if (normalizedOrigin === 'null') {
+    return false;
+  }
+
+  const isSecureTauriLocalhost = (protocol === 'https:' || protocol === 'http:')
+    && (hostname === 'tauri.localhost' || hostname === 'app.localhost');
+  if (isSecureTauriLocalhost) {
+    return true;
+  }
+
   const allowedOrigins = await getRequestOriginCandidates(req);
   return allowedOrigins.has(normalizedOrigin);
+};
+
+const DEVICE_GRANT_TTL_MS = 10 * 60 * 1000;
+const DEVICE_GRANT_DEFAULT_INTERVAL_SECONDS = 5;
+const DEVICE_CODE_BYTES = 24;
+const DEVICE_TOKEN_BYTES = 48;
+const DEVICE_POLL_MIN_INTERVAL_MS = 1000;
+const DEVICE_TOKEN_TTL_DAYS = Number.parseInt(process.env.OPENCHAMBER_DEVICE_TOKEN_TTL_DAYS || '30', 10);
+const DEVICE_LAST_USED_TOUCH_MS = 60 * 1000;
+const DEVICE_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+const pendingDeviceGrantsByCode = new Map();
+const pendingDeviceGrantCodeByUserCode = new Map();
+const deviceLastUsedTouchCache = new Map();
+
+const normalizedDeviceTokenTtlMs = Math.max(1, Number.isFinite(DEVICE_TOKEN_TTL_DAYS) ? DEVICE_TOKEN_TTL_DAYS : 30) * 24 * 60 * 60 * 1000;
+
+const normalizeUserCode = (value) => {
+  if (typeof value !== 'string') {
+    return '';
+  }
+  return value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+};
+
+const formatUserCode = (value) => {
+  const normalized = normalizeUserCode(value);
+  if (normalized.length < 8) {
+    return normalized;
+  }
+  return `${normalized.slice(0, 4)}-${normalized.slice(4, 8)}`;
+};
+
+const randomCode = (length) => {
+  let output = '';
+  for (let i = 0; i < length; i += 1) {
+    output += DEVICE_CODE_CHARS[Math.floor(Math.random() * DEVICE_CODE_CHARS.length)];
+  }
+  return output;
+};
+
+const createUserCode = () => {
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const raw = randomCode(8);
+    const normalized = normalizeUserCode(raw);
+    if (!pendingDeviceGrantCodeByUserCode.has(normalized)) {
+      return formatUserCode(normalized);
+    }
+  }
+  return formatUserCode(`${Date.now().toString(36).toUpperCase()}${randomCode(8)}`.slice(0, 8));
+};
+
+const normalizeDeviceRecord = (entry) => {
+  if (!entry || typeof entry !== 'object') {
+    return null;
+  }
+
+  const id = typeof entry.id === 'string' && entry.id.trim().length > 0 ? entry.id.trim() : null;
+  const tokenHash = typeof entry.tokenHash === 'string' && entry.tokenHash.trim().length > 0 ? entry.tokenHash.trim() : null;
+  const name = typeof entry.name === 'string' && entry.name.trim().length > 0 ? entry.name.trim() : 'Device';
+  const createdAt = Number.isFinite(entry.createdAt) ? Number(entry.createdAt) : Date.now();
+  const expiresAt = Number.isFinite(entry.expiresAt) ? Number(entry.expiresAt) : createdAt + normalizedDeviceTokenTtlMs;
+  const lastUsedAt = Number.isFinite(entry.lastUsedAt) ? Number(entry.lastUsedAt) : null;
+  const userAgent = typeof entry.userAgent === 'string' ? entry.userAgent : '';
+  const platform = normalizeDevicePlatform(entry.platform);
+
+  if (!id || !tokenHash) {
+    return null;
+  }
+
+  return {
+    id,
+    name,
+    createdAt,
+    lastUsedAt,
+    expiresAt,
+    userAgent,
+    platform,
+    tokenHash,
+  };
+};
+
+const normalizeDevicePlatformField = (value, maxLength = 120) => {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  return trimmed.slice(0, maxLength);
+};
+
+const normalizeDevicePlatform = (value) => {
+  if (!value || typeof value !== 'object') {
+    return {};
+  }
+
+  const platform = {
+    ...(normalizeDevicePlatformField(value.os) ? { os: normalizeDevicePlatformField(value.os) } : {}),
+    ...(normalizeDevicePlatformField(value.model) ? { model: normalizeDevicePlatformField(value.model) } : {}),
+    ...(normalizeDevicePlatformField(value.version) ? { version: normalizeDevicePlatformField(value.version) } : {}),
+    ...(normalizeDevicePlatformField(value.arch) ? { arch: normalizeDevicePlatformField(value.arch) } : {}),
+    ...(normalizeDevicePlatformField(value.type) ? { type: normalizeDevicePlatformField(value.type) } : {}),
+    ...(normalizeDevicePlatformField(value.runtime) ? { runtime: normalizeDevicePlatformField(value.runtime, 32) } : {}),
+  };
+
+  return platform;
+};
+
+const readDeviceRecordsFromSettings = async () => {
+  const settings = await readSettingsFromDiskMigrated();
+  const entries = Array.isArray(settings?.devices) ? settings.devices : [];
+  return entries
+    .map(normalizeDeviceRecord)
+    .filter(Boolean);
+};
+
+const writeDeviceRecordsToSettings = async (devices) => {
+  const settings = await readSettingsFromDiskMigrated();
+  await writeSettingsToDisk({
+    ...settings,
+    devices,
+  });
+};
+
+const hashDeviceToken = (token) => {
+  return crypto.createHash('sha256').update(token).digest('hex');
+};
+
+const parseDevicePlatform = (userAgent) => {
+  if (typeof userAgent !== 'string' || userAgent.length === 0) {
+    return {};
+  }
+
+  const ua = userAgent.toLowerCase();
+  const os = ua.includes('windows')
+    ? 'Windows'
+    : ua.includes('mac os') || ua.includes('macintosh')
+      ? 'macOS'
+      : ua.includes('android')
+        ? 'Android'
+        : ua.includes('iphone') || ua.includes('ipad') || ua.includes('ios')
+          ? 'iOS'
+          : ua.includes('linux')
+            ? 'Linux'
+            : undefined;
+
+  const model = ua.includes('iphone')
+    ? 'iPhone'
+    : ua.includes('ipad')
+      ? 'iPad'
+      : ua.includes('android')
+        ? 'Android'
+        : undefined;
+
+  return {
+    ...(os ? { os } : {}),
+    ...(model ? { model } : {}),
+  };
+};
+
+const resolveGrantPlatform = (requestedPlatform, userAgent) => {
+  const normalizedRequested = normalizeDevicePlatform(requestedPlatform);
+  const parsedFallback = parseDevicePlatform(userAgent);
+  return normalizeDevicePlatform({
+    ...parsedFallback,
+    ...normalizedRequested,
+  });
+};
+
+const toPublicDeviceRecord = (record) => {
+  if (!record) {
+    return null;
+  }
+  return {
+    id: record.id,
+    name: record.name,
+    createdAt: record.createdAt,
+    lastUsedAt: record.lastUsedAt,
+    expiresAt: record.expiresAt,
+    userAgent: record.userAgent,
+    platform: record.platform,
+  };
+};
+
+const prunePendingDeviceGrants = () => {
+  const now = Date.now();
+  for (const [deviceCode, grant] of pendingDeviceGrantsByCode.entries()) {
+    if (!grant || typeof grant !== 'object') {
+      pendingDeviceGrantsByCode.delete(deviceCode);
+      continue;
+    }
+    if (grant.expiresAt <= now || grant.status === 'denied') {
+      pendingDeviceGrantsByCode.delete(deviceCode);
+      pendingDeviceGrantCodeByUserCode.delete(grant.userCodeNormalized);
+    }
+  }
+};
+
+const resolveRequestOrigin = async (req) => {
+  const explicit = typeof process.env.OPENCHAMBER_PUBLIC_ORIGIN === 'string' && process.env.OPENCHAMBER_PUBLIC_ORIGIN.trim().length > 0
+    ? process.env.OPENCHAMBER_PUBLIC_ORIGIN.trim()
+    : null;
+  if (explicit) {
+    try {
+      return new URL(explicit).origin;
+    } catch {
+    }
+  }
+
+  try {
+    const settings = await readSettingsFromDiskMigrated();
+    if (typeof settings?.publicOrigin === 'string' && settings.publicOrigin.trim().length > 0) {
+      return new URL(settings.publicOrigin.trim()).origin;
+    }
+  } catch {
+  }
+
+  const forwardedProto = typeof req.headers['x-forwarded-proto'] === 'string'
+    ? req.headers['x-forwarded-proto'].split(',')[0].trim().toLowerCase()
+    : '';
+  const protocol = forwardedProto || (req.socket?.encrypted ? 'https' : 'http');
+  const forwardedHost = typeof req.headers['x-forwarded-host'] === 'string'
+    ? req.headers['x-forwarded-host'].split(',')[0].trim()
+    : '';
+  const host = forwardedHost || (typeof req.headers.host === 'string' ? req.headers.host.trim() : '');
+  if (host) {
+    return `${protocol}://${host}`;
+  }
+
+  return null;
+};
+
+const parseHttpOrigin = (value) => {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return null;
+    }
+    return parsed.origin;
+  } catch {
+    return null;
+  }
+};
+
+const parseHttpApiBase = (value) => {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return null;
+    }
+    return {
+      origin: parsed.origin,
+      pathname: parsed.pathname || '/',
+    };
+  } catch {
+    return null;
+  }
+};
+
+const resolveRequestHostOrigin = (req) => {
+  const forwardedProto = typeof req.headers['x-forwarded-proto'] === 'string'
+    ? req.headers['x-forwarded-proto'].split(',')[0].trim().toLowerCase()
+    : '';
+  const protocol = forwardedProto || (req.socket?.encrypted ? 'https' : 'http');
+  const forwardedHost = typeof req.headers['x-forwarded-host'] === 'string'
+    ? req.headers['x-forwarded-host'].split(',')[0].trim()
+    : '';
+  const host = forwardedHost || (typeof req.headers.host === 'string' ? req.headers.host.trim() : '');
+  if (!host) {
+    return null;
+  }
+  return `${protocol}://${host}`;
+};
+
+const resolveDirectServerOrigin = (req) => {
+  const localPort = Number.isFinite(req.socket?.localPort) ? Number(req.socket.localPort) : 0;
+  if (!localPort || localPort < 1) {
+    return null;
+  }
+  const protocol = req.socket?.encrypted ? 'https' : 'http';
+  return `${protocol}://localhost:${localPort}`;
+};
+
+const normalizeVerificationOriginCandidate = (origin, req) => {
+  if (typeof origin !== 'string' || !origin.trim()) {
+    return null;
+  }
+
+  const directServerOrigin = resolveDirectServerOrigin(req);
+  try {
+    const parsed = new URL(origin);
+    const hostName = parsed.hostname.toLowerCase();
+    const hostPort = parsed.port || (parsed.protocol === 'https:' ? '443' : '80');
+    const isLikelyUiDevProxy =
+      (hostName === 'localhost' || hostName === '127.0.0.1' || hostName === '[::1]')
+      && (hostPort === '5173' || hostPort === '4173' || hostPort === '8080');
+
+    if (isLikelyUiDevProxy && directServerOrigin) {
+      return directServerOrigin;
+    }
+  } catch {
+    return null;
+  }
+
+  return origin;
+};
+
+const resolveDeviceVerificationOrigin = async (req, options = {}) => {
+  const explicitApiBase = parseHttpApiBase(options.verificationApiBaseUrl);
+  if (explicitApiBase) {
+    const normalized = normalizeVerificationOriginCandidate(explicitApiBase.origin, req);
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  const explicitOrigin = parseHttpOrigin(options.verificationOrigin);
+  if (explicitOrigin) {
+    const normalized = normalizeVerificationOriginCandidate(explicitOrigin, req);
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  const hostOrigin = resolveRequestHostOrigin(req);
+  const directServerOrigin = resolveDirectServerOrigin(req);
+
+  if (hostOrigin) {
+    const normalized = normalizeVerificationOriginCandidate(hostOrigin, req);
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  if (directServerOrigin) {
+    return directServerOrigin;
+  }
+
+  return await resolveRequestOrigin(req);
+};
+
+const getBearerTokenFromRequest = (req) => {
+  const value = typeof req.headers.authorization === 'string' ? req.headers.authorization.trim() : '';
+  if (value) {
+    const match = value.match(/^Bearer\s+(.+)$/i);
+    if (!match || !match[1]) {
+      return null;
+    }
+    const token = match[1].trim();
+    return token.length > 0 ? token : null;
+  }
+
+  const queryToken = (() => {
+    const fromExpressQuery = req.query?.access_token;
+    if (typeof fromExpressQuery === 'string' && fromExpressQuery.trim().length > 0) {
+      return fromExpressQuery.trim();
+    }
+    if (Array.isArray(fromExpressQuery) && typeof fromExpressQuery[0] === 'string' && fromExpressQuery[0].trim().length > 0) {
+      return fromExpressQuery[0].trim();
+    }
+
+    const rawUrl = typeof req.url === 'string' ? req.url : '';
+    if (!rawUrl) {
+      return null;
+    }
+
+    try {
+      const parsed = new URL(rawUrl, 'http://localhost');
+      const fromUrl = parsed.searchParams.get('access_token');
+      if (typeof fromUrl === 'string' && fromUrl.trim().length > 0) {
+        return fromUrl.trim();
+      }
+    } catch {
+    }
+
+    return null;
+  })();
+
+  return queryToken;
+};
+
+const authenticateBearerDevice = async (req) => {
+  const token = getBearerTokenFromRequest(req);
+  if (!token) {
+    return null;
+  }
+
+  const tokenHash = hashDeviceToken(token);
+  const now = Date.now();
+  const devices = await readDeviceRecordsFromSettings();
+  const device = devices.find((entry) => entry.tokenHash === tokenHash) || null;
+  if (!device) {
+    return null;
+  }
+
+  if (device.expiresAt <= now) {
+    const nextDevices = devices.filter((entry) => entry.id !== device.id);
+    await writeDeviceRecordsToSettings(nextDevices);
+    return null;
+  }
+
+  const lastTouchAt = deviceLastUsedTouchCache.get(device.id) || 0;
+  if (now - lastTouchAt >= DEVICE_LAST_USED_TOUCH_MS && (!device.lastUsedAt || now - device.lastUsedAt >= DEVICE_LAST_USED_TOUCH_MS)) {
+    const nextDevices = devices.map((entry) => {
+      if (entry.id !== device.id) {
+        return entry;
+      }
+      return {
+        ...entry,
+        lastUsedAt: now,
+      };
+    });
+    deviceLastUsedTouchCache.set(device.id, now);
+    await writeDeviceRecordsToSettings(nextDevices);
+  }
+
+  return device;
 };
 
 const normalizePushSubscriptions = (record) => {
@@ -5954,6 +6411,8 @@ function setupProxy(app) {
     if (
       req.path.startsWith('/themes/custom') ||
       req.path.startsWith('/push') ||
+      req.path.startsWith('/auth/device') ||
+      req.path.startsWith('/auth/devices') ||
       req.path.startsWith('/config/agents') ||
       req.path.startsWith('/config/opencode-resolution') ||
       req.path.startsWith('/config/settings') ||
@@ -6561,6 +7020,65 @@ async function main(options = {}) {
   expressApp = app;
   server = http.createServer(app);
 
+  const appendVaryHeader = (res, value) => {
+    const current = res.getHeader('Vary');
+    if (!current) {
+      res.setHeader('Vary', value);
+      return;
+    }
+    const values = String(current)
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
+    if (!values.includes(value)) {
+      values.push(value);
+      res.setHeader('Vary', values.join(', '));
+    }
+  };
+
+  const applyTrustedCorsHeaders = async (req, res, allowedMethods, allowCredentials = false) => {
+    const originHeader = typeof req.headers.origin === 'string' ? req.headers.origin.trim() : '';
+    if (!originHeader) {
+      return false;
+    }
+
+    const allowed = await isRequestOriginAllowed(req);
+    if (!allowed) {
+      return false;
+    }
+
+    res.setHeader('Access-Control-Allow-Origin', originHeader);
+    appendVaryHeader(res, 'Origin');
+    res.setHeader('Access-Control-Allow-Methods', allowedMethods);
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, X-Requested-With');
+    if (allowCredentials) {
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+    }
+
+    return true;
+  };
+
+  app.use('/health', async (req, res, next) => {
+    const corsApplied = await applyTrustedCorsHeaders(req, res, 'GET,OPTIONS');
+    if (req.method === 'OPTIONS') {
+      const originHeader = typeof req.headers.origin === 'string' ? req.headers.origin.trim() : '';
+      console.log(`[health] preflight origin=${originHeader || 'none'} allowed=${corsApplied ? 'yes' : 'no'}`);
+      return res.status(corsApplied ? 204 : 403).end();
+    }
+    return next();
+  });
+
+  app.use('/api', async (req, res, next) => {
+    if (req.path.startsWith('/auth/device') || req.path.startsWith('/auth/devices')) {
+      return next();
+    }
+    const corsApplied = await applyTrustedCorsHeaders(req, res, 'GET,POST,PATCH,DELETE,OPTIONS');
+    if (req.method === 'OPTIONS') {
+      return res.status(corsApplied ? 204 : 403).end();
+    }
+    return next();
+  });
+
   app.get('/health', (req, res) => {
     res.json({
       status: 'ok',
@@ -6608,7 +7126,9 @@ async function main(options = {}) {
       req.path.startsWith('/api/config/mcp') ||
       req.path.startsWith('/api/config/settings') ||
       req.path.startsWith('/api/config/skills') ||
+      req.path.startsWith('/api/auth') ||
       req.path.startsWith('/api/projects') ||
+      req.path.startsWith('/api/auth') ||
       req.path.startsWith('/api/fs') ||
       req.path.startsWith('/api/git') ||
       req.path.startsWith('/api/prompts') ||
@@ -6696,16 +7216,89 @@ async function main(options = {}) {
     }
   });
 
+  const isDevicePublicAuthPath = (req) => {
+    const normalizedPath = typeof req.path === 'string' ? req.path : '';
+    if (normalizedPath === '/auth/device/start' || normalizedPath === '/auth/device/token') {
+      return true;
+    }
+    if (normalizedPath === '/auth/device/start/' || normalizedPath === '/auth/device/token/') {
+      return true;
+    }
+    return false;
+  };
+
+  const isDevicesAdminPath = (req) => {
+    const normalizedPath = typeof req.path === 'string' ? req.path : '';
+    return normalizedPath.startsWith('/auth/devices');
+  };
+
+  const requireUiCookieAuth = (req, res, next) => {
+    uiAuthController.requireAuth(req, res, next);
+  };
+
+  const authDeviceCorsMiddleware = async (req, res, next) => {
+    const originHeader = typeof req.headers.origin === 'string' ? req.headers.origin.trim() : '';
+    if (originHeader) {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept');
+    }
+    if (req.method === 'OPTIONS') {
+      return res.status(204).end();
+    }
+    return next();
+  };
+
+  const authDevicesCorsMiddleware = async (req, res, next) => {
+    const originHeader = typeof req.headers.origin === 'string' ? req.headers.origin.trim() : '';
+    if (originHeader) {
+      const allowed = await isRequestOriginAllowed(req);
+      if (allowed) {
+        res.setHeader('Access-Control-Allow-Origin', originHeader);
+        res.setHeader('Vary', 'Origin');
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+        res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept');
+      }
+    }
+    if (req.method === 'OPTIONS') {
+      return res.status(204).end();
+    }
+    return next();
+  };
+
+  app.use('/api/auth/device', authDeviceCorsMiddleware);
+  app.use('/api/auth/devices', authDevicesCorsMiddleware);
+
   app.use('/api', async (req, res, next) => {
+    if (isDevicePublicAuthPath(req)) {
+      return next();
+    }
+
     try {
       const requestScope = tunnelAuthController.classifyRequestScope(req);
       if (requestScope === 'tunnel' || requestScope === 'unknown-public') {
         return tunnelAuthController.requireTunnelSession(req, res, next);
       }
-      await uiAuthController.requireAuth(req, res, next);
     } catch (err) {
-      next(err);
+      return next(err);
     }
+
+    if (isDevicesAdminPath(req)) {
+      return requireUiCookieAuth(req, res, next);
+    }
+
+    try {
+      const authenticatedDevice = await authenticateBearerDevice(req);
+      if (authenticatedDevice) {
+        req.openchamberDevice = authenticatedDevice;
+        return next();
+      }
+    } catch (error) {
+      console.warn('Bearer authentication failed:', error);
+    }
+
+    return requireUiCookieAuth(req, res, next);
   });
 
   const parsePushSubscribeBody = (body) => {
@@ -9540,6 +10133,385 @@ async function main(options = {}) {
     } catch (error) {
       console.error('Failed to disconnect GitHub:', error);
       return res.status(500).json({ error: error.message || 'Failed to disconnect GitHub' });
+    }
+  });
+
+  app.post('/api/auth/device/start', async (req, res) => {
+    try {
+      prunePendingDeviceGrants();
+
+      const requestedName = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+      const requestedPlatform = normalizeDevicePlatform(req.body?.platform);
+      const requestedVerificationOrigin = typeof req.body?.verification_origin === 'string'
+        ? req.body.verification_origin.trim()
+        : '';
+      const requestedVerificationApiBaseUrl = typeof req.body?.verification_api_base_url === 'string'
+        ? req.body.verification_api_base_url.trim()
+        : '';
+      const userAgent = typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'] : '';
+      const now = Date.now();
+      const deviceCode = crypto.randomBytes(DEVICE_CODE_BYTES).toString('base64url');
+      const userCode = createUserCode();
+      const userCodeNormalized = normalizeUserCode(userCode);
+      const intervalSeconds = DEVICE_GRANT_DEFAULT_INTERVAL_SECONDS;
+      const expiresAt = now + DEVICE_GRANT_TTL_MS;
+
+      const origin = await resolveDeviceVerificationOrigin(req, {
+        verificationOrigin: requestedVerificationOrigin,
+        verificationApiBaseUrl: requestedVerificationApiBaseUrl,
+      });
+      const verificationPath = '/?settings=devices&devices=1';
+      const verificationUri = origin ? `${origin}${verificationPath}` : verificationPath;
+      const verificationUriComplete = `${verificationUri}${verificationUri.includes('?') ? '&' : '?'}user_code=${encodeURIComponent(userCode)}`;
+
+      pendingDeviceGrantsByCode.set(deviceCode, {
+        deviceCode,
+        userCode,
+        userCodeNormalized,
+        createdAt: now,
+        expiresAt,
+        intervalSeconds,
+        status: 'pending',
+        requestedName: requestedName || null,
+        requestedPlatform,
+        requestedUa: userAgent,
+        verificationUri,
+        verificationUriComplete,
+        nextPollAllowedAt: now,
+        lastPollAt: 0,
+      });
+      pendingDeviceGrantCodeByUserCode.set(userCodeNormalized, deviceCode);
+
+      return res.json({
+        device_code: deviceCode,
+        user_code: userCode,
+        verification_uri: verificationUri,
+        verification_uri_complete: verificationUriComplete,
+        expires_in: Math.floor((expiresAt - now) / 1000),
+        interval: intervalSeconds,
+      });
+    } catch (error) {
+      console.error('Failed to start device auth flow:', error);
+      return res.status(500).json({ error: 'server_error' });
+    }
+  });
+
+  app.post('/api/auth/device/token', async (req, res) => {
+    try {
+      prunePendingDeviceGrants();
+
+      const grantType = typeof req.body?.grant_type === 'string' ? req.body.grant_type.trim() : '';
+      const deviceCode = typeof req.body?.device_code === 'string' ? req.body.device_code.trim() : '';
+
+      if (!grantType || grantType !== 'urn:ietf:params:oauth:grant-type:device_code') {
+        return res.status(400).json({ error: 'unsupported_grant_type' });
+      }
+      if (!deviceCode) {
+        return res.status(400).json({ error: 'invalid_request' });
+      }
+
+      const grant = pendingDeviceGrantsByCode.get(deviceCode);
+      if (!grant) {
+        return res.status(400).json({ error: 'expired_token' });
+      }
+
+      const now = Date.now();
+      if (grant.expiresAt <= now) {
+        pendingDeviceGrantsByCode.delete(deviceCode);
+        pendingDeviceGrantCodeByUserCode.delete(grant.userCodeNormalized);
+        return res.status(400).json({ error: 'expired_token' });
+      }
+
+      if (grant.nextPollAllowedAt && now < grant.nextPollAllowedAt) {
+        const nextIntervalSeconds = (grant.intervalSeconds || DEVICE_GRANT_DEFAULT_INTERVAL_SECONDS) + 5;
+        grant.intervalSeconds = nextIntervalSeconds;
+        grant.nextPollAllowedAt = now + (nextIntervalSeconds * 1000);
+        pendingDeviceGrantsByCode.set(deviceCode, grant);
+        return res.status(400).json({ error: 'slow_down' });
+      }
+
+      grant.lastPollAt = now;
+      grant.nextPollAllowedAt = now + Math.max(DEVICE_POLL_MIN_INTERVAL_MS, (grant.intervalSeconds || DEVICE_GRANT_DEFAULT_INTERVAL_SECONDS) * 1000);
+
+      if (grant.status === 'denied') {
+        pendingDeviceGrantsByCode.delete(deviceCode);
+        pendingDeviceGrantCodeByUserCode.delete(grant.userCodeNormalized);
+        return res.status(400).json({ error: 'access_denied' });
+      }
+
+      if (grant.status !== 'approved' || !grant.approvedToken || !grant.approvedExpiresInSeconds) {
+        pendingDeviceGrantsByCode.set(deviceCode, grant);
+        return res.status(400).json({ error: 'authorization_pending' });
+      }
+
+      const accessToken = grant.approvedToken;
+      const expiresIn = grant.approvedExpiresInSeconds;
+      pendingDeviceGrantsByCode.delete(deviceCode);
+      pendingDeviceGrantCodeByUserCode.delete(grant.userCodeNormalized);
+
+      return res.json({
+        access_token: accessToken,
+        token_type: 'bearer',
+        expires_in: expiresIn,
+      });
+    } catch (error) {
+      console.error('Failed to exchange device auth token:', error);
+      return res.status(500).json({ error: 'server_error' });
+    }
+  });
+
+  app.get('/api/auth/device/pairing-base', requireUiCookieAuth, async (req, res) => {
+    try {
+      const origin = await resolveDeviceVerificationOrigin(req);
+      if (!origin) {
+        return res.status(500).json({ ok: false, error: 'origin_unavailable' });
+      }
+      return res.json({
+        ok: true,
+        origin,
+        api_base_url: `${origin}/api`,
+      });
+    } catch (error) {
+      console.error('Failed to resolve pairing base URL:', error);
+      return res.status(500).json({ ok: false, error: 'server_error' });
+    }
+  });
+
+  app.get('/api/auth/devices', requireUiCookieAuth, async (_req, res) => {
+    try {
+      const devices = await readDeviceRecordsFromSettings();
+      return res.json({
+        devices: devices.map(toPublicDeviceRecord).filter(Boolean),
+      });
+    } catch (error) {
+      console.error('Failed to list devices:', error);
+      return res.status(500).json({ error: 'Failed to list devices' });
+    }
+  });
+
+  app.get('/api/auth/devices/pending', requireUiCookieAuth, async (req, res) => {
+    try {
+      prunePendingDeviceGrants();
+
+      const rawUserCode = typeof req.query?.user_code === 'string' ? req.query.user_code : '';
+      const normalizedUserCode = normalizeUserCode(rawUserCode);
+      if (!normalizedUserCode) {
+        const pending = [];
+        for (const grant of pendingDeviceGrantsByCode.values()) {
+          if (!grant || typeof grant !== 'object') {
+            continue;
+          }
+          if (grant.status !== 'pending') {
+            continue;
+          }
+          pending.push({
+            userCode: grant.userCode,
+            requestedName: grant.requestedName || null,
+            userAgent: typeof grant.requestedUa === 'string' ? grant.requestedUa : '',
+            platform: resolveGrantPlatform(grant.requestedPlatform, grant.requestedUa),
+            createdAt: Number.isFinite(grant.createdAt) ? Number(grant.createdAt) : Date.now(),
+          });
+        }
+
+        pending.sort((a, b) => b.createdAt - a.createdAt);
+        return res.json({ ok: true, pending });
+      }
+
+      const deviceCode = pendingDeviceGrantCodeByUserCode.get(normalizedUserCode);
+      if (!deviceCode) {
+        return res.status(404).json({ ok: false, error: 'not_found' });
+      }
+
+      const grant = pendingDeviceGrantsByCode.get(deviceCode);
+      if (!grant) {
+        pendingDeviceGrantCodeByUserCode.delete(normalizedUserCode);
+        return res.status(404).json({ ok: false, error: 'not_found' });
+      }
+
+      const now = Date.now();
+      if (grant.expiresAt <= now) {
+        pendingDeviceGrantsByCode.delete(deviceCode);
+        pendingDeviceGrantCodeByUserCode.delete(normalizedUserCode);
+        return res.status(400).json({ ok: false, error: 'expired_token' });
+      }
+
+      return res.json({
+        ok: true,
+        pending: {
+          userCode: grant.userCode,
+          requestedName: grant.requestedName || null,
+          userAgent: typeof grant.requestedUa === 'string' ? grant.requestedUa : '',
+          platform: resolveGrantPlatform(grant.requestedPlatform, grant.requestedUa),
+        },
+      });
+    } catch (error) {
+      console.error('Failed to fetch pending device grant:', error);
+      return res.status(500).json({ ok: false, error: 'server_error' });
+    }
+  });
+
+  app.post('/api/auth/devices/deny', requireUiCookieAuth, async (req, res) => {
+    try {
+      prunePendingDeviceGrants();
+
+      const rawUserCode = typeof req.body?.user_code === 'string' ? req.body.user_code : '';
+      const normalizedUserCode = normalizeUserCode(rawUserCode);
+      if (!normalizedUserCode) {
+        return res.status(400).json({ ok: false, error: 'invalid_code' });
+      }
+
+      const deviceCode = pendingDeviceGrantCodeByUserCode.get(normalizedUserCode);
+      if (!deviceCode) {
+        return res.status(404).json({ ok: false, error: 'not_found' });
+      }
+
+      const grant = pendingDeviceGrantsByCode.get(deviceCode);
+      if (!grant) {
+        pendingDeviceGrantCodeByUserCode.delete(normalizedUserCode);
+        return res.status(404).json({ ok: false, error: 'not_found' });
+      }
+
+      if (grant.status === 'approved') {
+        return res.status(409).json({ ok: false, error: 'already_approved' });
+      }
+
+      grant.status = 'denied';
+      grant.nextPollAllowedAt = Date.now();
+      pendingDeviceGrantsByCode.set(deviceCode, grant);
+
+      return res.json({ ok: true });
+    } catch (error) {
+      console.error('Failed to deny device:', error);
+      return res.status(500).json({ ok: false, error: 'server_error' });
+    }
+  });
+
+  app.post('/api/auth/devices/approve', requireUiCookieAuth, async (req, res) => {
+    try {
+      prunePendingDeviceGrants();
+
+      const rawUserCode = typeof req.body?.user_code === 'string' ? req.body.user_code : '';
+      const normalizedUserCode = normalizeUserCode(rawUserCode);
+      if (!normalizedUserCode) {
+        return res.status(400).json({ ok: false, error: 'invalid_code' });
+      }
+
+      const deviceCode = pendingDeviceGrantCodeByUserCode.get(normalizedUserCode);
+      if (!deviceCode) {
+        return res.status(404).json({ ok: false, error: 'not_found' });
+      }
+
+      const grant = pendingDeviceGrantsByCode.get(deviceCode);
+      if (!grant) {
+        pendingDeviceGrantCodeByUserCode.delete(normalizedUserCode);
+        return res.status(404).json({ ok: false, error: 'not_found' });
+      }
+
+      const now = Date.now();
+      if (grant.expiresAt <= now) {
+        pendingDeviceGrantsByCode.delete(deviceCode);
+        pendingDeviceGrantCodeByUserCode.delete(normalizedUserCode);
+        return res.status(400).json({ ok: false, error: 'expired_token' });
+      }
+
+      if (grant.status === 'approved') {
+        return res.json({ ok: true });
+      }
+
+      const devices = await readDeviceRecordsFromSettings();
+      const token = crypto.randomBytes(DEVICE_TOKEN_BYTES).toString('base64url');
+      const tokenHash = hashDeviceToken(token);
+      const expiresAt = now + normalizedDeviceTokenTtlMs;
+      const expiresInSeconds = Math.floor((expiresAt - now) / 1000);
+
+      const nameFromBody = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+      const deviceName = nameFromBody || grant.requestedName || 'Device';
+      const userAgent = typeof grant.requestedUa === 'string' ? grant.requestedUa : '';
+      const platform = resolveGrantPlatform(grant.requestedPlatform, userAgent);
+
+      const record = {
+        id: crypto.randomUUID(),
+        name: deviceName,
+        createdAt: now,
+        lastUsedAt: null,
+        expiresAt,
+        userAgent,
+        platform,
+        tokenHash,
+      };
+
+      await writeDeviceRecordsToSettings([record, ...devices]);
+
+      grant.status = 'approved';
+      grant.approvedDeviceId = record.id;
+      grant.approvedToken = token;
+      grant.approvedExpiresInSeconds = expiresInSeconds;
+      grant.nextPollAllowedAt = now;
+      pendingDeviceGrantsByCode.set(deviceCode, grant);
+
+      return res.json({ ok: true });
+    } catch (error) {
+      console.error('Failed to approve device:', error);
+      return res.status(500).json({ ok: false, error: 'server_error' });
+    }
+  });
+
+  app.patch('/api/auth/devices/:id', requireUiCookieAuth, async (req, res) => {
+    try {
+      const deviceId = typeof req.params?.id === 'string' ? req.params.id.trim() : '';
+      const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+      if (!deviceId || !name) {
+        return res.status(400).json({ error: 'id and name are required' });
+      }
+
+      const devices = await readDeviceRecordsFromSettings();
+      let found = false;
+      const nextDevices = devices.map((entry) => {
+        if (entry.id !== deviceId) {
+          return entry;
+        }
+        found = true;
+        return {
+          ...entry,
+          name,
+        };
+      });
+
+      if (!found) {
+        return res.status(404).json({ error: 'Device not found' });
+      }
+
+      await writeDeviceRecordsToSettings(nextDevices);
+      const updated = nextDevices.find((entry) => entry.id === deviceId) || null;
+      return res.json({
+        ok: true,
+        device: toPublicDeviceRecord(updated),
+      });
+    } catch (error) {
+      console.error('Failed to update device:', error);
+      return res.status(500).json({ error: 'Failed to update device' });
+    }
+  });
+
+  app.delete('/api/auth/devices/:id', requireUiCookieAuth, async (req, res) => {
+    try {
+      const deviceId = typeof req.params?.id === 'string' ? req.params.id.trim() : '';
+      if (!deviceId) {
+        return res.status(400).json({ error: 'id is required' });
+      }
+
+      const devices = await readDeviceRecordsFromSettings();
+      const nextDevices = devices.filter((entry) => entry.id !== deviceId);
+      if (nextDevices.length === devices.length) {
+        return res.status(404).json({ error: 'Device not found' });
+      }
+
+      await writeDeviceRecordsToSettings(nextDevices);
+      deviceLastUsedTouchCache.delete(deviceId);
+      return res.json({ ok: true });
+    } catch (error) {
+      console.error('Failed to revoke device:', error);
+      return res.status(500).json({ error: 'Failed to revoke device' });
     }
   });
 
@@ -12640,17 +13612,33 @@ async function main(options = {}) {
 
     const handleUpgrade = async () => {
       try {
-        if (uiAuthController?.enabled) {
-          const sessionToken = uiAuthController?.ensureSessionToken?.(req, null);
-          if (!sessionToken) {
-            rejectWebSocketUpgrade(socket, 401, 'UI authentication required');
+        const requestScope = tunnelAuthController.classifyRequestScope(req);
+        if (requestScope === 'tunnel' || requestScope === 'unknown-public') {
+          const tunnelSession = tunnelAuthController.getTunnelSessionFromRequest(req);
+          if (!tunnelSession) {
+            rejectWebSocketUpgrade(socket, 401, 'Tunnel authentication required');
             return;
           }
+        }
 
-          const originAllowed = await isRequestOriginAllowed(req);
-          if (!originAllowed) {
-            rejectWebSocketUpgrade(socket, 403, 'Invalid origin');
-            return;
+        const authenticatedDevice = await authenticateBearerDevice(req);
+        if (authenticatedDevice) {
+          req.openchamberDevice = authenticatedDevice;
+        }
+
+        if (uiAuthController?.enabled) {
+          if (!authenticatedDevice) {
+            const sessionToken = uiAuthController?.ensureSessionToken?.(req, null);
+            if (!sessionToken) {
+              rejectWebSocketUpgrade(socket, 401, 'UI authentication required');
+              return;
+            }
+
+            const originAllowed = await isRequestOriginAllowed(req);
+            if (!originAllowed) {
+              rejectWebSocketUpgrade(socket, 403, 'Invalid origin');
+              return;
+            }
           }
         }
 
@@ -13199,10 +14187,33 @@ const isCliExecution = process.argv[1] === __filename;
 if (isCliExecution) {
   const cliOptions = parseArgs();
   exitOnShutdown = true;
+
+  // Attach signal handlers immediately for CLI mode
+  const handleSignal = (signal) => {
+    console.log(`\nReceived ${signal}, shutting down gracefully...`);
+    gracefulShutdown().catch((error) => {
+      console.error('Graceful shutdown failed:', error);
+      process.exit(1);
+    });
+  };
+
+  process.on('SIGINT', () => handleSignal('SIGINT'));
+  process.on('SIGTERM', () => handleSignal('SIGTERM'));
+  process.on('SIGQUIT', () => handleSignal('SIGQUIT'));
+
+  // Handle stdin EOF (when piping input)
+  process.stdin.on('end', () => {
+    console.log('STDIN closed, initiating graceful shutdown...');
+    gracefulShutdown().catch((error) => {
+      console.error('Graceful shutdown failed:', error);
+      process.exit(1);
+    });
+  });
+
   main({
     port: cliOptions.port,
     tryCfTunnel: cliOptions.tryCfTunnel,
-    attachSignals: true,
+    attachSignals: false, // Already attached above
     exitOnShutdown: true,
     uiPassword: cliOptions.uiPassword
   }).catch(error => {

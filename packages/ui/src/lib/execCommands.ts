@@ -1,14 +1,24 @@
 import type { CommandExecResult, FilesAPI, RuntimeAPIs } from '@/lib/api/types';
+import { resolveRuntimeApiBaseUrl } from '@/lib/instances/runtimeApiBaseUrl';
+import { resolveSelectedInstance } from '@/stores/useInstancesStore';
+import { getAccessToken } from '@/lib/auth/tokenStorage';
 
 type ExecResult = { success: boolean; results: CommandExecResult[] };
 
-const DEFAULT_BASE_URL = import.meta.env.VITE_OPENCODE_URL || '/api';
-
 const getBaseUrl = (): string => {
-  if (typeof DEFAULT_BASE_URL === 'string' && DEFAULT_BASE_URL.startsWith('/')) {
-    return DEFAULT_BASE_URL;
+  return resolveRuntimeApiBaseUrl();
+};
+
+const getAuthHeaders = (): Record<string, string> => {
+  const selectedInstance = resolveSelectedInstance();
+  const token = selectedInstance ? getAccessToken(selectedInstance.id) : null;
+  if (!token) {
+    return { 'Content-Type': 'application/json' };
   }
-  return DEFAULT_BASE_URL;
+  return {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${token}`,
+  };
 };
 
 function getRuntimeFilesAPI(): FilesAPI | null {
@@ -28,7 +38,7 @@ export async function execCommands(commands: string[], cwd: string): Promise<Exe
 
   const response = await fetch(`${getBaseUrl()}/fs/exec`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getAuthHeaders(),
     body: JSON.stringify({ commands, cwd, background: false }),
   });
 

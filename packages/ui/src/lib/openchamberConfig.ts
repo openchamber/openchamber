@@ -7,6 +7,9 @@
 import type { FilesAPI, RuntimeAPIs } from './api/types';
 import { getDesktopHomeDirectory } from './desktop';
 import { isVSCodeRuntime } from './desktop';
+import { resolveRuntimeApiBaseUrl } from '@/lib/instances/runtimeApiBaseUrl';
+import { resolveSelectedInstance } from '@/stores/useInstancesStore';
+import { getAccessToken } from '@/lib/auth/tokenStorage';
 
 type ProjectRef = { id: string; path: string };
 
@@ -122,18 +125,37 @@ const getLegacyConfigPath = (projectDirectory: string): string => {
 };
 
 const getBaseUrl = (): string => {
-  const defaultBaseUrl = import.meta.env.VITE_OPENCODE_URL || '/api';
-  if (defaultBaseUrl.startsWith('/')) {
-    return defaultBaseUrl;
+  return resolveRuntimeApiBaseUrl();
+};
+
+const getAuthHeader = (): string | null => {
+  const selectedInstance = resolveSelectedInstance();
+  if (!selectedInstance) {
+    return null;
   }
-  return defaultBaseUrl;
+  const token = getAccessToken(selectedInstance.id);
+  if (!token) {
+    return null;
+  }
+  return `Bearer ${token}`;
+};
+
+const createAuthHeaders = (baseHeaders?: Record<string, string>): Record<string, string> => {
+  const headers: Record<string, string> = {
+    ...(baseHeaders || {}),
+  };
+  const authorization = getAuthHeader();
+  if (authorization) {
+    headers.Authorization = authorization;
+  }
+  return headers;
 };
 
 const postJson = async <T>(url: string, body: unknown): Promise<{ ok: boolean; data: T | null }> => {
   try {
     const response = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: createAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
     });
     if (!response.ok) {
@@ -176,7 +198,9 @@ const readTextFile = async (path: string): Promise<string | null> => {
   }
 
   try {
-    const response = await fetch(`${getBaseUrl()}/fs/read?path=${encodeURIComponent(path)}`);
+    const response = await fetch(`${getBaseUrl()}/fs/read?path=${encodeURIComponent(path)}`, {
+      headers: createAuthHeaders(),
+    });
     if (!response.ok) {
       return null;
     }
@@ -214,7 +238,9 @@ const resolveHomeDirectory = async (): Promise<string | null> => {
   }
 
   try {
-    const response = await fetch(`${getBaseUrl()}/fs/home`);
+    const response = await fetch(`${getBaseUrl()}/fs/home`, {
+      headers: createAuthHeaders(),
+    });
     if (!response.ok) {
       return null;
     }

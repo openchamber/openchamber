@@ -7,7 +7,7 @@
   --font-scale: 1;
 }
 
-@media (max-width: 1024px) {
+@media (max-width: 1366px) {
 :root.mobile-pointer:not(.desktop-runtime) {
     --is-mobile: 1;
     --device-type: 'mobile';
@@ -24,7 +24,7 @@
   display: none;
 }
 
-@media (max-width: 1024px) {
+@media (max-width: 1366px) {
   :root.mobile-pointer:not(.desktop-runtime) .desktop-only {
     display: none !important;
   }
@@ -39,7 +39,7 @@
 }
 
 /* General mobile improvements for all mobile devices */
-@media (max-width: 1024px) {
+@media (max-width: 1366px) {
   /* Override CSS custom properties for mobile */
   :root.mobile-pointer:not(.desktop-runtime) {
     --text-markdown: 1rem;
@@ -165,11 +165,30 @@
     overflow: hidden;
   }
 
+  /* Fix for Tauri WKWebView returning a broken -webkit-fill-available */
+  :root.tauri-mobile-runtime.mobile-pointer:not(.desktop-runtime),
+  :root.tauri-mobile-runtime.mobile-pointer:not(.desktop-runtime) body,
+  :root.tauri-mobile-runtime.mobile-pointer:not(.desktop-runtime) #root {
+    height: 100vh !important;
+    min-height: 100vh !important;
+  }
+
   /* Prevent iOS keyboard from scrolling the page */
   :root.device-mobile:not(.desktop-runtime) body,
   :root.device-mobile:not(.desktop-runtime) #root {
     position: fixed;
     inset: 0;
+    width: 100%;
+    overflow: hidden;
+    overscroll-behavior-y: none;
+  }
+
+  :root.tauri-mobile-runtime.device-mobile:not(.desktop-runtime) body,
+  :root.tauri-mobile-runtime.device-mobile:not(.desktop-runtime) #root,
+  :root.tauri-mobile-runtime.device-tablet:not(.desktop-runtime) body,
+  :root.tauri-mobile-runtime.device-tablet:not(.desktop-runtime) #root {
+    position: relative;
+    inset: auto;
     width: 100%;
     overflow: hidden;
     overscroll-behavior-y: none;
@@ -182,14 +201,29 @@
     min-height: 0;
   }
 
+
+
   /* Fix header positioning */
-  :root.device-mobile:not(.desktop-runtime) .header-safe-area {
+  :root.device-mobile:not(.desktop-runtime) .header-safe-area,
+  :root.device-tablet:not(.desktop-runtime) .header-safe-area {
     position: fixed;
     top: var(--oc-visual-viewport-offset-top, 0px);
     left: 0;
     right: 0;
     width: 100%;
     z-index: 50;
+  }
+
+  :root.tauri-mobile-runtime.runtime-ios.device-mobile:not(.desktop-runtime) .header-safe-area,
+  :root.tauri-mobile-runtime.runtime-ios.device-tablet:not(.desktop-runtime) .header-safe-area {
+    top: 0;
+  }
+
+  :root.tauri-mobile-runtime.runtime-android.device-mobile:not(.desktop-runtime) .header-safe-area,
+  :root.tauri-mobile-runtime.runtime-android.device-tablet:not(.desktop-runtime) .header-safe-area {
+    --oc-android-safe-area-top: max(env(safe-area-inset-top, 0px), 24px);
+    top: 0;
+    padding-top: var(--oc-android-safe-area-top);
   }
 
   /* Fix main content area */
@@ -228,7 +262,7 @@
   }
 
   /* For tablet devices */
-  @media (min-width: 769px) and (max-width: 1024px) {
+  @media (min-width: 769px) and (max-width: 1366px) {
     :root.mobile-pointer:not(.desktop-runtime) .header-safe-area {
       --header-height: 3.25rem;
     }
@@ -239,7 +273,8 @@
 
 /* iOS safe area defaults (applies to PWA + Safari) */
 @supports (-webkit-touch-callout: none) {
-  :root.device-mobile:not(.desktop-runtime) {
+  :root.device-mobile:not(.desktop-runtime),
+  :root.device-tablet:not(.desktop-runtime) {
     --oc-safe-area-top: env(safe-area-inset-top, 0);
     --oc-safe-area-right: env(safe-area-inset-right, 0);
     --oc-safe-area-bottom: env(safe-area-inset-bottom, 0);
@@ -247,8 +282,34 @@
     --oc-safe-area-left: env(safe-area-inset-left, 0);
   }
 
-  :root.device-mobile:not(.desktop-runtime) .header-safe-area {
+  :root.device-mobile:not(.desktop-runtime) .header-safe-area,
+  :root.device-tablet:not(.desktop-runtime) .header-safe-area {
     padding-top: var(--oc-safe-area-top);
+  }
+
+  :root.device-mobile:not(.desktop-runtime) .bottom-safe-area,
+  :root.device-tablet:not(.desktop-runtime) .bottom-safe-area {
+    padding-bottom: var(--oc-safe-area-bottom, env(safe-area-inset-bottom, 0)) !important;
+  }
+
+  :root.tauri-mobile-runtime.device-mobile:not(.desktop-runtime) .bottom-safe-area,
+  :root.tauri-mobile-runtime.device-tablet:not(.desktop-runtime) .bottom-safe-area {
+    padding-bottom: var(--oc-safe-area-bottom-visual, 0px) !important;
+  }
+
+  :root.device-mobile:not(.desktop-runtime) .ios-keyboard-safe-area,
+  :root.device-tablet:not(.desktop-runtime) .ios-keyboard-safe-area {
+    padding-bottom: calc(var(--oc-keyboard-home-indicator, 34px) + var(--oc-safe-area-bottom, env(safe-area-inset-bottom, 0))) !important;
+  }
+
+  :root.tauri-mobile-runtime.device-mobile:not(.desktop-runtime) .ios-keyboard-safe-area,
+  :root.tauri-mobile-runtime.device-tablet:not(.desktop-runtime) .ios-keyboard-safe-area {
+    padding-bottom: calc(var(--oc-keyboard-home-indicator, 34px) + var(--oc-safe-area-bottom-visual, 0px)) !important;
+  }
+
+  :root.tauri-mobile-runtime.runtime-android.device-mobile:not(.desktop-runtime) .ios-keyboard-safe-area,
+  :root.tauri-mobile-runtime.runtime-android.device-tablet:not(.desktop-runtime) .ios-keyboard-safe-area {
+    padding-bottom: calc(var(--oc-keyboard-inset, 0px) + var(--oc-safe-area-bottom-visual, 0px)) !important;
   }
 }
 
@@ -278,18 +339,30 @@
 
     /* Safe area for bottom fixed/bottom-0 elements */
     .bottom-safe-area {
-      padding-bottom: var(--oc-safe-area-bottom-visual) !important;
+      padding-bottom: var(--oc-safe-area-bottom, env(safe-area-inset-bottom, 0)) !important;
     }
 
-    /* Drawer safe area - only top/bottom padding, no positioning */
+    :root.tauri-mobile-runtime .bottom-safe-area {
+      padding-bottom: var(--oc-safe-area-bottom-visual, 0px) !important;
+    }
+
+    /* Mobile drawer inner spacing - primitive fallback test */
     .drawer-safe-area {
-      padding-top: var(--oc-safe-area-top);
-      padding-bottom: var(--oc-safe-area-bottom-visual);
+      padding-top: 48px !important;
+      padding-bottom: 34px !important;
     }
 
     /* iOS keyboard home indicator safe area - used when keyboard is open */
     .ios-keyboard-safe-area {
+      padding-bottom: calc(var(--oc-keyboard-home-indicator, 34px) + var(--oc-safe-area-bottom, env(safe-area-inset-bottom, 0))) !important;
+    }
+
+    :root.tauri-mobile-runtime .ios-keyboard-safe-area {
       padding-bottom: calc(var(--oc-keyboard-home-indicator, 34px) + var(--oc-safe-area-bottom-visual, 0px)) !important;
+    }
+
+    :root.tauri-mobile-runtime.runtime-android .ios-keyboard-safe-area {
+      padding-bottom: calc(var(--oc-keyboard-inset, 0px) + var(--oc-safe-area-bottom-visual, 0px)) !important;
     }
 
     /* Prevent keyboard-induced page scroll on iOS PWA */
@@ -307,6 +380,13 @@
     .flex.flex-col.h-screen {
       min-height: 100vh;
       min-height: -webkit-fill-available;
+    }
+
+    /* Force Tauri Webview to use 100vh instead of broken -webkit-fill-available */
+    :root.tauri-mobile-runtime body,
+    :root.tauri-mobile-runtime .flex.flex-col.h-screen {
+      min-height: 100vh !important;
+      height: 100vh !important;
     }
 
     /* Prevent content overlap in iOS */
@@ -458,6 +538,11 @@
     -webkit-backdrop-filter: blur(10px);
     z-index: 1000;
     pointer-events: none;
+  }
+
+  :root.tauri-mobile-runtime body::after {
+    content: none;
+    display: none;
   }
 
   /* Fallback for browsers without rgba(from ...) support */

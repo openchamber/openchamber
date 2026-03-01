@@ -4,6 +4,7 @@ import './styles/fonts'
 import './index.css'
 import App from './App.tsx'
 import { SessionAuthGate } from './components/auth/SessionAuthGate'
+import { DeviceLoginGate } from './components/auth/DeviceLoginGate'
 import { ThemeSystemProvider } from './contexts/ThemeSystemContext'
 import { ThemeProvider } from './components/providers/ThemeProvider'
 import './lib/debug'
@@ -13,6 +14,8 @@ import { applyPersistedDirectoryPreferences } from './lib/directoryPersistence'
 import { startTypographyWatcher } from './lib/typographyWatcher'
 import { startModelPrefsAutoSave } from './lib/modelPrefsAutoSave'
 import type { RuntimeAPIs } from './lib/api/types'
+import { registerRuntimeAPIs } from './contexts/runtimeAPIRegistry'
+import { useInstancesStore } from './stores/useInstancesStore'
 
 declare global {
   interface Window {
@@ -23,6 +26,39 @@ declare global {
 const runtimeAPIs = (typeof window !== 'undefined' && window.__OPENCHAMBER_RUNTIME_APIS__) || (() => {
   throw new Error('Runtime APIs not provided for legacy UI entrypoint.');
 })();
+
+const waitForInstancesHydration = async (): Promise<void> => {
+  if (useInstancesStore.getState().hydrated) {
+    return;
+  }
+
+  const persistApi = (useInstancesStore as unknown as {
+    persist?: {
+      hasHydrated?: () => boolean;
+      onFinishHydration?: (callback: () => void) => (() => void) | void;
+    };
+  }).persist;
+
+  if (!persistApi?.onFinishHydration) {
+    return;
+  }
+
+  if (persistApi.hasHydrated?.()) {
+    return;
+  }
+
+  await new Promise<void>((resolve) => {
+    const unsubscribe = persistApi.onFinishHydration?.(() => {
+      if (typeof unsubscribe === 'function') {
+        unsubscribe();
+      }
+      resolve();
+    });
+  });
+};
+
+registerRuntimeAPIs(runtimeAPIs);
+await waitForInstancesHydration();
 
 await syncDesktopSettings();
 await initializeAppearancePreferences();
@@ -92,9 +128,11 @@ createRoot(rootElement).render(
   <StrictMode>
     <ThemeSystemProvider>
       <ThemeProvider>
-        <SessionAuthGate>
-          <App apis={runtimeAPIs} />
-        </SessionAuthGate>
+        <DeviceLoginGate>
+          <SessionAuthGate>
+            <App apis={runtimeAPIs} />
+          </SessionAuthGate>
+        </DeviceLoginGate>
       </ThemeProvider>
     </ThemeSystemProvider>
   </StrictMode>,

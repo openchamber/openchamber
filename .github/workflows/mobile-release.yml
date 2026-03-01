@@ -1,0 +1,442 @@
+name: Mobile Release
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        required: false
+        type: string
+        default: ""
+      build_android:
+        required: false
+        type: boolean
+        default: true
+      build_ios:
+        required: false
+        type: boolean
+        default: true
+      android_targets:
+        required: false
+        type: string
+        default: "aarch64 armv7 x86_64"
+      android_split_per_abi:
+        required: false
+        type: boolean
+        default: true
+      android_build_apk:
+        required: false
+        type: boolean
+        default: true
+      android_build_aab:
+        required: false
+        type: boolean
+        default: true
+      ios_export_method:
+        required: false
+        type: string
+        default: release-testing
+      publish_github_release:
+        required: false
+        type: boolean
+        default: false
+      upload_play_internal:
+        required: false
+        type: boolean
+        default: false
+      upload_testflight:
+        required: false
+        type: boolean
+        default: false
+      publish_fdroid_repo:
+        required: false
+        type: boolean
+        default: false
+      fdroid_repo_url:
+        required: false
+        type: string
+        default: ""
+    secrets:
+      GOOGLE_PLAY_JSON_KEY:
+        required: false
+      GOOGLE_PLAY_JSON_KEY_PATH:
+        required: false
+      ANDROID_KEYSTORE_BASE64:
+        required: false
+      ANDROID_KEYSTORE_PASSWORD:
+        required: false
+      ANDROID_KEY_ALIAS:
+        required: false
+      ANDROID_KEY_PASSWORD:
+        required: false
+      APP_STORE_CONNECT_API_KEY_KEY_ID:
+        required: false
+      APP_STORE_CONNECT_API_KEY_ISSUER_ID:
+        required: false
+      APP_STORE_CONNECT_API_KEY_KEY:
+        required: false
+      APP_STORE_CONNECT_API_KEY_BASE64:
+        required: false
+      IOS_CERTIFICATE:
+        required: false
+      IOS_CERTIFICATE_PASSWORD:
+        required: false
+      IOS_PROVISIONING_PROFILE:
+        required: false
+      FDROID_KEYSTORE_BASE64:
+        required: false
+      FDROID_KEYSTORE_PASSWORD:
+        required: false
+      FDROID_KEY_PASSWORD:
+        required: false
+      FDROID_REPO_KEY_ALIAS:
+        required: false
+      FDROID_REPO_KEY_DNAME:
+        required: false
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to tag/upload (defaults to package version)
+        required: false
+        type: string
+        default: ""
+      build_android:
+        description: Build Android APK/AAB artifacts
+        required: false
+        type: boolean
+        default: true
+      build_ios:
+        description: Build iOS IPA artifacts
+        required: false
+        type: boolean
+        default: true
+      android_targets:
+        description: Android targets list
+        required: false
+        type: string
+        default: "aarch64 armv7 x86_64"
+      android_split_per_abi:
+        description: Split APK/AAB by ABI
+        required: false
+        type: boolean
+        default: true
+      android_build_apk:
+        description: Build APKs
+        required: false
+        type: boolean
+        default: true
+      android_build_aab:
+        description: Build AABs
+        required: false
+        type: boolean
+        default: true
+      ios_export_method:
+        description: iOS export method
+        required: false
+        type: choice
+        default: release-testing
+        options:
+          - release-testing
+          - app-store-connect
+          - debugging
+      publish_github_release:
+        description: Upload artifacts to GitHub release
+        required: false
+        type: boolean
+        default: false
+      upload_play_internal:
+        description: Upload Android AAB to Google Play internal
+        required: false
+        type: boolean
+        default: false
+      upload_testflight:
+        description: Upload IPA to TestFlight
+        required: false
+        type: boolean
+        default: false
+      publish_fdroid_repo:
+        description: Publish F-Droid repository to gh-pages
+        required: false
+        type: boolean
+        default: false
+      fdroid_repo_url:
+        description: Public F-Droid repo URL
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  mobile-build:
+    runs-on: macos-latest
+    outputs:
+      version: ${{ steps.resolve_version.outputs.version }}
+      fdroid_repo_url: ${{ steps.fdroid_repo_url.outputs.value }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: resolve_version
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=$(node -p 'require("./package.json").version')" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve F-Droid repo URL
+        id: fdroid_repo_url
+        run: |
+          if [ -n "${{ inputs.fdroid_repo_url }}" ]; then
+            echo "value=${{ inputs.fdroid_repo_url }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/fdroid/repo" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          bundler-cache: true
+          working-directory: packages/desktop
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        if: ${{ inputs.build_android }}
+        uses: android-actions/setup-android@v3
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,aarch64-apple-ios
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: packages/desktop/src-tauri
+          key: mobile-release
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install Fastlane dependencies
+        run: bun run --cwd packages/desktop fastlane:install
+
+      - name: Validate F-Droid signing secrets
+        if: ${{ inputs.publish_fdroid_repo && inputs.build_android }}
+        run: |
+          test -n "${{ secrets.FDROID_KEYSTORE_BASE64 }}"
+          test -n "${{ secrets.FDROID_KEYSTORE_PASSWORD }}"
+          test -n "${{ secrets.FDROID_KEY_PASSWORD }}"
+
+      - name: Build Android artifacts
+        if: ${{ inputs.build_android }}
+        env:
+          ANDROID_TARGETS: ${{ inputs.android_targets }}
+          ANDROID_SPLIT_PER_ABI: ${{ inputs.android_split_per_abi }}
+          ANDROID_BUILD_APK: ${{ inputs.android_build_apk }}
+          ANDROID_BUILD_AAB: ${{ inputs.android_build_aab }}
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: bun run --cwd packages/desktop fastlane:android:build
+
+      - name: Install iOS signing assets
+        if: ${{ inputs.build_ios }}
+        env:
+          IOS_CERTIFICATE: ${{ secrets.IOS_CERTIFICATE }}
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+          IOS_PROVISIONING_PROFILE: ${{ secrets.IOS_PROVISIONING_PROFILE }}
+        run: |
+          if [ -z "$IOS_CERTIFICATE" ] || [ -z "$IOS_CERTIFICATE_PASSWORD" ]; then
+            echo "iOS certificate secrets not provided; skipping manual signing asset import"
+            exit 0
+          fi
+
+          KEYCHAIN_PATH="$RUNNER_TEMP/ios-signing.keychain-db"
+          KEYCHAIN_PASSWORD="${RUNNER_TEMP##*/}-$(openssl rand -hex 12)"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          echo "$IOS_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/ios-cert.p12"
+          security import "$RUNNER_TEMP/ios-cert.p12" \
+            -P "$IOS_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 \
+            -k "$KEYCHAIN_PATH"
+
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          if [ -n "$IOS_PROVISIONING_PROFILE" ]; then
+            PROFILE_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
+            mkdir -p "$PROFILE_DIR"
+            echo "$IOS_PROVISIONING_PROFILE" | base64 --decode > "$PROFILE_DIR/openchamber.mobileprovision"
+          fi
+
+      - name: Build iOS artifacts
+        if: ${{ inputs.build_ios }}
+        env:
+          IOS_EXPORT_METHOD: ${{ inputs.ios_export_method }}
+        run: bun run --cwd packages/desktop fastlane:ios:build
+
+      - name: Validate Google Play credentials
+        if: ${{ inputs.upload_play_internal && inputs.build_android }}
+        env:
+          GOOGLE_PLAY_JSON_KEY: ${{ secrets.GOOGLE_PLAY_JSON_KEY }}
+          GOOGLE_PLAY_JSON_KEY_PATH: ${{ secrets.GOOGLE_PLAY_JSON_KEY_PATH }}
+        run: |
+          if [ -z "$GOOGLE_PLAY_JSON_KEY" ] && [ -z "$GOOGLE_PLAY_JSON_KEY_PATH" ]; then
+            echo "GOOGLE_PLAY_JSON_KEY or GOOGLE_PLAY_JSON_KEY_PATH must be set for Play upload"
+            exit 1
+          fi
+
+      - name: Upload to Google Play internal
+        if: ${{ inputs.upload_play_internal && inputs.build_android }}
+        env:
+          GOOGLE_PLAY_JSON_KEY: ${{ secrets.GOOGLE_PLAY_JSON_KEY }}
+          GOOGLE_PLAY_JSON_KEY_PATH: ${{ secrets.GOOGLE_PLAY_JSON_KEY_PATH }}
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: bun run --cwd packages/desktop fastlane:android:play-internal
+
+      - name: Validate TestFlight credentials
+        if: ${{ inputs.upload_testflight && inputs.build_ios }}
+        env:
+          APP_STORE_CONNECT_API_KEY_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_KEY_ID }}
+          APP_STORE_CONNECT_API_KEY_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY_KEY }}
+        run: |
+          test -n "$APP_STORE_CONNECT_API_KEY_KEY_ID"
+          test -n "$APP_STORE_CONNECT_API_KEY_ISSUER_ID"
+          test -n "$APP_STORE_CONNECT_API_KEY_KEY"
+
+      - name: Upload to TestFlight
+        if: ${{ inputs.upload_testflight && inputs.build_ios }}
+        env:
+          APP_STORE_CONNECT_API_KEY_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_KEY_ID }}
+          APP_STORE_CONNECT_API_KEY_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY_KEY }}
+          APP_STORE_CONNECT_API_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_API_KEY_BASE64 }}
+        run: bun run --cwd packages/desktop fastlane:ios:testflight
+
+      - name: Setup Python
+        if: ${{ inputs.build_android }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install F-Droid server
+        if: ${{ inputs.build_android }}
+        run: python -m pip install --upgrade pip fdroidserver
+
+      - name: Build F-Droid repository
+        if: ${{ inputs.build_android }}
+        env:
+          FDROID_REPO_URL: ${{ steps.fdroid_repo_url.outputs.value }}
+          FDROID_KEYSTORE_BASE64: ${{ secrets.FDROID_KEYSTORE_BASE64 }}
+          FDROID_KEYSTORE_PASSWORD: ${{ secrets.FDROID_KEYSTORE_PASSWORD }}
+          FDROID_KEY_PASSWORD: ${{ secrets.FDROID_KEY_PASSWORD }}
+          FDROID_REPO_KEY_ALIAS: ${{ secrets.FDROID_REPO_KEY_ALIAS }}
+          FDROID_REPO_KEY_DNAME: ${{ secrets.FDROID_REPO_KEY_DNAME }}
+        run: bun run --cwd packages/desktop fdroid:repo
+
+      - name: Upload Android artifacts
+        if: ${{ inputs.build_android }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-android-${{ steps.resolve_version.outputs.version }}
+          path: |
+            packages/desktop/build/mobile-artifacts/android/*.apk
+            packages/desktop/build/mobile-artifacts/android/*.aab
+            packages/desktop/build/mobile-artifacts/android-manifest.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload iOS artifacts
+        if: ${{ inputs.build_ios }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-ios-${{ steps.resolve_version.outputs.version }}
+          path: |
+            packages/desktop/build/mobile-artifacts/ios/*.ipa
+            packages/desktop/build/mobile-artifacts/ios-manifest.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload F-Droid artifacts
+        if: ${{ inputs.build_android }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-fdroid-repo-${{ steps.resolve_version.outputs.version }}
+          path: |
+            packages/desktop/build/fdroid/repo/**
+            packages/desktop/build/fdroid/config.yml
+            packages/desktop/build/fdroid/metadata/**
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload mobile artifacts to GitHub release
+        if: ${{ inputs.publish_github_release }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.resolve_version.outputs.version }}
+          fail_on_unmatched_files: false
+          files: |
+            packages/desktop/build/mobile-artifacts/android/*.apk
+            packages/desktop/build/mobile-artifacts/android/*.aab
+            packages/desktop/build/mobile-artifacts/ios/*.ipa
+            packages/desktop/build/mobile-artifacts/*-manifest.json
+            packages/desktop/build/fdroid/repo/**
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish-fdroid:
+    needs: mobile-build
+    if: ${{ inputs.publish_fdroid_repo && inputs.build_android }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Validate F-Droid publish credentials
+        env:
+          FDROID_KEYSTORE_BASE64: ${{ secrets.FDROID_KEYSTORE_BASE64 }}
+          FDROID_KEYSTORE_PASSWORD: ${{ secrets.FDROID_KEYSTORE_PASSWORD }}
+          FDROID_KEY_PASSWORD: ${{ secrets.FDROID_KEY_PASSWORD }}
+        run: |
+          test -n "$FDROID_KEYSTORE_BASE64"
+          test -n "$FDROID_KEYSTORE_PASSWORD"
+          test -n "$FDROID_KEY_PASSWORD"
+
+      - name: Download F-Droid artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: mobile-fdroid-repo-${{ needs.mobile-build.outputs.version }}
+          path: fdroid-artifact
+
+      - name: Publish F-Droid repository
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: gh-pages
+          publish_dir: fdroid-artifact/packages/desktop/build/fdroid/repo
+          destination_dir: fdroid/repo
+          keep_files: true

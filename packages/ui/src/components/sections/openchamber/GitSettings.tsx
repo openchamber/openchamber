@@ -4,6 +4,7 @@ import { updateDesktopSettings } from '@/lib/persistence';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { setFilesViewShowGitignored, useFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
+import { buildRuntimeApiHeaders, resolveRuntimeApiEndpoint } from '@/lib/instances/runtimeApiBaseUrl';
 
 export const GitSettings: React.FC = () => {
   const settingsGitmojiEnabled = useConfigStore((state) => state.settingsGitmojiEnabled);
@@ -40,9 +41,9 @@ export const GitSettings: React.FC = () => {
 
         // 2. Fetch API (Web/server)
         if (!data) {
-          const response = await fetch('/api/config/settings', {
+          const response = await fetch(resolveRuntimeApiEndpoint('/config/settings'), {
             method: 'GET',
-            headers: { Accept: 'application/json' },
+            headers: buildRuntimeApiHeaders(),
           });
           if (response.ok) {
             data = await response.json();

@@ -42,6 +42,24 @@ const notifyWithTauri = async (payload?: NotificationPayload): Promise<boolean> 
   }
 
   try {
+    if (tauri.notification?.sendNotification) {
+      const isGranted = await tauri.notification.isPermissionGranted?.();
+      let granted = isGranted === true;
+      if (!granted) {
+        const permission = await tauri.notification.requestPermission?.();
+        granted = permission === 'granted';
+      }
+      if (!granted) {
+        return false;
+      }
+      await tauri.notification.sendNotification({
+        title: payload?.title,
+        body: payload?.body,
+        tag: payload?.tag,
+      });
+      return true;
+    }
+
     await tauri.core.invoke('desktop_notify', {
       payload: {
         title: payload?.title,
@@ -63,6 +81,9 @@ export const createWebNotificationsAPI = (): NotificationsAPI => ({
   canNotify: () => {
     if (typeof window !== 'undefined') {
       const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
+      if (tauri?.notification?.isPermissionGranted) {
+        return true;
+      }
       if (tauri?.core?.invoke) {
         return true;
       }
@@ -73,5 +94,10 @@ export const createWebNotificationsAPI = (): NotificationsAPI => ({
 type TauriGlobal = {
   core?: {
     invoke?: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
+  };
+  notification?: {
+    isPermissionGranted?: () => Promise<boolean>;
+    requestPermission?: () => Promise<'granted' | 'denied' | 'default' | string>;
+    sendNotification?: (payload: { title?: string; body?: string; tag?: string }) => Promise<void> | void;
   };
 };

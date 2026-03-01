@@ -9,6 +9,7 @@ src-tauri/gen/
 
 # Desktop sidecar + bundled web assets (generated)
 src-tauri/resources/web-dist/
+src-tauri/resources/mobile-web-dist/
 src-tauri/sidecars/openchamber-server-*
 src-tauri/sidecars/*.exe
 !src-tauri/resources/.gitkeep
@@ -19,3 +20,9 @@ src-tauri/sidecars/*.exe
 
 # OS-specific
 .DS_Store
+
+.bundle/
+vendor/bundle/
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/test_output/

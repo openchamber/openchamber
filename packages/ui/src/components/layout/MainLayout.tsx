@@ -1,29 +1,29 @@
-import React, { useRef, useEffect } from 'react';
-import { motion, useMotionValue, animate } from 'motion/react';
-import { Header } from './Header';
+import { MultiRunLauncher } from '@/components/multirun';
+import { SessionDialogs } from '@/components/session/SessionDialogs';
+import { SessionSidebar } from '@/components/session/SessionSidebar';
+import { DiffWorkerProvider } from '@/contexts/DiffWorkerProvider';
+import { DrawerProvider } from '@/contexts/DrawerContext';
+import { animate, motion, useMotionValue } from 'motion/react';
+import React, { useEffect, useRef } from 'react';
+import { CommandPalette } from '../ui/CommandPalette';
+import { ErrorBoundary } from '../ui/ErrorBoundary';
+import { HelpDialog } from '../ui/HelpDialog';
+import { OpenCodeStatusDialog } from '../ui/OpenCodeStatusDialog';
 import { BottomTerminalDock } from './BottomTerminalDock';
-import { Sidebar } from './Sidebar';
+import { ContextPanel } from './ContextPanel';
+import { Header } from './Header';
 import { NavRail } from './NavRail';
 import { RightSidebar } from './RightSidebar';
 import { RightSidebarTabs } from './RightSidebarTabs';
-import { ContextPanel } from './ContextPanel';
-import { ErrorBoundary } from '../ui/ErrorBoundary';
-import { CommandPalette } from '../ui/CommandPalette';
-import { HelpDialog } from '../ui/HelpDialog';
-import { OpenCodeStatusDialog } from '../ui/OpenCodeStatusDialog';
-import { SessionSidebar } from '@/components/session/SessionSidebar';
-import { SessionDialogs } from '@/components/session/SessionDialogs';
-import { DiffWorkerProvider } from '@/contexts/DiffWorkerProvider';
-import { MultiRunLauncher } from '@/components/multirun';
-import { DrawerProvider } from '@/contexts/DrawerContext';
+import { Sidebar } from './Sidebar';
 
+import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { useDeviceInfo } from '@/lib/device';
+import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 import { useUpdateStore } from '@/stores/useUpdateStore';
-import { useDeviceInfo } from '@/lib/device';
-import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
-import { cn } from '@/lib/utils';
 
-import { ChatView, PlanView, GitView, DiffView, TerminalView, FilesView, SettingsView, SettingsWindow } from '@/components/views';
+import { ChatView, DiffView, FilesView, GitView, PlanView, SettingsView, SettingsWindow, TerminalView } from '@/components/views';
 
 // Mobile drawer width as screen percentage
 const MOBILE_DRAWER_WIDTH_PERCENT = 85;
@@ -296,10 +296,24 @@ export const MainLayout: React.FC = () => {
         }
 
         const root = document.documentElement;
+        const isTauriMobileRuntime = root.classList.contains('tauri-mobile-runtime');
+        const isTauriIOSRuntime = isTauriMobileRuntime && root.classList.contains('runtime-ios');
+        const isTauriAndroidRuntime = isTauriMobileRuntime && root.classList.contains('runtime-android');
+
+        type VirtualKeyboardLike = {
+            overlaysContent?: boolean;
+            boundingRect?: { height?: number };
+            addEventListener?: (type: string, listener: EventListenerOrEventListenerObject) => void;
+            removeEventListener?: (type: string, listener: EventListenerOrEventListenerObject) => void;
+        };
+        const vkNavigator = navigator as Navigator & { virtualKeyboard?: VirtualKeyboardLike };
+        const virtualKeyboard = vkNavigator.virtualKeyboard;
 
         let stickyKeyboardInset = 0;
         let ignoreOpenUntilZero = false;
         let previousHeight = 0;
+        let layoutViewportBaseline = 0;
+        let windowViewportBaseline = 0;
         let keyboardAvoidTarget: HTMLElement | null = null;
 
         const setKeyboardOpen = useUIStore.getState().setKeyboardOpen;
@@ -353,7 +367,8 @@ export const MainLayout: React.FC = () => {
             const viewport = window.visualViewport;
 
             const height = viewport ? Math.round(viewport.height) : window.innerHeight;
-            const offsetTop = viewport ? Math.max(0, Math.round(viewport.offsetTop)) : 0;
+            const measuredOffsetTop = viewport ? Math.max(0, Math.round(viewport.offsetTop)) : 0;
+            const offsetTop = isTauriIOSRuntime ? 0 : measuredOffsetTop;
 
             root.style.setProperty('--oc-visual-viewport-offset-top', `${offsetTop}px`);
 
@@ -363,14 +378,39 @@ export const MainLayout: React.FC = () => {
             const isTextTarget = isInput || Boolean(active?.isContentEditable);
 
             const layoutHeight = Math.round(root.clientHeight || window.innerHeight);
+            const windowHeight = Math.round(window.innerHeight);
             const viewportSum = height + offsetTop;
-            const rawInset = Math.max(0, layoutHeight - viewportSum);
+            const baselineCandidate = Math.max(layoutHeight, viewportSum);
+            const windowBaselineCandidate = Math.max(windowHeight, viewportSum);
+            if (!isTextTarget && stickyKeyboardInset === 0) {
+                layoutViewportBaseline = baselineCandidate;
+                windowViewportBaseline = windowBaselineCandidate;
+            } else if (layoutViewportBaseline === 0) {
+                layoutViewportBaseline = baselineCandidate;
+                windowViewportBaseline = windowBaselineCandidate;
+            } else if (windowViewportBaseline === 0) {
+                windowViewportBaseline = windowBaselineCandidate;
+            }
+            const rootRawInset = Math.max(0, Math.max(layoutViewportBaseline, baselineCandidate) - viewportSum);
+            const windowRawInset = Math.max(0, Math.max(windowViewportBaseline, windowBaselineCandidate) - viewportSum);
+            const virtualKeyboardInset = (() => {
+                if (!isTauriAndroidRuntime || !isTextTarget) {
+                    return 0;
+                }
+                const value = virtualKeyboard?.boundingRect?.height;
+                if (typeof value !== 'number' || !Number.isFinite(value)) {
+                    return 0;
+                }
+                return Math.max(0, Math.round(value));
+            })();
+            const rawInset = Math.max(rootRawInset, windowRawInset, virtualKeyboardInset);
 
             // Keyboard heuristic:
             // - when an input is focused, smaller deltas can still be keyboard
             // - when not focused, treat only big deltas as keyboard (ignore toolbars)
             const openThreshold = isTextTarget ? 120 : 180;
             const measuredInset = rawInset >= openThreshold ? rawInset : 0;
+            const effectiveInset = isTauriIOSRuntime && !isTextTarget ? 0 : measuredInset;
 
             // Make the UI stable: treat keyboard inset as a step function.
             // - When opening: take the first big inset and hold it.
@@ -379,31 +419,31 @@ export const MainLayout: React.FC = () => {
             // - focus lost (handled via focusout)
             // - visual viewport height starts increasing while inset is non-zero
             if (ignoreOpenUntilZero) {
-                if (measuredInset === 0) {
+                if (effectiveInset === 0) {
                     ignoreOpenUntilZero = false;
                 }
                 stickyKeyboardInset = 0;
             } else if (stickyKeyboardInset === 0) {
-                if (measuredInset > 0 && isTextTarget) {
-                    stickyKeyboardInset = measuredInset;
+                if (effectiveInset > 0 && isTextTarget) {
+                    stickyKeyboardInset = effectiveInset;
                 }
             } else {
                 // Only detect closing-by-height when focus is NOT on text input
                 // (prevents false positives during Android keyboard animation)
                 const closingByHeight = !isTextTarget && height > previousHeight + 6;
 
-                if (measuredInset === 0) {
+                if (effectiveInset === 0) {
                     stickyKeyboardInset = 0;
                     setKeyboardOpen(false);
                 } else if (closingByHeight) {
                     forceKeyboardClosed();
-                } else if (measuredInset > 0 && isTextTarget) {
+                } else if (effectiveInset > 0 && isTextTarget) {
                     // When focus is on text input, track actual inset (allows settling
                     // to correct value after Android animation fluctuations)
-                    stickyKeyboardInset = measuredInset;
+                    stickyKeyboardInset = effectiveInset;
                     setKeyboardOpen(true);
-                } else if (measuredInset > stickyKeyboardInset) {
-                    stickyKeyboardInset = measuredInset;
+                } else if (effectiveInset > stickyKeyboardInset) {
+                    stickyKeyboardInset = effectiveInset;
                     setKeyboardOpen(true);
                 }
             }
@@ -428,7 +468,7 @@ export const MainLayout: React.FC = () => {
                 const rect = active.getBoundingClientRect();
                 const overlap = rect.bottom - viewportBottom;
                 const clearance = 8;
-                const keyboardInset = Math.max(stickyKeyboardInset, measuredInset);
+                const keyboardInset = Math.max(stickyKeyboardInset, effectiveInset);
                 const avoidOffset = overlap > clearance && keyboardInset > 0
                     ? Math.min(overlap, keyboardInset)
                     : 0;
@@ -456,6 +496,14 @@ export const MainLayout: React.FC = () => {
         const viewport = window.visualViewport;
         viewport?.addEventListener('resize', updateVisualViewport);
         viewport?.addEventListener('scroll', updateVisualViewport);
+        try {
+            if (virtualKeyboard) {
+                virtualKeyboard.overlaysContent = true;
+            }
+        } catch {
+            // ignored
+        }
+        virtualKeyboard?.addEventListener?.('geometrychange', updateVisualViewport);
         window.addEventListener('resize', updateVisualViewport);
         window.addEventListener('orientationchange', updateVisualViewport);
         const isTextInputTarget = (element: HTMLElement | null) => {
@@ -502,10 +550,17 @@ export const MainLayout: React.FC = () => {
 
                 const currentViewport = window.visualViewport;
                 const height = currentViewport ? Math.round(currentViewport.height) : window.innerHeight;
-                const offsetTop = currentViewport ? Math.max(0, Math.round(currentViewport.offsetTop)) : 0;
+                const measuredOffsetTop = currentViewport ? Math.max(0, Math.round(currentViewport.offsetTop)) : 0;
+                const offsetTop = isTauriIOSRuntime ? 0 : measuredOffsetTop;
                 const layoutHeight = Math.round(root.clientHeight || window.innerHeight);
+                const windowHeight = Math.round(window.innerHeight);
                 const viewportSum = height + offsetTop;
-                const rawInset = Math.max(0, layoutHeight - viewportSum);
+                const baselineCandidate = Math.max(layoutHeight, viewportSum);
+                const windowBaselineCandidate = Math.max(windowHeight, viewportSum);
+                const rawInset = Math.max(
+                    0,
+                    Math.max(layoutViewportBaseline, baselineCandidate, windowViewportBaseline, windowBaselineCandidate) - viewportSum,
+                );
 
                 if (rawInset > 0) {
                     updateVisualViewport();
@@ -522,6 +577,7 @@ export const MainLayout: React.FC = () => {
         return () => {
             viewport?.removeEventListener('resize', updateVisualViewport);
             viewport?.removeEventListener('scroll', updateVisualViewport);
+            virtualKeyboard?.removeEventListener?.('geometrychange', updateVisualViewport);
             window.removeEventListener('resize', updateVisualViewport);
             window.removeEventListener('orientationchange', updateVisualViewport);
             document.removeEventListener('focusin', handleFocusIn, true);
@@ -553,7 +609,7 @@ export const MainLayout: React.FC = () => {
         <DiffWorkerProvider>
             <div
                 className={cn(
-                    'main-content-safe-area h-[100dvh]',
+                    'main-content-safe-area h-full',
                     isMobile ? 'flex flex-col' : 'flex',
                     'bg-background'
                 )}
@@ -654,12 +710,18 @@ export const MainLayout: React.FC = () => {
                             }
                         }}
                         className={cn(
-                            'fixed left-0 top-0 z-50 h-full bg-transparent',
+                            'fixed left-0 top-0 z-50 h-full bg-transparent mobile-drawer-panel',
                             'cursor-grab active:cursor-grabbing'
                         )}
                         aria-hidden={!mobileLeftDrawerOpen}
                     >
-                        <div className="h-full overflow-hidden flex bg-sidebar shadow-none drawer-safe-area">
+                        <div
+                            className="h-full overflow-hidden flex bg-sidebar shadow-none drawer-safe-area"
+                            style={{
+                                paddingTop: 'max(env(safe-area-inset-top, 0px), 48px)',
+                                paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 34px)'
+                            }}
+                        >
                             <div onPointerDownCapture={(e) => e.stopPropagation()}>
                               <NavRail className="shrink-0" mobile />
                             </div>
@@ -705,12 +767,18 @@ export const MainLayout: React.FC = () => {
                             }
                         }}
                         className={cn(
-                            'fixed right-0 top-0 z-50 h-full bg-transparent',
+                            'fixed right-0 top-0 z-50 h-full bg-transparent mobile-drawer-panel',
                             'cursor-grab active:cursor-grabbing'
                         )}
                         aria-hidden={!isRightSidebarOpen}
                     >
-                        <div className="h-full overflow-hidden flex flex-col bg-background shadow-none drawer-safe-area">
+                        <div 
+                            className="h-full overflow-hidden flex flex-col bg-background shadow-none drawer-safe-area"
+                            style={{
+                                paddingTop: 'max(env(safe-area-inset-top, 0px), 48px)',
+                                paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 34px)'
+                            }}
+                        >
                             <ErrorBoundary>
                                 <GitView mode="sidebar" />
                             </ErrorBoundary>

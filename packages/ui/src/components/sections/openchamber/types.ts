@@ -3,6 +3,7 @@ export type OpenChamberSection =
   | 'chat'
   | 'shortcuts'
   | 'sessions'
+  | 'devices'
   | 'git'
   | 'github'
   | 'notifications'

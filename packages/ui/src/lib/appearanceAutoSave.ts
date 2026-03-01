@@ -8,6 +8,8 @@ type AppearanceSlice = {
   showDeletionDialog: boolean;
   nativeNotificationsEnabled: boolean;
   notificationMode: 'always' | 'hidden-only';
+  mobileHapticsEnabled: boolean;
+  biometricLockEnabled: boolean;
   notifyOnSubtasks: boolean;
   notifyOnCompletion: boolean;
   notifyOnError: boolean;
@@ -49,6 +51,8 @@ export const startAppearanceAutoSave = (): void => {
     showDeletionDialog: useUIStore.getState().showDeletionDialog,
     nativeNotificationsEnabled: useUIStore.getState().nativeNotificationsEnabled,
     notificationMode: useUIStore.getState().notificationMode,
+    mobileHapticsEnabled: useUIStore.getState().mobileHapticsEnabled,
+    biometricLockEnabled: useUIStore.getState().biometricLockEnabled,
     notifyOnSubtasks: useUIStore.getState().notifyOnSubtasks,
     notifyOnCompletion: useUIStore.getState().notifyOnCompletion,
     notifyOnError: useUIStore.getState().notifyOnError,
@@ -97,6 +101,8 @@ export const startAppearanceAutoSave = (): void => {
       showDeletionDialog: state.showDeletionDialog,
       nativeNotificationsEnabled: state.nativeNotificationsEnabled,
       notificationMode: state.notificationMode,
+      mobileHapticsEnabled: state.mobileHapticsEnabled,
+      biometricLockEnabled: state.biometricLockEnabled,
       notifyOnSubtasks: state.notifyOnSubtasks,
       notifyOnCompletion: state.notifyOnCompletion,
       notifyOnError: state.notifyOnError,
@@ -134,6 +140,12 @@ export const startAppearanceAutoSave = (): void => {
     }
     if (current.notificationMode !== previous.notificationMode) {
       diff.notificationMode = current.notificationMode;
+    }
+    if (current.mobileHapticsEnabled !== previous.mobileHapticsEnabled) {
+      diff.mobileHapticsEnabled = current.mobileHapticsEnabled;
+    }
+    if (current.biometricLockEnabled !== previous.biometricLockEnabled) {
+      diff.biometricLockEnabled = current.biometricLockEnabled;
     }
     if (current.notifyOnSubtasks !== previous.notifyOnSubtasks) {
       diff.notifyOnSubtasks = current.notifyOnSubtasks;

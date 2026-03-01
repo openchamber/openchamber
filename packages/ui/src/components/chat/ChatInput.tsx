@@ -36,7 +36,7 @@ import { useCurrentSessionActivity } from '@/hooks/useSessionActivity';
 import { toast } from '@/components/ui';
 import { useFileStore } from '@/stores/fileStore';
 import { useMessageStore } from '@/stores/messageStore';
-import { isDesktopLocalOriginActive, isTauriShell, isVSCodeRuntime } from '@/lib/desktop';
+import { isDesktopLocalOriginActive, isNativeMobileApp, isTauriShell, isVSCodeRuntime, pickFilesFromNativeDialog } from '@/lib/desktop';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { StopIcon } from '@/components/icons/StopIcon';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -1852,12 +1852,25 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
     }, [attachFiles]);
 
     const handlePickLocalFiles = React.useCallback(() => {
-        if (isVSCodeRuntime()) {
-            void handleVSCodePickFiles();
-            return;
-        }
-        fileInputRef.current?.click();
-    }, [handleVSCodePickFiles]);
+        const openPicker = async () => {
+            if (isVSCodeRuntime()) {
+                await handleVSCodePickFiles();
+                return;
+            }
+
+            if (isNativeMobileApp()) {
+                const files = await pickFilesFromNativeDialog();
+                if (files.length > 0) {
+                    await attachFiles(files);
+                    return;
+                }
+            }
+
+            fileInputRef.current?.click();
+        };
+
+        void openPicker();
+    }, [attachFiles, handleVSCodePickFiles]);
 
     const handleLocalFileSelect = React.useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
         const files = event.target.files;
@@ -2089,7 +2102,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
         <form
             onSubmit={(e) => { e.preventDefault(); handlePrimaryAction(); }}
             className={cn(
-                "relative pt-0 pb-4",
+                "relative pt-0",
+                isMobile ? "pb-2" : "pb-4",
                 isDesktopExpanded && 'flex h-full min-h-0 flex-col pt-4',
                 isMobile && isKeyboardOpen ? "ios-keyboard-safe-area" : "bottom-safe-area"
             )}

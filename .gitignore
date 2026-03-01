@@ -16,6 +16,8 @@ release
 /tsc
 /openchamber@*
 local-dev*
+local-build*
+*.bun-build
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

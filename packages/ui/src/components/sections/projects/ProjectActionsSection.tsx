@@ -67,7 +67,7 @@ interface ProjectActionsSectionProps {
 }
 
 export const ProjectActionsSection: React.FC<ProjectActionsSectionProps> = ({ projectRef }) => {
-  const isDesktopShellApp = React.useMemo(() => isDesktopShell(), []);
+  const isDesktopShellApp = isDesktopShell();
   const desktopSshInstances = useDesktopSshStore((state) => state.instances);
   const loadDesktopSsh = useDesktopSshStore((state) => state.load);
 

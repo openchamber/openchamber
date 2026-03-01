@@ -311,6 +311,20 @@ jobs:
           path: artifacts/latest-${{ matrix.platform }}.json
           retention-days: 1
 
+  build-mobile:
+    needs: create-release
+    uses: ./.github/workflows/mobile-release.yml
+    with:
+      version: ${{ needs.create-release.outputs.version }}
+      build_android: true
+      build_ios: true
+      publish_github_release: ${{ github.event.inputs.dry_run != 'true' }}
+      upload_play_internal: ${{ github.event.inputs.dry_run != 'true' }}
+      upload_testflight: ${{ github.event.inputs.dry_run != 'true' }}
+      publish_fdroid_repo: ${{ github.event.inputs.dry_run != 'true' }}
+      fdroid_repo_url: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/fdroid/repo
+    secrets: inherit
+
   publish-npm:
     needs: create-release
     runs-on: ubuntu-latest
@@ -435,7 +449,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   finalize-release:
-    needs: [create-release, build-desktop-macos, publish-npm, combine-manifests]
+    needs: [create-release, build-desktop-macos, build-mobile, publish-npm, combine-manifests]
     runs-on: ubuntu-latest
     steps:
       - name: Publish release

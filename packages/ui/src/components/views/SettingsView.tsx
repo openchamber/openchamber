@@ -29,6 +29,7 @@ import {
   RiRestartLine,
   RiServerLine,
   RiSlashCommands2,
+  RiSmartphoneLine,
 } from '@remixicon/react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
@@ -85,6 +86,7 @@ const pageOrder: SettingsPageSlug[] = [
   'chat',
   'notifications',
   'sessions',
+  'devices',
   'shortcuts',
   'git',
   'projects',
@@ -153,6 +155,8 @@ function getSettingsNavIcon(slug: SettingsPageSlug): React.ComponentType<{ class
       return RiMicLine;
     case 'tunnel':
       return RiGlobalLine;
+    case 'devices':
+      return RiSmartphoneLine;
     case 'home':
       return null;
     default:
@@ -245,14 +249,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
 
   const [mobileStage, setMobileStage] = React.useState<MobileStage>('nav');
   const autoNavSlugRef = React.useRef<string | null>(null);
-
   const [navWidth, setNavWidth] = React.useState(216);
   const [hasManuallyResized, setHasManuallyResized] = React.useState(false);
   const [isResizing, setIsResizing] = React.useState(false);
   const startXRef = React.useRef(0);
   const startWidthRef = React.useRef(navWidth);
   const containerRef = React.useRef<HTMLDivElement>(null);
-
   const isDesktopApp = React.useMemo(() => {
     return isDesktopShell();
   }, []);
@@ -268,14 +270,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       .filter((page) => !(runtimeCtx.isVSCode && page.slug === 'projects'))
       .filter((page) => !(isMobile && page.slug === 'shortcuts'));
   }, [runtimeCtx, isMobile]);
-
   const sortedFilteredPages = React.useMemo(() => {
     const rank = new Map<SettingsPageSlug, number>(pageOrder.map((s, i) => [s, i]));
     return visiblePages
       .slice()
       .sort((a, b) => (rank.get(a.slug) ?? 999) - (rank.get(b.slug) ?? 999));
   }, [visiblePages]);
-
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
 
   React.useEffect(() => {
@@ -341,7 +341,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       }, 0);
     }
   }, [activeProjectId, settingsSlug]);
-
   const openPage = React.useCallback((slug: SettingsPageSlug) => {
     setSettingsPage(slug);
     autoNavSlugRef.current = slug;
@@ -368,6 +367,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     chat: 'chat',
     shortcuts: 'shortcuts',
     sessions: 'sessions',
+    devices: 'devices',
     notifications: 'notifications',
     voice: 'voice',
     tunnel: 'tunnel',
@@ -440,11 +440,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       case 'chat':
       case 'shortcuts':
       case 'sessions':
+      case 'devices':
       case 'notifications':
       case 'voice':
       case 'tunnel': {
         const section = openChamberSectionBySlug[slug] ?? 'visual';
-        return <OpenChamberPage section={section} />;
+        const userCode = typeof window === 'undefined'
+          ? null
+          : (new URLSearchParams(window.location.search).get('user_code') || '').trim() || null;
+        return <OpenChamberPage section={section} userCode={userCode} />;
       }
       default:
         return <SettingsHome onOpen={openPage} />;

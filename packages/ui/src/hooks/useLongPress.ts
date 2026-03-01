@@ -1,4 +1,6 @@
 import { useRef, useCallback, useEffect } from 'react';
+import { runHapticFeedback } from '@/lib/desktop';
+import { useUIStore } from '@/stores/useUIStore';
 
 type LongPressOptions = {
   delay?: number;
@@ -13,6 +15,7 @@ export function useLongPress({
   onTap,
   enableHaptic = true,
 }: LongPressOptions) {
+  const mobileHapticsEnabled = useUIStore((state) => state.mobileHapticsEnabled);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isLongPressRef = useRef(false);
   const startPosRef = useRef<{ x: number; y: number } | null>(null);
@@ -35,16 +38,10 @@ export function useLongPress({
 
     timerRef.current = setTimeout(() => {
       isLongPressRef.current = true;
-      if (enableHaptic && typeof navigator !== 'undefined' && navigator.vibrate) {
-        try {
-          navigator.vibrate(15);
-        } catch {
-          // Ignore vibration errors
-        }
-      }
+      void runHapticFeedback('selection', enableHaptic && mobileHapticsEnabled);
       onLongPress();
     }, delay);
-  }, [delay, onLongPress, enableHaptic]);
+  }, [delay, onLongPress, enableHaptic, mobileHapticsEnabled]);
 
   const onPointerMove = useCallback((e: React.PointerEvent | React.TouchEvent) => {
     if (!startPosRef.current || !timerRef.current) return;

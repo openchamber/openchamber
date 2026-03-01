@@ -7,6 +7,7 @@ import { isVSCodeRuntime } from '@/lib/desktop';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { getDefaultModels } from '@/lib/quota/model-families';
 import { updateDesktopSettings } from '@/lib/persistence';
+import { buildRuntimeApiHeaders, resolveRuntimeApiEndpoint } from '@/lib/instances/runtimeApiBaseUrl';
 
 const DEFAULT_REFRESH_INTERVAL_MS = 60000;
 
@@ -107,9 +108,9 @@ const loadSettingsFromRuntime = async (): Promise<QuotaSettingsState> => {
   }
 
   if (!isVSCodeRuntime()) {
-    const response = await fetch('/api/config/settings', {
+    const response = await fetch(resolveRuntimeApiEndpoint('/config/settings'), {
       method: 'GET',
-      headers: { Accept: 'application/json' }
+      headers: buildRuntimeApiHeaders(),
     });
     if (response.ok) {
       const data = await response.json().catch(() => null);

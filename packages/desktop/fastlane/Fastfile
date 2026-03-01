@@ -1,0 +1,247 @@
+require "fileutils"
+require "json"
+require "shellwords"
+require "time"
+
+def desktop_root
+  @desktop_root ||= File.expand_path("..", __dir__)
+end
+
+def bool_env(name, default)
+  value = ENV[name]
+  return default if value.nil?
+
+  normalized = value.to_s.strip.downcase
+  return true if ["1", "true", "yes", "on"].include?(normalized)
+  return false if ["0", "false", "no", "off"].include?(normalized)
+
+  default
+end
+
+def list_env(name, default)
+  raw = ENV[name]
+  return default if raw.nil? || raw.strip.empty?
+
+  raw.split(/[\s,]+/).map(&:strip).reject(&:empty?)
+end
+
+def run_in_desktop(parts)
+  command = parts.map { |part| part.to_s.shellescape }.join(" ")
+  sh("cd #{desktop_root.shellescape} && #{command}")
+end
+
+def ensure_mobile_initialized!(platform)
+  marker =
+    if platform == :android
+      File.join(desktop_root, "src-tauri", "gen", "android", "gradlew")
+    else
+      File.join(desktop_root, "src-tauri", "gen", "apple")
+    end
+
+  return if File.exist?(marker)
+
+  init_command = platform == :android ? ["bun", "run", "tauri:android:init"] : ["bun", "run", "tauri:ios:init"]
+  run_in_desktop(init_command)
+end
+
+def platform_artifact_dir(platform)
+  dir = File.join(desktop_root, "build", "mobile-artifacts", platform)
+  FileUtils.rm_rf(dir)
+  FileUtils.mkdir_p(dir)
+  dir
+end
+
+def safe_copy_name(file_path)
+  parent = File.basename(File.dirname(file_path)).gsub(/[^A-Za-z0-9_.-]/, "-")
+  base = File.basename(file_path, File.extname(file_path))
+  ext = File.extname(file_path)
+  "#{base}-#{parent}#{ext}"
+end
+
+def copy_artifacts!(platform, patterns)
+  output_dir = platform_artifact_dir(platform)
+  files = patterns.flat_map { |pattern| Dir.glob(File.join(desktop_root, pattern)) }
+                  .select { |path| File.file?(path) }
+                  .uniq
+
+  UI.user_error!("No #{platform} artifacts found") if files.empty?
+
+  copied = []
+  files.each do |source|
+    target = File.join(output_dir, File.basename(source))
+    target = File.join(output_dir, safe_copy_name(source)) if File.exist?(target)
+    FileUtils.cp(source, target)
+    copied << target
+  end
+
+  manifest_path = File.join(desktop_root, "build", "mobile-artifacts", "#{platform}-manifest.json")
+  manifest = {
+    platform: platform,
+    generatedAt: Time.now.utc.iso8601,
+    files: copied.sort.map { |path| path.delete_prefix("#{desktop_root}/") }
+  }
+  File.write(manifest_path, JSON.pretty_generate(manifest))
+
+  copied
+end
+
+def latest_artifact!(glob_pattern)
+  files = Dir.glob(glob_pattern).select { |path| File.file?(path) }
+  UI.user_error!("No files found for #{glob_pattern}") if files.empty?
+
+  files.max_by { |path| File.mtime(path) }
+end
+
+def android_sdk_root
+  ENV["ANDROID_HOME"] || ENV["ANDROID_SDK_ROOT"] || File.join(Dir.home, "Library", "Android", "sdk")
+end
+
+def latest_android_build_tools_bin
+  build_tools_dir = File.join(android_sdk_root, "build-tools")
+  UI.user_error!("Android build-tools directory not found at #{build_tools_dir}") unless Dir.exist?(build_tools_dir)
+
+  versions = Dir.children(build_tools_dir)
+                .select { |name| File.directory?(File.join(build_tools_dir, name)) }
+                .sort_by { |name| name.split(".").map { |part| part.to_i } }
+  UI.user_error!("No Android build-tools versions found in #{build_tools_dir}") if versions.empty?
+
+  File.join(build_tools_dir, versions.last)
+end
+
+def sign_android_apks_if_configured!(artifacts)
+  key_alias = ENV["ANDROID_KEY_ALIAS"]
+  store_password = ENV["ANDROID_KEYSTORE_PASSWORD"]
+  key_password = ENV["ANDROID_KEY_PASSWORD"]
+  return if [key_alias, store_password, key_password].any? { |value| value.nil? || value.empty? }
+
+  explicit_keystore = ENV["ANDROID_KEYSTORE_PATH"]
+  generated_keystore = File.join(desktop_root, "src-tauri", "gen", "android", "keystore.jks")
+  keystore = if explicit_keystore && !explicit_keystore.empty?
+               explicit_keystore
+             elsif File.exist?(generated_keystore)
+               generated_keystore
+             end
+  return if keystore.nil? || keystore.empty? || !File.exist?(keystore)
+
+  build_tools_bin = latest_android_build_tools_bin
+  zipalign = File.join(build_tools_bin, "zipalign")
+  apksigner = File.join(build_tools_bin, "apksigner")
+
+  artifacts.select { |path| path.end_with?(".apk") }.each do |apk|
+    next unless apk.end_with?("-unsigned.apk")
+
+    aligned = apk.sub(/-unsigned\.apk\z/, "-aligned.apk")
+    signed = apk.sub(/-unsigned\.apk\z/, "-signed.apk")
+
+    sh("#{zipalign.shellescape} -f -p 4 #{apk.shellescape} #{aligned.shellescape}")
+    sh(
+      "#{apksigner.shellescape} sign " \
+      "--ks #{keystore.shellescape} " \
+      "--ks-key-alias #{key_alias.shellescape} " \
+      "--ks-pass #{"pass:#{store_password}".shellescape} " \
+      "--key-pass #{"pass:#{key_password}".shellescape} " \
+      "--out #{signed.shellescape} #{aligned.shellescape}"
+    )
+  end
+end
+
+def has_platform_artifacts?(platform, extension)
+  pattern = File.join(desktop_root, "build", "mobile-artifacts", platform, "*.#{extension}")
+  Dir.glob(pattern).any? { |path| File.file?(path) }
+end
+
+platform :android do
+  lane :build do
+    ensure_mobile_initialized!(:android)
+    run_in_desktop(["node", "./scripts/apply-mobile-branding.mjs"])
+    run_in_desktop(["node", "./scripts/apply-mobile-signing.mjs"])
+
+    targets = list_env("ANDROID_TARGETS", ["aarch64", "armv7", "x86_64"])
+    config = ENV["ANDROID_TAURI_CONFIG"] || "src-tauri/tauri.android.conf.json"
+    build_apk = bool_env("ANDROID_BUILD_APK", true)
+    build_aab = bool_env("ANDROID_BUILD_AAB", true)
+    split_per_abi = bool_env("ANDROID_SPLIT_PER_ABI", true)
+
+    command = ["bun", "run", "tauri", "android", "build", "--ci", "--config", config]
+    command << "--split-per-abi" if split_per_abi
+    command << "--apk" if build_apk
+    command << "--aab" if build_aab
+    command += ["--target", *targets] unless targets.empty?
+
+    run_in_desktop(command)
+
+    patterns = []
+    patterns << "src-tauri/gen/android/app/build/outputs/apk/**/*.apk" if build_apk
+    patterns << "src-tauri/gen/android/app/build/outputs/bundle/**/*.aab" if build_aab
+    artifacts = copy_artifacts!("android", patterns)
+    sign_android_apks_if_configured!(artifacts)
+  end
+
+  lane :play_internal do
+    build unless has_platform_artifacts?("android", "aab")
+
+    key_data = ENV["GOOGLE_PLAY_JSON_KEY"]
+    key_path = ENV["GOOGLE_PLAY_JSON_KEY_PATH"]
+    UI.user_error!("Set GOOGLE_PLAY_JSON_KEY or GOOGLE_PLAY_JSON_KEY_PATH") if (key_data.nil? || key_data.empty?) && (key_path.nil? || key_path.empty?)
+
+    aab = latest_artifact!(File.join(desktop_root, "build", "mobile-artifacts", "android", "*.aab"))
+    options = {
+      package_name: ENV["ANDROID_APP_ID"] || "ai.fedaykin.openchamber",
+      track: ENV["GOOGLE_PLAY_TRACK"] || "internal",
+      release_status: ENV["GOOGLE_PLAY_RELEASE_STATUS"] || "draft",
+      aab: aab,
+      skip_upload_metadata: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true,
+      skip_upload_changelogs: bool_env("GOOGLE_PLAY_SKIP_CHANGELOGS", true)
+    }
+    options[:json_key_data] = key_data if key_data && !key_data.empty?
+    options[:json_key] = key_path if key_path && !key_path.empty?
+
+    upload_to_play_store(**options)
+  end
+end
+
+platform :ios do
+  lane :build do
+    ensure_mobile_initialized!(:ios)
+    run_in_desktop(["node", "./scripts/apply-mobile-branding.mjs"])
+
+    targets = list_env("IOS_TARGETS", ["aarch64"])
+    config = ENV["IOS_TAURI_CONFIG"] || "src-tauri/tauri.ios.conf.json"
+    export_method = ENV["IOS_EXPORT_METHOD"] || "release-testing"
+    build_number = ENV["IOS_BUILD_NUMBER"]
+
+    command = ["bun", "run", "tauri", "ios", "build", "--ci", "--config", config, "--export-method", export_method]
+    command += ["--target", *targets] unless targets.empty?
+    command += ["--build-number", build_number] if build_number && !build_number.empty?
+
+    run_in_desktop(command)
+    copy_artifacts!("ios", ["src-tauri/gen/apple/build/**/*.ipa"])
+  end
+
+  lane :testflight do
+    build unless has_platform_artifacts?("ios", "ipa")
+
+    ipa = latest_artifact!(File.join(desktop_root, "build", "mobile-artifacts", "ios", "*.ipa"))
+    upload_options = {
+      ipa: ipa,
+      app_identifier: ENV["IOS_APP_ID"] || "ai.fedaykin.openchamber",
+      skip_waiting_for_build_processing: true,
+      distribute_external: bool_env("TESTFLIGHT_DISTRIBUTE_EXTERNAL", false)
+    }
+
+    if ENV["APP_STORE_CONNECT_API_KEY_KEY_ID"] && ENV["APP_STORE_CONNECT_API_KEY_ISSUER_ID"] && ENV["APP_STORE_CONNECT_API_KEY_KEY"]
+      upload_options[:api_key] = app_store_connect_api_key(
+        key_id: ENV["APP_STORE_CONNECT_API_KEY_KEY_ID"],
+        issuer_id: ENV["APP_STORE_CONNECT_API_KEY_ISSUER_ID"],
+        key_content: ENV["APP_STORE_CONNECT_API_KEY_KEY"],
+        is_key_content_base64: bool_env("APP_STORE_CONNECT_API_KEY_BASE64", false)
+      )
+    end
+
+    upload_options[:groups] = list_env("TESTFLIGHT_GROUPS", []) if ENV["TESTFLIGHT_GROUPS"]
+
+    upload_to_testflight(**upload_options)
+  end
+end

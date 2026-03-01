@@ -12,6 +12,7 @@ import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry";
 import { updateDesktopSettings } from "@/lib/persistence";
 import { useDirectoryStore } from "@/stores/useDirectoryStore";
 import { streamDebugEnabled } from "@/stores/utils/streamDebug";
+import { buildRuntimeApiHeaders, resolveRuntimeApiEndpoint } from "@/lib/instances/runtimeApiBaseUrl";
 
 const MODELS_DEV_API_URL = "https://models.dev/api.json";
 const MODELS_DEV_PROXY_URL = "/api/openchamber/models-metadata";
@@ -60,9 +61,9 @@ const fetchOpenChamberDefaults = async (): Promise<OpenChamberDefaults> => {
         }
 
         // 2. Fetch API (Web/server)
-        const response = await fetch('/api/config/settings', {
+        const response = await fetch(resolveRuntimeApiEndpoint('/config/settings'), {
             method: 'GET',
-            headers: { Accept: 'application/json' },
+            headers: buildRuntimeApiHeaders(),
         });
         if (!response.ok) {
             return {};

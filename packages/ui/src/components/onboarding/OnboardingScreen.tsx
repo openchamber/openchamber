@@ -4,6 +4,7 @@ import { isDesktopShell, isTauriShell } from '@/lib/desktop';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { updateDesktopSettings } from '@/lib/persistence';
+import { buildRuntimeApiHeaders, resolveRuntimeApiEndpoint } from '@/lib/instances/runtimeApiBaseUrl';
 import { copyTextToClipboard } from '@/lib/clipboard';
 
 const INSTALL_COMMAND = 'curl -fsSL https://opencode.ai/install | bash';
@@ -43,18 +44,14 @@ const HINT_DELAY_MS = 30000;
 export function OnboardingScreen({ onCliAvailable }: OnboardingScreenProps) {
   const [copied, setCopied] = React.useState(false);
   const [showHint, setShowHint] = React.useState(false);
-  const [isDesktopApp, setIsDesktopApp] = React.useState(false);
   const [isRetrying, setIsRetrying] = React.useState(false);
   const [opencodeBinary, setOpencodeBinary] = React.useState('');
   const [platform, setPlatform] = React.useState<OnboardingPlatform>('unknown');
+  const isDesktopApp = isDesktopShell();
 
   React.useEffect(() => {
     const timer = setTimeout(() => setShowHint(true), HINT_DELAY_MS);
     return () => clearTimeout(timer);
-  }, []);
-
-  React.useEffect(() => {
-    setIsDesktopApp(isDesktopShell());
   }, []);
 
   React.useEffect(() => {
@@ -83,7 +80,10 @@ export function OnboardingScreen({ onCliAvailable }: OnboardingScreenProps) {
     let cancelled = false;
     void (async () => {
       try {
-        const response = await fetch('/api/config/settings', { method: 'GET', headers: { Accept: 'application/json' } });
+        const response = await fetch(resolveRuntimeApiEndpoint('/config/settings'), {
+          method: 'GET',
+          headers: buildRuntimeApiHeaders(),
+        });
         if (!response.ok) return;
         const data = (await response.json().catch(() => null)) as null | { opencodeBinary?: unknown };
         if (!data || cancelled) return;

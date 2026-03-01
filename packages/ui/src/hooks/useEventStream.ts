@@ -16,7 +16,7 @@ import { handleTodoUpdatedEvent } from '@/stores/useTodoStore';
 import { useMcpStore } from '@/stores/useMcpStore';
 import { useContextStore } from '@/stores/contextStore';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
-import { isDesktopLocalOriginActive } from '@/lib/desktop';
+import { isDesktopLocalOriginActive, runHapticFeedback } from '@/lib/desktop';
 import { triggerSessionStatusPoll } from '@/hooks/useServerSessionStatus';
 import { PermissionToastActions } from '@/components/chat/PermissionToastActions';
 
@@ -1914,6 +1914,10 @@ export const useEventStream = () => {
         }
 
         dispatchRuntimeNotification({ title, body, tag, requireHidden });
+        const settings = useUIStore.getState();
+        if (settings.nativeNotificationsEnabled) {
+          void runHapticFeedback('success', settings.mobileHapticsEnabled);
+        }
 
         break;
       }

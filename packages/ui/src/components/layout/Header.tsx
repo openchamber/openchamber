@@ -201,12 +201,7 @@ export const Header: React.FC<HeaderProps> = ({
 
   const headerRef = React.useRef<HTMLElement | null>(null);
 
-  const [isDesktopApp, setIsDesktopApp] = React.useState<boolean>(() => {
-    if (typeof window === 'undefined') {
-      return false;
-    }
-    return isDesktopShell();
-  });
+  const isDesktopApp = isDesktopShell();
 
   const isMacPlatform = React.useMemo(() => {
     if (typeof navigator === 'undefined') {
@@ -242,11 +237,46 @@ export const Header: React.FC<HeaderProps> = ({
   }, []);
 
   useEffect(() => {
-    if (typeof window === 'undefined') {
+    if (!import.meta.env.DEV || typeof window === 'undefined' || typeof document === 'undefined') {
       return;
     }
-    setIsDesktopApp(isDesktopShell());
-  }, []);
+
+    const runtimeFromWindow = (
+      window as unknown as { __OPENCHAMBER_RUNTIME_APIS__?: { runtime?: unknown } }
+    ).__OPENCHAMBER_RUNTIME_APIS__?.runtime;
+    const root = document.documentElement;
+    const payload = {
+      timestamp: new Date().toISOString(),
+      isDesktopApp,
+      isMobile,
+      isMacPlatform,
+      macosMajorVersion,
+      runtimeFromHook: runtimeApis.runtime,
+      runtimeFromWindow,
+      injectedRuntimePlatform: (
+        window as unknown as { __OPENCHAMBER_RUNTIME_PLATFORM__?: unknown }
+      ).__OPENCHAMBER_RUNTIME_PLATFORM__,
+      localOriginHint: (
+        window as unknown as { __OPENCHAMBER_LOCAL_ORIGIN__?: unknown }
+      ).__OPENCHAMBER_LOCAL_ORIGIN__,
+      rootClasses: root.className,
+      userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
+    };
+
+    (
+      window as unknown as {
+        __OPENCHAMBER_RUNTIME_DEBUG__?: unknown;
+      }
+    ).__OPENCHAMBER_RUNTIME_DEBUG__ = payload;
+
+    console.info('[runtime-debug][header]', payload);
+  }, [
+    isDesktopApp,
+    isMobile,
+    isMacPlatform,
+    macosMajorVersion,
+    runtimeApis.runtime,
+  ]);
 
   const currentModel = getCurrentModel();
   const limit = currentModel && typeof currentModel.limit === 'object' && currentModel.limit !== null

@@ -15,6 +15,7 @@ import { toast } from '@/components/ui';
 import { RiStackLine, RiToolsLine, RiBrainAi3Line, RiFileImageLine, RiArrowDownSLine, RiCheckLine, RiSearchLine, RiInformationLine, RiEyeLine, RiEyeOffLine } from '@remixicon/react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
+import { openExternalUrl } from '@/lib/desktop';
 import { cn } from '@/lib/utils';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import type { ModelMetadata } from '@/types';
@@ -406,7 +407,7 @@ export const ProvidersPage: React.FC = () => {
       }));
 
       if (urlCandidate) {
-        window.open(urlCandidate, '_blank', 'noopener,noreferrer');
+        await openExternalUrl(urlCandidate);
       }
       setPendingOAuth({ providerId, methodIndex });
       toast.message('Complete the OAuth flow in your browser');

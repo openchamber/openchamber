@@ -53,6 +53,8 @@
     "@radix-ui/react-tooltip": "^1.2.8",
     "@remixicon/react": "^4.7.0",
     "@streamdown/code": "^1.0.2",
+    "@tauri-apps/plugin-barcode-scanner": "^2.0.0",
+    "@tauri-apps/plugin-os": "^2.0.0",
     "@tanstack/react-virtual": "^3.13.18",
     "@types/react-syntax-highlighter": "^15.5.13",
     "beautiful-mermaid": "^1.1.3",

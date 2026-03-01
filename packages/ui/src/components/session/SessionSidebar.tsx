@@ -2,7 +2,7 @@ import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
 import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
-import { isDesktopLocalOriginActive, isDesktopShell, isTauriShell } from '@/lib/desktop';
+import { isDesktopLocalOriginActive, isDesktopShell, isMobileRuntime as detectMobileRuntime, isTauriShell, isVSCodeRuntime } from '@/lib/desktop';
 import {
   DndContext,
   DragOverlay,
@@ -83,6 +83,7 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { useInstancesStore } from '@/stores/useInstancesStore';
 import type { WorktreeMetadata } from '@/types/worktree';
 import { opencodeClient } from '@/lib/opencode/client';
 import { checkIsGitRepository } from '@/lib/gitApi';
@@ -91,7 +92,6 @@ import { createWorktreeOnly, createWorktreeSession } from '@/lib/worktreeSession
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { useGitStore } from '@/stores/useGitStore';
 import { useDeviceInfo } from '@/lib/device';
-import { isVSCodeRuntime } from '@/lib/desktop';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { GitHubIssuePickerDialog } from './GitHubIssuePickerDialog';
 import { GitHubPullRequestPickerDialog } from './GitHubPullRequestPickerDialog';
@@ -861,11 +861,17 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
   const deviceInfo = useDeviceInfo();
   const setSessionSwitcherOpen = useUIStore((state) => state.setSessionSwitcherOpen);
+  const setDeviceLoginOpen = useUIStore((state) => state.setDeviceLoginOpen);
   const openMultiRunLauncher = useUIStore((state) => state.openMultiRunLauncher);
   const notifyOnSubtasks = useUIStore((state) => state.notifyOnSubtasks);
   const showDeletionDialog = useUIStore((state) => state.showDeletionDialog);
   const setShowDeletionDialog = useUIStore((state) => state.setShowDeletionDialog);
   const settingsAutoCreateWorktree = useConfigStore((state) => state.settingsAutoCreateWorktree);
+
+  const instances = useInstancesStore((state) => state.instances);
+  const currentInstanceId = useInstancesStore((state) => state.currentInstanceId);
+  const setCurrentInstance = useInstancesStore((state) => state.setCurrentInstance);
+  const touchInstance = useInstancesStore((state) => state.touchInstance);
 
   // Session Folders store
   const collapsedFolderIds = useSessionFoldersStore((state) => state.collapsedFolderIds);
@@ -900,7 +906,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const openNewSessionDraft = useSessionStore((state) => state.openNewSessionDraft);
 
   const tauriIpcAvailable = React.useMemo(() => isTauriShell(), []);
-  const isDesktopShellRuntime = React.useMemo(() => isDesktopShell(), []);
+  const isDesktopShellRuntime = isDesktopShell();
 
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
 
@@ -2135,6 +2141,40 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     !isDesktopShellRuntime && 'bg-transparent hover:bg-sidebar/40',
   );
 
+  const isMobileRuntime = React.useMemo(() => {
+    return detectMobileRuntime();
+  }, []);
+
+  const showMobileInstanceSwitcher = mobileVariant && isMobileRuntime;
+
+  const sortedInstances = React.useMemo(() => {
+    return [...instances].sort((a, b) => (b.lastUsedAt ?? 0) - (a.lastUsedAt ?? 0));
+  }, [instances]);
+
+  const activeInstanceLabel = React.useMemo(() => {
+    const selected = sortedInstances.find((instance) => instance.id === currentInstanceId) ?? sortedInstances[0] ?? null;
+    if (!selected) {
+      return 'Add instance';
+    }
+    return selected.label?.trim() || selected.origin;
+  }, [currentInstanceId, sortedInstances]);
+
+  const handleSwitchInstance = React.useCallback((instanceId: string) => {
+    if (!instanceId || instanceId === currentInstanceId) {
+      return;
+    }
+    setCurrentInstance(instanceId);
+    touchInstance(instanceId);
+    window.location.reload();
+  }, [currentInstanceId, setCurrentInstance, touchInstance]);
+
+  const handleAddInstance = React.useCallback(() => {
+    setDeviceLoginOpen(true);
+    if (mobileVariant) {
+      setSessionSwitcherOpen(false);
+    }
+  }, [mobileVariant, setDeviceLoginOpen, setSessionSwitcherOpen]);
+
   // Track when project sticky headers become "stuck"
   React.useEffect(() => {
     if (!isDesktopShellRuntime) return;
@@ -3007,6 +3047,50 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     >
       {!hideDirectoryControls && (
         <div className={cn('select-none pl-3.5 pr-2 flex-shrink-0 border-b border-border/60', hideProjectSelector ? 'py-1' : 'py-1.5')}>
+          {showMobileInstanceSwitcher ? (
+            <div className="mb-1 flex h-8 items-center justify-between gap-2">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className="flex h-8 min-w-0 flex-1 items-center gap-1 rounded-md px-2 text-left text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                  >
+                    <span className="truncate typography-ui-label font-medium">{activeInstanceLabel}</span>
+                    <RiArrowDownSLine className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="min-w-[220px] max-w-[320px]">
+                  {sortedInstances.length > 0 ? (
+                    sortedInstances.map((instance) => (
+                      <DropdownMenuItem
+                        key={instance.id}
+                        onClick={() => handleSwitchInstance(instance.id)}
+                        className="gap-2"
+                      >
+                        {instance.id === currentInstanceId ? <RiCheckLine className="h-4 w-4 text-primary" /> : <span className="h-4 w-4" />}
+                        <span className="truncate">{instance.label || instance.origin}</span>
+                      </DropdownMenuItem>
+                    ))
+                  ) : (
+                    <DropdownMenuItem disabled>No instances yet</DropdownMenuItem>
+                  )}
+                  <div className="my-1 h-px bg-border/70" />
+                  <DropdownMenuItem onClick={handleAddInstance} className="gap-2">
+                    <RiAddLine className="h-4 w-4" />
+                    Add instance
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <button
+                type="button"
+                onClick={handleAddInstance}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                aria-label="Add instance"
+              >
+                <RiAddLine className="h-4.5 w-4.5" />
+              </button>
+            </div>
+          ) : null}
           {!hideProjectSelector && (
           <div className="flex h-8 items-center justify-between gap-2">
             <DropdownMenu

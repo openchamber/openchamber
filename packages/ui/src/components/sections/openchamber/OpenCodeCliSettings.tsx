@@ -6,6 +6,7 @@ import { RiFolderLine, RiInformationLine } from '@remixicon/react';
 import { isDesktopShell, isTauriShell } from '@/lib/desktop';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
+import { buildRuntimeApiHeaders, resolveRuntimeApiEndpoint } from '@/lib/instances/runtimeApiBaseUrl';
 
 export const OpenCodeCliSettings: React.FC = () => {
   const [value, setValue] = React.useState('');
@@ -16,9 +17,9 @@ export const OpenCodeCliSettings: React.FC = () => {
     let cancelled = false;
     void (async () => {
       try {
-        const response = await fetch('/api/config/settings', {
+        const response = await fetch(resolveRuntimeApiEndpoint('/config/settings'), {
           method: 'GET',
-          headers: { Accept: 'application/json' },
+          headers: buildRuntimeApiHeaders(),
         });
         if (!response.ok) {
           return;

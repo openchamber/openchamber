@@ -1,0 +1,37 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "mobile",
+  "description": "Capabilities for OpenChamber mobile runtime",
+  "platforms": [
+    "android",
+    "iOS"
+  ],
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    "core:window:default",
+    "core:webview:default",
+    "shell:allow-open",
+    "opener:default",
+    "dialog:allow-open",
+    "dialog:allow-save",
+    "dialog:allow-message",
+    "dialog:allow-ask",
+    "dialog:allow-confirm",
+    "clipboard-manager:allow-read-text",
+    "clipboard-manager:allow-write-text",
+    "notification:default",
+    "notification:allow-is-permission-granted",
+    "notification:allow-request-permission",
+    "notification:allow-notify",
+    "haptics:allow-impact-feedback",
+    "haptics:allow-notification-feedback",
+    "haptics:allow-selection-feedback",
+    "haptics:allow-vibrate",
+    "barcode-scanner:default",
+    "biometric:default",
+    "os:default"
+  ]
+}
