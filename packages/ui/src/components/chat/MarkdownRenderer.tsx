@@ -543,9 +543,6 @@ const MermaidBlock: React.FC<{ source: string; mode: 'svg' | 'ascii' }> = ({ sou
 };
 
 const CodeBlockWrapper: React.FC<CodeBlockWrapperProps> = ({ children, className, style, ...props }) => {
-  const [copied, setCopied] = React.useState(false);
-  const codeRef = React.useRef<HTMLDivElement>(null);
-  const { isMobile } = useDeviceInfo();
   const mermaidInfo = getMermaidInfo(children);
   const mermaidRenderingMode = useUIStore((state) => state.mermaidRenderingMode);
   const codeChild = React.useMemo(
@@ -605,49 +602,14 @@ const CodeBlockWrapper: React.FC<CodeBlockWrapperProps> = ({ children, className
     return <MermaidBlock source={mermaidInfo.source} mode={mermaidRenderingMode} />;
   }
 
-  const getCodeContent = (): string => {
-    if (!codeRef.current) return '';
-    const codeEl = codeRef.current.querySelector('code');
-
-    return codeEl?.innerText || '';
-  };
-
-  const handleCopy = async () => {
-    const code = getCodeContent();
-    if (!code) return;
-    const result = await copyTextToClipboard(code);
-    if (result.ok) {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } else {
-      console.error('Failed to copy:', result.error);
-    }
-  };
-
   return (
-    <div className="group relative" ref={codeRef}>
-      <pre
-        {...props}
-        className={cn(className)}
-        style={normalizedStyle}
-      >
-        {codeChild}
-      </pre>
-      <div
-        className={cn(
-          'absolute top-1 right-2 transition-opacity',
-          isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
-        )}
-      >
-        <button
-          onClick={handleCopy}
-          className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
-          title="Copy"
-        >
-          {copied ? <RiCheckLine className="size-3.5" /> : <RiFileCopyLine className="size-3.5" />}
-        </button>
-      </div>
-    </div>
+    <pre
+      {...props}
+      className={cn(className, 'w-full min-w-full')}
+      style={normalizedStyle}
+    >
+      {codeChild}
+    </pre>
   );
 };
 
@@ -661,7 +623,7 @@ const streamdownPlugins = {
 };
 
 const streamdownControls = {
-  code: false,
+  code: true,
   table: false,
 };
 
@@ -829,7 +791,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
     : 'streamdown-content';
 
   const markdownContent = (
-    <div className={cn('break-words', className)} ref={streamdownContainerRef}>
+    <div className={cn('break-words w-full min-w-0', className)} ref={streamdownContainerRef}>
       <Streamdown
          key={`streamdown-${componentKey}-${currentMermaidTheme.metadata.id}:${currentMermaidTheme.metadata.variant}`}
          mode={isStreaming ? 'streaming' : 'static'}
@@ -894,7 +856,7 @@ export const SimpleMarkdownRenderer: React.FC<{
     : 'streamdown-content';
 
   return (
-    <div className={cn('break-words', className)} ref={streamdownContainerRef}>
+    <div className={cn('break-words w-full min-w-0', className)} ref={streamdownContainerRef}>
       <Streamdown
         key={`streamdown-simple-${currentMermaidTheme.metadata.id}:${currentMermaidTheme.metadata.variant}`}
         mode="static"
