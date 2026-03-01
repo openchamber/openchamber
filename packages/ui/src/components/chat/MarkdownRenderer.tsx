@@ -1,6 +1,6 @@
 import React from 'react';
 import { Streamdown } from 'streamdown';
-import { code } from '@streamdown/code';
+import { createCodePlugin } from '@streamdown/code';
 import { renderMermaidASCII, renderMermaidSVG } from 'beautiful-mermaid';
 import 'streamdown/styles.css';
 import { FadeInOnReveal } from './message/FadeInOnReveal';
@@ -122,6 +122,20 @@ const useMarkdownShikiThemes = (): readonly [string | object, string | object] =
   }, [getThemes, isVSCode]);
 
   return isVSCode ? themes : fallbackThemes;
+};
+
+type StreamdownCodeThemes = NonNullable<Parameters<typeof createCodePlugin>[0]>['themes'];
+
+const useStreamdownPlugins = (shikiThemes: readonly [string | object, string | object]) => {
+  return React.useMemo(
+    () => ({
+      code: createCodePlugin({
+        // Streamdown code plugin runtime accepts theme objects, but current type only models bundled theme names.
+        themes: shikiThemes as unknown as StreamdownCodeThemes,
+      }),
+    }),
+    [shikiThemes],
+  );
 };
 
 const useCurrentMermaidTheme = () => {
@@ -580,7 +594,6 @@ const CodeBlockWrapper: React.FC<CodeBlockWrapperProps> = ({ children, className
     const bg = normalizeDeclarationString((style as React.CSSProperties).backgroundColor);
     if (bg.value) {
       next.backgroundColor = bg.value;
-      (next as Record<string, string>)['--shiki-light-bg'] = bg.value;
     }
     for (const [k, v] of Object.entries(bg.vars)) {
       (next as Record<string, string>)[k] = v;
@@ -589,7 +602,6 @@ const CodeBlockWrapper: React.FC<CodeBlockWrapperProps> = ({ children, className
     const fg = normalizeDeclarationString((style as React.CSSProperties).color);
     if (fg.value) {
       next.color = fg.value;
-      (next as Record<string, string>)['--shiki-light'] = fg.value;
     }
     for (const [k, v] of Object.entries(fg.vars)) {
       (next as Record<string, string>)[k] = v;
@@ -616,10 +628,6 @@ const CodeBlockWrapper: React.FC<CodeBlockWrapperProps> = ({ children, className
 const streamdownComponents = {
   pre: CodeBlockWrapper,
   table: TableWrapper,
-};
-
-const streamdownPlugins = {
-  code,
 };
 
 const streamdownControls = {
@@ -783,6 +791,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
   useMermaidInlineInteractions({ containerRef: streamdownContainerRef, mermaidBlocks, onShowPopup });
 
   const shikiThemes = useMarkdownShikiThemes();
+  const streamdownPlugins = useStreamdownPlugins(shikiThemes);
   const currentMermaidTheme = useCurrentMermaidTheme();
   const componentKey = `markdown-${part?.id ? `part-${part.id}` : `message-${messageId}`}`;
 
@@ -800,7 +809,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
          controls={streamdownControls}
          plugins={streamdownPlugins}
          components={streamdownComponents}
-       >
+        >
         {content}
       </Streamdown>
     </div>
@@ -849,6 +858,7 @@ export const SimpleMarkdownRenderer: React.FC<{
   });
 
   const shikiThemes = useMarkdownShikiThemes();
+  const streamdownPlugins = useStreamdownPlugins(shikiThemes);
   const currentMermaidTheme = useCurrentMermaidTheme();
 
   const streamdownClassName = variant === 'tool'

@@ -829,6 +829,22 @@ html:not(.dark) .chat-scroll {
   color: var(--shiki-light, inherit);
 }
 
+.streamdown-content [data-streamdown="code-block-body"] span[style*="--sdm-c"] {
+  color: var(--sdm-c) !important;
+}
+
+.streamdown-content [data-streamdown="code-block-body"] span[style*="--sdm-tbg"] {
+  background-color: var(--sdm-tbg) !important;
+}
+
+.streamdown-content [data-streamdown="code-block-body"] span[style*="--shiki-light"] {
+  color: var(--shiki-light) !important;
+}
+
+.streamdown-content [data-streamdown="code-block-body"] span[style*="--shiki-light-bg"] {
+  background-color: var(--shiki-light-bg) !important;
+}
+
 .dark .streamdown-content [data-streamdown="code-block-body"] {
   background-color: transparent;
   color: var(--shiki-dark, var(--shiki-light, inherit));
@@ -836,6 +852,10 @@ html:not(.dark) .chat-scroll {
 
 .dark .streamdown-content [data-streamdown="code-block-body"] span[style*="--shiki-dark"] {
   color: var(--shiki-dark) !important;
+}
+
+.dark .streamdown-content [data-streamdown="code-block-body"] span[style*="--shiki-dark-bg"] {
+  background-color: var(--shiki-dark-bg) !important;
 }
 
 /* Fix list styling - override Tailwind reset */
