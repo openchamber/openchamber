@@ -13,7 +13,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { AnimatedTabs } from '@/components/ui/animated-tabs';
+import { SortableTabsStrip, type SortableTabsStripItem } from '@/components/ui/sortable-tabs-strip';
 
 import { RiArrowLeftSLine, RiChat4Line, RiCheckLine, RiCloseLine, RiCommandLine, RiFileTextLine, RiFolder6Line, RiGithubFill, RiLayoutLeftLine, RiLayoutRightLine, RiPlayListAddLine, RiRefreshLine, RiServerLine, RiStackLine, RiTerminalBoxLine, RiTimerLine, type RemixiconComponentType } from '@remixicon/react';
 import { DiffIcon } from '@/components/icons/DiffIcon';
@@ -831,10 +831,29 @@ export const Header: React.FC<HeaderProps> = ({
     return base;
   }, [isDesktopApp]);
 
+  const servicesTabItems = React.useMemo(() => {
+    return servicesTabs.map((tab) => ({
+      id: tab.value,
+      label: tab.label,
+      icon: <tab.icon className="h-3.5 w-3.5" />,
+    }));
+  }, [servicesTabs]);
+
   const quotaDisplayTabs = React.useMemo(() => {
     return [
       { value: 'usage' as const, label: 'Used' },
       { value: 'remaining' as const, label: 'Remaining' },
+    ];
+  }, []);
+
+  const quotaDisplayTabItems = React.useMemo(() => {
+    return quotaDisplayTabs.map((tab) => ({ id: tab.value, label: tab.label }));
+  }, [quotaDisplayTabs]);
+
+  const mobileServicesTabItems = React.useMemo<SortableTabsStripItem[]>(() => {
+    return [
+      { id: 'usage', label: 'Usage', icon: <RiTimerLine className="h-3.5 w-3.5" /> },
+      { id: 'mcp', label: 'MCP', icon: <RiCommandLine className="h-3.5 w-3.5" /> },
     ];
   }, []);
 
@@ -1089,17 +1108,21 @@ export const Header: React.FC<HeaderProps> = ({
               className="w-[min(30rem,calc(100vw-2rem))] max-h-[75vh] overflow-y-auto bg-[var(--surface-elevated)] p-0"
             >
               <div className="sticky top-0 z-20 border-b border-[var(--interactive-border)] bg-[var(--surface-elevated)] p-2">
-                <AnimatedTabs<'instance' | 'usage' | 'mcp'>
-                  value={desktopServicesTab}
-                  onValueChange={(value) => {
-                    setDesktopServicesTab(value);
-                    if (value === 'usage' && quotaResults.length === 0) {
-                      fetchAllQuotas();
-                    }
-                  }}
-                  tabs={servicesTabs}
-                  className="rounded-md"
-                />
+                <div className="h-8">
+                  <SortableTabsStrip
+                    items={servicesTabItems}
+                    activeId={desktopServicesTab}
+                    onSelect={(tabID) => {
+                      const value = tabID as 'instance' | 'usage' | 'mcp';
+                      setDesktopServicesTab(value);
+                      if (value === 'usage' && quotaResults.length === 0) {
+                        fetchAllQuotas();
+                      }
+                    }}
+                    layoutMode="fit"
+                    className="h-full"
+                  />
+                </div>
               </div>
 
               {isDesktopApp && desktopServicesTab === 'instance' && (
@@ -1126,13 +1149,15 @@ export const Header: React.FC<HeaderProps> = ({
                         </span>
                       </div>
                       <div className="flex items-center gap-1.5">
-                        <AnimatedTabs<'usage' | 'remaining'>
-                          value={quotaDisplayMode}
-                          onValueChange={handleDisplayModeChange}
-                          tabs={quotaDisplayTabs}
-                          size="sm"
-                          className="w-[10.5rem]"
-                        />
+                        <div className="h-7 w-[10.5rem]">
+                          <SortableTabsStrip
+                            items={quotaDisplayTabItems}
+                            activeId={quotaDisplayMode}
+                            onSelect={(tabID) => handleDisplayModeChange(tabID as 'usage' | 'remaining')}
+                            layoutMode="fit"
+                            className="h-full"
+                          />
+                        </div>
                         <button
                           type="button"
                           className={cn(
@@ -1583,20 +1608,21 @@ export const Header: React.FC<HeaderProps> = ({
                 <div className="flex h-full flex-col bg-[var(--surface-elevated)]">
                   <div className="sticky top-0 z-20 border-b border-[var(--interactive-border)] bg-[var(--surface-elevated)] p-2">
                     <div className="flex items-center justify-between gap-2 px-3 py-3">
-                      <AnimatedTabs<'usage' | 'mcp'>
-                        value={mobileServicesTab}
-                        onValueChange={(value) => {
-                          setMobileServicesTab(value);
-                          if (value === 'usage' && quotaResults.length === 0) {
-                            fetchAllQuotas();
-                          }
-                        }}
-                        tabs={[
-                          { value: 'usage', label: 'Usage', icon: RiTimerLine },
-                          { value: 'mcp', label: 'MCP', icon: RiCommandLine },
-                        ]}
-                        className="rounded-md"
-                      />
+                      <div className="h-8 min-w-0 flex-1">
+                        <SortableTabsStrip
+                          items={mobileServicesTabItems}
+                          activeId={mobileServicesTab}
+                          onSelect={(tabID) => {
+                            const value = tabID as 'usage' | 'mcp';
+                            setMobileServicesTab(value);
+                            if (value === 'usage' && quotaResults.length === 0) {
+                              fetchAllQuotas();
+                            }
+                          }}
+                          layoutMode="fit"
+                          className="h-full"
+                        />
+                      </div>
                       <button
                         type="button"
                         onClick={() => setIsMobileRateLimitsOpen(false)}

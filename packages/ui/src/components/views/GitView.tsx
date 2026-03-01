@@ -26,7 +26,6 @@ import {
   RiSplitCellsHorizontal,
 } from '@remixicon/react';
 import { toast } from '@/components/ui';
-import { AnimatedTabs } from '@/components/ui/animated-tabs';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import {
   Dialog,
@@ -1769,33 +1768,15 @@ export const GitView: React.FC<GitViewProps> = ({ mode = 'full' }) => {
       <div className="flex-1 min-h-0 overflow-hidden">
         <div className="h-full min-h-0 flex flex-col">
           <div className={cn('min-w-0 min-h-0 h-full flex flex-col', isSidebarMode ? 'bg-transparent' : 'bg-muted/10')}>
-            {isSidebarMode ? (
-              <div className="h-8">
-                <SortableTabsStrip
-                  items={actionTabItems}
-                  activeId={actionTab}
-                  onSelect={(tabID) => setActionTab(tabID as ActionTab)}
-                  layoutMode="fit"
-                  className="h-full"
-                />
-              </div>
-            ) : (
-              <div className="px-3 py-1.5">
-                <AnimatedTabs<ActionTab>
-                  value={actionTab}
-                  onValueChange={setActionTab}
-                  size="sm"
-                  collapseLabelsOnSmall
-                  collapseLabelsOnNarrow={isSidebarMode}
-                  tabs={[
-                    { value: 'commit', label: 'Commit', icon: RiGitCommitLine },
-                    { value: 'branch', label: 'Update', icon: RiGitMergeLine },
-                    { value: 'pr', label: 'PR', icon: RiGitPullRequestLine },
-                    { value: 'worktree', label: 'Worktree', icon: RiSplitCellsHorizontal },
-                  ]}
-                />
-              </div>
-            )}
+            <div className="h-8">
+              <SortableTabsStrip
+                items={actionTabItems}
+                activeId={actionTab}
+                onSelect={(tabID) => setActionTab(tabID as ActionTab)}
+                layoutMode="fit"
+                className="h-full"
+              />
+            </div>
             <div className="h-px bg-border/40" />
 
             <ScrollableOverlay

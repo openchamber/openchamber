@@ -221,9 +221,9 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                   )}
                   title={item.title ?? item.label}
                 >
-                  <span className={cn('flex min-w-0 items-center gap-1.5 leading-none', !isScrollable && 'justify-center')}>
-                    {item.icon ? <span className="flex shrink-0 items-center justify-center leading-none">{item.icon}</span> : null}
-                    <span className="truncate">{item.label}</span>
+                  <span className={cn('flex min-w-0 items-center gap-1.5', !isScrollable && 'justify-center')}>
+                    {item.icon ? <span className="flex shrink-0 items-center justify-center">{item.icon}</span> : null}
+                    <span className="truncate leading-[1.2]">{item.label}</span>
                   </span>
                 </button>
                 {closable ? (

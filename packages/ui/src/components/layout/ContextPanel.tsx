@@ -408,7 +408,7 @@ export const ContextPanel: React.FC = () => {
   }), [effectiveDirectory, tabs]);
 
   const activeNonChatContent = activeTab?.mode === 'diff'
-    ? <DiffView hideStackedFileSidebar stackedDefaultCollapsedAll hideFileSelector pinSelectedFileHeaderToTopOnNavigate />
+    ? <DiffView hideStackedFileSidebar stackedDefaultCollapsedAll hideFileSelector pinSelectedFileHeaderToTopOnNavigate showOpenInEditorAction />
     : activeTab?.mode === 'context'
         ? <ContextPanelContent />
         : activeTab?.mode === 'plan'
@@ -427,7 +427,7 @@ export const ContextPanel: React.FC = () => {
   const isFileTabActive = activeTab?.mode === 'file';
 
   const header = (
-    <header className="flex h-9 items-stretch border-b border-border/40">
+    <header className="flex h-8 items-stretch border-b border-border/40">
       <SortableTabsStrip
         items={tabItems}
         activeId={activeTab?.id ?? null}
