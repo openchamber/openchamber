@@ -825,12 +825,12 @@ html:not(.dark) .chat-scroll {
 /* Streamdown code blocks: ensure light/dark Shiki vars work even when Tailwind doesn't scan Streamdown's internal class names. */
 .streamdown-content [data-streamdown="code-block-body"] {
   font-size: var(--text-code);
-  background-color: var(--shiki-light-bg, transparent);
+  background-color: transparent;
   color: var(--shiki-light, inherit);
 }
 
 .dark .streamdown-content [data-streamdown="code-block-body"] {
-  background-color: var(--shiki-dark-bg, var(--shiki-light-bg, transparent));
+  background-color: transparent;
   color: var(--shiki-dark, var(--shiki-light, inherit));
 }
 
@@ -857,12 +857,17 @@ html:not(.dark) .chat-scroll {
 
 /* Reduce code block header height */
 [data-streamdown="code-block-header"] {
+  margin: 0;
   padding: 0.375rem 0.75rem;
   display: flex;
   align-items: center;
   justify-content: space-between;
   width: 100%;
   padding-right: 5.25rem;
+  border: 0;
+  border-bottom: 1px solid var(--interactive-border);
+  border-radius: 0;
+  background: var(--surface-muted);
 }
 
 /* Disable Streamdown's code block virtualization and keep block chrome fixed */
@@ -870,17 +875,23 @@ html:not(.dark) .chat-scroll {
   content-visibility: visible !important;
   contain-intrinsic-size: none !important;
   position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 0 !important;
   box-sizing: border-box;
   inline-size: 100%;
   max-inline-size: 100%;
   min-inline-size: 0;
   overflow: hidden;
+  background: var(--surface-background);
+  border: 1px solid var(--interactive-border);
+  border-radius: 0.75rem;
 }
 
 .streamdown-content [data-streamdown="code-block"] > div:not([data-streamdown]) {
   position: absolute;
-  top: 0.5rem;
-  right: 0.5rem;
+  top: 0;
+  right: 0;
   margin-top: 0;
   height: 2rem;
   z-index: 6;
@@ -890,12 +901,18 @@ html:not(.dark) .chat-scroll {
 /* Streamdown code block body: scroll text content within the card body */
 .streamdown-content [data-streamdown="code-block-body"] {
   display: block;
+  inline-size: 100%;
   min-width: 0;
   max-width: 100%;
+  margin: 0;
+  padding: 0;
   overflow-x: auto;
   overflow-y: hidden;
   box-sizing: border-box;
   scrollbar-gutter: stable;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
 }
 
 .streamdown-content [data-streamdown="code-block-body"] pre {
@@ -903,17 +920,49 @@ html:not(.dark) .chat-scroll {
   width: 100%;
   min-width: 100%;
   max-width: 100%;
+  margin: 0 !important;
+  padding: 0.75rem !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  background: transparent !important;
+}
+
+.streamdown-content [data-streamdown="code-block-body"] > * {
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  background: transparent !important;
 }
 
 .streamdown-content [data-streamdown="code-block-body"] code {
   white-space: pre;
   overflow-wrap: normal;
   word-break: normal;
+  background: transparent !important;
 }
 
 .streamdown-content [data-streamdown="code-block-actions"] {
   pointer-events: auto;
   transition: opacity 0.15s ease;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  gap: 0.125rem;
+}
+
+.streamdown-content [data-streamdown="code-block-actions"] button {
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0.25rem !important;
+  min-width: 1.5rem;
+  min-height: 1.5rem;
+}
+
+.streamdown-content [data-streamdown="code-block-actions"] button svg {
+  width: 0.875rem;
+  height: 0.875rem;
 }
 
 @media (hover: hover) and (pointer: fine) {
