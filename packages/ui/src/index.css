@@ -858,12 +858,75 @@ html:not(.dark) .chat-scroll {
 /* Reduce code block header height */
 [data-streamdown="code-block-header"] {
   padding: 0.375rem 0.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding-right: 5.25rem;
 }
 
-/* Disable Streamdown's code block virtualization (content-visibility) to avoid late height changes that break scroll-to-bottom. */
+/* Disable Streamdown's code block virtualization and keep block chrome fixed */
 .streamdown-content [data-streamdown="code-block"] {
   content-visibility: visible !important;
   contain-intrinsic-size: none !important;
+  position: relative;
+  box-sizing: border-box;
+  inline-size: 100%;
+  max-inline-size: 100%;
+  min-inline-size: 0;
+  overflow: hidden;
+}
+
+.streamdown-content [data-streamdown="code-block"] > div:not([data-streamdown]) {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  margin-top: 0;
+  height: 2rem;
+  z-index: 6;
+  pointer-events: none;
+}
+
+/* Streamdown code block body: scroll text content within the card body */
+.streamdown-content [data-streamdown="code-block-body"] {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  box-sizing: border-box;
+  scrollbar-gutter: stable;
+}
+
+.streamdown-content [data-streamdown="code-block-body"] pre {
+  display: block;
+  width: 100%;
+  min-width: 100%;
+  max-width: 100%;
+}
+
+.streamdown-content [data-streamdown="code-block-body"] code {
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.streamdown-content [data-streamdown="code-block-actions"] {
+  pointer-events: auto;
+  transition: opacity 0.15s ease;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .streamdown-content [data-streamdown="code-block"] [data-streamdown="code-block-actions"] {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .streamdown-content [data-streamdown="code-block"]:hover [data-streamdown="code-block-actions"],
+  .streamdown-content [data-streamdown="code-block"]:focus-within [data-streamdown="code-block-actions"] {
+    opacity: 1;
+    pointer-events: auto;
+  }
 }
 
 /* Mermaid block: position context for controls wrapper. */
