@@ -36,12 +36,11 @@ import { withWorktreeUpstreamDefaults } from '@/lib/worktrees/worktreeCreate';
 import { getWorktreeSetupCommands } from '@/lib/openchamberConfig';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { generateBranchSlug } from '@/lib/git/branchNameGenerator';
-import { getGitBranches } from '@/lib/gitApi';
+import { useGitBranches } from '@/stores/useGitStore';
 import { GitHubIntegrationDialog } from './GitHubIntegrationDialog';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import type {
-  GitBranch,
   GitHubIssue,
   GitHubPullRequestSummary,
 } from '@/lib/api/types';
@@ -141,9 +140,8 @@ export function NewWorktreeDialog({
     worktreeName: '',
   });
   
-  // Shared state
-  const [branches, setBranches] = React.useState<GitBranch | null>(null);
-  const [loadingBranches, setLoadingBranches] = React.useState(false);
+  // Use cached branches from Git store (instant if already fetched)
+  const branches = useGitBranches(projectDirectory);
   const [githubDialogOpen, setGithubDialogOpen] = React.useState(false);
   
   // Mobile branch picker states
@@ -165,41 +163,38 @@ export function NewWorktreeDialog({
   // Get current state based on mode
   const currentState = mode === 'new-branch' ? newBranchState : existingBranchState;
 
-  // Load branches when dialog opens
-  const loadBranches = React.useCallback(async () => {
-    if (!projectDirectory) return;
-    setLoadingBranches(true);
-    try {
-      const [branchData, rootBranch] = await Promise.all([
-        getGitBranches(projectDirectory),
-        getRootBranch(projectDirectory).catch(() => null),
-      ]);
-      setBranches(branchData);
-      
-      // Set default source branch for new-branch mode
-      const savedSourceBranch = localStorage.getItem(LAST_SOURCE_BRANCH_KEY);
-      const defaultSourceBranch = savedSourceBranch && branchData?.all?.includes(savedSourceBranch)
-        ? savedSourceBranch
-        : rootBranch && branchData?.all?.includes(rootBranch)
-          ? rootBranch
-          : branchData?.all?.includes('main')
-            ? 'main'
-            : branchData?.all?.includes('master')
-              ? 'master'
-              : branchData?.all?.[0] || '';
-      
-      if (defaultSourceBranch) {
-        setNewBranchState(prev => ({
-          ...prev,
-          sourceBranch: defaultSourceBranch,
-        }));
+  // Set default source branch when branches become available
+  React.useEffect(() => {
+    if (!branches?.all || !projectDirectory) return;
+    if (newBranchState.sourceBranch) return; // Already set
+    
+    const loadDefaultSourceBranch = async () => {
+      try {
+        const rootBranch = await getRootBranch(projectDirectory).catch(() => null);
+        const savedSourceBranch = localStorage.getItem(LAST_SOURCE_BRANCH_KEY);
+        const defaultSourceBranch = savedSourceBranch && branches.all?.includes(savedSourceBranch)
+          ? savedSourceBranch
+          : rootBranch && branches.all?.includes(rootBranch)
+            ? rootBranch
+            : branches.all?.includes('main')
+              ? 'main'
+              : branches.all?.includes('master')
+                ? 'master'
+                : branches.all?.[0] || '';
+        
+        if (defaultSourceBranch) {
+          setNewBranchState(prev => ({
+            ...prev,
+            sourceBranch: defaultSourceBranch,
+          }));
+        }
+      } catch {
+        // ignore
       }
-    } catch {
-      // ignore
-    } finally {
-      setLoadingBranches(false);
-    }
-  }, [projectDirectory]);
+    };
+    
+    void loadDefaultSourceBranch();
+  }, [branches, projectDirectory, newBranchState.sourceBranch]);
 
   // Reset state when dialog opens/closes
   React.useEffect(() => {
@@ -218,7 +213,6 @@ export function NewWorktreeDialog({
         selectedBranch: '',
         worktreeName: '',
       });
-      setBranches(null);
       setValidation({
         isValidating: false,
         branchError: null,
@@ -227,9 +221,7 @@ export function NewWorktreeDialog({
       });
       return;
     }
-    
-    void loadBranches();
-  }, [open, loadBranches]);
+  }, [open]);
 
   // Sync worktree name with branch name for new-branch mode
   React.useEffect(() => {
@@ -555,11 +547,7 @@ export function NewWorktreeDialog({
                   onClose={() => setExistingBranchPickerOpen(false)}
                 >
                   <div className="space-y-1">
-                    {loadingBranches ? (
-                      <div className="flex items-center justify-center py-8">
-                        <RiLoader4Line className="h-5 w-5 animate-spin text-muted-foreground" />
-                      </div>
-                    ) : branches?.all && branches.all.length > 0 ? (
+                    {branches?.all && branches.all.length > 0 ? (
                       branches.all.map(branch => (
                         <button
                           key={branch}
@@ -861,17 +849,12 @@ export function NewWorktreeDialog({
                       }));
                       setValidation(prev => ({ ...prev, touched: true }));
                     }}
-                    disabled={loadingBranches}
                   >
                     <SelectTrigger size="lg" className="w-fit">
                       <SelectValue placeholder="Choose a branch..." />
                     </SelectTrigger>
                     <SelectContent>
-                      {loadingBranches ? (
-                        <div className="flex items-center justify-center py-4">
-                          <RiLoader4Line className="h-4 w-4 animate-spin text-muted-foreground" />
-                        </div>
-                      ) : branches?.all && branches.all.length > 0 ? (
+                      {branches?.all && branches.all.length > 0 ? (
                         branches.all.map(branch => (
                           <SelectItem key={branch} value={branch}>
                             {branch}
