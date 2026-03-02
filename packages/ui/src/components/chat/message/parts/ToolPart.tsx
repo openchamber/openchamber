@@ -1366,8 +1366,9 @@ const ToolPart: React.FC<ToolPartProps> = ({
 
     const isTaskTool = part.tool.toLowerCase() === 'task';
 
-    const isFinalized = state.status === 'completed' || state.status === 'error';
-    const isActive = state.status === 'running' || state.status === 'pending';
+    const status = state.status as string | undefined;
+    const isFinalized = status === 'completed' || status === 'error';
+    const isActive = status === 'running' || status === 'pending' || status === 'started';
     const isError = state.status === 'error';
 
 
@@ -1681,7 +1682,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
                             <LiveDuration
                                 start={effectiveTimeStart}
                                 end={typeof effectiveTimeEnd === 'number' ? effectiveTimeEnd : undefined}
-                                active={Boolean(isTaskTool && isActive && typeof effectiveTimeEnd !== 'number')}
+                                active={Boolean(isActive && typeof effectiveTimeEnd !== 'number')}
                             />
                         </span>
                     )}
