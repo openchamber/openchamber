@@ -46,6 +46,7 @@ const OPEN_IN_APPS: OpenInAppOption[] = [
   { id: 'vscodium', label: 'VSCodium', appName: 'VSCodium' },
   { id: 'rustrover', label: 'RustRover', appName: 'RustRover' },
   { id: 'trae', label: 'Trae', appName: 'Trae' },
+  { id: 'antigravity', label: 'Antigravity', appName: 'Antigravity' },
 ];
 
 const DEFAULT_APP_ID = 'finder';
