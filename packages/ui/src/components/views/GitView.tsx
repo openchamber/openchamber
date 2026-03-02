@@ -224,10 +224,44 @@ interface GitViewProps {
 export const GitView: React.FC<GitViewProps> = ({ mode = 'full' }) => {
   const { git } = useRuntimeAPIs();
   const currentDirectory = useEffectiveDirectory();
-  const { currentSessionId, worktreeMetadata: worktreeMap } = useSessionStore();
-  const worktreeMetadata = currentSessionId
-    ? worktreeMap.get(currentSessionId) ?? undefined
-    : undefined;
+  const {
+    currentSessionId,
+    worktreeMetadata: worktreeMap,
+    availableWorktrees,
+    newSessionDraft,
+  } = useSessionStore();
+  const normalizedCurrentDirectory = normalizePath(currentDirectory);
+  const inferredWorktreeMetadata = React.useMemo(() => {
+    if (!normalizedCurrentDirectory) {
+      return undefined;
+    }
+
+    const fromAvailable = availableWorktrees.find(
+      (metadata) => normalizePath(metadata.path) === normalizedCurrentDirectory
+    );
+    if (fromAvailable) {
+      return fromAvailable;
+    }
+
+    for (const metadata of worktreeMap.values()) {
+      if (normalizePath(metadata.path) === normalizedCurrentDirectory) {
+        return metadata;
+      }
+    }
+
+    return undefined;
+  }, [availableWorktrees, normalizedCurrentDirectory, worktreeMap]);
+  const worktreeMetadata = React.useMemo(() => {
+    if (currentSessionId) {
+      return worktreeMap.get(currentSessionId) ?? inferredWorktreeMetadata;
+    }
+
+    if (newSessionDraft?.open) {
+      return inferredWorktreeMetadata;
+    }
+
+    return undefined;
+  }, [currentSessionId, inferredWorktreeMetadata, newSessionDraft?.open, worktreeMap]);
 
 
   const { profiles, globalIdentity, defaultGitIdentityId, loadProfiles, loadGlobalIdentity, loadDefaultGitIdentityId } =
