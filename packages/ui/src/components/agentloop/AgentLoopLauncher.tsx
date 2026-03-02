@@ -46,6 +46,7 @@ export const AgentLoopLauncher: React.FC<AgentLoopLauncherProps> = ({
   const [systemPrompt, setSystemPrompt] = React.useState('');
   const [selectedProviderId, setSelectedProviderId] = React.useState(prefill?.providerID ?? '');
   const [selectedModelId, setSelectedModelId] = React.useState(prefill?.modelID ?? '');
+  const [selectedVariant, setSelectedVariant] = React.useState<string | undefined>(undefined);
   const [selectedAgent, setSelectedAgent] = React.useState(prefill?.agent ?? '');
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [parseError, setParseError] = React.useState<string | null>(null);
@@ -62,16 +63,37 @@ export const AgentLoopLauncher: React.FC<AgentLoopLauncherProps> = ({
 
   const currentProviderId = useConfigStore((s) => s.currentProviderId);
   const currentModelId = useConfigStore((s) => s.currentModelId);
+  const providers = useConfigStore((s) => s.providers);
   const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
   const { startLoop, isCreating, error: loopError } = useAgentLoopStore();
+
+  // Compute available variants for the currently selected model
+  const availableVariants = React.useMemo(() => {
+    if (!selectedProviderId || !selectedModelId) return [];
+    const provider = providers.find((p) => p.id === selectedProviderId);
+    if (!provider) return [];
+    const model = provider.models.find((m) => m.id === selectedModelId) as
+      | { variants?: Record<string, unknown> }
+      | undefined;
+    return model?.variants ? Object.keys(model.variants) : [];
+  }, [providers, selectedProviderId, selectedModelId]);
   const startPlanningSession = useAgentLoopStore((s) => s.startPlanningSession);
   const setCurrentSession = useSessionStore((s) => s.setCurrentSession);
 
-  // Default to current model
+  // Default to current model, or pre-fill from workpackage file's saved config
   React.useEffect(() => {
     if (!selectedProviderId && currentProviderId) setSelectedProviderId(currentProviderId);
     if (!selectedModelId && currentModelId) setSelectedModelId(currentModelId);
   }, [currentProviderId, currentModelId, selectedProviderId, selectedModelId]);
+
+  // Pre-fill model config from workpackage file when one is loaded
+  React.useEffect(() => {
+    if (!workpackageFile?.modelConfig) return;
+    const cfg = workpackageFile.modelConfig;
+    if (cfg.providerID) setSelectedProviderId(cfg.providerID);
+    if (cfg.modelID) setSelectedModelId(cfg.modelID);
+    if (cfg.variant) setSelectedVariant(cfg.variant);
+  }, [workpackageFile]);
 
   // Load directory entries when entering or navigating the browser
   const loadBrowserDir = React.useCallback(async (path: string | null) => {
@@ -195,6 +217,7 @@ export const AgentLoopLauncher: React.FC<AgentLoopLauncherProps> = ({
         providerID: selectedProviderId,
         modelID: selectedModelId,
         agent: selectedAgent || undefined,
+        directory: currentDirectory || undefined,
       });
 
       if (sessionId) {
@@ -216,14 +239,22 @@ export const AgentLoopLauncher: React.FC<AgentLoopLauncherProps> = ({
       return;
     }
 
+    const filePath = workpackageFile.filePath;
+    if (!filePath) {
+      toast.error('Workpackage file path is required');
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       const loopId = await startLoop({
-        workpackageFile,
+        filePath,
         providerID: selectedProviderId,
         modelID: selectedModelId,
         agent: selectedAgent || undefined,
+        variant: selectedVariant || undefined,
         systemPrompt: systemPrompt.trim() || undefined,
+        directory: currentDirectory || undefined,
       });
 
       if (loopId) {
@@ -237,11 +268,12 @@ export const AgentLoopLauncher: React.FC<AgentLoopLauncherProps> = ({
     } finally {
       setIsSubmitting(false);
     }
-  }, [workpackageFile, selectedProviderId, selectedModelId, selectedAgent, systemPrompt, startLoop, setCurrentSession, onCreated]);
+  }, [workpackageFile, selectedProviderId, selectedModelId, selectedVariant, selectedAgent, systemPrompt, startLoop, setCurrentSession, onCreated]);
 
   const handleModelChange = React.useCallback((providerId: string, modelId: string) => {
     setSelectedProviderId(providerId);
     setSelectedModelId(modelId);
+    setSelectedVariant(undefined);
   }, []);
 
   return (
@@ -489,6 +521,41 @@ export const AgentLoopLauncher: React.FC<AgentLoopLauncherProps> = ({
                   onChange={handleModelChange}
                 />
               </div>
+
+              {availableVariants.length > 0 && (
+                <div className="space-y-2">
+                  <label className="typography-label text-foreground-muted">Thinking</label>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      className={cn(
+                        'rounded-md border px-3 py-1.5 typography-meta font-medium transition-colors',
+                        !selectedVariant
+                          ? 'border-primary/30 bg-primary/10 text-primary'
+                          : 'border-border text-foreground-muted hover:border-foreground/30',
+                      )}
+                      onClick={() => setSelectedVariant(undefined)}
+                    >
+                      Default
+                    </button>
+                    {availableVariants.map((v) => (
+                      <button
+                        key={v}
+                        type="button"
+                        className={cn(
+                          'rounded-md border px-3 py-1.5 typography-meta font-medium transition-colors',
+                          selectedVariant === v
+                            ? 'border-primary/30 bg-primary/10 text-primary'
+                            : 'border-border text-foreground-muted hover:border-foreground/30',
+                        )}
+                        onClick={() => setSelectedVariant(v)}
+                      >
+                        {v.charAt(0).toUpperCase() + v.slice(1)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className="space-y-2">
                 <label className="typography-label text-foreground-muted">Agent</label>

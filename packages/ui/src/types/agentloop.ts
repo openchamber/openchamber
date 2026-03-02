@@ -24,6 +24,20 @@ export interface Workpackage {
   error?: string;
   /** Number of times this workpackage has been retried due to stalling */
   retryCount?: number;
+  /** Timestamp when the task started executing */
+  startedAt?: number;
+  /** Timestamp when the task finished (completed, failed, or skipped) */
+  completedAt?: number;
+}
+
+/** Persisted model configuration stored in the workpackage file */
+export interface WorkpackageModelConfig {
+  /** Provider ID (e.g. "anthropic", "openai") */
+  providerID?: string;
+  /** Model ID (e.g. "claude-opus-4-6") */
+  modelID?: string;
+  /** Model variant (e.g. "thinking") */
+  variant?: string;
 }
 
 /** The JSON schema for a workpackage file */
@@ -32,6 +46,8 @@ export interface WorkpackageFile {
   name: string;
   /** List of tasks to process sequentially */
   workpackages: Workpackage[];
+  /** Persisted model configuration — saved when a loop is started */
+  modelConfig?: WorkpackageModelConfig;
   /**
    * Absolute path to the file on disk (set at runtime, not stored in JSON).
    * Used by implementation sessions to track and update task statuses.
@@ -44,8 +60,8 @@ export type AgentLoopStatus = 'idle' | 'running' | 'paused' | 'completed' | 'sto
 
 /** Parameters for starting an agent loop */
 export interface StartAgentLoopParams {
-  /** The workpackage file contents */
-  workpackageFile: WorkpackageFile;
+  /** Path to the workpackage file on disk */
+  filePath: string;
   /** Provider ID for the model */
   providerID: string;
   /** Model ID */
@@ -56,6 +72,8 @@ export interface StartAgentLoopParams {
   variant?: string;
   /** Optional system prompt prepended to each task */
   systemPrompt?: string;
+  /** Optional directory context */
+  directory?: string;
 }
 
 /** Represents an active agent loop instance */
@@ -86,6 +104,10 @@ export interface AgentLoopInstance {
   error?: string;
   /** Timestamp of the last observed activity (message part or status change) for the current workpackage */
   lastActivityAt?: number;
+  /** Project directory this loop runs in */
+  directory?: string;
+  /** All session IDs owned by this loop (root + task + subagent) for sidebar identification */
+  trackedSessionIds?: string[];
 }
 
 /**

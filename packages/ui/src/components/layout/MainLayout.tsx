@@ -22,9 +22,9 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useDeviceInfo } from '@/lib/device';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
-import { useAgentLoopWatcher } from '@/hooks/useAgentLoopWatcher';
+import { useAgentLoopPolling } from '@/hooks/useAgentLoopPolling';
+import { usePlanningSessionWatcher } from '@/hooks/usePlanningSessionWatcher';
 import { usePlanningSessionDetector } from '@/hooks/usePlanningSessionDetector';
-import { useLoopSessionDetector } from '@/hooks/useLoopSessionDetector';
 import { cn } from '@/lib/utils';
 
 import { ChatView, PlanView, GitView, DiffView, TerminalView, FilesView, SettingsView, SettingsWindow } from '@/components/views';
@@ -75,10 +75,10 @@ export const MainLayout: React.FC = () => {
         agentLoopLauncherPrefill,
     } = useUIStore();
 
-    // Watch for agent loop session completions and re-register [Plan]/[Loop] sessions after refresh
-    useAgentLoopWatcher();
+    // Poll backend for agent loop state and watch planning session completions
+    useAgentLoopPolling();
+    usePlanningSessionWatcher();
     usePlanningSessionDetector();
-    useLoopSessionDetector();
 
     const { isMobile } = useDeviceInfo();
     const effectiveDirectory = useEffectiveDirectory() ?? '';

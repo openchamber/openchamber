@@ -11,6 +11,8 @@ import crypto from 'crypto';
 import { createUiAuth } from './lib/opencode/ui-auth.js';
 import { startCloudflareTunnel, printTunnelWarning, checkCloudflaredAvailable } from './lib/cloudflare-tunnel.js';
 import { prepareNotificationLastMessage } from './lib/notifications/index.js';
+import { AgentLoopService } from './lib/agent-loop/service.js';
+import { registerAgentLoopRoutes } from './lib/agent-loop/routes.js';
 import {
   TERMINAL_INPUT_WS_MAX_PAYLOAD_BYTES,
   TERMINAL_INPUT_WS_PATH,
@@ -2800,6 +2802,7 @@ let openCodeBaseUrl = hmrState.openCodeBaseUrl ?? null;
 let isShuttingDown = hmrState.isShuttingDown;
 let signalsAttached = hmrState.signalsAttached;
 let openCodeWorkingDirectory = hmrState.openCodeWorkingDirectory;
+let agentLoopService = null;
 
 /**
  * Check if an existing OpenCode process is still alive and responding
@@ -3688,6 +3691,11 @@ const startGlobalEventWatcher = async () => {
                 });
               }
             }
+
+            // Forward to agent loop service for session completion detection
+            if (agentLoopService) {
+              try { agentLoopService.handleSseEvent(payload); } catch { /* ignore */ }
+            }
           }
         }
       } catch (error) {
@@ -4077,7 +4085,8 @@ function deriveSessionActivityTransitions(payload) {
 
   if (payload.type === 'message.part.updated' || payload.type === 'message.part.delta') {
     const info = payload.properties?.info;
-    const sessionId = info?.sessionID ?? info?.sessionId ?? payload.properties?.sessionID ?? payload.properties?.sessionId;
+    const part = payload.properties?.part;
+    const sessionId = info?.sessionID ?? info?.sessionId ?? part?.sessionID ?? part?.sessionId ?? payload.properties?.sessionID ?? payload.properties?.sessionId;
     const role = info?.role;
     const finish = info?.finish;
 
@@ -5533,6 +5542,12 @@ async function gracefulShutdown(options = {}) {
   console.log('Starting graceful shutdown...');
   const exitProcess = typeof options.exitProcess === 'boolean' ? options.exitProcess : exitOnShutdown;
 
+  // Shut down agent loop service
+  if (agentLoopService) {
+    agentLoopService.shutdown();
+    agentLoopService = null;
+  }
+
   stopGlobalEventWatcher();
 
   if (healthCheckInterval) {
@@ -6536,6 +6551,11 @@ async function main(options = {}) {
             next: update.next,
           });
         }
+      }
+
+      // Forward to agent loop service for session completion detection
+      if (agentLoopService) {
+        try { agentLoopService.handleSseEvent(payload); } catch { /* ignore */ }
       }
 
       const transitions = deriveSessionActivityTransitions(payload);
@@ -10242,6 +10262,43 @@ async function main(options = {}) {
     }
   });
 
+  // ── Agent Loop: routes ───────────────────────────────────────────────
+
+  // Always create the service — it doesn't connect at construction time;
+  // actual OpenCode API calls happen lazily when methods are invoked.
+  agentLoopService = new AgentLoopService({
+    buildOpenCodeUrl,
+    getOpenCodeAuthHeaders,
+    extractSessionStatusUpdate,
+    fsPromises,
+    resolveWorkspacePath,
+    isPathWithinRoot,
+    path,
+  });
+
+  // Register agent loop REST API routes.
+  // Pass a getter so routes always see the current service instance
+  // (survives HMR reloads and late initialization).
+  registerAgentLoopRoutes(app, () => agentLoopService, {
+    fsPromises,
+    resolveWorkspacePathFromContext,
+    isPathWithinRoot,
+    path,
+    validateWorkpackageFile: (data) => {
+      if (!data || typeof data !== 'object') return false;
+      if (typeof data.name !== 'string' || data.name.trim().length === 0) return false;
+      if (!Array.isArray(data.workpackages)) return false;
+      if (data.workpackages.length === 0) return false;
+      for (const wp of data.workpackages) {
+        if (!wp || typeof wp !== 'object') return false;
+        if (typeof wp.id !== 'string' || wp.id.trim().length === 0) return false;
+        if (typeof wp.title !== 'string' || wp.title.trim().length === 0) return false;
+        if (typeof wp.description !== 'string' || wp.description.trim().length === 0) return false;
+      }
+      return true;
+    },
+  });
+
   // Read file contents
   app.get('/api/fs/read', async (req, res) => {
     const filePath = typeof req.query.path === 'string' ? req.query.path.trim() : '';
@@ -11551,31 +11608,41 @@ async function main(options = {}) {
     return path.join(__dirname, '..', 'dist');
   })();
 
+    // Always register static middleware — express.static gracefully handles a
+    // missing directory (returns 404 per-file), so this works even when the
+    // build hasn't completed yet.  Once `dist/` appears the files are served
+    // immediately without a server restart.
     if (fs.existsSync(distPath)) {
       console.log(`Serving static files from ${distPath}`);
-      app.use(express.static(distPath, {
-        setHeaders(res, filePath) {
-          // Service workers should never be long-cached; iOS is especially sensitive.
-          if (typeof filePath === 'string' && filePath.endsWith(`${path.sep}sw.js`)) {
-            res.setHeader('Cache-Control', 'no-store');
-          }
-        },
-      }));
+    } else {
+      console.warn(`Warning: ${distPath} not found yet — static files will be served once the build completes`);
+    }
 
-      // Alias for PWA manifest (.webmanifest redirect → /site.webmanifest)
-      app.get('/manifest.webmanifest', (req, res) => {
-        res.redirect(301, '/site.webmanifest');
-      });
+    app.use(express.static(distPath, {
+      setHeaders(res, filePath) {
+        // Service workers should never be long-cached; iOS is especially sensitive.
+        if (typeof filePath === 'string' && filePath.endsWith(`${path.sep}sw.js`)) {
+          res.setHeader('Cache-Control', 'no-store');
+        }
+      },
+    }));
 
-    app.get(/^(?!\/api|.*\.(js|css|svg|png|jpg|jpeg|gif|ico|woff|woff2|ttf|eot|map)).*$/, (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+    // Alias for PWA manifest (.webmanifest redirect → /site.webmanifest)
+    app.get('/manifest.webmanifest', (req, res) => {
+      res.redirect(301, '/site.webmanifest');
     });
-  } else {
-    console.warn(`Warning: ${distPath} not found, static files will not be served`);
+
+    // SPA fallback — serve index.html for non-API/non-asset routes, but only
+    // once the build output actually exists.  Before that, return a helpful
+    // message so the developer knows the build is still in progress.
     app.get(/^(?!\/api|.*\.(js|css|svg|png|jpg|jpeg|gif|ico|woff|woff2|ttf|eot|map)).*$/, (req, res) => {
-      res.status(404).send('Static files not found. Please build the application first.');
+      const indexPath = path.join(distPath, 'index.html');
+      if (fs.existsSync(indexPath)) {
+        res.sendFile(indexPath);
+      } else {
+        res.status(503).send('Build in progress. Please wait for the build to complete and then refresh.');
+      }
     });
-  }
 
   let activePort = port;
 

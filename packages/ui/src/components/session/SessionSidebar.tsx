@@ -83,6 +83,7 @@ import { useSessionStore } from '@/stores/useSessionStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { useAgentLoopStore } from '@/stores/useAgentLoopStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import type { WorktreeMetadata } from '@/types/worktree';
 import { opencodeClient } from '@/lib/opencode/client';
@@ -908,6 +909,20 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const availableWorktreesByProject = useSessionStore((state) => state.availableWorktreesByProject);
   const getSessionsByDirectory = useSessionStore((state) => state.getSessionsByDirectory);
   const openNewSessionDraft = useSessionStore((state) => state.openNewSessionDraft);
+
+  // Agent loop: build a set of all session IDs owned by any loop for sidebar badge rendering
+  const agentLoopInstances = useAgentLoopStore((state) => state.loops);
+  const loopTrackedSessionIds = React.useMemo(() => {
+    const ids = new Set<string>();
+    for (const loop of agentLoopInstances.values()) {
+      if (loop.trackedSessionIds) {
+        for (const sid of loop.trackedSessionIds) {
+          ids.add(sid);
+        }
+      }
+    }
+    return ids;
+  }, [agentLoopInstances]);
 
   const tauriIpcAvailable = React.useMemo(() => isTauriShell(), []);
   const isDesktopShellRuntime = React.useMemo(() => isDesktopShell(), []);
@@ -2350,6 +2365,9 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                   {isPinnedSession ? (
                     <RiPushpinLine className="h-3 w-3 flex-shrink-0 text-primary" aria-label="Pinned session" />
                   ) : null}
+                  {loopTrackedSessionIds.has(session.id) ? (
+                    <RiLoopLeftLine className="h-3 w-3 flex-shrink-0 text-muted-foreground" aria-label="Agent loop session" />
+                  ) : null}
                   <div className="block min-w-0 flex-1 truncate typography-ui-label font-normal text-foreground">
                     {sessionTitle}
                   </div>
@@ -2614,6 +2632,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       removeSessionFromFolder,
       createFolderAndStartRename,
       notifyOnSubtasks,
+      loopTrackedSessionIds,
     ],
   );
 

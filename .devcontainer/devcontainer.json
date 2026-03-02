@@ -6,9 +6,7 @@
 
   "features": {
     // Bun package manager (1.3.5+ required by package.json)
-    "ghcr.io/devcontainers-community/features/bun:1": {
-      "version": "latest"
-    },
+    "ghcr.io/devcontainers-extra/features/bun:1": {},
     // Rust stable — required for Tauri desktop package
     "ghcr.io/devcontainers/features/rust:1": {
       "version": "stable",

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   RiAlertLine,
   RiCheckLine,
@@ -11,14 +11,60 @@ import {
   RiShieldLine,
   RiSkipForwardLine,
   RiStopLine,
+  RiTimeLine,
 } from '@remixicon/react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useAgentLoopStore } from '@/stores/useAgentLoopStore';
 import { useSessionStore } from '@/stores/useSessionStore';
+import { useConfigStore } from '@/stores/useConfigStore';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
 import { AgentSelector } from '@/components/multirun/AgentSelector';
 import type { AgentLoopInstance, AgentLoopStatus, WorkpackageStatus } from '@/types/agentloop';
+
+function formatElapsed(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`;
+  }
+  if (minutes > 0) {
+    return `${minutes}m ${seconds}s`;
+  }
+  return `${seconds}s`;
+}
+
+const ElapsedTime: React.FC<{ startedAt?: number; completedAt?: number; isRunning: boolean }> = ({
+  startedAt,
+  completedAt,
+  isRunning,
+}) => {
+  const [now, setNow] = useState(Date.now);
+
+  useEffect(() => {
+    if (!isRunning || !startedAt) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [isRunning, startedAt]);
+
+  if (!startedAt) return null;
+
+  const endTime = completedAt ?? (isRunning ? now : startedAt);
+  const elapsed = endTime - startedAt;
+  if (elapsed < 0) return null;
+
+  return (
+    <span
+      className="inline-flex items-center gap-0.5 typography-meta text-foreground-muted shrink-0 tabular-nums"
+      title={`Elapsed: ${formatElapsed(elapsed)}`}
+    >
+      <RiTimeLine className="h-3 w-3" />
+      {formatElapsed(elapsed)}
+    </span>
+  );
+};
 
 const statusConfig: Record<WorkpackageStatus, { icon: React.ElementType; label: string; color: string }> = {
   pending: { icon: RiHourglassLine, label: 'Pending', color: 'text-foreground-muted' },
@@ -114,29 +160,9 @@ export const AgentLoopStatusView: React.FC<AgentLoopStatusViewProps> = ({ loopId
         </div>
       )}
 
-      {/* Model & Agent configuration */}
+      {/* Model, Variant & Agent configuration */}
       {!isTerminal && (
-        <div className="border-b border-border px-4 py-3">
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="flex items-center gap-2">
-              <span className="typography-meta text-foreground-muted shrink-0">Model</span>
-              <ModelSelector
-                providerId={loop.providerID}
-                modelId={loop.modelID}
-                onChange={(providerID, modelID) => updateLoopConfig(loopId, { providerID, modelID })}
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="typography-meta text-foreground-muted shrink-0">Agent</span>
-              <AgentSelector
-                value={loop.agent ?? ''}
-                onChange={(agent) => updateLoopConfig(loopId, { agent: agent || undefined })}
-                className="max-w-50 typography-meta text-foreground"
-              />
-            </div>
-          </div>
-          <p className="typography-micro text-foreground-muted mt-1.5">Changes apply to new sessions only</p>
-        </div>
+        <LoopConfigSection loopId={loopId} loop={loop} updateLoopConfig={updateLoopConfig} />
       )}
 
       {/* Task list */}
@@ -203,6 +229,11 @@ export const AgentLoopStatusView: React.FC<AgentLoopStatusViewProps> = ({ loopId
                         {retryCount}
                       </span>
                     )}
+                    <ElapsedTime
+                      startedAt={wp.startedAt}
+                      completedAt={wp.completedAt}
+                      isRunning={isRunning}
+                    />
                   </div>
                   {wp.error && (
                     <p className="mt-1 typography-meta text-destructive truncate">
@@ -219,12 +250,90 @@ export const AgentLoopStatusView: React.FC<AgentLoopStatusViewProps> = ({ loopId
   );
 };
 
+interface LoopConfigSectionProps {
+  loopId: string;
+  loop: AgentLoopInstance;
+  updateLoopConfig: (loopId: string, patch: Pick<Partial<AgentLoopInstance>, 'providerID' | 'modelID' | 'agent' | 'variant'>) => Promise<void>;
+}
+
+const LoopConfigSection: React.FC<LoopConfigSectionProps> = ({ loopId, loop, updateLoopConfig }) => {
+  const providers = useConfigStore((s) => s.providers);
+
+  const availableVariants = React.useMemo(() => {
+    if (!loop.providerID || !loop.modelID) return [];
+    const provider = providers.find((p) => p.id === loop.providerID);
+    if (!provider) return [];
+    const model = provider.models.find((m) => m.id === loop.modelID) as
+      | { variants?: Record<string, unknown> }
+      | undefined;
+    return model?.variants ? Object.keys(model.variants) : [];
+  }, [providers, loop.providerID, loop.modelID]);
+
+  return (
+    <div className="border-b border-border px-4 py-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-2">
+          <span className="typography-meta text-foreground-muted shrink-0">Model</span>
+          <ModelSelector
+            providerId={loop.providerID}
+            modelId={loop.modelID}
+            onChange={(providerID, modelID) => updateLoopConfig(loopId, { providerID, modelID, variant: undefined })}
+          />
+        </div>
+        {availableVariants.length > 0 && (
+          <div className="flex items-center gap-2">
+            <span className="typography-meta text-foreground-muted shrink-0">Thinking</span>
+            <div className="flex gap-1">
+              <button
+                type="button"
+                className={cn(
+                  'rounded-md border px-2 py-0.5 typography-meta font-medium transition-colors',
+                  !loop.variant
+                    ? 'border-primary/30 bg-primary/10 text-primary'
+                    : 'border-border text-foreground-muted hover:border-foreground/30',
+                )}
+                onClick={() => updateLoopConfig(loopId, { variant: '' })}
+              >
+                Default
+              </button>
+              {availableVariants.map((v) => (
+                <button
+                  key={v}
+                  type="button"
+                  className={cn(
+                    'rounded-md border px-2 py-0.5 typography-meta font-medium transition-colors',
+                    loop.variant === v
+                      ? 'border-primary/30 bg-primary/10 text-primary'
+                      : 'border-border text-foreground-muted hover:border-foreground/30',
+                  )}
+                  onClick={() => updateLoopConfig(loopId, { variant: v })}
+                >
+                  {v.charAt(0).toUpperCase() + v.slice(1)}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        <div className="flex items-center gap-2">
+          <span className="typography-meta text-foreground-muted shrink-0">Agent</span>
+          <AgentSelector
+            value={loop.agent ?? ''}
+            onChange={(agent) => updateLoopConfig(loopId, { agent: agent || undefined })}
+            className="max-w-50 typography-meta text-foreground"
+          />
+        </div>
+      </div>
+      <p className="typography-micro text-foreground-muted mt-1.5">Changes apply to new sessions only</p>
+    </div>
+  );
+};
+
 interface LoopControlsProps {
   loop: AgentLoopInstance;
-  onPause: (id: string) => void;
-  onResume: (id: string) => void;
-  onSkip: (id: string) => void;
-  onStop: (id: string) => void;
+  onPause: (id: string) => void | Promise<void>;
+  onResume: (id: string) => void | Promise<void>;
+  onSkip: (id: string) => void | Promise<void>;
+  onStop: (id: string) => void | Promise<void>;
 }
 
 const LoopControls: React.FC<LoopControlsProps> = ({
