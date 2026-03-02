@@ -12650,7 +12650,7 @@ async function main(options = {}) {
     const handleUpgrade = async () => {
       try {
         if (uiAuthController?.enabled) {
-          const sessionToken = uiAuthController?.ensureSessionToken?.(req, null);
+          const sessionToken = await uiAuthController?.ensureSessionToken?.(req, null);
           if (!sessionToken) {
             rejectWebSocketUpgrade(socket, 401, 'UI authentication required');
             return;
