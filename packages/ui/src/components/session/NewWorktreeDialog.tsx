@@ -37,6 +37,7 @@ import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { generateBranchSlug } from '@/lib/git/branchNameGenerator';
 import { getGitBranches } from '@/lib/gitApi';
 import { GitHubIntegrationDialog } from './GitHubIntegrationDialog';
+import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import type {
   GitBranch,
   GitHubIssue,
@@ -465,32 +466,19 @@ export function NewWorktreeDialog({
                 New Worktree
               </DialogTitle>
               
-              {/* Mode Selection - after title */}
-              <div className="flex items-center gap-1 p-1 bg-muted rounded-lg">
-                <button
-                  onClick={() => handleModeChange('new-branch')}
-                  className={cn(
-                    'flex items-center gap-1.5 px-3 py-1 rounded-md typography-ui-label transition-all',
-                    mode === 'new-branch'
-                      ? 'bg-background text-foreground shadow-sm'
-                      : 'text-muted-foreground hover:text-foreground hover:bg-muted-foreground/5'
-                  )}
-                >
-                  <RiGitBranchLine className="h-3.5 w-3.5" />
-                  New Branch
-                </button>
-                <button
-                  onClick={() => handleModeChange('existing-branch')}
-                  className={cn(
-                    'flex items-center gap-1.5 px-3 py-1 rounded-md typography-ui-label transition-all',
-                    mode === 'existing-branch'
-                      ? 'bg-background text-foreground shadow-sm'
-                      : 'text-muted-foreground hover:text-foreground hover:bg-muted-foreground/5'
-                  )}
-                >
-                  <RiGitRepositoryLine className="h-3.5 w-3.5" />
-                  Existing Branch
-                </button>
+              {/* Mode Selection - using SortableTabsStrip */}
+              <div className="w-[280px] shrink-0">
+                <SortableTabsStrip
+                  items={[
+                    { id: 'new-branch', label: 'New Branch', icon: <RiGitBranchLine className="h-3.5 w-3.5" /> },
+                    { id: 'existing-branch', label: 'Existing Branch', icon: <RiGitRepositoryLine className="h-3.5 w-3.5" /> },
+                  ]}
+                  activeId={mode}
+                  onSelect={(id) => handleModeChange(id as Mode)}
+                  variant="active-pill"
+                  layoutMode="fit"
+                  className="w-full"
+                />
               </div>
             </div>
           </DialogHeader>
@@ -547,7 +535,7 @@ export function NewWorktreeDialog({
                       variant="outline"
                       size="sm"
                       onClick={() => setGithubDialogOpen(true)}
-                      className="gap-1.5"
+                      className="gap-1.5 h-7"
                     >
                       <RiGithubLine className="size-4 text-status-success" />
                       {newBranchState.linkedIssue || newBranchState.linkedPr ? 'Change' : 'GitHub'}

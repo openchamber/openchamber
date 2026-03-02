@@ -25,6 +25,7 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { validateWorktreeCreate } from '@/lib/worktrees/worktreeManager';
+import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import type {
   GitHubIssue,
   GitHubIssueSummary,
@@ -297,38 +298,21 @@ export function GitHubIntegrationDialog({
               Select from GitHub
             </DialogTitle>
             
-            {/* Tabs - after title */}
-            <div className="flex items-center gap-1 p-1 bg-muted rounded-lg">
-              <button
-                onClick={() => {
-                  setActiveTab('issues');
+            {/* Tabs - using SortableTabsStrip */}
+            <div className="w-[220px]">
+              <SortableTabsStrip
+                items={[
+                  { id: 'issues', label: 'Issues', icon: <RiGitBranchLine className="h-3.5 w-3.5" /> },
+                  { id: 'prs', label: 'Pull Requests', icon: <RiGitPullRequestLine className="h-3.5 w-3.5" /> },
+                ]}
+                activeId={activeTab}
+                onSelect={(id) => {
+                  setActiveTab(id as GitHubTab);
                   setSearchQuery('');
                 }}
-                className={cn(
-                  'flex items-center gap-1.5 px-3 py-1 rounded-md typography-ui-label transition-all',
-                  activeTab === 'issues'
-                    ? 'bg-background text-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-muted-foreground/5'
-                )}
-              >
-                <RiGitBranchLine className="h-3.5 w-3.5" />
-                Issues
-              </button>
-              <button
-                onClick={() => {
-                  setActiveTab('prs');
-                  setSearchQuery('');
-                }}
-                className={cn(
-                  'flex items-center gap-1.5 px-3 py-1 rounded-md typography-ui-label transition-all',
-                  activeTab === 'prs'
-                    ? 'bg-background text-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-muted-foreground/5'
-                )}
-              >
-                <RiGitPullRequestLine className="h-3.5 w-3.5" />
-                Pull Requests
-              </button>
+                variant="active-pill"
+                layoutMode="fit"
+              />
             </div>
           </div>
           
