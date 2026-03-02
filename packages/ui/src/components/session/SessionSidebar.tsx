@@ -88,7 +88,7 @@ import type { WorktreeMetadata } from '@/types/worktree';
 import { opencodeClient } from '@/lib/opencode/client';
 import { checkIsGitRepository } from '@/lib/gitApi';
 import { getSafeStorage } from '@/stores/utils/safeStorage';
-import { createWorktreeOnly, createWorktreeSession } from '@/lib/worktreeSessionCreator';
+import { createWorktreeSession } from '@/lib/worktreeSessionCreator';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { useGitStore } from '@/stores/useGitStore';
 import { useDeviceInfo } from '@/lib/device';
@@ -96,6 +96,7 @@ import { isVSCodeRuntime } from '@/lib/desktop';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { GitHubIssuePickerDialog } from './GitHubIssuePickerDialog';
 import { GitHubPullRequestPickerDialog } from './GitHubPullRequestPickerDialog';
+import { NewWorktreeDialog } from './NewWorktreeDialog';
 import { ProjectNotesTodoPanel } from './ProjectNotesTodoPanel';
 import { BranchPickerDialog } from './BranchPickerDialog';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
@@ -763,6 +764,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const [issuePickerOpen, setIssuePickerOpen] = React.useState(false);
   const [pullRequestPickerOpen, setPullRequestPickerOpen] = React.useState(false);
   const [isBranchPickerOpen, setIsBranchPickerOpen] = React.useState(false);
+  const [newWorktreeDialogOpen, setNewWorktreeDialogOpen] = React.useState(false);
   const [projectNotesPanelOpen, setProjectNotesPanelOpen] = React.useState(false);
   const [stuckProjectHeaders, setStuckProjectHeaders] = React.useState<Set<string>>(new Set());
   const [openMenuSessionId, setOpenMenuSessionId] = React.useState<string | null>(null);
@@ -3167,15 +3169,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                       if (activeProjectForHeader.id !== activeProjectId) {
                         setActiveProjectIdOnly(activeProjectForHeader.id);
                       }
-                      const newWorktreePath = await createWorktreeOnly();
-                      if (!newWorktreePath) {
-                        return;
-                      }
-                      setActiveMainTab('chat');
-                      if (mobileVariant) {
-                        setSessionSwitcherOpen(false);
-                      }
-                      openNewSessionDraft({ directoryOverride: newWorktreePath });
+                      setNewWorktreeDialogOpen(true);
                     }}
                     className={headerActionButtonClass}
                     aria-label="New worktree"
@@ -3485,6 +3479,18 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         open={isBranchPickerOpen}
         onOpenChange={setIsBranchPickerOpen}
         project={branchPickerProject}
+      />
+
+      <NewWorktreeDialog
+        open={newWorktreeDialogOpen}
+        onOpenChange={setNewWorktreeDialogOpen}
+        onWorktreeCreated={(worktreePath) => {
+          setActiveMainTab('chat');
+          if (mobileVariant) {
+            setSessionSwitcherOpen(false);
+          }
+          openNewSessionDraft({ directoryOverride: worktreePath });
+        }}
       />
 
       {useMobileNotesPanel ? (
