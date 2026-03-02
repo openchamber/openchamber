@@ -295,6 +295,49 @@ export const useKeyboardShortcuts = () => {
         return;
       }
 
+      // Alt+F / Alt+Shift+F: Cycle through starred models (same gating as Shift+M)
+      if (
+        eventMatchesShortcut(e, combo('cycle_favorite_model_forward')) ||
+        eventMatchesShortcut(e, combo('cycle_favorite_model_backward'))
+      ) {
+        const {
+          isSettingsDialogOpen,
+          isCommandPaletteOpen,
+          isHelpDialogOpen,
+          isSessionSwitcherOpen,
+          isAboutDialogOpen,
+          activeMainTab,
+          favoriteModels,
+          addRecentModel,
+        } = useUIStore.getState();
+
+        if (isSettingsDialogOpen) {
+          return;
+        }
+
+        const hasOverlay = isCommandPaletteOpen || isHelpDialogOpen || isSessionSwitcherOpen || isAboutDialogOpen;
+        const isChatActive = activeMainTab === 'chat';
+
+        if (hasOverlay || !isChatActive || favoriteModels.length === 0) {
+          return;
+        }
+
+        e.preventDefault();
+
+        const { currentProviderId, currentModelId, setProvider, setModel } = useConfigStore.getState();
+        const len = favoriteModels.length;
+        const currentIdx = favoriteModels.findIndex(
+          (f) => f.providerID === currentProviderId && f.modelID === currentModelId,
+        );
+        const delta = eventMatchesShortcut(e, combo('cycle_favorite_model_forward')) ? 1 : -1;
+        const next = favoriteModels[(currentIdx + delta + len) % len];
+
+        setProvider(next.providerID);
+        setModel(next.modelID);
+        addRecentModel(next.providerID, next.modelID);
+        return;
+      }
+
       if (eventMatchesShortcut(e, combo('expand_input'))) {
         if (isMobile) {
           return;
