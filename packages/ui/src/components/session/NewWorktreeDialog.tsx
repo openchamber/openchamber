@@ -684,7 +684,7 @@ export function NewWorktreeDialog({
                       className="gap-1.5 h-7"
                     >
                       <RiGithubLine className="size-4 text-status-success" />
-                      {newBranchState.linkedIssue || newBranchState.linkedPr ? 'Change' : 'GitHub'}
+                        {newBranchState.linkedIssue || newBranchState.linkedPr ? 'Change' : 'Start from GitHub Issue/PR'}
                     </Button>
                   )}
                 </div>
@@ -1031,7 +1031,7 @@ export function NewWorktreeDialog({
                         className="gap-1.5 h-7"
                       >
                         <RiGithubLine className="size-4 text-status-success" />
-                        {newBranchState.linkedIssue || newBranchState.linkedPr ? 'Change' : 'GitHub'}
+                      {newBranchState.linkedIssue || newBranchState.linkedPr ? 'Change' : 'Start from GitHub Issue/PR'}
                       </Button>
                     )}
                   </div>
