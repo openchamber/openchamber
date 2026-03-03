@@ -3,6 +3,7 @@ import { cn } from '@/lib/utils';
 import type { Part } from '@opencode-ai/sdk/v2';
 import type { AgentMentionInfo } from '../types';
 import { SimpleMarkdownRenderer } from '../../MarkdownRenderer';
+import { useUIStore } from '@/stores/useUIStore';
 
 type PartWithText = Part & { text?: string; content?: string; value?: string };
 
@@ -18,6 +19,10 @@ const buildMentionUrl = (name: string): string => {
     return `https://opencode.ai/docs/agents/#${encoded}`;
 };
 
+const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' => {
+    return mode === 'markdown' ? 'markdown' : 'plain';
+};
+
 const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMention }) => {
     const CLAMP_LINES = 2;
     const partWithText = part as PartWithText;
@@ -27,6 +32,8 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
     const [isExpanded, setIsExpanded] = React.useState(false);
     const [isTruncated, setIsTruncated] = React.useState(false);
     const [collapseZoneHeight, setCollapseZoneHeight] = React.useState<number>(0);
+    const userMessageRenderingMode = useUIStore((state) => state.userMessageRenderingMode);
+    const normalizedRenderingMode = normalizeUserMessageRenderingMode(userMessageRenderingMode);
     const textRef = React.useRef<HTMLDivElement>(null);
 
     const hasActiveSelectionInElement = React.useCallback((element: HTMLElement): boolean => {
@@ -91,13 +98,38 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
         }
     }, [collapseZoneHeight, hasActiveSelectionInElement, isExpanded, isTruncated]);
 
-    const processedContent = React.useMemo(() => {
+    const processedMarkdownContent = React.useMemo(() => {
         if (!agentMention?.token || !textContent.includes(agentMention.token)) {
             return textContent;
         }
         
         const mentionHtml = `<a href="${buildMentionUrl(agentMention.name)}" class="text-primary hover:underline" target="_blank" rel="noopener noreferrer">${agentMention.token}</a>`;
         return textContent.replace(agentMention.token, mentionHtml);
+    }, [agentMention, textContent]);
+
+    const plainTextContent = React.useMemo(() => {
+        if (!agentMention?.token || !textContent.includes(agentMention.token)) {
+            return textContent;
+        }
+
+        const idx = textContent.indexOf(agentMention.token);
+        const before = textContent.slice(0, idx);
+        const after = textContent.slice(idx + agentMention.token.length);
+        return (
+            <>
+                {before}
+                <a
+                    href={buildMentionUrl(agentMention.name)}
+                    className="text-primary hover:underline"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(event) => event.stopPropagation()}
+                >
+                    {agentMention.token}
+                </a>
+                {after}
+            </>
+        );
     }, [agentMention, textContent]);
 
     if (!textContent || textContent.trim().length === 0) {
@@ -109,16 +141,21 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
             <div
                 className={cn(
                     "break-words font-sans typography-markdown",
+                    normalizedRenderingMode === 'plain' && 'whitespace-pre-wrap',
                     !isExpanded && "line-clamp-2",
                     isTruncated && !isExpanded && "cursor-pointer"
                 )}
                 ref={textRef}
                 onClick={handleClick}
             >
-                <SimpleMarkdownRenderer 
-                    content={processedContent} 
-                    disableLinkSafety 
-                />
+                {normalizedRenderingMode === 'markdown' ? (
+                    <SimpleMarkdownRenderer 
+                        content={processedMarkdownContent} 
+                        disableLinkSafety 
+                    />
+                ) : (
+                    plainTextContent
+                )}
             </div>
         </div>
     );

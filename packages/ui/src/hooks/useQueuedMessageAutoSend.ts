@@ -101,7 +101,8 @@ const resolveSessionSendConfig = (sessionId: string) => {
   };
 };
 
-export function useQueuedMessageAutoSend() {
+export function useQueuedMessageAutoSend(options?: { enabled?: boolean }) {
+  const enabled = options?.enabled ?? true;
   const queuedMessages = useMessageQueueStore((state) => state.queuedMessages);
   const sessionStatus = useSessionStore((state) => state.sessionStatus);
 
@@ -109,6 +110,10 @@ export function useQueuedMessageAutoSend() {
   const previousStatusRef = React.useRef<Map<string, SessionStatusType>>(new Map());
 
   React.useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+
     const dispatchSessionQueue = async (sessionId: string, queueSnapshot: QueuedMessage[]) => {
       if (queueSnapshot.length === 0) {
         return;
@@ -187,6 +192,5 @@ export function useQueuedMessageAutoSend() {
     });
 
     previousStatusRef.current = nextStatusMap;
-  }, [queuedMessages, sessionStatus]);
+  }, [enabled, queuedMessages, sessionStatus]);
 }
-

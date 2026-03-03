@@ -1,6 +1,6 @@
 import React from 'react';
 import { Streamdown } from 'streamdown';
-import { code } from '@streamdown/code';
+import { createCodePlugin } from '@streamdown/code';
 import { renderMermaidASCII, renderMermaidSVG } from 'beautiful-mermaid';
 import 'streamdown/styles.css';
 import { FadeInOnReveal } from './message/FadeInOnReveal';
@@ -122,6 +122,20 @@ const useMarkdownShikiThemes = (): readonly [string | object, string | object] =
   }, [getThemes, isVSCode]);
 
   return isVSCode ? themes : fallbackThemes;
+};
+
+type StreamdownCodeThemes = NonNullable<Parameters<typeof createCodePlugin>[0]>['themes'];
+
+const useStreamdownPlugins = (shikiThemes: readonly [string | object, string | object]) => {
+  return React.useMemo(
+    () => ({
+      code: createCodePlugin({
+        // Streamdown code plugin runtime accepts theme objects, but current type only models bundled theme names.
+        themes: shikiThemes as unknown as StreamdownCodeThemes,
+      }),
+    }),
+    [shikiThemes],
+  );
 };
 
 const useCurrentMermaidTheme = () => {
@@ -543,9 +557,6 @@ const MermaidBlock: React.FC<{ source: string; mode: 'svg' | 'ascii' }> = ({ sou
 };
 
 const CodeBlockWrapper: React.FC<CodeBlockWrapperProps> = ({ children, className, style, ...props }) => {
-  const [copied, setCopied] = React.useState(false);
-  const codeRef = React.useRef<HTMLDivElement>(null);
-  const { isMobile } = useDeviceInfo();
   const mermaidInfo = getMermaidInfo(children);
   const mermaidRenderingMode = useUIStore((state) => state.mermaidRenderingMode);
   const codeChild = React.useMemo(
@@ -583,7 +594,6 @@ const CodeBlockWrapper: React.FC<CodeBlockWrapperProps> = ({ children, className
     const bg = normalizeDeclarationString((style as React.CSSProperties).backgroundColor);
     if (bg.value) {
       next.backgroundColor = bg.value;
-      (next as Record<string, string>)['--shiki-light-bg'] = bg.value;
     }
     for (const [k, v] of Object.entries(bg.vars)) {
       (next as Record<string, string>)[k] = v;
@@ -592,7 +602,6 @@ const CodeBlockWrapper: React.FC<CodeBlockWrapperProps> = ({ children, className
     const fg = normalizeDeclarationString((style as React.CSSProperties).color);
     if (fg.value) {
       next.color = fg.value;
-      (next as Record<string, string>)['--shiki-light'] = fg.value;
     }
     for (const [k, v] of Object.entries(fg.vars)) {
       (next as Record<string, string>)[k] = v;
@@ -605,49 +614,14 @@ const CodeBlockWrapper: React.FC<CodeBlockWrapperProps> = ({ children, className
     return <MermaidBlock source={mermaidInfo.source} mode={mermaidRenderingMode} />;
   }
 
-  const getCodeContent = (): string => {
-    if (!codeRef.current) return '';
-    const codeEl = codeRef.current.querySelector('code');
-
-    return codeEl?.innerText || '';
-  };
-
-  const handleCopy = async () => {
-    const code = getCodeContent();
-    if (!code) return;
-    const result = await copyTextToClipboard(code);
-    if (result.ok) {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } else {
-      console.error('Failed to copy:', result.error);
-    }
-  };
-
   return (
-    <div className="group relative" ref={codeRef}>
-      <pre
-        {...props}
-        className={cn(className)}
-        style={normalizedStyle}
-      >
-        {codeChild}
-      </pre>
-      <div
-        className={cn(
-          'absolute top-1 right-2 transition-opacity',
-          isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
-        )}
-      >
-        <button
-          onClick={handleCopy}
-          className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
-          title="Copy"
-        >
-          {copied ? <RiCheckLine className="size-3.5" /> : <RiFileCopyLine className="size-3.5" />}
-        </button>
-      </div>
-    </div>
+    <pre
+      {...props}
+      className={cn(className, 'w-full min-w-full')}
+      style={normalizedStyle}
+    >
+      {codeChild}
+    </pre>
   );
 };
 
@@ -656,12 +630,8 @@ const streamdownComponents = {
   table: TableWrapper,
 };
 
-const streamdownPlugins = {
-  code,
-};
-
 const streamdownControls = {
-  code: false,
+  code: true,
   table: false,
 };
 
@@ -821,6 +791,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
   useMermaidInlineInteractions({ containerRef: streamdownContainerRef, mermaidBlocks, onShowPopup });
 
   const shikiThemes = useMarkdownShikiThemes();
+  const streamdownPlugins = useStreamdownPlugins(shikiThemes);
   const currentMermaidTheme = useCurrentMermaidTheme();
   const componentKey = `markdown-${part?.id ? `part-${part.id}` : `message-${messageId}`}`;
 
@@ -829,7 +800,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
     : 'streamdown-content';
 
   const markdownContent = (
-    <div className={cn('break-words', className)} ref={streamdownContainerRef}>
+    <div className={cn('break-words w-full min-w-0', className)} ref={streamdownContainerRef}>
       <Streamdown
          key={`streamdown-${componentKey}-${currentMermaidTheme.metadata.id}:${currentMermaidTheme.metadata.variant}`}
          mode={isStreaming ? 'streaming' : 'static'}
@@ -838,7 +809,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
          controls={streamdownControls}
          plugins={streamdownPlugins}
          components={streamdownComponents}
-       >
+        >
         {content}
       </Streamdown>
     </div>
@@ -887,6 +858,7 @@ export const SimpleMarkdownRenderer: React.FC<{
   });
 
   const shikiThemes = useMarkdownShikiThemes();
+  const streamdownPlugins = useStreamdownPlugins(shikiThemes);
   const currentMermaidTheme = useCurrentMermaidTheme();
 
   const streamdownClassName = variant === 'tool'
@@ -894,7 +866,7 @@ export const SimpleMarkdownRenderer: React.FC<{
     : 'streamdown-content';
 
   return (
-    <div className={cn('break-words', className)} ref={streamdownContainerRef}>
+    <div className={cn('break-words w-full min-w-0', className)} ref={streamdownContainerRef}>
       <Streamdown
         key={`streamdown-simple-${currentMermaidTheme.metadata.id}:${currentMermaidTheme.metadata.variant}`}
         mode="static"

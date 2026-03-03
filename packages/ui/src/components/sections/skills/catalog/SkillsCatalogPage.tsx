@@ -3,7 +3,7 @@ import React from 'react';
 import { ButtonSmall } from '@/components/ui/button-small';
 import { Input } from '@/components/ui/input';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
-import { AnimatedTabs } from '@/components/ui/animated-tabs';
+import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import {
   Dialog,
   DialogContent,
@@ -152,15 +152,20 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
         <div className="mb-4">
           {showModeTabs && (
             <div className="mb-4">
-              <AnimatedTabs
-                tabs={[
-                  { value: 'manual', label: 'Manual' },
-                  { value: 'external', label: 'External' },
-                ]}
-                value={mode}
-                onValueChange={onModeChange}
-                animate={false}
-              />
+              <div className="h-10">
+                <SortableTabsStrip
+                  items={[
+                    { id: 'manual', label: 'Manual' },
+                    { id: 'external', label: 'External' },
+                  ]}
+                  activeId={mode}
+                  onSelect={(next) => onModeChange(next as 'manual' | 'external')}
+                  layoutMode="fit"
+                  variant="animated"
+                  animateActivePill={false}
+                  className="h-full"
+                />
+              </div>
             </div>
           )}
           <h2 className="typography-ui-header font-semibold text-foreground px-1">Skills Catalog</h2>

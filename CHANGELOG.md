@@ -4,6 +4,33 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.8.3] - 2026-03-02
+
+- Chat: added user-message display controls for plain-text rendering and sticky headers, so you can tune readability to match your preferences.
+- Chat/UI: overhauled the context panel with reusable tabs and embedded session chat (_beta_), making parallel context work easier without losing place.
+- Chat: improved code block presentation with cleaner action alignment, restored horizontal scrolling, and polished themed highlighting across chat messages and tool output (thanks to @nelsonPires5).
+- Diff: added quick open-in-editor actions from diff views that jump to the first changed line, so it is faster to move from review to edits.
+- Git: refined Git sidebar tab behavior and spacing, plus bulk-revert with confirmations for easier cleanup.
+- Git: fixed commit staging edge cases by filtering stale deleted paths before staging, reducing pathspec commit failures.
+- Git/Worktrees: restored branch rename/edit controls in draft sessions when working in a worktree directory, so branch actions stay available earlier.
+- Chat: model picker now supports collapsible provider groups and remembers expanded state between sessions.
+- Settings: reorganized chat display settings into a more compact two-column layout, so more new options are easier to navigate.
+- Mobile/UI: fixed session-title overflow in compact headers so running/unread indicators and actions remain visible (thanks to @iamhenry).
+
+
+## [1.8.2] - 2026-03-01
+
+- Updates: hardened the self-update flow with safer release handling and fallback behavior, reducing failed or stuck updates.
+- Chat: added a new "Share as image" action so you can quickly export and share important messages (thanks to @Jovines).
+- Chat: improved message readability with cleaner tool/reasoning rendering and less noisy activity timing in busy conversations (thanks to @nelsonPires5).
+- Desktop/Chat: permission toasts now include session context and a clearer permission preview, making approvals more accessible outside of a session (thanks to @nelsonPires5).
+- VSCode: fixed live streaming edge cases for event endpoints with query/trailing-slash variants, improving real-time updates in chat, session editor, and agent-manager views.
+- Reliability: improved event-stream/session visibility handling when the app is hidden or restored, reducing stale activity states and missed updates.
+- Windows: fixed CLI/runtime path and spawn edge cases to reduce startup and command failures on Windows (thanks to @plfavreau).
+- Notifications/Voice: consolidated TTS and summarization service wiring for steadier text-to-speech and summary flows (thanks to @nelsonPires5).
+- Deployment: fixed Docker build/runtime issues for more reliable containerized setups (thanks to @nzlov).
+
+
 ## [1.8.1] - 2026-02-28
 
 - Web/Auth: fixed an issue where non-tunnel browser sessions could incorrectly show a tunnel-only lock screen; normal auth flow now appears unless a tunnel is actually active.

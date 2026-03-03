@@ -305,13 +305,20 @@ export const SidebarFilesTree: React.FC = () => {
   const inFlightDirsRef = React.useRef<Set<string>>(new Set());
 
   const EMPTY_PATHS: string[] = React.useMemo(() => [], []);
+  const EMPTY_CONTEXT_TABS: Array<{ mode: string; targetPath: string | null }> = React.useMemo(() => [], []);
   const expandedPaths = useFilesViewTabsStore((state) => (root ? (state.byRoot[root]?.expandedPaths ?? EMPTY_PATHS) : EMPTY_PATHS));
-  const openPaths = useFilesViewTabsStore((state) => (root ? (state.byRoot[root]?.openPaths ?? EMPTY_PATHS) : EMPTY_PATHS));
   const selectedPath = useFilesViewTabsStore((state) => (root ? (state.byRoot[root]?.selectedPath ?? null) : null));
   const setSelectedPath = useFilesViewTabsStore((state) => state.setSelectedPath);
   const addOpenPath = useFilesViewTabsStore((state) => state.addOpenPath);
   const removeOpenPathsByPrefix = useFilesViewTabsStore((state) => state.removeOpenPathsByPrefix);
   const toggleExpandedPath = useFilesViewTabsStore((state) => state.toggleExpandedPath);
+  const contextTabs = useUIStore((state) => (root ? (state.contextPanelByDirectory[root]?.tabs ?? EMPTY_CONTEXT_TABS) : EMPTY_CONTEXT_TABS));
+  const openContextFilePaths = React.useMemo(() => new Set(
+    contextTabs
+      .map((tab) => (tab.mode === 'file' ? tab.targetPath : null))
+      .filter((targetPath): targetPath is string => typeof targetPath === 'string' && targetPath.length > 0)
+      .map((targetPath) => normalizePath(targetPath))
+  ), [contextTabs]);
 
   // Context menu state
   const [contextMenuPath, setContextMenuPath] = React.useState<string | null>(null);
@@ -552,7 +559,7 @@ export const SidebarFilesTree: React.FC = () => {
   // --- Git status helpers (matching FilesView) ---
 
   const getFileStatus = React.useCallback((path: string): FileStatus | null => {
-    if (openPaths.includes(path)) return 'open';
+    if (openContextFilePaths.has(path)) return 'open';
 
     if (gitStatus?.files) {
       const relative = path.startsWith(root + '/') ? path.slice(root.length + 1) : path;
@@ -564,7 +571,7 @@ export const SidebarFilesTree: React.FC = () => {
       }
     }
     return null;
-  }, [openPaths, gitStatus, root]);
+  }, [openContextFilePaths, gitStatus, root]);
 
   const getFolderBadge = React.useCallback((dirPath: string): { modified: number; added: number } | null => {
     if (!gitStatus?.files) return null;

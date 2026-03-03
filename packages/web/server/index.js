@@ -1549,6 +1549,19 @@ const resolveProjectDirectory = async (req) => {
   return { directory: validated.directory, error: null };
 };
 
+const isUnsafeSkillRelativePath = (value) => {
+  if (typeof value !== 'string' || value.length === 0) {
+    return true;
+  }
+
+  const normalized = value.replace(/\\/g, '/');
+  if (path.posix.isAbsolute(normalized)) {
+    return true;
+  }
+
+  return normalized.split('/').some((segment) => segment === '..');
+};
+
 const resolveOptionalProjectDirectory = async (req) => {
   const headerDirectory = typeof req.get === 'function' ? req.get('x-opencode-directory') : null;
   const queryDirectory = Array.isArray(req.query?.directory)
@@ -1970,6 +1983,15 @@ const sanitizeSettingsUpdate = (payload) => {
     if (mode === 'collapsed' || mode === 'activity' || mode === 'detailed') {
       result.toolCallExpansion = mode;
     }
+  }
+  if (typeof candidate.userMessageRenderingMode === 'string') {
+    const mode = candidate.userMessageRenderingMode.trim();
+    if (mode === 'markdown' || mode === 'plain') {
+      result.userMessageRenderingMode = mode;
+    }
+  }
+  if (typeof candidate.stickyUserHeader === 'boolean') {
+    result.stickyUserHeader = candidate.stickyUserHeader;
   }
   if (typeof candidate.fontSize === 'number' && Number.isFinite(candidate.fontSize)) {
     result.fontSize = Math.max(50, Math.min(200, Math.round(candidate.fontSize)));
@@ -3367,27 +3389,30 @@ const ENV_CONFIGURED_OPENCODE_PORT = (() => {
 const ENV_CONFIGURED_OPENCODE_HOST = (() => {
   const raw = process.env.OPENCODE_HOST?.trim();
   if (!raw) return null;
+
+  const warnInvalidHost = (reason) => {
+    console.warn(`[config] Ignoring OPENCODE_HOST=${JSON.stringify(raw)}: ${reason}`);
+  };
+
   let url;
   try {
     url = new URL(raw);
   } catch {
-    console.error(`[fatal] OPENCODE_HOST is not a valid URL: ${JSON.stringify(raw)}`);
-    process.exit(1);
+    warnInvalidHost('not a valid URL');
+    return null;
   }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    console.error(`[fatal] OPENCODE_HOST must use http or https scheme, got: ${JSON.stringify(url.protocol)}`);
-    process.exit(1);
+    warnInvalidHost(`must use http or https scheme (got ${JSON.stringify(url.protocol)})`);
+    return null;
   }
   const port = parseInt(url.port, 10);
   if (!Number.isFinite(port) || port <= 0) {
-    console.error(`[fatal] OPENCODE_HOST must include an explicit port (e.g. http://hostname:4096), got: ${JSON.stringify(raw)}`);
-    process.exit(1);
+    warnInvalidHost('must include an explicit port (example: http://hostname:4096)');
+    return null;
   }
   if (url.pathname !== '/' || url.search || url.hash) {
-    console.error(
-      `[fatal] OPENCODE_HOST must not include a path, query, or hash; got: ${JSON.stringify(raw)}`
-    );
-    process.exit(1);
+    warnInvalidHost('must not include path, query, or hash');
+    return null;
   }
   return { origin: url.origin, port };
 })();
@@ -6840,7 +6865,9 @@ async function main(options = {}) {
 
   // Voice token endpoint - returns OpenAI TTS availability status
   app.post('/api/voice/token', async (req, res) => {
-    console.log('[Voice] Token request received:', { body: req.body, headers: req.headers['content-type'] });
+    console.log('[Voice] Token request received:', {
+      contentType: req.headers['content-type'] || null,
+    });
     try {
       const openaiApiKey = process.env.OPENAI_API_KEY;
       console.log('[Voice] OpenAI API Key present:', !!openaiApiKey);
@@ -7240,19 +7267,39 @@ async function main(options = {}) {
 
       const isWindows = process.platform === 'win32';
 
-      // Build restart command with stored options
-      let restartCmd = `openchamber serve --port ${storedOptions.port} --daemon`;
+      const quotePosix = (value) => `'${String(value).replace(/'/g, "'\\''")}'`;
+      const quoteCmd = (value) => {
+        const stringValue = String(value);
+        return `"${stringValue.replace(/"/g, '""')}"`;
+      };
+
+      // Build restart command using explicit runtime + CLI path.
+      // Avoids relying on `openchamber` being in PATH for service environments.
+      const cliPath = path.resolve(__dirname, '..', 'bin', 'cli.js');
+      const restartParts = [
+        isWindows ? quoteCmd(process.execPath) : quotePosix(process.execPath),
+        isWindows ? quoteCmd(cliPath) : quotePosix(cliPath),
+        'serve',
+        '--port',
+        String(storedOptions.port),
+        '--daemon',
+      ];
+      let restartCmdPrimary = restartParts.join(' ');
+      let restartCmdFallback = `openchamber serve --port ${storedOptions.port} --daemon`;
       if (storedOptions.uiPassword) {
         if (isWindows) {
           // Escape for cmd.exe quoted argument
           const escapedPw = storedOptions.uiPassword.replace(/"/g, '""');
-          restartCmd += ` --ui-password "${escapedPw}"`;
+          restartCmdPrimary += ` --ui-password "${escapedPw}"`;
+          restartCmdFallback += ` --ui-password "${escapedPw}"`;
         } else {
           // Escape for POSIX single-quoted argument
           const escapedPw = storedOptions.uiPassword.replace(/'/g, "'\\''");
-          restartCmd += ` --ui-password '${escapedPw}'`;
+          restartCmdPrimary += ` --ui-password '${escapedPw}'`;
+          restartCmdFallback += ` --ui-password '${escapedPw}'`;
         }
       }
+      const restartCmd = `(${restartCmdPrimary}) || (${restartCmdFallback})`;
 
       // Respond immediately - update will happen after response
       res.json({
@@ -7298,13 +7345,31 @@ async function main(options = {}) {
             fi
           `;
 
-        // Spawn detached shell to run update after we exit
+        // Spawn detached shell to run update after we exit.
+        // Capture output to disk so restart failures are diagnosable.
+        const updateLogPath = path.join(OPENCHAMBER_DATA_DIR, 'update-install.log');
+        let logFd = null;
+        try {
+          fs.mkdirSync(path.dirname(updateLogPath), { recursive: true });
+          logFd = fs.openSync(updateLogPath, 'a');
+        } catch (logError) {
+          console.warn('Failed to open update log file, continuing without log capture:', logError);
+        }
+
         const child = spawnChild(shell, [shellFlag, script], {
           detached: true,
-          stdio: 'ignore',
+          stdio: logFd !== null ? ['ignore', logFd, logFd] : 'ignore',
           env: process.env,
         });
         child.unref();
+
+        if (logFd !== null) {
+          try {
+            fs.closeSync(logFd);
+          } catch {
+            // ignore
+          }
+        }
 
         console.log('Update process spawned, shutting down server...');
 
@@ -9082,6 +9147,9 @@ async function main(options = {}) {
     try {
       const skillName = req.params.name;
       const filePath = decodeURIComponent(req.params.filePath); // Decode URL-encoded path
+      if (isUnsafeSkillRelativePath(filePath)) {
+        return res.status(400).json({ error: 'Invalid file path' });
+      }
       const { directory, error } = await resolveProjectDirectory(req);
       if (!directory) {
         return res.status(400).json({ error });
@@ -9101,6 +9169,9 @@ async function main(options = {}) {
 
       res.json({ path: filePath, content });
     } catch (error) {
+      if (error && typeof error === 'object' && (error.code === 'EACCES' || error.code === 'EPERM')) {
+        return res.status(403).json({ error: 'Access to file denied' });
+      }
       console.error('Failed to read skill file:', error);
       res.status(500).json({ error: 'Failed to read skill file' });
     }
@@ -9167,6 +9238,9 @@ async function main(options = {}) {
     try {
       const skillName = req.params.name;
       const filePath = decodeURIComponent(req.params.filePath); // Decode URL-encoded path
+      if (isUnsafeSkillRelativePath(filePath)) {
+        return res.status(400).json({ error: 'Invalid file path' });
+      }
       const { content } = req.body;
       const { directory, error } = await resolveProjectDirectory(req);
       if (!directory) {
@@ -9187,6 +9261,9 @@ async function main(options = {}) {
         message: `File ${filePath} saved successfully`,
       });
     } catch (error) {
+      if (error && typeof error === 'object' && (error.code === 'EACCES' || error.code === 'EPERM')) {
+        return res.status(403).json({ error: 'Access to file denied' });
+      }
       console.error('Failed to write skill file:', error);
       res.status(500).json({ error: error.message || 'Failed to write skill file' });
     }
@@ -9197,6 +9274,9 @@ async function main(options = {}) {
     try {
       const skillName = req.params.name;
       const filePath = decodeURIComponent(req.params.filePath); // Decode URL-encoded path
+      if (isUnsafeSkillRelativePath(filePath)) {
+        return res.status(400).json({ error: 'Invalid file path' });
+      }
       const { directory, error } = await resolveProjectDirectory(req);
       if (!directory) {
         return res.status(400).json({ error });
@@ -9216,6 +9296,9 @@ async function main(options = {}) {
         message: `File ${filePath} deleted successfully`,
       });
     } catch (error) {
+      if (error && typeof error === 'object' && (error.code === 'EACCES' || error.code === 'EPERM')) {
+        return res.status(403).json({ error: 'Access to file denied' });
+      }
       console.error('Failed to delete skill file:', error);
       res.status(500).json({ error: error.message || 'Failed to delete skill file' });
     }
@@ -12600,7 +12683,8 @@ async function main(options = {}) {
     const handleUpgrade = async () => {
       try {
         if (uiAuthController?.enabled) {
-          const sessionToken = uiAuthController?.ensureSessionToken?.(req, null);
+          // Must be awaited: this call performs async token verification.
+          const sessionToken = await uiAuthController?.ensureSessionToken?.(req, null);
           if (!sessionToken) {
             rejectWebSocketUpgrade(socket, 401, 'UI authentication required');
             return;

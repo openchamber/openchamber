@@ -131,10 +131,11 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     } = sessionState;
 
     const providers = useConfigStore((state) => state.providers);
-    const { showReasoningTraces, toolCallExpansion } = useUIStore(
+    const { showReasoningTraces, toolCallExpansion, stickyUserHeader } = useUIStore(
         useShallow((state) => ({
             showReasoningTraces: state.showReasoningTraces,
             toolCallExpansion: state.toolCallExpansion,
+            stickyUserHeader: state.stickyUserHeader,
         }))
     );
 
@@ -164,6 +165,8 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
 
     const messageRole = React.useMemo(() => deriveMessageRole(message.info), [message.info]);
     const isUser = messageRole.isUser;
+    const useExternalUserActionsRow = isUser && (isMobile || !stickyUserHeader);
+    const showStickyInlineHoverRow = isUser && !isMobile && stickyUserHeader && !useExternalUserActionsRow;
 
     const sessionId = message.info.sessionID;
 
@@ -940,12 +943,16 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         return null;
     }
 
+    const assistantTopPaddingClass = !isUser && shouldShowHeader
+        ? (stickyUserHeader ? (isMobile ? 'pt-4' : 'pt-6') : 'pt-0')
+        : 'pt-0';
+
     return (
         <>
             <div
                 className={cn(
                     'group w-full',
-                    isUser ? (isMobile ? 'pt-2' : 'pt-6') : (shouldShowHeader ? (isMobile ? 'pt-10' : 'pt-6') : 'pt-0'),
+                    isUser ? (isMobile ? 'pt-2' : 'pt-6') : assistantTopPaddingClass,
                     isUser ? 'pb-0' : isFollowedByAssistant ? 'pb-0' : 'pb-8'
                 )}
                 data-message-id={message.info.id}
@@ -955,37 +962,74 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                     {isUser ? (
                         displayParts.length === 0 ? null : (
                         <FadeInOnReveal>
-                            <div className="flex justify-end">
-                                <div style={{ backgroundColor: 'var(--chat-user-message-bg)' }} className="max-w-[85%] rounded-2xl rounded-br-sm px-5 py-3 shadow-none border border-primary/5">
-                                    <MessageBody
-                                        messageId={message.info.id}
-                                        parts={displayParts}
-                                        isUser={isUser}
-                                        isMessageCompleted={isMessageCompleted}
-                                        messageFinish={messageFinish}
-                                        syntaxTheme={syntaxTheme}
-                                        isMobile={isMobile}
-                                        hasTouchInput={hasTouchInput}
-                                        copiedCode={copiedCode}
-                                        onCopyCode={handleCopyCode}
-                                        expandedTools={expandedTools}
-                                        onToggleTool={handleToggleTool}
-                                        onShowPopup={handleShowPopup}
-                                        streamPhase={streamPhase}
-                                        allowAnimation={allowAnimation}
-                                        onContentChange={onContentChange}
-                                        shouldShowHeader={false}
-                                        hasTextContent={hasTextContent}
-                                        onCopyMessage={handleCopyMessage}
-                                        copiedMessage={copiedMessage}
-                                        showReasoningTraces={showReasoningTraces}
-                                        onAuxiliaryContentComplete={handleAuxiliaryContentComplete}
-                                        agentMention={agentMention}
-                                        onRevert={handleRevert}
-                                        onFork={isUser ? handleFork : undefined}
-                                        errorMessage={assistantErrorText}
-                                    />
+                            <div className={cn('relative flex justify-end', !isMobile ? 'group/user-shell' : undefined)}>
+                                <div className="max-w-[85%]">
+                                    <div style={{ backgroundColor: 'var(--chat-user-message-bg)' }} className="rounded-2xl rounded-br-sm px-5 py-3 shadow-none border border-primary/5">
+                                        <MessageBody
+                                            messageId={message.info.id}
+                                            parts={displayParts}
+                                            isUser={isUser}
+                                            isMessageCompleted={isMessageCompleted}
+                                            messageFinish={messageFinish}
+                                            syntaxTheme={syntaxTheme}
+                                            isMobile={isMobile}
+                                            hasTouchInput={hasTouchInput}
+                                            copiedCode={copiedCode}
+                                            onCopyCode={handleCopyCode}
+                                            expandedTools={expandedTools}
+                                            onToggleTool={handleToggleTool}
+                                            onShowPopup={handleShowPopup}
+                                            streamPhase={streamPhase}
+                                            allowAnimation={allowAnimation}
+                                            onContentChange={onContentChange}
+                                            shouldShowHeader={false}
+                                            hasTextContent={hasTextContent}
+                                            onCopyMessage={handleCopyMessage}
+                                            copiedMessage={copiedMessage}
+                                            showReasoningTraces={showReasoningTraces}
+                                            onAuxiliaryContentComplete={handleAuxiliaryContentComplete}
+                                            agentMention={agentMention}
+                                            onRevert={handleRevert}
+                                            onFork={isUser ? handleFork : undefined}
+                                            errorMessage={assistantErrorText}
+                                            userActionsMode={useExternalUserActionsRow ? 'external-content' : 'inline'}
+                                            stickyUserHeaderEnabled={stickyUserHeader}
+                                        />
+                                    </div>
+                                    {useExternalUserActionsRow ? (
+                                        <MessageBody
+                                            messageId={message.info.id}
+                                            parts={displayParts}
+                                            isUser={isUser}
+                                            isMessageCompleted={isMessageCompleted}
+                                            messageFinish={messageFinish}
+                                            syntaxTheme={syntaxTheme}
+                                            isMobile={isMobile}
+                                            hasTouchInput={hasTouchInput}
+                                            copiedCode={copiedCode}
+                                            onCopyCode={handleCopyCode}
+                                            expandedTools={expandedTools}
+                                            onToggleTool={handleToggleTool}
+                                            onShowPopup={handleShowPopup}
+                                            streamPhase={streamPhase}
+                                            allowAnimation={allowAnimation}
+                                            onContentChange={onContentChange}
+                                            shouldShowHeader={false}
+                                            hasTextContent={hasTextContent}
+                                            onCopyMessage={handleCopyMessage}
+                                            copiedMessage={copiedMessage}
+                                            showReasoningTraces={showReasoningTraces}
+                                            onAuxiliaryContentComplete={handleAuxiliaryContentComplete}
+                                            agentMention={agentMention}
+                                            onRevert={handleRevert}
+                                            onFork={isUser ? handleFork : undefined}
+                                            errorMessage={assistantErrorText}
+                                            userActionsMode="external-actions"
+                                            stickyUserHeaderEnabled={stickyUserHeader}
+                                        />
+                                    ) : null}
                                 </div>
+                                {showStickyInlineHoverRow ? <div aria-hidden="true" className="absolute left-0 right-0 top-full h-11" /> : null}
                             </div>
                         </FadeInOnReveal>
                         )

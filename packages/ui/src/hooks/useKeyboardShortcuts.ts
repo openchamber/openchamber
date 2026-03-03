@@ -70,25 +70,20 @@ export const useKeyboardShortcuts = () => {
         return;
       }
 
-      if (eventMatchesShortcut(e, combo('new_chat')) || eventMatchesShortcut(e, combo('new_chat_worktree'))) {
+      const matchedNewSessionShortcut = eventMatchesShortcut(e, combo('new_chat'));
+      const matchedWorktreeShortcut = eventMatchesShortcut(e, combo('new_chat_worktree'));
+
+      if (matchedNewSessionShortcut || matchedWorktreeShortcut) {
         e.preventDefault();
 
-        const isVSCode = isVSCodeRuntime();
-        const autoWorktree = useConfigStore.getState().settingsAutoCreateWorktree;
-        const matchedPrimaryShortcut = eventMatchesShortcut(e, combo('new_chat'));
-        const shouldCreateWorktree = isVSCode
-          ? false
-          : (matchedPrimaryShortcut ? autoWorktree : !autoWorktree);
+        setActiveMainTab('chat');
+        setSessionSwitcherOpen(false);
 
-        if (shouldCreateWorktree) {
-          setActiveMainTab('chat');
-          setSessionSwitcherOpen(false);
+        if (!isVSCodeRuntime() && matchedWorktreeShortcut) {
           createWorktreeSession();
           return;
         }
 
-        setActiveMainTab('chat');
-        setSessionSwitcherOpen(false);
         openNewSessionDraft();
         return;
       }

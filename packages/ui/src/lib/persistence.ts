@@ -363,6 +363,15 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
       store.setToolCallExpansion(settings.toolCallExpansion);
     }
   }
+  if (typeof settings.userMessageRenderingMode === 'string'
+    && (settings.userMessageRenderingMode === 'markdown' || settings.userMessageRenderingMode === 'plain')) {
+    if (settings.userMessageRenderingMode !== store.userMessageRenderingMode) {
+      store.setUserMessageRenderingMode(settings.userMessageRenderingMode);
+    }
+  }
+  if (typeof settings.stickyUserHeader === 'boolean' && settings.stickyUserHeader !== store.stickyUserHeader) {
+    store.setStickyUserHeader(settings.stickyUserHeader);
+  }
   if (typeof settings.fontSize === 'number' && Number.isFinite(settings.fontSize) && settings.fontSize !== store.fontSize) {
     store.setFontSize(settings.fontSize);
   }
@@ -719,6 +728,13 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
       || candidate.toolCallExpansion === 'detailed')
   ) {
     result.toolCallExpansion = candidate.toolCallExpansion;
+  }
+  if (typeof candidate.userMessageRenderingMode === 'string'
+    && (candidate.userMessageRenderingMode === 'markdown' || candidate.userMessageRenderingMode === 'plain')) {
+    result.userMessageRenderingMode = candidate.userMessageRenderingMode;
+  }
+  if (typeof candidate.stickyUserHeader === 'boolean') {
+    result.stickyUserHeader = candidate.stickyUserHeader;
   }
   if (typeof candidate.fontSize === 'number' && Number.isFinite(candidate.fontSize)) {
     result.fontSize = candidate.fontSize;

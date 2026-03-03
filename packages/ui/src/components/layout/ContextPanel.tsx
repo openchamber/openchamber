@@ -1,8 +1,11 @@
 import React from 'react';
-import { RiCloseLine, RiFullscreenExitLine, RiFullscreenLine } from '@remixicon/react';
+import { RiArrowLeftRightLine, RiChat4Line, RiCloseLine, RiDonutChartFill, RiFileTextLine, RiFullscreenExitLine, RiFullscreenLine } from '@remixicon/react';
 
+import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { Button } from '@/components/ui/button';
+import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { DiffView, FilesView, PlanView } from '@/components/views';
+import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { cn } from '@/lib/utils';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
@@ -12,6 +15,7 @@ import { ContextPanelContent } from './ContextSidebarTab';
 const CONTEXT_PANEL_MIN_WIDTH = 360;
 const CONTEXT_PANEL_MAX_WIDTH = 1400;
 const CONTEXT_PANEL_DEFAULT_WIDTH = 600;
+const CONTEXT_TAB_LABEL_MAX_CHARS = 24;
 
 const normalizeDirectoryKey = (value: string): string => {
   if (!value) return '';
@@ -52,23 +56,133 @@ const getRelativePathLabel = (filePath: string | null, directory: string): strin
   return normalizedFile;
 };
 
+const getModeLabel = (mode: 'diff' | 'file' | 'context' | 'plan' | 'chat'): string => {
+  if (mode === 'chat') return 'Chat';
+  if (mode === 'file') return 'Files';
+  if (mode === 'diff') return 'Diff';
+  if (mode === 'plan') return 'Plan';
+  return 'Context';
+};
+
+const getFileNameFromPath = (path: string | null): string | null => {
+  if (!path) {
+    return null;
+  }
+
+  const normalized = path.replace(/\\/g, '/').trim();
+  if (!normalized) {
+    return null;
+  }
+
+  const segments = normalized.split('/').filter(Boolean);
+  if (segments.length === 0) {
+    return normalized;
+  }
+
+  return segments[segments.length - 1] || null;
+};
+
+const getTabLabel = (tab: { mode: 'diff' | 'file' | 'context' | 'plan' | 'chat'; label: string | null; targetPath: string | null }): string => {
+  if (tab.label) {
+    return tab.label;
+  }
+
+  if (tab.mode === 'file') {
+    return getFileNameFromPath(tab.targetPath) || 'Files';
+  }
+
+  return getModeLabel(tab.mode);
+};
+
+const getTabIcon = (tab: { mode: 'diff' | 'file' | 'context' | 'plan' | 'chat'; targetPath: string | null }): React.ReactNode | undefined => {
+  if (tab.mode === 'file') {
+    return tab.targetPath
+      ? <FileTypeIcon filePath={tab.targetPath} className="h-3.5 w-3.5" />
+      : undefined;
+  }
+
+  if (tab.mode === 'diff') {
+    return <RiArrowLeftRightLine className="h-3.5 w-3.5" />;
+  }
+
+  if (tab.mode === 'plan') {
+    return <RiFileTextLine className="h-3.5 w-3.5" />;
+  }
+
+  if (tab.mode === 'context') {
+    return <RiDonutChartFill className="h-3.5 w-3.5" />;
+  }
+
+  if (tab.mode === 'chat') {
+    return <RiChat4Line className="h-3.5 w-3.5" />;
+  }
+
+  return undefined;
+};
+
+const getSessionIDFromDedupeKey = (dedupeKey: string | undefined): string | null => {
+  if (!dedupeKey || !dedupeKey.startsWith('session:')) {
+    return null;
+  }
+
+  const sessionID = dedupeKey.slice('session:'.length).trim();
+  return sessionID || null;
+};
+
+const buildEmbeddedSessionChatURL = (sessionID: string, directory: string | null): string => {
+  if (typeof window === 'undefined') {
+    return '';
+  }
+
+  const url = new URL(window.location.pathname, window.location.origin);
+  url.searchParams.set('ocPanel', 'session-chat');
+  url.searchParams.set('sessionId', sessionID);
+  if (directory && directory.trim().length > 0) {
+    url.searchParams.set('directory', directory);
+  } else {
+    url.searchParams.delete('directory');
+  }
+
+  url.hash = '';
+  return url.toString();
+};
+
+const truncateTabLabel = (value: string, maxChars: number): string => {
+  if (value.length <= maxChars) {
+    return value;
+  }
+
+  return `${value.slice(0, maxChars - 3)}...`;
+};
+
 export const ContextPanel: React.FC = () => {
   const effectiveDirectory = useEffectiveDirectory() ?? '';
   const directoryKey = React.useMemo(() => normalizeDirectoryKey(effectiveDirectory), [effectiveDirectory]);
 
   const panelState = useUIStore((state) => (directoryKey ? state.contextPanelByDirectory[directoryKey] : undefined));
   const closeContextPanel = useUIStore((state) => state.closeContextPanel);
+  const closeContextPanelTab = useUIStore((state) => state.closeContextPanelTab);
   const toggleContextPanelExpanded = useUIStore((state) => state.toggleContextPanelExpanded);
   const setContextPanelWidth = useUIStore((state) => state.setContextPanelWidth);
+  const setActiveContextPanelTab = useUIStore((state) => state.setActiveContextPanelTab);
+  const reorderContextPanelTabs = useUIStore((state) => state.reorderContextPanelTabs);
+  const setPendingDiffFile = useUIStore((state) => state.setPendingDiffFile);
+  const setSelectedFilePath = useFilesViewTabsStore((state) => state.setSelectedPath);
+  const { themeMode, lightThemeId, darkThemeId, currentTheme } = useThemeSystem();
 
-  const isOpen = Boolean(panelState?.isOpen && panelState?.mode);
+  const tabs = React.useMemo(() => panelState?.tabs ?? [], [panelState?.tabs]);
+  const activeTab = tabs.find((tab) => tab.id === panelState?.activeTabId) ?? tabs[tabs.length - 1] ?? null;
+  const isOpen = Boolean(panelState?.isOpen && activeTab);
   const isExpanded = Boolean(isOpen && panelState?.expanded);
   const width = clampWidth(panelState?.width ?? CONTEXT_PANEL_DEFAULT_WIDTH);
 
   const [isResizing, setIsResizing] = React.useState(false);
   const startXRef = React.useRef(0);
   const startWidthRef = React.useRef(width);
+  const resizingWidthRef = React.useRef<number | null>(null);
+  const activeResizePointerIDRef = React.useRef<number | null>(null);
   const panelRef = React.useRef<HTMLElement | null>(null);
+  const chatFrameRefs = React.useRef<Map<string, HTMLIFrameElement>>(new Map());
   const wasOpenRef = React.useRef(false);
 
   React.useEffect(() => {
@@ -85,39 +199,73 @@ export const ContextPanel: React.FC = () => {
     return () => window.cancelAnimationFrame(frame);
   }, [isOpen]);
 
-  React.useEffect(() => {
-    if (!isResizing || !directoryKey) {
+  const applyLiveWidth = React.useCallback((nextWidth: number) => {
+    const panel = panelRef.current;
+    if (!panel) {
       return;
     }
 
-    const handlePointerMove = (event: PointerEvent) => {
-      const delta = startXRef.current - event.clientX;
-      setContextPanelWidth(directoryKey, startWidthRef.current + delta);
-    };
-
-    const handlePointerUp = () => {
-      setIsResizing(false);
-    };
-
-    window.addEventListener('pointermove', handlePointerMove);
-    window.addEventListener('pointerup', handlePointerUp, { once: true });
-
-    return () => {
-      window.removeEventListener('pointermove', handlePointerMove);
-      window.removeEventListener('pointerup', handlePointerUp);
-    };
-  }, [directoryKey, isResizing, setContextPanelWidth]);
+    panel.style.setProperty('--oc-context-panel-width', `${nextWidth}px`);
+  }, []);
 
   const handleResizeStart = React.useCallback((event: React.PointerEvent) => {
     if (!isOpen || isExpanded || !directoryKey) {
       return;
     }
 
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // ignore; fallback listeners still handle drag
+    }
+
+    activeResizePointerIDRef.current = event.pointerId;
     setIsResizing(true);
     startXRef.current = event.clientX;
     startWidthRef.current = width;
+    resizingWidthRef.current = width;
+    applyLiveWidth(width);
     event.preventDefault();
-  }, [directoryKey, isExpanded, isOpen, width]);
+  }, [applyLiveWidth, directoryKey, isExpanded, isOpen, width]);
+
+  const handleResizeMove = React.useCallback((event: React.PointerEvent) => {
+    if (!isResizing || activeResizePointerIDRef.current !== event.pointerId) {
+      return;
+    }
+
+    const delta = startXRef.current - event.clientX;
+    const nextWidth = clampWidth(startWidthRef.current + delta);
+    if (resizingWidthRef.current === nextWidth) {
+      return;
+    }
+
+    resizingWidthRef.current = nextWidth;
+    applyLiveWidth(nextWidth);
+  }, [applyLiveWidth, isResizing]);
+
+  const handleResizeEnd = React.useCallback((event: React.PointerEvent) => {
+    if (activeResizePointerIDRef.current !== event.pointerId || !directoryKey) {
+      return;
+    }
+
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {
+      // ignore
+    }
+
+    const finalWidth = resizingWidthRef.current ?? width;
+    setIsResizing(false);
+    activeResizePointerIDRef.current = null;
+    resizingWidthRef.current = null;
+    setContextPanelWidth(directoryKey, finalWidth);
+  }, [directoryKey, setContextPanelWidth, width]);
+
+  React.useEffect(() => {
+    if (!isResizing) {
+      resizingWidthRef.current = null;
+    }
+  }, [isResizing]);
 
   const handleClose = React.useCallback(() => {
     if (!directoryKey) {
@@ -143,50 +291,190 @@ export const ContextPanel: React.FC = () => {
     handleClose();
   }, [handleClose]);
 
-  const activeFilePath = useFilesViewTabsStore((state) => (directoryKey ? (state.byRoot[directoryKey]?.selectedPath ?? null) : null));
+  React.useEffect(() => {
+    if (!directoryKey || !activeTab) {
+      return;
+    }
 
-  const panelTitle = panelState?.mode === 'diff' ? 'Diff' : panelState?.mode === 'file' ? 'File' : panelState?.mode === 'context' ? 'Context' : panelState?.mode === 'plan' ? 'Plan' : 'Panel';
-  const effectivePath = panelState?.mode === 'file' ? (activeFilePath ?? panelState?.targetPath ?? null) : panelState?.mode === 'context' ? null : (panelState?.targetPath ?? null);
-  const pathLabel = getRelativePathLabel(effectivePath, effectiveDirectory);
+    if (activeTab.mode === 'file' && activeTab.targetPath) {
+      setSelectedFilePath(directoryKey, activeTab.targetPath);
+      return;
+    }
 
-  const content = panelState?.mode === 'diff'
-    ? <DiffView hideStackedFileSidebar stackedDefaultCollapsedAll hideFileSelector pinSelectedFileHeaderToTopOnNavigate />
-    : panelState?.mode === 'file'
-      ? <FilesView mode="editor-only" />
-      : panelState?.mode === 'context'
+    if (activeTab.mode === 'diff' && activeTab.targetPath) {
+      setPendingDiffFile(activeTab.targetPath);
+    }
+  }, [activeTab, directoryKey, setPendingDiffFile, setSelectedFilePath]);
+
+  const activeChatTabID = activeTab?.mode === 'chat' ? activeTab.id : null;
+
+  const postThemeSyncToEmbeddedChat = React.useCallback(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const payload = {
+      themeMode,
+      lightThemeId,
+      darkThemeId,
+      currentTheme,
+    };
+
+    for (const frame of chatFrameRefs.current.values()) {
+      const frameWindow = frame.contentWindow;
+      if (!frameWindow) {
+        continue;
+      }
+
+      const directThemeSync = (frameWindow as unknown as {
+        __openchamberApplyThemeSync?: (themePayload: typeof payload) => void;
+      }).__openchamberApplyThemeSync;
+
+      if (typeof directThemeSync === 'function') {
+        try {
+          directThemeSync(payload);
+          continue;
+        } catch {
+          // fallback to postMessage below
+        }
+      }
+
+      frameWindow.postMessage(
+        {
+          type: 'openchamber:theme-sync',
+          payload,
+        },
+        window.location.origin,
+      );
+    }
+  }, [currentTheme, darkThemeId, lightThemeId, themeMode]);
+
+  const postEmbeddedVisibilityToChats = React.useCallback(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    for (const [tabID, frame] of chatFrameRefs.current.entries()) {
+      const frameWindow = frame.contentWindow;
+      if (!frameWindow) {
+        continue;
+      }
+
+      const payload = { visible: activeChatTabID === tabID };
+      const directVisibilitySync = (frameWindow as unknown as {
+        __openchamberSetEmbeddedVisibility?: (visibilityPayload: typeof payload) => void;
+      }).__openchamberSetEmbeddedVisibility;
+
+      if (typeof directVisibilitySync === 'function') {
+        try {
+          directVisibilitySync(payload);
+          continue;
+        } catch {
+          // fallback to postMessage below
+        }
+      }
+
+      frameWindow.postMessage(
+        {
+          type: 'openchamber:embedded-visibility',
+          payload,
+        },
+        window.location.origin,
+      );
+    }
+  }, [activeChatTabID]);
+
+  React.useLayoutEffect(() => {
+    const hasAnyChatTab = tabs.some((tab) => tab.mode === 'chat');
+    if (!hasAnyChatTab) {
+      return;
+    }
+
+    postThemeSyncToEmbeddedChat();
+    postEmbeddedVisibilityToChats();
+  }, [darkThemeId, lightThemeId, postEmbeddedVisibilityToChats, postThemeSyncToEmbeddedChat, tabs, themeMode]);
+
+  const tabItems = React.useMemo(() => tabs.map((tab) => {
+    const rawLabel = getTabLabel(tab);
+    const label = truncateTabLabel(rawLabel, CONTEXT_TAB_LABEL_MAX_CHARS);
+    const tabPathLabel = getRelativePathLabel(tab.targetPath, effectiveDirectory);
+    return {
+      id: tab.id,
+      label,
+      icon: getTabIcon(tab),
+      title: tabPathLabel ? `${rawLabel}: ${tabPathLabel}` : rawLabel,
+      closeLabel: `Close ${label} tab`,
+    };
+  }), [effectiveDirectory, tabs]);
+
+  const activeNonChatContent = activeTab?.mode === 'diff'
+    ? <DiffView hideStackedFileSidebar stackedDefaultCollapsedAll hideFileSelector pinSelectedFileHeaderToTopOnNavigate showOpenInEditorAction />
+    : activeTab?.mode === 'context'
         ? <ContextPanelContent />
-        : panelState?.mode === 'plan'
+        : activeTab?.mode === 'plan'
           ? <PlanView />
           : null;
 
+  const chatTabs = React.useMemo(
+    () => tabs.filter((tab) => tab.mode === 'chat'),
+    [tabs],
+  );
+  const hasFileTabs = React.useMemo(
+    () => tabs.some((tab) => tab.mode === 'file'),
+    [tabs],
+  );
+
+  const isFileTabActive = activeTab?.mode === 'file';
+
   const header = (
-    <header className="flex h-10 items-center gap-2 border-b border-border/40 px-2.5">
-      <div className="min-w-0 flex-1 truncate typography-ui-label text-foreground">
-        <span>{panelTitle}</span>
-        {pathLabel ? <span className="ml-2 text-muted-foreground">{pathLabel}</span> : null}
+    <header className="flex h-8 items-stretch border-b border-border/40">
+      <SortableTabsStrip
+        items={tabItems}
+        activeId={activeTab?.id ?? null}
+        onSelect={(tabID) => {
+          if (!directoryKey) {
+            return;
+          }
+          setActiveContextPanelTab(directoryKey, tabID);
+        }}
+        onClose={(tabID) => {
+          if (!directoryKey) {
+            return;
+          }
+          closeContextPanelTab(directoryKey, tabID);
+        }}
+        onReorder={(activeTabID, overTabID) => {
+          if (!directoryKey) {
+            return;
+          }
+          reorderContextPanelTabs(directoryKey, activeTabID, overTabID);
+        }}
+        layoutMode="scrollable"
+      />
+      <div className="flex items-center gap-1 px-1.5">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={handleToggleExpanded}
+          className="h-7 w-7 p-0"
+          title={isExpanded ? 'Collapse panel' : 'Expand panel'}
+          aria-label={isExpanded ? 'Collapse panel' : 'Expand panel'}
+        >
+          {isExpanded ? <RiFullscreenExitLine className="h-3.5 w-3.5" /> : <RiFullscreenLine className="h-3.5 w-3.5" />}
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={handleClose}
+          className="h-7 w-7 p-0"
+          title="Close panel"
+          aria-label="Close panel"
+        >
+          <RiCloseLine className="h-3.5 w-3.5" />
+        </Button>
       </div>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        onClick={handleToggleExpanded}
-        className="h-6 w-6 p-0"
-        title={isExpanded ? 'Collapse panel' : 'Expand panel'}
-        aria-label={isExpanded ? 'Collapse panel' : 'Expand panel'}
-      >
-        {isExpanded ? <RiFullscreenExitLine className="h-3.5 w-3.5" /> : <RiFullscreenLine className="h-3.5 w-3.5" />}
-      </Button>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        onClick={handleClose}
-        className="h-6 w-6 p-0"
-        title="Close panel"
-        aria-label="Close panel"
-      >
-        <RiCloseLine className="h-3.5 w-3.5" />
-      </Button>
     </header>
   );
 
@@ -196,13 +484,16 @@ export const ContextPanel: React.FC = () => {
 
   const panelStyle: React.CSSProperties = isExpanded
     ? {
-        ['--oc-context-panel-width' as string]: '100vw',
+        ['--oc-context-panel-width' as string]: '100%',
+        width: '100%',
+        minWidth: '100%',
+        maxWidth: '100%',
       }
     : {
-        width: `${width}px`,
-        minWidth: `${width}px`,
-        maxWidth: `${width}px`,
-        ['--oc-context-panel-width' as string]: `${width}px`,
+        width: 'var(--oc-context-panel-width)',
+        minWidth: 'var(--oc-context-panel-width)',
+        maxWidth: 'var(--oc-context-panel-width)',
+        ['--oc-context-panel-width' as string]: `${isResizing ? (resizingWidthRef.current ?? width) : width}px`,
       };
 
   return (
@@ -228,13 +519,57 @@ export const ContextPanel: React.FC = () => {
             isResizing && 'bg-primary'
           )}
           onPointerDown={handleResizeStart}
+          onPointerMove={handleResizeMove}
+          onPointerUp={handleResizeEnd}
+          onPointerCancel={handleResizeEnd}
           role="separator"
           aria-orientation="vertical"
           aria-label="Resize context panel"
         />
       )}
       {header}
-      <div className="min-h-0 flex-1 overflow-hidden">{content}</div>
+      <div className={cn('relative min-h-0 flex-1 overflow-hidden', isResizing && 'pointer-events-none')}>
+        {hasFileTabs ? (
+          <div className={cn('absolute inset-0', isFileTabActive ? 'block' : 'hidden')}>
+            <FilesView mode="editor-only" />
+          </div>
+        ) : null}
+        {chatTabs.map((tab) => {
+          const sessionID = getSessionIDFromDedupeKey(tab.dedupeKey);
+          if (!sessionID) {
+            return null;
+          }
+
+          const src = buildEmbeddedSessionChatURL(sessionID, directoryKey || null);
+          if (!src) {
+            return null;
+          }
+
+          return (
+            <iframe
+              key={tab.id}
+              ref={(node) => {
+                if (!node) {
+                  chatFrameRefs.current.delete(tab.id);
+                  return;
+                }
+                chatFrameRefs.current.set(tab.id, node);
+              }}
+              src={src}
+              title={`Session chat ${sessionID}`}
+              className={cn(
+                'absolute inset-0 h-full w-full border-0 bg-background',
+                activeChatTabID === tab.id ? 'block' : 'hidden'
+              )}
+              onLoad={() => {
+                postThemeSyncToEmbeddedChat();
+                postEmbeddedVisibilityToChats();
+              }}
+            />
+          );
+        })}
+        {activeTab?.mode !== 'chat' && !isFileTabActive ? activeNonChatContent : null}
+      </div>
     </aside>
   );
 };

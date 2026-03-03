@@ -106,6 +106,7 @@ export const ChatContainer: React.FC = () => {
         isTimelineDialogOpen,
         setTimelineDialogOpen,
         isExpandedInput,
+        stickyUserHeader,
     } = useUIStore();
 
     const sessionMessages = useSessionStore(
@@ -593,14 +594,14 @@ export const ChatContainer: React.FC = () => {
                 aria-hidden={isDesktopExpandedInput}
             >
                 <div className="absolute inset-0">
-                    <ScrollShadow
-                        className="absolute inset-0 overflow-y-auto overflow-x-hidden z-0 chat-scroll overlay-scrollbar-target"
-                        ref={scrollRef}
-                        observeMutations={false}
-                        hideTopShadow={isMobile}
-                        data-scroll-shadow="true"
-                        data-scrollbar="chat"
-                    >
+                        <ScrollShadow
+                            className="absolute inset-0 overflow-y-auto overflow-x-hidden z-0 chat-scroll overlay-scrollbar-target"
+                            ref={scrollRef}
+                            observeMutations={false}
+                            hideTopShadow={isMobile && stickyUserHeader}
+                            data-scroll-shadow="true"
+                            data-scrollbar="chat"
+                        >
                         <div className="relative z-0 min-h-full">
                             <MessageList
                                 ref={messageListRef}

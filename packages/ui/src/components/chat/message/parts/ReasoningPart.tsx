@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils';
 import { formatTimestampForDisplay } from '../timeFormat';
 import type { ContentChangeReason } from '@/hooks/useChatScrollManager';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { useUIStore } from '@/stores/useUIStore';
 
 type PartWithText = Part & { text?: string; content?: string; time?: { start?: number; end?: number } };
 
@@ -98,6 +99,7 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
     time,
 }) => {
     const [isExpanded, setIsExpanded] = React.useState(false);
+    const isMobile = useUIStore((state) => state.isMobile);
 
     const summary = React.useMemo(() => getReasoningSummary(text), [text]);
     const { label, Icon } = variantConfig[variant];
@@ -157,23 +159,35 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
 
                 {(summary || typeof timeStart === 'number' || endedTimestampText) ? (
                     <div className="flex items-center gap-1 flex-1 min-w-0 typography-meta text-muted-foreground/70">
-                        {summary ? <span className="truncate italic">{summary}</span> : null}
+                        {summary ? <span className="flex-1 min-w-0 truncate italic">{summary}</span> : null}
                         {typeof timeStart === 'number' ? (
-                            <span className="text-muted-foreground/80 flex-shrink-0 tabular-nums">
-                                <LiveDuration
-                                    start={timeStart}
-                                    end={timeEnd}
-                                    active={typeof timeEnd !== 'number'}
-                                />
+                            <span className="relative flex-shrink-0 tabular-nums text-right">
+                                <span
+                                    className={cn(
+                                        'text-muted-foreground/80 transition-opacity duration-150',
+                                        !isMobile && endedTimestampText && 'group-hover/tool:opacity-0'
+                                    )}
+                                >
+                                    <LiveDuration
+                                        start={timeStart}
+                                        end={timeEnd}
+                                        active={typeof timeEnd !== 'number'}
+                                    />
+                                </span>
+                                {!isMobile && endedTimestampText ? (
+                                    <span
+                                        className={cn(
+                                            'pointer-events-none absolute right-0 top-0 whitespace-nowrap text-muted-foreground/70 transition-opacity duration-150',
+                                            'opacity-0 group-hover/tool:opacity-100'
+                                        )}
+                                    >
+                                        {endedTimestampText}
+                                    </span>
+                                ) : null}
                             </span>
                         ) : null}
-                        {endedTimestampText ? (
-                            <span
-                                className={cn(
-                                    'text-muted-foreground/70 flex-shrink-0 tabular-nums transition-opacity duration-150',
-                                    'opacity-0 group-hover/tool:opacity-100'
-                                )}
-                            >
+                        {typeof timeStart !== 'number' && !isMobile && endedTimestampText ? (
+                            <span className="text-muted-foreground/70 flex-shrink-0 tabular-nums">
                                 {endedTimestampText}
                             </span>
                         ) : null}

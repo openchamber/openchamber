@@ -366,6 +366,26 @@ const parseRemoteBranchRef = (value) => {
   };
 };
 
+const resolveRemoteBranchRef = async (primaryWorktree, value) => {
+  const raw = String(value || '').trim();
+  const parsed = parseRemoteBranchRef(raw);
+  if (!parsed) {
+    return null;
+  }
+
+  if (raw.startsWith('refs/remotes/') || raw.startsWith('remotes/')) {
+    return parsed;
+  }
+
+  const localRef = `refs/heads/${raw}`;
+  const localExists = await runGitCommand(primaryWorktree, ['show-ref', '--verify', '--quiet', localRef]);
+  if (localExists.success) {
+    return null;
+  }
+
+  return parsed;
+};
+
 const normalizeUpstreamTarget = (remote, branch) => {
   const remoteName = String(remote || '').trim();
   const branchName = String(branch || '').trim();
@@ -1743,19 +1763,57 @@ export async function commit(directory, message, options = {}) {
   const git = await createGit(directory);
 
   try {
+    const requestedFiles = Array.isArray(options.files)
+      ? options.files
+        .map((value) => String(value || '').trim())
+        .filter(Boolean)
+      : [];
+    let filesToCommit = requestedFiles;
 
     if (options.addAll) {
       await git.add('.');
-    } else if (Array.isArray(options.files) && options.files.length > 0) {
-      await git.add(options.files);
+    } else if (requestedFiles.length > 0) {
+      const status = await git.status();
+      const fileStatusByPath = new Map(status.files.map((file) => [file.path, file]));
+      filesToCommit = requestedFiles.filter((filePath) => fileStatusByPath.has(filePath));
+
+      if (filesToCommit.length === 0) {
+        throw new Error('No selected files are available to commit. Refresh git status and try again.');
+      }
+
+      const filesNeedingAdd = filesToCommit.filter((filePath) => {
+        const fileStatus = fileStatusByPath.get(filePath);
+        if (!fileStatus) {
+          return false;
+        }
+
+        const alreadyFullyStaged = fileStatus.index !== ' ' && fileStatus.working_dir === ' ';
+        return !alreadyFullyStaged;
+      });
+
+      if (filesNeedingAdd.length > 0) {
+        await git.add(filesNeedingAdd);
+      }
     }
 
     const commitArgs =
-      !options.addAll && Array.isArray(options.files) && options.files.length > 0
-        ? options.files
+      !options.addAll && filesToCommit.length > 0
+        ? filesToCommit
         : undefined;
 
-    const result = await git.commit(message, commitArgs);
+    let result;
+    try {
+      result = await git.commit(message, commitArgs);
+    } catch (error) {
+      const gitErrorText = parseGitErrorText(error);
+      const isPathspecError = gitErrorText.includes('pathspec') && gitErrorText.includes('did not match any files');
+      if (!isPathspecError || !commitArgs || commitArgs.length === 0) {
+        throw error;
+      }
+
+      // Fallback for deleted/stale selections: commit currently staged changes.
+      result = await git.commit(message);
+    }
 
     return {
       success: true,
@@ -1887,7 +1945,7 @@ export async function validateWorktreeCreate(directory, input = {}) {
     if (mode === 'existing') {
       try {
         const requestedExistingBranch = String(input?.existingBranch || '').trim();
-        const parsedExistingRemote = parseRemoteBranchRef(requestedExistingBranch);
+        const parsedExistingRemote = await resolveRemoteBranchRef(context.primaryWorktree, requestedExistingBranch);
         if (parsedExistingRemote && ensureRemoteName && ensureRemoteUrl && ensureRemoteName === parsedExistingRemote.remote) {
           const lsRemote = await runGitCommand(
             context.primaryWorktree,
@@ -1932,7 +1990,7 @@ export async function validateWorktreeCreate(directory, input = {}) {
         localBranch = preferredBranchName;
       }
 
-      const parsedRemoteRef = parseRemoteBranchRef(startRef);
+      const parsedRemoteRef = await resolveRemoteBranchRef(context.primaryWorktree, startRef);
       if (startRef && startRef !== 'HEAD') {
         if (parsedRemoteRef && ensureRemoteName && ensureRemoteUrl && ensureRemoteName === parsedRemoteRef.remote) {
           const remoteCheck = await checkRemoteBranchExists(
@@ -2069,7 +2127,7 @@ export async function createWorktree(directory, input = {}) {
 
   if (mode === 'existing') {
     const requestedExistingBranch = String(input?.existingBranch || '').trim();
-    const parsedExistingRemote = parseRemoteBranchRef(requestedExistingBranch);
+    const parsedExistingRemote = await resolveRemoteBranchRef(context.primaryWorktree, requestedExistingBranch);
     if (parsedExistingRemote && ensureRemoteName && ensureRemoteUrl && parsedExistingRemote.remote === ensureRemoteName) {
       await ensureRemoteWithUrl(context.primaryWorktree, ensureRemoteName, ensureRemoteUrl);
       await fetchRemoteBranchRef(context.primaryWorktree, parsedExistingRemote.remote, parsedExistingRemote.branch);
@@ -2115,7 +2173,7 @@ export async function createWorktree(directory, input = {}) {
       worktreeAddArgs.push(startRef);
     }
 
-    const parsedRemoteStartRef = parseRemoteBranchRef(startRef);
+    const parsedRemoteStartRef = await resolveRemoteBranchRef(context.primaryWorktree, startRef);
     if (parsedRemoteStartRef) {
       inferredUpstream = {
         remote: parsedRemoteStartRef.remote,
@@ -2129,7 +2187,7 @@ export async function createWorktree(directory, input = {}) {
   }
 
   if (mode === 'new') {
-    const parsedRemoteStartRef = parseRemoteBranchRef(startRef);
+    const parsedRemoteStartRef = await resolveRemoteBranchRef(context.primaryWorktree, startRef);
     if (parsedRemoteStartRef) {
       await fetchRemoteBranchRef(context.primaryWorktree, parsedRemoteStartRef.remote, parsedRemoteStartRef.branch);
     }

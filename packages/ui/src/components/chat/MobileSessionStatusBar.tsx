@@ -446,8 +446,8 @@ function SessionStatusHeader({
           <div className="w-full h-px bg-[var(--interactive-border)] my-1" />
         </div>
       )}
-      <div className="flex items-center gap-1.5">
-        <span className="text-[13px] text-[var(--surface-foreground)] truncate leading-none">
+      <div className="flex items-center gap-1.5 min-w-0">
+        <span className="flex-1 min-w-0 text-[13px] text-[var(--surface-foreground)] truncate leading-none">
           {currentSessionTitle}
         </span>
         {childIndicators.length > 0 && (

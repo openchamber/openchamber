@@ -50,6 +50,7 @@ import {
   RiAddLine,
   RiArrowDownSLine,
   RiArrowRightSLine,
+  RiChat4Line,
   RiCheckboxBlankLine,
   RiCheckboxLine,
   RiCheckLine,
@@ -60,17 +61,13 @@ import {
   RiFolderAddLine,
   RiFolderLine,
   RiGitBranchLine,
-  RiGitPullRequestLine,
-  RiGitRepositoryLine,
   RiNodeTree,
   RiStickyNoteLine,
   RiLinkUnlinkM,
-
-  RiGithubLine,
-
   RiMore2Line,
   RiPencilAiLine,
   RiPushpinLine,
+  RiSearchLine,
   RiShare2Line,
   RiShieldLine,
   RiUnpinLine,
@@ -87,18 +84,17 @@ import type { WorktreeMetadata } from '@/types/worktree';
 import { opencodeClient } from '@/lib/opencode/client';
 import { checkIsGitRepository } from '@/lib/gitApi';
 import { getSafeStorage } from '@/stores/utils/safeStorage';
-import { createWorktreeOnly, createWorktreeSession } from '@/lib/worktreeSessionCreator';
+import { createWorktreeSession } from '@/lib/worktreeSessionCreator';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { useGitStore } from '@/stores/useGitStore';
 import { useDeviceInfo } from '@/lib/device';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { updateDesktopSettings } from '@/lib/persistence';
-import { GitHubIssuePickerDialog } from './GitHubIssuePickerDialog';
-import { GitHubPullRequestPickerDialog } from './GitHubPullRequestPickerDialog';
+import { NewWorktreeDialog } from './NewWorktreeDialog';
 import { ProjectNotesTodoPanel } from './ProjectNotesTodoPanel';
-import { BranchPickerDialog } from './BranchPickerDialog';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { SessionFolderItem } from './SessionFolderItem';
+import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 
 const ATTENTION_DIAMOND_INDICES = new Set([1, 3, 4, 5, 7]);
 
@@ -228,6 +224,46 @@ const formatProjectLabel = (label: string): string => {
     .replace(/\b\w/g, (char) => char.toUpperCase());
 };
 
+const renderHighlightedText = (text: string, query: string): React.ReactNode => {
+  if (!query) {
+    return text;
+  }
+
+  const loweredText = text.toLowerCase();
+  const loweredQuery = query.toLowerCase();
+  const queryLength = loweredQuery.length;
+  if (queryLength === 0) {
+    return text;
+  }
+
+  const parts: React.ReactNode[] = [];
+  let cursor = 0;
+  let matchIndex = loweredText.indexOf(loweredQuery, cursor);
+
+  while (matchIndex !== -1) {
+    if (matchIndex > cursor) {
+      parts.push(text.slice(cursor, matchIndex));
+    }
+    const matchText = text.slice(matchIndex, matchIndex + queryLength);
+    parts.push(
+      <mark
+        key={`${matchIndex}-${matchText}`}
+        className="bg-primary text-primary-foreground ring-1 ring-primary/90"
+      >
+        {matchText}
+      </mark>,
+    );
+    cursor = matchIndex + queryLength;
+    matchIndex = loweredText.indexOf(loweredQuery, cursor);
+  }
+
+  if (cursor < text.length) {
+    parts.push(text.slice(cursor));
+  }
+
+  return parts.length > 0 ? parts : text;
+};
+
 type SessionNode = {
   session: Session;
   children: SessionNode[];
@@ -243,6 +279,14 @@ type SessionGroup = {
   worktree: WorktreeMetadata | null;
   directory: string | null;
   sessions: SessionNode[];
+};
+
+type GroupSearchData = {
+  filteredNodes: SessionNode[];
+  matchedSessionCount: number;
+  folderNameMatchCount: number;
+  groupMatches: boolean;
+  hasMatch: boolean;
 };
 
 // --- Session Folder DnD helpers ---
@@ -367,8 +411,8 @@ const SessionFolderDndScope: React.FC<{
       {children}
       <DragOverlay>
         {activeDragId && hasFolders ? (
-          <div 
-            style={{ 
+          <div
+            style={{
               width: activeDragWidth ? `${activeDragWidth}px` : 'auto',
               height: activeDragHeight ? `${activeDragHeight}px` : 'auto'
             }}
@@ -403,8 +447,6 @@ interface SortableProjectItemProps {
   onHoverChange: (hovered: boolean) => void;
   onNewSession: () => void;
   onNewWorktreeSession?: () => void;
-  onNewSessionFromGitHubIssue?: () => void;
-  onNewSessionFromGitHubPR?: () => void;
   onOpenMultiRunLauncher: () => void;
   onRenameStart: () => void;
   onRenameSave: () => void;
@@ -436,8 +478,6 @@ const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   onHoverChange,
   onNewSession,
   onNewWorktreeSession,
-  onNewSessionFromGitHubIssue,
-  onNewSessionFromGitHubPR,
   onOpenMultiRunLauncher,
   onRenameStart,
   onRenameSave,
@@ -601,18 +641,6 @@ const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                     New Session in Worktree
                   </DropdownMenuItem>
                 )}
-                {showCreateButtons && isRepo && !hideDirectoryControls && onNewSessionFromGitHubIssue && (
-                  <DropdownMenuItem onClick={onNewSessionFromGitHubIssue}>
-                    <RiGithubLine className="mr-1.5 h-4 w-4" />
-                    New session from GitHub issue
-                  </DropdownMenuItem>
-                )}
-                {showCreateButtons && isRepo && !hideDirectoryControls && onNewSessionFromGitHubPR && (
-                  <DropdownMenuItem onClick={onNewSessionFromGitHubPR}>
-                    <RiGitPullRequestLine className="mr-1.5 h-4 w-4" />
-                    New session from GitHub PR
-                  </DropdownMenuItem>
-                )}
                 {showCreateButtons && isRepo && !hideDirectoryControls && (
                   <DropdownMenuItem onClick={onOpenMultiRunLauncher}>
                     <ArrowsMerge className="mr-1.5 h-4 w-4" />
@@ -741,6 +769,10 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   hideProjectSelector = true,
   showOnlyMainWorkspace = false,
 }) => {
+  const [isSessionSearchOpen, setIsSessionSearchOpen] = React.useState(false);
+  const [sessionSearchQuery, setSessionSearchQuery] = React.useState('');
+  const sessionSearchContainerRef = React.useRef<HTMLDivElement | null>(null);
+  const sessionSearchInputRef = React.useRef<HTMLInputElement | null>(null);
   const [editingId, setEditingId] = React.useState<string | null>(null);
   const [editTitle, setEditTitle] = React.useState('');
   const [editingProjectId, setEditingProjectId] = React.useState<string | null>(null);
@@ -759,9 +791,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const [projectRepoStatus, setProjectRepoStatus] = React.useState<Map<string, boolean | null>>(new Map());
   const [expandedSessionGroups, setExpandedSessionGroups] = React.useState<Set<string>>(new Set());
   const [hoveredProjectId, setHoveredProjectId] = React.useState<string | null>(null);
-  const [issuePickerOpen, setIssuePickerOpen] = React.useState(false);
-  const [pullRequestPickerOpen, setPullRequestPickerOpen] = React.useState(false);
-  const [isBranchPickerOpen, setIsBranchPickerOpen] = React.useState(false);
+  const [newWorktreeDialogOpen, setNewWorktreeDialogOpen] = React.useState(false);
   const [projectNotesPanelOpen, setProjectNotesPanelOpen] = React.useState(false);
   const [stuckProjectHeaders, setStuckProjectHeaders] = React.useState<Set<string>>(new Set());
   const [openMenuSessionId, setOpenMenuSessionId] = React.useState<string | null>(null);
@@ -859,6 +889,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const renameProject = useProjectsStore((state) => state.renameProject);
 
   const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
+  const openContextPanelTab = useUIStore((state) => state.openContextPanelTab);
   const deviceInfo = useDeviceInfo();
   const setSessionSwitcherOpen = useUIStore((state) => state.setSessionSwitcherOpen);
   const openMultiRunLauncher = useUIStore((state) => state.openMultiRunLauncher);
@@ -866,6 +897,14 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const showDeletionDialog = useUIStore((state) => state.showDeletionDialog);
   const setShowDeletionDialog = useUIStore((state) => state.setShowDeletionDialog);
   const settingsAutoCreateWorktree = useConfigStore((state) => state.settingsAutoCreateWorktree);
+
+  const debouncedSessionSearchQuery = useDebouncedValue(sessionSearchQuery, 120);
+  const normalizedSessionSearchQuery = React.useMemo(
+    () => debouncedSessionSearchQuery.trim().toLowerCase(),
+    [debouncedSessionSearchQuery],
+  );
+
+  const hasSessionSearchQuery = normalizedSessionSearchQuery.length > 0;
 
   // Session Folders store
   const collapsedFolderIds = useSessionFoldersStore((state) => state.collapsedFolderIds);
@@ -878,6 +917,75 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const toggleFolderCollapse = useSessionFoldersStore((state) => state.toggleFolderCollapse);
   const cleanupSessions = useSessionFoldersStore((state) => state.cleanupSessions);
   const getSessionFolderId = useSessionFoldersStore((state) => state.getSessionFolderId);
+
+  const buildGroupSearchText = React.useCallback((group: SessionGroup): string => {
+    return [
+      group.label,
+      group.branch ?? '',
+      group.description ?? '',
+      group.directory ?? '',
+    ]
+      .join(' ')
+      .toLowerCase();
+  }, []);
+
+  const buildSessionSearchText = React.useCallback((session: Session): string => {
+    const sessionDirectory = normalizePath((session as Session & { directory?: string | null }).directory ?? null) ?? '';
+    const sessionTitle = (session.title || 'Untitled Session').trim();
+    return `${sessionTitle} ${sessionDirectory}`.toLowerCase();
+  }, []);
+
+  const filterSessionNodesForSearch = React.useCallback(
+    (nodes: SessionNode[], query: string): SessionNode[] => {
+      if (!query) {
+        return nodes;
+      }
+
+      return nodes.flatMap((node) => {
+        const nodeMatches = buildSessionSearchText(node.session).includes(query);
+        if (nodeMatches) {
+          return [node];
+        }
+
+        const filteredChildren = filterSessionNodesForSearch(node.children, query);
+        if (filteredChildren.length === 0) {
+          return [];
+        }
+
+        return [{
+          ...node,
+          children: filteredChildren,
+        }];
+      });
+    },
+    [buildSessionSearchText],
+  );
+
+  React.useEffect(() => {
+    if (!isSessionSearchOpen || typeof window === 'undefined') {
+      return;
+    }
+    const raf = window.requestAnimationFrame(() => {
+      sessionSearchInputRef.current?.focus();
+      sessionSearchInputRef.current?.select();
+    });
+    return () => window.cancelAnimationFrame(raf);
+  }, [isSessionSearchOpen]);
+  React.useEffect(() => {
+    if (!isSessionSearchOpen || typeof document === 'undefined') {
+      return;
+    }
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!sessionSearchContainerRef.current) {
+        return;
+      }
+      if (!sessionSearchContainerRef.current.contains(event.target as Node)) {
+        setIsSessionSearchOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    return () => document.removeEventListener('mousedown', handlePointerDown);
+  }, [isSessionSearchOpen]);
 
   const gitDirectories = useGitStore((state) => state.directories);
 
@@ -1257,6 +1365,14 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         return;
       }
 
+      const resetSessionSearch = () => {
+        if (!isSessionSearchOpen && sessionSearchQuery.length === 0) {
+          return;
+        }
+        setSessionSearchQuery('');
+        setIsSessionSearchOpen(false);
+      };
+
       if (projectId && projectId !== activeProjectId) {
         // Important: avoid switching to the project root first (that can select the wrong session).
         setActiveProjectIdOnly(projectId);
@@ -1273,25 +1389,31 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
       // Always return early if same session is selected to avoid unnecessary store operations
       if (sessionId === currentSessionId) {
-        if (!allowReselect) {
+        if (allowReselect) {
           onSessionSelected?.(sessionId);
         }
+        resetSessionSearch();
         return;
       }
       setCurrentSession(sessionId);
       onSessionSelected?.(sessionId);
+      resetSessionSearch();
     },
     [
       activeProjectId,
       allowReselect,
       currentDirectory,
       currentSessionId,
+      isSessionSearchOpen,
       mobileVariant,
       onSessionSelected,
+      sessionSearchQuery,
       setActiveMainTab,
       setActiveProjectIdOnly,
       setCurrentSession,
       setDirectory,
+      setIsSessionSearchOpen,
+      setSessionSearchQuery,
       setSessionSwitcherOpen,
     ],
   );
@@ -1878,6 +2000,93 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     return active ? [active] : [projectSections[0]];
   }, [projectSections, activeProjectId]);
 
+  const groupSearchDataByGroup = React.useMemo(() => {
+    const result = new WeakMap<SessionGroup, GroupSearchData>();
+    if (!hasSessionSearchQuery) {
+      return result;
+    }
+
+    const countNodes = (nodes: SessionNode[]): number => {
+      return nodes.reduce((total, node) => total + 1 + countNodes(node.children), 0);
+    };
+
+    visibleProjectSections.forEach((section) => {
+      section.groups.forEach((group) => {
+        const filteredNodes = filterSessionNodesForSearch(group.sessions, normalizedSessionSearchQuery);
+        const matchedSessionCount = countNodes(filteredNodes);
+        const groupMatches = buildGroupSearchText(group).includes(normalizedSessionSearchQuery);
+        const scopeKey = normalizePath(group.directory ?? null);
+        const folderNameMatchCount = scopeKey
+          ? getFoldersForScope(scopeKey).filter((folder) => folder.name.toLowerCase().includes(normalizedSessionSearchQuery)).length
+          : 0;
+
+        result.set(group, {
+          filteredNodes,
+          matchedSessionCount,
+          folderNameMatchCount,
+          groupMatches,
+          hasMatch: groupMatches || matchedSessionCount > 0 || folderNameMatchCount > 0,
+        });
+      });
+    });
+
+    return result;
+  }, [
+    hasSessionSearchQuery,
+    visibleProjectSections,
+    filterSessionNodesForSearch,
+    normalizedSessionSearchQuery,
+    buildGroupSearchText,
+    getFoldersForScope,
+  ]);
+
+  const searchableProjectSections = React.useMemo(() => {
+    if (!hasSessionSearchQuery) {
+      return visibleProjectSections;
+    }
+
+    return visibleProjectSections
+      .map((section) => ({
+        ...section,
+        groups: section.groups.filter((group) => groupSearchDataByGroup.get(group)?.hasMatch === true),
+      }))
+      .filter((section) => section.groups.length > 0);
+  }, [
+    hasSessionSearchQuery,
+    visibleProjectSections,
+    groupSearchDataByGroup,
+  ]);
+
+  const sectionsForRender = hasSessionSearchQuery ? searchableProjectSections : visibleProjectSections;
+
+  const searchMatchCount = React.useMemo(() => {
+    if (!hasSessionSearchQuery) {
+      return 0;
+    }
+
+    return sectionsForRender.reduce((total, section) => {
+      return total + section.groups.reduce((groupTotal, group) => {
+        const data = groupSearchDataByGroup.get(group);
+        if (!data) {
+          return groupTotal;
+        }
+        const metadataMatches = data.folderNameMatchCount + (data.groupMatches ? 1 : 0);
+        return groupTotal + data.matchedSessionCount + metadataMatches;
+      }, 0);
+    }, 0);
+  }, [
+    hasSessionSearchQuery,
+    sectionsForRender,
+    groupSearchDataByGroup,
+  ]);
+
+  const searchEmptyState = (
+    <div className="py-6 text-center text-muted-foreground">
+      <p className="typography-ui-label font-semibold">No matching sessions</p>
+      <p className="typography-meta mt-1">Try a different title, branch, folder, or path.</p>
+    </div>
+  );
+
   const activeProjectForHeader = React.useMemo(
     () => normalizedProjects.find((project) => project.id === activeProjectId) ?? normalizedProjects[0] ?? null,
     [normalizedProjects, activeProjectId],
@@ -1891,17 +2100,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       : null),
     [activeProjectForHeader],
   );
-  const branchPickerProject = React.useMemo(() => {
-    if (!activeProjectForHeader) {
-      return null;
-    }
-    return {
-      id: activeProjectForHeader.id,
-      path: activeProjectForHeader.path,
-      normalizedPath: activeProjectForHeader.normalizedPath,
-      label: activeProjectForHeader.label,
-    };
-  }, [activeProjectForHeader]);
 
   const activeProjectIsRepo = React.useMemo(
     () => (activeProjectForHeader ? Boolean(projectRepoStatus.get(activeProjectForHeader.id)) : false),
@@ -2144,7 +2342,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         entries.forEach((entry) => {
           const projectId = (entry.target as HTMLElement).dataset.projectId;
           if (!projectId) return;
-          
+
           setStuckProjectHeaders((prev) => {
             const next = new Set(prev);
             if (!entry.isIntersecting) {
@@ -2179,7 +2377,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       const sessionTitle = session.title || 'Untitled Session';
       const hasChildren = node.children.length > 0;
       const isPinnedSession = pinnedSessionIds.has(session.id);
-      const isExpanded = expandedParents.has(session.id);
+      const isExpanded = hasSessionSearchQuery ? true : expandedParents.has(session.id);
       const isSubtaskSession = Boolean((session as Session & { parentID?: string | null }).parentID);
       const rawNeedsAttention = sessionAttentionStates.get(session.id)?.needsAttention === true;
       // When notifyOnSubtasks is disabled, suppress attention dots for child sessions.
@@ -2342,7 +2540,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                     <RiPushpinLine className="h-3 w-3 flex-shrink-0 text-primary" aria-label="Pinned session" />
                   ) : null}
                   <div className="block min-w-0 flex-1 truncate typography-ui-label font-normal text-foreground">
-                    {sessionTitle}
+                    {renderHighlightedText(sessionTitle, normalizedSessionSearchQuery)}
                   </div>
 
                   {pendingPermissionCount > 0 ? (
@@ -2552,6 +2750,27 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                         </>
                       );
                     })() : null}
+                    <DropdownMenuItem
+                      disabled={!sessionDirectory}
+                      onClick={() => {
+                        if (!sessionDirectory) {
+                          return;
+                        }
+
+                        openContextPanelTab(sessionDirectory, {
+                          mode: 'chat',
+                          dedupeKey: `session:${session.id}`,
+                          label: sessionTitle,
+                        });
+                      }}
+                      className="[&>svg]:mr-1"
+                    >
+                      <RiChat4Line className="mr-1 h-4 w-4" />
+                      <span className="truncate">Open in Side Panel</span>
+                      <span className="shrink-0 typography-micro px-1 rounded leading-none pb-px text-[var(--status-warning)] bg-[var(--status-warning)]/10">
+                        beta
+                      </span>
+                    </DropdownMenuItem>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem
                       className="text-destructive focus:text-destructive [&>svg]:mr-1"
@@ -2581,6 +2800,8 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       sessionAttentionStates,
       permissions,
       currentSessionId,
+      hasSessionSearchQuery,
+      normalizedSessionSearchQuery,
       expandedParents,
       editingId,
       editTitle,
@@ -2604,37 +2825,93 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       addSessionToFolder,
       removeSessionFromFolder,
       createFolderAndStartRename,
+      openContextPanelTab,
       notifyOnSubtasks,
     ],
   );
 
   const renderGroupSessions = React.useCallback(
     (group: SessionGroup, groupKey: string, projectId?: string | null, hideGroupLabel?: boolean) => {
+      const searchData = hasSessionSearchQuery ? groupSearchDataByGroup.get(group) : null;
       const isExpanded = expandedSessionGroups.has(groupKey);
-      const isCollapsed = collapsedGroups.has(groupKey);
+      const isCollapsed = hasSessionSearchQuery ? false : collapsedGroups.has(groupKey);
       const maxVisible = hideDirectoryControls ? 10 : 5;
+      const groupMatchesSearch = hasSessionSearchQuery
+        ? searchData?.groupMatches === true
+        : false;
+      const shouldFilterGroupContents = hasSessionSearchQuery;
+
+      const sourceGroupNodes = shouldFilterGroupContents
+        ? (searchData?.filteredNodes ?? [])
+        : group.sessions;
 
       // --- Session Folders: split into foldered vs ungrouped ---
       const folderScopeKey = normalizePath(group.directory ?? null);
       const scopeFolders = folderScopeKey ? getFoldersForScope(folderScopeKey) : [];
-      const sessionIdsInFolders = new Set(scopeFolders.flatMap((f) => f.sessionIds));
-      const ungroupedSessions = group.sessions.filter((node) => !sessionIdsInFolders.has(node.session.id));
+
+      const nodeBySessionId = new Map<string, SessionNode>();
+      const collectNodeLookup = (nodes: SessionNode[]) => {
+        nodes.forEach((node) => {
+          nodeBySessionId.set(node.session.id, node);
+          if (node.children.length > 0) {
+            collectNodeLookup(node.children);
+          }
+        });
+      };
+      collectNodeLookup(sourceGroupNodes);
 
       // ALL folders for this scope – including empty ones (so newly created folders show up)
       // Build enriched list: { folder, nodes } for every folder in scope
-      const allFoldersForGroup = scopeFolders.map((folder) => {
+      const allFoldersForGroupBase = scopeFolders.map((folder) => {
         const nodes = folder.sessionIds
-          .map((sid) => group.sessions.find((node) => node.session.id === sid))
+          .map((sid) => nodeBySessionId.get(sid))
           .filter((n): n is SessionNode => Boolean(n))
           .sort((a, b) => compareSessionsByPinnedAndTime(a.session, b.session, pinnedSessionIds));
         return { folder, nodes };
       });
 
+      const shouldKeepFolder = (folderId: string, folderMap: Map<string, { folder: (typeof allFoldersForGroupBase)[number]['folder']; nodes: SessionNode[] }>): boolean => {
+        const entry = folderMap.get(folderId);
+        if (!entry) {
+          return false;
+        }
+
+        if (!hasSessionSearchQuery) {
+          return true;
+        }
+
+        const folderMatches = entry.folder.name.toLowerCase().includes(normalizedSessionSearchQuery);
+        if (folderMatches || entry.nodes.length > 0) {
+          return true;
+        }
+
+        return allFoldersForGroupBase
+          .filter(({ folder }) => folder.parentId === folderId)
+          .some(({ folder }) => shouldKeepFolder(folder.id, folderMap));
+      };
+
+      const folderMapById = new Map(
+        allFoldersForGroupBase.map((entry) => [entry.folder.id, entry]),
+      );
+
+      const allFoldersForGroup = hasSessionSearchQuery
+        ? allFoldersForGroupBase.filter(({ folder }) => shouldKeepFolder(folder.id, folderMapById))
+        : allFoldersForGroupBase;
+
+      const sessionIdsInFolders = new Set(allFoldersForGroup.flatMap((f) => f.folder.sessionIds));
+      const ungroupedSessions = sourceGroupNodes.filter((node) => !sessionIdsInFolders.has(node.session.id));
+
       // Root-level folders (no parentId) — sub-folders are rendered inside their parent
       const rootFolders = allFoldersForGroup.filter(({ folder }) => !folder.parentId);
 
+      if (hasSessionSearchQuery && !groupMatchesSearch && rootFolders.length === 0 && ungroupedSessions.length === 0) {
+        return null;
+      }
+
       const totalSessions = ungroupedSessions.length;
-      const visibleSessions = isExpanded ? ungroupedSessions : ungroupedSessions.slice(0, maxVisible);
+      const visibleSessions = hasSessionSearchQuery
+        ? ungroupedSessions
+        : (isExpanded ? ungroupedSessions : ungroupedSessions.slice(0, maxVisible));
       const remainingCount = totalSessions - visibleSessions.length;
       const collectGroupSessions = (nodes: SessionNode[]): Session[] => {
         const collected: Session[] = [];
@@ -2649,7 +2926,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         visit(nodes);
         return collected;
       };
-      const allGroupSessions = collectGroupSessions(group.sessions);
+      const allGroupSessions = collectGroupSessions(sourceGroupNodes);
       const normalizedGroupDirectory = normalizePath(group.directory ?? null);
       const isGitProject = projectId && projectRepoStatus.has(projectId)
         ? Boolean(projectRepoStatus.get(projectId))
@@ -2676,7 +2953,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                 folder={folder}
                 sessions={nodes}
                 subFolderItems={subFolderItems}
-                isCollapsed={collapsedFolderIds.has(folder.id)}
+                isCollapsed={hasSessionSearchQuery ? false : collapsedFolderIds.has(folder.id)}
                 onToggle={() => toggleFolderCollapse(folder.id)}
                 onRename={(name) => {
                   if (folderScopeKey) renameFolder(folderScopeKey, folder.id, name);
@@ -2760,7 +3037,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
               >
               {renderFolderItems()}
               {visibleSessions.map((node) => renderSessionNode(node, 0, group.directory, projectId))}
-              {totalSessions === 0 && scopeFolders.length === 0 ? (
+              {totalSessions === 0 && allFoldersForGroup.length === 0 ? (
                 <div className="py-1 text-left typography-micro text-muted-foreground">
                   No sessions in this workspace yet.
                 </div>
@@ -2839,7 +3116,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                 ) : null}
                 <div className="min-w-0 flex flex-col justify-center">
                   <p className={cn('text-[14px] font-semibold truncate', isActiveGroup ? 'text-primary' : 'text-muted-foreground')}>
-                    {group.label}
+                    {renderHighlightedText(group.label, normalizedSessionSearchQuery)}
                   </p>
                   {showBranchSubtitle ? (
                     <span className="text-[10px] sm:text-[11px] text-muted-foreground/80 truncate leading-tight">
@@ -2929,7 +3206,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
               >
                 {renderFolderItems()}
                 {visibleSessions.map((node) => renderSessionNode(node, 0, group.directory, projectId))}
-                {totalSessions === 0 && scopeFolders.length === 0 ? (
+                {totalSessions === 0 && allFoldersForGroup.length === 0 ? (
                   <div className="py-1 text-left typography-micro text-muted-foreground">
                     No sessions in this workspace yet.
                   </div>
@@ -2962,6 +3239,9 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       expandedSessionGroups,
       collapsedGroups,
       hideDirectoryControls,
+      hasSessionSearchQuery,
+      normalizedSessionSearchQuery,
+      groupSearchDataByGroup,
       currentSessionDirectory,
       projectRepoStatus,
       renderSessionNode,
@@ -3000,6 +3280,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
   return (
     <div
+      ref={sessionSearchContainerRef}
       className={cn(
         'flex h-full flex-col text-foreground overflow-x-hidden',
         mobileVariant ? '' : 'bg-transparent',
@@ -3127,8 +3408,9 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
           </div>
           )}
           {reserveHeaderActionsSpace ? (
-            <div className="-ml-1 flex h-8 items-center">
+            <div className="-ml-1 flex h-auto min-h-8 flex-col gap-1">
               {activeProjectForHeader ? (
+              <>
               <div className="flex h-8 -translate-y-px items-center gap-1.5 rounded-md pl-0 pr-1">
               {stableActiveProjectIsRepo ? (
                 <>
@@ -3143,15 +3425,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                       if (activeProjectForHeader.id !== activeProjectId) {
                         setActiveProjectIdOnly(activeProjectForHeader.id);
                       }
-                      const newWorktreePath = await createWorktreeOnly();
-                      if (!newWorktreePath) {
-                        return;
-                      }
-                      setActiveMainTab('chat');
-                      if (mobileVariant) {
-                        setSessionSwitcherOpen(false);
-                      }
-                      openNewSessionDraft({ directoryOverride: newWorktreePath });
+                      setNewWorktreeDialogOpen(true);
                     }}
                     className={headerActionButtonClass}
                     aria-label="New worktree"
@@ -3160,32 +3434,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom" sideOffset={4}><p>New worktree</p></TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    onClick={() => setIssuePickerOpen(true)}
-                    className={headerActionButtonClass}
-                    aria-label="New from issue"
-                  >
-                    <RiGithubLine className={headerActionIconClass} />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom" sideOffset={4}><p>New from issue</p></TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    onClick={() => setPullRequestPickerOpen(true)}
-                    className={headerActionButtonClass}
-                    aria-label="New from PR"
-                  >
-                    <RiGitPullRequestLine className={headerActionIconClass} />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom" sideOffset={4}><p>New from PR</p></TooltipContent>
               </Tooltip>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -3201,21 +3449,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                 <TooltipContent side="bottom" sideOffset={4}><p>New multi-run</p></TooltipContent>
               </Tooltip>
                 </>
-              ) : null}
-              {stableActiveProjectIsRepo && branchPickerProject ? (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      onClick={() => setIsBranchPickerOpen(true)}
-                      className={headerActionButtonClass}
-                      aria-label="Manage branches"
-                    >
-                      <RiGitRepositoryLine className={headerActionIconClass} />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom" sideOffset={4}><p>Manage branches</p></TooltipContent>
-                </Tooltip>
               ) : null}
               {useMobileNotesPanel ? (
                 <Tooltip>
@@ -3256,7 +3489,62 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                   </DropdownMenuContent>
                 </DropdownMenu>
               )}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={() => setIsSessionSearchOpen((prev) => !prev)}
+                    className={headerActionButtonClass}
+                    aria-label="Search sessions"
+                    aria-expanded={isSessionSearchOpen}
+                  >
+                    <RiSearchLine className={headerActionIconClass} />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" sideOffset={4}><p>Search sessions</p></TooltipContent>
+              </Tooltip>
               </div>
+              {isSessionSearchOpen ? (
+                <div className="px-1 pb-1">
+                  <div className="mb-1 flex items-center justify-between px-0.5 typography-micro text-muted-foreground/80">
+                    {hasSessionSearchQuery ? (
+                      <span>{searchMatchCount} {searchMatchCount === 1 ? 'match' : 'matches'}</span>
+                    ) : <span />}
+                    <span>Esc to clear</span>
+                  </div>
+                  <div className="relative">
+                    <RiSearchLine className="pointer-events-none absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <input
+                      ref={sessionSearchInputRef}
+                      value={sessionSearchQuery}
+                      onChange={(event) => setSessionSearchQuery(event.target.value)}
+                      placeholder="Search sessions..."
+                      className="h-8 w-full rounded-md border border-border bg-transparent pl-8 pr-8 typography-ui-label text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                      onKeyDown={(event) => {
+                        if (event.key === 'Escape') {
+                          event.stopPropagation();
+                          if (hasSessionSearchQuery) {
+                            setSessionSearchQuery('');
+                          } else {
+                            setIsSessionSearchOpen(false);
+                          }
+                        }
+                      }}
+                    />
+                    {sessionSearchQuery.length > 0 ? (
+                      <button
+                        type="button"
+                        onClick={() => setSessionSearchQuery('')}
+                        className="absolute right-1 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                        aria-label="Clear search"
+                      >
+                        <RiCloseLine className="h-3.5 w-3.5" />
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
+              </>
               ) : null}
             </div>
           ) : null}
@@ -3269,12 +3557,14 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       >
         {projectSections.length === 0 ? (
           emptyState
+        ) : sectionsForRender.length === 0 ? (
+          searchEmptyState
         ) : showOnlyMainWorkspace ? (
           <div className="space-y-[0.6rem] py-1">
             {(() => {
-              const activeSection = projectSections.find((section) => section.project.id === activeProjectId) ?? projectSections[0];
+              const activeSection = sectionsForRender.find((section) => section.project.id === activeProjectId) ?? sectionsForRender[0];
               if (!activeSection) {
-                return emptyState;
+                return hasSessionSearchQuery ? searchEmptyState : emptyState;
               }
               // VS Code sessions view typically only shows one workspace, but sessions may live in worktrees or
               // canonicalized paths. Prefer the main group if it has sessions; otherwise fall back to any group
@@ -3298,7 +3588,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
           </div>
         ) : (
           <>
-            {visibleProjectSections.map((section) => {
+            {sectionsForRender.map((section) => {
                 const project = section.project;
                 const projectKey = project.id;
                 const projectLabel = formatProjectLabel(
@@ -3348,18 +3638,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                         setSessionSwitcherOpen(false);
                       }
                       createWorktreeSession();
-                    }}
-                    onNewSessionFromGitHubIssue={() => {
-                      if (projectKey !== activeProjectId) {
-                        setActiveProjectIdOnly(projectKey);
-                      }
-                      setIssuePickerOpen(true);
-                    }}
-                    onNewSessionFromGitHubPR={() => {
-                      if (projectKey !== activeProjectId) {
-                        setActiveProjectIdOnly(projectKey);
-                      }
-                      setPullRequestPickerOpen(true);
                     }}
                     onOpenMultiRunLauncher={() => {
                       if (projectKey !== activeProjectId) {
@@ -3435,32 +3713,20 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         )}
       </ScrollableOverlay>
 
-      <GitHubIssuePickerDialog
-        open={issuePickerOpen}
-        onOpenChange={(open) => {
-          setIssuePickerOpen(open);
-          if (!open && mobileVariant) {
-            setActiveMainTab('chat');
+      <NewWorktreeDialog
+        open={newWorktreeDialogOpen}
+        onOpenChange={setNewWorktreeDialogOpen}
+        onWorktreeCreated={(worktreePath, options) => {
+          setActiveMainTab('chat');
+          if (mobileVariant) {
             setSessionSwitcherOpen(false);
           }
-        }}
-      />
-
-      <GitHubPullRequestPickerDialog
-        open={pullRequestPickerOpen}
-        onOpenChange={(open) => {
-          setPullRequestPickerOpen(open);
-          if (!open && mobileVariant) {
-            setActiveMainTab('chat');
-            setSessionSwitcherOpen(false);
+          if (options?.sessionId) {
+            setCurrentSession(options.sessionId);
+            return;
           }
+          openNewSessionDraft({ directoryOverride: worktreePath });
         }}
-      />
-
-      <BranchPickerDialog
-        open={isBranchPickerOpen}
-        onOpenChange={setIsBranchPickerOpen}
-        project={branchPickerProject}
       />
 
       {useMobileNotesPanel ? (

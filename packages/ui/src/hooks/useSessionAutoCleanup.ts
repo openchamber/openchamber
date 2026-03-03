@@ -57,10 +57,12 @@ type CleanupResult = {
 
 type CleanupOptions = {
   autoRun?: boolean;
+  enabled?: boolean;
 };
 
 export const useSessionAutoCleanup = (options?: CleanupOptions) => {
   const autoRun = options?.autoRun !== false;
+  const enabled = options?.enabled ?? true;
 
   const sessions = useSessionStore((state) => state.sessions);
   const currentSessionId = useSessionStore((state) => state.currentSessionId);
@@ -147,6 +149,10 @@ export const useSessionAutoCleanup = (options?: CleanupOptions) => {
   );
 
   React.useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+
     if (!autoRun) {
       return;
     }
@@ -166,6 +172,7 @@ export const useSessionAutoCleanup = (options?: CleanupOptions) => {
     autoDeleteEnabled,
     autoDeleteLastRunAt,
     autoRun,
+    enabled,
     isLoading,
     sessions.length,
     runCleanup,

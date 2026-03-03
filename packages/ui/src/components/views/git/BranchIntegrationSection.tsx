@@ -198,13 +198,13 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
       {operationCompleted ? (
         mode === 'dialog' ? (
           <DialogFooter>
-            <Button variant="default" size="sm" onClick={handleClose}>
+            <Button variant="default" size="sm" className="h-7 px-2 py-0" onClick={handleClose}>
               {hasError ? 'Close' : 'Done'}
             </Button>
           </DialogFooter>
         ) : (
           <div className="flex justify-end">
-            <Button variant="default" size="sm" onClick={handleClose}>
+            <Button variant="default" size="sm" className="h-7 px-2 py-0" onClick={handleClose}>
               {hasError ? 'Close' : 'Done'}
             </Button>
           </div>
@@ -214,7 +214,7 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
   );
 
   const renderForm = () => (
-    <>
+    <div className="space-y-4">
       {/* Operation Selection */}
       <div className="space-y-3">
         <p className="typography-meta text-muted-foreground">Operation</p>
@@ -291,15 +291,18 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
               <RiArrowDownSLine className="size-4 opacity-60 shrink-0" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-[--radix-dropdown-menu-trigger-width] p-0 max-h-[300px]">
-            <Command>
+          <DropdownMenuContent
+            align="start"
+            className="w-[--radix-dropdown-menu-trigger-width] p-0 max-h-(--radix-dropdown-menu-content-available-height) flex flex-col overflow-hidden"
+          >
+            <Command className="h-full min-h-0">
               <CommandInput
                 ref={searchInputRef}
                 placeholder="Search branches..."
                 value={branchSearch}
                 onValueChange={setBranchSearch}
               />
-              <CommandList>
+              <CommandList className="h-full min-h-0" disableHorizontal>
                 <CommandEmpty>No branches found.</CommandEmpty>
 
                 {filteredLocal.length > 0 && (
@@ -349,8 +352,8 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
       ) : null}
 
       {mode === 'dialog' ? (
-        <DialogFooter className="gap-2">
-          <Button variant="ghost" size="sm" onClick={handleCancel}>
+        <DialogFooter className="gap-2 pt-1">
+          <Button variant="ghost" size="sm" className="h-7 px-2 py-0" onClick={handleCancel}>
             Cancel
           </Button>
           <Button
@@ -358,7 +361,7 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
             size="sm"
             onClick={handleConfirm}
             disabled={!selectedBranch}
-            className="gap-1.5"
+            className="h-7 px-2 py-0 gap-1.5"
           >
             {operation === 'merge' ? (
               <>
@@ -374,33 +377,35 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
           </Button>
         </DialogFooter>
       ) : (
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" onClick={handleCancel} disabled={isDisabled}>
+        <div className="flex items-center gap-2 pt-1">
+          <Button variant="ghost" size="sm" className="h-7 px-2 py-0" onClick={handleCancel} disabled={isDisabled}>
             Reset
           </Button>
           <div className="flex-1" />
-          <Button variant="default" size="sm" onClick={handleConfirm} disabled={isDisabled || !selectedBranch}>
+          <Button variant="default" size="sm" className="h-7 px-2 py-0" onClick={handleConfirm} disabled={isDisabled || !selectedBranch}>
             {operation === 'merge' ? 'Merge' : 'Rebase'}
           </Button>
         </div>
       )}
-    </>
+    </div>
   );
 
   const body = isOperating ? renderOperating() : renderForm();
 
   if (mode === 'inline') {
     return (
-      <div className="space-y-4">
-        <div className="space-y-1">
-          <div className="typography-ui-header font-semibold text-foreground">Update branch</div>
-          <div className="typography-micro text-muted-foreground">
-            Bring changes from another branch into{' '}
-            <span className="font-mono text-foreground">{targetBranchLabel}</span>.
+      <section className="border-0 bg-transparent rounded-none">
+        <header className="border-b border-border/40 px-0 py-3">
+          <div className="space-y-1">
+            <div className="typography-ui-header font-semibold text-foreground">Update branch</div>
+            <div className="typography-micro text-muted-foreground">
+              Bring changes from another branch into{' '}
+              <span className="font-mono text-foreground">{targetBranchLabel}</span>.
+            </div>
           </div>
-        </div>
-        {body}
-      </div>
+        </header>
+        <div className="pt-3">{body}</div>
+      </section>
     );
   }
 
@@ -411,7 +416,7 @@ export const BranchIntegrationSection: React.FC<BranchIntegrationSectionProps> =
           <Button
             variant="outline"
             size="sm"
-            className="h-8 px-2 gap-1.5"
+            className="h-7 px-2 py-0 gap-1.5"
             onClick={handleOpenDialog}
             disabled={isDisabled}
           >

@@ -1,5 +1,5 @@
 import React from 'react';
-import { RiArrowDownSLine, RiArrowRightSLine, RiGitCommitLine, RiLoader4Line, RiTextWrap } from '@remixicon/react';
+import { RiArrowDownSLine, RiArrowRightSLine, RiEditLine, RiGitCommitLine, RiLoader4Line, RiTextWrap } from '@remixicon/react';
 
 import { useUIStore } from '@/stores/useUIStore';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
@@ -109,6 +109,60 @@ const describeChange = (file: GitStatus['files'][number]): ChangeDescriptor => {
 const isNewStatusFile = (file: GitStatus['files'][number]): boolean => {
     const { index, working_dir: workingDir } = file;
     return index === 'A' || workingDir === 'A' || index === '?' || workingDir === '?';
+};
+
+const isAbsolutePath = (value: string): boolean => {
+    return value.startsWith('/') || value.startsWith('//') || /^[A-Za-z]:\//.test(value);
+};
+
+const toAbsolutePath = (directory: string, filePath: string): string => {
+    const normalizedDirectory = directory.replace(/\\/g, '/').replace(/\/+$/g, '');
+    const normalizedFilePath = filePath.replace(/\\/g, '/');
+    if (isAbsolutePath(normalizedFilePath)) {
+        return normalizedFilePath;
+    }
+    const trimmedFilePath = normalizedFilePath.replace(/^\/+/, '');
+    return normalizedDirectory ? `${normalizedDirectory}/${trimmedFilePath}` : trimmedFilePath;
+};
+
+const getFirstChangedModifiedLine = (original: string, modified: string): number => {
+    const originalLines = original.split('\n');
+    const modifiedLines = modified.split('\n');
+    const sharedLength = Math.min(originalLines.length, modifiedLines.length);
+
+    for (let index = 0; index < sharedLength; index += 1) {
+        if (originalLines[index] !== modifiedLines[index]) {
+            return index + 1;
+        }
+    }
+
+    if (modifiedLines.length > originalLines.length) {
+        return originalLines.length + 1;
+    }
+
+    if (originalLines.length > modifiedLines.length) {
+        return Math.max(1, modifiedLines.length);
+    }
+
+    return 1;
+};
+
+const getFirstVisibleModifiedLineFromPatch = (patch: string): number | null => {
+    if (!patch) {
+        return null;
+    }
+
+    const match = patch.match(/@@\s*-\d+(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s*@@/m);
+    if (!match) {
+        return null;
+    }
+
+    const parsed = Number.parseInt(match[1], 10);
+    if (!Number.isFinite(parsed) || parsed < 1) {
+        return null;
+    }
+
+    return parsed;
 };
 
 const formatDiffTotals = (insertions?: number, deletions?: number) => {
@@ -547,6 +601,9 @@ interface MultiFileDiffEntryProps {
     defaultCollapsed?: boolean;
     expandRequestPath?: string | null;
     expandRequestNonce?: number;
+    showOpenInEditorAction?: boolean;
+    isOpeningInEditor?: boolean;
+    onOpenInEditor?: (filePath: string, diffData: DiffData | null) => void;
 }
 
 const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
@@ -561,6 +618,9 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
     defaultCollapsed = false,
     expandRequestPath = null,
     expandRequestNonce = 0,
+    showOpenInEditorAction = false,
+    isOpeningInEditor = false,
+    onOpenInEditor,
 }) => {
     const { git } = useRuntimeAPIs();
     const cachedDiff = useGitStore(
@@ -763,6 +823,25 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                     </div>
                     <div className="relative flex items-center gap-2">
                         {formatDiffTotals(file.insertions, file.deletions)}
+                        {showOpenInEditorAction && onOpenInEditor ? (
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-5 w-5 p-0 opacity-70 hover:opacity-100"
+                                title="Open this file in editor at change"
+                                onClick={(event) => {
+                                    event.stopPropagation();
+                                    onOpenInEditor(file.path, diffData);
+                                }}
+                                disabled={isOpeningInEditor}
+                            >
+                                {isOpeningInEditor ? (
+                                    <RiLoader4Line className="size-3.5 animate-spin" />
+                                ) : (
+                                    <RiEditLine className="size-3.5" />
+                                )}
+                            </Button>
+                        ) : null}
                         <DiffViewToggle
                             mode={renderSideBySide ? 'side-by-side' : 'unified'}
                             onModeChange={(mode: DiffViewMode) => {
@@ -819,6 +898,7 @@ interface DiffViewProps {
     stackedDefaultCollapsedAll?: boolean;
     hideFileSelector?: boolean;
     pinSelectedFileHeaderToTopOnNavigate?: boolean;
+    showOpenInEditorAction?: boolean;
 }
 
 export const DiffView: React.FC<DiffViewProps> = ({
@@ -826,6 +906,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
     stackedDefaultCollapsedAll = false,
     hideFileSelector = false,
     pinSelectedFileHeaderToTopOnNavigate = false,
+    showOpenInEditorAction = false,
 }) => {
     const { git } = useRuntimeAPIs();
     const effectiveDirectory = useEffectiveDirectory();
@@ -853,6 +934,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
     const setDiffWrapLines = useUIStore((state) => state.setDiffWrapLines);
     const diffViewMode = useUIStore((state) => state.diffViewMode);
     const setDiffViewMode = useUIStore((state) => state.setDiffViewMode);
+    const openContextFileAtLine = useUIStore((state) => state.openContextFileAtLine);
     // Default to wrap on mobile
     const diffWrapLines = isMobile || diffWrapLinesStore;
 
@@ -1283,6 +1365,69 @@ export const DiffView: React.FC<DiffViewProps> = ({
         return { original: selectedCachedDiff.original, modified: selectedCachedDiff.modified, isBinary: selectedCachedDiff.isBinary };
     }, [selectedCachedDiff]);
 
+    const [openingEditorFilePath, setOpeningEditorFilePath] = React.useState<string | null>(null);
+
+    const openFileInEditorAtChange = React.useCallback(async (filePath: string, cachedDiffData: DiffData | null) => {
+        if (!effectiveDirectory || !filePath) {
+            return;
+        }
+
+        setOpeningEditorFilePath(filePath);
+        try {
+            let targetLine: number | null = null;
+
+            if (cachedDiffData && !cachedDiffData.isBinary && !isImageFile(filePath)) {
+                targetLine = getFirstChangedModifiedLine(cachedDiffData.original, cachedDiffData.modified);
+            }
+
+            if (targetLine === null) {
+                try {
+                    const patchResponse = await git.getGitDiff(effectiveDirectory, {
+                        path: filePath,
+                        contextLines: 3,
+                    });
+                    targetLine = getFirstVisibleModifiedLineFromPatch(patchResponse.diff);
+                } catch {
+                    targetLine = null;
+                }
+            }
+
+            let diffForNavigation = cachedDiffData;
+            if (targetLine === null || !diffForNavigation) {
+                const response = await git.getGitFileDiff(effectiveDirectory, { path: filePath });
+                diffForNavigation = {
+                    original: response.original ?? '',
+                    modified: response.modified ?? '',
+                    isBinary: response.isBinary,
+                };
+                setDiff(effectiveDirectory, filePath, diffForNavigation);
+            }
+
+            const resolvedTargetLine = targetLine ?? ((diffForNavigation.isBinary || isImageFile(filePath))
+                ? 1
+                : getFirstChangedModifiedLine(diffForNavigation.original, diffForNavigation.modified));
+
+            openContextFileAtLine(
+                effectiveDirectory,
+                toAbsolutePath(effectiveDirectory, filePath),
+                resolvedTargetLine,
+                1,
+            );
+        } finally {
+            setOpeningEditorFilePath((current) => (current === filePath ? null : current));
+        }
+    }, [effectiveDirectory, git, openContextFileAtLine, setDiff]);
+
+    const openSelectedFileInEditorAtChange = React.useCallback(async () => {
+        if (!selectedFile) {
+            return;
+        }
+
+        await openFileInEditorAtChange(selectedFile, selectedDiffData);
+    }, [openFileInEditorAtChange, selectedDiffData, selectedFile]);
+
+    const isOpeningSelectedInEditor = Boolean(selectedFile && openingEditorFilePath === selectedFile);
+
     const hasCurrentDiff = !!selectedCachedDiff;
     const isCurrentFileLoading = !isStackedView && !!selectedFile && !hasCurrentDiff;
 
@@ -1402,6 +1547,11 @@ export const DiffView: React.FC<DiffViewProps> = ({
                                 defaultCollapsed={stackedDefaultCollapsedAll ? true : index >= defaultExpandedCount}
                                 expandRequestPath={stackedExpandTarget}
                                 expandRequestNonce={stackedExpandRequestNonce}
+                                showOpenInEditorAction={showOpenInEditorAction}
+                                isOpeningInEditor={openingEditorFilePath === file.path}
+                                onOpenInEditor={(filePath, diffData) => {
+                                    void openFileInEditorAtChange(filePath, diffData);
+                                }}
                             />
                         ))}
                     </div>
@@ -1526,6 +1676,24 @@ export const DiffView: React.FC<DiffViewProps> = ({
                         title={diffWrapLines ? 'Disable line wrap' : 'Enable line wrap'}
                     >
                         <RiTextWrap className="size-4" />
+                    </Button>
+                )}
+                {showOpenInEditorAction && selectedFileEntry && !isStackedView && (
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-5 w-5 p-0 opacity-70 hover:opacity-100"
+                        onClick={() => {
+                            void openSelectedFileInEditorAtChange();
+                        }}
+                        disabled={isOpeningSelectedInEditor}
+                        title="Open this file at first changed line"
+                    >
+                        {isOpeningSelectedInEditor ? (
+                            <RiLoader4Line className="size-3.5 animate-spin" />
+                        ) : (
+                            <RiEditLine className="size-3.5" />
+                        )}
                     </Button>
                 )}
                 {selectedFileEntry && currentLayoutForSelectedFile && (

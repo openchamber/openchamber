@@ -136,7 +136,19 @@ async function installWebUpdate(): Promise<InstallWebUpdateResult> {
   }
 }
 
-async function waitForUpdateApplied(maxAttempts = 40, intervalMs = 2000): Promise<boolean> {
+async function isServerReachable(): Promise<boolean> {
+  try {
+    const response = await fetch('/health', {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function waitForUpdateApplied(previousVersion?: string, maxAttempts = 40, intervalMs = 2000): Promise<boolean> {
   for (let i = 0; i < maxAttempts; i++) {
     try {
       const response = await fetch('/api/openchamber/update-check', {
@@ -148,6 +160,16 @@ async function waitForUpdateApplied(maxAttempts = 40, intervalMs = 2000): Promis
         if (data && data.available === false) {
           return true;
         }
+        if (
+          data &&
+          typeof data.currentVersion === 'string' &&
+          typeof previousVersion === 'string' &&
+          data.currentVersion !== previousVersion
+        ) {
+          return true;
+        }
+      } else if ((response.status === 401 || response.status === 403) && await isServerReachable()) {
+        return true;
       }
     } catch {
       // Server may be restarting
@@ -240,7 +262,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
 
     setWebUpdateState('reconnecting');
 
-    const applied = await waitForUpdateApplied();
+    const applied = await waitForUpdateApplied(info?.currentVersion);
 
     if (applied) {
       window.location.reload();
@@ -248,7 +270,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
       setWebUpdateState('error');
       setWebError('Update did not apply. Refresh and try again, or run: openchamber update');
     }
-  }, []);
+  }, [info?.currentVersion]);
 
   const isWebUpdating = webUpdateState !== 'idle' && webUpdateState !== 'error';
 

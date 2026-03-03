@@ -17,7 +17,7 @@ const QueuedMessageChip = memo(({ message, sessionId, onEdit }: QueuedMessageChi
     const firstLine = React.useMemo(() => {
         const lines = message.content.split('\n');
         const first = lines[0] || '';
-        const maxLength = 50;
+        const maxLength = 100;
         if (first.length > maxLength) {
             return first.substring(0, maxLength) + '...';
         }
@@ -27,32 +27,34 @@ const QueuedMessageChip = memo(({ message, sessionId, onEdit }: QueuedMessageChi
     const attachmentCount = message.attachments?.length ?? 0;
 
     return (
-        <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-muted/30 border border-border/30 rounded-xl typography-meta group">
-            <RiMessage2Line className="h-3 w-3 text-muted-foreground flex-shrink-0" />
-            <button
-                type="button"
-                onClick={() => onEdit(message)}
-                className="flex items-center gap-1.5 hover:text-foreground transition-colors text-left"
-                title="Click to edit"
-            >
-                <span className="truncate max-w-[200px]">
-                    {firstLine || '(empty)'}
-                </span>
+        <button
+            type="button"
+            onClick={() => onEdit(message)}
+            className="flex w-full items-center gap-1.5 text-sm hover:opacity-80 transition-opacity text-left h-5 px-1"
+        >
+            <RiMessage2Line 
+                className="h-4 w-4 flex-shrink-0 text-muted-foreground" 
+            />
+            <span className="text-muted-foreground flex-shrink-0">
+                Queued
                 {attachmentCount > 0 && (
-                    <span className="text-muted-foreground flex-shrink-0">
-                        +{attachmentCount} file{attachmentCount > 1 ? 's' : ''}
-                    </span>
+                    <span className="ml-1">+{attachmentCount} file{attachmentCount > 1 ? 's' : ''}</span>
                 )}
-            </button>
-            <button
-                type="button"
-                onClick={() => removeFromQueue(sessionId, message.id)}
-                className="ml-1 hover:text-destructive p-0.5 opacity-60 group-hover:opacity-100 transition-opacity"
-                title="Remove from queue"
+            </span>
+            <span className="text-foreground truncate">
+                {firstLine || '(empty)'}
+            </span>
+            <span
+                onClick={(e) => {
+                    e.stopPropagation();
+                    removeFromQueue(sessionId, message.id);
+                }}
+                className="flex items-center justify-center h-6 w-6 flex-shrink-0 hover:bg-[var(--interactive-hover)] rounded-full transition-colors cursor-pointer"
+                aria-label="Remove from queue"
             >
-                <RiCloseLine className="h-3 w-3" />
-            </button>
-        </div>
+                <RiCloseLine className="h-4 w-4 text-muted-foreground" />
+            </span>
+        </button>
     );
 });
 
@@ -98,17 +100,15 @@ export const QueuedMessageChips = memo(({ onEditMessage }: QueuedMessageChipsPro
     }
 
     return (
-        <div className="pb-2">
-            <div className="flex items-center flex-wrap gap-2 px-3 py-2 bg-muted/30 rounded-xl border border-border/30">
-                {queuedMessages.map((message) => (
-                    <QueuedMessageChip
-                        key={message.id}
-                        message={message}
-                        sessionId={currentSessionId}
-                        onEdit={handleEdit}
-                    />
-                ))}
-            </div>
+        <div className="pb-2 w-full px-1 space-y-1">
+            {queuedMessages.map((message) => (
+                <QueuedMessageChip
+                    key={message.id}
+                    message={message}
+                    sessionId={currentSessionId}
+                    onEdit={handleEdit}
+                />
+            ))}
         </div>
     );
 });

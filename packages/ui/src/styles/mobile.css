@@ -150,6 +150,13 @@
     -webkit-overflow-scrolling: touch;
   }
 
+  /* Keep Streamdown code blocks horizontally scrollable on mobile. */
+  :root.mobile-pointer:not(.desktop-runtime) .streamdown-content [data-streamdown="code-block-body"] {
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
   /* Fix mobile viewport height */
   :root.mobile-pointer:not(.desktop-runtime),
   :root.mobile-pointer:not(.desktop-runtime) body {

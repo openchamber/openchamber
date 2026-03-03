@@ -1,16 +1,13 @@
 import React from 'react';
-import { RiInformationLine } from '@remixicon/react';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
 import { AgentSelector } from '@/components/sections/commands/AgentSelector';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
 import { updateDesktopSettings } from '@/lib/persistence';
-import { isVSCodeRuntime } from '@/lib/desktop';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
-import { getModifierLabel, cn } from '@/lib/utils';
+import { cn } from '@/lib/utils';
 
 const getDisplayModel = (
   storedModel: string | undefined
@@ -33,8 +30,6 @@ export const DefaultsSettings: React.FC = () => {
   const setSettingsDefaultModel = useConfigStore((state) => state.setSettingsDefaultModel);
   const setSettingsDefaultVariant = useConfigStore((state) => state.setSettingsDefaultVariant);
   const setSettingsDefaultAgent = useConfigStore((state) => state.setSettingsDefaultAgent);
-  const settingsAutoCreateWorktree = useConfigStore((state) => state.settingsAutoCreateWorktree);
-  const setSettingsAutoCreateWorktree = useConfigStore((state) => state.setSettingsAutoCreateWorktree);
   const showDeletionDialog = useUIStore((state) => state.showDeletionDialog);
   const setShowDeletionDialog = useUIStore((state) => state.setShowDeletionDialog);
   const providers = useConfigStore((state) => state.providers);
@@ -45,7 +40,6 @@ export const DefaultsSettings: React.FC = () => {
   const [isLoading, setIsLoading] = React.useState(true);
 
   const parsedModel = React.useMemo(() => getDisplayModel(defaultModel), [defaultModel]);
-  const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
 
   React.useEffect(() => {
     const loadSettings = async () => {
@@ -210,18 +204,6 @@ export const DefaultsSettings: React.FC = () => {
     }
   }, [defaultVariant, setCurrentVariant, setSettingsDefaultVariant, supportsVariants]);
 
-  const handleAutoWorktreeChange = React.useCallback(
-    async (enabled: boolean) => {
-      setSettingsAutoCreateWorktree(enabled);
-      try {
-        await updateDesktopSettings({ autoCreateWorktree: enabled });
-      } catch (error) {
-        console.warn('Failed to save auto create worktree setting:', error);
-      }
-    },
-    [setSettingsAutoCreateWorktree]
-  );
-
   if (isLoading) {
     return null;
   }
@@ -309,46 +291,6 @@ export const DefaultsSettings: React.FC = () => {
           <span className="typography-ui-label text-foreground">Show Deletion Dialog</span>
         </div>
 
-        {!isVSCode && (
-          <div
-            className="group flex cursor-pointer items-center gap-2 py-1"
-            role="button"
-            tabIndex={0}
-            aria-pressed={settingsAutoCreateWorktree}
-            onClick={() => {
-              void handleAutoWorktreeChange(!settingsAutoCreateWorktree);
-            }}
-            onKeyDown={(event) => {
-              if (event.key === ' ' || event.key === 'Enter') {
-                event.preventDefault();
-                void handleAutoWorktreeChange(!settingsAutoCreateWorktree);
-              }
-            }}
-          >
-            <Checkbox
-              checked={settingsAutoCreateWorktree}
-              onChange={(checked) => {
-                void handleAutoWorktreeChange(checked);
-              }}
-              ariaLabel="Always create worktree"
-            />
-            <div className="flex min-w-0 flex-col">
-              <div className="flex items-center gap-1.5">
-                <span className="typography-ui-label text-foreground">Always Create Worktree</span>
-                <Tooltip delayDuration={1000}>
-                  <TooltipTrigger asChild>
-                    <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
-                  </TooltipTrigger>
-                  <TooltipContent sideOffset={8} className="max-w-xs">
-                    {settingsAutoCreateWorktree
-                      ? `New session (Worktree): ${getModifierLabel()}+N\nStandard: Shift+${getModifierLabel()}+N`
-                      : `New session (Standard): ${getModifierLabel()}+N\nWorktree: Shift+${getModifierLabel()}+N`}
-                  </TooltipContent>
-                </Tooltip>
-              </div>
-            </div>
-          </div>
-        )}
       </section>
     </div>
   );

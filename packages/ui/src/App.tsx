@@ -2,6 +2,7 @@ import React from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { VSCodeLayout } from '@/components/layout/VSCodeLayout';
 import { AgentManagerView } from '@/components/views/agent-manager';
+import { ChatView } from '@/components/views';
 import { FireworksProvider } from '@/contexts/FireworksContext';
 import { Toaster } from '@/components/ui/sonner';
 import { MemoryDebugPanel } from '@/components/ui/MemoryDebugPanel';
@@ -19,7 +20,7 @@ import { useWindowTitle } from '@/hooks/useWindowTitle';
 import { GitPollingProvider } from '@/hooks/useGitPolling';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { hasModifier } from '@/lib/utils';
-import { isDesktopLocalOriginActive, isDesktopShell, isTauriShell } from '@/lib/desktop';
+import { isDesktopLocalOriginActive, isDesktopShell } from '@/lib/desktop';
 import { OnboardingScreen } from '@/components/onboarding/OnboardingScreen';
 import { useSessionStore } from '@/stores/useSessionStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -54,17 +55,60 @@ type AppProps = {
   apis: RuntimeAPIs;
 };
 
+type EmbeddedSessionChatConfig = {
+  sessionId: string;
+  directory: string | null;
+};
+
+type EmbeddedVisibilityPayload = {
+  visible?: unknown;
+};
+
+const readEmbeddedSessionChatConfig = (): EmbeddedSessionChatConfig | null => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('ocPanel') !== 'session-chat') {
+    return null;
+  }
+
+  const sessionIdRaw = params.get('sessionId');
+  const sessionId = typeof sessionIdRaw === 'string' ? sessionIdRaw.trim() : '';
+  if (!sessionId) {
+    return null;
+  }
+
+  const directoryRaw = params.get('directory');
+  const directory = typeof directoryRaw === 'string' && directoryRaw.trim().length > 0
+    ? directoryRaw.trim()
+    : null;
+
+  return {
+    sessionId,
+    directory,
+  };
+};
+
 function App({ apis }: AppProps) {
   const { initializeApp, isInitialized, isConnected } = useConfigStore();
   const { error, clearError, loadSessions } = useSessionStore();
+  const currentSessionId = useSessionStore((state) => state.currentSessionId);
+  const setCurrentSession = useSessionStore((state) => state.setCurrentSession);
+  const sessions = useSessionStore((state) => state.sessions);
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
+  const setDirectory = useDirectoryStore((state) => state.setDirectory);
   const isSwitchingDirectory = useDirectoryStore((state) => state.isSwitchingDirectory);
   const [showMemoryDebug, setShowMemoryDebug] = React.useState(false);
   const { uiFont, monoFont } = useFontPreferences();
   const refreshGitHubAuthStatus = useGitHubAuthStore((state) => state.refreshStatus);
   const [isVSCodeRuntime, setIsVSCodeRuntime] = React.useState<boolean>(() => apis.runtime.isVSCode);
   const [showCliOnboarding, setShowCliOnboarding] = React.useState(false);
+  const [isEmbeddedVisible, setIsEmbeddedVisible] = React.useState(true);
   const appReadyDispatchedRef = React.useRef(false);
+  const embeddedSessionChat = React.useMemo<EmbeddedSessionChatConfig | null>(() => readEmbeddedSessionChatConfig(), []);
+  const embeddedBackgroundWorkEnabled = !embeddedSessionChat || isEmbeddedVisible;
 
   React.useEffect(() => {
     setIsVSCodeRuntime(apis.runtime.isVSCode);
@@ -76,8 +120,12 @@ function App({ apis }: AppProps) {
   }, [apis]);
 
   React.useEffect(() => {
+    if (embeddedSessionChat) {
+      return;
+    }
+
     void refreshGitHubAuthStatus(apis.github, { force: true });
-  }, [apis.github, refreshGitHubAuthStatus]);
+  }, [apis.github, embeddedSessionChat, refreshGitHubAuthStatus]);
 
   React.useEffect(() => {
     if (typeof document === 'undefined') {
@@ -167,6 +215,95 @@ function App({ apis }: AppProps) {
   }, [currentDirectory, isSwitchingDirectory, loadSessions, isConnected, isVSCodeRuntime]);
 
   React.useEffect(() => {
+    if (!embeddedSessionChat || typeof window === 'undefined') {
+      return;
+    }
+
+    const applyVisibility = (payload?: EmbeddedVisibilityPayload) => {
+      const nextVisible = payload?.visible === true;
+      setIsEmbeddedVisible(nextVisible);
+    };
+
+    const handleMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) {
+        return;
+      }
+
+      const data = event.data as { type?: unknown; payload?: EmbeddedVisibilityPayload };
+      if (data?.type !== 'openchamber:embedded-visibility') {
+        return;
+      }
+
+      applyVisibility(data.payload);
+    };
+
+    const scopedWindow = window as unknown as {
+      __openchamberSetEmbeddedVisibility?: (payload?: EmbeddedVisibilityPayload) => void;
+    };
+
+    scopedWindow.__openchamberSetEmbeddedVisibility = applyVisibility;
+    window.addEventListener('message', handleMessage);
+
+    return () => {
+      window.removeEventListener('message', handleMessage);
+      if (scopedWindow.__openchamberSetEmbeddedVisibility === applyVisibility) {
+        delete scopedWindow.__openchamberSetEmbeddedVisibility;
+      }
+    };
+  }, [embeddedSessionChat]);
+
+  React.useEffect(() => {
+    if (!embeddedSessionChat?.directory || isVSCodeRuntime) {
+      return;
+    }
+
+    if (currentDirectory === embeddedSessionChat.directory) {
+      return;
+    }
+
+    setDirectory(embeddedSessionChat.directory, { showOverlay: false });
+  }, [currentDirectory, embeddedSessionChat, isVSCodeRuntime, setDirectory]);
+
+  React.useEffect(() => {
+    if (!embeddedSessionChat || isVSCodeRuntime) {
+      return;
+    }
+
+    if (currentSessionId === embeddedSessionChat.sessionId) {
+      return;
+    }
+
+    if (!sessions.some((session) => session.id === embeddedSessionChat.sessionId)) {
+      return;
+    }
+
+    void setCurrentSession(embeddedSessionChat.sessionId);
+  }, [currentSessionId, embeddedSessionChat, isVSCodeRuntime, sessions, setCurrentSession]);
+
+  React.useEffect(() => {
+    if (!embeddedSessionChat || typeof window === 'undefined') {
+      return;
+    }
+
+    const handleStorage = (event: StorageEvent) => {
+      if (event.storageArea !== window.localStorage) {
+        return;
+      }
+
+      if (event.key !== 'ui-store') {
+        return;
+      }
+
+      void useUIStore.persist.rehydrate();
+    };
+
+    window.addEventListener('storage', handleStorage);
+    return () => {
+      window.removeEventListener('storage', handleStorage);
+    };
+  }, [embeddedSessionChat]);
+
+  React.useEffect(() => {
     if (typeof window === 'undefined') return;
     if (!isInitialized || isSwitchingDirectory) return;
     if (appReadyDispatchedRef.current) return;
@@ -175,13 +312,13 @@ function App({ apis }: AppProps) {
     window.dispatchEvent(new Event('openchamber:app-ready'));
   }, [isInitialized, isSwitchingDirectory]);
 
-  useEventStream();
+  useEventStream({ enabled: embeddedBackgroundWorkEnabled });
 
   // Server-authoritative session status polling
   // Replaces SSE-dependent status updates with reliable HTTP polling
-  useServerSessionStatus();
+  useServerSessionStatus({ enabled: embeddedBackgroundWorkEnabled });
 
-  usePushVisibilityBeacon();
+  usePushVisibilityBeacon({ enabled: embeddedBackgroundWorkEnabled });
 
   useWindowTitle();
 
@@ -195,26 +332,15 @@ function App({ apis }: AppProps) {
 
   useMenuActions(handleToggleMemoryDebug);
 
-  const settingsAutoCreateWorktree = useConfigStore((state) => state.settingsAutoCreateWorktree);
-  React.useEffect(() => {
-    if (!isTauriShell()) {
-      return;
-    }
-    const tauri = (window as unknown as { __TAURI__?: { core?: { invoke?: (cmd: string, args?: Record<string, unknown>) => Promise<unknown> } } }).__TAURI__;
-    if (typeof tauri?.core?.invoke !== 'function') {
-      return;
-    }
-
-    void tauri.core.invoke('desktop_set_auto_worktree_menu', { enabled: settingsAutoCreateWorktree });
-  }, [settingsAutoCreateWorktree]);
-
-
-
-  useSessionStatusBootstrap();
-  useSessionAutoCleanup();
-  useQueuedMessageAutoSend();
+  useSessionStatusBootstrap({ enabled: embeddedBackgroundWorkEnabled });
+  useSessionAutoCleanup({ enabled: embeddedBackgroundWorkEnabled });
+  useQueuedMessageAutoSend({ enabled: embeddedBackgroundWorkEnabled });
 
   React.useEffect(() => {
+    if (embeddedSessionChat) {
+      return;
+    }
+
     const handleKeyDown = (e: KeyboardEvent) => {
       if (hasModifier(e) && e.shiftKey && e.key === 'D') {
         e.preventDefault();
@@ -224,16 +350,24 @@ function App({ apis }: AppProps) {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [embeddedSessionChat]);
 
   React.useEffect(() => {
+    if (embeddedSessionChat) {
+      return;
+    }
+
     if (error) {
 
       setTimeout(() => clearError(), 5000);
     }
-  }, [error, clearError]);
+  }, [clearError, embeddedSessionChat, error]);
 
   React.useEffect(() => {
+    if (embeddedSessionChat) {
+      return;
+    }
+
     if (!isDesktopShell() || !isDesktopLocalOriginActive()) {
       return;
     }
@@ -269,7 +403,7 @@ function App({ apis }: AppProps) {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, []);
+  }, [embeddedSessionChat]);
 
   const handleCliAvailable = React.useCallback(() => {
     setShowCliOnboarding(false);
@@ -282,6 +416,21 @@ function App({ apis }: AppProps) {
         <div className="h-full text-foreground bg-transparent">
           <OnboardingScreen onCliAvailable={handleCliAvailable} />
         </div>
+      </ErrorBoundary>
+    );
+  }
+
+  if (embeddedSessionChat) {
+    return (
+      <ErrorBoundary>
+        <RuntimeAPIProvider apis={apis}>
+          <TooltipProvider delayDuration={700} skipDelayDuration={150}>
+            <div className="h-full text-foreground bg-background">
+              <ChatView />
+              <Toaster />
+            </div>
+          </TooltipProvider>
+        </RuntimeAPIProvider>
       </ErrorBoundary>
     );
   }

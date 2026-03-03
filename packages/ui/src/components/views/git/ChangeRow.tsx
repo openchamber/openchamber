@@ -49,6 +49,7 @@ interface ChangeRowProps {
   onRevert: () => void;
   isReverting: boolean;
   stats?: { insertions: number; deletions: number };
+  rowPaddingClassName?: string;
 }
 
 export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
@@ -59,6 +60,7 @@ export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
   onRevert,
   isReverting,
   stats,
+  rowPaddingClassName,
 }) {
   const descriptor = useMemo(() => describeChange(file), [file]);
   const indicatorLabel = descriptor.description;
@@ -98,7 +100,7 @@ export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
 
   return (
     <div
-      className="group flex items-center gap-2 px-3 py-1.5 hover:bg-sidebar/40 cursor-pointer"
+      className={`group flex items-center gap-2 py-1.5 hover:bg-sidebar/40 cursor-pointer ${rowPaddingClassName ?? 'px-3'}`}
       role="button"
       tabIndex={0}
       onClick={onViewDiff}

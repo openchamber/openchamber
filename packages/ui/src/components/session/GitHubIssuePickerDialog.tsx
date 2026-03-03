@@ -66,9 +66,13 @@ const buildIssueContextText = (args: {
 export function GitHubIssuePickerDialog({
   open,
   onOpenChange,
+  mode = 'createSession',
+  onSelect,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  mode?: 'createSession' | 'select';
+  onSelect?: (issue: { number: number; title: string; url: string; contextText: string; author?: { login: string; avatarUrl?: string } }) => void;
 }) {
   const { github } = useRuntimeAPIs();
   const githubAuthStatus = useGitHubAuthStore((state) => state.status);
@@ -259,6 +263,68 @@ export function GitHubIssuePickerDialog({
   }, []);
 
   const startSession = React.useCallback(async (issueNumber: number) => {
+    if (mode === 'select') {
+      // In select mode, fetch full issue details and return via onSelect
+      if (!projectDirectory) {
+        toast.error('No active project');
+        return;
+      }
+      if (!github?.issueGet || !github?.issueComments) {
+        toast.error('GitHub runtime API unavailable');
+        return;
+      }
+      if (startingIssueNumber) return;
+      setStartingIssueNumber(issueNumber);
+      try {
+        const issueRes = await github.issueGet(projectDirectory, issueNumber);
+        if (issueRes.connected === false) {
+          toast.error('GitHub not connected');
+          return;
+        }
+        if (!issueRes.repo) {
+          toast.error('Repo not resolvable', {
+            description: 'origin remote must be a GitHub URL',
+          });
+          return;
+        }
+        const issue = issueRes.issue;
+        if (!issue) {
+          toast.error('Issue not found');
+          return;
+        }
+
+        const commentsRes = await github.issueComments(projectDirectory, issueNumber);
+        if (commentsRes.connected === false) {
+          toast.error('GitHub not connected');
+          return;
+        }
+        const comments = commentsRes.comments ?? [];
+
+        // Build full context text like in createSession mode
+        const contextText = buildIssueContextText({ repo: issueRes.repo, issue, comments });
+
+        if (onSelect) {
+          onSelect({ 
+            number: issue.number, 
+            title: issue.title, 
+            url: issue.url,
+            contextText,
+            author: issue.author ? {
+              login: issue.author.login,
+              avatarUrl: issue.author.avatarUrl,
+            } : undefined,
+          });
+        }
+        onOpenChange(false);
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        toast.error('Failed to load issue details', { description: message });
+      } finally {
+        setStartingIssueNumber(null);
+      }
+      return;
+    }
+
     if (!projectDirectory) {
       toast.error('No active project');
       return;
@@ -444,7 +510,7 @@ Do not implement changes until I confirm; end with: “Next actions: <1 sentence
     } finally {
       setStartingIssueNumber(null);
     }
-  }, [createInWorktree, github, onOpenChange, projectDirectory, resolveDefaultAgentName, resolveDefaultModelSelection, resolveDefaultVariant, startingIssueNumber]);
+  }, [createInWorktree, github, mode, onOpenChange, onSelect, projectDirectory, resolveDefaultAgentName, resolveDefaultModelSelection, resolveDefaultVariant, startingIssueNumber]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -452,10 +518,12 @@ Do not implement changes until I confirm; end with: “Next actions: <1 sentence
         <DialogHeader className="flex-shrink-0">
           <DialogTitle className="flex items-center gap-2">
             <RiGithubLine className="h-5 w-5" />
-            New Session From GitHub Issue
+            {mode === 'select' ? 'Link GitHub Issue' : 'New Session From GitHub Issue'}
           </DialogTitle>
           <DialogDescription>
-            Seeds a new session with hidden issue context (title/body/labels/comments).
+            {mode === 'select'
+              ? 'Select an issue to link to this session.'
+              : 'Seeds a new session with hidden issue context (title/body/labels/comments).'}
           </DialogDescription>
         </DialogHeader>
 
@@ -583,6 +651,7 @@ Do not implement changes until I confirm; end with: “Next actions: <1 sentence
           ) : null}
         </div>
 
+        {mode !== 'select' && (
         <div className="mt-4 p-3 bg-muted/30 rounded-lg">
           <p className="typography-meta text-muted-foreground font-medium mb-2">Actions</p>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-2">
@@ -634,6 +703,7 @@ Do not implement changes until I confirm; end with: “Next actions: <1 sentence
             </div>
           </div>
         </div>
+        )}
       </DialogContent>
     </Dialog>
   );

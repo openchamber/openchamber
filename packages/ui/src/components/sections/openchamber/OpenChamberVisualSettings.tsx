@@ -20,6 +20,7 @@ import {
 } from '@/components/ui/select';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useDeviceInfo } from '@/lib/device';
+import { updateDesktopSettings } from '@/lib/persistence';
 import {
     setDirectoryShowHidden,
     useDirectoryShowHidden,
@@ -96,7 +97,24 @@ const MERMAID_RENDERING_OPTIONS: Option<'svg' | 'ascii'>[] = [
     },
 ];
 
-export type VisibleSetting = 'theme' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'cornerRadius' | 'inputBarOffset' | 'navRail' | 'toolOutput' | 'mermaidRendering' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'reasoning' | 'queueMode' | 'textJustificationActivity' | 'terminalQuickKeys' | 'persistDraft';
+const USER_MESSAGE_RENDERING_OPTIONS: Option<'markdown' | 'plain'>[] = [
+    {
+        id: 'markdown',
+        label: 'Markdown',
+        description: 'Render user text with markdown formatting.',
+    },
+    {
+        id: 'plain',
+        label: 'Plain text',
+        description: 'Render user text with preserved whitespace and links.',
+    },
+];
+
+const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' => {
+    return mode === 'markdown' ? 'markdown' : 'plain';
+};
+
+export type VisibleSetting = 'theme' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'cornerRadius' | 'inputBarOffset' | 'navRail' | 'toolOutput' | 'mermaidRendering' | 'userMessageRendering' | 'stickyUserHeader' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'reasoning' | 'queueMode' | 'textJustificationActivity' | 'terminalQuickKeys' | 'persistDraft';
 
 interface OpenChamberVisualSettingsProps {
     /** Which settings to show. If undefined, shows all. */
@@ -114,6 +132,10 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setToolCallExpansion = useUIStore(state => state.setToolCallExpansion);
     const mermaidRenderingMode = useUIStore(state => state.mermaidRenderingMode);
     const setMermaidRenderingMode = useUIStore(state => state.setMermaidRenderingMode);
+    const userMessageRenderingMode = useUIStore(state => state.userMessageRenderingMode);
+    const setUserMessageRenderingMode = useUIStore(state => state.setUserMessageRenderingMode);
+    const stickyUserHeader = useUIStore(state => state.stickyUserHeader);
+    const setStickyUserHeader = useUIStore(state => state.setStickyUserHeader);
     const fontSize = useUIStore(state => state.fontSize);
     const setFontSize = useUIStore(state => state.setFontSize);
     const terminalFontSize = useUIStore(state => state.terminalFontSize);
@@ -151,6 +173,16 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     } = useThemeSystem();
 
     const [themesReloading, setThemesReloading] = React.useState(false);
+    const handleUserMessageRenderingModeChange = React.useCallback((mode: 'markdown' | 'plain') => {
+        setUserMessageRenderingMode(mode);
+        void updateDesktopSettings({ userMessageRenderingMode: mode });
+    }, [setUserMessageRenderingMode]);
+
+    const handleStickyUserHeaderChange = React.useCallback((enabled: boolean) => {
+        setStickyUserHeader(enabled);
+        void updateDesktopSettings({ stickyUserHeader: enabled });
+    }, [setStickyUserHeader]);
+
     const lightThemes = React.useMemo(
         () => availableThemes
             .filter((theme) => theme.metadata.variant === 'light')
@@ -185,11 +217,14 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         return visibleSettings.includes(setting);
     };
 
-    const hasAppearanceSettings = shouldShow('theme') && !isVSCodeRuntime();
+    const isVSCode = isVSCodeRuntime();
+    const hasAppearanceSettings = shouldShow('theme') && !isVSCode;
     const hasLayoutSettings = shouldShow('fontSize') || shouldShow('terminalFontSize') || shouldShow('spacing') || shouldShow('cornerRadius') || shouldShow('inputBarOffset');
     const hasNavigationSettings = (!isMobile && shouldShow('navRail')) || (shouldShow('terminalQuickKeys') && !isMobile);
     const hasBehaviorSettings = shouldShow('toolOutput')
         || shouldShow('mermaidRendering')
+        || shouldShow('userMessageRendering')
+        || shouldShow('stickyUserHeader')
         || shouldShow('diffLayout')
         || (shouldShow('mobileStatusBar') && isMobile)
         || shouldShow('dotfiles')
@@ -573,116 +608,179 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 </section>
                             )}
 
-                            {shouldShow('mermaidRendering') && (
-                                <section className="p-2">
-                                    <h4 className="typography-ui-header font-medium text-foreground">Mermaid Rendering</h4>
-                                    <div role="radiogroup" aria-label="Mermaid rendering mode" className="mt-1 space-y-0">
-                                        {MERMAID_RENDERING_OPTIONS.map((option) => {
-                                            const selected = mermaidRenderingMode === option.id;
-                                            return (
-                                                <div
-                                                    key={option.id}
-                                                    role="button"
-                                                    tabIndex={0}
-                                                    aria-pressed={selected}
-                                                    onClick={() => setMermaidRenderingMode(option.id)}
-                                                    onKeyDown={(event) => {
-                                                        if (event.key === ' ' || event.key === 'Enter') {
-                                                            event.preventDefault();
-                                                            setMermaidRenderingMode(option.id);
-                                                        }
-                                                    }}
-                                                    className="flex w-full items-center gap-2 py-0.5 text-left"
-                                                >
-                                                    <Radio
-                                                        checked={selected}
-                                                        onChange={() => setMermaidRenderingMode(option.id)}
-                                                        ariaLabel={`Mermaid rendering: ${option.label}`}
-                                                    />
-                                                    <span className={cn('typography-ui-label font-normal', selected ? 'text-foreground' : 'text-foreground/50')}>
-                                                        {option.label}
-                                                    </span>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                </section>
+                            {(shouldShow('userMessageRendering') || shouldShow('mermaidRendering') || (shouldShow('diffLayout') && !isVSCode)) && (
+                                <div className="grid grid-cols-1 gap-y-2 md:grid-cols-[minmax(0,16rem)_minmax(0,16rem)] md:justify-start md:gap-x-2">
+                                    {shouldShow('userMessageRendering') && (
+                                        <section className="p-2">
+                                            <h4 className="typography-ui-header font-medium text-foreground">User Message Rendering</h4>
+                                            <div role="radiogroup" aria-label="User message rendering mode" className="mt-1 space-y-0">
+                                                {USER_MESSAGE_RENDERING_OPTIONS.map((option) => {
+                                                    const selected = normalizeUserMessageRenderingMode(userMessageRenderingMode) === option.id;
+                                                    return (
+                                                        <div
+                                                            key={option.id}
+                                                            role="button"
+                                                            tabIndex={0}
+                                                            aria-pressed={selected}
+                                                            onClick={() => handleUserMessageRenderingModeChange(option.id)}
+                                                            onKeyDown={(event) => {
+                                                                if (event.key === ' ' || event.key === 'Enter') {
+                                                                    event.preventDefault();
+                                                                    handleUserMessageRenderingModeChange(option.id);
+                                                                }
+                                                            }}
+                                                            className="flex w-full items-center gap-2 py-0.5 text-left"
+                                                        >
+                                                            <Radio
+                                                                checked={selected}
+                                                                onChange={() => handleUserMessageRenderingModeChange(option.id)}
+                                                                ariaLabel={`User message rendering: ${option.label}`}
+                                                            />
+                                                            <span className={cn('typography-ui-label font-normal', selected ? 'text-foreground' : 'text-foreground/50')}>
+                                                                {option.label}
+                                                            </span>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </section>
+                                    )}
+
+                                    {shouldShow('mermaidRendering') && (
+                                        <section className="p-2">
+                                            <h4 className="typography-ui-header font-medium text-foreground">Mermaid Rendering</h4>
+                                            <div role="radiogroup" aria-label="Mermaid rendering mode" className="mt-1 space-y-0">
+                                                {MERMAID_RENDERING_OPTIONS.map((option) => {
+                                                    const selected = mermaidRenderingMode === option.id;
+                                                    return (
+                                                        <div
+                                                            key={option.id}
+                                                            role="button"
+                                                            tabIndex={0}
+                                                            aria-pressed={selected}
+                                                            onClick={() => setMermaidRenderingMode(option.id)}
+                                                            onKeyDown={(event) => {
+                                                                if (event.key === ' ' || event.key === 'Enter') {
+                                                                    event.preventDefault();
+                                                                    setMermaidRenderingMode(option.id);
+                                                                }
+                                                            }}
+                                                            className="flex w-full items-center gap-2 py-0.5 text-left"
+                                                        >
+                                                            <Radio
+                                                                checked={selected}
+                                                                onChange={() => setMermaidRenderingMode(option.id)}
+                                                                ariaLabel={`Mermaid rendering: ${option.label}`}
+                                                            />
+                                                            <span className={cn('typography-ui-label font-normal', selected ? 'text-foreground' : 'text-foreground/50')}>
+                                                                {option.label}
+                                                            </span>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </section>
+                                    )}
+
+                                    {shouldShow('diffLayout') && !isVSCode && (
+                                        <section className="p-2">
+                                            <h4 className="typography-ui-header font-medium text-foreground">Diff Layout</h4>
+                                            <div role="radiogroup" aria-label="Diff layout" className="mt-1 space-y-0">
+                                                {DIFF_LAYOUT_OPTIONS.map((option) => {
+                                                    const selected = diffLayoutPreference === option.id;
+                                                    return (
+                                                        <div
+                                                            key={option.id}
+                                                            role="button"
+                                                            tabIndex={0}
+                                                            aria-pressed={selected}
+                                                            onClick={() => setDiffLayoutPreference(option.id)}
+                                                            onKeyDown={(event) => {
+                                                                if (event.key === ' ' || event.key === 'Enter') {
+                                                                    event.preventDefault();
+                                                                    setDiffLayoutPreference(option.id);
+                                                                }
+                                                            }}
+                                                            className="flex w-full items-center gap-2 py-0.5 text-left"
+                                                        >
+                                                            <Radio
+                                                                checked={selected}
+                                                                onChange={() => setDiffLayoutPreference(option.id)}
+                                                                ariaLabel={`Diff layout: ${option.label}`}
+                                                            />
+                                                            <span className={cn('typography-ui-label font-normal', selected ? 'text-foreground' : 'text-foreground/50')}>
+                                                                {option.label}
+                                                            </span>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </section>
+                                    )}
+
+                                    {shouldShow('diffLayout') && !isVSCode && (
+                                        <section className="p-2">
+                                            <h4 className="typography-ui-header font-medium text-foreground">Diff View Mode</h4>
+                                            <div role="radiogroup" aria-label="Diff view mode" className="mt-1 space-y-0">
+                                                {DIFF_VIEW_MODE_OPTIONS.map((option) => {
+                                                    const selected = diffViewMode === option.id;
+                                                    return (
+                                                        <div
+                                                            key={option.id}
+                                                            role="button"
+                                                            tabIndex={0}
+                                                            aria-pressed={selected}
+                                                            onClick={() => setDiffViewMode(option.id)}
+                                                            onKeyDown={(event) => {
+                                                                if (event.key === ' ' || event.key === 'Enter') {
+                                                                    event.preventDefault();
+                                                                    setDiffViewMode(option.id);
+                                                                }
+                                                            }}
+                                                            className="flex w-full items-center gap-2 py-0.5 text-left"
+                                                        >
+                                                            <Radio
+                                                                checked={selected}
+                                                                onChange={() => setDiffViewMode(option.id)}
+                                                                ariaLabel={`Diff view mode: ${option.label}`}
+                                                            />
+                                                            <span className={cn('typography-ui-label font-normal', selected ? 'text-foreground' : 'text-foreground/50')}>
+                                                                {option.label}
+                                                            </span>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </section>
+                                    )}
+                                </div>
                             )}
 
-                            {shouldShow('diffLayout') && !isVSCodeRuntime() && (
-                                <section className="p-2">
-                                    <h4 className="typography-ui-header font-medium text-foreground">Diff Layout</h4>
-                                    <div role="radiogroup" aria-label="Diff layout" className="mt-1 space-y-0">
-                                        {DIFF_LAYOUT_OPTIONS.map((option) => {
-                                            const selected = diffLayoutPreference === option.id;
-                                            return (
-                                                <div
-                                                    key={option.id}
-                                                    role="button"
-                                                    tabIndex={0}
-                                                    aria-pressed={selected}
-                                                    onClick={() => setDiffLayoutPreference(option.id)}
-                                                    onKeyDown={(event) => {
-                                                        if (event.key === ' ' || event.key === 'Enter') {
-                                                            event.preventDefault();
-                                                            setDiffLayoutPreference(option.id);
-                                                        }
-                                                    }}
-                                                    className="flex w-full items-center gap-2 py-0.5 text-left"
-                                                >
-                                                    <Radio
-                                                        checked={selected}
-                                                        onChange={() => setDiffLayoutPreference(option.id)}
-                                                        ariaLabel={`Diff layout: ${option.label}`}
-                                                    />
-                                                    <span className={cn('typography-ui-label font-normal', selected ? 'text-foreground' : 'text-foreground/50')}>
-                                                        {option.label}
-                                                    </span>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                </section>
-                            )}
-
-                            {shouldShow('diffLayout') && !isVSCodeRuntime() && (
-                                <section className="p-2">
-                                    <h4 className="typography-ui-header font-medium text-foreground">Diff View Mode</h4>
-                                    <div role="radiogroup" aria-label="Diff view mode" className="mt-1 space-y-0">
-                                        {DIFF_VIEW_MODE_OPTIONS.map((option) => {
-                                            const selected = diffViewMode === option.id;
-                                            return (
-                                                <div
-                                                    key={option.id}
-                                                    role="button"
-                                                    tabIndex={0}
-                                                    aria-pressed={selected}
-                                                    onClick={() => setDiffViewMode(option.id)}
-                                                    onKeyDown={(event) => {
-                                                        if (event.key === ' ' || event.key === 'Enter') {
-                                                            event.preventDefault();
-                                                            setDiffViewMode(option.id);
-                                                        }
-                                                    }}
-                                                    className="flex w-full items-center gap-2 py-0.5 text-left"
-                                                >
-                                                    <Radio
-                                                        checked={selected}
-                                                        onChange={() => setDiffViewMode(option.id)}
-                                                        ariaLabel={`Diff view mode: ${option.label}`}
-                                                    />
-                                                    <span className={cn('typography-ui-label font-normal', selected ? 'text-foreground' : 'text-foreground/50')}>
-                                                        {option.label}
-                                                    </span>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                </section>
-                            )}
-
-                            {((shouldShow('mobileStatusBar') && isMobile) || shouldShow('dotfiles') || shouldShow('queueMode') || shouldShow('persistDraft') || shouldShow('reasoning') || shouldShow('textJustificationActivity')) && (
+                            {(shouldShow('stickyUserHeader') || (shouldShow('mobileStatusBar') && isMobile) || shouldShow('dotfiles') || shouldShow('queueMode') || shouldShow('persistDraft') || shouldShow('reasoning') || shouldShow('textJustificationActivity')) && (
                                 <section className="p-2 space-y-0.5">
+                                    {shouldShow('stickyUserHeader') && (
+                                        <div
+                                            className="group flex cursor-pointer items-center gap-2 py-1.5"
+                                            role="button"
+                                            tabIndex={0}
+                                            aria-pressed={stickyUserHeader}
+                                            onClick={() => handleStickyUserHeaderChange(!stickyUserHeader)}
+                                            onKeyDown={(event) => {
+                                                if (event.key === ' ' || event.key === 'Enter') {
+                                                    event.preventDefault();
+                                                    handleStickyUserHeaderChange(!stickyUserHeader);
+                                                }
+                                            }}
+                                        >
+                                            <Checkbox
+                                                checked={stickyUserHeader}
+                                                onChange={handleStickyUserHeaderChange}
+                                                ariaLabel="Sticky user header"
+                                            />
+                                            <span className="typography-ui-label text-foreground">Sticky User Header</span>
+                                        </div>
+                                    )}
+
                                     {shouldShow('mobileStatusBar') && isMobile && (
                                         <div
                                             className="group flex cursor-pointer items-center gap-2 py-1.5"

@@ -185,6 +185,7 @@ export const ProjectActionsButton = ({
   const [runningByKey, setRunningByKey] = React.useState<Record<string, RunningEntry>>({});
   const tabByKeyRef = React.useRef<Record<string, string>>({});
   const urlWatchByRunKeyRef = React.useRef<Record<string, UrlWatchEntry>>({});
+  const loadRequestIdRef = React.useRef(0);
 
   const projectId = projectRef?.id ?? null;
   const projectPath = projectRef?.path ?? '';
@@ -224,22 +225,38 @@ export const ProjectActionsButton = ({
 
   const loadActions = React.useCallback(async () => {
     if (!stableProjectRef) {
-      setActions([]);
-      setSelectedActionId(null);
       return;
     }
+
+    const requestId = loadRequestIdRef.current + 1;
+    loadRequestIdRef.current = requestId;
 
     setIsLoading(true);
     try {
       const state = await getProjectActionsState(stableProjectRef);
+      if (loadRequestIdRef.current !== requestId) {
+        return;
+      }
       const filtered = state.actions;
       setActions(filtered);
-      setSelectedActionId(filtered[0]?.id ?? null);
+      setSelectedActionId((current) => {
+        if (filtered.length === 0) {
+          return null;
+        }
+        if (current && filtered.some((entry) => entry.id === current)) {
+          return current;
+        }
+        return filtered[0]?.id ?? null;
+      });
     } catch {
-      setActions([]);
-      setSelectedActionId(null);
+      if (loadRequestIdRef.current !== requestId) {
+        return;
+      }
+      // Keep last known actions while next project loads or transient fetch fails.
     } finally {
-      setIsLoading(false);
+      if (loadRequestIdRef.current === requestId) {
+        setIsLoading(false);
+      }
     }
   }, [stableProjectRef]);
 
@@ -616,12 +633,10 @@ export const ProjectActionsButton = ({
       return (
         <button
           type="button"
-          disabled={isLoading}
           className={cn(
             'app-region-no-drag inline-flex h-9 w-9 items-center justify-center rounded-md p-2',
             'typography-ui-label font-medium text-muted-foreground hover:bg-interactive-hover hover:text-foreground transition-colors',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-            'disabled:opacity-50',
             className
           )}
           aria-label="Add action"
@@ -635,12 +650,10 @@ export const ProjectActionsButton = ({
     return (
       <button
         type="button"
-        disabled={isLoading}
         className={cn(
           'app-region-no-drag inline-flex h-7 items-center gap-2 self-center rounded-md border border-[var(--interactive-border)]',
           'bg-[var(--surface-elevated)] pl-1.5 pr-2.5 typography-ui-label font-medium text-foreground hover:bg-interactive-hover transition-colors',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-          'disabled:opacity-50',
           className
         )}
         onClick={openProjectActionsSettings}
@@ -673,7 +686,7 @@ export const ProjectActionsButton = ({
               'app-region-no-drag inline-flex h-9 w-9 items-center justify-center rounded-md p-2',
               'typography-ui-label font-medium text-muted-foreground hover:bg-interactive-hover hover:text-foreground transition-colors',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-              'disabled:opacity-50',
+              'disabled:cursor-not-allowed',
               className
             )}
             aria-label={selectedRunning ? `Stop ${resolvedSelected.name}` : `Run ${resolvedSelected.name}`}
@@ -738,7 +751,7 @@ export const ProjectActionsButton = ({
         className={cn(
           'inline-flex h-full items-center typography-ui-label font-medium text-foreground hover:bg-interactive-hover',
           compact ? 'w-9 justify-center px-0' : 'gap-2 pl-2 pr-3',
-          'transition-colors disabled:opacity-50'
+          'transition-colors disabled:cursor-not-allowed'
         )}
         aria-label={selectedRunning ? `Stop ${resolvedSelected.name}` : `Run ${resolvedSelected.name}`}
       >

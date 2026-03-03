@@ -437,8 +437,23 @@ function listSkillSupportingFiles(skillDir) {
   return files;
 }
 
+function assertPathWithinSkillDir(skillDir, relativePath) {
+  const root = fs.realpathSync(skillDir);
+  const target = path.resolve(root, relativePath);
+  const relative = path.relative(root, target);
+  const isWithin = relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+
+  if (!isWithin) {
+    const error = new Error('Access to file denied');
+    error.code = 'EACCES';
+    throw error;
+  }
+
+  return target;
+}
+
 function readSkillSupportingFile(skillDir, relativePath) {
-  const fullPath = path.join(skillDir, relativePath);
+  const fullPath = assertPathWithinSkillDir(skillDir, relativePath);
   if (!fs.existsSync(fullPath)) {
     return null;
   }
@@ -446,18 +461,19 @@ function readSkillSupportingFile(skillDir, relativePath) {
 }
 
 function writeSkillSupportingFile(skillDir, relativePath, content) {
-  const fullPath = path.join(skillDir, relativePath);
+  const fullPath = assertPathWithinSkillDir(skillDir, relativePath);
   const dir = path.dirname(fullPath);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(fullPath, content, 'utf8');
 }
 
 function deleteSkillSupportingFile(skillDir, relativePath) {
-  const fullPath = path.join(skillDir, relativePath);
+  const root = fs.realpathSync(skillDir);
+  const fullPath = assertPathWithinSkillDir(skillDir, relativePath);
   if (fs.existsSync(fullPath)) {
     fs.unlinkSync(fullPath);
     let parentDir = path.dirname(fullPath);
-    while (parentDir !== skillDir) {
+    while (parentDir !== root) {
       try {
         const entries = fs.readdirSync(parentDir);
         if (entries.length === 0) {

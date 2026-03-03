@@ -7,7 +7,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useUIStore } from "@/stores/useUIStore";
-import { useConfigStore } from "@/stores/useConfigStore";
 import {
   RiAddLine,
   RiAiAgentLine,
@@ -54,7 +53,6 @@ const renderShortcut = (id: string, fallbackCombo: string, overrides: Record<str
 
 export const HelpDialog: React.FC = () => {
   const { isHelpDialogOpen, setHelpDialogOpen, shortcutOverrides } = useUIStore();
-  const settingsAutoCreateWorktree = useConfigStore((state) => state.settingsAutoCreateWorktree);
   const mod = getModifierLabel();
 
   const shortcuts: ShortcutSection[] = [
@@ -108,14 +106,14 @@ export const HelpDialog: React.FC = () => {
       items: [
         {
           id: 'new_chat',
-          description: settingsAutoCreateWorktree ? "Create New Session in Worktree" : "Create New Session",
-          icon: settingsAutoCreateWorktree ? RiGitBranchLine : RiAddLine,
+          description: "Create New Session",
+          icon: RiAddLine,
           keys: '',
         },
         {
           id: 'new_chat_worktree',
-          description: settingsAutoCreateWorktree ? "Create New Session" : "Create New Session in Worktree",
-          icon: settingsAutoCreateWorktree ? RiAddLine : RiGitBranchLine,
+          description: "Create New Session in Worktree",
+          icon: RiGitBranchLine,
           keys: '',
         },
         { id: 'focus_input', description: "Focus Chat Input", icon: RiText, keys: '' },

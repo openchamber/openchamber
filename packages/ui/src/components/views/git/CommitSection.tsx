@@ -64,11 +64,11 @@ export const CommitSection: React.FC<CommitSectionProps> = ({
   const headerClassName =
     variant === 'framed'
       ? 'flex w-full items-center justify-between px-3 py-2'
-      : 'flex w-full items-center justify-between px-4 py-3 border-b border-border/40';
+      : 'flex w-full items-center justify-between px-0 py-3 border-b border-border/40';
   const contentClassName =
     variant === 'framed'
       ? 'flex flex-col gap-3 p-3 pt-0'
-      : 'flex flex-col gap-3 px-4 py-3';
+      : 'flex flex-col gap-3 px-0 py-3';
 
   return (
     <Collapsible
@@ -168,14 +168,14 @@ export const CommitSection: React.FC<CommitSectionProps> = ({
             {isMobile ? (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button
-                    variant="default"
-                    size="sm"
-                    onClick={() => onCommitAndPush()}
-                    disabled={!canCommit || isGeneratingMessage}
-                    className="h-7 w-7 p-0"
-                    aria-label="Commit & Push"
-                  >
+                    <Button
+                      variant="default"
+                      size="sm"
+                      onClick={() => onCommitAndPush()}
+                      disabled={!canCommit || isGeneratingMessage}
+                      className="h-7 w-7 p-0"
+                      aria-label="Push"
+                    >
                     {commitAction === 'commitAndPush' ? (
                       <RiLoader4Line className="size-4 animate-spin" />
                     ) : (
@@ -184,7 +184,7 @@ export const CommitSection: React.FC<CommitSectionProps> = ({
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="top">
-                  <p>Commit & Push</p>
+                  <p>Push</p>
                 </TooltipContent>
               </Tooltip>
             ) : (
@@ -193,17 +193,17 @@ export const CommitSection: React.FC<CommitSectionProps> = ({
                 onClick={() => onCommitAndPush()}
                 disabled={!canCommit || isGeneratingMessage}
                 className="commit-actions__btn"
-                aria-label="Commit & Push"
+                aria-label="Push"
               >
                 {commitAction === 'commitAndPush' ? (
                   <>
                     <RiLoader4Line className="size-4 animate-spin" />
-                    <span className="commit-actions__label commit-actions__label--long">Pushing...</span>
+                    <span className="commit-actions__label">Pushing...</span>
                   </>
                 ) : (
                   <>
                     <RiArrowUpLine className="size-4" />
-                    <span className="commit-actions__label commit-actions__label--long">Commit &amp; Push</span>
+                    <span className="commit-actions__label">Push</span>
                   </>
                 )}
               </ButtonLarge>
