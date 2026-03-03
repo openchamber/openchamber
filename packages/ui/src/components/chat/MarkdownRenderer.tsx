@@ -688,6 +688,8 @@ const FILE_LINK_SELECTOR = '[data-openchamber-file-link="true"]';
 
 type ParsedFileReference = {
   path: string;
+  line?: number;
+  column?: number;
 };
 
 const WINDOWS_DRIVE_PATH_PATTERN = /^[A-Za-z]:[\\/]/;
@@ -804,10 +806,12 @@ const stripTrailingReference = (value: string): string => {
     return '';
   }
 
-  const hashOrSemicolonIndex = next.search(/[;#]/);
-  if (hashOrSemicolonIndex >= 0) {
-    next = next.slice(0, hashOrSemicolonIndex);
+  const semicolonIndex = next.indexOf(';');
+  if (semicolonIndex >= 0) {
+    next = next.slice(0, semicolonIndex);
   }
+
+  next = next.replace(/#.*$/, '');
 
   const extensionSuffixMatch = next.match(/^(.*\.[A-Za-z0-9_-]{1,16}):.*$/);
   if (extensionSuffixMatch) {
@@ -825,12 +829,57 @@ const stripTrailingReference = (value: string): string => {
 };
 
 const parseFileReference = (value: string): ParsedFileReference | null => {
-  const trimmed = stripTrailingReference(value);
+  const trimmed = trimPathCandidate(value);
   if (!trimmed) {
     return null;
   }
 
-  return { path: trimmed };
+  const semicolonIndex = trimmed.indexOf(';');
+  const withoutSemicolonSuffix = semicolonIndex >= 0
+    ? trimPathCandidate(trimmed.slice(0, semicolonIndex))
+    : trimmed;
+  if (!withoutSemicolonSuffix) {
+    return null;
+  }
+
+  const hashMatch = withoutSemicolonSuffix.match(/^(.*)#L(\d+)(?:C(\d+))?$/i);
+  if (hashMatch) {
+    const path = stripTrailingReference(hashMatch[1] ?? '');
+    const line = Number.parseInt(hashMatch[2] ?? '', 10);
+    const column = hashMatch[3] ? Number.parseInt(hashMatch[3], 10) : undefined;
+    if (!path || !Number.isFinite(line)) {
+      return null;
+    }
+
+    return {
+      path,
+      line,
+      column: Number.isFinite(column ?? Number.NaN) ? column : undefined,
+    };
+  }
+
+  const colonMatch = withoutSemicolonSuffix.match(/^(.*):(\d+)(?::(\d+))?$/);
+  if (colonMatch) {
+    const path = stripTrailingReference(colonMatch[1] ?? '');
+    const line = Number.parseInt(colonMatch[2] ?? '', 10);
+    const column = colonMatch[3] ? Number.parseInt(colonMatch[3], 10) : undefined;
+    if (!path || !Number.isFinite(line)) {
+      return null;
+    }
+
+    return {
+      path,
+      line,
+      column: Number.isFinite(column ?? Number.NaN) ? column : undefined,
+    };
+  }
+
+  const pathOnly = stripTrailingReference(withoutSemicolonSuffix);
+  if (!pathOnly) {
+    return null;
+  }
+
+  return { path: pathOnly };
 };
 
 const hasFileExtension = (path: string): boolean => {
@@ -841,13 +890,7 @@ const hasFileExtension = (path: string): boolean => {
   return /\.[A-Za-z0-9_-]{1,16}$/.test(base);
 };
 
-const isLikelyFilePath = (value: string): boolean => {
-  const parsed = parseFileReference(value);
-  if (!parsed) {
-    return false;
-  }
-
-  const path = parsed.path;
+const isLikelyFilePathValue = (path: string): boolean => {
   if (!path || path.startsWith('--') || path.includes('://')) {
     return false;
   }
@@ -870,6 +913,14 @@ const isLikelyFilePath = (value: string): boolean => {
   return hasFileExtension(normalized);
 };
 
+const isLikelyFilePath = (value: string): boolean => {
+  const parsed = parseFileReference(value);
+  if (!parsed) {
+    return false;
+  }
+  return isLikelyFilePathValue(parsed.path);
+};
+
 const extractPathCandidateFromElement = (element: HTMLElement): string => {
   if (element.tagName.toLowerCase() === 'a') {
     const href = element.getAttribute('href')?.trim();
@@ -883,7 +934,7 @@ const extractPathCandidateFromElement = (element: HTMLElement): string => {
 
 const getResolvedReference = (rawValue: string, effectiveDirectory: string): (ParsedFileReference & { resolvedPath: string }) | null => {
   const parsed = parseFileReference(rawValue);
-  if (!parsed || !isLikelyFilePath(rawValue)) {
+  if (!parsed || !isLikelyFilePathValue(parsed.path)) {
     return null;
   }
 
@@ -1076,7 +1127,18 @@ const useFileReferenceInteractions = ({
 
       const contextDirectory = getContextDirectory(effectiveDirectory, resolved.resolvedPath);
       const uiStore = useUIStore.getState();
-      uiStore.openContextFile(contextDirectory, resolved.resolvedPath);
+      if (Number.isFinite(resolved.line ?? Number.NaN)) {
+        uiStore.openContextFileAtLine(
+          contextDirectory,
+          resolved.resolvedPath,
+          Math.max(1, Math.trunc(resolved.line as number)),
+          Number.isFinite(resolved.column ?? Number.NaN)
+            ? Math.max(1, Math.trunc(resolved.column as number))
+            : 1,
+        );
+      } else {
+        uiStore.openContextFile(contextDirectory, resolved.resolvedPath);
+      }
       return true;
     };
 
