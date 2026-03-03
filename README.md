@@ -58,7 +58,7 @@ The whole project was built entirely with AI coding agents under my supervision.
 
 ### Web / PWA
 
-- Cloudflare Quick Tunnel for instant remote access (`--try-cf-tunnel`)
+- Cloudflare tunnel access with two modes: Quick Tunnel (CLI) and Named Tunnel (in-app settings)
 - One-scan onboarding with tunnel QR + password URL helpers
 - Mobile-first experience: optimized chat controls, keyboard-safe layouts, and attachment-friendly UI
 - Background notifications plus reliable cross-tab session activity tracking
@@ -116,6 +116,8 @@ openchamber stop                     # Stop server
 openchamber update                   # Update to latest version
 ```
 
+Named Tunnel mode is configured in-app (Settings -> OpenChamber -> Tunnel). The CLI currently supports Quick Tunnel flags only. `--tunnel <config.yml>` is not supported yet.
+
 ### Desktop App (macOS)
 
 Download from [Releases](https://github.com/btriapitsyn/openchamber/releases).
@@ -153,6 +155,15 @@ environment:
 | `true`     | Enable tunnel only              |
 | `qr`       | Enable tunnel + QR code         |
 | `password` | Enable tunnel + password in URL |
+
+### Named Cloudflare Tunnel (persistent hostname)
+
+OpenChamber also supports Named Tunnel mode for more reliable long-lived access with your Cloudflare account and custom hostname.
+
+- Configure it in-app at **Settings -> OpenChamber -> Tunnel** and switch mode to **Named**.
+- Named tunnels require a domain in your Cloudflare account.
+- Cloudflare setup guide: https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/get-started/create-remote-tunnel/
+- CLI note: `--tunnel <config.yml>` is not supported yet.
 
 **Data Directory Permission Note:** The `data/` directory is mounted into the container for persistent storage (config, sessions, SSH keys, workspaces). Before running, ensure the directory exists and has proper permissions:
 

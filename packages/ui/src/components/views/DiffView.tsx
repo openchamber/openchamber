@@ -16,6 +16,7 @@ import {
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
+import { toast } from '@/components/ui';
 
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { getLanguageFromExtension, isImageFile } from '@/lib/toolHelpers';
@@ -25,6 +26,7 @@ import type { DiffViewMode } from '@/components/chat/message/types';
 import { PierreDiffViewer } from './PierreDiffViewer';
 import { useDeviceInfo } from '@/lib/device';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
+import { getContextFileOpenFailureMessage, validateContextFileOpen } from '@/lib/contextFileOpenGuard';
 
 // Minimum width for side-by-side diff view (px)
 const SIDE_BY_SIDE_MIN_WIDTH = 1100;
@@ -908,7 +910,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
     pinSelectedFileHeaderToTopOnNavigate = false,
     showOpenInEditorAction = false,
 }) => {
-    const { git } = useRuntimeAPIs();
+    const { git, files } = useRuntimeAPIs();
     const effectiveDirectory = useEffectiveDirectory();
     const { screenWidth, isMobile } = useDeviceInfo();
 
@@ -1407,16 +1409,23 @@ export const DiffView: React.FC<DiffViewProps> = ({
                 ? 1
                 : getFirstChangedModifiedLine(diffForNavigation.original, diffForNavigation.modified));
 
+            const absolutePath = toAbsolutePath(effectiveDirectory, filePath);
+            const openValidation = await validateContextFileOpen(files, absolutePath);
+            if (!openValidation.ok) {
+                toast.error(getContextFileOpenFailureMessage(openValidation.reason));
+                return;
+            }
+
             openContextFileAtLine(
                 effectiveDirectory,
-                toAbsolutePath(effectiveDirectory, filePath),
+                absolutePath,
                 resolvedTargetLine,
                 1,
             );
         } finally {
             setOpeningEditorFilePath((current) => (current === filePath ? null : current));
         }
-    }, [effectiveDirectory, git, openContextFileAtLine, setDiff]);
+    }, [effectiveDirectory, files, git, openContextFileAtLine, setDiff]);
 
     const openSelectedFileInEditorAtChange = React.useCallback(async () => {
         if (!selectedFile) {

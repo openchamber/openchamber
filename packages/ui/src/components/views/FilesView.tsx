@@ -649,6 +649,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const setMainTabGuard = useUIStore((state) => state.setMainTabGuard);
   const pendingFileNavigation = useUIStore((state) => state.pendingFileNavigation);
   const setPendingFileNavigation = useUIStore((state) => state.setPendingFileNavigation);
+  const pendingFileFocusPath = useUIStore((state) => state.pendingFileFocusPath);
+  const setPendingFileFocusPath = useUIStore((state) => state.setPendingFileFocusPath);
 
   // Global mouseup to end drag selection
   React.useEffect(() => {
@@ -1838,6 +1840,57 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     selectedFile?.path,
     selectedPath,
     setPendingFileNavigation,
+    setSelectedPath,
+    textViewMode,
+  ]);
+
+  React.useEffect(() => {
+    if (!pendingFileFocusPath || !root) {
+      return;
+    }
+
+    const targetPath = normalizePath(pendingFileFocusPath);
+    if (!targetPath) {
+      setPendingFileFocusPath(null);
+      return;
+    }
+
+    if (selectedFile?.path !== targetPath) {
+      if (selectedPath !== targetPath) {
+        setSelectedPath(root, targetPath);
+      }
+      return;
+    }
+
+    if (fileLoading || loadedFilePath !== targetPath || fileError || isSelectedImage) {
+      return;
+    }
+
+    if (canEdit && textViewMode !== 'edit') {
+      setTextViewMode('edit');
+      return;
+    }
+
+    if (canEdit) {
+      const view = editorViewRef.current;
+      if (!view) {
+        return;
+      }
+      view.focus();
+    }
+
+    setPendingFileFocusPath(null);
+  }, [
+    canEdit,
+    fileError,
+    fileLoading,
+    isSelectedImage,
+    loadedFilePath,
+    pendingFileFocusPath,
+    root,
+    selectedFile?.path,
+    selectedPath,
+    setPendingFileFocusPath,
     setSelectedPath,
     textViewMode,
   ]);

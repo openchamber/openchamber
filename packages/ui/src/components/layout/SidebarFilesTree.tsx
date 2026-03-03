@@ -47,6 +47,7 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 import { cn } from '@/lib/utils';
 import { opencodeClient } from '@/lib/opencode/client';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
+import { getContextFileOpenFailureMessage, validateContextFileOpen } from '@/lib/contextFileOpenGuard';
 
 type FileNode = {
   name: string;
@@ -590,13 +591,19 @@ export const SidebarFilesTree: React.FC = () => {
 
   // --- File operations ---
 
-  const handleOpenFile = React.useCallback((node: FileNode) => {
+  const handleOpenFile = React.useCallback(async (node: FileNode) => {
     if (!root) return;
+
+    const openValidation = await validateContextFileOpen(files, node.path);
+    if (!openValidation.ok) {
+      toast.error(getContextFileOpenFailureMessage(openValidation.reason));
+      return;
+    }
 
     setSelectedPath(root, node.path);
     addOpenPath(root, node.path);
     openContextFile(root, node.path);
-  }, [addOpenPath, openContextFile, root, setSelectedPath]);
+  }, [addOpenPath, files, openContextFile, root, setSelectedPath]);
 
   const toggleDirectory = React.useCallback(async (dirPath: string) => {
     const normalized = normalizePath(dirPath);

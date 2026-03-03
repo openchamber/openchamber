@@ -823,6 +823,17 @@ html:not(.dark) .chat-scroll {
   color: var(--markdown-link-hover, var(--primary));
 }
 
+.streamdown-content [data-openchamber-file-link="true"] {
+  color: var(--markdown-link, var(--primary));
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.streamdown-content [data-openchamber-file-link="true"]:hover {
+  color: var(--markdown-link-hover, var(--primary));
+}
+
 /* Markdown blockquote - use theme colors */
 .streamdown-content blockquote {
   color: var(--markdown-blockquote, var(--muted-foreground));

@@ -476,6 +476,7 @@ interface UIStore {
   sidebarOpenBeforeFullscreenTab: boolean | null;
   pendingDiffFile: string | null;
   pendingFileNavigation: PendingFileNavigation | null;
+  pendingFileFocusPath: string | null;
   isMobile: boolean;
   isKeyboardOpen: boolean;
   isCommandPaletteOpen: boolean;
@@ -590,6 +591,7 @@ interface UIStore {
   setMainTabGuard: (guard: MainTabGuard | null) => void;
   setPendingDiffFile: (filePath: string | null) => void;
   setPendingFileNavigation: (navigation: PendingFileNavigation | null) => void;
+  setPendingFileFocusPath: (path: string | null) => void;
   navigateToDiff: (filePath: string) => void;
   consumePendingDiffFile: () => string | null;
   setIsMobile: (isMobile: boolean) => void;
@@ -699,6 +701,7 @@ export const useUIStore = create<UIStore>()(
         sidebarOpenBeforeFullscreenTab: null,
         pendingDiffFile: null,
         pendingFileNavigation: null,
+        pendingFileFocusPath: null,
         isMobile: false,
         isKeyboardOpen: false,
         isCommandPaletteOpen: false,
@@ -896,12 +899,13 @@ export const useUIStore = create<UIStore>()(
 
         openContextFile: (directory, filePath) => {
           const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
-          const normalizedFilePath = (filePath || '').trim();
+          const normalizedFilePath = normalizeContextTargetPath(filePath);
           if (!normalizedDirectory || !normalizedFilePath) {
             return;
           }
 
           get().openContextPanelTab(normalizedDirectory, { mode: 'file', targetPath: normalizedFilePath });
+          get().setPendingFileFocusPath(normalizedFilePath);
           get().setPendingFileNavigation(null);
         },
 
@@ -915,6 +919,7 @@ export const useUIStore = create<UIStore>()(
           }
 
           get().openContextPanelTab(normalizedDirectory, { mode: 'file', targetPath: normalizedFilePath });
+          get().setPendingFileFocusPath(null);
           get().setPendingFileNavigation({
             path: normalizedFilePath,
             line: normalizedLine,
@@ -1183,6 +1188,10 @@ export const useUIStore = create<UIStore>()(
 
         setPendingFileNavigation: (navigation) => {
           set({ pendingFileNavigation: navigation });
+        },
+
+        setPendingFileFocusPath: (path) => {
+          set({ pendingFileFocusPath: path });
         },
 
         navigateToDiff: (filePath) => {
