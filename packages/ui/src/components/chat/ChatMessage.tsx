@@ -29,7 +29,12 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 
 const ToolOutputDialog = React.lazy(() => import('./message/ToolOutputDialog'));
 
-const DETAILED_DEFAULT_TOOLS = new Set(['task', 'edit', 'multiedit', 'write', 'apply_patch', 'bash', 'todowrite']);
+const TOOL_DEFAULT_EXPANSION_BY_MODE = {
+    detailed: new Set(['task', 'edit', 'multiedit', 'write', 'apply_patch', 'bash', 'todowrite']),
+    changes: new Set(['edit', 'multiedit', 'write', 'apply_patch']),
+} as const;
+
+type DefaultExpandedToolMode = keyof typeof TOOL_DEFAULT_EXPANSION_BY_MODE;
 const EXPANDED_TOOLS_CACHE_MAX = 4000;
 const expandedToolsStateCache = new Map<string, Set<string>>();
 
@@ -48,8 +53,8 @@ const writeExpandedToolsCache = (messageId: string, value: Set<string>): void =>
     expandedToolsStateCache.set(messageId, new Set(value));
 };
 
-const isDetailedDefaultTool = (toolName: unknown): boolean =>
-    typeof toolName === 'string' && DETAILED_DEFAULT_TOOLS.has(toolName.toLowerCase());
+const isDefaultExpandedTool = (toolName: unknown, mode: DefaultExpandedToolMode): boolean =>
+    typeof toolName === 'string' && TOOL_DEFAULT_EXPANSION_BY_MODE[mode].has(toolName.toLowerCase());
 
 function useStickyDisplayValue<T>(value: T | null | undefined): T | null | undefined {
     const [stickyValue, setStickyValue] = React.useState<T | null | undefined>(value);
@@ -443,19 +448,29 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         // 'collapsed': Activity and tools start collapsed
         // 'activity': Activity expanded, tools collapsed
         // 'detailed': Activity expanded, only key tools expanded
+        // 'changes': Activity expanded, only edit/diff tools expanded
 
         if (toolCallExpansion === 'collapsed' || toolCallExpansion === 'activity') {
             // Tools default collapsed: expandedTools contains IDs of tools that ARE expanded
             return expandedTools;
         }
 
-        // 'detailed': expand only allowlisted tools by default.
+        const defaultExpansionMode =
+            toolCallExpansion === 'detailed' || toolCallExpansion === 'changes'
+                ? toolCallExpansion
+                : null;
+
+        if (!defaultExpansionMode) {
+            return expandedTools;
+        }
+
+        // 'detailed'/'changes': expand only allowlisted tools by default.
         // expandedTools acts as a "toggled" set (XOR with defaults).
         const defaultExpandedToolIds = new Set<string>();
 
         for (const part of toolParts) {
             const toolName = (part as { tool?: unknown }).tool;
-            if (part.id && isDetailedDefaultTool(toolName)) {
+            if (part.id && isDefaultExpandedTool(toolName, defaultExpansionMode)) {
                 defaultExpandedToolIds.add(part.id);
             }
         }
@@ -467,7 +482,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                 }
 
                 const toolPart = activity.part as unknown as { id?: string; tool?: unknown };
-                if (isDetailedDefaultTool(toolPart.tool)) {
+                if (isDefaultExpandedTool(toolPart.tool, defaultExpansionMode)) {
                     if (toolPart.id) {
                         defaultExpandedToolIds.add(toolPart.id);
                     }

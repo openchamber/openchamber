@@ -47,10 +47,11 @@ const THEME_MODE_OPTIONS: Array<{ value: ThemeMode; label: string }> = [
     },
 ];
 
-const TOOL_EXPANSION_OPTIONS: Array<{ value: 'collapsed' | 'activity' | 'detailed'; label: string; description: string }> = [
-    { value: 'collapsed', label: 'Collapsed', description: 'Activity and tools start collapsed' },
-    { value: 'activity', label: 'Summary', description: 'Activity expanded, tools collapsed' },
-    { value: 'detailed', label: 'Detailed', description: 'Activity expanded, key tools expanded' },
+const TOOL_EXPANSION_OPTIONS: Array<{ value: 'collapsed' | 'activity' | 'detailed' | 'changes'; label: string; description: string }> = [
+    { value: 'collapsed', label: 'Collapsed', description: 'Activity and tool calls stay collapsed by default.' },
+    { value: 'activity', label: 'Summary', description: 'Activity opens by default; tool calls stay collapsed.' },
+    { value: 'detailed', label: 'Detailed', description: 'Activity opens; key tools auto-expand for richer detail.' },
+    { value: 'changes', label: 'Changes', description: 'Activity opens; only edit/write/patch tools auto-expand.' },
 ];
 
 const DIFF_LAYOUT_OPTIONS: Option<'dynamic' | 'inline' | 'side-by-side'>[] = [
@@ -232,6 +233,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         || shouldShow('queueMode')
         || shouldShow('textJustificationActivity')
         || shouldShow('persistDraft');
+    const selectedToolExpansionOption = TOOL_EXPANSION_OPTIONS.find((option) => option.value === toolCallExpansion);
     return (
         <div className="space-y-8">
 
@@ -590,6 +592,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             return (
                                                 <ButtonSmall
                                                     key={option.value}
+                                                    type="button"
                                                     variant="outline"
                                                     size="xs"
                                                     className={cn(
@@ -605,6 +608,11 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             );
                                         })}
                                     </div>
+                                    {selectedToolExpansionOption && (
+                                        <p className="mt-2 typography-ui-label font-normal text-muted-foreground">
+                                            {selectedToolExpansionOption.description}
+                                        </p>
+                                    )}
                                 </section>
                             )}
 

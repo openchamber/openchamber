@@ -503,7 +503,7 @@ interface UIStore {
   autoDeleteLastRunAt: number | null;
   messageLimit: number;
 
-  toolCallExpansion: 'collapsed' | 'activity' | 'detailed';
+  toolCallExpansion: 'collapsed' | 'activity' | 'detailed' | 'changes';
   fontSize: number;
   terminalFontSize: number;
   padding: number;
@@ -616,7 +616,7 @@ interface UIStore {
   setAutoDeleteAfterDays: (days: number) => void;
   setAutoDeleteLastRunAt: (timestamp: number | null) => void;
   setMessageLimit: (value: number) => void;
-  setToolCallExpansion: (value: 'collapsed' | 'activity' | 'detailed') => void;
+  setToolCallExpansion: (value: 'collapsed' | 'activity' | 'detailed' | 'changes') => void;
   setFontSize: (size: number) => void;
   setTerminalFontSize: (size: number) => void;
   setPadding: (size: number) => void;

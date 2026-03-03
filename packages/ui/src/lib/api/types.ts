@@ -524,7 +524,7 @@ export interface SettingsPayload {
   autoDeleteAfterDays?: number;
   queueModeEnabled?: boolean;
   gitmojiEnabled?: boolean;
-  toolCallExpansion?: 'collapsed' | 'activity' | 'detailed';
+  toolCallExpansion?: 'collapsed' | 'activity' | 'detailed' | 'changes';
   fontSize?: number;
   terminalFontSize?: number;
   padding?: number;

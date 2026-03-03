@@ -24,7 +24,7 @@ type AppearanceSlice = {
   maxLastMessageLength: number;
   autoDeleteEnabled: boolean;
   autoDeleteAfterDays: number;
-  toolCallExpansion: 'collapsed' | 'activity' | 'detailed';
+  toolCallExpansion: 'collapsed' | 'activity' | 'detailed' | 'changes';
   fontSize: number;
   terminalFontSize: number;
   padding: number;
