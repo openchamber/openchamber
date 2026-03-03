@@ -9,6 +9,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
+import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { toast } from '@/components/ui';
 import {
   RiGithubLine,
@@ -114,6 +115,7 @@ export function GitHubPrPickerDialog({
   const githubAuthChecked = useGitHubAuthStore((state) => state.hasChecked);
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
+  const isMobile = useUIStore((state) => state.isMobile);
   const activeProject = useProjectsStore((state) => state.getActiveProject());
 
   const projectDirectory = activeProject?.path ?? null;
@@ -296,48 +298,40 @@ export function GitHubPrPickerDialog({
     }
   }, [github, includeDiff, loadingPrNumber, onOpenChange, onSelect, projectDirectory]);
 
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[70vh] flex flex-col">
-        <DialogHeader className="flex-shrink-0">
-          <DialogTitle className="flex items-center gap-2">
-            <RiGithubLine className="h-5 w-5" />
-            Link GitHub Pull Request
-          </DialogTitle>
-          <DialogDescription>
-            Select a pull request to attach review context to this message.
-          </DialogDescription>
-        </DialogHeader>
+  const title = 'Link GitHub Pull Request';
+  const description = 'Select a pull request to attach review context to this message.';
 
-        <div className="mt-2 flex items-center gap-3">
-          <div className="relative flex-1 min-w-0">
-            <RiSearchLine className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search by title or #123, or paste pull request URL"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              className="pl-9 w-full"
-            />
-          </div>
-          <button
-            type="button"
-            onClick={() => setIncludeDiff((prev) => !prev)}
-            className="h-9 shrink-0 flex items-center gap-1 text-left"
-            aria-pressed={includeDiff}
-            aria-label="Include PR diff in attached context"
-          >
-            <Checkbox
-              checked={includeDiff}
-              onChange={(checked) => setIncludeDiff(checked)}
-              ariaLabel="Include PR diff in attached context"
-              className="size-6"
-              iconClassName="size-5"
-            />
-            <span className="typography-small text-muted-foreground whitespace-nowrap">Include PR diff</span>
-          </button>
+  const content = (
+    <>
+      <div className="mt-2 flex items-center gap-3">
+        <div className="relative flex-1 min-w-0">
+          <RiSearchLine className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search by title or #123, or paste pull request URL"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            className="pl-9 w-full"
+          />
         </div>
+        <button
+          type="button"
+          onClick={() => setIncludeDiff((prev) => !prev)}
+          className="h-9 shrink-0 flex items-center gap-1 text-left"
+          aria-pressed={includeDiff}
+          aria-label="Include PR diff in attached context"
+        >
+          <Checkbox
+            checked={includeDiff}
+            onChange={(checked) => setIncludeDiff(checked)}
+            ariaLabel="Include PR diff in attached context"
+            className="size-6"
+            iconClassName="size-5"
+          />
+          <span className="typography-small text-muted-foreground whitespace-nowrap">Include PR diff</span>
+        </button>
+      </div>
 
-        <div className="flex-1 overflow-y-auto">
+      <div className={cn(isMobile ? 'min-h-0' : 'flex-1 overflow-y-auto')}>
           {!projectDirectory ? (
             <div className="text-center text-muted-foreground py-8">No active project selected.</div>
           ) : null}
@@ -450,7 +444,45 @@ export function GitHubPrPickerDialog({
               </button>
             </div>
           ) : null}
-        </div>
+      </div>
+    </>
+  );
+
+  if (isMobile) {
+    return (
+      <MobileOverlayPanel
+        open={open}
+        title={title}
+        onClose={() => onOpenChange(false)}
+        renderHeader={(closeButton) => (
+          <div className="flex flex-col gap-1.5 px-3 py-2 border-b border-border/40">
+            <div className="flex items-center justify-between">
+              <h2 className="typography-ui-label font-semibold text-foreground">{title}</h2>
+              {closeButton}
+            </div>
+            <p className="typography-small text-muted-foreground">{description}</p>
+          </div>
+        )}
+      >
+        {content}
+      </MobileOverlayPanel>
+    );
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl max-h-[70vh] flex flex-col">
+        <DialogHeader className="flex-shrink-0">
+          <DialogTitle className="flex items-center gap-2">
+            <RiGithubLine className="h-5 w-5" />
+            {title}
+          </DialogTitle>
+          <DialogDescription>
+            {description}
+          </DialogDescription>
+        </DialogHeader>
+
+        {content}
       </DialogContent>
     </Dialog>
   );
