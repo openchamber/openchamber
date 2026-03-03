@@ -39,7 +39,7 @@ import { useCurrentSessionActivity } from '@/hooks/useSessionActivity';
 import { toast } from '@/components/ui';
 import { useFileStore } from '@/stores/fileStore';
 import { useMessageStore } from '@/stores/messageStore';
-import { isDesktopLocalOriginActive, isTauriShell, isVSCodeRuntime } from '@/lib/desktop';
+import { isTauriShell, isVSCodeRuntime } from '@/lib/desktop';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { StopIcon } from '@/components/icons/StopIcon';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -127,6 +127,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
     const textareaRef = React.useRef<HTMLTextAreaElement>(null);
     const dropZoneRef = React.useRef<HTMLDivElement>(null);
     const canAcceptDropRef = React.useRef(false);
+    const nativeDragInsideDropZoneRef = React.useRef(false);
     const mentionRef = React.useRef<FileMentionHandle>(null);
     const commandRef = React.useRef<CommandAutocompleteHandle>(null);
     const skillRef = React.useRef<SkillAutocompleteHandle>(null);
@@ -1697,7 +1698,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
 
                     // Check if drop is inside the chat input area
                     const zone = dropZoneRef.current;
-                    let inZone = false;
+                    let inZone: boolean | null = null;
                     if (zone && typeof x === 'number' && typeof y === 'number') {
                         const rect = zone.getBoundingClientRect();
                         inZone = x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
@@ -1710,16 +1711,22 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                     }
 
                     if (type === 'enter' || type === 'over') {
-                        setIsDragging(inZone);
+                        if (inZone !== null) {
+                            nativeDragInsideDropZoneRef.current = inZone;
+                        }
+                        setIsDragging(nativeDragInsideDropZoneRef.current);
                         return;
                     }
                     if (type === 'leave') {
+                        nativeDragInsideDropZoneRef.current = false;
                         setIsDragging(false);
                         return;
                     }
                     if (type === 'drop') {
+                        const shouldHandleDrop = inZone ?? nativeDragInsideDropZoneRef.current;
+                        nativeDragInsideDropZoneRef.current = false;
                         setIsDragging(false);
-                        if (!inZone) return;
+                        if (!shouldHandleDrop) return;
 
                         const paths = Array.isArray(typed.paths)
                             ? typed.paths.filter((p): p is string => typeof p === 'string')
@@ -1734,9 +1741,9 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                                 const fileName = normalizedPath.split(/[\\/]/).pop() || normalizedPath;
                                 let file: File;
 
-                                // In desktop shell on remote origin, local file paths are not readable via /api/fs/raw.
-                                // Read bytes from local machine via Tauri command.
-                                if (isTauriShell() && !isDesktopLocalOriginActive()) {
+                                // In Tauri shell, dropped paths are local machine paths.
+                                // Read bytes via native command to avoid workspace-bound /api/fs/raw restrictions.
+                                if (isTauriShell()) {
                                     const { invoke } = await import('@tauri-apps/api/core');
                                     const result = await invoke<{ mime: string; base64: string }>('desktop_read_file', { path: normalizedPath });
                                     const byteCharacters = atob(result.base64);
