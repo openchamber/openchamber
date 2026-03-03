@@ -295,7 +295,7 @@ export const useKeyboardShortcuts = () => {
         return;
       }
 
-      // Alt+F / Alt+Shift+F: Cycle through starred models (same gating as Shift+M)
+      // Ctrl+] / Ctrl+[: Cycle through starred models (same gating as Shift+M)
       if (
         eventMatchesShortcut(e, combo('cycle_favorite_model_forward')) ||
         eventMatchesShortcut(e, combo('cycle_favorite_model_backward'))
