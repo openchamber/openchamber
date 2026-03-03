@@ -2166,7 +2166,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                 )}
 
                 {/* Linked Issue Button - only in draft mode */}
-                {newSessionDraftOpen && (
+                {newSessionDraftOpen && !isVSCode && (
                     <div className="pb-2 w-full px-1">
                         {linkedIssue ? (
                             <button
