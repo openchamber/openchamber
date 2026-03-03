@@ -64,3 +64,4 @@ COPY --chmod=755 scripts/docker-entrypoint.sh /app/openchamber-entrypoint.sh
 EXPOSE 3000
 
 ENTRYPOINT ["/app/openchamber-entrypoint.sh"]
+
