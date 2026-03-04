@@ -3532,6 +3532,10 @@ const ENV_CONFIGURED_OPENCODE_HOST = (() => {
 // OPENCODE_HOST takes precedence over OPENCODE_PORT when both are set
 const ENV_EFFECTIVE_PORT = ENV_CONFIGURED_OPENCODE_HOST?.port ?? ENV_CONFIGURED_OPENCODE_PORT;
 
+const ENV_CONFIGURED_OPENCODE_HOSTNAME =
+  process.env.OPENCHAMBER_OPENCODE_HOSTNAME ||
+  '127.0.0.1';
+
 const ENV_SKIP_OPENCODE_START = process.env.OPENCODE_SKIP_START === 'true' ||
                                     process.env.OPENCHAMBER_SKIP_OPENCODE_START === 'true';
 const ENV_DESKTOP_NOTIFY = process.env.OPENCHAMBER_DESKTOP_NOTIFY === 'true';
@@ -5685,7 +5689,7 @@ async function startOpenCode() {
 
   try {
     const serverInstance = await createManagedOpenCodeServerProcess({
-      hostname: '127.0.0.1',
+      hostname: ENV_CONFIGURED_OPENCODE_HOSTNAME,
       port: spawnPort,
       timeout: 30000,
       cwd: openCodeWorkingDirectory,
