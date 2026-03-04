@@ -19,6 +19,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useDeviceInfo } from '@/lib/device';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { useLanguage } from '@/hooks/useLanguage';
 import type { EditorAPI } from '@/lib/api/types';
 
 const withStableStringId = <T extends object>(value: T, id: string): T => {

@@ -505,7 +505,7 @@ export const GitView: React.FC = () => {
       }
       toast.error(t('common.copyFailed'));
     });
-  }, []);
+  }, [t]);
 
   const handleToggleCommit = React.useCallback((hash: string) => {
     setExpandedCommitHashes((prev) => {
@@ -663,7 +663,7 @@ export const GitView: React.FC = () => {
         }
       }
     },
-    [currentDirectory, git, fetchStatus, fetchBranches]
+    [currentDirectory, git, fetchStatus, fetchBranches, t]
   );
 
   const refreshLog = React.useCallback(async () => {
@@ -915,7 +915,7 @@ export const GitView: React.FC = () => {
     } finally {
       setIsGeneratingMessage(false);
     }
-  }, [currentDirectory, selectedPaths, settingsGitmojiEnabled, gitmojiEmojis, scrollActionPanelToBottom]);
+  }, [currentDirectory, selectedPaths, settingsGitmojiEnabled, gitmojiEmojis, scrollActionPanelToBottom, t]);
 
   const handleCreateBranch = async (branchName: string, remote?: GitRemote) => {
     if (!currentDirectory || !status) return;
@@ -1267,7 +1267,7 @@ export const GitView: React.FC = () => {
         });
       }
     },
-    [currentDirectory, refreshStatusAndBranches, git]
+    [currentDirectory, refreshStatusAndBranches, git, t]
   );
 
   const handleRevertAll = React.useCallback(
@@ -1317,7 +1317,7 @@ export const GitView: React.FC = () => {
         setIsRevertingAll(false);
       }
     },
-    [currentDirectory, git, isRevertingAll, refreshStatusAndBranches]
+    [currentDirectory, git, isRevertingAll, refreshStatusAndBranches, t]
   );
 
   const handleInsertHighlights = React.useCallback(() => {
@@ -1451,7 +1451,7 @@ export const GitView: React.FC = () => {
       }
       // Note: branchOperation is cleared when dialog closes via handleOperationComplete
     },
-    [currentDirectory, git, status, refreshStatusAndBranches, refreshLog, isUncommittedChangesError, persistConflictState, clearConflictState, addOperationLog, updateLastLog, resetOperationLogs]
+    [currentDirectory, git, status, refreshStatusAndBranches, refreshLog, isUncommittedChangesError, persistConflictState, clearConflictState, addOperationLog, updateLastLog, resetOperationLogs, t]
   );
 
   const handleRebase = React.useCallback(
@@ -1503,7 +1503,7 @@ export const GitView: React.FC = () => {
       }
       // Note: branchOperation is cleared when dialog closes via handleOperationComplete
     },
-    [currentDirectory, git, status, refreshStatusAndBranches, refreshLog, isUncommittedChangesError, persistConflictState, clearConflictState, addOperationLog, updateLastLog, resetOperationLogs]
+    [currentDirectory, git, status, refreshStatusAndBranches, refreshLog, isUncommittedChangesError, persistConflictState, clearConflictState, addOperationLog, updateLastLog, resetOperationLogs, t]
   );
 
   const handleAbortConflict = React.useCallback(async () => {
@@ -1524,7 +1524,7 @@ export const GitView: React.FC = () => {
       const message = err instanceof Error ? err.message : t('gitView.failedToAbortConflictOperation', { operation: conflictOperation });
       toast.error(message);
     }
-  }, [currentDirectory, git, conflictOperation, refreshStatusAndBranches, refreshLog, clearConflictState]);
+  }, [currentDirectory, git, conflictOperation, refreshStatusAndBranches, refreshLog, clearConflictState, t]);
 
   // Check if there are unresolved conflicts (files with 'U' status)
   const hasUnresolvedConflicts = React.useMemo(() => {
@@ -1576,7 +1576,7 @@ export const GitView: React.FC = () => {
       const message = err instanceof Error ? err.message : t('gitView.failedToContinueOperation');
       toast.error(message);
     }
-  }, [currentDirectory, git, status, refreshStatusAndBranches, refreshLog, persistConflictState, clearConflictState]);
+  }, [currentDirectory, git, status, refreshStatusAndBranches, refreshLog, persistConflictState, clearConflictState, t]);
 
   const handleAbortOperation = React.useCallback(async () => {
     if (!currentDirectory) return;
@@ -1597,7 +1597,7 @@ export const GitView: React.FC = () => {
       const message = err instanceof Error ? err.message : t('gitView.failedToAbortOperation');
       toast.error(message);
     }
-  }, [currentDirectory, git, status, refreshStatusAndBranches, refreshLog, clearConflictState]);
+  }, [currentDirectory, git, status, refreshStatusAndBranches, refreshLog, clearConflictState, t]);
 
   const handleResolveWithAIFromBanner = React.useCallback(() => {
     if (!currentDirectory) return;
@@ -1695,7 +1695,7 @@ export const GitView: React.FC = () => {
         throw err;
       }
     },
-    [currentDirectory, git, status, stashDialogOperation, stashDialogBranch, refreshStatusAndBranches, refreshLog]
+    [currentDirectory, git, status, stashDialogOperation, stashDialogBranch, refreshStatusAndBranches, refreshLog, t]
   );
 
   if (!currentDirectory) {

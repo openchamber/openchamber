@@ -116,7 +116,7 @@ export function OnboardingScreen({ onCliAvailable }: OnboardingScreenProps) {
         console.error('Failed to start window dragging:', error);
       }
     }
-  }, [isDesktopApp, t]);
+  }, [isDesktopApp]);
 
   const checkCliAvailability = React.useCallback(async (): Promise<boolean> => {
     try {
@@ -163,7 +163,7 @@ export function OnboardingScreen({ onCliAvailable }: OnboardingScreenProps) {
     } catch {
       // ignore
     }
-  }, [isDesktopApp]);
+  }, [isDesktopApp, t]);
 
   const handleApplyPath = React.useCallback(async () => {
     setIsRetrying(true);

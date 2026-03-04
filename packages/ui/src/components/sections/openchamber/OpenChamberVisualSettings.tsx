@@ -329,8 +329,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 <SelectValue placeholder={t('appearance.selectLanguage')} />
                                             </SelectTrigger>
                                             <SelectContent>
-                                                <SelectItem value="en">English</SelectItem>
-                                                <SelectItem value="zh">简体中文</SelectItem>
+                                                <SelectItem value="en">{t('settings.languageEnglish')}</SelectItem>
+                                                <SelectItem value="zh">{t('settings.languageChineseSimplified')}</SelectItem>
                                             </SelectContent>
                                         </Select>
                                     </div>
@@ -443,8 +443,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                             {showPwaInstallNameSetting && (
                                 <div className={cn('py-1.5', isMobile ? 'space-y-2' : 'flex items-center gap-8')}>
                                     <div className={cn('flex min-w-0 flex-col', isMobile ? 'w-full' : 'w-56 shrink-0')}>
-                                        <span className="typography-ui-label text-foreground">Install App Name</span>
-                                        <span className="typography-meta text-muted-foreground">Used by Chrome install prompt before install.</span>
+                                        <span className="typography-ui-label text-foreground">{t('appearance.installAppName')}</span>
+                                        <span className="typography-meta text-muted-foreground">{t('appearance.installAppNameDesc')}</span>
                                     </div>
                                     <div className={cn('flex items-center gap-2', isMobile ? 'w-full' : 'w-fit min-w-[22rem]')}>
                                         <Input
@@ -463,7 +463,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             }}
                                             className="h-7"
                                             maxLength={64}
-                                            aria-label="PWA install app name"
+                                            aria-label={t('appearance.pwaInstallAppNameAria')}
                                         />
                                         <ButtonSmall
                                             type="button"
@@ -473,7 +473,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 void applyPwaInstallName('');
                                             }}
                                             className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
-                                            aria-label="Reset install app name"
+                                            aria-label={t('appearance.resetInstallAppNameAria')}
                                             title={t('common.resetButton')}
                                         >
                                             <RiRestartLine className="h-3.5 w-3.5" />

@@ -58,9 +58,7 @@
     "release:test": "./scripts/test-release-build.sh",
     "release:test:intel": "./scripts/test-release-build.sh x86_64",
     "release:test:arm": "./scripts/test-release-build.sh aarch64",
-    "i18n:check-keys": "node scripts/i18n-tools.mjs check-keys",
-    "i18n:scan-gaps": "node scripts/i18n-tools.mjs scan-gaps",
-    "i18n:clean-unused": "node scripts/i18n-tools.mjs clean-unused"
+    "i18n:check": "node scripts/i18n-tools.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.0",

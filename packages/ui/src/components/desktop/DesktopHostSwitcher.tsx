@@ -299,7 +299,7 @@ export function DesktopHostSwitcherDialog({
   const currentDefaultLabel = React.useMemo(() => {
     const id = defaultHostId || LOCAL_HOST_ID;
     return allHosts.find((h) => h.id === id)?.label || t('desktopHostSwitcher.local');
-  }, [allHosts, defaultHostId]);
+  }, [allHosts, defaultHostId, t]);
 
   const persist = React.useCallback(async (nextHosts: DesktopHost[], nextDefaultHostId: string | null) => {
     if (!isTauriShell()) return;
@@ -315,7 +315,7 @@ export function DesktopHostSwitcherDialog({
     } finally {
       setIsSaving(false);
     }
-  }, []);
+  }, [t]);
 
   const openRemoteInstancesSettings = React.useCallback(() => {
     setSettingsPage('remote-instances');
@@ -350,7 +350,7 @@ export function DesktopHostSwitcherDialog({
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [t]);
 
   const probeAll = React.useCallback(async (hosts: DesktopHost[]) => {
     if (!isTauriShell()) return;
@@ -605,7 +605,7 @@ export function DesktopHostSwitcherDialog({
         description: err instanceof Error ? err.message : String(err),
       });
     });
-  }, []);
+  }, [t]);
 
   const switchToLocal = React.useCallback(() => {
     sshSwitchTokenRef.current += 1;

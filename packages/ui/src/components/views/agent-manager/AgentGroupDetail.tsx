@@ -139,7 +139,7 @@ export const AgentGroupDetail: React.FC<AgentGroupDetailProps> = ({
     } finally {
       setIsProcessing(false);
     }
-  }, [deleteGroupWorktree, group.name, isProcessing, keepOnlyGroupWorktree, worktreeDialog]);
+  }, [deleteGroupWorktree, group.name, isProcessing, keepOnlyGroupWorktree, t, worktreeDialog]);
 
   return (
     <div className={cn('flex h-full flex-col bg-background', className)}>

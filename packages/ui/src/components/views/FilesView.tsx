@@ -602,7 +602,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     void files.revealPath(targetPath).catch(() => {
       toast.error(t('sidebarFilesTree.failedToRevealPath'));
     });
-  }, [files]);
+  }, [files, t]);
 
   const handleOpenInApp = React.useCallback(async (app: { id: string; appName: string }) => {
     if (!selectedFile?.path || !root) {
@@ -1020,7 +1020,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     }
 
     done();
-  }, [activeDialog, dialogData, dialogInputValue, files, refreshRoot, isMobile, removeOpenPathsByPrefix, root, selectedFile?.path, setSelectedPath]);
+  }, [activeDialog, dialogData, dialogInputValue, files, refreshRoot, isMobile, removeOpenPathsByPrefix, root, selectedFile?.path, setSelectedPath, t]);
 
   React.useEffect(() => {
     if (!currentDirectory) {
@@ -1089,7 +1089,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       throw new Error((error as { error?: string }).error || t('filesView.failedToReadFile'));
     }
     return response.text();
-  }, [files]);
+  }, [files, t]);
 
   const displayedContent = React.useMemo(() => {
     return fileContent.length > MAX_VIEW_CHARS
@@ -1125,7 +1125,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       .finally(() => {
         setIsSaving(false);
       });
-  }, [draftContent, files, isDirty, selectedFile]);
+  }, [draftContent, files, isDirty, selectedFile, t]);
 
   React.useEffect(() => {
     if (!isDirty) {
@@ -1249,7 +1249,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       .finally(() => {
         setFileLoading(false);
       });
-  }, [expandPaths, isMobile, loadDirectory, readFile, root, runtime.isDesktop, searchQuery, setSelectedPath]);
+  }, [expandPaths, isMobile, loadDirectory, readFile, root, runtime.isDesktop, searchQuery, setSelectedPath, t]);
 
   const ensurePathVisible = React.useCallback(async (targetPath: string, includeTarget: boolean) => {
     if (!root) {
@@ -1979,7 +1979,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     return () => {
       cancelled = true;
     };
-  }, [files, isSelectedImage, isSelectedSvg, runtime.isDesktop, selectedFile?.path]);
+  }, [files, isSelectedImage, isSelectedSvg, runtime.isDesktop, selectedFile?.path, t]);
 
   const renderDialogs = () => (
     <Dialog open={!!activeDialog} onOpenChange={(open) => !open && setActiveDialog(null)}>

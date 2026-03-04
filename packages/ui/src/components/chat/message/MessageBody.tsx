@@ -944,7 +944,7 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
                 setIsSharing(false);
             }
         },
-        [messageId, isSharing]
+        [messageId, isSharing, t]
     );
 
     React.useEffect(() => {

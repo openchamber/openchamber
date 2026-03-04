@@ -136,6 +136,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
     addProject,
     handleClose,
     isDesktop,
+    t,
     requestAccess,
     startAccessing,
     isConfirming,

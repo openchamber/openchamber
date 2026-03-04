@@ -1021,7 +1021,7 @@ export const PullRequestSection: React.FC<{
       }
       isRefreshInFlightRef.current = false;
     }
-  }, [branch, canShow, directory, github, githubAuthChecked, githubAuthStatus]);
+  }, [branch, canShow, directory, github, githubAuthChecked, githubAuthStatus, t]);
 
   // Refetch PR status when selected remote changes
   const handleRemoteChange = React.useCallback((remote: GitRemote) => {

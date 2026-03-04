@@ -742,6 +742,7 @@ Nice-to-have:
     validation.touched,
     validationAbortController,
     isCreating,
+    t,
   ]);
 
   // Extract branch name for dependency array

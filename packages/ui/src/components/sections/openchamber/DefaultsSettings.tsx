@@ -220,7 +220,7 @@ export const DefaultsSettings: React.FC = () => {
 
       <section className="px-2 pb-2 pt-0 space-y-0">
         <div className="mt-0 mb-1 typography-meta text-muted-foreground">
-          New sessions will start with:{' '}
+          {t('defaultsSettings.newSessionsWillStartWith')}{' '}
           {parsedModel.providerId ? (
             <span className="text-foreground">
               {parsedModel.providerId}/{parsedModel.modelId}

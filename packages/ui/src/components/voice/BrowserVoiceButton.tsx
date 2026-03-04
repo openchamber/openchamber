@@ -30,15 +30,7 @@ import {
 } from '@remixicon/react';
 import { VoiceStatusIndicator } from './VoiceStatusIndicator';
 import { toast } from '@/components/ui/toast';
-
-// Status text for accessibility and labels
-const statusLabels: Record<string, string> = {
-    idle: 'Start Voice',
-    listening: 'Listening',
-    processing: 'Processing',
-    speaking: 'AI Speaking',
-    error: 'Voice Error',
-};
+import { useLanguage } from '@/hooks/useLanguage';
 
 // iOS Safari detection utility
 const isIOSSafari = (): boolean => {
@@ -70,6 +62,7 @@ const normalizeVoiceErrorMessage = (error: string): string => {
  * Browser Voice Button with language selection
  */
 export function BrowserVoiceButton() {
+    const { t } = useLanguage();
     const voiceModeEnabled = useConfigStore((s) => s.voiceModeEnabled);
     
     const {
@@ -113,6 +106,13 @@ export function BrowserVoiceButton() {
     const isIdle = status === 'idle';
 
     const isSpeaking = status === 'speaking';
+    const statusLabels: Record<string, string> = {
+        idle: t('voiceSettings.startVoice'),
+        listening: t('voiceSettings.listening'),
+        processing: t('voiceSettings.processing'),
+        speaking: t('voiceSettings.aiSpeaking'),
+        error: t('voiceSettings.voiceError'),
+    };
 
     // Show toast notification when voice error occurs
     useEffect(() => {
@@ -135,10 +135,10 @@ export function BrowserVoiceButton() {
 
     // Status text for accessibility
     const statusText = isError
-        ? error || 'Voice Error'
+        ? error || t('voiceSettings.voiceError')
         : conversationMode && status === 'idle'
-          ? 'Start Voice (Continuous mode on)'
-          : statusLabels[status] || 'Start Voice';
+          ? t('voiceSettings.startVoiceContinuousModeOn')
+          : statusLabels[status] || t('voiceSettings.startVoice');
 
     // Tooltip content based on state
     const getTooltipContent = () => {
@@ -146,12 +146,12 @@ export function BrowserVoiceButton() {
             return normalizeVoiceErrorMessage(error);
         }
         if (isActive) {
-            return 'Stop voice conversation';
+            return t('voiceSettings.stopVoiceConversation');
         }
         if (isMobile) {
-            return 'Start voice conversation';
+            return t('voiceSettings.startVoiceConversation');
         }
-        return `Start voice conversation (Shift+Click for continuous mode) • Cmd/Ctrl+Shift+V to toggle`;
+        return t('voiceSettings.startVoiceConversationHint');
     };
 
     // Handle voice activation (used by both click and touch)
@@ -367,8 +367,8 @@ export function BrowserVoiceButton() {
                     variant="ghost"
                     onPointerDownCapture={(event) => event.stopPropagation()}
                     onClick={handleToggleConversationMode}
-                    aria-label={conversationMode ? 'Continuous mode on' : 'Continuous mode off'}
-                    title={conversationMode ? 'Continuous mode on' : 'Continuous mode off'}
+                    aria-label={conversationMode ? t('voiceSettings.continuousModeOn') : t('voiceSettings.continuousModeOff')}
+                    title={conversationMode ? t('voiceSettings.continuousModeOn') : t('voiceSettings.continuousModeOff')}
                     className={
                         `${buttonSizeClass} p-0 ${clearHoverBackgroundClass} ${conversationMode ? 'text-[var(--status-info)] hover:text-[var(--status-info)]' : 'text-muted-foreground hover:text-foreground'}`
                     }

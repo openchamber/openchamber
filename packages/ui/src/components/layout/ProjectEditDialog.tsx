@@ -219,7 +219,7 @@ export const ProjectEditDialog: React.FC<ProjectEditDialogProps> = ({
       .finally(() => {
         setIsDiscoveringIcon(false);
       });
-  }, [clearPendingUploadIcon, discoverProjectIcon, isDiscoveringIcon, projectId]);
+  }, [clearPendingUploadIcon, discoverProjectIcon, isDiscoveringIcon, projectId, t]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

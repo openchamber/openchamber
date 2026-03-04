@@ -2652,7 +2652,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                       className="[&>svg]:mr-1"
                     >
                       <RiPencilAiLine className="mr-1 h-4 w-4" />
-                      Rename
+                      {t('sessionSidebar.rename')}
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => togglePinnedSession(session.id)} className="[&>svg]:mr-1">
                       {isPinnedSession ? (
@@ -2660,12 +2660,12 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                       ) : (
                         <RiPushpinLine className="mr-1 h-4 w-4" />
                       )}
-                      {isPinnedSession ? 'Unpin session' : 'Pin session'}
+                      {isPinnedSession ? t('sessionSidebar.unpinSession') : t('sessionSidebar.pinSession')}
                     </DropdownMenuItem>
                     {!session.share ? (
                       <DropdownMenuItem onClick={() => handleShareSession(session)} className="[&>svg]:mr-1">
                         <RiShare2Line className="mr-1 h-4 w-4" />
-                        Share
+                        {t('sessionSidebar.share')}
                       </DropdownMenuItem>
                     ) : (
                       <>
@@ -2805,6 +2805,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     },
     [
       directoryStatus,
+      language,
       sessionMemoryState,
       sessionStatus,
       sessionAttentionStates,
@@ -2837,6 +2838,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       createFolderAndStartRename,
       openContextPanelTab,
       notifyOnSubtasks,
+      t,
     ],
   );
 
@@ -3273,6 +3275,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       renamingFolderId,
       renameFolderDraft,
       pinnedSessionIds,
+      t,
     ]
   );
 

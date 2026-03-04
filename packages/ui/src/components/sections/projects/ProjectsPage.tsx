@@ -149,6 +149,7 @@ export const ProjectsPage: React.FC = () => {
     removeProjectIcon,
     selectedProject,
     updateProjectMeta,
+    t,
   ]);
 
   const currentColorVar = color ? (COLOR_MAP[color] ?? null) : null;
@@ -229,7 +230,7 @@ export const ProjectsPage: React.FC = () => {
       .finally(() => {
         setIsDiscoveringIcon(false);
       });
-  }, [clearPendingUploadIcon, discoverProjectIcon, isDiscoveringIcon, selectedProject]);
+  }, [clearPendingUploadIcon, discoverProjectIcon, isDiscoveringIcon, selectedProject, t]);
 
   if (!selectedProject) {
     return (
