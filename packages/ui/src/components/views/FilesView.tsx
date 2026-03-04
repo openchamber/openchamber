@@ -471,6 +471,9 @@ const FileRow: React.FC<FileRowProps> = ({
   const isDragging = isDndDragging || isNativeDragging;
   const isDropTarget = isUploadDropTarget || isDndDropTarget;
 
+  // Disable native drag when internal DnD (dnd-kit) is enabled to prevent conflicts
+  const enableNativeDrag = !isDir && Boolean(onDragStart) && !isMobile && !permissions.canRename;
+
   return (
     <div
       className={cn(
@@ -478,10 +481,10 @@ const FileRow: React.FC<FileRowProps> = ({
         isDragging && "opacity-50"
       )}
       onContextMenu={!isMobile ? handleContextMenu : undefined}
-      // Native drag for desktop file export only (not for internal moves)
-      draggable={!isDir && Boolean(onDragStart) && !isMobile}
-      onDragStart={!isDir && !isMobile ? handleNativeDragStart : undefined}
-      onDragEnd={!isDir && !isMobile ? handleNativeDragEnd : undefined}
+      // Native drag for desktop file export only (disabled when internal DnD is active)
+      draggable={enableNativeDrag}
+      onDragStart={enableNativeDrag ? handleNativeDragStart : undefined}
+      onDragEnd={enableNativeDrag ? handleNativeDragEnd : undefined}
       // Upload drop target (for external files)
       onDragEnter={isDir ? handleUploadDragEnter : undefined}
       onDragLeave={isDir ? handleUploadDragLeave : undefined}
@@ -893,29 +896,30 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   }, [childrenByDir]);
 
   const resolveCurrentModifiedTime = React.useCallback(async (node: Pick<FileNode, 'path' | 'modifiedTime'>): Promise<number | undefined> => {
+    // Prefer fresh stat call with TTL cache over stale node.modifiedTime
+    if (files.stat) {
+      const cachedStat = getCachedFileStat(node.path);
+      if (cachedStat) {
+        return cachedStat.modifiedTime;
+      }
+
+      try {
+        const stat = await files.stat(node.path);
+        const modifiedTime = typeof stat?.modifiedTime === 'number' ? stat.modifiedTime : undefined;
+        setCachedFileStat(node.path, modifiedTime);
+        return modifiedTime;
+      } catch {
+        // Fall through to node baseline if stat fails
+      }
+    }
+
+    // Fall back to node.modifiedTime from directory listing as baseline
     const fromNode = resolveNodeModifiedTime(node);
     if (typeof fromNode === 'number') {
-      setCachedFileStat(node.path, fromNode);
       return fromNode;
     }
 
-    const cachedStat = getCachedFileStat(node.path);
-    if (cachedStat) {
-      return cachedStat.modifiedTime;
-    }
-
-    if (!files.stat) {
-      return undefined;
-    }
-
-    try {
-      const stat = await files.stat(node.path);
-      const modifiedTime = typeof stat?.modifiedTime === 'number' ? stat.modifiedTime : undefined;
-      setCachedFileStat(node.path, modifiedTime);
-      return modifiedTime;
-    } catch {
-      return undefined;
-    }
+    return undefined;
   }, [files, getCachedFileStat, resolveNodeModifiedTime, setCachedFileStat]);
 
   const isCacheEntryFresh = React.useCallback((
@@ -2266,6 +2270,32 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     }
   }, [loadDirectory, root, toggleExpandedPath]);
 
+  // Helper to construct proper file:// URLs for native drag-out
+  const pathToFileUrl = React.useCallback((filePath: string): string => {
+    // Normalize path separators to forward slashes
+    let normalized = filePath.replace(/\\/g, '/');
+
+    // For Windows paths, ensure drive letter format is correct
+    // Convert C: to /C: for proper file URL format
+    if (/^[A-Za-z]:/.test(normalized)) {
+      normalized = '/' + normalized;
+    }
+
+    // Ensure path starts with /
+    if (!normalized.startsWith('/')) {
+      normalized = '/' + normalized;
+    }
+
+    // URI-encode the path components while preserving slashes
+    const encoded = normalized
+      .split('/')
+      .map(segment => encodeURIComponent(segment))
+      .join('/');
+
+    // Construct file:// URL with three slashes (file:// + /)
+    return `file://${encoded}`;
+  }, []);
+
   // Drag-out download handler: allows dragging files to desktop/file manager
   const handleFileDragStart = React.useCallback((node: FileNode, event: React.DragEvent) => {
     if (node.type === 'directory') {
@@ -2292,7 +2322,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
     // For desktop platform, use file:// URL for native drag
     if (runtime.isDesktop) {
-      const fileUrl = `file://${node.path}`;
+      const fileUrl = pathToFileUrl(node.path);
       event.dataTransfer.setData('text/uri-list', fileUrl);
       // Set DownloadURL format for cross-platform compatibility
       // Format: mime:filename:url
@@ -2304,7 +2334,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       event.dataTransfer.setData('text/uri-list', absoluteUrl);
       event.dataTransfer.setData('DownloadURL', `${mimeType}:${fileName}:${absoluteUrl}`);
     }
-  }, [runtime.isDesktop]);
+  }, [pathToFileUrl, runtime.isDesktop]);
 
   // Download button handler (selected file)
   const handleDownloadFile = React.useCallback(() => {
