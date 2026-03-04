@@ -12771,6 +12771,7 @@ async function main(options = {}) {
 
       const ext = path.extname(canonicalPath).toLowerCase();
       const mimeMap = {
+        // Images
         '.png': 'image/png',
         '.jpg': 'image/jpeg',
         '.jpeg': 'image/jpeg',
@@ -12780,6 +12781,24 @@ async function main(options = {}) {
         '.ico': 'image/x-icon',
         '.bmp': 'image/bmp',
         '.avif': 'image/avif',
+        // PDF
+        '.pdf': 'application/pdf',
+        // Audio
+        '.mp3': 'audio/mpeg',
+        '.wav': 'audio/wav',
+        '.ogg': 'audio/ogg',
+        '.m4a': 'audio/mp4',
+        '.aac': 'audio/aac',
+        '.flac': 'audio/flac',
+        '.opus': 'audio/opus',
+        // Video
+        '.mp4': 'video/mp4',
+        '.webm': 'video/webm',
+        '.ogv': 'video/ogg',
+        '.mov': 'video/quicktime',
+        '.avi': 'video/x-msvideo',
+        '.mkv': 'video/x-matroska',
+        '.m4v': 'video/x-m4v',
       };
       const mimeType = mimeMap[ext] || 'application/octet-stream';
       const totalBytes = stats.size;
@@ -12880,9 +12899,22 @@ async function main(options = {}) {
         return res.status(400).json({ error: resolved.error });
       }
 
+      // Detect if content is base64 (for binary files)
+      // Base64 strings are typically long and contain only base64 characters
+      const isBase64 = content.length > 100 && /^[A-Za-z0-9+/]+=*$/.test(content);
+
       // Ensure parent directory exists
       await fsPromises.mkdir(path.dirname(resolved.resolved), { recursive: true });
-      await fsPromises.writeFile(resolved.resolved, content, 'utf8');
+
+      if (isBase64) {
+        // Decode and write as binary
+        const buffer = Buffer.from(content, 'base64');
+        await fsPromises.writeFile(resolved.resolved, buffer);
+      } else {
+        // Write as UTF-8 text
+        await fsPromises.writeFile(resolved.resolved, content, 'utf8');
+      }
+
       res.json({ success: true, path: resolved.resolved });
     } catch (error) {
       const err = error;
@@ -13279,12 +13311,40 @@ async function main(options = {}) {
     }
   });
 
+  // Helper for limiting concurrency of async operations
+  const mapWithConcurrency = async (items, concurrency, mapper) => {
+    if (items.length === 0) {
+      return [];
+    }
+
+    const workerCount = Math.max(1, Math.min(concurrency, items.length));
+    const results = new Array(items.length);
+    let nextIndex = 0;
+
+    const workers = Array.from({ length: workerCount }, async () => {
+      while (true) {
+        const currentIndex = nextIndex;
+        nextIndex += 1;
+
+        if (currentIndex >= items.length) {
+          return;
+        }
+
+        results[currentIndex] = await mapper(items[currentIndex], currentIndex);
+      }
+    });
+
+    await Promise.all(workers);
+    return results;
+  };
+
   app.get('/api/fs/list', async (req, res) => {
     const rawPath = typeof req.query.path === 'string' && req.query.path.trim().length > 0
       ? req.query.path.trim()
       : os.homedir();
     const respectGitignore = req.query.respectGitignore === 'true';
     let resolvedPath = '';
+    const DIRECTORY_STAT_CONCURRENCY_LIMIT = 32;
 
     const isPlansDirectory = (value) => {
       if (!value || typeof value !== 'string') return false;
@@ -13339,8 +13399,10 @@ async function main(options = {}) {
         }
       }
 
-      const entries = await Promise.all(
-        dirents.map(async (dirent) => {
+      const entries = await mapWithConcurrency(
+        dirents,
+        DIRECTORY_STAT_CONCURRENCY_LIMIT,
+        async (dirent) => {
           const entryPath = path.join(resolvedPath, dirent.name);
 
           // Skip gitignored entries
