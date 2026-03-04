@@ -479,6 +479,33 @@ export interface ListDirectoryOptions {
   respectGitignore?: boolean;
 }
 
+export interface WriteFileOptions {
+  encoding?: 'utf8' | 'base64';
+  expectedSizeBytes?: number;
+}
+
+export interface WriteFileResult {
+  success: boolean;
+  path: string;
+  sizeBytes?: number;
+}
+
+export interface UploadFileProgress {
+  loadedBytes: number;
+  totalBytes: number;
+}
+
+export interface UploadFileOptions {
+  expectedSizeBytes?: number;
+  onProgress?: (progress: UploadFileProgress) => void;
+}
+
+export interface UploadFileResult {
+  success: boolean;
+  path: string;
+  sizeBytes?: number;
+}
+
 export interface FilesAPI {
   listDirectory(path: string, options?: ListDirectoryOptions): Promise<DirectoryListResult>;
   stat?(path: string): Promise<FileStatResult>;
@@ -486,7 +513,8 @@ export interface FilesAPI {
   createDirectory(path: string): Promise<{ success: boolean; path: string }>;
   readFile?(path: string): Promise<{ content: string; path: string }>;
   readFileBinary?(path: string): Promise<{ dataUrl: string; path: string }>;
-  writeFile?(path: string, content: string): Promise<{ success: boolean; path: string }>;
+  uploadFile?(path: string, file: Blob, options?: UploadFileOptions): Promise<UploadFileResult>;
+  writeFile?(path: string, content: string, options?: WriteFileOptions): Promise<WriteFileResult>;
   delete?(path: string): Promise<{ success: boolean }>;
   rename?(oldPath: string, newPath: string): Promise<{ success: boolean; path: string }>;
   revealPath?(path: string): Promise<{ success: boolean }>;

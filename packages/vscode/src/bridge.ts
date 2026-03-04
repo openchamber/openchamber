@@ -1790,7 +1790,17 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
       }
 
       case 'api:fs:write': {
-        const { path: targetPath, content } = (payload as { path: string; content: string }) || {};
+        const {
+          path: targetPath,
+          content,
+          encoding,
+          expectedSizeBytes,
+        } = (payload as {
+          path: string;
+          content: string;
+          encoding?: 'utf8' | 'base64';
+          expectedSizeBytes?: number;
+        }) || {};
         if (!targetPath) {
           return { id, type, success: false, error: 'Path is required' };
         }
@@ -1808,8 +1818,42 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
           } catch {
             // Directory may already exist
           }
-          await vscode.workspace.fs.writeFile(uri, Buffer.from(content, 'utf8'));
-          return { id, type, success: true, data: { success: true, path: normalizeFsPath(resolvedPath) } };
+
+          let writeBuffer;
+          if (encoding === 'base64') {
+            writeBuffer = Buffer.from(content, 'base64');
+          } else if (/^data:[^;]*;base64,/.test(content)) {
+            const commaIndex = content.indexOf(',');
+            const base64Content = commaIndex >= 0 ? content.slice(commaIndex + 1) : content;
+            writeBuffer = Buffer.from(base64Content, 'base64');
+          } else {
+            writeBuffer = Buffer.from(content, 'utf8');
+          }
+
+          const normalizedExpectedSize = Number.isFinite(expectedSizeBytes)
+            ? Math.max(0, Math.trunc(Number(expectedSizeBytes)))
+            : undefined;
+
+          if (typeof normalizedExpectedSize === 'number' && writeBuffer.byteLength !== normalizedExpectedSize) {
+            return {
+              id,
+              type,
+              success: false,
+              error: `Uploaded size mismatch: expected ${normalizedExpectedSize} bytes but received ${writeBuffer.byteLength} bytes`,
+            };
+          }
+
+          await vscode.workspace.fs.writeFile(uri, writeBuffer);
+          return {
+            id,
+            type,
+            success: true,
+            data: {
+              success: true,
+              path: normalizeFsPath(resolvedPath),
+              sizeBytes: writeBuffer.byteLength,
+            },
+          };
         } catch (error) {
           const message = error instanceof Error ? error.message : 'Failed to write file';
           return { id, type, success: false, error: message };

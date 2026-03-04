@@ -31,6 +31,7 @@ import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { triggerFileDownload } from '@/lib/fileDownload';
 import { subscribeToFileContentInvalidated } from '@/lib/fileContentInvalidation';
+import { getFriendlyUploadErrorMessage, getUploadPreflightError } from '@/lib/fileUploadGuards';
 
 import {
   DropdownMenu,
@@ -62,7 +63,7 @@ import { useFileSearchStore } from '@/stores/useFileSearchStore';
 import { useDeviceInfo } from '@/lib/device';
 import { cn, getModifierLabel, hasModifier } from '@/lib/utils';
 import { getLanguageFromExtension, getImageMimeType, isImageFile } from '@/lib/toolHelpers';
-import { getFileTypeInfo, getBinaryFileWarning, getFileCategory, looksLikeBinaryContent } from '@/lib/fileHelpers';
+import { getFileTypeInfo, getBinaryFileWarning, getFileCategory, isBinaryFile, looksLikeBinaryContent } from '@/lib/fileHelpers';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { EditorView } from '@codemirror/view';
 import type { Extension } from '@codemirror/state';
@@ -733,14 +734,6 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     fileStatCacheRef.current.delete(normalizedPath);
   }, []);
 
-  React.useEffect(() => {
-    return subscribeToFileContentInvalidated((paths) => {
-      for (const path of paths) {
-        invalidateCachedPath(path);
-      }
-    });
-  }, [invalidateCachedPath]);
-
   const invalidateCachedPathPrefix = React.useCallback((prefixPath: string) => {
     const normalizedPrefix = normalizePath(prefixPath);
     if (!normalizedPrefix) {
@@ -760,6 +753,18 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       }
     }
   }, []);
+
+  React.useEffect(() => {
+    return subscribeToFileContentInvalidated(({ paths, prefixes }) => {
+      for (const path of paths) {
+        invalidateCachedPath(path);
+      }
+
+      for (const prefix of prefixes) {
+        invalidateCachedPathPrefix(prefix);
+      }
+    });
+  }, [invalidateCachedPath, invalidateCachedPathPrefix]);
 
   const resolveNodeModifiedTime = React.useCallback((node: Pick<FileNode, 'path' | 'modifiedTime'>): number | undefined => {
     if (typeof node.modifiedTime === 'number') {
@@ -893,6 +898,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const canRename = Boolean(files.rename);
   const canDelete = Boolean(files.delete);
   const canReveal = runtime.isDesktop && Boolean(files.revealPath);
+  const canUploadFiles = Boolean(files.uploadFile || files.writeFile);
   const openInApps = useOpenInAppsStore((state) => state.availableApps);
   const openInCacheStale = useOpenInAppsStore((state) => state.isCacheStale);
   const initializeOpenInApps = useOpenInAppsStore((state) => state.initialize);
@@ -2141,20 +2147,51 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     triggerFileDownload(node.path, node.name);
   }, []);
 
-  const uploadFile = React.useCallback(async (file: File, targetDir: string): Promise<boolean> => {
-    if (!files.writeFile) {
-      toast.error('File upload not supported');
-      return false;
+  const uploadFile = React.useCallback(async (
+    file: File,
+    targetDir: string,
+  ): Promise<{ success: true } | { success: false; error: string }> => {
+    if (!files.uploadFile && !files.writeFile) {
+      return { success: false, error: 'File upload not supported' };
     }
 
     const filePath = normalizePath(`${targetDir}/${file.name}`);
+    const preflightError = getUploadPreflightError({
+      fileName: file.name,
+      sizeBytes: file.size,
+      isBinary: isBinaryFile(file.name),
+      supportsStreamingUpload: Boolean(files.uploadFile),
+    });
+
+    if (preflightError) {
+      return { success: false, error: preflightError };
+    }
 
     try {
-      // Use getFileCategory for more robust file type detection
-      const category = getFileCategory(file.name);
-      const isTextFile = category === 'text';
+      if (files.uploadFile) {
+        const uploadResult = await files.uploadFile(filePath, file, {
+          expectedSizeBytes: file.size,
+        });
 
-      // Read file content
+        if (!uploadResult.success) {
+          return { success: false, error: 'Upload failed' };
+        }
+
+        if (typeof uploadResult.sizeBytes === 'number' && uploadResult.sizeBytes !== file.size) {
+          return {
+            success: false,
+            error: `Uploaded size mismatch: expected ${file.size} bytes but wrote ${uploadResult.sizeBytes} bytes`,
+          };
+        }
+
+        return { success: true };
+      }
+
+      if (!files.writeFile) {
+        return { success: false, error: 'File upload not supported' };
+      }
+
+      const isTextFile = getFileCategory(file.name) === 'text';
       const content = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
         reader.onerror = () => reject(reader.error);
@@ -2162,34 +2199,55 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         if (isTextFile) {
           reader.onload = () => resolve(reader.result as string);
           reader.readAsText(file);
-        } else {
-          // For binary files, read as data URL (includes base64 prefix)
-          // Server will detect and strip the data:*;base64, prefix
-          reader.onload = () => resolve(reader.result as string);
-          reader.readAsDataURL(file);
+          return;
         }
+
+        reader.onload = () => {
+          const dataUrl = reader.result as string;
+          const commaIndex = dataUrl.indexOf(',');
+          resolve(commaIndex >= 0 ? dataUrl.slice(commaIndex + 1) : dataUrl);
+        };
+        reader.readAsDataURL(file);
       });
 
-      const result = await files.writeFile(filePath, content);
-      return result.success;
+      const result = await files.writeFile(filePath, content, {
+        encoding: isTextFile ? 'utf8' : 'base64',
+        expectedSizeBytes: file.size,
+      });
+
+      if (!result.success) {
+        return { success: false, error: 'Upload failed' };
+      }
+
+      if (typeof result.sizeBytes === 'number' && result.sizeBytes !== file.size) {
+        return {
+          success: false,
+          error: `Uploaded size mismatch: expected ${file.size} bytes but wrote ${result.sizeBytes} bytes`,
+        };
+      }
+
+      return { success: true };
     } catch (error) {
-      console.error('Failed to upload file:', error);
-      return false;
+      return { success: false, error: getFriendlyUploadErrorMessage(error) };
     }
   }, [files]);
 
   const handleFileDrop = React.useCallback(async (droppedFiles: File[], targetDir: string) => {
-    if (droppedFiles.length === 0 || !files.writeFile) return;
+    if (droppedFiles.length === 0 || (!files.uploadFile && !files.writeFile)) return;
 
     let successCount = 0;
     let failCount = 0;
+    let firstFailureMessage: string | null = null;
 
     for (const file of droppedFiles) {
-      const success = await uploadFile(file, targetDir);
-      if (success) {
+      const result = await uploadFile(file, targetDir);
+      if (result.success) {
         successCount++;
       } else {
         failCount++;
+        if (!firstFailureMessage) {
+          firstFailureMessage = result.error;
+        }
       }
     }
 
@@ -2203,16 +2261,16 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       } else if (failCount === 0) {
         toast.success(`${successCount} files uploaded successfully`);
       } else {
-        toast.warning(`${successCount} uploaded, ${failCount} failed`);
+        toast.warning(firstFailureMessage ?? `${successCount} uploaded, ${failCount} failed`);
       }
     } else if (failCount > 0) {
-      toast.error(`Failed to upload ${failCount} file${failCount > 1 ? 's' : ''}`);
+      toast.error(firstFailureMessage ?? `Failed to upload ${failCount} file${failCount > 1 ? 's' : ''}`);
     }
-  }, [files.writeFile, invalidateCachedPath, refreshRoot, uploadFile]);
+  }, [files.uploadFile, files.writeFile, invalidateCachedPath, refreshRoot, uploadFile]);
 
   const handleFileUploadFromDialog = React.useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFiles = event.target.files;
-    if (!selectedFiles || selectedFiles.length === 0 || !dialogData) return;
+    if (!selectedFiles || selectedFiles.length === 0 || !dialogData || !canUploadFiles) return;
 
     const targetDir = dialogData.path;
     const fileArray = Array.from(selectedFiles);
@@ -2227,10 +2285,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     if (fileUploadInputRef.current) {
       fileUploadInputRef.current.value = '';
     }
-  }, [dialogData, handleFileDrop]);
+  }, [canUploadFiles, dialogData, handleFileDrop]);
 
   const handleUploadToFolder = React.useCallback((targetPath: string) => {
-    if (!files.writeFile) {
+    if (!canUploadFiles) {
       toast.error('File upload not supported');
       return;
     }
@@ -2246,13 +2304,13 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
     uploadInput.value = '';
     uploadInput.click();
-  }, [files.writeFile]);
+  }, [canUploadFiles]);
 
   const handleContextUploadInputChange = React.useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFiles = event.target.files;
     const targetPath = contextUploadTargetPath;
 
-    if (!selectedFiles || selectedFiles.length === 0 || !targetPath) {
+    if (!selectedFiles || selectedFiles.length === 0 || !targetPath || !canUploadFiles) {
       event.target.value = '';
       setContextUploadTargetPath(null);
       return;
@@ -2261,7 +2319,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     await handleFileDrop(Array.from(selectedFiles), targetPath);
     event.target.value = '';
     setContextUploadTargetPath(null);
-  }, [contextUploadTargetPath, handleFileDrop]);
+  }, [canUploadFiles, contextUploadTargetPath, handleFileDrop]);
 
   function renderTree(dirPath: string, depth: number): React.ReactNode {
     const nodes = childrenByDir[dirPath] ?? [];
@@ -2295,7 +2353,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
               canCreateFolder,
               canDelete,
               canReveal,
-              canUpload: Boolean(files.writeFile),
+              canUpload: canUploadFiles,
               canDownload: true,
             }}
             contextMenuPath={contextMenuPath}

@@ -4,6 +4,10 @@ import type {
   FileSearchQuery,
   FileSearchResult,
   FilesAPI,
+  UploadFileOptions,
+  UploadFileResult,
+  WriteFileOptions,
+  WriteFileResult,
 } from '@openchamber/ui/lib/api/types';
 
 const normalizePath = (path: string): string => path.replace(/\\/g, '/');
@@ -155,16 +159,90 @@ export const createWebFilesAPI = (): FilesAPI => ({
     return { content, path: target };
   },
 
-  async writeFile(path: string, content: string): Promise<{ success: boolean; path: string }> {
+  async uploadFile(path: string, file: Blob, options?: UploadFileOptions): Promise<UploadFileResult> {
+    const target = normalizePath(path);
+
+    const expectedSize = Number.isFinite(options?.expectedSizeBytes)
+      ? Number(options?.expectedSizeBytes)
+      : Number.isFinite(file.size)
+        ? file.size
+        : undefined;
+
+    const result = await new Promise<UploadFileResult>((resolve, reject) => {
+      const request = new XMLHttpRequest();
+      request.open('PUT', `/api/fs/upload?path=${encodeURIComponent(target)}`);
+      request.setRequestHeader('x-openchamber-upload-encoding', 'binary');
+      if (typeof expectedSize === 'number') {
+        request.setRequestHeader('x-openchamber-expected-size', String(expectedSize));
+      }
+
+      request.upload.onprogress = (event) => {
+        const totalBytes = event.lengthComputable ? event.total : (typeof expectedSize === 'number' ? expectedSize : 0);
+        options?.onProgress?.({
+          loadedBytes: event.loaded,
+          totalBytes,
+        });
+      };
+
+      request.onerror = () => {
+        reject(new Error('Failed to upload file'));
+      };
+
+      request.onload = () => {
+        const status = request.status;
+        const rawResponse = typeof request.responseText === 'string' ? request.responseText : '';
+        const payload = (() => {
+          try {
+            return JSON.parse(rawResponse) as { success?: boolean; path?: string; sizeBytes?: number; error?: string };
+          } catch {
+            return null;
+          }
+        })();
+
+        if (status >= 200 && status < 300) {
+          resolve({
+            success: Boolean(payload?.success),
+            path: typeof payload?.path === 'string' ? normalizePath(payload.path) : target,
+            sizeBytes: typeof payload?.sizeBytes === 'number' ? payload.sizeBytes : undefined,
+          });
+          return;
+        }
+
+        const fallbackError = status === 413
+          ? 'Upload payload is too large for current server or proxy limits'
+          : 'Failed to upload file';
+
+        reject(new Error(payload?.error || rawResponse.trim() || fallbackError));
+      };
+
+      request.send(file);
+    });
+
+    return result;
+  },
+
+  async writeFile(path: string, content: string, options?: WriteFileOptions): Promise<WriteFileResult> {
     const target = normalizePath(path);
     const response = await fetch('/api/fs/write', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path: target, content }),
+      body: JSON.stringify({
+        path: target,
+        content,
+        encoding: options?.encoding,
+        expectedSizeBytes: options?.expectedSizeBytes,
+      }),
     });
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: response.statusText }));
+      const error = await response
+        .json()
+        .catch(async () => ({ error: (await response.text().catch(() => response.statusText)) || response.statusText }));
+
+      if (response.status === 413) {
+        throw new Error((error as { error?: string }).error || 'Upload payload is too large for current server limits');
+      }
+
       throw new Error((error as { error?: string }).error || 'Failed to write file');
     }
 
@@ -172,6 +250,9 @@ export const createWebFilesAPI = (): FilesAPI => ({
     return {
       success: Boolean((result as { success?: boolean }).success),
       path: typeof (result as { path?: string }).path === 'string' ? normalizePath((result as { path: string }).path) : target,
+      sizeBytes: typeof (result as { sizeBytes?: number }).sizeBytes === 'number'
+        ? (result as { sizeBytes: number }).sizeBytes
+        : undefined,
     };
   },
 

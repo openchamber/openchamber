@@ -4,6 +4,7 @@ import { spawn, spawnSync } from 'child_process';
 import fs from 'fs';
 import http from 'http';
 import net from 'net';
+import { pipeline } from 'stream/promises';
 import { WebSocketServer } from 'ws';
 import { fileURLToPath } from 'url';
 import os from 'os';
@@ -6775,6 +6776,11 @@ async function main(options = {}) {
   });
 
   app.use((req, res, next) => {
+    const isRawFileUploadRoute = req.path === '/api/fs/upload' && (req.method === 'PUT' || req.method === 'POST');
+    if (isRawFileUploadRoute) {
+      return next();
+    }
+
     if (
       req.path.startsWith('/api/config/agents') ||
       req.path.startsWith('/api/config/commands') ||
@@ -6803,6 +6809,16 @@ async function main(options = {}) {
     }
   });
   app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+  app.use((error, req, res, next) => {
+    if (error && typeof error === 'object' && (error.type === 'entity.too.large' || error.status === 413)) {
+      return res.status(413).json({
+        error: 'Request payload is too large for the current upload route. Use streaming upload or reduce file size.',
+      });
+    }
+
+    return next(error);
+  });
 
   app.use((req, res, next) => {
     console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
@@ -12119,14 +12135,107 @@ async function main(options = {}) {
     }
   });
 
+  app.put('/api/fs/upload', async (req, res) => {
+    const filePath = typeof req.query.path === 'string' ? req.query.path.trim() : '';
+    if (!filePath) {
+      return res.status(400).json({ error: 'Path is required' });
+    }
+
+    const expectedSizeHeader = Array.isArray(req.headers['x-openchamber-expected-size'])
+      ? req.headers['x-openchamber-expected-size'][0]
+      : req.headers['x-openchamber-expected-size'];
+    const parsedExpectedSize = typeof expectedSizeHeader === 'string'
+      ? Number.parseInt(expectedSizeHeader, 10)
+      : Number.NaN;
+    const expectedSizeBytes = Number.isFinite(parsedExpectedSize) && parsedExpectedSize >= 0
+      ? parsedExpectedSize
+      : undefined;
+
+    if (typeof expectedSizeHeader === 'string' && expectedSizeBytes === undefined) {
+      return res.status(400).json({ error: 'Invalid expected upload size' });
+    }
+
+    let tempFilePath = '';
+
+    try {
+      const resolved = await resolveWorkspacePathFromContext(req, filePath);
+      if (!resolved.ok) {
+        return res.status(400).json({ error: resolved.error });
+      }
+
+      await fsPromises.mkdir(path.dirname(resolved.resolved), { recursive: true });
+
+      tempFilePath = `${resolved.resolved}.upload-${Date.now()}-${crypto.randomUUID()}.tmp`;
+
+      let receivedBytes = 0;
+      req.on('data', (chunk) => {
+        if (chunk && typeof chunk.length === 'number') {
+          receivedBytes += chunk.length;
+        }
+      });
+
+      const writeStream = fs.createWriteStream(tempFilePath, { flags: 'w' });
+      await pipeline(req, writeStream);
+
+      if (typeof expectedSizeBytes === 'number' && receivedBytes !== expectedSizeBytes) {
+        await fsPromises.rm(tempFilePath, { force: true });
+        tempFilePath = '';
+        return res.status(400).json({
+          error: `Uploaded size mismatch: expected ${expectedSizeBytes} bytes but received ${receivedBytes} bytes`,
+        });
+      }
+
+      await fsPromises.rename(tempFilePath, resolved.resolved);
+      tempFilePath = '';
+
+      const stats = await fsPromises.stat(resolved.resolved);
+      const sizeBytes = stats.size;
+
+      if (typeof expectedSizeBytes === 'number' && sizeBytes !== expectedSizeBytes) {
+        await fsPromises.rm(resolved.resolved, { force: true });
+        return res.status(400).json({
+          error: `Uploaded size mismatch: expected ${expectedSizeBytes} bytes but wrote ${sizeBytes} bytes`,
+        });
+      }
+
+      return res.json({ success: true, path: resolved.resolved, sizeBytes });
+    } catch (error) {
+      if (tempFilePath) {
+        await fsPromises.rm(tempFilePath, { force: true }).catch(() => undefined);
+      }
+
+      const err = error;
+      if (err && typeof err === 'object' && err.code === 'EACCES') {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+      if (err && typeof err === 'object' && err.code === 'ENOENT') {
+        return res.status(404).json({ error: 'Upload target path not found' });
+      }
+      if (err && typeof err === 'object' && (err.code === 'ERR_STREAM_PREMATURE_CLOSE' || err.code === 'ECONNRESET')) {
+        return res.status(400).json({ error: 'Upload interrupted before completion' });
+      }
+
+      console.error('Failed to upload file:', error);
+      return res.status(500).json({ error: (error && error.message) || 'Failed to upload file' });
+    }
+  });
+
   // Write file contents
   app.post('/api/fs/write', async (req, res) => {
-    const { path: filePath, content, encoding } = req.body || {};
+    const { path: filePath, content, encoding, expectedSizeBytes } = req.body || {};
     if (!filePath || typeof filePath !== 'string') {
       return res.status(400).json({ error: 'Path is required' });
     }
     if (typeof content !== 'string') {
       return res.status(400).json({ error: 'Content is required' });
+    }
+
+    const normalizedExpectedSize = Number.isFinite(expectedSizeBytes)
+      ? Math.max(0, Math.trunc(Number(expectedSizeBytes)))
+      : undefined;
+
+    if (expectedSizeBytes !== undefined && normalizedExpectedSize === undefined) {
+      return res.status(400).json({ error: 'expectedSizeBytes must be a non-negative number' });
     }
 
     try {
@@ -12135,46 +12244,66 @@ async function main(options = {}) {
         return res.status(400).json({ error: resolved.error });
       }
 
-      // Ensure parent directory exists
       await fsPromises.mkdir(path.dirname(resolved.resolved), { recursive: true });
 
-      // Check for explicit encoding parameter or data URL prefix
       let actualContent = content;
       let isBase64 = encoding === 'base64';
 
       if (!isBase64 && /^data:[^;]*;base64,/.test(content)) {
-        // Strip data URL prefix and treat as base64
         const commaIndex = content.indexOf(',');
         actualContent = content.substring(commaIndex + 1);
         isBase64 = true;
       }
 
-      // Fallback heuristic with validation only when no explicit indicator
       if (!isBase64 && encoding === undefined) {
         if (/^[A-Za-z0-9+/]+=*$/.test(actualContent)) {
           try {
-            // Validate base64 by round-trip: decode then re-encode and compare
             const decoded = Buffer.from(actualContent, 'base64');
             const reencoded = decoded.toString('base64');
             if (reencoded === actualContent) {
               isBase64 = true;
             }
           } catch {
-            // Not valid base64, treat as text
+            // Not valid base64, treat as text.
           }
         }
       }
 
+      let bytesWritten = 0;
       if (isBase64) {
-        // Decode and write as binary
         const buffer = Buffer.from(actualContent, 'base64');
+        bytesWritten = buffer.byteLength;
+
+        if (typeof normalizedExpectedSize === 'number' && bytesWritten !== normalizedExpectedSize) {
+          return res.status(400).json({
+            error: `Uploaded size mismatch: expected ${normalizedExpectedSize} bytes but received ${bytesWritten} bytes`,
+          });
+        }
+
         await fsPromises.writeFile(resolved.resolved, buffer);
       } else {
-        // Write as UTF-8 text
-        await fsPromises.writeFile(resolved.resolved, content, 'utf8');
+        const buffer = Buffer.from(content, 'utf8');
+        bytesWritten = buffer.byteLength;
+
+        if (typeof normalizedExpectedSize === 'number' && bytesWritten !== normalizedExpectedSize) {
+          return res.status(400).json({
+            error: `Uploaded size mismatch: expected ${normalizedExpectedSize} bytes but received ${bytesWritten} bytes`,
+          });
+        }
+
+        await fsPromises.writeFile(resolved.resolved, buffer);
       }
 
-      res.json({ success: true, path: resolved.resolved });
+      const stats = await fsPromises.stat(resolved.resolved);
+      const sizeBytes = stats.size;
+
+      if (typeof normalizedExpectedSize === 'number' && sizeBytes !== normalizedExpectedSize) {
+        return res.status(400).json({
+          error: `Uploaded size mismatch: expected ${normalizedExpectedSize} bytes but wrote ${sizeBytes} bytes`,
+        });
+      }
+
+      res.json({ success: true, path: resolved.resolved, sizeBytes });
     } catch (error) {
       const err = error;
       if (err && typeof err === 'object' && err.code === 'EACCES') {
@@ -12696,7 +12825,7 @@ async function main(options = {}) {
             size,
             modifiedTime,
           };
-        })
+        }
       );
 
       res.json({

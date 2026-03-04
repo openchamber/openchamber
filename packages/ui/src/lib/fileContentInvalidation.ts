@@ -2,6 +2,7 @@ const FILE_CONTENT_INVALIDATED_EVENT = 'openchamber:files:content-invalidated';
 
 type FileContentInvalidatedDetail = {
   paths: string[];
+  prefixes: string[];
 };
 
 const sanitizePaths = (paths: string[]): string[] => {
@@ -14,23 +15,34 @@ const sanitizePaths = (paths: string[]): string[] => {
   );
 };
 
-export const notifyFileContentInvalidated = (paths: string[]): void => {
+type InvalidationPayload = {
+  paths?: string[];
+  prefixes?: string[];
+};
+
+export const notifyFileContentInvalidated = (payload: string[] | InvalidationPayload): void => {
   if (typeof window === 'undefined') {
     return;
   }
 
-  const sanitizedPaths = sanitizePaths(paths);
-  if (sanitizedPaths.length === 0) {
+  const normalizedPayload: InvalidationPayload = Array.isArray(payload) ? { paths: payload } : payload;
+  const sanitizedPaths = sanitizePaths(Array.isArray(normalizedPayload.paths) ? normalizedPayload.paths : []);
+  const sanitizedPrefixes = sanitizePaths(Array.isArray(normalizedPayload.prefixes) ? normalizedPayload.prefixes : []);
+
+  if (sanitizedPaths.length === 0 && sanitizedPrefixes.length === 0) {
     return;
   }
 
   window.dispatchEvent(new CustomEvent<FileContentInvalidatedDetail>(FILE_CONTENT_INVALIDATED_EVENT, {
-    detail: { paths: sanitizedPaths },
+    detail: {
+      paths: sanitizedPaths,
+      prefixes: sanitizedPrefixes,
+    },
   }));
 };
 
 export const subscribeToFileContentInvalidated = (
-  listener: (paths: string[]) => void
+  listener: (payload: { paths: string[]; prefixes: string[] }) => void
 ): (() => void) => {
   if (typeof window === 'undefined') {
     return () => undefined;
@@ -39,10 +51,11 @@ export const subscribeToFileContentInvalidated = (
   const handler = (event: Event) => {
     const customEvent = event as CustomEvent<FileContentInvalidatedDetail>;
     const nextPaths = sanitizePaths(Array.isArray(customEvent.detail?.paths) ? customEvent.detail.paths : []);
-    if (nextPaths.length === 0) {
+    const nextPrefixes = sanitizePaths(Array.isArray(customEvent.detail?.prefixes) ? customEvent.detail.prefixes : []);
+    if (nextPaths.length === 0 && nextPrefixes.length === 0) {
       return;
     }
-    listener(nextPaths);
+    listener({ paths: nextPaths, prefixes: nextPrefixes });
   };
 
   window.addEventListener(FILE_CONTENT_INVALIDATED_EVENT, handler as EventListener);

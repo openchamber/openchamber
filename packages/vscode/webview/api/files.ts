@@ -5,6 +5,8 @@ import type {
   FileSearchQuery,
   FileSearchResult,
   FilesAPI,
+  WriteFileOptions,
+  WriteFileResult,
 } from '@openchamber/ui/lib/api/types';
 
 import { sendBridgeMessage, sendBridgeMessageWithOptions } from './bridge';
@@ -122,12 +124,18 @@ export const createVSCodeFilesAPI = (): FilesAPI => ({
     };
   },
 
-  async writeFile(path: string, content: string): Promise<{ success: boolean; path: string }> {
+  async writeFile(path: string, content: string, options?: WriteFileOptions): Promise<WriteFileResult> {
     const target = normalizePath(path);
-    const data = await sendBridgeMessage<{ success: boolean; path: string }>('api:fs:write', { path: target, content });
+    const data = await sendBridgeMessage<{ success: boolean; path: string; sizeBytes?: number }>('api:fs:write', {
+      path: target,
+      content,
+      encoding: options?.encoding,
+      expectedSizeBytes: options?.expectedSizeBytes,
+    });
     return {
       success: Boolean(data?.success),
       path: typeof data?.path === 'string' ? normalizePath(data.path) : target,
+      sizeBytes: typeof data?.sizeBytes === 'number' ? data.sizeBytes : undefined,
     };
   },
 

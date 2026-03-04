@@ -68,7 +68,8 @@ import { cn } from '@/lib/utils';
 import { opencodeClient } from '@/lib/opencode/client';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { getContextFileOpenFailureMessage, validateContextFileOpen } from '@/lib/contextFileOpenGuard';
-import { getFileCategory } from '@/lib/fileHelpers';
+import { getFileCategory, isBinaryFile } from '@/lib/fileHelpers';
+import { getFriendlyUploadErrorMessage, getUploadPreflightError } from '@/lib/fileUploadGuards';
 
 type FileNode = {
   name: string;
@@ -89,6 +90,10 @@ type UploadPlaceholder = {
   status: UploadPlaceholderStatus;
   progress: number;
 };
+
+type UploadAttemptResult =
+  | { success: true; sizeBytes?: number }
+  | { success: false; error: string };
 
 const sortNodes = (items: FileNode[]) =>
   items.slice().sort((a, b) => {
@@ -549,6 +554,7 @@ export const SidebarFilesTree: React.FC = () => {
   const canRename = Boolean(files.rename);
   const canDelete = Boolean(files.delete);
   const canReveal = runtime.isDesktop && Boolean(files.revealPath);
+  const canUploadFiles = Boolean(files.uploadFile || files.writeFile);
 
   const pointerSensor = useSensor(PointerSensor, {
     activationConstraint: { distance: 8 },
@@ -853,14 +859,57 @@ export const SidebarFilesTree: React.FC = () => {
     file: File,
     targetDir: string,
     onProgress?: (update: { phase: 'reading' | 'writing'; progress: number }) => void
-  ): Promise<boolean> => {
-    if (!files.writeFile) {
-      return false;
+  ): Promise<UploadAttemptResult> => {
+    if (!files.uploadFile && !files.writeFile) {
+      return { success: false, error: 'File upload not supported' };
     }
 
     const filePath = normalizePath(`${targetDir}/${file.name}`);
+    const isBinaryUpload = isBinaryFile(file.name);
+    const preflightError = getUploadPreflightError({
+      fileName: file.name,
+      sizeBytes: file.size,
+      isBinary: isBinaryUpload,
+      supportsStreamingUpload: Boolean(files.uploadFile),
+    });
+
+    if (preflightError) {
+      return { success: false, error: preflightError };
+    }
 
     try {
+      if (files.uploadFile) {
+        const uploadResult = await files.uploadFile(filePath, file, {
+          expectedSizeBytes: file.size,
+          onProgress: ({ loadedBytes, totalBytes }) => {
+            const denominator = totalBytes > 0 ? totalBytes : file.size;
+            const progress = denominator > 0
+              ? Math.max(0, Math.min(100, Math.round((loadedBytes / denominator) * 100)))
+              : 0;
+            onProgress?.({ phase: progress >= 100 ? 'writing' : 'reading', progress });
+          },
+        });
+
+        onProgress?.({ phase: 'writing', progress: 100 });
+
+        if (!uploadResult.success) {
+          return { success: false, error: 'Upload failed' };
+        }
+
+        if (typeof uploadResult.sizeBytes === 'number' && uploadResult.sizeBytes !== file.size) {
+          return {
+            success: false,
+            error: `Uploaded size mismatch: expected ${file.size} bytes but wrote ${uploadResult.sizeBytes} bytes`,
+          };
+        }
+
+        return { success: true, sizeBytes: uploadResult.sizeBytes };
+      }
+
+      if (!files.writeFile) {
+        return { success: false, error: 'File upload not supported' };
+      }
+
       const category = getFileCategory(file.name);
       const isTextFile = category === 'text';
 
@@ -886,21 +935,41 @@ export const SidebarFilesTree: React.FC = () => {
           return;
         }
 
-        // For binary files, read as data URL (includes base64 prefix)
-        // Server will detect and strip the data:*;base64, prefix
+        // Fallback path for runtimes without streaming upload.
+        // Read as data URL then pass only raw base64 payload.
+        reader.onload = () => {
+          onProgress?.({ phase: 'reading', progress: 100 });
+          const dataUrl = reader.result as string;
+          const commaIndex = dataUrl.indexOf(',');
+          resolve(commaIndex >= 0 ? dataUrl.slice(commaIndex + 1) : dataUrl);
+        };
         reader.readAsDataURL(file);
       });
 
       onProgress?.({ phase: 'writing', progress: 100 });
-      const result = await files.writeFile(filePath, content);
-      return result.success;
-    } catch {
-      return false;
+      const result = await files.writeFile(filePath, content, {
+        encoding: isTextFile ? 'utf8' : 'base64',
+        expectedSizeBytes: file.size,
+      });
+      if (!result.success) {
+        return { success: false, error: 'Upload failed' };
+      }
+
+      if (typeof result.sizeBytes === 'number' && result.sizeBytes !== file.size) {
+        return {
+          success: false,
+          error: `Uploaded size mismatch: expected ${file.size} bytes but wrote ${result.sizeBytes} bytes`,
+        };
+      }
+
+      return { success: true, sizeBytes: result.sizeBytes };
+    } catch (error) {
+      return { success: false, error: getFriendlyUploadErrorMessage(error) };
     }
   }, [files]);
 
   const handleFileDrop = React.useCallback(async (droppedFiles: File[], targetDir: string) => {
-    if (droppedFiles.length === 0 || !files.writeFile) {
+    if (droppedFiles.length === 0 || (!files.uploadFile && !files.writeFile)) {
       return;
     }
 
@@ -933,6 +1002,7 @@ export const SidebarFilesTree: React.FC = () => {
     const uploadedPaths: string[] = [];
     const successfulPlaceholderIds: string[] = [];
     const failedPlaceholderIds: string[] = [];
+    let firstFailureMessage: string | null = null;
 
     for (const [index, file] of droppedFiles.entries()) {
       const placeholder = placeholders[index];
@@ -941,19 +1011,22 @@ export const SidebarFilesTree: React.FC = () => {
       }
 
       updateUploadPlaceholder(placeholder.id, { status: 'reading', progress: 0 });
-      const success = await uploadFile(file, normalizedTargetDir, ({ phase, progress }) => {
+      const result = await uploadFile(file, normalizedTargetDir, ({ phase, progress }) => {
         updateUploadPlaceholder(placeholder.id, {
           status: phase === 'reading' ? 'reading' : 'writing',
           progress,
         });
       });
 
-      if (success) {
+      if (result.success) {
         successCount += 1;
         uploadedPaths.push(placeholder.path);
         successfulPlaceholderIds.push(placeholder.id);
       } else {
         failCount += 1;
+        if (!firstFailureMessage) {
+          firstFailureMessage = result.error;
+        }
         failedPlaceholderIds.push(placeholder.id);
         updateUploadPlaceholder(placeholder.id, { status: 'error' });
       }
@@ -969,10 +1042,10 @@ export const SidebarFilesTree: React.FC = () => {
       } else if (failCount === 0) {
         toast.success(`${successCount} files uploaded successfully`);
       } else {
-        toast.warning(`${successCount} uploaded, ${failCount} failed`);
+        toast.warning(firstFailureMessage ?? `${successCount} uploaded, ${failCount} failed`);
       }
     } else if (failCount > 0) {
-      toast.error(`Failed to upload ${failCount} file${failCount === 1 ? '' : 's'}`);
+      toast.error(firstFailureMessage ?? `Failed to upload ${failCount} file${failCount === 1 ? '' : 's'}`);
     }
 
     removeUploadPlaceholders(successfulPlaceholderIds);
@@ -981,11 +1054,11 @@ export const SidebarFilesTree: React.FC = () => {
         removeUploadPlaceholders(failedPlaceholderIds);
       }, 2500);
     }
-  }, [ensurePathVisible, files.writeFile, refreshRoot, removeUploadPlaceholders, updateUploadPlaceholder, uploadFile]);
+  }, [ensurePathVisible, files.uploadFile, files.writeFile, refreshRoot, removeUploadPlaceholders, updateUploadPlaceholder, uploadFile]);
 
   const handleFileUploadFromDialog = React.useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFiles = event.target.files;
-    if (!selectedFiles || selectedFiles.length === 0 || !dialogData || !files.writeFile) {
+    if (!selectedFiles || selectedFiles.length === 0 || !dialogData || !canUploadFiles) {
       return;
     }
 
@@ -998,10 +1071,10 @@ export const SidebarFilesTree: React.FC = () => {
     if (fileUploadInputRef.current) {
       fileUploadInputRef.current.value = '';
     }
-  }, [dialogData, files.writeFile, handleFileDrop]);
+  }, [canUploadFiles, dialogData, handleFileDrop]);
 
   const handleUploadToFolder = React.useCallback((targetPath: string) => {
-    if (!files.writeFile) {
+    if (!canUploadFiles) {
       toast.error('File upload not supported');
       return;
     }
@@ -1017,13 +1090,13 @@ export const SidebarFilesTree: React.FC = () => {
 
     uploadInput.value = '';
     uploadInput.click();
-  }, [files.writeFile]);
+  }, [canUploadFiles]);
 
   const handleContextUploadInputChange = React.useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFiles = event.target.files;
     const targetDir = contextUploadTargetPath;
 
-    if (!selectedFiles || selectedFiles.length === 0 || !targetDir || !files.writeFile) {
+    if (!selectedFiles || selectedFiles.length === 0 || !targetDir || !canUploadFiles) {
       event.target.value = '';
       setContextUploadTargetPath(null);
       return;
@@ -1033,7 +1106,7 @@ export const SidebarFilesTree: React.FC = () => {
 
     event.target.value = '';
     setContextUploadTargetPath(null);
-  }, [contextUploadTargetPath, files.writeFile, handleFileDrop]);
+  }, [canUploadFiles, contextUploadTargetPath, handleFileDrop]);
 
   const hasDraggedFiles = React.useCallback((dataTransfer: DataTransfer | null | undefined): boolean => {
     if (!dataTransfer) {
@@ -1065,29 +1138,36 @@ export const SidebarFilesTree: React.FC = () => {
   }, []);
 
   const handleTreeDragEnter = React.useCallback((event: React.DragEvent) => {
-    if (!hasDraggedFiles(event.dataTransfer) || !files.writeFile) {
+    if (!hasDraggedFiles(event.dataTransfer) || !canUploadFiles) {
       return;
     }
 
     event.preventDefault();
     event.stopPropagation();
+
+    const currentTarget = event.currentTarget as unknown as Node | null;
+    const previousTarget = event.relatedTarget as Node | null;
+    if (currentTarget && previousTarget && currentTarget.contains(previousTarget)) {
+      return;
+    }
+
     dragCounterRef.current += 1;
 
     if (!isDraggingFiles) {
       setIsDraggingFiles(true);
       setDropTargetPath(normalizedCurrentDirectory);
     }
-  }, [files.writeFile, hasDraggedFiles, isDraggingFiles, normalizedCurrentDirectory]);
+  }, [canUploadFiles, hasDraggedFiles, isDraggingFiles, normalizedCurrentDirectory]);
 
   const handleTreeDragOver = React.useCallback((event: React.DragEvent) => {
-    if (!hasDraggedFiles(event.dataTransfer) || !files.writeFile) {
+    if (!hasDraggedFiles(event.dataTransfer) || !canUploadFiles) {
       return;
     }
 
     event.preventDefault();
     event.stopPropagation();
     event.dataTransfer.dropEffect = 'copy';
-  }, [files.writeFile, hasDraggedFiles]);
+  }, [canUploadFiles, hasDraggedFiles]);
 
   const handleTreeDragLeave = React.useCallback((event: React.DragEvent) => {
     event.preventDefault();
@@ -1116,23 +1196,23 @@ export const SidebarFilesTree: React.FC = () => {
     const targetDir = dropTargetPath || normalizedCurrentDirectory;
     setDropTargetPath(null);
 
-    if (!hasDraggedFiles(event.dataTransfer) || !files.writeFile || !targetDir) {
+    if (!hasDraggedFiles(event.dataTransfer) || !canUploadFiles || !targetDir) {
       return;
     }
 
     const droppedFiles = collectDroppedFiles(event.dataTransfer);
     await handleFileDrop(droppedFiles, targetDir);
-  }, [collectDroppedFiles, dropTargetPath, files.writeFile, handleFileDrop, hasDraggedFiles, normalizedCurrentDirectory]);
+  }, [canUploadFiles, collectDroppedFiles, dropTargetPath, handleFileDrop, hasDraggedFiles, normalizedCurrentDirectory]);
 
   const handleDirectoryDragEnter = React.useCallback((event: React.DragEvent, dirPath: string) => {
-    if (!hasDraggedFiles(event.dataTransfer) || !files.writeFile) {
+    if (!hasDraggedFiles(event.dataTransfer) || !canUploadFiles) {
       return;
     }
 
     event.preventDefault();
     event.stopPropagation();
     setDropTargetPath(dirPath);
-  }, [files.writeFile, hasDraggedFiles]);
+  }, [canUploadFiles, hasDraggedFiles]);
 
   const handleDirectoryDragLeave = React.useCallback((event: React.DragEvent) => {
     event.preventDefault();
@@ -1223,6 +1303,11 @@ export const SidebarFilesTree: React.FC = () => {
         toast.error('Move failed');
         return;
       }
+
+      notifyFileContentInvalidated({
+        paths: [source.path, newPath],
+        prefixes: source.type === 'directory' ? [source.path, newPath] : [],
+      });
 
       toast.success(`Moved ${source.name} to ${targetDir.split('/').pop() || 'target folder'}`);
       await refreshRoot();
@@ -1441,7 +1526,7 @@ export const SidebarFilesTree: React.FC = () => {
           canCreateFolder,
           canDelete,
           canReveal,
-          canUpload: Boolean(files.writeFile),
+          canUpload: canUploadFiles,
           canDownload: true,
         },
         contextMenuPath,
