@@ -78,6 +78,18 @@ type FileNode = {
   relativePath?: string;
 };
 
+type UploadPlaceholderStatus = 'queued' | 'reading' | 'writing' | 'error';
+
+type UploadPlaceholder = {
+  id: string;
+  targetDir: string;
+  path: string;
+  name: string;
+  extension?: string;
+  status: UploadPlaceholderStatus;
+  progress: number;
+};
+
 const sortNodes = (items: FileNode[]) =>
   items.slice().sort((a, b) => {
     if (a.type !== b.type) {
@@ -411,6 +423,41 @@ const FileRow: React.FC<FileRowProps> = ({
   );
 };
 
+const UploadPlaceholderRow: React.FC<{ item: UploadPlaceholder }> = ({ item }) => {
+  const statusLabel = item.status === 'queued'
+    ? 'Queued...'
+    : item.status === 'reading'
+      ? `${Math.max(0, Math.min(100, item.progress))}%`
+      : item.status === 'writing'
+        ? 'Writing...'
+        : 'Failed';
+
+  return (
+    <div className="group relative flex items-center">
+      <div
+        className={cn(
+          'flex w-full items-center gap-1.5 rounded-md px-2 py-1 pr-2 text-left',
+          item.status === 'error'
+            ? 'bg-destructive/10'
+            : 'bg-interactive-hover/20'
+        )}
+      >
+        {getFileIcon(item.path, item.extension)}
+        <span className="min-w-0 flex-1 truncate typography-meta" title={item.path}>
+          {item.name}
+        </span>
+        <span className={cn(
+          'typography-meta',
+          item.status === 'error' ? 'text-destructive' : 'text-muted-foreground'
+        )}>
+          {statusLabel}
+        </span>
+        {item.status !== 'error' ? <RiLoader4Line className="h-3.5 w-3.5 animate-spin text-primary/80" /> : null}
+      </div>
+    </div>
+  );
+};
+
 // --- Main component ---
 
 export const SidebarFilesTree: React.FC = () => {
@@ -445,6 +492,7 @@ export const SidebarFilesTree: React.FC = () => {
   const addOpenPath = useFilesViewTabsStore((state) => state.addOpenPath);
   const removeOpenPathsByPrefix = useFilesViewTabsStore((state) => state.removeOpenPathsByPrefix);
   const toggleExpandedPath = useFilesViewTabsStore((state) => state.toggleExpandedPath);
+  const expandPaths = useFilesViewTabsStore((state) => state.expandPaths);
   const contextTabs = useUIStore((state) => (root ? (state.contextPanelByDirectory[root]?.tabs ?? EMPTY_CONTEXT_TABS) : EMPTY_CONTEXT_TABS));
   const openContextFilePaths = React.useMemo(() => new Set(
     contextTabs
@@ -460,6 +508,7 @@ export const SidebarFilesTree: React.FC = () => {
   const [isDraggingFiles, setIsDraggingFiles] = React.useState(false);
   const [dropTargetPath, setDropTargetPath] = React.useState<string | null>(null);
   const [isUploading, setIsUploading] = React.useState(false);
+  const [uploadPlaceholders, setUploadPlaceholders] = React.useState<UploadPlaceholder[]>([]);
   const dragCounterRef = React.useRef(0);
 
   const [activeDndNode, setActiveDndNode] = React.useState<FileNode | null>(null);
@@ -475,6 +524,25 @@ export const SidebarFilesTree: React.FC = () => {
   const [dialogData, setDialogData] = React.useState<{ path: string; name?: string; type?: 'file' | 'directory' } | null>(null);
   const [dialogInputValue, setDialogInputValue] = React.useState('');
   const [isDialogSubmitting, setIsDialogSubmitting] = React.useState(false);
+
+  const uploadPlaceholdersByDir = React.useMemo(() => {
+    const byDir: Record<string, UploadPlaceholder[]> = {};
+    for (const item of uploadPlaceholders) {
+      const targetDir = normalizePath(item.targetDir);
+      if (!targetDir) {
+        continue;
+      }
+      const existing = byDir[targetDir] ?? [];
+      existing.push(item);
+      byDir[targetDir] = existing;
+    }
+
+    for (const items of Object.values(byDir)) {
+      items.sort((a, b) => a.name.localeCompare(b.name));
+    }
+
+    return byDir;
+  }, [uploadPlaceholders]);
 
   const canCreateFile = Boolean(files.writeFile);
   const canCreateFolder = Boolean(files.createDirectory);
@@ -720,7 +788,72 @@ export const SidebarFilesTree: React.FC = () => {
     }
   }, [loadDirectory, root, toggleExpandedPath]);
 
-  const uploadFile = React.useCallback(async (file: File, targetDir: string): Promise<boolean> => {
+  const getAncestorPaths = React.useCallback((targetPath: string): string[] => {
+    if (!root) {
+      return [];
+    }
+
+    const normalizedTargetPath = normalizePath(targetPath);
+    if (!normalizedTargetPath || normalizedTargetPath === root) {
+      return [];
+    }
+
+    if (!normalizedTargetPath.startsWith(`${root}/`)) {
+      return [];
+    }
+
+    const relative = normalizedTargetPath.slice(root.length + 1);
+    const segments = relative.split('/').filter(Boolean);
+    if (segments.length === 0) {
+      return [];
+    }
+
+    const ancestors: string[] = [];
+    let current = root;
+    for (const segment of segments) {
+      current = normalizePath(`${current}/${segment}`);
+      ancestors.push(current);
+    }
+
+    return ancestors;
+  }, [root]);
+
+  const ensurePathVisible = React.useCallback(async (targetPath: string) => {
+    if (!root) {
+      return;
+    }
+
+    const ancestors = getAncestorPaths(targetPath);
+    if (ancestors.length === 0) {
+      return;
+    }
+
+    expandPaths(root, ancestors);
+    for (const ancestor of ancestors) {
+      if (loadedDirsRef.current.has(ancestor) || inFlightDirsRef.current.has(ancestor)) {
+        continue;
+      }
+      await loadDirectory(ancestor);
+    }
+  }, [expandPaths, getAncestorPaths, loadDirectory, root]);
+
+  const updateUploadPlaceholder = React.useCallback((id: string, updates: Partial<UploadPlaceholder>) => {
+    setUploadPlaceholders((previous) => previous.map((item) => (item.id === id ? { ...item, ...updates } : item)));
+  }, []);
+
+  const removeUploadPlaceholders = React.useCallback((ids: string[]) => {
+    if (ids.length === 0) {
+      return;
+    }
+    const idSet = new Set(ids);
+    setUploadPlaceholders((previous) => previous.filter((item) => !idSet.has(item.id)));
+  }, []);
+
+  const uploadFile = React.useCallback(async (
+    file: File,
+    targetDir: string,
+    onProgress?: (update: { phase: 'reading' | 'writing'; progress: number }) => void
+  ): Promise<boolean> => {
     if (!files.writeFile) {
       return false;
     }
@@ -734,19 +867,31 @@ export const SidebarFilesTree: React.FC = () => {
       const content = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
         reader.onerror = () => reject(reader.error);
+        reader.onprogress = (event) => {
+          if (!event.lengthComputable || event.total <= 0) {
+            return;
+          }
+
+          const progress = Math.max(0, Math.min(100, Math.round((event.loaded / event.total) * 100)));
+          onProgress?.({ phase: 'reading', progress });
+        };
+
+        reader.onload = () => {
+          onProgress?.({ phase: 'reading', progress: 100 });
+          resolve(reader.result as string);
+        };
 
         if (isTextFile) {
-          reader.onload = () => resolve(reader.result as string);
           reader.readAsText(file);
           return;
         }
 
         // For binary files, read as data URL (includes base64 prefix)
         // Server will detect and strip the data:*;base64, prefix
-        reader.onload = () => resolve(reader.result as string);
         reader.readAsDataURL(file);
       });
 
+      onProgress?.({ phase: 'writing', progress: 100 });
       const result = await files.writeFile(filePath, content);
       return result.success;
     } catch {
@@ -759,18 +904,58 @@ export const SidebarFilesTree: React.FC = () => {
       return;
     }
 
+    const normalizedTargetDir = normalizePath(targetDir);
+    if (!normalizedTargetDir) {
+      return;
+    }
+
+    await ensurePathVisible(normalizedTargetDir);
+
+    const startedAt = Date.now();
+    const placeholders: UploadPlaceholder[] = droppedFiles.map((file, index) => {
+      const path = normalizePath(`${normalizedTargetDir}/${file.name}`);
+      const extension = file.name.includes('.') ? file.name.split('.').pop()?.toLowerCase() : undefined;
+      return {
+        id: `${path}:${startedAt}:${index}`,
+        targetDir: normalizedTargetDir,
+        path,
+        name: file.name,
+        extension,
+        status: 'queued',
+        progress: 0,
+      };
+    });
+    setUploadPlaceholders((previous) => [...previous, ...placeholders]);
+
     setIsUploading(true);
     let successCount = 0;
     let failCount = 0;
     const uploadedPaths: string[] = [];
+    const successfulPlaceholderIds: string[] = [];
+    const failedPlaceholderIds: string[] = [];
 
-    for (const file of droppedFiles) {
-      const success = await uploadFile(file, targetDir);
+    for (const [index, file] of droppedFiles.entries()) {
+      const placeholder = placeholders[index];
+      if (!placeholder) {
+        continue;
+      }
+
+      updateUploadPlaceholder(placeholder.id, { status: 'reading', progress: 0 });
+      const success = await uploadFile(file, normalizedTargetDir, ({ phase, progress }) => {
+        updateUploadPlaceholder(placeholder.id, {
+          status: phase === 'reading' ? 'reading' : 'writing',
+          progress,
+        });
+      });
+
       if (success) {
         successCount += 1;
-        uploadedPaths.push(normalizePath(`${targetDir}/${file.name}`));
+        uploadedPaths.push(placeholder.path);
+        successfulPlaceholderIds.push(placeholder.id);
       } else {
         failCount += 1;
+        failedPlaceholderIds.push(placeholder.id);
+        updateUploadPlaceholder(placeholder.id, { status: 'error' });
       }
     }
 
@@ -786,13 +971,17 @@ export const SidebarFilesTree: React.FC = () => {
       } else {
         toast.warning(`${successCount} uploaded, ${failCount} failed`);
       }
-      return;
-    }
-
-    if (failCount > 0) {
+    } else if (failCount > 0) {
       toast.error(`Failed to upload ${failCount} file${failCount === 1 ? '' : 's'}`);
     }
-  }, [files.writeFile, refreshRoot, uploadFile]);
+
+    removeUploadPlaceholders(successfulPlaceholderIds);
+    if (failedPlaceholderIds.length > 0) {
+      window.setTimeout(() => {
+        removeUploadPlaceholders(failedPlaceholderIds);
+      }, 2500);
+    }
+  }, [ensurePathVisible, files.writeFile, refreshRoot, removeUploadPlaceholders, updateUploadPlaceholder, uploadFile]);
 
   const handleFileUploadFromDialog = React.useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFiles = event.target.files;
@@ -1197,12 +1386,39 @@ export const SidebarFilesTree: React.FC = () => {
 
   function renderTree(dirPath: string, depth: number): React.ReactNode {
     const nodes = childrenByDir[dirPath] ?? [];
+    const placeholders = uploadPlaceholdersByDir[dirPath] ?? [];
 
-    return nodes.map((node, index) => {
+    const entries: Array<
+      { kind: 'node'; node: FileNode }
+      | { kind: 'upload'; upload: UploadPlaceholder }
+    > = [
+      ...nodes.map((node) => ({ kind: 'node' as const, node })),
+      ...placeholders.map((upload) => ({ kind: 'upload' as const, upload })),
+    ];
+
+    return entries.map((entry, index) => {
+      const isLast = index === entries.length - 1;
+
+      if (entry.kind === 'upload') {
+        return (
+          <li key={`upload:${entry.upload.id}`} className="relative">
+            {depth > 0 && (
+              <>
+                <span className="absolute top-3.5 left-[-12px] w-3 h-px bg-border/40" />
+                {isLast && (
+                  <span className="absolute top-3.5 bottom-0 left-[-13px] w-[2px] bg-sidebar/50" />
+                )}
+              </>
+            )}
+            <UploadPlaceholderRow item={entry.upload} />
+          </li>
+        );
+      }
+
+      const { node } = entry;
       const isDir = node.type === 'directory';
       const isExpanded = isDir && expandedPaths.includes(node.path);
       const isActive = selectedPath === node.path;
-      const isLast = index === nodes.length - 1;
 
       const nodeIsUploadDropTarget = isDir && isDraggingFiles && dropTargetPath === node.path;
       const nodeIsDndDropTarget = isDir && dndDropTargetPath === node.path;
@@ -1393,6 +1609,18 @@ export const SidebarFilesTree: React.FC = () => {
           onDragEnd={handleDndDragEnd}
         >
           <ul className="flex flex-col">
+            {searchQuery.trim().length > 0 && uploadPlaceholders.length > 0 ? (
+              <li className="px-2 py-1 mb-1 border-b border-border/40">
+                <div className="typography-meta text-muted-foreground mb-1">Uploading</div>
+                <div className="flex flex-col gap-1">
+                  {uploadPlaceholders.map((item) => (
+                    <div key={`search-upload:${item.id}`}>
+                      <UploadPlaceholderRow item={item} />
+                    </div>
+                  ))}
+                </div>
+              </li>
+            ) : null}
             {searching ? (
               <li className="flex items-center gap-1.5 px-2 py-1 typography-meta text-muted-foreground">
                 <RiLoader4Line className="h-4 w-4 animate-spin" />
