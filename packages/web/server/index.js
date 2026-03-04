@@ -784,6 +784,36 @@ const resolveZenModel = async (override) => {
   return validatedZenFallback || ZEN_DEFAULT_MODEL;
 };
 
+const validateZenModelAtStartup = async () => {
+  try {
+    const freeModels = await fetchFreeZenModels();
+    const freeModelIds = freeModels.map((m) => m.id);
+
+    if (freeModelIds.length > 0) {
+      validatedZenFallback = freeModelIds[0];
+
+      const settings = await readSettingsFromDisk();
+      const storedModel = typeof settings?.zenModel === 'string' ? settings.zenModel.trim() : '';
+
+      if (!storedModel || !freeModelIds.includes(storedModel)) {
+        const fallback = freeModelIds[0];
+        console.log(
+          storedModel
+            ? `[zen] Stored model "${storedModel}" not found in free models, falling back to "${fallback}"`
+            : `[zen] No model configured, setting default to "${fallback}"`
+        );
+        await persistSettings({ zenModel: fallback });
+      } else {
+        console.log(`[zen] Stored model "${storedModel}" verified as available`);
+      }
+    } else {
+      console.warn('[zen] No free models returned from API, skipping validation');
+    }
+  } catch (error) {
+    console.warn('[zen] Startup model validation failed (non-blocking):', error?.message || error);
+  }
+};
+
 
 const summarizeText = async (text, targetLength, zenModel) => {
   if (!text || typeof text !== 'string' || text.trim().length === 0) return text;
@@ -1148,6 +1178,11 @@ const PROJECT_ICON_EXTENSION_TO_MIME = Object.fromEntries(
 );
 const PROJECT_ICON_SUPPORTED_MIMES = new Set(Object.keys(PROJECT_ICON_MIME_TO_EXTENSION));
 const PROJECT_ICON_MAX_BYTES = 5 * 1024 * 1024;
+const PROJECT_ICON_THEME_COLORS = {
+  light: '#111111',
+  dark: '#f5f5f5',
+};
+const PROJECT_ICON_HEX_COLOR_PATTERN = /^#(?:[\da-fA-F]{3}|[\da-fA-F]{4}|[\da-fA-F]{6}|[\da-fA-F]{8})$/;
 
 const normalizeProjectIconMime = (value) => {
   if (typeof value !== 'string') {
@@ -1228,6 +1263,54 @@ const parseProjectIconDataUrl = (value) => {
   } catch {
     return { ok: false, error: 'Failed to decode icon data' };
   }
+};
+
+const normalizeProjectIconThemeVariant = (value) => {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'light' || normalized === 'dark') {
+    return normalized;
+  }
+  return null;
+};
+
+const normalizeProjectIconColor = (value) => {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const normalized = value.trim();
+  if (!PROJECT_ICON_HEX_COLOR_PATTERN.test(normalized)) {
+    return null;
+  }
+  return normalized;
+};
+
+const applyProjectIconSvgTheme = (svgMarkup, themeVariant, iconColor) => {
+  if (typeof svgMarkup !== 'string') {
+    return svgMarkup;
+  }
+
+  const color = iconColor || PROJECT_ICON_THEME_COLORS[themeVariant];
+  if (!color) {
+    return svgMarkup;
+  }
+
+  const svgTagIndex = svgMarkup.search(/<svg\b/i);
+  if (svgTagIndex === -1) {
+    return svgMarkup;
+  }
+
+  const svgOpenTagEndIndex = svgMarkup.indexOf('>', svgTagIndex);
+  if (svgOpenTagEndIndex === -1) {
+    return svgMarkup;
+  }
+
+  const overrideStyle = `<style data-openchamber-theme-icon="1">:root{color:${color}!important;}</style>`;
+  return `${svgMarkup.slice(0, svgOpenTagEndIndex + 1)}${overrideStyle}${svgMarkup.slice(svgOpenTagEndIndex + 1)}`;
 };
 
 const findProjectById = (settings, projectId) => {
@@ -1794,6 +1877,18 @@ const sanitizeSettingsUpdate = (payload) => {
   }
   if (typeof candidate.darkThemeId === 'string' && candidate.darkThemeId.length > 0) {
     result.darkThemeId = candidate.darkThemeId;
+  }
+  if (typeof candidate.splashBgLight === 'string' && candidate.splashBgLight.trim().length > 0) {
+    result.splashBgLight = candidate.splashBgLight.trim();
+  }
+  if (typeof candidate.splashFgLight === 'string' && candidate.splashFgLight.trim().length > 0) {
+    result.splashFgLight = candidate.splashFgLight.trim();
+  }
+  if (typeof candidate.splashBgDark === 'string' && candidate.splashBgDark.trim().length > 0) {
+    result.splashBgDark = candidate.splashBgDark.trim();
+  }
+  if (typeof candidate.splashFgDark === 'string' && candidate.splashFgDark.trim().length > 0) {
+    result.splashFgDark = candidate.splashFgDark.trim();
   }
   if (typeof candidate.lastDirectory === 'string' && candidate.lastDirectory.length > 0) {
     result.lastDirectory = candidate.lastDirectory;
@@ -5929,6 +6024,72 @@ async function refreshOpenCodeAfterConfigChange(reason, options = {}) {
   }
 }
 
+async function bootstrapOpenCodeAtStartup() {
+  try {
+    syncFromHmrState();
+    if (await isOpenCodeProcessHealthy()) {
+      console.log(`[HMR] Reusing existing OpenCode process on port ${openCodePort}`);
+    } else if (ENV_SKIP_OPENCODE_START && ENV_EFFECTIVE_PORT) {
+      const label = ENV_CONFIGURED_OPENCODE_HOST ? ENV_CONFIGURED_OPENCODE_HOST.origin : `http://localhost:${ENV_EFFECTIVE_PORT}`;
+      console.log(`Using external OpenCode server at ${label} (skip-start mode)`);
+      openCodeBaseUrl = ENV_CONFIGURED_OPENCODE_HOST?.origin ?? null;
+      setOpenCodePort(ENV_EFFECTIVE_PORT);
+      isOpenCodeReady = true;
+      isExternalOpenCode = true;
+      lastOpenCodeError = null;
+      openCodeNotReadySince = 0;
+      syncToHmrState();
+    } else if (ENV_EFFECTIVE_PORT && await probeExternalOpenCode(ENV_EFFECTIVE_PORT, ENV_CONFIGURED_OPENCODE_HOST?.origin)) {
+      const label = ENV_CONFIGURED_OPENCODE_HOST ? ENV_CONFIGURED_OPENCODE_HOST.origin : `http://localhost:${ENV_EFFECTIVE_PORT}`;
+      console.log(`Auto-detected existing OpenCode server at ${label}`);
+      openCodeBaseUrl = ENV_CONFIGURED_OPENCODE_HOST?.origin ?? null;
+      setOpenCodePort(ENV_EFFECTIVE_PORT);
+      isOpenCodeReady = true;
+      isExternalOpenCode = true;
+      lastOpenCodeError = null;
+      openCodeNotReadySince = 0;
+      syncToHmrState();
+    } else if (!ENV_EFFECTIVE_PORT && await probeExternalOpenCode(4096)) {
+      console.log('Auto-detected existing OpenCode server on default port 4096');
+      setOpenCodePort(4096);
+      isOpenCodeReady = true;
+      isExternalOpenCode = true;
+      lastOpenCodeError = null;
+      openCodeNotReadySince = 0;
+      syncToHmrState();
+    } else {
+      if (ENV_EFFECTIVE_PORT) {
+        console.log(`Using OpenCode port from environment: ${ENV_EFFECTIVE_PORT}`);
+        setOpenCodePort(ENV_EFFECTIVE_PORT);
+      } else {
+        openCodePort = null;
+        syncToHmrState();
+      }
+
+      lastOpenCodeError = null;
+      openCodeProcess = await startOpenCode();
+      syncToHmrState();
+    }
+    await waitForOpenCodePort();
+    try {
+      await waitForOpenCodeReady();
+    } catch (error) {
+      console.error(`OpenCode readiness check failed: ${error.message}`);
+      scheduleOpenCodeApiDetection();
+    }
+    scheduleOpenCodeApiDetection();
+    startHealthMonitoring();
+    void startGlobalEventWatcher().catch((error) => {
+      console.warn(`Global event watcher startup failed: ${error?.message || error}`);
+    });
+  } catch (error) {
+    console.error(`Failed to start OpenCode: ${error.message}`);
+    console.log('Continuing without OpenCode integration...');
+    lastOpenCodeError = error.message;
+    scheduleOpenCodeApiDetection();
+  }
+}
+
 function setupProxy(app) {
   if (app.get('opencodeProxyConfigured')) {
     return;
@@ -6564,35 +6725,8 @@ async function main(options = {}) {
     sayTTSCapability = { available: false, voices: [], reason: 'Not macOS' };
   }
 
-  // Validate stored zen model at startup – best-effort, never blocks startup
-  try {
-    const freeModels = await fetchFreeZenModels();
-    const freeModelIds = freeModels.map((m) => m.id);
-
-    if (freeModelIds.length > 0) {
-      // Set the validated fallback to the first available free model
-      validatedZenFallback = freeModelIds[0];
-
-      const settings = await readSettingsFromDisk();
-      const storedModel = typeof settings?.zenModel === 'string' ? settings.zenModel.trim() : '';
-
-      if (!storedModel || !freeModelIds.includes(storedModel)) {
-        const fallback = freeModelIds[0];
-        console.log(
-          storedModel
-            ? `[zen] Stored model "${storedModel}" not found in free models, falling back to "${fallback}"`
-            : `[zen] No model configured, setting default to "${fallback}"`
-        );
-        await persistSettings({ zenModel: fallback });
-      } else {
-        console.log(`[zen] Stored model "${storedModel}" verified as available`);
-      }
-    } else {
-      console.warn('[zen] No free models returned from API, skipping validation');
-    }
-  } catch (error) {
-    console.warn('[zen] Startup model validation failed (non-blocking):', error?.message || error);
-  }
+  // Startup model validation is best-effort and runs in background.
+  void validateZenModelAtStartup();
 
   const app = express();
   const serverStartedAt = new Date().toISOString();
@@ -8091,11 +8225,34 @@ async function main(options = {}) {
         ? [preferredPath, ...projectIconPathCandidates(projectId).filter((candidate) => candidate !== preferredPath)]
         : projectIconPathCandidates(projectId);
 
+      const themeQuery = Array.isArray(req.query?.theme) ? req.query.theme[0] : req.query?.theme;
+      const requestedThemeVariant = normalizeProjectIconThemeVariant(themeQuery);
+      const iconColorQuery = Array.isArray(req.query?.iconColor) ? req.query.iconColor[0] : req.query?.iconColor;
+      const requestedIconColor = normalizeProjectIconColor(iconColorQuery);
+
       for (const iconPath of candidates) {
         try {
           const data = await fsPromises.readFile(iconPath);
           const ext = path.extname(iconPath).slice(1).toLowerCase();
-          const contentType = metadataMime || PROJECT_ICON_EXTENSION_TO_MIME[ext] || 'application/octet-stream';
+          const resolvedMime = metadataMime || PROJECT_ICON_EXTENSION_TO_MIME[ext] || 'application/octet-stream';
+          const contentType = resolvedMime === 'image/svg+xml' ? 'image/svg+xml; charset=utf-8' : resolvedMime;
+
+          if (resolvedMime === 'image/svg+xml' && requestedThemeVariant) {
+            const svgMarkup = data.toString('utf8');
+            const themedSvgMarkup = applyProjectIconSvgTheme(svgMarkup, requestedThemeVariant, requestedIconColor);
+            res.setHeader('Content-Type', contentType);
+            res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+            return res.send(themedSvgMarkup);
+          }
+
+          if (resolvedMime === 'image/svg+xml' && requestedIconColor) {
+            const svgMarkup = data.toString('utf8');
+            const themedSvgMarkup = applyProjectIconSvgTheme(svgMarkup, requestedThemeVariant, requestedIconColor);
+            res.setHeader('Content-Type', contentType);
+            res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+            return res.send(themedSvgMarkup);
+          }
+
           res.setHeader('Content-Type', contentType);
           res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
           return res.send(data);
@@ -13006,69 +13163,9 @@ async function main(options = {}) {
     res.json({ success: true, killedCount });
   });
 
-  try {
-    syncFromHmrState();
-    if (await isOpenCodeProcessHealthy()) {
-      console.log(`[HMR] Reusing existing OpenCode process on port ${openCodePort}`);
-    } else if (ENV_SKIP_OPENCODE_START && ENV_EFFECTIVE_PORT) {
-      const label = ENV_CONFIGURED_OPENCODE_HOST ? ENV_CONFIGURED_OPENCODE_HOST.origin : `http://localhost:${ENV_EFFECTIVE_PORT}`;
-      console.log(`Using external OpenCode server at ${label} (skip-start mode)`);
-      openCodeBaseUrl = ENV_CONFIGURED_OPENCODE_HOST?.origin ?? null;
-      setOpenCodePort(ENV_EFFECTIVE_PORT);
-      isOpenCodeReady = true;
-      isExternalOpenCode = true;
-      lastOpenCodeError = null;
-      openCodeNotReadySince = 0;
-      syncToHmrState();
-    } else if (ENV_EFFECTIVE_PORT && await probeExternalOpenCode(ENV_EFFECTIVE_PORT, ENV_CONFIGURED_OPENCODE_HOST?.origin)) {
-      const label = ENV_CONFIGURED_OPENCODE_HOST ? ENV_CONFIGURED_OPENCODE_HOST.origin : `http://localhost:${ENV_EFFECTIVE_PORT}`;
-      console.log(`Auto-detected existing OpenCode server at ${label}`);
-      openCodeBaseUrl = ENV_CONFIGURED_OPENCODE_HOST?.origin ?? null;
-      setOpenCodePort(ENV_EFFECTIVE_PORT);
-      isOpenCodeReady = true;
-      isExternalOpenCode = true;
-      lastOpenCodeError = null;
-      openCodeNotReadySince = 0;
-      syncToHmrState();
-    } else if (!ENV_EFFECTIVE_PORT && await probeExternalOpenCode(4096)) {
-      console.log('Auto-detected existing OpenCode server on default port 4096');
-      setOpenCodePort(4096);
-      isOpenCodeReady = true;
-      isExternalOpenCode = true;
-      lastOpenCodeError = null;
-      openCodeNotReadySince = 0;
-      syncToHmrState();
-    } else {
-      if (ENV_EFFECTIVE_PORT) {
-        console.log(`Using OpenCode port from environment: ${ENV_EFFECTIVE_PORT}`);
-        setOpenCodePort(ENV_EFFECTIVE_PORT);
-      } else {
-        openCodePort = null;
-        syncToHmrState();
-      }
-
-      lastOpenCodeError = null;
-      openCodeProcess = await startOpenCode();
-      syncToHmrState();
-    }
-    await waitForOpenCodePort();
-    try {
-      await waitForOpenCodeReady();
-    } catch (error) {
-      console.error(`OpenCode readiness check failed: ${error.message}`);
-      scheduleOpenCodeApiDetection();
-    }
-    setupProxy(app);
-    scheduleOpenCodeApiDetection();
-    startHealthMonitoring();
-    void startGlobalEventWatcher();
-  } catch (error) {
-    console.error(`Failed to start OpenCode: ${error.message}`);
-    console.log('Continuing without OpenCode integration...');
-    lastOpenCodeError = error.message;
-    setupProxy(app);
-    scheduleOpenCodeApiDetection();
-  }
+  setupProxy(app);
+  scheduleOpenCodeApiDetection();
+  void bootstrapOpenCodeAtStartup();
 
   const distPath = (() => {
     const env = typeof process.env.OPENCHAMBER_DIST_DIR === 'string' ? process.env.OPENCHAMBER_DIST_DIR.trim() : '';
@@ -13371,12 +13468,16 @@ async function main(options = {}) {
               const bootstrapTtlMs = settings?.tunnelBootstrapTtlMs === null
                 ? null
                 : normalizeTunnelBootstrapTtlMs(settings?.tunnelBootstrapTtlMs);
-              tunnelAuthController.issueBootstrapToken({ ttlMs: bootstrapTtlMs });
-            }
-            if (onTunnelReady) {
-              if (tunnelUrl) {
-                onTunnelReady(tunnelUrl);
+              const bootstrapToken = tunnelAuthController.issueBootstrapToken({ ttlMs: bootstrapTtlMs });
+              const connectUrl = `${tunnelUrl.replace(/\/$/, '')}/connect?t=${encodeURIComponent(bootstrapToken.token)}`;
+              if (onTunnelReady) {
+                onTunnelReady(tunnelUrl, connectUrl);
+              } else {
+                console.log(`\n🌐 Tunnel URL: ${connectUrl}`);
+                console.log('🔑 One-time connect link (expires after first use)\n');
               }
+            } else if (onTunnelReady) {
+              onTunnelReady(tunnelUrl, null);
             }
           } catch (error) {
             console.error(`Failed to start Cloudflare tunnel: ${error.message}`);

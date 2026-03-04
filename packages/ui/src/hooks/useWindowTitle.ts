@@ -113,6 +113,12 @@ export const useWindowTitle = () => {
         if (cancelled) {
           return;
         }
+
+        const isMac = typeof navigator !== 'undefined' && /Macintosh|Mac OS X/.test(navigator.userAgent || '');
+        if (isMac) {
+          return;
+        }
+
         const currentWindow = getCurrentWindow();
         await currentWindow.setTitle(title);
       } catch {

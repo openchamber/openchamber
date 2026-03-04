@@ -98,6 +98,10 @@ const readEmbeddedSessionChatConfig = (): EmbeddedSessionChatConfig | null => {
 
 function App({ apis }: AppProps) {
   const { initializeApp, isInitialized, isConnected } = useConfigStore();
+  const providersCount = useConfigStore((state) => state.providers.length);
+  const agentsCount = useConfigStore((state) => state.agents.length);
+  const loadProviders = useConfigStore((state) => state.loadProviders);
+  const loadAgents = useConfigStore((state) => state.loadAgents);
   const { error, clearError, loadSessions } = useSessionStore();
   const currentSessionId = useSessionStore((state) => state.currentSessionId);
   const setCurrentSession = useSessionStore((state) => state.setCurrentSession);
@@ -196,6 +200,49 @@ function App({ apis }: AppProps) {
 
     init();
   }, [initializeApp, isVSCodeRuntime]);
+
+  const startupRecoveryInProgressRef = React.useRef(false);
+  const startupRecoveryLastAttemptRef = React.useRef(0);
+
+  React.useEffect(() => {
+    if (isVSCodeRuntime) {
+      return;
+    }
+    if (!isConnected) {
+      return;
+    }
+    if (providersCount > 0 && agentsCount > 0) {
+      return;
+    }
+    if (startupRecoveryInProgressRef.current) {
+      return;
+    }
+
+    const now = Date.now();
+    if (now - startupRecoveryLastAttemptRef.current < 750) {
+      return;
+    }
+
+    startupRecoveryLastAttemptRef.current = now;
+    startupRecoveryInProgressRef.current = true;
+
+    const repair = async () => {
+      try {
+        if (providersCount === 0) {
+          await loadProviders();
+        }
+        if (agentsCount === 0) {
+          await loadAgents();
+        }
+      } catch {
+        // Keep UI responsive; we'll retry on next cycle.
+      } finally {
+        startupRecoveryInProgressRef.current = false;
+      }
+    };
+
+    void repair();
+  }, [agentsCount, isConnected, isVSCodeRuntime, loadAgents, loadProviders, providersCount]);
 
   React.useEffect(() => {
     if (isSwitchingDirectory) {

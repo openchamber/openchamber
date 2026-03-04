@@ -1,15 +1,26 @@
 <svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <style>
+    :root {
+      color: #111111;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        color: #f5f5f5;
+      }
+    }
+  </style>
   <!-- OpenChamber logo - simplified for favicon -->
   <g transform="translate(16, 16) scale(0.48)">
     <!-- Left face - with fill -->
-    <path d="M0 0 L-26 -15 L-26 15 L0 30 Z" fill="white" fill-opacity="0.25" stroke="white" stroke-width="4" stroke-linejoin="round"/>
+    <path d="M0 0 L-26 -15 L-26 15 L0 30 Z" fill="currentColor" fill-opacity="0.25" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/>
     <!-- Right face - with fill -->
-    <path d="M0 0 L26 -15 L26 15 L0 30 Z" fill="white" fill-opacity="0.4" stroke="white" stroke-width="4" stroke-linejoin="round"/>
+    <path d="M0 0 L26 -15 L26 15 L0 30 Z" fill="currentColor" fill-opacity="0.4" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/>
     <!-- Top face - open -->
-    <path d="M0 -30 L-26 -15 L0 0 L26 -15 Z" fill="none" stroke="white" stroke-width="4" stroke-linejoin="round"/>
+    <path d="M0 -30 L-26 -15 L0 0 L26 -15 Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/>
     <!-- O logo - hollow rectangle frame on top face with gray fill inside -->
     <g transform="matrix(0.866, 0.5, -0.866, 0.5, 0, -15) scale(0.55)">
-      <rect x="-12" y="-14" width="24" height="28" fill="white" fill-opacity="0.4" stroke="white" stroke-width="8"/>
+      <rect x="-12" y="-14" width="24" height="28" fill="currentColor" fill-opacity="0.4" stroke="currentColor" stroke-width="8"/>
     </g>
   </g>
 </svg>

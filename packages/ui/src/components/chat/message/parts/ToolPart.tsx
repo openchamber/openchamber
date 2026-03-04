@@ -142,9 +142,6 @@ const LiveDuration: React.FC<{ start: number; end?: number; active: boolean }> =
     return <>{formatDuration(start, end, now)}</>;
 };
 
-// TODO: Re-enable tool header timestamp display after hover UX is redesigned.
-const ENABLE_TOOL_HEADER_TIMESTAMPS = false;
-
 const parseDiffStats = (metadata?: Record<string, unknown>): { added: number; removed: number } | null => {
     if (!metadata?.diff || typeof metadata.diff !== 'string') return null;
 
@@ -1547,6 +1544,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
 }) => {
     const state = part.state;
     const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
+    const showActivityHeaderTimestamps = useUIStore((store) => store.showActivityHeaderTimestamps);
 
     const isTaskTool = part.tool.toLowerCase() === 'task';
 
@@ -1881,7 +1879,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
                             <span
                                 className={cn(
                                     'text-muted-foreground/80 transition-opacity duration-150',
-                                    !isMobile && endedTimestampText && ENABLE_TOOL_HEADER_TIMESTAMPS && 'group-hover/tool:opacity-0'
+                                    !isMobile && endedTimestampText && showActivityHeaderTimestamps && 'group-hover/tool:opacity-0'
                                 )}
                             >
                                 <LiveDuration
@@ -1890,10 +1888,10 @@ const ToolPart: React.FC<ToolPartProps> = ({
                                     active={Boolean(isActive && typeof effectiveTimeEnd !== 'number')}
                                 />
                             </span>
-                            {!isMobile && endedTimestampText && ENABLE_TOOL_HEADER_TIMESTAMPS ? (
+                            {!isMobile && endedTimestampText && showActivityHeaderTimestamps ? (
                                 <span
                                     className={cn(
-                                        'pointer-events-none absolute right-0 top-0 whitespace-nowrap text-muted-foreground/70 transition-opacity duration-150',
+                                        'pointer-events-none absolute right-0 top-0 z-10 whitespace-nowrap rounded-sm bg-[var(--surface-background)] px-1 text-muted-foreground/70 transition-opacity duration-150',
                                         'opacity-0 group-hover/tool:opacity-100'
                                     )}
                                 >
@@ -1902,7 +1900,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
                             ) : null}
                         </span>
                     ) : null}
-                    {typeof effectiveTimeStart !== 'number' && !isMobile && endedTimestampText && ENABLE_TOOL_HEADER_TIMESTAMPS ? (
+                    {typeof effectiveTimeStart !== 'number' && !isMobile && endedTimestampText && showActivityHeaderTimestamps ? (
                         <span className="ml-auto text-muted-foreground/70 flex-shrink-0 tabular-nums">
                             {endedTimestampText}
                         </span>

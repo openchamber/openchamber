@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.8.5] - 2026-03-04
+
+- Desktop: startup now opens the app shell much earlier while background services continue loading, so the app feels ready faster after launch.
+- Desktop/macOS: fixed early title updates that could shift traffic-light window controls on startup, keeping native controls stable in their expected position.
+- VSCode: edit-style tool results now open directly in a focused diff view, so you can review generated changes at the first modified line with less manual navigation.
+- VSCode: cleaned up extension settings by removing duplicate display controls and hiding sections that do not apply in the editor environment.
+- Chat: fixed focus-mode composer layout so the footer action row stays pinned and accessible while writing longer prompts.
+- UI/Theming: unified loading logos and startup screens across runtimes, with visuals that better match your active theme.
+- Projects/UI: project icons now follow active theme foreground colors more consistently, improving readability and visual consistency in project lists.
+- Reliability: improved early startup recovery so models and agents are less likely to appear missing right after launch.
+- Tunnel/CLI: fixed one-time Cloudflare tunnel connect links in CLI output for `--try-cf-tunnel`, so remote collaborators can use the printed URL/QR flow successfully (thanks to @plfavreau).
+- Mobile/PWA: respected OS rotation lock by removing forced orientation behavior in the web app shell (thanks to @theluckystrike).
+
+
 ## [1.8.4] - 2026-03-04
 
 - Chat: added clickable file-path links in assistant messages (including line targeting), so you can jump from answer text straight to the exact file location (thanks to @yulia-ivashko).

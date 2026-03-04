@@ -13,6 +13,7 @@ import { toast } from '@/components/ui';
 import { cn } from '@/lib/utils';
 import { PROJECT_ICONS, PROJECT_COLORS, PROJECT_COLOR_MAP, getProjectIconImageUrl } from '@/lib/projectMeta';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useThemeSystem } from '@/contexts/useThemeSystem';
 
 interface ProjectEditDialogProps {
   open: boolean;
@@ -55,6 +56,7 @@ export const ProjectEditDialog: React.FC<ProjectEditDialogProps> = ({
   const removeProjectIcon = useProjectsStore((state) => state.removeProjectIcon);
   const discoverProjectIcon = useProjectsStore((state) => state.discoverProjectIcon);
   const currentIconImage = useProjectsStore((state) => state.projects.find((project) => project.id === projectId)?.iconImage ?? null);
+  const { currentTheme } = useThemeSystem();
   const [name, setName] = React.useState(projectName);
   const [icon, setIcon] = React.useState<string | null>(initialIcon);
   const [color, setColor] = React.useState<string | null>(initialColor);
@@ -147,7 +149,13 @@ export const ProjectEditDialog: React.FC<ProjectEditDialogProps> = ({
     ? (hasPendingUploadImageIcon
       ? pendingUploadIconPreviewUrl
       : (hasStoredImageIcon && !pendingRemoveImageIcon
-        ? getProjectIconImageUrl({ id: projectId, iconImage: currentIconImage ?? null })
+        ? getProjectIconImageUrl(
+          { id: projectId, iconImage: currentIconImage ?? null },
+          {
+            themeVariant: currentTheme.metadata.variant,
+            iconColor: currentTheme.colors.surface.foreground,
+          },
+        )
         : null))
     : null;
 

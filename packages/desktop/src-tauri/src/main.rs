@@ -28,12 +28,18 @@ use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 /// Global counter for generating unique window labels.
 static WINDOW_COUNTER: AtomicU64 = AtomicU64::new(1);
 
-fn next_window_label() -> String {
-    let n = WINDOW_COUNTER.fetch_add(1, Ordering::Relaxed);
-    if n == 1 {
-        "main".to_string()
-    } else {
-        format!("main-{n}")
+fn next_window_label<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> String {
+    loop {
+        let n = WINDOW_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let candidate = if n == 1 {
+            "main".to_string()
+        } else {
+            format!("main-{n}")
+        };
+
+        if !app.webview_windows().contains_key(&candidate) {
+            return candidate;
+        }
     }
 }
 
@@ -1166,6 +1172,10 @@ const SIDECAR_NAME: &str = "openchamber-server";
 const SIDECAR_NOTIFY_PREFIX: &str = "[OpenChamberDesktopNotify] ";
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(20);
 const HEALTH_POLL_INTERVAL: Duration = Duration::from_millis(250);
+const LOCAL_SIDECAR_HEALTH_TIMEOUT: Duration = Duration::from_secs(8);
+const LOCAL_SIDECAR_HEALTH_POLL_INTERVAL: Duration = Duration::from_millis(100);
+const STARTUP_REMOTE_PROBE_SOFT_TIMEOUT: Duration = Duration::from_secs(2);
+const STARTUP_REMOTE_PROBE_HARD_TIMEOUT: Duration = Duration::from_secs(10);
 
 const DEFAULT_DESKTOP_PORT: u16 = 57123;
 const WINDOW_STATE_DEBOUNCE_MS: u64 = 300;
@@ -1511,12 +1521,11 @@ struct HostProbeResult {
     latency_ms: u64,
 }
 
-#[tauri::command]
-async fn desktop_host_probe(url: String) -> Result<HostProbeResult, String> {
-    let health = build_health_url(&url).ok_or_else(|| "Invalid URL".to_string())?;
+async fn probe_host_with_timeout(url: &str, timeout: Duration) -> Result<HostProbeResult, String> {
+    let health = build_health_url(url).ok_or_else(|| "Invalid URL".to_string())?;
     let client = reqwest::Client::builder()
         .no_proxy()
-        .timeout(Duration::from_secs(2))
+        .timeout(timeout)
         .build()
         .map_err(|err| err.to_string())?;
     let started = std::time::Instant::now();
@@ -1547,6 +1556,11 @@ async fn desktop_host_probe(url: String) -> Result<HostProbeResult, String> {
             latency_ms: started.elapsed().as_millis() as u64,
         }),
     }
+}
+
+#[tauri::command]
+async fn desktop_host_probe(url: String) -> Result<HostProbeResult, String> {
+    probe_host_with_timeout(&url, STARTUP_REMOTE_PROBE_SOFT_TIMEOUT).await
 }
 
 #[derive(Clone, Serialize)]
@@ -1724,13 +1738,13 @@ fn maybe_show_sidecar_notification(app: &tauri::AppHandle, payload: SidecarNotif
     let _ = builder.show();
 }
 
-async fn wait_for_health(url: &str) -> bool {
+async fn wait_for_health_with(url: &str, timeout: Duration, poll_interval: Duration) -> bool {
     let client = match reqwest::Client::builder().no_proxy().build() {
         Ok(c) => c,
         Err(_) => return false,
     };
 
-    let deadline = std::time::Instant::now() + HEALTH_TIMEOUT;
+    let deadline = std::time::Instant::now() + timeout;
     let health_url = format!("{}/health", url.trim_end_matches('/'));
 
     while std::time::Instant::now() < deadline {
@@ -1739,10 +1753,14 @@ async fn wait_for_health(url: &str) -> bool {
                 return true;
             }
         }
-        tokio::time::sleep(HEALTH_POLL_INTERVAL).await;
+        tokio::time::sleep(poll_interval).await;
     }
 
     false
+}
+
+async fn wait_for_health(url: &str) -> bool {
+    wait_for_health_with(url, HEALTH_TIMEOUT, HEALTH_POLL_INTERVAL).await
 }
 
 fn kill_sidecar(app: tauri::AppHandle) {
@@ -1993,7 +2011,13 @@ async fn spawn_local_server(app: &tauri::AppHandle) -> Result<String> {
             *state.url.lock().expect("sidecar url mutex") = Some(url.clone());
         }
 
-        if !wait_for_health(&url).await {
+        if !wait_for_health_with(
+            &url,
+            LOCAL_SIDECAR_HEALTH_TIMEOUT,
+            LOCAL_SIDECAR_HEALTH_POLL_INTERVAL,
+        )
+        .await
+        {
             kill_sidecar(app.clone());
             continue;
         }
@@ -2455,7 +2479,7 @@ fn create_window(
     restore_geometry: bool,
 ) -> Result<()> {
     let parsed = url::Url::parse(url).map_err(|err| anyhow!("Invalid URL: {err}"))?;
-    let label = next_window_label();
+    let label = next_window_label(app);
 
     let init_script = build_init_script(local_origin);
 
@@ -2519,6 +2543,170 @@ fn create_window(
     let _ = window.set_focus();
 
     Ok(())
+}
+
+fn create_startup_window(app: &tauri::AppHandle, restore_geometry: bool) -> Result<()> {
+    if app.get_webview_window("main").is_some() {
+        return Ok(());
+    }
+
+    let restored_state = if restore_geometry {
+        read_desktop_window_state_from_disk()
+    } else {
+        None
+    };
+
+    let splash_script = build_startup_splash_script();
+
+    let mut builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+        .title("OpenChamber")
+        .inner_size(1280.0, 800.0)
+        .min_inner_size(MIN_WINDOW_WIDTH as f64, MIN_WINDOW_HEIGHT as f64)
+        .decorations(true)
+        .visible(true)
+        .initialization_script(&splash_script)
+        .background_throttling(BackgroundThrottlingPolicy::Disabled);
+
+    let apply_restored_state = restored_state
+        .as_ref()
+        .map(|state| is_window_state_visible(app, state))
+        .unwrap_or(false);
+
+    if let Some(state) = restored_state.as_ref().filter(|_| apply_restored_state) {
+        let restored_width = state.width.max(MIN_RESTORE_WINDOW_WIDTH);
+        let restored_height = state.height.max(MIN_RESTORE_WINDOW_HEIGHT);
+        builder = builder
+            .inner_size(restored_width as f64, restored_height as f64)
+            .position(state.x as f64, state.y as f64);
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder
+            .hidden_title(true)
+            .title_bar_style(tauri::TitleBarStyle::Overlay)
+            .traffic_light_position(tauri::Position::Logical(tauri::LogicalPosition {
+                x: 17.0,
+                y: 26.0,
+            }));
+    }
+
+    let window = builder.build()?;
+
+    if let Some(state) = restored_state.as_ref().filter(|_| apply_restored_state) {
+        if state.maximized || state.fullscreen {
+            let _ = window.maximize();
+        }
+    }
+
+    let _ = window.show();
+    let _ = window.set_focus();
+
+    Ok(())
+}
+
+fn build_startup_splash_script() -> String {
+    let settings = fs::read_to_string(settings_file_path())
+        .ok()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok());
+
+    let theme_mode = settings
+        .as_ref()
+        .and_then(|value| value.get("themeMode"))
+        .and_then(|value| value.as_str())
+        .and_then(|value| match value.trim() {
+            "light" => Some("light"),
+            "dark" => Some("dark"),
+            "system" => Some("system"),
+            _ => None,
+        });
+
+    let use_system_theme = settings
+        .as_ref()
+        .and_then(|value| value.get("useSystemTheme"))
+        .and_then(|value| value.as_bool())
+        .unwrap_or(true);
+
+    let theme_variant = settings
+        .as_ref()
+        .and_then(|value| value.get("themeVariant"))
+        .and_then(|value| value.as_str())
+        .and_then(|value| match value.trim() {
+            "light" => Some("light"),
+            "dark" => Some("dark"),
+            _ => None,
+        });
+
+    let effective_mode = theme_mode
+        .or_else(|| {
+            if use_system_theme {
+                Some("system")
+            } else {
+                None
+            }
+        })
+        .or(theme_variant)
+        .unwrap_or("system");
+
+    let splash_bg_light = settings
+        .as_ref()
+        .and_then(|value| value.get("splashBgLight"))
+        .and_then(|value| value.as_str())
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("");
+    let splash_fg_light = settings
+        .as_ref()
+        .and_then(|value| value.get("splashFgLight"))
+        .and_then(|value| value.as_str())
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("");
+    let splash_bg_dark = settings
+        .as_ref()
+        .and_then(|value| value.get("splashBgDark"))
+        .and_then(|value| value.as_str())
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("");
+    let splash_fg_dark = settings
+        .as_ref()
+        .and_then(|value| value.get("splashFgDark"))
+        .and_then(|value| value.as_str())
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("");
+
+    let mode_json = serde_json::to_string(effective_mode).unwrap_or_else(|_| "\"system\"".into());
+    let bg_light_json = serde_json::to_string(splash_bg_light).unwrap_or_else(|_| "\"\"".into());
+    let fg_light_json = serde_json::to_string(splash_fg_light).unwrap_or_else(|_| "\"\"".into());
+    let bg_dark_json = serde_json::to_string(splash_bg_dark).unwrap_or_else(|_| "\"\"".into());
+    let fg_dark_json = serde_json::to_string(splash_fg_dark).unwrap_or_else(|_| "\"\"".into());
+
+    format!(
+        "(function(){{try{{var mode={mode_json};var bgLight={bg_light_json};var fgLight={fg_light_json};var bgDark={bg_dark_json};var fgDark={fg_dark_json};var root=document.documentElement;if(bgLight)root.style.setProperty('--splash-background-light',bgLight);if(fgLight)root.style.setProperty('--splash-stroke-light',fgLight);if(bgDark)root.style.setProperty('--splash-background-dark',bgDark);if(fgDark)root.style.setProperty('--splash-stroke-dark',fgDark);var prefersDark=false;try{{prefersDark=!!(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches);}}catch(_e){{}}var dark=mode==='dark'?true:(mode==='light'?false:prefersDark);root.setAttribute('data-splash-variant',dark?'dark':'light');root.style.setProperty('color-scheme',dark?'dark':'light');}}catch(_e){{}}}})();"
+    )
+}
+
+fn activate_main_window(app: &tauri::AppHandle, url: &str, local_origin: &str) -> Result<()> {
+    let parsed = url::Url::parse(url).map_err(|err| anyhow!("Invalid URL: {err}"))?;
+    let init_script = build_init_script(local_origin);
+
+    if let Some(state) = app.try_state::<DesktopUiInjectionState>() {
+        *state.script.lock().expect("desktop ui injection mutex") = Some(init_script);
+        *state
+            .local_origin
+            .lock()
+            .expect("desktop local origin mutex") = Some(local_origin.to_string());
+    }
+
+    if let Some(window) = app.get_webview_window("main") {
+        window.navigate(parsed).map_err(|err| anyhow!(err.to_string()))?;
+        let _ = window.set_focus();
+        return Ok(());
+    }
+
+    create_window(app, url, local_origin, true)
 }
 
 /// Open a new window pointed at the default host (local or configured default).
@@ -2849,6 +3037,11 @@ fn main() {
         ])
         .setup(|app| {
             let handle = app.handle().clone();
+
+            if let Err(err) = create_startup_window(&handle, true) {
+                log::error!("[desktop] failed to create startup window: {err}");
+            }
+
             tauri::async_runtime::spawn(async move {
                 let local_url = if cfg!(debug_assertions) {
                     let dev_url = "http://127.0.0.1:3901".to_string();
@@ -2916,37 +3109,48 @@ fn main() {
 
                 if initial_url != local_ui_url {
                     let failed_url = initial_url.clone();
-                    match desktop_host_probe(initial_url.clone()).await {
-                        Ok(probe) if probe.status != "unreachable" => {}
-                        Ok(_) => {
+                    let soft_probe =
+                        probe_host_with_timeout(&initial_url, STARTUP_REMOTE_PROBE_SOFT_TIMEOUT).await;
+
+                    let remote_reachable = match soft_probe {
+                        Ok(probe) if probe.status != "unreachable" => true,
+                        Ok(_) | Err(_) => {
                             log::warn!(
-                                "[desktop] startup host unreachable ({}), falling back to local ({})",
-                                initial_url,
-                                local_ui_url
+                                "[desktop] startup host slow/unreachable ({}), retrying with extended timeout",
+                                initial_url
                             );
-                            initial_url = local_ui_url.clone();
-                            // Cache the failure so open_new_window skips this host.
-                            if let Some(state) = handle.try_state::<DesktopUiInjectionState>() {
-                                state.unreachable_hosts.lock().expect("unreachable hosts mutex").insert(failed_url);
+
+                            match probe_host_with_timeout(
+                                &initial_url,
+                                STARTUP_REMOTE_PROBE_HARD_TIMEOUT,
+                            )
+                            .await
+                            {
+                                Ok(probe) if probe.status != "unreachable" => true,
+                                Ok(_) | Err(_) => false,
                             }
                         }
-                        Err(err) => {
-                            log::warn!(
-                                "[desktop] startup host probe failed ({}): {}, falling back to local ({})",
-                                initial_url,
-                                err,
-                                local_ui_url
-                            );
-                            initial_url = local_ui_url.clone();
-                            if let Some(state) = handle.try_state::<DesktopUiInjectionState>() {
-                                state.unreachable_hosts.lock().expect("unreachable hosts mutex").insert(failed_url);
-                            }
+                    };
+
+                    if !remote_reachable {
+                        log::warn!(
+                            "[desktop] startup host unreachable after retries ({}), falling back to local ({})",
+                            initial_url,
+                            local_ui_url
+                        );
+                        initial_url = local_ui_url.clone();
+                        if let Some(state) = handle.try_state::<DesktopUiInjectionState>() {
+                            state
+                                .unreachable_hosts
+                                .lock()
+                                .expect("unreachable hosts mutex")
+                                .insert(failed_url);
                         }
                     }
                 }
 
-                if let Err(err) = create_window(&handle, &initial_url, &local_origin, true) {
-                    log::error!("[desktop] failed to create window: {err}");
+                if let Err(err) = activate_main_window(&handle, &initial_url, &local_origin) {
+                    log::error!("[desktop] failed to activate main window: {err}");
                 }
             });
 

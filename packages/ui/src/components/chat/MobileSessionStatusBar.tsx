@@ -52,6 +52,7 @@ import { ProjectEditDialog } from '@/components/layout/ProjectEditDialog';
 import { useDrawerSwipe } from '@/hooks/useDrawerSwipe';
 import { useLanguage } from '@/hooks/useLanguage';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
+import { useThemeSystem } from '@/contexts/useThemeSystem';
 
 
 interface MobileSessionStatusBarProps {
@@ -608,6 +609,7 @@ function SortableProjectItem({
   onDelete,
   formatProjectLabel,
 }: SortableProjectItemProps) {
+  const { currentTheme } = useThemeSystem();
   const {
     attributes,
     listeners,
@@ -625,7 +627,12 @@ function SortableProjectItem({
 
   const [imageFailed, setImageFailed] = React.useState(false);
   const ProjectIcon = project.icon ? PROJECT_ICON_MAP[project.icon] : null;
-  const projectIconImageUrl = !imageFailed ? getProjectIconImageUrl(project) : null;
+  const projectIconImageUrl = !imageFailed
+    ? getProjectIconImageUrl(project, {
+      themeVariant: currentTheme.metadata.variant,
+      iconColor: currentTheme.colors.surface.foreground,
+    })
+    : null;
   const projectColorVar = project.color ? (PROJECT_COLOR_MAP[project.color] ?? null) : null;
 
   return (
@@ -855,9 +862,15 @@ function ProjectButton({
   onOpenEditPanel,
   formatProjectLabel,
 }: ProjectButtonProps) {
+  const { currentTheme } = useThemeSystem();
   const [imageFailed, setImageFailed] = React.useState(false);
   const ProjectIcon = project.icon ? PROJECT_ICON_MAP[project.icon] : null;
-  const projectIconImageUrl = !imageFailed ? getProjectIconImageUrl(project) : null;
+  const projectIconImageUrl = !imageFailed
+    ? getProjectIconImageUrl(project, {
+      themeVariant: currentTheme.metadata.variant,
+      iconColor: currentTheme.colors.surface.foreground,
+    })
+    : null;
 
   React.useEffect(() => {
     setImageFailed(false);
@@ -1421,6 +1434,7 @@ export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
   cornerRadius,
 }) => {
   const { t } = useLanguage();
+  const { currentTheme } = useThemeSystem();
   const sessions = useSessionStore((state) => state.sessions);
   const currentSessionId = useSessionStore((state) => state.currentSessionId);
   const sessionStatus = useSessionStore((state) => state.sessionStatus);
@@ -1460,7 +1474,12 @@ export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
   const activeProject = getActiveProject();
   const currentProjectLabel = activeProject?.label || formatDirectoryName(activeProject?.path || '', homeDirectory);
   const currentProjectIcon = activeProject?.icon;
-  const currentProjectIconImageUrl = activeProject ? getProjectIconImageUrl(activeProject) : null;
+  const currentProjectIconImageUrl = activeProject
+    ? getProjectIconImageUrl(activeProject, {
+      themeVariant: currentTheme.metadata.variant,
+      iconColor: currentTheme.colors.surface.foreground,
+    })
+    : null;
   const currentProjectIconBackground = activeProject?.iconBackground ?? null;
   const currentProjectColor = activeProject?.color;
 

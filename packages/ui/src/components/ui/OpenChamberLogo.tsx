@@ -1,6 +1,20 @@
 import React, { useMemo } from 'react';
 import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
 
+const LEFT_FACE_CELL_OPACITIES = [
+  0.2, 0.45, 0.15, 0.55,
+  0.35, 0.1, 0.5, 0.25,
+  0.4, 0.3, 0.45, 0.15,
+  0.55, 0.2, 0.35, 0.1,
+];
+
+const RIGHT_FACE_CELL_OPACITIES = [
+  0.3, 0.15, 0.45, 0.25,
+  0.5, 0.35, 0.1, 0.4,
+  0.2, 0.55, 0.3, 0.15,
+  0.45, 0.25, 0.4, 0.2,
+];
+
 interface OpenChamberLogoProps {
   className?: string;
   width?: number;
@@ -79,6 +93,9 @@ export const OpenChamberLogo: React.FC<OpenChamberLogoProps> = ({
   }
 
   const strokeColor = useMemo(() => {
+    if (themeContext) {
+      return themeContext.currentTheme.colors.surface.foreground;
+    }
     if (typeof window !== 'undefined') {
       const fromVars = getComputedStyle(document.documentElement).getPropertyValue('--splash-stroke').trim();
       if (fromVars) {
@@ -86,9 +103,22 @@ export const OpenChamberLogo: React.FC<OpenChamberLogoProps> = ({
       }
     }
     return isDark ? 'white' : 'black';
-  }, [isDark]);
+  }, [themeContext, isDark]);
+
+  const supportsColorMix = useMemo(() => {
+    if (typeof window === 'undefined' || typeof CSS === 'undefined' || typeof CSS.supports !== 'function') {
+      return false;
+    }
+    return CSS.supports('color', 'color-mix(in srgb, white 50%, transparent)');
+  }, []);
 
   const fillColor = useMemo(() => {
+    if (themeContext) {
+      if (supportsColorMix) {
+        return `color-mix(in srgb, ${strokeColor} 15%, transparent)`;
+      }
+      return isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.15)';
+    }
     if (typeof window !== 'undefined') {
       const fromVars = getComputedStyle(document.documentElement).getPropertyValue('--splash-face-fill').trim();
       if (fromVars) {
@@ -96,9 +126,15 @@ export const OpenChamberLogo: React.FC<OpenChamberLogoProps> = ({
       }
     }
     return isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.15)';
-  }, [isDark]);
+  }, [themeContext, supportsColorMix, strokeColor, isDark]);
 
   const cellHighlightColor = useMemo(() => {
+    if (themeContext) {
+      if (supportsColorMix) {
+        return `color-mix(in srgb, ${strokeColor} 35%, transparent)`;
+      }
+      return isDark ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.4)';
+    }
     if (typeof window !== 'undefined') {
       const fromVars = getComputedStyle(document.documentElement).getPropertyValue('--splash-cell-fill').trim();
       if (fromVars) {
@@ -106,7 +142,7 @@ export const OpenChamberLogo: React.FC<OpenChamberLogoProps> = ({
       }
     }
     return isDark ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.4)';
-  }, [isDark]);
+  }, [themeContext, supportsColorMix, strokeColor, isDark]);
 
   const logoFillColor = strokeColor;
 
@@ -145,15 +181,6 @@ export const OpenChamberLogo: React.FC<OpenChamberLogoProps> = ({
   // Right face: center -> right -> bottomRight -> bottom  
   const rightFaceCells = generateFaceGrid(center, right, bottomRight, bottom);
 
-  // Generate random opacity values for cells (stable per component instance)
-  const cellOpacities = useMemo(() => {
-    const opacities: number[] = [];
-    for (let i = 0; i < 32; i++) { // 16 cells per face * 2 faces
-      opacities.push(0.1 + Math.random() * 0.5); // Random opacity 0.1-0.6
-    }
-    return opacities;
-  }, []);
-
   return (
     <svg
       width={width}
@@ -180,7 +207,7 @@ export const OpenChamberLogo: React.FC<OpenChamberLogoProps> = ({
           key={`left-${i}`}
           d={cell.path}
           fill={cellHighlightColor}
-          opacity={cellOpacities[i]}
+          opacity={LEFT_FACE_CELL_OPACITIES[cell.row * 4 + (3 - cell.col)] ?? 0.35}
         />
       ))}
       
@@ -199,7 +226,7 @@ export const OpenChamberLogo: React.FC<OpenChamberLogoProps> = ({
           key={`right-${i}`}
           d={cell.path}
           fill={cellHighlightColor}
-          opacity={cellOpacities[i + 16]}
+          opacity={RIGHT_FACE_CELL_OPACITIES[cell.row * 4 + cell.col] ?? 0.35}
         />
       ))}
       

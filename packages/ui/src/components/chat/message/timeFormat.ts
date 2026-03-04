@@ -8,6 +8,12 @@ const isSameDay = (left: Date, right: Date): boolean => {
     );
 };
 
+const isYesterday = (date: Date, now: Date): boolean => {
+    const yesterday = new Date(now);
+    yesterday.setDate(now.getDate() - 1);
+    return isSameDay(date, yesterday);
+};
+
 const isValidTimestamp = (timestamp: number): boolean => {
     return Number.isFinite(timestamp) && !Number.isNaN(new Date(timestamp).getTime());
 };
@@ -20,15 +26,23 @@ export const formatTimestampForDisplay = (timestamp: number): string => {
     const date = new Date(timestamp);
     const now = new Date();
 
-    const timePart = `${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`;
+    const timePart = `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
 
     if (isSameDay(date, now)) {
         return timePart;
     }
 
-    const yearPart = String(date.getFullYear()).slice(-2);
-    const monthPart = pad2(date.getMonth() + 1);
-    const dayPart = pad2(date.getDate());
+    if (isYesterday(date, now)) {
+        return `Yesterday ${timePart}`;
+    }
 
-    return `${yearPart}-${monthPart}-${dayPart} ${timePart}`;
+    const monthPart = date.toLocaleString(undefined, { month: 'short' });
+    const dayPart = date.getDate();
+    const datePart = `${monthPart} ${dayPart}`;
+
+    if (date.getFullYear() === now.getFullYear()) {
+        return `${datePart}, ${timePart}`;
+    }
+
+    return `${datePart}, ${date.getFullYear()}, ${timePart}`;
 };

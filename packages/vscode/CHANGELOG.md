@@ -1,3 +1,11 @@
+## [1.8.5] - 2026-03-04
+
+- Chat/Files: edit-style tool results now open in a VS Code diff editor with focus on the first changed line, making review and follow-up edits much faster.
+- Chat: improved focus-mode input layout so the footer action row stays pinned and available while composing long prompts.
+- Settings: removed duplicate chat display options from Appearance and hid extension-irrelevant sections, making settings easier to scan.
+- UI/Theming: aligned startup/loading branding with the active theme for a more consistent look during connection and auth states.
+- Reliability: improved startup recovery for provider/model/agent loading so options are less likely to appear empty right after opening the extension.
+
 ## [1.8.4] - 2026-03-04
 
 - Chat: added Save as image support for assistant messages, so you can export response snapshots directly from the extension.

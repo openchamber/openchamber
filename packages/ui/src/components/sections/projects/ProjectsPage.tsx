@@ -11,6 +11,7 @@ import { RiCloseLine } from '@remixicon/react';
 import { WorktreeSectionContent } from '@/components/sections/openchamber/WorktreeSectionContent';
 import { ProjectActionsSection } from '@/components/sections/projects/ProjectActionsSection';
 import { useLanguage } from '@/hooks/useLanguage';
+import { useThemeSystem } from '@/contexts/useThemeSystem';
 
 export const ProjectsPage: React.FC = () => {
   const { t } = useLanguage();
@@ -21,6 +22,7 @@ export const ProjectsPage: React.FC = () => {
   const discoverProjectIcon = useProjectsStore((state) => state.discoverProjectIcon);
   const selectedId = useUIStore((state) => state.settingsProjectsSelectedId);
   const setSelectedId = useUIStore((state) => state.setSettingsProjectsSelectedId);
+  const { currentTheme } = useThemeSystem();
 
   const selectedProject = React.useMemo(() => {
     if (!selectedId) return null;
@@ -162,7 +164,10 @@ export const ProjectsPage: React.FC = () => {
     ? (hasPendingUploadImageIcon
       ? pendingUploadIconPreviewUrl
       : (selectedProject && hasStoredImageIcon && !pendingRemoveImageIcon
-        ? getProjectIconImageUrl(selectedProject)
+        ? getProjectIconImageUrl(selectedProject, {
+          themeVariant: currentTheme.metadata.variant,
+          iconColor: currentTheme.colors.surface.foreground,
+        })
         : null))
     : null;
 

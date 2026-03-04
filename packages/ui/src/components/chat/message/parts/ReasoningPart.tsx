@@ -84,9 +84,6 @@ const LiveDuration: React.FC<{ start: number; end?: number; active: boolean }> =
     return <>{formatDuration(start, end, now)}</>;
 };
 
-// TODO: Re-enable reasoning/justification header timestamps after hover UX is redesigned.
-const ENABLE_REASONING_HEADER_TIMESTAMPS = false;
-
 type ReasoningTimelineBlockProps = {
     text: string;
     variant: ReasoningVariant;
@@ -105,6 +102,7 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
     const { t } = useLanguage();
     const [isExpanded, setIsExpanded] = React.useState(false);
     const isMobile = useUIStore((state) => state.isMobile);
+    const showActivityHeaderTimestamps = useUIStore((state) => state.showActivityHeaderTimestamps);
 
     const summary = React.useMemo(() => getReasoningSummary(text), [text]);
     const { Icon } = variantIconConfig[variant];
@@ -169,21 +167,21 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
                         {typeof timeStart === 'number' ? (
                             <span className="relative flex-shrink-0 tabular-nums text-right">
                                 <span
-                                    className={cn(
-                                        'text-muted-foreground/80 transition-opacity duration-150',
-                                        !isMobile && endedTimestampText && ENABLE_REASONING_HEADER_TIMESTAMPS && 'group-hover/tool:opacity-0'
-                                    )}
-                                >
+                                        className={cn(
+                                            'text-muted-foreground/80 transition-opacity duration-150',
+                                            !isMobile && endedTimestampText && showActivityHeaderTimestamps && 'group-hover/tool:opacity-0'
+                                        )}
+                                    >
                                     <LiveDuration
                                         start={timeStart}
                                         end={timeEnd}
                                         active={typeof timeEnd !== 'number'}
                                     />
                                 </span>
-                                {!isMobile && endedTimestampText && ENABLE_REASONING_HEADER_TIMESTAMPS ? (
+                                {!isMobile && endedTimestampText && showActivityHeaderTimestamps ? (
                                     <span
                                         className={cn(
-                                            'pointer-events-none absolute right-0 top-0 whitespace-nowrap text-muted-foreground/70 transition-opacity duration-150',
+                                            'pointer-events-none absolute right-0 top-0 z-10 whitespace-nowrap rounded-sm bg-[var(--surface-background)] px-1 text-muted-foreground/70 transition-opacity duration-150',
                                             'opacity-0 group-hover/tool:opacity-100'
                                         )}
                                     >
@@ -192,7 +190,7 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
                                 ) : null}
                             </span>
                         ) : null}
-                        {typeof timeStart !== 'number' && !isMobile && endedTimestampText && ENABLE_REASONING_HEADER_TIMESTAMPS ? (
+                        {typeof timeStart !== 'number' && !isMobile && endedTimestampText && showActivityHeaderTimestamps ? (
                             <span className="text-muted-foreground/70 flex-shrink-0 tabular-nums">
                                 {endedTimestampText}
                             </span>

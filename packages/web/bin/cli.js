@@ -636,10 +636,12 @@ const commands = {
       exitOnShutdown: true,
       uiPassword: typeof effectiveUiPassword === 'string' ? effectiveUiPassword : null,
       tryCfTunnel: options.tryCfTunnel,
-      onTunnelReady: async (url) => {
-        const displayUrl = buildTunnelUrl(url, effectiveUiPassword, options.tunnelPasswordUrl);
+      onTunnelReady: async (url, connectUrl) => {
+        const displayUrl = connectUrl || buildTunnelUrl(url, effectiveUiPassword, options.tunnelPasswordUrl);
         console.log(`\n🌐 Tunnel URL: \x1b[36m${displayUrl}\x1b[0m\n`);
-        if (options.tunnelPasswordUrl && effectiveUiPassword) {
+        if (connectUrl) {
+          console.log('🔑 One-time connect link (expires after first use)\n');
+        } else if (options.tunnelPasswordUrl && effectiveUiPassword) {
           console.log('🔑 Password is embedded in URL for auto-login\n');
         }
         if (options.tunnelQr) {

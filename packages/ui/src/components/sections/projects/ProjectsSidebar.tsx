@@ -11,6 +11,7 @@ import { isDesktopLocalOriginActive, isTauriShell, isVSCodeRuntime, requestDirec
 import { sessionEvents } from '@/lib/sessionEvents';
 import { toast } from '@/components/ui';
 import { useLanguage } from '@/hooks/useLanguage';
+import { useThemeSystem } from '@/contexts/useThemeSystem';
 
 export const ProjectsSidebar: React.FC<{ onItemSelect?: () => void }> = ({ onItemSelect }) => {
   const { t } = useLanguage();
@@ -18,6 +19,7 @@ export const ProjectsSidebar: React.FC<{ onItemSelect?: () => void }> = ({ onIte
   const addProject = useProjectsStore((state) => state.addProject);
   const selectedId = useUIStore((state) => state.settingsProjectsSelectedId);
   const setSelectedId = useUIStore((state) => state.setSettingsProjectsSelectedId);
+  const { currentTheme } = useThemeSystem();
   const [brokenIconIds, setBrokenIconIds] = React.useState<Set<string>>(new Set());
 
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
@@ -93,7 +95,12 @@ export const ProjectsSidebar: React.FC<{ onItemSelect?: () => void }> = ({ onIte
         const selected = project.id === selectedId;
         const Icon = project.icon ? PROJECT_ICON_MAP[project.icon] : null;
         const imageFailureKey = `${project.id}:${project.iconImage?.updatedAt ?? 0}`;
-        const imageUrl = brokenIconIds.has(imageFailureKey) ? null : getProjectIconImageUrl(project);
+        const imageUrl = brokenIconIds.has(imageFailureKey)
+          ? null
+          : getProjectIconImageUrl(project, {
+            themeVariant: currentTheme.metadata.variant,
+            iconColor: currentTheme.colors.surface.foreground,
+          });
         const color = project.color ? (PROJECT_COLOR_MAP[project.color] ?? null) : null;
         const icon = imageUrl
           ? (

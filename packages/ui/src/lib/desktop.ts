@@ -41,6 +41,10 @@ export type DesktopSettings = {
   themeVariant?: 'light' | 'dark';
   lightThemeId?: string;
   darkThemeId?: string;
+  splashBgLight?: string;
+  splashFgLight?: string;
+  splashBgDark?: string;
+  splashFgDark?: string;
   lastDirectory?: string;
   homeDirectory?: string;
   // Optional absolute path to `opencode` binary.

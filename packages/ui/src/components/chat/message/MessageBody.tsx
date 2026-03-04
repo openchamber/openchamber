@@ -1300,6 +1300,8 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
         return formatted.length > 0 ? formatted : null;
     }, [messageCompletedAt, messageCreatedAt]);
 
+    const footerTimestampClassName = 'text-sm text-muted-foreground/60 tabular-nums flex items-center gap-1';
+
     const footerButtons = (
          <>
               {onCopyMessage && (
@@ -1467,17 +1469,13 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
                                                 </span>
                                             ) : null}
                                             {footerTimestamp ? (
-                                                <Tooltip delayDuration={300}>
-                                                    <TooltipTrigger asChild>
-                                                        <span
-                                                            className="text-sm text-muted-foreground/60 tabular-nums flex items-center"
-                                                            aria-label={`Message time: ${footerTimestamp}`}
-                                                        >
-                                                            <RiTimeLine className="h-3.5 w-3.5" />
-                                                        </span>
-                                                    </TooltipTrigger>
-                                                    <TooltipContent sideOffset={6}>{footerTimestamp}</TooltipContent>
-                                                </Tooltip>
+                                                <span
+                                                    className={footerTimestampClassName}
+                                                    aria-label={`Message time: ${footerTimestamp}`}
+                                                >
+                                                    <RiTimeLine className="h-3.5 w-3.5" />
+                                                    {footerTimestamp}
+                                                </span>
                                             ) : null}
                                         </div>
                                     </div>
@@ -1500,17 +1498,13 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
                                 </span>
                             ) : null}
                             {footerTimestamp ? (
-                                <Tooltip delayDuration={300}>
-                                    <TooltipTrigger asChild>
-                                        <span
-                                            className="text-sm text-muted-foreground/60 tabular-nums flex items-center"
-                                            aria-label={`Message time: ${footerTimestamp}`}
-                                        >
-                                            <RiTimeLine className="h-3.5 w-3.5" />
-                                        </span>
-                                    </TooltipTrigger>
-                                    <TooltipContent sideOffset={6}>{footerTimestamp}</TooltipContent>
-                                </Tooltip>
+                                <span
+                                    className={footerTimestampClassName}
+                                    aria-label={`Message time: ${footerTimestamp}`}
+                                >
+                                    <RiTimeLine className="h-3.5 w-3.5" />
+                                    {footerTimestamp}
+                                </span>
                             ) : null}
                         </div>
                     </div>
