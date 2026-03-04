@@ -12121,7 +12121,7 @@ async function main(options = {}) {
 
   // Write file contents
   app.post('/api/fs/write', async (req, res) => {
-    const { path: filePath, content } = req.body || {};
+    const { path: filePath, content, encoding } = req.body || {};
     if (!filePath || typeof filePath !== 'string') {
       return res.status(400).json({ error: 'Path is required' });
     }
@@ -12135,16 +12135,39 @@ async function main(options = {}) {
         return res.status(400).json({ error: resolved.error });
       }
 
-      // Detect if content is base64 (for binary files)
-      // Base64 strings are typically long and contain only base64 characters
-      const isBase64 = content.length > 100 && /^[A-Za-z0-9+/]+=*$/.test(content);
-
       // Ensure parent directory exists
       await fsPromises.mkdir(path.dirname(resolved.resolved), { recursive: true });
 
+      // Check for explicit encoding parameter or data URL prefix
+      let actualContent = content;
+      let isBase64 = encoding === 'base64';
+
+      if (!isBase64 && /^data:[^;]*;base64,/.test(content)) {
+        // Strip data URL prefix and treat as base64
+        const commaIndex = content.indexOf(',');
+        actualContent = content.substring(commaIndex + 1);
+        isBase64 = true;
+      }
+
+      // Fallback heuristic with validation only when no explicit indicator
+      if (!isBase64 && encoding === undefined) {
+        if (/^[A-Za-z0-9+/]+=*$/.test(actualContent)) {
+          try {
+            // Validate base64 by round-trip: decode then re-encode and compare
+            const decoded = Buffer.from(actualContent, 'base64');
+            const reencoded = decoded.toString('base64');
+            if (reencoded === actualContent) {
+              isBase64 = true;
+            }
+          } catch {
+            // Not valid base64, treat as text
+          }
+        }
+      }
+
       if (isBase64) {
         // Decode and write as binary
-        const buffer = Buffer.from(content, 'base64');
+        const buffer = Buffer.from(actualContent, 'base64');
         await fsPromises.writeFile(resolved.resolved, buffer);
       } else {
         // Write as UTF-8 text

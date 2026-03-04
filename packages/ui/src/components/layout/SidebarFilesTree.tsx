@@ -634,11 +634,9 @@ export const SidebarFilesTree: React.FC = () => {
           return;
         }
 
-        reader.onload = () => {
-          const dataUrl = reader.result as string;
-          const commaIndex = dataUrl.indexOf(',');
-          resolve(commaIndex >= 0 ? dataUrl.slice(commaIndex + 1) : dataUrl);
-        };
+        // For binary files, read as data URL (includes base64 prefix)
+        // Server will detect and strip the data:*;base64, prefix
+        reader.onload = () => resolve(reader.result as string);
         reader.readAsDataURL(file);
       });
 

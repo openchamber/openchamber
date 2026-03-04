@@ -899,15 +899,19 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     // Prefer fresh stat call with TTL cache over stale node.modifiedTime
     if (files.stat) {
       const cachedStat = getCachedFileStat(node.path);
-      if (cachedStat) {
+      if (cachedStat && typeof cachedStat.modifiedTime === 'number') {
         return cachedStat.modifiedTime;
       }
 
       try {
         const stat = await files.stat(node.path);
         const modifiedTime = typeof stat?.modifiedTime === 'number' ? stat.modifiedTime : undefined;
-        setCachedFileStat(node.path, modifiedTime);
-        return modifiedTime;
+        // Only cache if we got a numeric value
+        if (typeof modifiedTime === 'number') {
+          setCachedFileStat(node.path, modifiedTime);
+          return modifiedTime;
+        }
+        // Fall through to node baseline if stat returned undefined
       } catch {
         // Fall through to node baseline if stat fails
       }
@@ -2286,14 +2290,11 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       normalized = '/' + normalized;
     }
 
-    // URI-encode the path components while preserving slashes
-    const encoded = normalized
-      .split('/')
-      .map(segment => encodeURIComponent(segment))
-      .join('/');
+    // URI-encode the full path while preserving reserved characters like ":" and "/"
+    const encodedPath = encodeURI(normalized);
 
     // Construct file:// URL with three slashes (file:// + /)
-    return `file://${encoded}`;
+    return `file://${encodedPath}`;
   }, []);
 
   // Drag-out download handler: allows dragging files to desktop/file manager
@@ -2400,13 +2401,9 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           reader.onload = () => resolve(reader.result as string);
           reader.readAsText(file);
         } else {
-          // For binary files, read as data URL and extract base64 content
-          // This is more robust and performant than manual ArrayBuffer to base64 conversion
-          reader.onload = () => {
-            const dataUrl = reader.result as string;
-            const content = dataUrl.substring(dataUrl.indexOf(',') + 1);
-            resolve(content);
-          };
+          // For binary files, read as data URL (includes base64 prefix)
+          // Server will detect and strip the data:*;base64, prefix
+          reader.onload = () => resolve(reader.result as string);
           reader.readAsDataURL(file);
         }
       });
