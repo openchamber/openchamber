@@ -84,6 +84,9 @@ const LiveDuration: React.FC<{ start: number; end?: number; active: boolean }> =
     return <>{formatDuration(start, end, now)}</>;
 };
 
+// TODO: Re-enable reasoning/justification header timestamps after hover UX is redesigned.
+const ENABLE_REASONING_HEADER_TIMESTAMPS = false;
+
 type ReasoningTimelineBlockProps = {
     text: string;
     variant: ReasoningVariant;
@@ -168,7 +171,7 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
                                 <span
                                     className={cn(
                                         'text-muted-foreground/80 transition-opacity duration-150',
-                                        !isMobile && endedTimestampText && 'group-hover/tool:opacity-0'
+                                        !isMobile && endedTimestampText && ENABLE_REASONING_HEADER_TIMESTAMPS && 'group-hover/tool:opacity-0'
                                     )}
                                 >
                                     <LiveDuration
@@ -177,7 +180,7 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
                                         active={typeof timeEnd !== 'number'}
                                     />
                                 </span>
-                                {!isMobile && endedTimestampText ? (
+                                {!isMobile && endedTimestampText && ENABLE_REASONING_HEADER_TIMESTAMPS ? (
                                     <span
                                         className={cn(
                                             'pointer-events-none absolute right-0 top-0 whitespace-nowrap text-muted-foreground/70 transition-opacity duration-150',
@@ -189,7 +192,7 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
                                 ) : null}
                             </span>
                         ) : null}
-                        {typeof timeStart !== 'number' && !isMobile && endedTimestampText ? (
+                        {typeof timeStart !== 'number' && !isMobile && endedTimestampText && ENABLE_REASONING_HEADER_TIMESTAMPS ? (
                             <span className="text-muted-foreground/70 flex-shrink-0 tabular-nums">
                                 {endedTimestampText}
                             </span>

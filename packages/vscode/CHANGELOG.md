@@ -1,3 +1,17 @@
+## [1.8.4] - 2026-03-04
+
+- Chat: added Save as image support for assistant messages, so you can export response snapshots directly from the extension.
+- Chat: added a new `Changes` tool-output mode that opens edit/write/patch results by default while keeping activity easier to scan.
+- Chat Activity: active tools now appear immediately and continue updating in collapsed view, so in-flight work stays visible with stable durations (thanks to @nelsonPires5).
+- Chat: file references in assistant responses are now clickable (including line targets), making jump-to-file workflows faster during review.
+- Chat/Files: improved `@` file mentions with active-project scoping and more consistent search behavior, reducing irrelevant results.
+- Chat/GitHub: added Attach menu support for linking pull requests into your draft with picker-based selection and attached PR context.
+- Chat: simplified attachment actions with a direct Attach files flow, reducing friction when adding context from the workspace.
+- Chat: improved sticky user-message behavior with bounded height and internal scrolling, so long prompts stay readable without overwhelming the thread.
+- Shortcuts/Models: added favorite-model cycling shortcuts, so you can switch between starred models without leaving the keyboard (thanks to @iamhenry).
+- UI: interactive controls now consistently use pointer cursors, improving click affordance throughout the extension (thanks to @KJdotIO).
+
+
 ## [1.8.3] - 2026-03-02
 
 - Chat: added user-message display options for plain-text rendering and sticky headers, with preferences persisted in settings.

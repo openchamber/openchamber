@@ -142,6 +142,9 @@ const LiveDuration: React.FC<{ start: number; end?: number; active: boolean }> =
     return <>{formatDuration(start, end, now)}</>;
 };
 
+// TODO: Re-enable tool header timestamp display after hover UX is redesigned.
+const ENABLE_TOOL_HEADER_TIMESTAMPS = false;
+
 const parseDiffStats = (metadata?: Record<string, unknown>): { added: number; removed: number } | null => {
     if (!metadata?.diff || typeof metadata.diff !== 'string') return null;
 
@@ -156,6 +159,78 @@ const parseDiffStats = (metadata?: Record<string, unknown>): { added: number; re
 
     if (added === 0 && removed === 0) return null;
     return { added, removed };
+};
+
+const extractFirstChangedLineFromDiff = (diffText: string): number | undefined => {
+    if (!diffText || typeof diffText !== 'string') {
+        return undefined;
+    }
+
+    const lines = diffText.split('\n');
+    let currentNewLine: number | undefined;
+    let firstHunkStart: number | undefined;
+
+    for (const rawLine of lines) {
+        const line = rawLine.replace(/\r$/, '');
+        const hunkMatch = line.match(/^@@\s+-\d+(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s+@@/);
+        if (hunkMatch) {
+            const parsed = Number.parseInt(hunkMatch[1] ?? '', 10);
+            if (Number.isFinite(parsed)) {
+                currentNewLine = Math.max(1, parsed);
+                if (!Number.isFinite(firstHunkStart)) {
+                    firstHunkStart = currentNewLine;
+                }
+            }
+            continue;
+        }
+
+        if (currentNewLine === undefined || !Number.isFinite(currentNewLine)) {
+            continue;
+        }
+
+        if (line.startsWith('+++') || line.startsWith('---') || line.startsWith('diff ')) {
+            continue;
+        }
+
+        if (line.startsWith('+')) {
+            return currentNewLine;
+        }
+
+        if (line.startsWith(' ')) {
+            currentNewLine += 1;
+            continue;
+        }
+
+        if (line.startsWith('-') || line.startsWith('\\')) {
+            continue;
+        }
+    }
+
+    return firstHunkStart;
+};
+
+const getFirstChangedLineFromMetadata = (tool: string, metadata?: Record<string, unknown>): number | undefined => {
+    if (!metadata || (tool !== 'edit' && tool !== 'multiedit' && tool !== 'apply_patch')) {
+        return undefined;
+    }
+
+    if (typeof metadata.diff === 'string') {
+        const line = extractFirstChangedLineFromDiff(metadata.diff);
+        if (Number.isFinite(line)) {
+            return line;
+        }
+    }
+
+    const files = Array.isArray(metadata.files) ? metadata.files : [];
+    const firstFile = files[0] as { diff?: unknown } | undefined;
+    if (typeof firstFile?.diff === 'string') {
+        const line = extractFirstChangedLineFromDiff(firstFile.diff);
+        if (Number.isFinite(line)) {
+            return line;
+        }
+    }
+
+    return undefined;
 };
 
 const getRelativePath = (absolutePath: string, currentDirectory: string): string => {
@@ -1641,12 +1716,15 @@ const ToolPart: React.FC<ToolPartProps> = ({
         }
 
         let filePath: unknown;
+        let targetLine: number | undefined;
         if (part.tool === 'edit' || part.tool === 'multiedit') {
             filePath = input?.filePath || input?.file_path || input?.path || metadata?.filePath || metadata?.file_path || metadata?.path;
+            targetLine = getFirstChangedLineFromMetadata(part.tool, metadata);
         } else if (part.tool === 'apply_patch') {
             const files = Array.isArray(metadata?.files) ? metadata?.files : [];
             const firstFile = files[0] as { relativePath?: string; filePath?: string } | undefined;
             filePath = firstFile?.relativePath || firstFile?.filePath;
+            targetLine = getFirstChangedLineFromMetadata(part.tool, metadata);
         } else if (['write', 'create', 'file_write', 'read', 'view', 'file_read', 'cat'].includes(part.tool)) {
             filePath = input?.filePath || input?.file_path || input?.path || metadata?.filePath || metadata?.file_path || metadata?.path;
         }
@@ -1657,7 +1735,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
             if (!filePath.startsWith('/')) {
                 absolutePath = currentDirectory.endsWith('/') ? currentDirectory + filePath : currentDirectory + '/' + filePath;
             }
-            runtime.editor.openFile(absolutePath);
+            runtime.editor.openFile(absolutePath, targetLine);
         } else {
             onToggle(part.id);
         }
@@ -1752,7 +1830,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
                             <span
                                 className={cn(
                                     'text-muted-foreground/80 transition-opacity duration-150',
-                                    !isMobile && endedTimestampText && 'group-hover/tool:opacity-0'
+                                    !isMobile && endedTimestampText && ENABLE_TOOL_HEADER_TIMESTAMPS && 'group-hover/tool:opacity-0'
                                 )}
                             >
                                 <LiveDuration
@@ -1761,7 +1839,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
                                     active={Boolean(isActive && typeof effectiveTimeEnd !== 'number')}
                                 />
                             </span>
-                            {!isMobile && endedTimestampText ? (
+                            {!isMobile && endedTimestampText && ENABLE_TOOL_HEADER_TIMESTAMPS ? (
                                 <span
                                     className={cn(
                                         'pointer-events-none absolute right-0 top-0 whitespace-nowrap text-muted-foreground/70 transition-opacity duration-150',
@@ -1773,7 +1851,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
                             ) : null}
                         </span>
                     ) : null}
-                    {typeof effectiveTimeStart !== 'number' && !isMobile && endedTimestampText ? (
+                    {typeof effectiveTimeStart !== 'number' && !isMobile && endedTimestampText && ENABLE_TOOL_HEADER_TIMESTAMPS ? (
                         <span className="ml-auto text-muted-foreground/70 flex-shrink-0 tabular-nums">
                             {endedTimestampText}
                         </span>
