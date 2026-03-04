@@ -514,7 +514,8 @@ export const TurnGroupingProvider: React.FC<TurnGroupingProviderProps> = ({ mess
     const { isWorking: sessionIsWorking } = useCurrentSessionActivity();
     const toolCallExpansion = useUIStore((state) => state.toolCallExpansion);
     const showTextJustificationActivity = useUIStore((state) => state.showTextJustificationActivity);
-    const defaultActivityExpanded = toolCallExpansion === 'activity' || toolCallExpansion === 'detailed';
+    const defaultActivityExpanded =
+        toolCallExpansion === 'activity' || toolCallExpansion === 'detailed' || toolCallExpansion === 'changes';
     const structureKey = React.useMemo(() => getStructureKey(messages), [messages]);
     const [structuredMessages, setStructuredMessages] = React.useState<ChatMessageEntry[]>(messages);
 

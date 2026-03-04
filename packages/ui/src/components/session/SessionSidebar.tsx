@@ -2344,13 +2344,13 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   }, [activeProjectForHeader, projectRenameDraft, renameProject]);
 
   const desktopHeaderActionButtonClass =
-    'inline-flex h-6 w-6 items-center justify-center rounded-md leading-none text-foreground hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50';
+    'inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-md leading-none text-foreground hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed';
   const mobileHeaderActionButtonClass =
-    'inline-flex h-6 w-6 items-center justify-center rounded-md leading-none text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50';
+    'inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-md leading-none text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed';
   const headerActionButtonClass = mobileVariant ? mobileHeaderActionButtonClass : desktopHeaderActionButtonClass;
   const headerActionIconClass = 'h-4.5 w-4.5';
   const addProjectButtonClass = cn(
-    'inline-flex items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
+    'inline-flex cursor-pointer items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed',
     mobileVariant
       ? 'h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50'
       : 'h-8 w-8 text-foreground hover:bg-interactive-hover',
@@ -2533,9 +2533,9 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                   e.stopPropagation();
                   handleSessionDoubleClick();
                 }}
-                className={cn(
-                  'flex min-w-0 flex-1 flex-col gap-0 overflow-hidden rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none',
-                )}
+                  className={cn(
+                    'flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none disabled:cursor-not-allowed',
+                  )}
               >
                 {}
                   <div className="flex w-full items-center gap-2 min-w-0 flex-1 overflow-hidden">
@@ -3328,7 +3328,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
-                  className="flex h-8 min-w-0 max-w-[calc(100%-2.5rem)] items-center gap-1 rounded-md px-2 text-left text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                  className="flex h-8 min-w-0 max-w-[calc(100%-2.5rem)] cursor-pointer items-center gap-1 rounded-md px-2 text-left text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
                 >
                   <span className="text-base font-semibold truncate">
                     {activeProjectForHeader
@@ -3397,13 +3397,13 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                           }
                         }}
                       />
-                      <button type="submit" className="inline-flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:text-foreground">
+                      <button type="submit" className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded text-muted-foreground hover:text-foreground">
                         <RiCheckLine className="h-4 w-4" />
                       </button>
                       <button
                         type="button"
                         onClick={() => setIsProjectRenameInline(false)}
-                        className="inline-flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:text-foreground"
+                        className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded text-muted-foreground hover:text-foreground"
                       >
                         <RiCloseLine className="h-4 w-4" />
                       </button>

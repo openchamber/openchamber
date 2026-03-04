@@ -8,6 +8,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { toast } from '@/components/ui';
 import {
   RiCheckboxBlankLine,
@@ -79,6 +80,7 @@ export function GitHubIssuePickerDialog({
   const githubAuthChecked = useGitHubAuthStore((state) => state.hasChecked);
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
+  const isMobile = useUIStore((state) => state.isMobile);
   const activeProject = useProjectsStore((state) => state.getActiveProject());
 
   const projectDirectory = activeProject?.path ?? null;
@@ -512,32 +514,24 @@ Do not implement changes until I confirm; end with: “Next actions: <1 sentence
     }
   }, [createInWorktree, github, mode, onOpenChange, onSelect, projectDirectory, resolveDefaultAgentName, resolveDefaultModelSelection, resolveDefaultVariant, startingIssueNumber]);
 
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[70vh] flex flex-col">
-        <DialogHeader className="flex-shrink-0">
-          <DialogTitle className="flex items-center gap-2">
-            <RiGithubLine className="h-5 w-5" />
-            {mode === 'select' ? 'Link GitHub Issue' : 'New Session From GitHub Issue'}
-          </DialogTitle>
-          <DialogDescription>
-            {mode === 'select'
-              ? 'Select an issue to link to this session.'
-              : 'Seeds a new session with hidden issue context (title/body/labels/comments).'}
-          </DialogDescription>
-        </DialogHeader>
+  const title = mode === 'select' ? 'Link GitHub Issue' : 'New Session From GitHub Issue';
+  const description = mode === 'select'
+    ? 'Select an issue to link to this session.'
+    : 'Seeds a new session with hidden issue context (title/body/labels/comments).';
 
-        <div className="relative mt-2">
-          <RiSearchLine className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search by title or #123, or paste issue URL"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="pl-9 w-full"
-          />
-        </div>
+  const content = (
+    <>
+      <div className="relative mt-2">
+        <RiSearchLine className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+        <Input
+          placeholder="Search by title or #123, or paste issue URL"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          className="pl-9 w-full"
+        />
+      </div>
 
-        <div className="flex-1 overflow-y-auto mt-2">
+      <div className={cn(isMobile ? 'min-h-0 mt-2' : 'flex-1 overflow-y-auto mt-2')}>
           {!projectDirectory ? (
             <div className="text-center text-muted-foreground py-8">No active project selected.</div>
           ) : null}
@@ -649,9 +643,9 @@ Do not implement changes until I confirm; end with: “Next actions: <1 sentence
               </button>
             </div>
           ) : null}
-        </div>
+      </div>
 
-        {mode !== 'select' && (
+      {mode !== 'select' && (
         <div className="mt-4 p-3 bg-muted/30 rounded-lg">
           <p className="typography-meta text-muted-foreground font-medium mb-2">Actions</p>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-2">
@@ -703,7 +697,45 @@ Do not implement changes until I confirm; end with: “Next actions: <1 sentence
             </div>
           </div>
         </div>
+      )}
+    </>
+  );
+
+  if (isMobile) {
+    return (
+      <MobileOverlayPanel
+        open={open}
+        title={title}
+        onClose={() => onOpenChange(false)}
+        renderHeader={(closeButton) => (
+          <div className="flex flex-col gap-1.5 px-3 py-2 border-b border-border/40">
+            <div className="flex items-center justify-between">
+              <h2 className="typography-ui-label font-semibold text-foreground">{title}</h2>
+              {closeButton}
+            </div>
+            <p className="typography-small text-muted-foreground">{description}</p>
+          </div>
         )}
+      >
+        {content}
+      </MobileOverlayPanel>
+    );
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl max-h-[70vh] flex flex-col">
+        <DialogHeader className="flex-shrink-0">
+          <DialogTitle className="flex items-center gap-2">
+            <RiGithubLine className="h-5 w-5" />
+            {title}
+          </DialogTitle>
+          <DialogDescription>
+            {description}
+          </DialogDescription>
+        </DialogHeader>
+
+        {content}
       </DialogContent>
     </Dialog>
   );

@@ -265,10 +265,12 @@ FileChip.displayName = 'FileChip';
 export const AttachedFilesList = memo(() => {
   const { attachedFiles, removeAttachedFile } = useSessionStore();
 
-  if (attachedFiles.length === 0) return null;
+  const localFiles = attachedFiles.filter((file) => file.source !== 'server');
 
-  const images = attachedFiles.filter(f => f.mimeType.startsWith('image/'));
-  const otherFiles = attachedFiles.filter(f => !f.mimeType.startsWith('image/'));
+  if (localFiles.length === 0) return null;
+
+  const images = localFiles.filter((f) => f.mimeType.startsWith('image/'));
+  const otherFiles = localFiles.filter((f) => !f.mimeType.startsWith('image/'));
 
   return (
     <div className="pb-4 w-full px-1 space-y-3">
@@ -338,7 +340,134 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false }
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
+  const imageFiles = fileItems.filter(f => f.mime?.startsWith('image/') && f.url);
+  const otherFiles = fileItems.filter(f => !f.mime?.startsWith('image/'));
+
+  const imageGallery = React.useMemo(
+    () =>
+      imageFiles.flatMap((file) => {
+        if (!file.url) return [];
+        const filename = extractFilename(file.filename) || 'Image';
+        return [{
+          url: file.url,
+          mimeType: file.mime,
+          filename,
+          size: file.size,
+        }];
+      }),
+    [imageFiles]
+  );
+
+  const handleImageClick = React.useCallback((index: number) => {
+    if (!onShowPopup) {
+      return;
+    }
+
+    const file = imageGallery[index];
+    if (!file?.url) return;
+
+    const filename = file.filename || 'Image';
+
+    onShowPopup({
+      open: true,
+      title: filename,
+      content: '',
+      metadata: {
+        tool: 'image-preview',
+        filename,
+        mime: file.mimeType,
+        size: file.size,
+      },
+      image: {
+        url: file.url,
+        mimeType: file.mimeType,
+        filename,
+        size: file.size,
+        gallery: imageGallery,
+        index,
+      },
+    });
+  }, [imageGallery, onShowPopup]);
+
   if (fileItems.length === 0) return null;
+
+  if (compact) {
+    return (
+      <div className="space-y-1.5 mt-1.5">
+        {otherFiles.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {otherFiles.map((file, index) => {
+              const fileName = extractFilename(file.filename || file.url);
+              const sizeText = formatFileSize(file.size);
+              return (
+                <Tooltip key={`file-${file.url || file.filename || index}`}>
+                  <TooltipTrigger asChild>
+                    <div className="inline-flex items-center bg-muted/30 border border-border/30 typography-meta gap-1 px-2 py-0.5 rounded-lg">
+                      {file.mime?.includes('pdf') ? (
+                        <RiFilePdfLine className="text-muted-foreground h-3.5 w-3.5" />
+                      ) : (
+                        <RiFileLine className="text-muted-foreground h-3.5 w-3.5" />
+                      )}
+                      <div className="overflow-hidden max-w-[140px]">
+                        <span className="truncate block" title={fileName}>{fileName}</span>
+                      </div>
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>{fileName}{sizeText ? ` (${sizeText})` : ''}</p>
+                  </TooltipContent>
+                </Tooltip>
+              );
+            })}
+          </div>
+        )}
+
+        {imageFiles.length > 0 && (
+          <div className="overflow-x-auto -mx-1 px-1 py-0.5 scrollbar-thin">
+            <div className="flex snap-x snap-mandatory gap-2">
+              {imageFiles.map((file, index) => {
+                const filename = extractFilename(file.filename) || 'Image';
+
+                return (
+                  <Tooltip key={`img-${file.url || file.filename || index}`} delayDuration={1000}>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={() => handleImageClick(index)}
+                        className="relative flex-none border border-border/40 bg-muted/10 overflow-hidden snap-start h-12 w-12 sm:h-14 sm:w-14 md:h-16 md:w-16 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-primary"
+                        aria-label={filename}
+                      >
+                        {file.url ? (
+                          <img
+                            src={file.url}
+                            alt={filename}
+                            className="h-full w-full object-cover"
+                            loading="lazy"
+                            onError={(e) => {
+                              const target = e.target as HTMLImageElement;
+                              target.style.visibility = 'hidden';
+                            }}
+                          />
+                        ) : (
+                          <div className="h-full w-full flex items-center justify-center bg-muted/30 text-muted-foreground">
+                            <RiFileImageLine className="h-6 w-6" />
+                          </div>
+                        )}
+                        <span className="sr-only">{filename}</span>
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" sideOffset={6} className="typography-meta px-2 py-1">
+                      {filename}
+                    </TooltipContent>
+                  </Tooltip>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className={cn(

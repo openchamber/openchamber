@@ -1,7 +1,15 @@
 import React from "react";
-import { RiArrowUpSLine, RiArrowDownSLine, RiCloseCircleLine } from "@remixicon/react";
+import {
+  RiArrowDownSLine,
+  RiArrowUpDoubleLine,
+  RiArrowUpSLine,
+  RiCheckboxCircleLine,
+  RiCloseCircleLine,
+  RiRecordCircleLine,
+  RiTimeLine,
+} from "@remixicon/react";
 import { cn } from "@/lib/utils";
-import { useTodoStore, type TodoItem, type TodoStatus } from "@/stores/useTodoStore";
+import { useTodoStore, type TodoItem, type TodoPriority, type TodoStatus } from "@/stores/useTodoStore";
 import { useSessionStore } from "@/stores/useSessionStore";
 import { useUIStore } from "@/stores/useUIStore";
 import { WorkingPlaceholder } from "./message/parts/WorkingPlaceholder";
@@ -22,6 +30,18 @@ const statusConfig: Record<TodoStatus, { textClassName: string }> = {
   },
 };
 
+const priorityClassName: Record<TodoPriority, string> = {
+  high: "text-[var(--status-warning)]",
+  medium: "text-muted-foreground",
+  low: "text-muted-foreground/70",
+};
+
+const priorityIcon: Record<TodoPriority, React.ReactNode> = {
+  high: <RiArrowUpDoubleLine className="h-3.5 w-3.5" aria-hidden="true" />,
+  medium: <RiArrowUpSLine className="h-3.5 w-3.5" aria-hidden="true" />,
+  low: <RiArrowDownSLine className="h-3.5 w-3.5" aria-hidden="true" />,
+};
+
 interface TodoItemRowProps {
   todo: TodoItem;
 }
@@ -29,8 +49,18 @@ interface TodoItemRowProps {
 const TodoItemRow: React.FC<TodoItemRowProps> = ({ todo }) => {
   const config = statusConfig[todo.status] || statusConfig.pending;
 
+  const statusIcon =
+    todo.status === "in_progress" ? (
+      <RiRecordCircleLine className="h-3.5 w-3.5 text-[var(--status-info)]" aria-hidden="true" />
+    ) : todo.status === "completed" ? (
+      <RiCheckboxCircleLine className="h-3.5 w-3.5 text-[var(--status-success)]" aria-hidden="true" />
+    ) : (
+      <RiTimeLine className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+    );
+
   return (
-    <div className="flex items-start min-w-0 py-0.5">
+    <div className="flex items-start min-w-0 py-0.5 gap-2">
+      <span className="mt-0.5 flex-shrink-0">{statusIcon}</span>
       <span
         className={cn(
           "flex-1 typography-ui-label",
@@ -38,6 +68,15 @@ const TodoItemRow: React.FC<TodoItemRowProps> = ({ todo }) => {
         )}
       >
         {todo.content}
+      </span>
+      <span
+        className={cn(
+          "typography-meta flex-shrink-0",
+          priorityClassName[todo.priority] ?? priorityClassName.medium
+        )}
+        title={`${todo.priority} priority`}
+      >
+        {priorityIcon[todo.priority] ?? priorityIcon.medium}
       </span>
     </div>
   );
@@ -89,18 +128,10 @@ export const StatusRow: React.FC<StatusRowProps> = ({
     }
   }, [currentSessionId, loadTodos]);
 
-  // Filter out cancelled todos for display, sort by status priority
+  // Filter out cancelled todos for display and keep original order.
+  // This prevents items from jumping around when status changes.
   const visibleTodos = React.useMemo(() => {
-    const statusOrder: Record<TodoStatus, number> = {
-      in_progress: 0,
-      pending: 1,
-      completed: 2,
-      cancelled: 3,
-    };
-
-    return [...todos]
-      .filter((todo) => todo.status !== "cancelled")
-      .sort((a, b) => statusOrder[a.status] - statusOrder[b.status]);
+    return todos.filter((todo) => todo.status !== "cancelled");
   }, [todos]);
 
   // Find the current active todo (first in_progress, or first pending)
@@ -118,6 +149,12 @@ export const StatusRow: React.FC<StatusRowProps> = ({
     const completed = todos.filter((t) => t.status === "completed").length;
     return { completed, total };
   }, [todos]);
+
+  const statusSummary = React.useMemo(() => {
+    const active = visibleTodos.filter((t) => t.status === "in_progress").length;
+    const left = visibleTodos.filter((t) => t.status === "in_progress" || t.status === "pending").length;
+    return { active, left };
+  }, [visibleTodos]);
 
   const hasActiveTodos = visibleTodos.some((t) => t.status === "in_progress" || t.status === "pending");
   // Original logic from ChatInput
@@ -178,7 +215,7 @@ export const StatusRow: React.FC<StatusRowProps> = ({
         <span className="typography-ui-label">Tasks</span>
       )}
       <span className="typography-meta">
-        {progress.completed}/{progress.total}
+        {statusSummary.active} active · {statusSummary.left} left
       </span>
       {isExpanded ? (
         <RiArrowUpSLine className="h-3.5 w-3.5" />

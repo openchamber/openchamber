@@ -309,6 +309,9 @@ export const Header: React.FC<HeaderProps> = ({
 
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
   const showDesktopHeaderContextUsage = !isVSCode && activeMainTab === 'chat' && !!stableDesktopContextUsage && stableDesktopContextUsage.totalTokens > 0;
+  const desktopHeaderDisplayPercentage = stableDesktopContextUsage && stableDesktopContextUsage.contextLimit > 0
+    ? Math.min(999, (stableDesktopContextUsage.totalTokens / stableDesktopContextUsage.contextLimit) * 100)
+    : 0;
 
   const refreshCurrentInstanceLabel = React.useCallback(async () => {
     if (typeof window === 'undefined' || !isDesktopApp) {
@@ -1063,7 +1066,8 @@ export const Header: React.FC<HeaderProps> = ({
         {showDesktopHeaderContextUsage && stableDesktopContextUsage && (
           <ContextUsageDisplay
             totalTokens={stableDesktopContextUsage.totalTokens}
-            percentage={stableDesktopContextUsage.percentage}
+            percentage={desktopHeaderDisplayPercentage}
+            colorPercentage={stableDesktopContextUsage.percentage}
             contextLimit={stableDesktopContextUsage.contextLimit}
             outputLimit={stableDesktopContextUsage.outputLimit ?? 0}
             size="compact"

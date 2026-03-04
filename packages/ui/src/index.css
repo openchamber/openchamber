@@ -30,6 +30,19 @@ textarea[data-chat-input="true"]:focus-visible {
   box-shadow: none;
 }
 
+/* Ensure interactive controls consistently show pointer cursor */
+:where(
+  button,
+  [role="button"],
+  a[href]
+):not(:disabled) {
+  cursor: pointer;
+}
+
+:where(button, [role="button"]):disabled {
+  cursor: not-allowed;
+}
+
 .oc-cm-selected-line {
   background: color-mix(in srgb, var(--accent) 70%, transparent);
 }

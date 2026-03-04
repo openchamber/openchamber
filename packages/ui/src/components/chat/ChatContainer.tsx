@@ -332,6 +332,33 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ aboveInput }) => {
         trimToViewportWindow,
     });
 
+    React.useLayoutEffect(() => {
+        const container = scrollRef.current;
+        if (!container) {
+            return;
+        }
+
+        const updateChatScrollHeight = () => {
+            container.style.setProperty('--chat-scroll-height', `${container.clientHeight}px`);
+        };
+
+        updateChatScrollHeight();
+
+        if (typeof ResizeObserver === 'undefined') {
+            window.addEventListener('resize', updateChatScrollHeight);
+            return () => {
+                window.removeEventListener('resize', updateChatScrollHeight);
+            };
+        }
+
+        const resizeObserver = new ResizeObserver(updateChatScrollHeight);
+        resizeObserver.observe(container);
+
+        return () => {
+            resizeObserver.disconnect();
+        };
+    }, [currentSessionId, isDesktopExpandedInput, scrollRef]);
+
     React.useEffect(() => {
         cancelTurnBackfill();
         if (!currentSessionId) {

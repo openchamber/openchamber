@@ -14,7 +14,7 @@ import { isEmptyTextPart, extractTextContent } from './partUtils';
 import { FadeInOnReveal } from './FadeInOnReveal';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { RiCheckLine, RiFileCopyLine, RiChatNewLine, RiArrowGoBackLine, RiGitBranchLine, RiHourglassLine, RiTimeLine, RiVolumeUpLine, RiStopLine, RiShare2Line, RiLoader4Line } from '@remixicon/react';
+import { RiCheckLine, RiFileCopyLine, RiChatNewLine, RiArrowGoBackLine, RiGitBranchLine, RiHourglassLine, RiTimeLine, RiVolumeUpLine, RiStopLine, RiImageDownloadLine, RiLoader4Line } from '@remixicon/react';
 import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
 import type { ContentChangeReason } from '@/hooks/useChatScrollManager';
 
@@ -28,6 +28,7 @@ import { useMessageTTS } from '@/hooks/useMessageTTS';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { TextSelectionMenu } from './TextSelectionMenu';
 import { copyTextToClipboard } from '@/lib/clipboard';
+import { isVSCodeRuntime } from '@/lib/desktop';
 import { toPng } from 'html-to-image';
 import { toast } from '@/components/ui';
 import { formatTimestampForDisplay } from './timeFormat';
@@ -332,6 +333,7 @@ const UserMessageBody: React.FC<{
     const hasCopyableText = Boolean(hasTextContent);
     const showUserContent = userActionsMode !== 'external-actions';
     const showUserActions = userActionsMode !== 'external-content';
+    const useStickyScrollableUserContent = stickyUserHeaderEnabled && userActionsMode === 'inline';
 
     const clearCopyHintTimeout = React.useCallback(() => {
         if (copyHintTimeoutRef.current !== null && typeof window !== 'undefined') {
@@ -490,7 +492,15 @@ const UserMessageBody: React.FC<{
             style={{ contain: 'layout', transform: 'translateZ(0)' }}
             onTouchStart={isTouchContext && canCopyMessage && hasCopyableText ? revealCopyHint : undefined}
         >
-            <div className="leading-relaxed overflow-hidden text-foreground/90 text-base">
+            <div
+                className={cn(
+                    'leading-relaxed text-foreground/90 text-base overflow-x-hidden',
+                    useStickyScrollableUserContent
+                        ? 'overflow-y-auto overscroll-contain scrollbar-none'
+                        : 'overflow-y-hidden'
+                )}
+                style={useStickyScrollableUserContent ? { maxHeight: 'calc(var(--chat-scroll-height, 100dvh) * 0.4)' } : undefined}
+            >
                 {userContentParts.map((part, index) => {
                     if (isSubtaskPart(part)) {
                         return (
@@ -833,12 +843,17 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
             try {
                 const originalElement = messageContentRef.current;
                 const computedStyle = window.getComputedStyle(originalElement);
+                const rootStyle = window.getComputedStyle(document.documentElement);
+                const resolvedBackgroundColor =
+                    rootStyle.getPropertyValue('--surface-background').trim() ||
+                    computedStyle.backgroundColor ||
+                    window.getComputedStyle(document.body).backgroundColor;
                 const paddingSize = 24;
 
                 wrapper = document.createElement('div');
                 wrapper.style.cssText = `
                     padding: ${paddingSize}px;
-                    background-color: var(--surface-background);
+                    background-color: ${resolvedBackgroundColor};
                     display: inline-block;
                 `;
 
@@ -849,21 +864,69 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
                     contain: none;
                 `;
 
+                const timestampElements = clone.querySelectorAll<HTMLElement>('[aria-label^="Message time:"]');
+                const footerRowsAdjusted = new Set<HTMLElement>();
+                timestampElements.forEach((element) => {
+                    const label = element.getAttribute('aria-label');
+                    const timestamp = label?.replace('Message time:', '').trim();
+                    if (!timestamp || element.textContent?.includes(timestamp)) {
+                        return;
+                    }
+
+                    const timestampText = document.createElement('span');
+                    timestampText.style.marginLeft = '4px';
+                    timestampText.textContent = timestamp;
+                    element.appendChild(timestampText);
+
+                    const metaGroup = element.parentElement;
+                    const footerRow = metaGroup?.parentElement as HTMLElement | null;
+                    const actionsGroup = footerRow?.firstElementChild as HTMLElement | null;
+                    if (!footerRow || !actionsGroup || actionsGroup === metaGroup || footerRowsAdjusted.has(footerRow)) {
+                        return;
+                    }
+
+                    actionsGroup.style.display = 'none';
+                    footerRow.style.justifyContent = 'flex-start';
+                    footerRowsAdjusted.add(footerRow);
+                });
+
                 wrapper.appendChild(clone);
                 document.body.appendChild(wrapper);
 
                 const dataUrl = await toPng(wrapper, {
                     quality: 1,
                     pixelRatio: 2,
-                    backgroundColor: 'var(--surface-background)',
+                    backgroundColor: resolvedBackgroundColor,
                 });
 
-                const link = document.createElement('a');
-                link.download = `message-${messageId}.png`;
-                link.href = dataUrl;
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
+                const fileName = `message-${messageId}.png`;
+
+                if (isVSCodeRuntime()) {
+                    const response = await fetch('/api/vscode/save-image', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ fileName, dataUrl }),
+                    });
+
+                    if (!response.ok) {
+                        throw new Error('Failed to save image in VS Code');
+                    }
+
+                    const payload = await response.json() as { saved?: boolean; canceled?: boolean; error?: string };
+                    if (payload.saved !== true) {
+                        if (payload.canceled) {
+                            return;
+                        }
+                        throw new Error(payload.error || 'Failed to save image in VS Code');
+                    }
+                } else {
+                    const link = document.createElement('a');
+                    link.download = fileName;
+                    link.href = dataUrl;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                }
 
                 toast.success('Image saved');
             } catch (error) {
@@ -1289,7 +1352,7 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
                             {isSharing ? (
                                 <RiLoader4Line className="h-4 w-4 animate-spin" />
                             ) : (
-                                <RiShare2Line className="h-4 w-4" />
+                                <RiImageDownloadLine className="h-4 w-4" />
                             )}
                         </Button>
                     </TooltipTrigger>
@@ -1399,10 +1462,17 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
                                                 </span>
                                             ) : null}
                                             {footerTimestamp ? (
-                                                <span className="text-sm text-muted-foreground/60 tabular-nums flex items-center gap-1">
-                                                    <RiTimeLine className="h-3.5 w-3.5" />
-                                                    {footerTimestamp}
-                                                </span>
+                                                <Tooltip delayDuration={300}>
+                                                    <TooltipTrigger asChild>
+                                                        <span
+                                                            className="text-sm text-muted-foreground/60 tabular-nums flex items-center"
+                                                            aria-label={`Message time: ${footerTimestamp}`}
+                                                        >
+                                                            <RiTimeLine className="h-3.5 w-3.5" />
+                                                        </span>
+                                                    </TooltipTrigger>
+                                                    <TooltipContent sideOffset={6}>{footerTimestamp}</TooltipContent>
+                                                </Tooltip>
                                             ) : null}
                                         </div>
                                     </div>
@@ -1425,10 +1495,17 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
                                 </span>
                             ) : null}
                             {footerTimestamp ? (
-                                <span className="text-sm text-muted-foreground/60 tabular-nums flex items-center gap-1">
-                                    <RiTimeLine className="h-3.5 w-3.5" />
-                                    {footerTimestamp}
-                                </span>
+                                <Tooltip delayDuration={300}>
+                                    <TooltipTrigger asChild>
+                                        <span
+                                            className="text-sm text-muted-foreground/60 tabular-nums flex items-center"
+                                            aria-label={`Message time: ${footerTimestamp}`}
+                                        >
+                                            <RiTimeLine className="h-3.5 w-3.5" />
+                                        </span>
+                                    </TooltipTrigger>
+                                    <TooltipContent sideOffset={6}>{footerTimestamp}</TooltipContent>
+                                </Tooltip>
                             ) : null}
                         </div>
                     </div>

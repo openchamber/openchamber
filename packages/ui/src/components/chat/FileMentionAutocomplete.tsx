@@ -1,11 +1,12 @@
 import React from 'react';
 import { RiCodeLine, RiFileImageLine, RiFileLine, RiFilePdfLine, RiRefreshLine } from '@remixicon/react';
 import { cn, truncatePathMiddle } from '@/lib/utils';
-import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { useSessionStore } from '@/stores/useSessionStore';
 import { useFileSearchStore } from '@/stores/useFileSearchStore';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
+import { useChatSearchDirectory } from '@/hooks/useChatSearchDirectory';
 import type { ProjectFileSearchHit } from '@/lib/opencode/client';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { useDirectoryShowHidden } from '@/lib/directoryShowHidden';
@@ -45,8 +46,24 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
   onTabSelect,
   style,
 }, ref) => {
-  const { currentDirectory } = useDirectoryStore();
-  const { addServerFile } = useSessionStore();
+  const currentDirectory = useChatSearchDirectory() ?? '';
+  const activeProjectId = useProjectsStore((state) => state.activeProjectId);
+  const activeProjectPath = useProjectsStore(
+    React.useCallback(
+      (state) => state.projects.find((project) => project.id === activeProjectId)?.path ?? null,
+      [activeProjectId],
+    ),
+  );
+  const projectRoot = React.useMemo(() => {
+    const candidate = activeProjectPath || currentDirectory;
+    return candidate ? candidate.replace(/\\/g, '/').replace(/\/+$/, '') : null;
+  }, [activeProjectPath, currentDirectory]);
+  const projectTabs = useFilesViewTabsStore(
+    React.useCallback(
+      (state) => (projectRoot ? state.byRoot[projectRoot] : undefined),
+      [projectRoot],
+    ),
+  );
   const { getVisibleAgents } = useConfigStore();
   const searchFiles = useFileSearchStore((state) => state.searchFiles);
   const debouncedQuery = useDebouncedValue(searchQuery, 180);
@@ -67,55 +84,43 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
   const normalizedSearchQuery = (searchQuery ?? '').trim();
   const visibleAgents = normalizedSearchQuery.length > 0 ? agents : agents.slice(0, 2);
 
-  const fuzzyScore = React.useCallback((query: string, candidate: string): number | null => {
-    const q = query.trim().toLowerCase();
-    if (!q) {
-      return 0;
+  const recentFiles = React.useMemo(() => {
+    if (!projectRoot || !projectTabs) {
+      return [] as FileInfo[];
     }
 
-    const c = candidate.toLowerCase();
-    let score = 0;
-    let lastIndex = -1;
-    let consecutive = 0;
+    const ordered = [
+      projectTabs.selectedPath,
+      ...projectTabs.openPaths.slice().reverse(),
+    ].filter((value): value is string => typeof value === 'string' && value.length > 0);
 
-    for (let i = 0; i < q.length; i += 1) {
-      const ch = q[i];
-      if (!ch || ch === ' ') {
-        continue;
-      }
+    const seen = new Set<string>();
+    const queryLower = normalizedSearchQuery.toLowerCase();
+    const mapped = ordered
+      .filter((filePath) => {
+        if (seen.has(filePath)) return false;
+        seen.add(filePath);
+        const relative = filePath.startsWith(`${projectRoot}/`) ? filePath.slice(projectRoot.length + 1) : filePath;
+        if (!queryLower) return true;
+        return relative.toLowerCase().includes(queryLower);
+      })
+      .slice(0, 6)
+      .map((filePath) => {
+        const normalizedPath = filePath.replace(/\\/g, '/');
+        const name = normalizedPath.split('/').filter(Boolean).pop() || normalizedPath;
+        const relativePath = normalizedPath.startsWith(`${projectRoot}/`)
+          ? normalizedPath.slice(projectRoot.length + 1)
+          : normalizedPath;
+        return {
+          name,
+          path: normalizedPath,
+          relativePath,
+          extension: name.includes('.') ? name.split('.').pop()?.toLowerCase() : undefined,
+        } satisfies FileInfo;
+      });
 
-      const idx = c.indexOf(ch, lastIndex + 1);
-      if (idx === -1) {
-        return null;
-      }
-
-      const gap = idx - lastIndex - 1;
-      if (gap === 0) {
-        consecutive += 1;
-      } else {
-        consecutive = 0;
-      }
-
-      score += 10;
-      score += Math.max(0, 18 - idx);
-      score -= Math.max(0, gap);
-
-      if (idx === 0) {
-        score += 12;
-      } else {
-        const prev = c[idx - 1];
-        if (prev === '/' || prev === '_' || prev === '-' || prev === '.' || prev === ' ') {
-          score += 10;
-        }
-      }
-
-      score += consecutive > 0 ? 12 : 0;
-      lastIndex = idx;
-    }
-
-    score += Math.max(0, 24 - Math.round(c.length / 3));
-    return score;
-  }, []);
+    return mapped;
+  }, [normalizedSearchQuery, projectRoot, projectTabs]);
 
   React.useEffect(() => {
     const handlePointerDown = (event: MouseEvent | TouchEvent) => {
@@ -138,6 +143,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
   React.useEffect(() => {
     if (!currentDirectory) {
       setFiles([]);
+      setLoading(false);
       return;
     }
 
@@ -147,35 +153,27 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
       .replace(/^\/+/, '')
       .toLowerCase();
 
+    if (!normalizedQueryLower) {
+      setFiles([]);
+      setLoading(false);
+      return;
+    }
+
     let cancelled = false;
     setLoading(true);
 
     searchFiles(currentDirectory, normalizedQueryLower, 80, {
       includeHidden: showHidden,
       respectGitignore: !showGitignored,
+      type: 'file',
     })
       .then((hits) => {
         if (cancelled) {
           return;
         }
 
-        const ranked = normalizedQueryLower
-          ? hits
-            .map((file) => {
-              const label = file.relativePath || file.name || file.path;
-              const score = fuzzyScore(normalizedQueryLower, label);
-              return score === null ? null : { file, score, labelLength: label.length };
-            })
-            .filter(Boolean) as Array<{ file: FileInfo; score: number; labelLength: number }>
-          : hits.map((file) => ({ file, score: 0, labelLength: (file.relativePath || file.name || file.path).length }));
-
-        ranked.sort((a, b) => (
-          b.score - a.score
-          || a.labelLength - b.labelLength
-          || a.file.path.localeCompare(b.file.path)
-        ));
-
-        setFiles(ranked.slice(0, 15).map((entry) => entry.file));
+        const recentSet = new Set(recentFiles.map((file) => file.path));
+        setFiles(hits.filter((hit) => !recentSet.has(hit.path)).slice(0, 15));
       })
       .catch(() => {
         if (!cancelled) {
@@ -191,7 +189,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
     return () => {
       cancelled = true;
     };
-  }, [currentDirectory, debouncedQuery, fuzzyScore, searchFiles, showHidden, showGitignored]);
+  }, [currentDirectory, debouncedQuery, recentFiles, searchFiles, showHidden, showGitignored]);
 
   React.useEffect(() => {
     const visibleAgents = getVisibleAgents();
@@ -216,7 +214,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
     setSelectedIndex(0);
     setOverflowMap({});
     setMarqueeDurations({});
-  }, [files, visibleAgents.length]);
+  }, [files, recentFiles.length, visibleAgents.length]);
 
   React.useEffect(() => {
     itemRefs.current[selectedIndex]?.scrollIntoView({
@@ -292,11 +290,9 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
     };
   }, [selectedIndex]);
 
-  const handleFileSelect = React.useCallback(async (file: FileInfo) => {
-
-    await addServerFile(file.path, file.name);
+  const handleFileSelect = React.useCallback((file: FileInfo) => {
     onFileSelect(file);
-  }, [addServerFile, onFileSelect]);
+  }, [onFileSelect]);
 
   const handleAgentPick = React.useCallback((agentName: string) => {
     onAgentSelect?.(agentName);
@@ -309,7 +305,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
         return;
       }
 
-      const total = visibleAgents.length + files.length;
+      const total = visibleAgents.length + recentFiles.length + files.length;
       if (total === 0) {
         return;
       }
@@ -333,13 +329,16 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
           }
           return;
         }
-        const selectedFile = files[safeIndex - visibleAgents.length];
+        const fileIndex = safeIndex - visibleAgents.length;
+        const selectedFile = fileIndex < recentFiles.length
+          ? recentFiles[fileIndex]
+          : files[fileIndex - recentFiles.length];
         if (selectedFile) {
           handleFileSelect(selectedFile);
         }
       }
     }
-  }), [files, visibleAgents, selectedIndex, onClose, handleFileSelect, handleAgentPick]);
+  }), [files, recentFiles, visibleAgents, selectedIndex, onClose, handleFileSelect, handleAgentPick]);
 
   const getFileIcon = (file: FileInfo) => {
     const ext = file.extension?.toLowerCase();
@@ -440,11 +439,68 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
                 </div>
               );
             })}
-            {visibleAgents.length > 0 && files.length > 0 && (
+            {visibleAgents.length === 2 && normalizedSearchQuery.length === 0 && agents.length > 2 && (
+              <div className="px-3 py-1 typography-meta text-muted-foreground">
+                Type to search more agents
+              </div>
+            )}
+            {visibleAgents.length > 0 && (recentFiles.length > 0 || files.length > 0) && (
+              <div className="my-1 border-t border-border/60" />
+            )}
+            {recentFiles.map((file, index) => {
+              const rowIndex = visibleAgents.length + index;
+              const relativePath = file.relativePath || file.name;
+              const displayPath = truncatePathMiddle(relativePath, { maxLength: 60 });
+              const isSelected = selectedIndex === rowIndex;
+              const isOverflowing = overflowMap[rowIndex] ?? false;
+              const marqueeDuration = marqueeDurations[rowIndex] ?? 2.6;
+
+              return (
+                <div
+                  key={`recent-${file.path}`}
+                  ref={(el) => { itemRefs.current[rowIndex] = el; }}
+                  className={cn(
+                    "flex items-center gap-2 px-3 py-1.5 cursor-pointer typography-ui-label rounded-lg",
+                    isSelected && "bg-interactive-selection"
+                  )}
+                  onClick={() => handleFileSelect(file)}
+                  onMouseEnter={() => setSelectedIndex(rowIndex)}
+                >
+                  {getFileIcon(file)}
+                  <span
+                    ref={(el) => { labelRefs.current[rowIndex] = el; }}
+                    className="relative flex-1 min-w-0 overflow-hidden file-mention-marquee-container"
+                    style={isSelected ? {
+                      ['--file-mention-marquee-width' as string]: `${marqueeWidth}px`,
+                      ['--file-mention-marquee-duration' as string]: `${marqueeDuration}s`
+                    } : undefined}
+                    aria-label={relativePath}
+                  >
+                    <span
+                      ref={(el) => { measureRefs.current[rowIndex] = el; }}
+                      className="absolute invisible whitespace-nowrap pointer-events-none"
+                      aria-hidden
+                    >
+                      {relativePath}
+                    </span>
+                    {isOverflowing && isSelected ? (
+                      <span className="inline-block whitespace-nowrap file-mention-marquee">
+                        {relativePath}
+                      </span>
+                    ) : (
+                      <span className="block truncate">
+                        {displayPath}
+                      </span>
+                    )}
+                  </span>
+                </div>
+              );
+            })}
+            {recentFiles.length > 0 && files.length > 0 && (
               <div className="my-1 border-t border-border/60" />
             )}
             {files.map((file, index) => {
-              const rowIndex = visibleAgents.length + index;
+              const rowIndex = visibleAgents.length + recentFiles.length + index;
               const relativePath = file.relativePath || file.name;
               const displayPath = truncatePathMiddle(relativePath, { maxLength: 60 });
               const isSelected = selectedIndex === rowIndex;
@@ -497,12 +553,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
                 </React.Fragment>
               );
             })}
-            {visibleAgents.length === 2 && normalizedSearchQuery.length === 0 && agents.length > 2 && (
-              <div className="px-3 py-1 typography-meta text-muted-foreground">
-                Type to search more agents
-              </div>
-            )}
-            {files.length === 0 && visibleAgents.length === 0 && (
+            {files.length === 0 && recentFiles.length === 0 && visibleAgents.length === 0 && (
               <div className="px-3 py-2 typography-ui-label text-muted-foreground">
                 No matches found
               </div>

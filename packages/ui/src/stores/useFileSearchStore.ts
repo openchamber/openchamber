@@ -19,7 +19,7 @@ interface FileSearchStoreState {
     directory: string,
     query: string,
     limit?: number,
-    options?: { includeHidden?: boolean; respectGitignore?: boolean }
+    options?: { includeHidden?: boolean; respectGitignore?: boolean; type?: 'file' | 'directory' }
   ) => Promise<ProjectFileSearchHit[]>;
   invalidateDirectory: (directory?: string | null) => void;
 }
@@ -29,11 +29,12 @@ const buildCacheKey = (
   query: string,
   limit: number,
   includeHidden: boolean,
-  respectGitignore: boolean
+  respectGitignore: boolean,
+  type: 'file' | 'directory'
 ) => {
   const normalizedDirectory = directory.trim();
   const normalizedQuery = query.trim().toLowerCase();
-  return `${normalizedDirectory}::${normalizedQuery}::${limit}::${includeHidden ? '1' : '0'}::${respectGitignore ? '1' : '0'}`;
+  return `${normalizedDirectory}::${normalizedQuery}::${limit}::${includeHidden ? '1' : '0'}::${respectGitignore ? '1' : '0'}::${type}`;
 };
 
 export const useFileSearchStore = create<FileSearchStoreState>()(
@@ -51,7 +52,8 @@ export const useFileSearchStore = create<FileSearchStoreState>()(
         const normalizedQuery = typeof query === 'string' ? query.trim() : '';
         const includeHidden = Boolean(options?.includeHidden);
         const respectGitignore = options?.respectGitignore ?? true;
-        const key = buildCacheKey(normalizedDirectory, normalizedQuery, limit, includeHidden, respectGitignore);
+        const type = options?.type === 'directory' ? 'directory' : 'file';
+        const key = buildCacheKey(normalizedDirectory, normalizedQuery, limit, includeHidden, respectGitignore, type);
         const now = Date.now();
         const cached = get().cache[key];
 
@@ -70,6 +72,8 @@ export const useFileSearchStore = create<FileSearchStoreState>()(
             limit,
             includeHidden,
             respectGitignore,
+            dirs: type !== 'file',
+            type,
           })
           .then((files) => {
             set((state) => {

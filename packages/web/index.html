@@ -21,39 +21,275 @@
     <link rel="preload" href="https://cdn.jsdelivr.net/gh/mshaugh/nerdfont-webfonts@v3.3.0/build/fonts/FiraCodeNerdFont-Regular.woff2"
           as="font" type="font/woff2" crossorigin="anonymous">
 
-    <!-- Web app manifest (data URL to avoid nginx auth issues) -->
+    <!-- Web app manifest (endpoint-first with data URL fallback) -->
     <script>
       const baseUrl = location.origin;
-      const manifest = {
-        "name": "OpenChamber - AI Coding Assistant",
-        "short_name": "OpenChamber",
-        "description": "Web interface companion for OpenCode AI coding agent",
-        "start_url": baseUrl + "/",
-        "display": "standalone",
-        "background_color": "#151313",
-        "theme_color": "#edb449",
-        "orientation": "any",
-          "icons": [
-            { "src": baseUrl + "/pwa-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
-            { "src": baseUrl + "/pwa-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-            { "src": baseUrl + "/pwa-maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
-            { "src": baseUrl + "/pwa-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" },
-            { "src": baseUrl + "/apple-touch-icon-180x180.png", "sizes": "180x180", "type": "image/png", "purpose": "any" },
-            { "src": baseUrl + "/apple-touch-icon-152x152.png", "sizes": "152x152", "type": "image/png", "purpose": "any" },
-            { "src": baseUrl + "/favicon-32.png", "sizes": "32x32", "type": "image/png" },
-            { "src": baseUrl + "/favicon-16.png", "sizes": "16x16", "type": "image/png" }
-          ],
-        "categories": ["developer", "tools", "productivity"],
-        "lang": "en"
+      const defaultAppName = 'OpenChamber - AI Coding Assistant';
+      const defaultShortName = 'OpenChamber';
+      const pwaNameStorageKey = 'openchamber.pwaName';
+      const pwaRecentSessionsStorageKey = 'openchamber.pwaRecentSessions';
+
+      const normalizePwaName = (value, fallback) => {
+        if (typeof value !== 'string') {
+          return fallback;
+        }
+        const normalized = value.trim().replace(/\s+/g, ' ');
+        if (!normalized) {
+          return fallback;
+        }
+        return normalized.slice(0, 64);
       };
 
-      const manifestBlob = new Blob([JSON.stringify(manifest)], {type: 'application/manifest+json'});
-      const manifestURL = URL.createObjectURL(manifestBlob);
+      const truncate = (value, maxLength) => {
+        if (typeof value !== 'string') {
+          return '';
+        }
+        return value.length > maxLength ? value.slice(0, maxLength) : value;
+      };
 
-      const link = document.createElement('link');
-      link.rel = 'manifest';
-      link.href = manifestURL;
-      document.head.appendChild(link);
+      const getStoredInstallName = () => {
+        try {
+          const storedName = localStorage.getItem(pwaNameStorageKey);
+          return normalizePwaName(storedName, defaultAppName);
+        } catch {
+          return defaultAppName;
+        }
+      };
+
+      const setStoredInstallName = (value) => {
+        const normalizedName = normalizePwaName(value, '');
+        try {
+          if (normalizedName) {
+            localStorage.setItem(pwaNameStorageKey, normalizedName);
+          } else {
+            localStorage.removeItem(pwaNameStorageKey);
+          }
+        } catch {
+          return defaultAppName;
+        }
+        return normalizedName || defaultAppName;
+      };
+
+      const getQueryInstallNameOverride = () => {
+        try {
+          const params = new URLSearchParams(location.search);
+          const queryName = params.get('pwa_name') ?? params.get('app_name') ?? params.get('appName');
+          if (queryName === null) {
+            return null;
+          }
+
+          const normalizedQueryName = normalizePwaName(queryName, '');
+          if (normalizedQueryName) {
+            localStorage.setItem(pwaNameStorageKey, normalizedQueryName);
+            return normalizedQueryName;
+          }
+
+          localStorage.removeItem(pwaNameStorageKey);
+          return defaultAppName;
+        } catch {
+          return null;
+        }
+      };
+
+      const parseRecentSessionShortcuts = () => {
+        try {
+          const raw = localStorage.getItem(pwaRecentSessionsStorageKey);
+          if (!raw) {
+            return [];
+          }
+
+          const parsed = JSON.parse(raw);
+          if (!Array.isArray(parsed)) {
+            return [];
+          }
+
+          const seen = new Set();
+          const recentSessions = [];
+
+          for (const item of parsed) {
+            if (!item || typeof item !== 'object') {
+              continue;
+            }
+
+            const sessionId = typeof item.sessionId === 'string' ? item.sessionId.trim().slice(0, 160) : '';
+            if (!sessionId || seen.has(sessionId)) {
+              continue;
+            }
+
+            const fallbackTitle = `Session ${recentSessions.length + 1}`;
+            const title = truncate(normalizePwaName(item.title, fallbackTitle), 48);
+
+            seen.add(sessionId);
+            recentSessions.push({ sessionId, title });
+
+            if (recentSessions.length >= 3) {
+              break;
+            }
+          }
+
+          return recentSessions;
+        } catch {
+          return [];
+        }
+      };
+
+      const buildShortcuts = (recentSessions) => {
+        const shortcuts = [
+          {
+            name: 'Appearance Settings',
+            short_name: 'Settings',
+            description: 'Open appearance settings',
+            url: `${baseUrl}/?settings=appearance`,
+            icons: [{ src: `${baseUrl}/pwa-192.png`, sizes: '192x192', type: 'image/png' }],
+          },
+        ];
+
+        for (const session of recentSessions) {
+          const sessionTitle = truncate(session.title, 32);
+          shortcuts.push({
+            name: sessionTitle,
+            short_name: sessionTitle,
+            description: 'Open recent session',
+            url: `${baseUrl}/?session=${encodeURIComponent(session.sessionId)}`,
+            icons: [{ src: `${baseUrl}/pwa-192.png`, sizes: '192x192', type: 'image/png' }],
+          });
+        }
+
+        return shortcuts;
+      };
+
+      const buildManifest = (appName, recentSessions) => {
+        const shortName = appName === defaultAppName ? defaultShortName : truncate(appName, 30);
+        return {
+          name: appName,
+          short_name: shortName,
+          description: 'Web interface companion for OpenCode AI coding agent',
+          id: `${baseUrl}/`,
+          start_url: `${baseUrl}/`,
+          scope: `${baseUrl}/`,
+          display: 'standalone',
+          background_color: '#151313',
+          theme_color: '#edb449',
+          orientation: 'any',
+          icons: [
+            { src: `${baseUrl}/pwa-192.png`, sizes: '192x192', type: 'image/png', purpose: 'any' },
+            { src: `${baseUrl}/pwa-512.png`, sizes: '512x512', type: 'image/png', purpose: 'any' },
+            { src: `${baseUrl}/pwa-maskable-192.png`, sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
+            { src: `${baseUrl}/pwa-maskable-512.png`, sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
+            { src: `${baseUrl}/apple-touch-icon-180x180.png`, sizes: '180x180', type: 'image/png', purpose: 'any' },
+            { src: `${baseUrl}/apple-touch-icon-152x152.png`, sizes: '152x152', type: 'image/png', purpose: 'any' },
+            { src: `${baseUrl}/favicon-32.png`, sizes: '32x32', type: 'image/png' },
+            { src: `${baseUrl}/favicon-16.png`, sizes: '16x16', type: 'image/png' },
+          ],
+          shortcuts: buildShortcuts(recentSessions),
+          categories: ['developer', 'tools', 'productivity'],
+          lang: 'en',
+        };
+      };
+
+      const buildManifestEndpointUrl = (installNameOverride = null) => {
+        const params = new URLSearchParams();
+        if (typeof installNameOverride === 'string') {
+          params.set('appName', installNameOverride);
+        }
+        const search = params.toString();
+        return `${baseUrl}/manifest.webmanifest${search ? `?${search}` : ''}`;
+      };
+
+      const manifestLink = document.createElement('link');
+      manifestLink.rel = 'manifest';
+      document.head.appendChild(manifestLink);
+
+      let activeManifestBlobUrl = null;
+      let manifestRequestVersion = 0;
+
+      const setManifestFromBlob = (manifest) => {
+        if (activeManifestBlobUrl) {
+          URL.revokeObjectURL(activeManifestBlobUrl);
+        }
+
+        const manifestBlob = new Blob([JSON.stringify(manifest)], { type: 'application/manifest+json' });
+        activeManifestBlobUrl = URL.createObjectURL(manifestBlob);
+        manifestLink.href = activeManifestBlobUrl;
+      };
+
+      const setManifestFromEndpoint = (manifestUrl) => {
+        if (activeManifestBlobUrl) {
+          URL.revokeObjectURL(activeManifestBlobUrl);
+          activeManifestBlobUrl = null;
+        }
+        manifestLink.href = manifestUrl;
+      };
+
+      const canUseManifestEndpoint = async (manifestUrl, requestVersion) => {
+        if (typeof fetch !== 'function') {
+          return false;
+        }
+
+        const controller = typeof AbortController === 'function' ? new AbortController() : null;
+        const timeoutId = setTimeout(() => {
+          controller?.abort();
+        }, 1500);
+
+        try {
+          const response = await fetch(manifestUrl, {
+            credentials: 'include',
+            cache: 'no-store',
+            headers: {
+              Accept: 'application/manifest+json, application/json;q=0.9, */*;q=0.1',
+            },
+            ...(controller ? { signal: controller.signal } : {}),
+          });
+
+          if (requestVersion !== manifestRequestVersion || !response.ok) {
+            return false;
+          }
+
+          const contentType = response.headers.get('content-type') || '';
+          return /manifest|json/i.test(contentType);
+        } catch {
+          return false;
+        } finally {
+          clearTimeout(timeoutId);
+        }
+      };
+
+      const updateManifest = async (installNameOverride = null) => {
+        const resolvedFallbackName = typeof installNameOverride === 'string' ? installNameOverride : getStoredInstallName();
+        const recentSessions = parseRecentSessionShortcuts();
+        const manifest = buildManifest(resolvedFallbackName, recentSessions);
+        const manifestUrl = buildManifestEndpointUrl(installNameOverride);
+        const requestVersion = ++manifestRequestVersion;
+
+        const useEndpoint = await canUseManifestEndpoint(manifestUrl, requestVersion);
+        if (requestVersion !== manifestRequestVersion) {
+          return;
+        }
+
+        if (useEndpoint) {
+          setManifestFromEndpoint(manifestUrl);
+          return;
+        }
+
+        setManifestFromBlob(manifest);
+      };
+
+      const refreshManifestFromStorage = () => {
+        void updateManifest();
+      };
+
+      const initialInstallNameOverride = getQueryInstallNameOverride();
+      void updateManifest(initialInstallNameOverride);
+
+      window.__OPENCHAMBER_GET_PWA_INSTALL_NAME__ = () => getStoredInstallName();
+      window.__OPENCHAMBER_SET_PWA_INSTALL_NAME__ = (value) => {
+        const resolvedName = setStoredInstallName(value);
+        void updateManifest(resolvedName);
+        return resolvedName;
+      };
+      window.__OPENCHAMBER_UPDATE_PWA_MANIFEST__ = () => {
+        refreshManifestFromStorage();
+      };
     </script>
 
     <script>

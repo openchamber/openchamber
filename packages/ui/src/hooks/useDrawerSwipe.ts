@@ -1,6 +1,6 @@
 import React from 'react';
 import { animate } from 'motion/react';
-import { useDrawer } from '@/contexts/DrawerContext';
+import { useOptionalDrawer } from '@/contexts/DrawerContext';
 
 type DrawerSwipeOptions = {
   edgeSide?: 'left' | 'right';
@@ -11,7 +11,7 @@ type DrawerSwipeOptions = {
 };
 
 export function useDrawerSwipe(options: DrawerSwipeOptions = {}) {
-  const drawer = useDrawer();
+  const drawer = useOptionalDrawer();
   const {
     edgeSide,
     strictHorizontalIntent = false,
@@ -25,13 +25,15 @@ export function useDrawerSwipe(options: DrawerSwipeOptions = {}) {
   const isDraggingDrawerRef = React.useRef<'left' | 'right' | null>(null);
 
   const handleTouchStart = React.useCallback((e: React.TouchEvent) => {
+    if (!drawer) return;
     touchStartXRef.current = e.touches[0].clientX;
     touchStartYRef.current = e.touches[0].clientY;
     isHorizontalSwipeRef.current = null;
     isDraggingDrawerRef.current = null;
-  }, []);
+  }, [drawer]);
 
   const handleTouchMove = React.useCallback((e: React.TouchEvent) => {
+    if (!drawer) return;
     const currentX = e.touches[0].clientX;
     const currentY = e.touches[0].clientY;
     const deltaX = currentX - touchStartXRef.current;
@@ -106,6 +108,7 @@ export function useDrawerSwipe(options: DrawerSwipeOptions = {}) {
   }, [activationDistance, drawer, edgeSide, horizontalIntentRatio, onlyWhenClosed, strictHorizontalIntent]);
 
   const handleTouchEnd = React.useCallback((e: React.TouchEvent) => {
+    if (!drawer) return;
     if (isHorizontalSwipeRef.current !== true) return;
 
     const endX = e.changedTouches[0].clientX;

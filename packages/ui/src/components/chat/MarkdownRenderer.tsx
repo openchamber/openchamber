@@ -19,6 +19,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useDeviceInfo } from '@/lib/device';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import type { EditorAPI } from '@/lib/api/types';
 
 const withStableStringId = <T extends object>(value: T, id: string): T => {
   const existingPrimitive = (value as Record<symbol, unknown>)[Symbol.toPrimitive];
@@ -966,10 +967,14 @@ const useFileReferenceInteractions = ({
   containerRef,
   effectiveDirectory,
   readFile,
+  editor,
+  preferRuntimeEditor,
 }: {
   containerRef: React.RefObject<HTMLDivElement | null>;
   effectiveDirectory: string;
   readFile?: (path: string) => Promise<{ content: string; path: string }>;
+  editor?: EditorAPI;
+  preferRuntimeEditor?: boolean;
 }) => {
   const validationCacheRef = React.useRef<Map<string, boolean>>(new Map());
   const inFlightValidationsRef = React.useRef<Map<string, Promise<boolean>>>(new Map());
@@ -1126,6 +1131,19 @@ const useFileReferenceInteractions = ({
       }
 
       const contextDirectory = getContextDirectory(effectiveDirectory, resolved.resolvedPath);
+      if (preferRuntimeEditor && editor) {
+        await editor.openFile(
+          resolved.resolvedPath,
+          Number.isFinite(resolved.line ?? Number.NaN)
+            ? Math.max(1, Math.trunc(resolved.line as number))
+            : undefined,
+          Number.isFinite(resolved.column ?? Number.NaN)
+            ? Math.max(1, Math.trunc(resolved.column as number))
+            : undefined,
+        );
+        return true;
+      }
+
       const uiStore = useUIStore.getState();
       if (Number.isFinite(resolved.line ?? Number.NaN)) {
         uiStore.openContextFileAtLine(
@@ -1206,7 +1224,7 @@ const useFileReferenceInteractions = ({
       container.removeEventListener('click', handleClick);
       container.removeEventListener('keydown', handleKeyDown);
     };
-  }, [containerRef, effectiveDirectory, readFile]);
+  }, [containerRef, editor, effectiveDirectory, preferRuntimeEditor, readFile]);
 };
 
 const useMermaidInlineInteractions = ({
@@ -1312,12 +1330,18 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
   variant = 'assistant',
   onShowPopup,
 }) => {
-  const { files } = useRuntimeAPIs();
+  const { files, editor, runtime } = useRuntimeAPIs();
   const streamdownContainerRef = React.useRef<HTMLDivElement>(null);
   const effectiveDirectory = useEffectiveDirectory() ?? '';
   const mermaidBlocks = React.useMemo(() => extractMermaidBlocks(content), [content]);
   useMermaidInlineInteractions({ containerRef: streamdownContainerRef, mermaidBlocks, onShowPopup });
-  useFileReferenceInteractions({ containerRef: streamdownContainerRef, effectiveDirectory, readFile: files.readFile });
+  useFileReferenceInteractions({
+    containerRef: streamdownContainerRef,
+    effectiveDirectory,
+    readFile: files.readFile,
+    editor,
+    preferRuntimeEditor: runtime.isVSCode,
+  });
 
   const shikiThemes = useMarkdownShikiThemes();
   const streamdownPlugins = useStreamdownPlugins(shikiThemes);
@@ -1373,7 +1397,7 @@ export const SimpleMarkdownRenderer: React.FC<{
   onShowPopup,
   allowMermaidWheelZoom = false,
 }) => {
-  const { files } = useRuntimeAPIs();
+  const { files, editor, runtime } = useRuntimeAPIs();
   const renderedContent = React.useMemo(
     () => (stripFrontmatter ? stripLeadingFrontmatter(content) : content),
     [content, stripFrontmatter],
@@ -1387,7 +1411,13 @@ export const SimpleMarkdownRenderer: React.FC<{
     onShowPopup,
     allowWheelZoom: allowMermaidWheelZoom,
   });
-  useFileReferenceInteractions({ containerRef: streamdownContainerRef, effectiveDirectory, readFile: files.readFile });
+  useFileReferenceInteractions({
+    containerRef: streamdownContainerRef,
+    effectiveDirectory,
+    readFile: files.readFile,
+    editor,
+    preferRuntimeEditor: runtime.isVSCode,
+  });
 
   const shikiThemes = useMarkdownShikiThemes();
   const streamdownPlugins = useStreamdownPlugins(shikiThemes);

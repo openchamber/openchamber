@@ -131,7 +131,12 @@ export const ScrollShadow = React.forwardRef<HTMLDivElement, ScrollShadowProps>(
 
       el.addEventListener("scroll", handleScroll, { passive: true });
       resizeObserver?.observe(el);
-      mutationObserver?.observe(el, { childList: true, subtree: true });
+      mutationObserver?.observe(el, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        characterData: true,
+      });
 
       return () => {
         if (rafId !== null) cancelAnimationFrame(rafId);

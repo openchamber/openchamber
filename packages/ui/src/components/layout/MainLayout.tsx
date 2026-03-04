@@ -156,13 +156,24 @@ export const MainLayout: React.FC = () => {
         }
     }, [isRightSidebarOpen, isMobile]);
 
-    // Trigger update check 3 seconds after mount (for both mobile and desktop)
+    // Trigger initial update check shortly after mount, then every hour.
     const checkForUpdates = useUpdateStore((state) => state.checkForUpdates);
     React.useEffect(() => {
-        const timer = setTimeout(() => {
+        const initialDelayMs = 3000;
+        const periodicIntervalMs = 60 * 60 * 1000;
+
+        const timer = window.setTimeout(() => {
             checkForUpdates();
-        }, 3000);
-        return () => clearTimeout(timer);
+        }, initialDelayMs);
+
+        const interval = window.setInterval(() => {
+            checkForUpdates();
+        }, periodicIntervalMs);
+
+        return () => {
+            window.clearTimeout(timer);
+            window.clearInterval(interval);
+        };
     }, [checkForUpdates]);
 
     React.useEffect(() => {

@@ -43,8 +43,21 @@ export const ProjectsPage: React.FC = () => {
   const [isUploadingIcon, setIsUploadingIcon] = React.useState(false);
   const [isRemovingCustomIcon, setIsRemovingCustomIcon] = React.useState(false);
   const [isDiscoveringIcon, setIsDiscoveringIcon] = React.useState(false);
+  const [pendingRemoveImageIcon, setPendingRemoveImageIcon] = React.useState(false);
+  const [pendingUploadIconFile, setPendingUploadIconFile] = React.useState<File | null>(null);
+  const [pendingUploadIconPreviewUrl, setPendingUploadIconPreviewUrl] = React.useState<string | null>(null);
   const [previewImageFailed, setPreviewImageFailed] = React.useState(false);
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
+
+  const clearPendingUploadIcon = React.useCallback(() => {
+    setPendingUploadIconFile(null);
+    setPendingUploadIconPreviewUrl((previousUrl) => {
+      if (previousUrl) {
+        URL.revokeObjectURL(previousUrl);
+      }
+      return null;
+    });
+  }, []);
 
   const selectedProjectRef = React.useMemo(() => {
     if (!selectedProject) {
@@ -65,70 +78,138 @@ export const ProjectsPage: React.FC = () => {
     setIcon(selectedProject.icon ?? null);
     setColor(selectedProject.color ?? null);
     setIconBackground(selectedProject.iconBackground ?? null);
+    setPendingRemoveImageIcon(false);
+    clearPendingUploadIcon();
     setPreviewImageFailed(false);
-  }, [selectedProject]);
+  }, [selectedProject, clearPendingUploadIcon]);
+
+  React.useEffect(() => {
+    return () => {
+      clearPendingUploadIcon();
+    };
+  }, [clearPendingUploadIcon]);
 
   const hasChanges = Boolean(selectedProject) && (
     name.trim() !== (selectedProject?.label ?? '').trim()
     || icon !== (selectedProject?.icon ?? null)
     || color !== (selectedProject?.color ?? null)
     || iconBackground !== (selectedProject?.iconBackground ?? null)
+    || pendingRemoveImageIcon
+    || Boolean(pendingUploadIconFile)
   );
 
-  const handleSave = React.useCallback(() => {
+  const handleSave = React.useCallback(async () => {
     if (!selectedProject) return;
-    updateProjectMeta(selectedProject.id, { label: name.trim(), icon, color, iconBackground });
-  }, [color, icon, iconBackground, name, selectedProject, updateProjectMeta]);
+
+    if (pendingUploadIconFile) {
+      setIsUploadingIcon(true);
+      const uploadResult = await uploadProjectIcon(selectedProject.id, pendingUploadIconFile);
+      setIsUploadingIcon(false);
+      if (!uploadResult.ok) {
+        toast.error(uploadResult.error || 'Failed to upload project icon');
+        return;
+      }
+      toast.success('Project icon updated');
+      clearPendingUploadIcon();
+      setPendingRemoveImageIcon(false);
+    }
+
+    const willRemoveImageIcon = pendingRemoveImageIcon && Boolean(selectedProject.iconImage);
+
+    if (willRemoveImageIcon) {
+      setIsRemovingCustomIcon(true);
+      const removeResult = await removeProjectIcon(selectedProject.id);
+      setIsRemovingCustomIcon(false);
+      if (!removeResult.ok) {
+        toast.error(removeResult.error || 'Failed to remove project icon');
+        return;
+      }
+      toast.success('Project icon removed');
+      setPendingRemoveImageIcon(false);
+      setIconBackground(null);
+    }
+
+    updateProjectMeta(selectedProject.id, {
+      label: name.trim(),
+      icon,
+      color,
+      iconBackground: willRemoveImageIcon ? null : iconBackground,
+    });
+  }, [
+    color,
+    icon,
+    iconBackground,
+    name,
+    pendingUploadIconFile,
+    pendingRemoveImageIcon,
+    clearPendingUploadIcon,
+    uploadProjectIcon,
+    removeProjectIcon,
+    selectedProject,
+    updateProjectMeta,
+  ]);
 
   const currentColorVar = color ? (COLOR_MAP[color] ?? null) : null;
-  const hasImageIcon = Boolean(selectedProject?.iconImage);
+  const hasStoredImageIcon = Boolean(selectedProject?.iconImage);
+  const hasPendingUploadImageIcon = Boolean(pendingUploadIconFile && pendingUploadIconPreviewUrl);
   const hasCustomIcon = selectedProject?.iconImage?.source === 'custom';
-  const iconPreviewUrl = selectedProject && hasImageIcon && !previewImageFailed
-    ? getProjectIconImageUrl(selectedProject)
+  const effectiveHasImageIcon = (hasStoredImageIcon && !pendingRemoveImageIcon) || hasPendingUploadImageIcon;
+  const hasRemovableImageIcon = effectiveHasImageIcon;
+  const iconPreviewUrl = !previewImageFailed
+    ? (hasPendingUploadImageIcon
+      ? pendingUploadIconPreviewUrl
+      : (selectedProject && hasStoredImageIcon && !pendingRemoveImageIcon
+        ? getProjectIconImageUrl(selectedProject)
+        : null))
     : null;
 
-  const handleUploadIcon = React.useCallback(async (file: File | null) => {
+  const handleUploadIcon = React.useCallback((file: File | null) => {
     if (!selectedProject || !file || isUploadingIcon) {
       return;
     }
 
-    setIsUploadingIcon(true);
-    void uploadProjectIcon(selectedProject.id, file)
-      .then((result) => {
-        if (!result.ok) {
-          toast.error(result.error || 'Failed to upload project icon');
-          return;
-        }
-        toast.success('Project icon updated');
-      })
-      .finally(() => {
-        setIsUploadingIcon(false);
-      });
-  }, [isUploadingIcon, selectedProject, uploadProjectIcon]);
+    setPendingRemoveImageIcon(false);
+    setPreviewImageFailed(false);
+    setPendingUploadIconFile(file);
+    setPendingUploadIconPreviewUrl((previousUrl) => {
+      if (previousUrl) {
+        URL.revokeObjectURL(previousUrl);
+      }
+      return URL.createObjectURL(file);
+    });
+  }, [isUploadingIcon, selectedProject]);
 
-  const handleRemoveCustomIcon = React.useCallback(async () => {
-    if (!selectedProject || !hasCustomIcon || isRemovingCustomIcon) {
+  const handleRemoveImageIcon = React.useCallback(() => {
+    if (!selectedProject || !hasRemovableImageIcon || isRemovingCustomIcon) {
       return;
     }
 
-    setIsRemovingCustomIcon(true);
-    void removeProjectIcon(selectedProject.id)
-      .then((result) => {
-        if (!result.ok) {
-          toast.error(result.error || 'Failed to remove project icon');
-          return;
-        }
-        toast.success('Custom project icon removed');
-      })
-      .finally(() => {
-        setIsRemovingCustomIcon(false);
-      });
-  }, [hasCustomIcon, isRemovingCustomIcon, removeProjectIcon, selectedProject]);
+    if (hasPendingUploadImageIcon) {
+      clearPendingUploadIcon();
+    }
+    if (hasStoredImageIcon) {
+      setPendingRemoveImageIcon(true);
+    } else {
+      setPendingRemoveImageIcon(false);
+    }
+    setPreviewImageFailed(false);
+  }, [
+    clearPendingUploadIcon,
+    hasPendingUploadImageIcon,
+    hasRemovableImageIcon,
+    hasStoredImageIcon,
+    isRemovingCustomIcon,
+    selectedProject,
+  ]);
 
   const handleDiscoverIcon = React.useCallback(async () => {
     if (!selectedProject || isDiscoveringIcon) {
       return;
     }
+
+    clearPendingUploadIcon();
+    setPendingRemoveImageIcon(false);
+    setPreviewImageFailed(false);
 
     setIsDiscoveringIcon(true);
     void discoverProjectIcon(selectedProject.id)
@@ -146,7 +227,7 @@ export const ProjectsPage: React.FC = () => {
       .finally(() => {
         setIsDiscoveringIcon(false);
       });
-  }, [discoverProjectIcon, isDiscoveringIcon, selectedProject]);
+  }, [clearPendingUploadIcon, discoverProjectIcon, isDiscoveringIcon, selectedProject]);
 
   if (!selectedProject) {
     return (
@@ -279,7 +360,7 @@ export const ProjectsPage: React.FC = () => {
                   );
                 })}
               </div>
-              {hasImageIcon && iconPreviewUrl && (
+              {effectiveHasImageIcon && iconPreviewUrl && (
                 <div className="mt-2 flex items-center gap-2">
                   <span className="typography-meta text-muted-foreground">Preview</span>
                   <span className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border/60 bg-[var(--surface-elevated)] p-1">
@@ -298,7 +379,7 @@ export const ProjectsPage: React.FC = () => {
                   </span>
                 </div>
               )}
-              {hasImageIcon && (
+              {effectiveHasImageIcon && (
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   <input
                     type="color"
@@ -349,15 +430,26 @@ export const ProjectsPage: React.FC = () => {
                     </ButtonSmall>
                   </>
                 )}
-                {hasCustomIcon && (
+                {hasRemovableImageIcon && (
                   <ButtonSmall
                     size="xs"
                     className="!font-normal"
                     variant="outline"
-                    onClick={() => void handleRemoveCustomIcon()}
+                    onClick={() => void handleRemoveImageIcon()}
                     disabled={isRemovingCustomIcon}
                   >
-                    {isRemovingCustomIcon ? 'Removing...' : 'Remove Custom Icon'}
+                    {isRemovingCustomIcon ? 'Removing...' : 'Remove Project Icon'}
+                  </ButtonSmall>
+                )}
+                {pendingRemoveImageIcon && (
+                  <ButtonSmall
+                    size="xs"
+                    className="!font-normal"
+                    variant="outline"
+                    onClick={() => setPendingRemoveImageIcon(false)}
+                    disabled={isRemovingCustomIcon}
+                  >
+                    Undo Remove
                   </ButtonSmall>
                 )}
               </div>
@@ -368,7 +460,7 @@ export const ProjectsPage: React.FC = () => {
           <div className="mt-0.5 px-2 py-1">
             <ButtonSmall
               onClick={handleSave}
-              disabled={!hasChanges || name.trim().length === 0}
+              disabled={!hasChanges || name.trim().length === 0 || isUploadingIcon || isRemovingCustomIcon}
               size="xs"
               className="!font-normal"
             >

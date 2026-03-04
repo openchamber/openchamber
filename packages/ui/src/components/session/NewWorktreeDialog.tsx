@@ -45,7 +45,7 @@ import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { generateBranchSlug } from '@/lib/git/branchNameGenerator';
 import { opencodeClient } from '@/lib/opencode/client';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import { useGitBranches } from '@/stores/useGitStore';
+import { useGitBranches, useGitStore } from '@/stores/useGitStore';
 import { GitHubIntegrationDialog } from './GitHubIntegrationDialog';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
@@ -195,7 +195,7 @@ export function NewWorktreeDialog({
   onOpenChange,
   onWorktreeCreated,
 }: NewWorktreeDialogProps) {
-  const { github } = useRuntimeAPIs();
+  const { github, git } = useRuntimeAPIs();
   const isMobile = useUIStore((state) => state.isMobile);
   const githubAuthStatus = useGitHubAuthStore((state) => state.status);
   const githubAuthChecked = useGitHubAuthStore((state) => state.hasChecked);
@@ -230,6 +230,14 @@ export function NewWorktreeDialog({
   
   // Use cached branches from Git store (instant if already fetched)
   const branches = useGitBranches(projectDirectory);
+  const isLoadingBranches = useGitStore((state) => state.isLoadingBranches);
+  const fetchBranches = useGitStore((state) => state.fetchBranches);
+
+  React.useEffect(() => {
+    if (!open || !projectDirectory || !git) return;
+    if (branches?.all) return;
+    void fetchBranches(projectDirectory, git);
+  }, [open, projectDirectory, git, branches?.all, fetchBranches]);
   
   // Compute local and remote branch lists (same pattern as GitView)
   const localBranches = React.useMemo(() => {
@@ -1052,7 +1060,11 @@ Nice-to-have:
                   onClose={() => setExistingBranchPickerOpen(false)}
                 >
                   <div className="space-y-4">
-                    {localBranches.length === 0 && remoteBranches.length === 0 ? (
+                    {isLoadingBranches ? (
+                      <div className="px-2 py-8 text-center typography-small text-muted-foreground">
+                        Loading branches...
+                      </div>
+                    ) : localBranches.length === 0 && remoteBranches.length === 0 ? (
                       <div className="px-2 py-8 text-center typography-small text-muted-foreground">
                         No branches found
                       </div>
@@ -1267,7 +1279,11 @@ Nice-to-have:
                   onClose={() => setSourceBranchPickerOpen(false)}
                 >
                   <div className="space-y-4">
-                    {localBranches.length === 0 && remoteBranches.length === 0 ? (
+                    {isLoadingBranches ? (
+                      <div className="px-2 py-8 text-center typography-small text-muted-foreground">
+                        Loading branches...
+                      </div>
+                    ) : localBranches.length === 0 && remoteBranches.length === 0 ? (
                       <div className="px-2 py-8 text-center typography-small text-muted-foreground">
                         No branches found
                       </div>
@@ -1438,7 +1454,11 @@ Nice-to-have:
                       <SelectValue placeholder="Choose a branch..." />
                     </SelectTrigger>
                   <SelectContent className="max-h-[280px] max-w-[320px]">
-                    {localBranches.length === 0 && remoteBranches.length === 0 ? (
+                    {isLoadingBranches ? (
+                      <div className="px-2 py-4 text-center typography-small text-muted-foreground">
+                        Loading branches...
+                      </div>
+                    ) : localBranches.length === 0 && remoteBranches.length === 0 ? (
                       <div className="px-2 py-4 text-center typography-small text-muted-foreground">
                         No branches found
                       </div>
@@ -1598,7 +1618,11 @@ Nice-to-have:
                       <SelectValue placeholder="Select source branch..." />
                     </SelectTrigger>
                     <SelectContent className="max-h-[280px] max-w-[320px]">
-                      {localBranches.length === 0 && remoteBranches.length === 0 ? (
+                      {isLoadingBranches ? (
+                        <div className="px-2 py-4 text-center typography-small text-muted-foreground">
+                          Loading branches...
+                        </div>
+                      ) : localBranches.length === 0 && remoteBranches.length === 0 ? (
                         <div className="px-2 py-4 text-center typography-small text-muted-foreground">
                           No branches found
                         </div>

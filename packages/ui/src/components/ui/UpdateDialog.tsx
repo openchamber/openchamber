@@ -114,6 +114,9 @@ type InstallWebUpdateResult = {
   autoRestart?: boolean;
 };
 
+const WEB_UPDATE_POLL_INTERVAL_MS = 2000;
+const WEB_UPDATE_MAX_WAIT_MS = 10 * 60 * 1000;
+
 async function installWebUpdate(): Promise<InstallWebUpdateResult> {
   try {
     const response = await fetch('/api/openchamber/update-install', {
@@ -148,7 +151,11 @@ async function isServerReachable(): Promise<boolean> {
   }
 }
 
-async function waitForUpdateApplied(previousVersion?: string, maxAttempts = 40, intervalMs = 2000): Promise<boolean> {
+async function waitForUpdateApplied(
+  previousVersion?: string,
+  maxAttempts = Math.ceil(WEB_UPDATE_MAX_WAIT_MS / WEB_UPDATE_POLL_INTERVAL_MS),
+  intervalMs = WEB_UPDATE_POLL_INTERVAL_MS,
+): Promise<boolean> {
   for (let i = 0; i < maxAttempts; i++) {
     try {
       const response = await fetch('/api/openchamber/update-check', {
@@ -268,7 +275,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
       window.location.reload();
     } else {
       setWebUpdateState('error');
-      setWebError('Update did not apply. Refresh and try again, or run: openchamber update');
+      setWebError('Update is taking longer than expected. Wait a bit and refresh, or run: openchamber update');
     }
   }, [info?.currentVersion]);
 

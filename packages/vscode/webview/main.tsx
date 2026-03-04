@@ -452,24 +452,6 @@ const handleLocalApiRequest = async (url: URL, init?: RequestInit) => {
     return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
   }
 
-  if (pathname.startsWith('/api/fs/search')) {
-    const directory = url.searchParams.get('directory') || '';
-    const query = url.searchParams.get('q') || '';
-    const limitParam = url.searchParams.get('limit');
-    const limit = limitParam ? Number(limitParam) : undefined;
-    const resolvedLimit = Number.isFinite(limit) ? limit : undefined;
-    const includeHidden = url.searchParams.get('includeHidden') === 'true';
-    const respectGitignore = url.searchParams.get('respectGitignore') !== 'false';
-    const data = await sendBridgeMessage('api:fs:search', {
-      directory,
-      query,
-      limit: resolvedLimit,
-      includeHidden,
-      respectGitignore,
-    });
-    return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-  }
-
   if (pathname.startsWith('/api/fs/mkdir')) {
     const body = init?.body ? JSON.parse(init.body as string) : {};
     const data = await sendBridgeMessage('api:fs:mkdir', { path: body.path });
@@ -492,6 +474,18 @@ const handleLocalApiRequest = async (url: URL, init?: RequestInit) => {
       ? (body as { uris: unknown[] }).uris.filter((value): value is string => typeof value === 'string')
       : [];
     const data = await sendBridgeMessage('api:files/drop', { uris });
+    return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  if (pathname.startsWith('/api/vscode/save-image') && method === 'POST') {
+    const body = init?.body ? JSON.parse(init.body as string) : {};
+    const fileName = typeof (body as { fileName?: unknown }).fileName === 'string'
+      ? (body as { fileName: string }).fileName
+      : undefined;
+    const dataUrl = typeof (body as { dataUrl?: unknown }).dataUrl === 'string'
+      ? (body as { dataUrl: string }).dataUrl
+      : undefined;
+    const data = await sendBridgeMessage('api:files/save-image', { fileName, dataUrl });
     return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
   }
 

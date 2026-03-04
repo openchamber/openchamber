@@ -16,28 +16,29 @@ interface MenuPosition {
   show: boolean;
 }
 
-const MENU_TRANSITION_MS = 200;
+const DESKTOP_MENU_SIDE_MARGIN_PX = 8;
+const DESKTOP_MENU_FALLBACK_WIDTH_PX = 280;
 
 export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerRef }) => {
   const [position, setPosition] = React.useState<MenuPosition>({ x: 0, y: 0, show: false });
   const [selectedText, setSelectedText] = React.useState('');
   const [isDragging, setIsDragging] = React.useState(false);
-  const [isClosing, setIsClosing] = React.useState(false);
   const [isOpening, setIsOpening] = React.useState(false);
   const menuRef = React.useRef<HTMLDivElement>(null);
+  const menuWidthRef = React.useRef(DESKTOP_MENU_FALLBACK_WIDTH_PX);
   const pendingSelectionRef = React.useRef<{ text: string; rect: DOMRect } | null>(null);
-  const hideTimeoutRef = React.useRef<number | null>(null);
   const openRafRef = React.useRef<number | null>(null);
+  const isMenuVisibleRef = React.useRef(false);
   const createSession = useSessionStore((state) => state.createSession);
   const setPendingInputText = useSessionStore((state) => state.setPendingInputText);
   const isMobile = useUIStore((state) => state.isMobile);
 
   React.useEffect(() => {
+    isMenuVisibleRef.current = position.show;
+  }, [position.show]);
+
+  React.useEffect(() => {
     return () => {
-      if (hideTimeoutRef.current !== null) {
-        window.clearTimeout(hideTimeoutRef.current);
-        hideTimeoutRef.current = null;
-      }
       if (openRafRef.current !== null) {
         window.cancelAnimationFrame(openRafRef.current);
         openRafRef.current = null;
@@ -46,40 +47,51 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
   }, []);
 
   const hideMenu = React.useCallback(() => {
-    if (hideTimeoutRef.current !== null) {
-      window.clearTimeout(hideTimeoutRef.current);
-      hideTimeoutRef.current = null;
+    pendingSelectionRef.current = null;
+
+    if (!isMenuVisibleRef.current) {
+      return;
     }
+
     if (openRafRef.current !== null) {
       window.cancelAnimationFrame(openRafRef.current);
       openRafRef.current = null;
     }
     setIsOpening(false);
 
-    setIsClosing(true);
-    hideTimeoutRef.current = window.setTimeout(() => {
-      setPosition((prev) => ({ ...prev, show: false }));
-      setSelectedText('');
-      pendingSelectionRef.current = null;
-      setIsClosing(false);
-      hideTimeoutRef.current = null;
-    }, MENU_TRANSITION_MS);
+    setPosition((prev) => ({ ...prev, show: false }));
+    setSelectedText('');
+    isMenuVisibleRef.current = false;
+  }, []);
+
+  const getDesktopClampedX = React.useCallback((anchorX: number) => {
+    if (typeof window === 'undefined') {
+      return anchorX;
+    }
+
+    const viewportWidth = window.innerWidth;
+    const menuWidth = menuWidthRef.current;
+    const halfWidth = menuWidth / 2;
+    const minX = DESKTOP_MENU_SIDE_MARGIN_PX + halfWidth;
+    const maxX = viewportWidth - DESKTOP_MENU_SIDE_MARGIN_PX - halfWidth;
+
+    if (minX > maxX) {
+      return viewportWidth / 2;
+    }
+
+    return Math.min(Math.max(anchorX, minX), maxX);
   }, []);
 
   const showMenu = React.useCallback(() => {
     if (!pendingSelectionRef.current) return;
 
-    if (hideTimeoutRef.current !== null) {
-      window.clearTimeout(hideTimeoutRef.current);
-      hideTimeoutRef.current = null;
-    }
-    setIsClosing(false);
-
     const { text, rect } = pendingSelectionRef.current;
     const shouldAnimateIn = !position.show;
 
     // Position menu above the selection
-    const menuX = rect.left + rect.width / 2;
+    const menuX = isMobile
+      ? rect.left + rect.width / 2
+      : getDesktopClampedX(rect.left + rect.width / 2);
     const menuY = rect.top - 10;
 
     setSelectedText(text);
@@ -88,6 +100,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
       y: menuY,
       show: true,
     });
+    isMenuVisibleRef.current = true;
 
     if (shouldAnimateIn) {
       setIsOpening(true);
@@ -99,7 +112,42 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
         openRafRef.current = null;
       });
     }
-  }, [position.show]);
+  }, [getDesktopClampedX, isMobile, position.show]);
+
+  React.useLayoutEffect(() => {
+    if (!position.show || isMobile || !menuRef.current) {
+      return;
+    }
+
+    const measuredWidth = menuRef.current.offsetWidth;
+    if (!Number.isFinite(measuredWidth) || measuredWidth <= 0 || measuredWidth === menuWidthRef.current) {
+      return;
+    }
+
+    menuWidthRef.current = measuredWidth;
+    setPosition((prev) => ({
+      ...prev,
+      x: getDesktopClampedX(prev.x),
+    }));
+  }, [getDesktopClampedX, isMobile, position.show]);
+
+  React.useEffect(() => {
+    if (!position.show || isMobile) {
+      return;
+    }
+
+    const handleViewportResize = () => {
+      setPosition((prev) => ({
+        ...prev,
+        x: getDesktopClampedX(prev.x),
+      }));
+    };
+
+    window.addEventListener('resize', handleViewportResize);
+    return () => {
+      window.removeEventListener('resize', handleViewportResize);
+    };
+  }, [getDesktopClampedX, isMobile, position.show]);
 
   const handleSelectionChange = React.useCallback(() => {
     const selection = window.getSelection();
@@ -247,11 +295,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
           'px-3 py-2',
           'safe-area-bottom',
           'transition-[opacity,transform] duration-200 ease-out will-change-[opacity,transform]',
-          isClosing
-            ? 'opacity-0 translate-y-[4px] pointer-events-none'
-            : isOpening
-              ? 'opacity-0 translate-y-[4px]'
-              : 'opacity-100 translate-y-0'
+          isOpening ? 'opacity-0 translate-y-[4px]' : 'opacity-100 translate-y-0'
         )}
         style={{
           paddingBottom: 'calc(0.5rem + env(safe-area-inset-bottom, 0px))',
@@ -319,16 +363,12 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
     >
       <div
         className={cn(
-          'flex items-center gap-1',
+          'flex items-center gap-1 whitespace-nowrap',
           'rounded-lg border border-[var(--interactive-border)]',
           'bg-[var(--surface-elevated)] shadow-none',
           'px-1.5 py-1',
           'transition-[opacity,transform] duration-200 ease-out will-change-[opacity,transform]',
-          isClosing
-            ? 'opacity-0 translate-y-[4px] pointer-events-none'
-            : isOpening
-              ? 'opacity-0 translate-y-[4px]'
-              : 'opacity-100 translate-y-0'
+          isOpening ? 'opacity-0 translate-y-[4px]' : 'opacity-100 translate-y-0'
         )}
       >
         <button
@@ -344,7 +384,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
           type="button"
         >
           <RiAddLine className="h-4 w-4" />
-          <span>Add to chat</span>
+          <span className="whitespace-nowrap">Add to chat</span>
         </button>
       
         <div className="w-px h-4 bg-[var(--interactive-border)]" />
@@ -362,7 +402,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
           type="button"
         >
           <RiChatNewLine className="h-4 w-4" />
-          <span>New session</span>
+          <span className="whitespace-nowrap">New session</span>
         </button>
       </div>
     </div>,

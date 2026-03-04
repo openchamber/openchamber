@@ -103,22 +103,16 @@ const ShortcutsSectionContent: React.FC = () => {
 // Visual section: Theme Mode, Font Size, Spacing, Corner Radius, Input Bar Offset (mobile), Nav Rail
 const VisualSectionContent: React.FC = () => {
     const isVSCode = isVSCodeRuntime();
-    const visibleSettings: Array<'theme' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'cornerRadius' | 'inputBarOffset' | 'terminalQuickKeys' | 'navRail' | 'mermaidRendering' | 'userMessageRendering' | 'stickyUserHeader'> = [
+    return <OpenChamberVisualSettings visibleSettings={[
         'theme',
+        'pwaInstallName',
         'fontSize',
         'terminalFontSize',
         'spacing',
         'cornerRadius',
         'inputBarOffset',
-        'terminalQuickKeys',
-        'navRail',
-    ];
-
-    if (isVSCode) {
-        visibleSettings.push('mermaidRendering', 'userMessageRendering', 'stickyUserHeader');
-    }
-
-    return <OpenChamberVisualSettings visibleSettings={visibleSettings} />;
+        ...(!isVSCode ? ['terminalQuickKeys' as const, 'navRail' as const] : []),
+    ]} />;
 };
 
 // Chat section: Default Tool Output, User message rendering, Diff layout, Mobile status bar, Show reasoning traces, Queue mode, Persist draft

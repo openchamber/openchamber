@@ -2286,91 +2286,43 @@ class OpencodeService {
       limit?: number;
       includeHidden?: boolean;
       respectGitignore?: boolean;
+      dirs?: boolean;
+      type?: 'file' | 'directory';
     }
   ): Promise<ProjectFileSearchHit[]> {
-    const desktopFiles = getDesktopFilesApi();
     const directory = typeof options?.directory === 'string' && options.directory.trim().length > 0
       ? options.directory.trim()
       : this.currentDirectory;
     const normalizedDirectory = directory ? normalizeFsPath(directory) : null;
+    const scopedClient = directory ? this.getScopedApiClient(directory) : this.client;
 
-    if (desktopFiles) {
-      try {
-        const results = await desktopFiles.search({
-          directory: directory || '',
-          query,
-          maxResults: options?.limit,
-          includeHidden: options?.includeHidden,
-          respectGitignore: options?.respectGitignore,
-        });
+    try {
+      const response = await scopedClient.find.files({
+        query,
+        limit: typeof options?.limit === 'number' && Number.isFinite(options.limit) ? options.limit : undefined,
+        dirs: options?.dirs === false || options?.type === 'file' ? 'false' : 'true',
+        type: options?.type,
+      });
 
-        if (!Array.isArray(results)) {
-          return [];
-        }
+      const items = Array.isArray(response?.data) ? response.data : [];
+      return items.map<ProjectFileSearchHit>((item) => {
+        const normalizedRelativePath = normalizeFsPath(item);
+        const name = normalizedRelativePath.split('/').filter(Boolean).pop() || normalizedRelativePath;
+        const normalizedPath = normalizedDirectory
+          ? normalizeFsPath(`${normalizedDirectory}/${normalizedRelativePath}`)
+          : normalizeFsPath(normalizedRelativePath);
 
-        return results.map<ProjectFileSearchHit>((file) => {
-          const normalizedPath = normalizeFsPath(file.path);
-          const name = normalizedPath.split('/').filter(Boolean).pop() || normalizedPath;
-          const relativePath = (() => {
-            if (file.preview && file.preview.length > 0 && typeof file.preview[0] === 'string') {
-              return normalizeFsPath(file.preview[0]);
-            }
-            if (normalizedDirectory && normalizedPath.startsWith(normalizedDirectory)) {
-              const suffix = normalizedPath.slice(normalizedDirectory.length).replace(/^\/+/, '');
-              return suffix || name;
-            }
-            return name;
-          })();
-
-          return {
-            name,
-            path: normalizedPath,
-            relativePath,
-            extension: name.includes('.') ? name.split('.').pop()?.toLowerCase() : undefined,
-          };
-        });
-      } catch (error) {
-        console.error('Failed to search files:', error);
-        throw error;
-      }
+        return {
+          name,
+          path: normalizedPath,
+          relativePath: normalizedRelativePath,
+          extension: name.includes('.') ? name.split('.').pop()?.toLowerCase() : undefined,
+        };
+      });
+    } catch (error) {
+      console.error('Failed to search files:', error);
+      throw error;
     }
-
-    const params = new URLSearchParams();
-    if (directory && directory.length > 0) {
-      params.set('directory', directory);
-    }
-    if (typeof query === 'string') {
-      params.set('q', query);
-    }
-    if (typeof options?.limit === 'number' && Number.isFinite(options.limit)) {
-      params.set('limit', String(options.limit));
-    }
-    if (options?.includeHidden) {
-      params.set('includeHidden', 'true');
-    }
-    if (options?.respectGitignore === false) {
-      params.set('respectGitignore', 'false');
-    }
-
-    const searchUrl = `${this.baseUrl}/fs/search${params.toString() ? `?${params.toString()}` : ''}`;
-    const response = await fetch(searchUrl, {
-      method: 'GET',
-      headers: {
-        Accept: 'application/json'
-      }
-    });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      const message = typeof error.error === 'string' ? error.error : 'Failed to search files';
-      throw new Error(message);
-    }
-
-    const result = await response.json();
-    if (!result || !Array.isArray(result.files)) {
-      return [];
-    }
-    return result.files as ProjectFileSearchHit[];
   }
 
   async getFilesystemHome(): Promise<string | null> {

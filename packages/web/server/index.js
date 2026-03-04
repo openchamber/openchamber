@@ -65,8 +65,6 @@ const OPENCHAMBER_VERSION = (() => {
   return 'unknown';
 })();
 const fsPromises = fs.promises;
-const DEFAULT_FILE_SEARCH_LIMIT = 60;
-const MAX_FILE_SEARCH_LIMIT = 400;
 const FILE_SEARCH_MAX_CONCURRENCY = 5;
 const FILE_SEARCH_EXCLUDED_DIRS = new Set([
   'node_modules',
@@ -1762,6 +1760,20 @@ const sanitizeProjects = (input) => {
   return result;
 };
 
+const DEFAULT_PWA_APP_NAME = 'OpenChamber - AI Coding Assistant';
+const PWA_APP_NAME_MAX_LENGTH = 64;
+
+const normalizePwaAppName = (value, fallback = '') => {
+  if (typeof value !== 'string') {
+    return fallback;
+  }
+  const normalized = value.trim().replace(/\s+/g, ' ');
+  if (!normalized) {
+    return fallback;
+  }
+  return normalized.slice(0, PWA_APP_NAME_MAX_LENGTH);
+};
+
 const sanitizeSettingsUpdate = (payload) => {
   if (!payload || typeof payload !== 'object') {
     return {};
@@ -1980,9 +1992,12 @@ const sanitizeSettingsUpdate = (payload) => {
     const trimmed = candidate.gitModelId.trim();
     result.gitModelId = trimmed.length > 0 ? trimmed : undefined;
   }
+  if (typeof candidate.pwaAppName === 'string') {
+    result.pwaAppName = normalizePwaAppName(candidate.pwaAppName, undefined);
+  }
   if (typeof candidate.toolCallExpansion === 'string') {
     const mode = candidate.toolCallExpansion.trim();
-    if (mode === 'collapsed' || mode === 'activity' || mode === 'detailed') {
+    if (mode === 'collapsed' || mode === 'activity' || mode === 'detailed' || mode === 'changes') {
       result.toolCallExpansion = mode;
     }
   }
@@ -2230,10 +2245,12 @@ const formatSettingsResponse = (settings) => {
   const approved = normalizeStringArray(settings.approvedDirectories);
   const bookmarks = normalizeStringArray(settings.securityScopedBookmarks);
   const hasNamedTunnelToken = typeof settings?.namedTunnelToken === 'string' && settings.namedTunnelToken.trim().length > 0;
+  const pwaAppName = normalizePwaAppName(settings?.pwaAppName, '');
 
   return {
     ...sanitized,
     hasNamedTunnelToken,
+    ...(pwaAppName ? { pwaAppName } : {}),
     approvedDirectories: approved,
     securityScopedBookmarks: bookmarks,
     pinnedDirectories: normalizeStringArray(settings.pinnedDirectories),
@@ -12402,53 +12419,6 @@ async function main(options = {}) {
     }
   });
 
-  app.get('/api/fs/search', async (req, res) => {
-    const rawRoot = typeof req.query.root === 'string' && req.query.root.trim().length > 0
-      ? req.query.root.trim()
-      : typeof req.query.directory === 'string' && req.query.directory.trim().length > 0
-        ? req.query.directory.trim()
-        : os.homedir();
-  const rawQuery = typeof req.query.q === 'string' ? req.query.q : '';
-  const includeHidden = req.query.includeHidden === 'true';
-  const respectGitignore = req.query.respectGitignore !== 'false';
-  const limitParam = typeof req.query.limit === 'string' ? Number.parseInt(req.query.limit, 10) : undefined;
-    const parsedLimit = Number.isFinite(limitParam) ? Number(limitParam) : DEFAULT_FILE_SEARCH_LIMIT;
-    const limit = Math.max(1, Math.min(parsedLimit, MAX_FILE_SEARCH_LIMIT));
-
-    try {
-      const resolvedRoot = path.resolve(normalizeDirectoryPath(rawRoot));
-      const stats = await fsPromises.stat(resolvedRoot);
-      if (!stats.isDirectory()) {
-        return res.status(400).json({ error: 'Specified root is not a directory' });
-      }
-
-      const files = await searchFilesystemFiles(resolvedRoot, {
-        limit,
-        query: rawQuery || '',
-        includeHidden,
-        respectGitignore,
-      });
-      res.json({
-        root: resolvedRoot,
-        count: files.length,
-        files
-      });
-    } catch (error) {
-      console.error('Failed to search filesystem:', error);
-      const err = error;
-      if (err && typeof err === 'object' && 'code' in err) {
-        const code = err.code;
-        if (code === 'ENOENT') {
-          return res.status(404).json({ error: 'Directory not found' });
-        }
-        if (code === 'EACCES') {
-          return res.status(403).json({ error: 'Access to directory denied' });
-        }
-      }
-      res.status(500).json({ error: (error && error.message) || 'Failed to search files' });
-    }
-  });
-
   let ptyProviderPromise = null;
   const getPtyProvider = async () => {
     if (ptyProviderPromise) {
@@ -13183,6 +13153,231 @@ async function main(options = {}) {
         }
       },
     }));
+      const recentPwaSessionsCache = new Map();
+
+      const getRecentPwaSessionShortcuts = async (req) => {
+        const now = Date.now();
+
+        const resolvedDirectoryResult = await resolveProjectDirectory(req).catch(() => ({ directory: null }));
+        const preferredDirectory = typeof resolvedDirectoryResult?.directory === 'string'
+          ? resolvedDirectoryResult.directory
+          : null;
+
+        const cacheKey = preferredDirectory ? `dir:${preferredDirectory}` : 'global';
+        const cached = recentPwaSessionsCache.get(cacheKey);
+        if (cached && now - cached.at < 5000) {
+          return cached.data;
+        }
+
+        const normalizeShortcutTitle = (value, fallback) => {
+          const normalized = normalizePwaAppName(value, fallback);
+          return normalized.length > 48 ? normalized.slice(0, 48) : normalized;
+        };
+
+        const toFiniteNumber = (value) => {
+          if (typeof value === 'number' && Number.isFinite(value)) {
+            return value;
+          }
+          if (typeof value === 'string' && value.trim().length > 0) {
+            const parsed = Number(value);
+            if (Number.isFinite(parsed)) {
+              return parsed;
+            }
+          }
+          return null;
+        };
+
+        const normalizeDirectory = (value) => {
+          if (typeof value !== 'string') {
+            return '';
+          }
+          const trimmed = value.trim();
+          if (!trimmed) {
+            return '';
+          }
+          const normalized = trimmed.replace(/\\/g, '/');
+          if (normalized === '/') {
+            return '/';
+          }
+          return normalized.length > 1 ? normalized.replace(/\/+$/, '') : normalized;
+        };
+
+        const sessionUpdatedAt = (session) => {
+          const time = session && typeof session.time === 'object' ? session.time : null;
+          return toFiniteNumber(time?.updated) ?? toFiniteNumber(time?.created) ?? 0;
+        };
+
+        const filterSessionsByDirectory = (sessions, directory) => {
+          const normalizedDirectory = normalizeDirectory(directory);
+          if (!normalizedDirectory) {
+            return sessions;
+          }
+
+          const prefix = normalizedDirectory === '/' ? '/' : `${normalizedDirectory}/`;
+          return sessions.filter((session) => {
+            const sessionDirectory = normalizeDirectory(session?.directory);
+            if (!sessionDirectory) {
+              return false;
+            }
+            return sessionDirectory === normalizedDirectory || (prefix !== '/' && sessionDirectory.startsWith(prefix));
+          });
+        };
+
+        const listSessions = async (directory) => {
+          const query = (() => {
+            if (typeof directory !== 'string' || directory.length === 0) {
+              return '';
+            }
+            const preparedDirectory = process.platform === 'win32'
+              ? directory.replace(/\//g, '\\')
+              : directory;
+            return `?directory=${encodeURIComponent(preparedDirectory)}`;
+          })();
+
+          const response = await fetch(buildOpenCodeUrl(`/session${query}`, ''), {
+            method: 'GET',
+            headers: {
+              Accept: 'application/json',
+              ...getOpenCodeAuthHeaders(),
+            },
+            signal: AbortSignal.timeout(2500),
+          });
+
+          if (!response.ok) {
+            return [];
+          }
+
+          const payload = await response.json().catch(() => null);
+          return Array.isArray(payload) ? payload : [];
+        };
+
+        try {
+          let payload = [];
+
+          if (preferredDirectory) {
+            const scopedPayload = await listSessions(preferredDirectory);
+            const filteredScopedPayload = filterSessionsByDirectory(scopedPayload, preferredDirectory);
+
+            if (filteredScopedPayload.length > 0) {
+              payload = filteredScopedPayload;
+            } else {
+              const globalPayload = await listSessions(null);
+              const filteredGlobalPayload = filterSessionsByDirectory(globalPayload, preferredDirectory);
+              payload = filteredGlobalPayload.length > 0 ? filteredGlobalPayload : globalPayload;
+            }
+          } else {
+            payload = await listSessions(null);
+          }
+
+          const seen = new Set();
+          const rows = [];
+
+          for (const item of payload) {
+            if (!item || typeof item !== 'object') {
+              continue;
+            }
+
+            const id = typeof item.id === 'string' ? item.id.trim().slice(0, 160) : '';
+            if (!id || seen.has(id)) {
+              continue;
+            }
+
+            seen.add(id);
+            const title = normalizeShortcutTitle(item.title, `Session ${rows.length + 1}`);
+            const updatedAt = sessionUpdatedAt(item);
+
+            rows.push({ id, title, updatedAt });
+          }
+
+          rows.sort((a, b) => b.updatedAt - a.updatedAt);
+
+          const shortcuts = rows.slice(0, 3).map((session) => ({
+            name: session.title,
+            short_name: session.title.length > 32 ? session.title.slice(0, 32) : session.title,
+            description: 'Open recent session',
+            url: `/?session=${encodeURIComponent(session.id)}`,
+            icons: [{ src: '/pwa-192.png', sizes: '192x192', type: 'image/png' }],
+          }));
+
+          recentPwaSessionsCache.set(cacheKey, { at: now, data: shortcuts });
+          return shortcuts;
+        } catch {
+          recentPwaSessionsCache.set(cacheKey, { at: now, data: [] });
+          return [];
+        }
+      };
+
+      app.get('/manifest.webmanifest', async (req, res) => {
+        const hasQueryOverride =
+          typeof req.query?.pwa_name === 'string'
+          || typeof req.query?.app_name === 'string'
+          || typeof req.query?.appName === 'string';
+
+        let queryValueRaw = '';
+        if (typeof req.query?.pwa_name === 'string') {
+          queryValueRaw = req.query.pwa_name;
+        } else if (typeof req.query?.app_name === 'string') {
+          queryValueRaw = req.query.app_name;
+        } else if (typeof req.query?.appName === 'string') {
+          queryValueRaw = req.query.appName;
+        }
+
+        const queryOverrideName = normalizePwaAppName(queryValueRaw, '');
+
+        let storedName = '';
+        try {
+          const settings = await readSettingsFromDiskMigrated();
+          storedName = normalizePwaAppName(settings?.pwaAppName, '');
+        } catch {
+          storedName = '';
+        }
+
+        const appName = hasQueryOverride
+          ? (queryOverrideName || DEFAULT_PWA_APP_NAME)
+          : (storedName || DEFAULT_PWA_APP_NAME);
+
+        const shortName = appName.length > 30 ? appName.slice(0, 30) : appName;
+        const recentSessionShortcuts = await getRecentPwaSessionShortcuts(req);
+
+        const manifest = {
+          name: appName,
+          short_name: shortName,
+          description: 'Web interface companion for OpenCode AI coding agent',
+          id: '/',
+          start_url: '/',
+          scope: '/',
+          display: 'standalone',
+          background_color: '#151313',
+          theme_color: '#edb449',
+          orientation: 'any',
+          icons: [
+            { src: '/pwa-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+            { src: '/pwa-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+            { src: '/pwa-maskable-192.png', sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
+            { src: '/pwa-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
+            { src: '/apple-touch-icon-180x180.png', sizes: '180x180', type: 'image/png', purpose: 'any' },
+            { src: '/apple-touch-icon-152x152.png', sizes: '152x152', type: 'image/png', purpose: 'any' },
+            { src: '/favicon-32.png', sizes: '32x32', type: 'image/png' },
+            { src: '/favicon-16.png', sizes: '16x16', type: 'image/png' },
+          ],
+          shortcuts: [
+            {
+              name: 'Appearance Settings',
+              short_name: 'Settings',
+              description: 'Open appearance settings',
+              url: '/?settings=appearance',
+              icons: [{ src: '/pwa-192.png', sizes: '192x192', type: 'image/png' }],
+            },
+            ...recentSessionShortcuts,
+          ],
+          categories: ['developer', 'tools', 'productivity'],
+          lang: 'en',
+        };
+
+        res.setHeader('Cache-Control', 'no-store, must-revalidate');
+        res.type('application/manifest+json');
+        res.send(JSON.stringify(manifest));
+      });
 
     // Alias for PWA manifest (.webmanifest redirect → /site.webmanifest)
     app.get('/manifest.webmanifest', (req, res) => {
@@ -13247,12 +13442,16 @@ async function main(options = {}) {
               const bootstrapTtlMs = settings?.tunnelBootstrapTtlMs === null
                 ? null
                 : normalizeTunnelBootstrapTtlMs(settings?.tunnelBootstrapTtlMs);
-              tunnelAuthController.issueBootstrapToken({ ttlMs: bootstrapTtlMs });
-            }
-            if (onTunnelReady) {
-              if (tunnelUrl) {
-                onTunnelReady(tunnelUrl);
+              const bootstrapToken = tunnelAuthController.issueBootstrapToken({ ttlMs: bootstrapTtlMs });
+              const connectUrl = `${tunnelUrl.replace(/\/$/, '')}/connect?t=${encodeURIComponent(bootstrapToken.token)}`;
+              if (onTunnelReady) {
+                onTunnelReady(tunnelUrl, connectUrl);
+              } else {
+                console.log(`\n🌐 Tunnel URL: ${connectUrl}`);
+                console.log('🔑 One-time connect link (expires after first use)\n');
               }
+            } else if (onTunnelReady) {
+              onTunnelReady(tunnelUrl, null);
             }
           } catch (error) {
             console.error(`Failed to start Cloudflare tunnel: ${error.message}`);

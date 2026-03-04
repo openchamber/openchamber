@@ -60,8 +60,21 @@ export const ProjectEditDialog: React.FC<ProjectEditDialogProps> = ({
   const [isUploadingIcon, setIsUploadingIcon] = React.useState(false);
   const [isRemovingCustomIcon, setIsRemovingCustomIcon] = React.useState(false);
   const [isDiscoveringIcon, setIsDiscoveringIcon] = React.useState(false);
+  const [pendingRemoveImageIcon, setPendingRemoveImageIcon] = React.useState(false);
+  const [pendingUploadIconFile, setPendingUploadIconFile] = React.useState<File | null>(null);
+  const [pendingUploadIconPreviewUrl, setPendingUploadIconPreviewUrl] = React.useState<string | null>(null);
   const [previewImageFailed, setPreviewImageFailed] = React.useState(false);
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
+
+  const clearPendingUploadIcon = React.useCallback(() => {
+    setPendingUploadIconFile(null);
+    setPendingUploadIconPreviewUrl((previousUrl) => {
+      if (previousUrl) {
+        URL.revokeObjectURL(previousUrl);
+      }
+      return null;
+    });
+  }, []);
 
   React.useEffect(() => {
     if (open) {
@@ -69,69 +82,124 @@ export const ProjectEditDialog: React.FC<ProjectEditDialogProps> = ({
       setIcon(initialIcon);
       setColor(initialColor);
       setIconBackground(normalizeIconBackground(initialIconBackground));
+      setPendingRemoveImageIcon(false);
+      clearPendingUploadIcon();
+      setPreviewImageFailed(false);
     }
-  }, [open, projectName, initialIcon, initialColor, initialIconBackground]);
+  }, [open, projectName, initialIcon, initialColor, initialIconBackground, clearPendingUploadIcon]);
 
-  const handleSave = () => {
+  React.useEffect(() => {
+    return () => {
+      clearPendingUploadIcon();
+    };
+  }, [clearPendingUploadIcon]);
+
+  const handleSave = async () => {
     const trimmed = name.trim();
     if (!trimmed) return;
-    onSave({ label: trimmed, icon, color, iconBackground: normalizeIconBackground(iconBackground) });
+
+    if (pendingUploadIconFile) {
+      setIsUploadingIcon(true);
+      const uploadResult = await uploadProjectIcon(projectId, pendingUploadIconFile);
+      setIsUploadingIcon(false);
+      if (!uploadResult.ok) {
+        toast.error(uploadResult.error || 'Failed to upload project icon');
+        return;
+      }
+      toast.success('Project icon updated');
+      clearPendingUploadIcon();
+      setPendingRemoveImageIcon(false);
+    }
+
+    const willRemoveImageIcon = pendingRemoveImageIcon && hasStoredImageIcon;
+
+    if (willRemoveImageIcon) {
+      setIsRemovingCustomIcon(true);
+      const result = await removeProjectIcon(projectId);
+      setIsRemovingCustomIcon(false);
+      if (!result.ok) {
+        toast.error(result.error || 'Failed to remove project icon');
+        return;
+      }
+      toast.success('Project icon removed');
+      setPendingRemoveImageIcon(false);
+      setIconBackground(null);
+    }
+
+    onSave({
+      label: trimmed,
+      icon,
+      color,
+      iconBackground: normalizeIconBackground(willRemoveImageIcon ? null : iconBackground),
+    });
     onOpenChange(false);
   };
 
   const currentColorVar = color ? (PROJECT_COLOR_MAP[color] ?? null) : null;
-  const hasImageIcon = Boolean(currentIconImage);
+  const hasStoredImageIcon = Boolean(currentIconImage);
+  const hasPendingUploadImageIcon = Boolean(pendingUploadIconFile && pendingUploadIconPreviewUrl);
   const hasCustomIcon = currentIconImage?.source === 'custom';
-  const iconPreviewUrl = hasImageIcon && !previewImageFailed
-    ? getProjectIconImageUrl({ id: projectId, iconImage: currentIconImage ?? null })
+  const effectiveHasImageIcon = (hasStoredImageIcon && !pendingRemoveImageIcon) || hasPendingUploadImageIcon;
+  const hasRemovableImageIcon = effectiveHasImageIcon;
+  const iconPreviewUrl = !previewImageFailed
+    ? (hasPendingUploadImageIcon
+      ? pendingUploadIconPreviewUrl
+      : (hasStoredImageIcon && !pendingRemoveImageIcon
+        ? getProjectIconImageUrl({ id: projectId, iconImage: currentIconImage ?? null })
+        : null))
     : null;
 
   React.useEffect(() => {
     setPreviewImageFailed(false);
   }, [projectId, currentIconImage?.updatedAt]);
 
-  const handleUploadIcon = React.useCallback(async (file: File | null) => {
+  const handleUploadIcon = React.useCallback((file: File | null) => {
     if (!projectId || !file || isUploadingIcon) {
       return;
     }
 
-    setIsUploadingIcon(true);
-    void uploadProjectIcon(projectId, file)
-      .then((result) => {
-        if (!result.ok) {
-          toast.error(result.error || 'Failed to upload project icon');
-          return;
-        }
-        toast.success('Project icon updated');
-      })
-      .finally(() => {
-        setIsUploadingIcon(false);
-      });
-  }, [isUploadingIcon, projectId, uploadProjectIcon]);
+    setPendingRemoveImageIcon(false);
+    setPreviewImageFailed(false);
+    setPendingUploadIconFile(file);
+    setPendingUploadIconPreviewUrl((previousUrl) => {
+      if (previousUrl) {
+        URL.revokeObjectURL(previousUrl);
+      }
+      return URL.createObjectURL(file);
+    });
+  }, [isUploadingIcon, projectId]);
 
-  const handleRemoveCustomIcon = React.useCallback(async () => {
-    if (!projectId || !hasCustomIcon || isRemovingCustomIcon) {
+  const handleRemoveImageIcon = React.useCallback(() => {
+    if (!projectId || !hasRemovableImageIcon || isRemovingCustomIcon) {
       return;
     }
 
-    setIsRemovingCustomIcon(true);
-    void removeProjectIcon(projectId)
-      .then((result) => {
-        if (!result.ok) {
-          toast.error(result.error || 'Failed to remove project icon');
-          return;
-        }
-        toast.success('Custom project icon removed');
-      })
-      .finally(() => {
-        setIsRemovingCustomIcon(false);
-      });
-  }, [hasCustomIcon, isRemovingCustomIcon, projectId, removeProjectIcon]);
+    if (hasPendingUploadImageIcon) {
+      clearPendingUploadIcon();
+    }
+    if (hasStoredImageIcon) {
+      setPendingRemoveImageIcon(true);
+    } else {
+      setPendingRemoveImageIcon(false);
+    }
+    setPreviewImageFailed(false);
+  }, [
+    clearPendingUploadIcon,
+    hasPendingUploadImageIcon,
+    hasRemovableImageIcon,
+    hasStoredImageIcon,
+    isRemovingCustomIcon,
+    projectId,
+  ]);
 
   const handleDiscoverIcon = React.useCallback(async () => {
     if (!projectId || isDiscoveringIcon) {
       return;
     }
+
+    clearPendingUploadIcon();
+    setPendingRemoveImageIcon(false);
+    setPreviewImageFailed(false);
 
     setIsDiscoveringIcon(true);
     void discoverProjectIcon(projectId)
@@ -149,7 +217,7 @@ export const ProjectEditDialog: React.FC<ProjectEditDialogProps> = ({
       .finally(() => {
         setIsDiscoveringIcon(false);
       });
-  }, [discoverProjectIcon, isDiscoveringIcon, projectId]);
+  }, [clearPendingUploadIcon, discoverProjectIcon, isDiscoveringIcon, projectId]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -273,7 +341,7 @@ export const ProjectEditDialog: React.FC<ProjectEditDialogProps> = ({
                 );
               })}
             </div>
-            {hasImageIcon && iconPreviewUrl && (
+            {effectiveHasImageIcon && iconPreviewUrl && (
               <div className="flex items-center gap-2 pt-1">
                 <span className="typography-meta text-muted-foreground">Preview</span>
                 <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border/60 bg-[var(--surface-elevated)] p-1">
@@ -303,15 +371,20 @@ export const ProjectEditDialog: React.FC<ProjectEditDialogProps> = ({
                   </Button>
                 </>
               )}
-              {hasCustomIcon && (
-                <Button size="sm" variant="outline" onClick={() => void handleRemoveCustomIcon()} disabled={isRemovingCustomIcon}>
-                  {isRemovingCustomIcon ? 'Removing...' : 'Remove Custom Icon'}
+              {hasRemovableImageIcon && (
+                <Button size="sm" variant="outline" onClick={() => void handleRemoveImageIcon()} disabled={isRemovingCustomIcon}>
+                  {isRemovingCustomIcon ? 'Removing...' : 'Remove Project Icon'}
+                </Button>
+              )}
+              {pendingRemoveImageIcon && (
+                <Button size="sm" variant="outline" onClick={() => setPendingRemoveImageIcon(false)} disabled={isRemovingCustomIcon}>
+                  Undo Remove
                 </Button>
               )}
             </div>
           </div>
 
-          {hasImageIcon && (
+          {effectiveHasImageIcon && (
             <div className="min-w-0 space-y-2">
               <label className="typography-ui-label font-medium text-foreground">
                 Icon Background
@@ -342,7 +415,7 @@ export const ProjectEditDialog: React.FC<ProjectEditDialogProps> = ({
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button onClick={handleSave} disabled={!name.trim()}>
+          <Button onClick={handleSave} disabled={!name.trim() || isUploadingIcon || isRemovingCustomIcon}>
             Save
           </Button>
         </DialogFooter>
