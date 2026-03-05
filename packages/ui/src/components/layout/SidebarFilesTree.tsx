@@ -48,6 +48,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { FileDropOverlay } from '@/components/ui/FileDropOverlay';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -55,6 +56,8 @@ import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useDeviceInfo } from '@/lib/device';
+import { isTauriShell } from '@/lib/desktop';
+import { collectDesktopDroppedPaths, readDesktopDroppedFile } from '@/lib/desktopDroppedFiles';
 import { useFileSearchStore } from '@/stores/useFileSearchStore';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -299,6 +302,7 @@ const FileRow: React.FC<FileRowProps> = ({
 
   return (
     <div
+      data-sidebar-upload-dir={isDir ? node.path : undefined}
       className={cn('group relative flex items-center', isDragging && 'opacity-50')}
       onContextMenu={handleContextMenu}
       onDragEnter={isDir ? handleUploadDragEnter : undefined}
@@ -510,6 +514,8 @@ export const SidebarFilesTree: React.FC = () => {
   const [isUploading, setIsUploading] = React.useState(false);
   const [uploadPlaceholders, setUploadPlaceholders] = React.useState<UploadPlaceholder[]>([]);
   const dragCounterRef = React.useRef(0);
+  const treeSectionRef = React.useRef<HTMLElement>(null);
+  const nativeDragInsideTreeRef = React.useRef(false);
   const failedUploadCleanupTimeoutIdsRef = React.useRef<Set<number>>(new Set());
 
   const [activeDndNode, setActiveDndNode] = React.useState<FileNode | null>(null);
@@ -551,6 +557,7 @@ export const SidebarFilesTree: React.FC = () => {
   const canDelete = Boolean(files.delete);
   const canReveal = runtime.isDesktop && Boolean(files.revealPath);
   const canUploadFiles = Boolean(files.uploadFile || files.writeFile);
+  const hasNativeDesktopDrop = isTauriShell();
 
   const pointerSensor = useSensor(PointerSensor, {
     activationConstraint: { distance: 8 },
@@ -1080,7 +1087,204 @@ export const SidebarFilesTree: React.FC = () => {
       .filter((file): file is File => Boolean(file));
   }, []);
 
+  const resolveTreeDropPoint = React.useCallback((x: number | undefined, y: number | undefined) => {
+    if (typeof x !== 'number' || typeof y !== 'number') {
+      return null;
+    }
+
+    const treeSection = treeSectionRef.current;
+    if (!treeSection) {
+      return null;
+    }
+
+    const rect = treeSection.getBoundingClientRect();
+    const pointCandidates: Array<{ x: number; y: number }> = [{ x, y }];
+    if (typeof window !== 'undefined' && window.devicePixelRatio > 1) {
+      pointCandidates.push({ x: x / window.devicePixelRatio, y: y / window.devicePixelRatio });
+    }
+
+    for (const candidate of pointCandidates) {
+      const inside = candidate.x >= rect.left
+        && candidate.x <= rect.right
+        && candidate.y >= rect.top
+        && candidate.y <= rect.bottom;
+      if (inside) {
+        return { ...candidate, inside: true as const };
+      }
+    }
+
+    return { x, y, inside: false as const };
+  }, []);
+
+  const resolveDropTargetFromPoint = React.useCallback((x: number, y: number): string => {
+    const pointCandidates: Array<{ x: number; y: number }> = [{ x, y }];
+    if (typeof window !== 'undefined' && window.devicePixelRatio > 1) {
+      pointCandidates.push({ x: x / window.devicePixelRatio, y: y / window.devicePixelRatio });
+    }
+
+    for (const candidate of pointCandidates) {
+      const hit = document.elementFromPoint(candidate.x, candidate.y);
+      const dropTarget = hit instanceof Element
+        ? hit.closest('[data-sidebar-upload-dir]')
+        : null;
+      const dropPath = dropTarget?.getAttribute('data-sidebar-upload-dir') || '';
+      const normalizedDropPath = normalizePath(dropPath);
+      if (normalizedDropPath) {
+        return normalizedDropPath;
+      }
+    }
+
+    return normalizedCurrentDirectory;
+  }, [normalizedCurrentDirectory]);
+
+  const handleDesktopNativeDrop = React.useCallback(async (rawPaths: string[], targetDir: string) => {
+    if (rawPaths.length === 0) {
+      return;
+    }
+
+    const droppedFiles: File[] = [];
+    let failedCount = 0;
+    let firstFailureMessage: string | null = null;
+
+    for (const rawPath of rawPaths) {
+      try {
+        const { file } = await readDesktopDroppedFile(rawPath);
+        droppedFiles.push(file);
+      } catch (error) {
+        failedCount += 1;
+        if (!firstFailureMessage) {
+          firstFailureMessage = error instanceof Error ? error.message : 'Failed to read dropped file';
+        }
+      }
+    }
+
+    if (failedCount > 0) {
+      if (droppedFiles.length === 0) {
+        toast.error(firstFailureMessage ?? `Failed to read ${failedCount} dropped file${failedCount === 1 ? '' : 's'}`);
+      } else {
+        toast.warning(firstFailureMessage ?? `Skipped ${failedCount} dropped file${failedCount === 1 ? '' : 's'}`);
+      }
+    }
+
+    if (droppedFiles.length === 0) {
+      return;
+    }
+
+    await handleFileDrop(droppedFiles, targetDir);
+  }, [handleFileDrop]);
+
+  React.useEffect(() => {
+    if (!hasNativeDesktopDrop) {
+      return;
+    }
+
+    let cancelled = false;
+    let unlisten: null | (() => void) = null;
+
+    void (async () => {
+      try {
+        const { getCurrentWebviewWindow } = await import('@tauri-apps/api/webviewWindow');
+        const webviewWindow = getCurrentWebviewWindow();
+        const removeListener = await webviewWindow.onDragDropEvent(async (event) => {
+          if (!canUploadFiles) {
+            return;
+          }
+
+          const payload = (event as { payload?: unknown }).payload;
+          if (!payload || typeof payload !== 'object') {
+            return;
+          }
+
+          const typedPayload = payload as {
+            type?: string;
+            paths?: unknown;
+            position?: { x?: number; y?: number };
+          };
+
+          const point = resolveTreeDropPoint(typedPayload.position?.x, typedPayload.position?.y);
+          const inTree = point?.inside ?? null;
+          const targetFromPoint = point?.inside ? resolveDropTargetFromPoint(point.x, point.y) : null;
+
+          if (typedPayload.type === 'enter' || typedPayload.type === 'over') {
+            if (inTree !== null) {
+              nativeDragInsideTreeRef.current = inTree;
+            }
+
+            if (nativeDragInsideTreeRef.current) {
+              setIsDraggingFiles(true);
+              setDropTargetPath(targetFromPoint || normalizedCurrentDirectory);
+            } else {
+              setIsDraggingFiles(false);
+              setDropTargetPath(null);
+            }
+            return;
+          }
+
+          if (typedPayload.type === 'leave') {
+            nativeDragInsideTreeRef.current = false;
+            setIsDraggingFiles(false);
+            setDropTargetPath(null);
+            return;
+          }
+
+          if (typedPayload.type !== 'drop') {
+            return;
+          }
+
+          const shouldHandleDrop = inTree ?? nativeDragInsideTreeRef.current;
+          nativeDragInsideTreeRef.current = false;
+          setIsDraggingFiles(false);
+          setDropTargetPath(null);
+
+          if (!shouldHandleDrop) {
+            return;
+          }
+
+          const targetDir = targetFromPoint || normalizedCurrentDirectory;
+          const rawPaths = collectDesktopDroppedPaths(typedPayload.paths);
+          if (rawPaths.length === 0 || !targetDir) {
+            return;
+          }
+
+          await handleDesktopNativeDrop(rawPaths, targetDir);
+        });
+
+        if (cancelled) {
+          removeListener();
+          return;
+        }
+
+        unlisten = removeListener;
+      } catch (error) {
+        if (!cancelled) {
+          console.warn('Failed to register sidebar desktop drag-drop listener:', error);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      nativeDragInsideTreeRef.current = false;
+      if (unlisten) {
+        unlisten();
+      }
+    };
+  }, [
+    canUploadFiles,
+    handleDesktopNativeDrop,
+    hasNativeDesktopDrop,
+    normalizedCurrentDirectory,
+    resolveDropTargetFromPoint,
+    resolveTreeDropPoint,
+  ]);
+
   const handleTreeDragEnter = React.useCallback((event: React.DragEvent) => {
+    if (hasNativeDesktopDrop) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+
     if (!hasDraggedFiles(event.dataTransfer) || !canUploadFiles) {
       return;
     }
@@ -1100,9 +1304,15 @@ export const SidebarFilesTree: React.FC = () => {
       setIsDraggingFiles(true);
       setDropTargetPath(normalizedCurrentDirectory);
     }
-  }, [canUploadFiles, hasDraggedFiles, isDraggingFiles, normalizedCurrentDirectory]);
+  }, [canUploadFiles, hasDraggedFiles, hasNativeDesktopDrop, isDraggingFiles, normalizedCurrentDirectory]);
 
   const handleTreeDragOver = React.useCallback((event: React.DragEvent) => {
+    if (hasNativeDesktopDrop) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+
     if (!hasDraggedFiles(event.dataTransfer) || !canUploadFiles) {
       return;
     }
@@ -1110,9 +1320,15 @@ export const SidebarFilesTree: React.FC = () => {
     event.preventDefault();
     event.stopPropagation();
     event.dataTransfer.dropEffect = 'copy';
-  }, [canUploadFiles, hasDraggedFiles]);
+  }, [canUploadFiles, hasDraggedFiles, hasNativeDesktopDrop]);
 
   const handleTreeDragLeave = React.useCallback((event: React.DragEvent) => {
+    if (hasNativeDesktopDrop) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+
     event.preventDefault();
     event.stopPropagation();
 
@@ -1128,9 +1344,15 @@ export const SidebarFilesTree: React.FC = () => {
       setIsDraggingFiles(false);
       setDropTargetPath(null);
     }
-  }, []);
+  }, [hasNativeDesktopDrop]);
 
   const handleTreeDrop = React.useCallback(async (event: React.DragEvent) => {
+    if (hasNativeDesktopDrop) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+
     event.preventDefault();
     event.stopPropagation();
     dragCounterRef.current = 0;
@@ -1145,7 +1367,7 @@ export const SidebarFilesTree: React.FC = () => {
 
     const droppedFiles = collectDroppedFiles(event.dataTransfer);
     await handleFileDrop(droppedFiles, targetDir);
-  }, [canUploadFiles, collectDroppedFiles, dropTargetPath, handleFileDrop, hasDraggedFiles, normalizedCurrentDirectory]);
+  }, [canUploadFiles, collectDroppedFiles, dropTargetPath, handleFileDrop, hasDraggedFiles, hasNativeDesktopDrop, normalizedCurrentDirectory]);
 
   const handleDirectoryDragEnter = React.useCallback((event: React.DragEvent, dirPath: string) => {
     if (!hasDraggedFiles(event.dataTransfer) || !canUploadFiles) {
@@ -1547,6 +1769,7 @@ export const SidebarFilesTree: React.FC = () => {
 
   return (
     <section
+      ref={treeSectionRef}
       className={cn(
         'flex h-full min-h-0 flex-col overflow-hidden bg-transparent relative',
         isDraggingFiles && !dropTargetPath && 'ring-2 ring-primary ring-inset'
@@ -1564,19 +1787,14 @@ export const SidebarFilesTree: React.FC = () => {
         className="hidden"
       />
       {isDraggingFiles && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm pointer-events-none">
-          <div className="text-center">
-            <RiUploadCloud2Line className="h-12 w-12 mx-auto mb-2 text-primary" />
-            <div className="typography-ui font-medium text-foreground">
-              {dropTargetPath && dropTargetPath !== normalizedCurrentDirectory
-                ? `Drop to upload to ${dropTargetPath.split('/').pop()}`
-                : 'Drop files to upload'}
-            </div>
-            <div className="typography-meta text-muted-foreground mt-1">
-              {isUploading ? 'Uploading...' : 'Release to upload'}
-            </div>
-          </div>
-        </div>
+        <FileDropOverlay
+          pointerEventsNone
+          icon={<RiUploadCloud2Line className="mx-auto mb-2 h-12 w-12 text-primary" />}
+          title={dropTargetPath && dropTargetPath !== normalizedCurrentDirectory
+            ? `Drop to upload to ${dropTargetPath.split('/').pop()}`
+            : 'Drop files to upload'}
+          subtitle={isUploading ? 'Uploading...' : 'Release to upload'}
+        />
       )}
 
       <div className="flex items-center gap-2 border-b border-border/40 px-3 py-2">
