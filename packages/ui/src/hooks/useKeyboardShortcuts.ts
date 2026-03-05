@@ -179,13 +179,24 @@ export const useKeyboardShortcuts = () => {
         return;
       }
 
+      if (eventMatchesShortcut(e, combo('open_right_sidebar_board'))) {
+        const { isMobile } = useUIStore.getState();
+        if (isMobile) {
+          return;
+        }
+        e.preventDefault();
+        setRightSidebarOpen(true);
+        setRightSidebarTab('board');
+        return;
+      }
+
       if (eventMatchesShortcut(e, combo('cycle_right_sidebar_tab'))) {
         const { isMobile, rightSidebarTab } = useUIStore.getState();
         if (isMobile) {
           return;
         }
 
-        const tabs = ['git', 'files'] as const;
+        const tabs = ['git', 'files', 'board'] as const;
         const currentIndex = tabs.indexOf(rightSidebarTab);
         const nextTab = tabs[(currentIndex + 1) % tabs.length];
 
