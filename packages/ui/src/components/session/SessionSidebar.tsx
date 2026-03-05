@@ -48,6 +48,7 @@ import { GridLoader } from '@/components/ui/grid-loader';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import {
   RiAddLine,
+  RiArchiveLine,
   RiArrowDownSLine,
   RiArrowRightSLine,
   RiChat4Line,
@@ -57,6 +58,7 @@ import {
   RiCloseLine,
   RiDeleteBinLine,
   RiErrorWarningLine,
+  RiFileEditLine,
   RiFileCopyLine,
   RiFolderAddLine,
   RiFolderLine,
@@ -70,6 +72,7 @@ import {
   RiSearchLine,
   RiShare2Line,
   RiShieldLine,
+  RiRobot2Line,
   RiUnpinLine,
 } from '@remixicon/react';
 import { sessionEvents } from '@/lib/sessionEvents';
@@ -225,6 +228,95 @@ const dedupeSessionsById = (sessions: Session[]): Session[] => {
   return Array.from(byId.values());
 };
 
+const getArchivedScopeKey = (projectRoot: string): string => `__archived__:${projectRoot}`;
+
+const resolveArchivedFolderName = (session: Session, projectRoot: string | null): string => {
+  const sessionDirectory = normalizePath((session as Session & { directory?: string | null }).directory ?? null);
+  const projectWorktree = normalizePath((session as Session & { project?: { worktree?: string | null } | null }).project?.worktree ?? null);
+  const resolved = sessionDirectory ?? projectWorktree;
+  if (!resolved) {
+    return 'unassigned';
+  }
+  if (projectRoot && resolved === projectRoot) {
+    return 'project root';
+  }
+  const source = projectRoot && resolved.startsWith(`${projectRoot}/`)
+    ? resolved.slice(projectRoot.length + 1)
+    : resolved;
+  const segments = source.split('/').filter(Boolean);
+  return segments[segments.length - 1] ?? 'unassigned';
+};
+
+const isSessionRelatedToProject = (
+  session: Session,
+  projectRoot: string,
+  validDirectories?: Set<string>,
+): boolean => {
+  const sessionDirectory = normalizePath((session as Session & { directory?: string | null }).directory ?? null);
+  const projectWorktree = normalizePath((session as Session & { project?: { worktree?: string | null } | null }).project?.worktree ?? null);
+
+  if (projectWorktree && (projectWorktree === projectRoot || projectWorktree.startsWith(`${projectRoot}/`))) {
+    return true;
+  }
+
+  if (!sessionDirectory) {
+    return false;
+  }
+  if (validDirectories && validDirectories.has(sessionDirectory)) {
+    return true;
+  }
+  return sessionDirectory === projectRoot || sessionDirectory.startsWith(`${projectRoot}/`);
+};
+
+type SessionSummaryMeta = {
+  additions?: number | string | null;
+  deletions?: number | string | null;
+  files?: number | null;
+  diffs?: Array<{ additions?: number | string | null; deletions?: number | string | null }>;
+};
+
+const parseSummaryCount = (value: number | string | null | undefined): number | null => {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return null;
+};
+
+const resolveSessionDiffStats = (summary?: SessionSummaryMeta): { additions: number; deletions: number } | null => {
+  if (!summary) {
+    return null;
+  }
+
+  const directAdditions = parseSummaryCount(summary.additions);
+  const directDeletions = parseSummaryCount(summary.deletions);
+  if (directAdditions !== null || directDeletions !== null) {
+    const stats = {
+      additions: Math.max(0, directAdditions ?? 0),
+      deletions: Math.max(0, directDeletions ?? 0),
+    };
+    return stats.additions === 0 && stats.deletions === 0 ? null : stats;
+  }
+
+  const diffs = Array.isArray(summary.diffs) ? summary.diffs : [];
+  if (diffs.length === 0) {
+    return null;
+  }
+
+  let additions = 0;
+  let deletions = 0;
+  diffs.forEach((diff) => {
+    additions += Math.max(0, parseSummaryCount(diff.additions) ?? 0);
+    deletions += Math.max(0, parseSummaryCount(diff.deletions) ?? 0);
+  });
+  return additions === 0 && deletions === 0 ? null : { additions, deletions };
+};
+
 // Format project label: kebab-case/snake_case → Title Case
 const formatProjectLabel = (label: string): string => {
   return label
@@ -287,6 +379,7 @@ type SessionGroup = {
   isArchivedBucket?: boolean;
   worktree: WorktreeMetadata | null;
   directory: string | null;
+  folderScopeKey?: string | null;
   sessions: SessionNode[];
 };
 
@@ -918,6 +1011,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
   // Session Folders store
   const collapsedFolderIds = useSessionFoldersStore((state) => state.collapsedFolderIds);
+  const foldersMap = useSessionFoldersStore((state) => state.foldersMap);
   const getFoldersForScope = useSessionFoldersStore((state) => state.getFoldersForScope);
   const createFolder = useSessionFoldersStore((state) => state.createFolder);
   const renameFolder = useSessionFoldersStore((state) => state.renameFolder);
@@ -1783,6 +1877,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         isArchivedBucket: false,
         worktree: null,
         directory: normalizedProjectRoot,
+        folderScopeKey: normalizedProjectRoot,
         sessions: groupedNodes.get(rootKey) ?? [],
       }];
 
@@ -1814,6 +1909,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
           isArchivedBucket: false,
           worktree: meta,
           directory,
+          folderScopeKey: directory,
           sessions: groupedNodes.get(directory) ?? [],
         });
       });
@@ -1827,6 +1923,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         isArchivedBucket: true,
         worktree: null,
         directory: null,
+        folderScopeKey: normalizedProjectRoot ? getArchivedScopeKey(normalizedProjectRoot) : null,
         sessions: groupedNodes.get(archivedKey) ?? [],
       });
 
@@ -1965,12 +2062,39 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       idsByScope.set(directory, new Set([session.id]));
     });
 
+    normalizedProjects.forEach((project) => {
+      const scopeKey = getArchivedScopeKey(project.normalizedPath);
+      const worktreesForProject = isVSCode ? [] : (availableWorktreesByProject.get(project.normalizedPath) ?? []);
+      const validDirectories = new Set<string>([
+        project.normalizedPath,
+        ...worktreesForProject
+          .map((meta) => normalizePath(meta.path) ?? meta.path)
+          .filter((value): value is string => Boolean(value)),
+      ]);
+      const archivedForProject = dedupeSessionsById([
+        ...archivedSessions,
+        ...sessions.filter((session) => {
+          if (session.time?.archived) {
+            return false;
+          }
+          const sessionDirectory = normalizePath((session as Session & { directory?: string | null }).directory ?? null);
+          if (sessionDirectory) {
+            return false;
+          }
+          return isSessionRelatedToProject(session, project.normalizedPath, validDirectories);
+        }),
+      ]).filter((session) => {
+        return isSessionRelatedToProject(session, project.normalizedPath, validDirectories);
+      });
+      idsByScope.set(scopeKey, new Set(archivedForProject.map((session) => session.id)));
+    });
+
     const currentFoldersMap = useSessionFoldersStore.getState().foldersMap;
     const allScopeKeys = new Set([...Object.keys(currentFoldersMap), ...idsByScope.keys()]);
     allScopeKeys.forEach((scopeKey) => {
       cleanupSessions(scopeKey, idsByScope.get(scopeKey) ?? new Set<string>());
     });
-  }, [sessions, isSessionsLoading, cleanupSessions]); // removed foldersMap from deps to prevent cascade re-renders
+  }, [sessions, archivedSessions, isSessionsLoading, cleanupSessions, normalizedProjects, isVSCode, availableWorktreesByProject]); // removed foldersMap from deps to prevent cascade re-renders
 
   const getSessionsForProject = React.useCallback(
     (project: { normalizedPath: string }) => {
@@ -2012,18 +2136,9 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
           .filter((value): value is string => Boolean(value)),
       ]);
 
-      const collect = (input: Session[]): Session[] => input.filter((session) => {
-        const sessionDirectory = normalizePath((session as Session & { directory?: string | null }).directory ?? null);
-        const projectWorktree = normalizePath((session as Session & { project?: { worktree?: string | null } | null }).project?.worktree ?? null);
-        const resolved = sessionDirectory ?? projectWorktree;
-        if (!resolved) {
-          return false;
-        }
-        if (validDirectories.has(resolved)) {
-          return true;
-        }
-        return resolved.startsWith(`${project.normalizedPath}/`);
-      });
+      const collect = (input: Session[]): Session[] => input.filter((session) =>
+        isSessionRelatedToProject(session, project.normalizedPath, validDirectories),
+      );
 
       const archived = collect(archivedSessions);
       const unassignedLive = sessions.filter((session) => {
@@ -2045,6 +2160,45 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     },
     [archivedSessions, availableWorktreesByProject, isVSCode, sessions],
   );
+
+  React.useEffect(() => {
+    if (isSessionsLoading) {
+      return;
+    }
+
+    normalizedProjects.forEach((project) => {
+      const scopeKey = getArchivedScopeKey(project.normalizedPath);
+      const projectArchivedSessions = getArchivedSessionsForProject(project);
+      const sessionIds = new Set(projectArchivedSessions.map((session) => session.id));
+
+      const existingFolders = foldersMap[scopeKey] ?? [];
+      const folderByName = new Map(existingFolders.map((folder) => [folder.name.toLowerCase(), folder]));
+
+      projectArchivedSessions.forEach((session) => {
+        const folderName = resolveArchivedFolderName(session, project.normalizedPath);
+        const key = folderName.toLowerCase();
+        let folder = folderByName.get(key);
+        if (!folder) {
+          folder = createFolder(scopeKey, folderName);
+          folderByName.set(key, folder);
+        }
+
+        if (!folder.sessionIds.includes(session.id)) {
+          addSessionToFolder(scopeKey, folder.id, session.id);
+        }
+      });
+
+      cleanupSessions(scopeKey, sessionIds);
+    });
+  }, [
+    normalizedProjects,
+    getArchivedSessionsForProject,
+    foldersMap,
+    createFolder,
+    addSessionToFolder,
+    cleanupSessions,
+    isSessionsLoading,
+  ]);
 
   // Keep last-known repo status to avoid UI jiggling during project switch
   const lastRepoStatusRef = React.useRef(false);
@@ -2474,14 +2628,8 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       const rawNeedsAttention = sessionAttentionStates.get(session.id)?.needsAttention === true;
       // When notifyOnSubtasks is disabled, suppress attention dots for child sessions.
       const needsAttention = rawNeedsAttention && (!isSubtaskSession || notifyOnSubtasks);
-      const sessionSummary = session.summary as
-        | {
-          additions?: number | string | null;
-          deletions?: number | string | null;
-          files?: number | null;
-          diffs?: Array<{ additions?: number | string | null; deletions?: number | string | null }>;
-        }
-        | undefined;
+      const sessionSummary = session.summary as SessionSummaryMeta | undefined;
+      const sessionDiffStats = resolveSessionDiffStats(sessionSummary);
 
       if (editingId === session.id) {
         return (
@@ -2533,7 +2681,10 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                   <RiCloseLine className="size-4" />
                 </button>
               </form>
-              <div className="flex items-center gap-2 typography-micro text-muted-foreground/60 min-w-0 overflow-hidden leading-tight">
+              <div
+                className="flex items-center gap-2 text-muted-foreground/60 min-w-0 overflow-hidden leading-tight"
+                style={{ fontSize: 'calc(var(--text-ui-label) * 0.85)' }}
+              >
                 {hasChildren ? (
                   <span className="inline-flex items-center justify-center flex-shrink-0">
                     {isExpanded ? (
@@ -2544,17 +2695,44 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                   </span>
                 ) : null}
                 <span className="flex-shrink-0">{formatSessionDateLabel(session.time?.updated || session.time?.created || Date.now())}</span>
+                {sessionDiffStats ? (
+                  <span className="flex-shrink-0">
+                    <span className="text-status-success/80">+{sessionDiffStats.additions}</span>
+                    <span className="text-muted-foreground/60">/</span>
+                    <span className="text-status-error/80">-{sessionDiffStats.deletions}</span>
+                  </span>
+                ) : null}
                 {session.share ? (
                   <RiShare2Line className="h-3 w-3 text-[color:var(--status-info)] flex-shrink-0" />
                 ) : null}
-                {(sessionSummary?.files ?? 0) > 0 ? (
-                  <span className="flex-shrink-0">
-                    · {sessionSummary!.files} {sessionSummary!.files === 1 ? 'file' : 'files'} changed
-                  </span>
-                ) : null}
-                {hasChildren ? (
-                  <span className="truncate">
-                    {node.children.length} {node.children.length === 1 ? 'task' : 'tasks'}
+                {(sessionSummary?.files ?? 0) > 0 || hasChildren ? (
+                  <span className="flex items-center gap-2 flex-shrink-0">
+                    {(sessionSummary?.files ?? 0) > 0 ? (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="inline-flex items-center gap-0.5">
+                            <RiFileEditLine className="h-3 w-3 text-muted-foreground/70" />
+                            <span>{sessionSummary!.files}</span>
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom" sideOffset={4}>
+                          <p>{sessionSummary!.files} changed {sessionSummary!.files === 1 ? 'file' : 'files'}</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    ) : null}
+                    {hasChildren ? (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="inline-flex items-center gap-0.5">
+                            <RiRobot2Line className="h-3 w-3 text-muted-foreground/70" />
+                            <span>{node.children.length}</span>
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom" sideOffset={4}>
+                          <p>{node.children.length} {node.children.length === 1 ? 'sub-session' : 'sub-sessions'}</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    ) : null}
                   </span>
                 ) : null}
               </div>
@@ -2648,7 +2826,10 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                 </div>
 
                 {}
-                <div className="flex items-center gap-2 typography-micro text-muted-foreground/60 min-w-0 overflow-hidden leading-tight">
+                <div
+                  className="flex items-center gap-2 text-muted-foreground/60 min-w-0 overflow-hidden leading-tight"
+                  style={{ fontSize: 'calc(var(--text-ui-label) * 0.85)' }}
+                >
                   {hasChildren ? (
                     <span
                       role="button"
@@ -2675,17 +2856,44 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                     </span>
                   ) : null}
                   <span className="flex-shrink-0">{formatSessionDateLabel(session.time?.updated || session.time?.created || Date.now())}</span>
+                  {sessionDiffStats ? (
+                    <span className="flex-shrink-0">
+                      <span className="text-status-success/80">+{sessionDiffStats.additions}</span>
+                      <span className="text-muted-foreground/60">/</span>
+                      <span className="text-status-error/80">-{sessionDiffStats.deletions}</span>
+                    </span>
+                  ) : null}
                   {session.share ? (
                     <RiShare2Line className="h-3 w-3 text-[color:var(--status-info)] flex-shrink-0" />
                   ) : null}
-                  {(sessionSummary?.files ?? 0) > 0 ? (
-                    <span className="flex-shrink-0">
-                      · {sessionSummary!.files} {sessionSummary!.files === 1 ? 'file' : 'files'} changed
-                    </span>
-                  ) : null}
-                  {hasChildren ? (
-                    <span className="truncate">
-                      {node.children.length} {node.children.length === 1 ? 'task' : 'tasks'}
+                  {(sessionSummary?.files ?? 0) > 0 || hasChildren ? (
+                    <span className="flex items-center gap-2 flex-shrink-0">
+                      {(sessionSummary?.files ?? 0) > 0 ? (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="inline-flex items-center gap-0.5">
+                              <RiFileEditLine className="h-3 w-3 text-muted-foreground/70" />
+                              <span>{sessionSummary!.files}</span>
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom" sideOffset={4}>
+                            <p>{sessionSummary!.files} changed {sessionSummary!.files === 1 ? 'file' : 'files'}</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      ) : null}
+                      {hasChildren ? (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="inline-flex items-center gap-0.5">
+                              <RiRobot2Line className="h-3 w-3 text-muted-foreground/70" />
+                              <span>{node.children.length}</span>
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom" sideOffset={4}>
+                            <p>{node.children.length} {node.children.length === 1 ? 'sub-session' : 'sub-sessions'}</p>
+                          </TooltipContent>
+                        </Tooltip>
+                      ) : null}
                     </span>
                   ) : null}
                   {isMissingDirectory ? (
@@ -2778,7 +2986,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                       </>
                     )}
                     {/* Move to folder submenu */}
-                    {sessionDirectory ? (() => {
+                    {sessionDirectory && !archivedBucket ? (() => {
                       const scopeFolders = getFoldersForScope(sessionDirectory);
                       const currentFolderId = getSessionFolderId(sessionDirectory, session.id);
                       return (
@@ -2869,7 +3077,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                       onClick={() => handleDeleteSession(session, { archivedBucket })}
                     >
                       <RiDeleteBinLine className="mr-1 h-4 w-4" />
-                      {archivedBucket ? 'Delete permanently' : 'Archive'}
+                      {archivedBucket ? 'Delete' : 'Archive'}
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
@@ -2938,7 +3146,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         : group.sessions;
 
       // --- Session Folders: split into foldered vs ungrouped ---
-      const folderScopeKey = normalizePath(group.directory ?? null);
+      const folderScopeKey = group.folderScopeKey ?? normalizePath(group.directory ?? null);
       const scopeFolders = folderScopeKey ? getFoldersForScope(folderScopeKey) : [];
 
       const nodeBySessionId = new Map<string, SessionNode>();
@@ -3001,7 +3209,9 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       }
 
       const totalSessions = ungroupedSessions.length;
-      const visibleSessions = hasSessionSearchQuery
+      const visibleSessions = group.isArchivedBucket
+        ? ungroupedSessions
+        : hasSessionSearchQuery
         ? ungroupedSessions
         : (isExpanded ? ungroupedSessions : ungroupedSessions.slice(0, maxVisible));
       const remainingCount = totalSessions - visibleSessions.length;
@@ -3029,7 +3239,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
           && currentSessionDirectory
           && normalizedGroupDirectory === currentSessionDirectory,
       );
-
       // Helper: render a single folder item (root or sub) wrapped in DroppableFolderWrapper
       const renderOneFolderItem = (folder: (typeof allFoldersForGroup)[number]['folder'], nodes: SessionNode[], depth: number) => {
         // Find direct sub-folders of this folder
@@ -3103,6 +3312,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                   if (!folderScopeKey) return;
                   createFolderAndStartRename(folderScopeKey, folder.id);
                 } : undefined}
+                hideActions={group.isArchivedBucket === true}
               />
             )}
           </DroppableFolderWrapper>
@@ -3131,7 +3341,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
               {visibleSessions.map((node) => renderSessionNode(node, 0, group.directory, projectId, group.isArchivedBucket === true))}
               {totalSessions === 0 && allFoldersForGroup.length === 0 ? (
                 <div className="py-1 text-left typography-micro text-muted-foreground">
-                  No sessions in this workspace yet.
+                  {group.isArchivedBucket ? 'No archived sessions yet.' : 'No sessions in this workspace yet.'}
                 </div>
               ) : null}
               {remainingCount > 0 && !isExpanded ? (
@@ -3203,7 +3413,9 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                     ? "group-hover/gh:pr-14 group-focus-within/gh:pr-14"
                     : "group-hover/gh:pr-7 group-focus-within/gh:pr-7"),
               )}>
-                {!group.isMain || isGitProject ? (
+                {group.isArchivedBucket ? (
+                  <RiArchiveLine className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
+                ) : (!group.isMain || isGitProject) ? (
                   <RiGitBranchLine className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
                 ) : null}
                 <div className="min-w-0 flex flex-col justify-center">
@@ -3300,7 +3512,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                 {visibleSessions.map((node) => renderSessionNode(node, 0, group.directory, projectId, group.isArchivedBucket === true))}
                 {totalSessions === 0 && allFoldersForGroup.length === 0 ? (
                   <div className="py-1 text-left typography-micro text-muted-foreground">
-                    No sessions in this workspace yet.
+                    {group.isArchivedBucket ? 'No archived sessions yet.' : 'No sessions in this workspace yet.'}
                   </div>
                 ) : null}
                 {remainingCount > 0 && !isExpanded ? (

@@ -47,6 +47,8 @@ interface SessionFolderItemProps<TSessionNode> {
   onNewSubFolder?: () => void;
   /** Visual indent depth (0 = root folder, 1 = sub-folder) */
   depth?: number;
+  /** Hide folder action buttons (rename/delete/new) */
+  hideActions?: boolean;
 }
 
 const SessionFolderItemBase = <TSessionNode,>({
@@ -71,6 +73,7 @@ const SessionFolderItemBase = <TSessionNode,>({
   onNewSession,
   onNewSubFolder,
   depth = 0,
+  hideActions = false,
 }: SessionFolderItemProps<TSessionNode>) => {
   const [localRenaming, setLocalRenaming] = React.useState(false);
   const [localDraft, setLocalDraft] = React.useState('');
@@ -228,7 +231,7 @@ const SessionFolderItemBase = <TSessionNode,>({
         </div>
 
         {/* Action buttons */}
-        {!renaming ? (
+        {!renaming && !hideActions ? (
           <div className="flex items-center gap-0.5 px-0.5">
             <div
               className={cn(
