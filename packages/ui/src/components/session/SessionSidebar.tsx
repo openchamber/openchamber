@@ -95,6 +95,7 @@ import { ProjectNotesTodoPanel } from './ProjectNotesTodoPanel';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { SessionFolderItem } from './SessionFolderItem';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
+import { getProjectDirectories } from '@/lib/worktrees/projectDirectories';
 
 const ATTENTION_DIAMOND_INDICES = new Set([1, 3, 4, 5, 7]);
 
@@ -1937,14 +1938,9 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
   const getSessionsForProject = React.useCallback(
     (project: { normalizedPath: string }) => {
-      // In VS Code, only show sessions from the main project directory (skip worktrees)
-      const worktreesForProject = isVSCode ? [] : (availableWorktreesByProject.get(project.normalizedPath) ?? []);
-      const directories = [
-        project.normalizedPath,
-        ...worktreesForProject
-          .map((meta) => normalizePath(meta.path) ?? meta.path)
-          .filter((value): value is string => Boolean(value)),
-      ];
+      const directories = isVSCode
+        ? [project.normalizedPath]
+        : getProjectDirectories(project.normalizedPath, availableWorktreesByProject);
 
       const seen = new Set<string>();
       const collected: Session[] = [];
