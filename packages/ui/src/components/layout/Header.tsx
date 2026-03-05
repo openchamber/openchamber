@@ -125,8 +125,8 @@ const resolveTilde = (path: string, homeDir: string | null): string => {
 const getActiveContextMode = (panelState: {
   isOpen: boolean;
   activeTabId: string | null;
-  tabs: Array<{ id: string; mode: 'diff' | 'file' | 'context' | 'plan' | 'chat' }>;
-} | undefined): 'diff' | 'file' | 'context' | 'plan' | 'chat' | null => {
+  tabs: Array<{ id: string; mode: 'diff' | 'file' | 'context' | 'plan' | 'chat' | 'board' }>;
+} | undefined): 'diff' | 'file' | 'context' | 'plan' | 'chat' | 'board' | null => {
   if (!panelState?.isOpen || !Array.isArray(panelState.tabs) || panelState.tabs.length === 0) {
     return null;
   }
