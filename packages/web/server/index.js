@@ -6784,6 +6784,8 @@ async function main(options = {}) {
       req.path.startsWith('/api/projects') ||
       req.path.startsWith('/api/fs') ||
       req.path.startsWith('/api/git') ||
+      req.path.startsWith('/api/github') ||
+      req.path.startsWith('/api/kanban') ||
       req.path.startsWith('/api/prompts') ||
       req.path.startsWith('/api/terminal') ||
       req.path.startsWith('/api/opencode') ||
@@ -11069,6 +11071,14 @@ async function main(options = {}) {
     return gitLibraries;
   };
 
+  let kanbanLibrary = null;
+  const getKanbanLibrary = async () => {
+    if (!kanbanLibrary) {
+      kanbanLibrary = await import('./lib/kanban/index.js');
+    }
+    return kanbanLibrary;
+  };
+
   app.get('/api/git/identities', async (req, res) => {
     const { getProfiles } = await getGitLibraries();
     try {
@@ -11846,6 +11856,286 @@ async function main(options = {}) {
     } catch (error) {
       console.error('Failed to get commit files:', error);
       res.status(500).json({ error: error.message || 'Failed to get commit files' });
+    }
+  });
+
+  app.get('/api/kanban/board', async (req, res) => {
+    const { getOrCreateBoard } = await getKanbanLibrary();
+    try {
+      const resolved = await resolveProjectDirectory(req);
+      if (!resolved.directory) {
+        return res.status(400).json({ error: resolved.error || 'Active workspace is required' });
+      }
+
+      const result = await getOrCreateBoard(resolved.directory);
+      res.json(result);
+    } catch (error) {
+      console.error('Failed to get kanban board:', error);
+      res.status(500).json({ error: error.message || 'Failed to get kanban board' });
+    }
+  });
+
+  app.post('/api/kanban/columns', async (req, res) => {
+    const { createColumn, KanbanValidationError, KanbanNotFoundError } = await getKanbanLibrary();
+    try {
+      const resolved = await resolveProjectDirectory(req);
+      if (!resolved.directory) {
+        return res.status(400).json({ error: resolved.error || 'Active workspace is required' });
+      }
+
+      const { name, afterColumnId } = req.body || {};
+      const trimmedName = typeof name === 'string' ? name.trim() : '';
+      const trimmedAfterColumnId = typeof afterColumnId === 'string' ? afterColumnId.trim() : '';
+
+      if (!trimmedName) {
+        return res.status(400).json({ error: 'Column name is required' });
+      }
+
+      const result = await createColumn(resolved.directory, { name: trimmedName, afterColumnId: trimmedAfterColumnId });
+      res.json(result);
+    } catch (error) {
+      console.error('Failed to create column:', error);
+      if (error instanceof KanbanValidationError) {
+        return res.status(400).json({ error: error.message });
+      }
+      if (error instanceof KanbanNotFoundError) {
+        return res.status(404).json({ error: error.message });
+      }
+      res.status(500).json({ error: error.message || 'Failed to create column' });
+    }
+  });
+
+  app.patch('/api/kanban/columns/:columnId', async (req, res) => {
+    const { renameColumn, KanbanValidationError, KanbanNotFoundError } = await getKanbanLibrary();
+    try {
+      const { columnId } = req.params;
+      if (!columnId || typeof columnId !== 'string') {
+        return res.status(400).json({ error: 'Column ID is required' });
+      }
+
+      const resolved = await resolveProjectDirectory(req);
+      if (!resolved.directory) {
+        return res.status(400).json({ error: resolved.error || 'Active workspace is required' });
+      }
+
+      const { name } = req.body || {};
+      const trimmedName = typeof name === 'string' ? name.trim() : '';
+
+      if (!trimmedName) {
+        return res.status(400).json({ error: 'Column name is required' });
+      }
+
+      const result = await renameColumn(resolved.directory, columnId, { name: trimmedName });
+      res.json(result);
+    } catch (error) {
+      console.error('Failed to rename column:', error);
+      if (error instanceof KanbanValidationError) {
+        return res.status(400).json({ error: error.message });
+      }
+      if (error instanceof KanbanNotFoundError) {
+        return res.status(404).json({ error: error.message });
+      }
+      res.status(500).json({ error: error.message || 'Failed to rename column' });
+    }
+  });
+
+  app.delete('/api/kanban/columns/:columnId', async (req, res) => {
+    const { deleteColumn, KanbanValidationError, KanbanNotFoundError } = await getKanbanLibrary();
+    try {
+      const { columnId } = req.params;
+      if (!columnId || typeof columnId !== 'string') {
+        return res.status(400).json({ error: 'Column ID is required' });
+      }
+
+      const resolved = await resolveProjectDirectory(req);
+      if (!resolved.directory) {
+        return res.status(400).json({ error: resolved.error || 'Active workspace is required' });
+      }
+
+      const result = await deleteColumn(resolved.directory, columnId);
+      res.json(result);
+    } catch (error) {
+      console.error('Failed to delete column:', error);
+      if (error instanceof KanbanValidationError) {
+        return res.status(400).json({ error: error.message });
+      }
+      if (error instanceof KanbanNotFoundError) {
+        return res.status(404).json({ error: error.message });
+      }
+      res.status(500).json({ error: error.message || 'Failed to delete column' });
+    }
+  });
+
+  app.post('/api/kanban/cards', async (req, res) => {
+    const { createCard, KanbanValidationError, KanbanNotFoundError } = await getKanbanLibrary();
+    try {
+      const resolved = await resolveProjectDirectory(req);
+      if (!resolved.directory) {
+        return res.status(400).json({ error: resolved.error || 'Active workspace is required' });
+      }
+
+      const { columnId, title, description, worktreeId } = req.body || {};
+      const trimmedColumnId = typeof columnId === 'string' ? columnId.trim() : '';
+      const trimmedTitle = typeof title === 'string' ? title.trim() : '';
+      const trimmedDescription = typeof description === 'string' ? description.trim() : '';
+      const trimmedWorktreeId = typeof worktreeId === 'string' ? worktreeId.trim() : '';
+
+      if (!trimmedColumnId) {
+        return res.status(400).json({ error: 'Column ID is required' });
+      }
+      if (!trimmedTitle) {
+        return res.status(400).json({ error: 'Card title is required' });
+      }
+      if (!trimmedDescription) {
+        return res.status(400).json({ error: 'Card description is required' });
+      }
+      if (!trimmedWorktreeId) {
+        return res.status(400).json({ error: 'Worktree ID is required' });
+      }
+
+      const validatedWorktree = await resolveWorkspacePathFromContext(req, trimmedWorktreeId);
+      if (!validatedWorktree.ok) {
+        return res.status(400).json({ error: `Invalid worktree path: ${validatedWorktree.error}` });
+      }
+
+      const result = await createCard(resolved.directory, {
+        columnId: trimmedColumnId,
+        title: trimmedTitle,
+        description: trimmedDescription,
+        worktreeId: validatedWorktree.resolved
+      });
+      res.json(result);
+    } catch (error) {
+      console.error('Failed to create card:', error);
+      if (error instanceof KanbanValidationError) {
+        return res.status(400).json({ error: error.message });
+      }
+      if (error instanceof KanbanNotFoundError) {
+        return res.status(404).json({ error: error.message });
+      }
+      res.status(500).json({ error: error.message || 'Failed to create card' });
+    }
+  });
+
+  app.patch('/api/kanban/cards/:cardId', async (req, res) => {
+    const { updateCard, KanbanValidationError, KanbanNotFoundError } = await getKanbanLibrary();
+    try {
+      const { cardId } = req.params;
+      if (!cardId || typeof cardId !== 'string') {
+        return res.status(400).json({ error: 'Card ID is required' });
+      }
+
+      const resolved = await resolveProjectDirectory(req);
+      if (!resolved.directory) {
+        return res.status(400).json({ error: resolved.error || 'Active workspace is required' });
+      }
+
+      const { title, description, worktreeId } = req.body || {};
+      const trimmedTitle = typeof title === 'string' ? title.trim() : undefined;
+      const trimmedDescription = typeof description === 'string' ? description.trim() : undefined;
+      const trimmedWorktreeId = typeof worktreeId === 'string' ? worktreeId.trim() : undefined;
+
+      if (trimmedTitle !== undefined && !trimmedTitle) {
+        return res.status(400).json({ error: 'Card title cannot be empty' });
+      }
+      if (trimmedDescription !== undefined && !trimmedDescription) {
+        return res.status(400).json({ error: 'Card description cannot be empty' });
+      }
+
+      let validatedWorktreePath = undefined;
+      if (trimmedWorktreeId !== undefined) {
+        if (!trimmedWorktreeId) {
+          return res.status(400).json({ error: 'Worktree ID cannot be empty' });
+        }
+        const validatedWorktree = await resolveWorkspacePathFromContext(req, trimmedWorktreeId);
+        if (!validatedWorktree.ok) {
+          return res.status(400).json({ error: `Invalid worktree path: ${validatedWorktree.error}` });
+        }
+        validatedWorktreePath = validatedWorktree.resolved;
+      }
+
+      const result = await updateCard(resolved.directory, cardId, {
+        title: trimmedTitle,
+        description: trimmedDescription,
+        worktreeId: validatedWorktreePath
+      });
+      res.json(result);
+    } catch (error) {
+      console.error('Failed to update card:', error);
+      if (error instanceof KanbanValidationError) {
+        return res.status(400).json({ error: error.message });
+      }
+      if (error instanceof KanbanNotFoundError) {
+        return res.status(404).json({ error: error.message });
+      }
+      res.status(500).json({ error: error.message || 'Failed to update card' });
+    }
+  });
+
+  app.delete('/api/kanban/cards/:cardId', async (req, res) => {
+    const { deleteCard, KanbanValidationError, KanbanNotFoundError } = await getKanbanLibrary();
+    try {
+      const { cardId } = req.params;
+      if (!cardId || typeof cardId !== 'string') {
+        return res.status(400).json({ error: 'Card ID is required' });
+      }
+
+      const resolved = await resolveProjectDirectory(req);
+      if (!resolved.directory) {
+        return res.status(400).json({ error: resolved.error || 'Active workspace is required' });
+      }
+
+      const result = await deleteCard(resolved.directory, cardId);
+      res.json(result);
+    } catch (error) {
+      console.error('Failed to delete card:', error);
+      if (error instanceof KanbanValidationError) {
+        return res.status(400).json({ error: error.message });
+      }
+      if (error instanceof KanbanNotFoundError) {
+        return res.status(404).json({ error: error.message });
+      }
+      res.status(500).json({ error: error.message || 'Failed to delete card' });
+    }
+  });
+
+  app.post('/api/kanban/cards/:cardId/move', async (req, res) => {
+    const { moveCard, KanbanValidationError, KanbanNotFoundError } = await getKanbanLibrary();
+    try {
+      const { cardId } = req.params;
+      if (!cardId || typeof cardId !== 'string') {
+        return res.status(400).json({ error: 'Card ID is required' });
+      }
+
+      const resolved = await resolveProjectDirectory(req);
+      if (!resolved.directory) {
+        return res.status(400).json({ error: resolved.error || 'Active workspace is required' });
+      }
+
+      const { toColumnId, toOrder } = req.body || {};
+      const trimmedToColumnId = typeof toColumnId === 'string' ? toColumnId.trim() : '';
+
+      if (!trimmedToColumnId) {
+        return res.status(400).json({ error: 'Target column ID is required' });
+      }
+      if (typeof toOrder !== 'number' || toOrder < 0) {
+        return res.status(400).json({ error: 'Target order must be a non-negative number' });
+      }
+
+      const result = await moveCard(resolved.directory, cardId, {
+        toColumnId: trimmedToColumnId,
+        toOrder
+      });
+      res.json(result);
+    } catch (error) {
+      console.error('Failed to move card:', error);
+      if (error instanceof KanbanValidationError) {
+        return res.status(400).json({ error: error.message });
+      }
+      if (error instanceof KanbanNotFoundError) {
+        return res.status(404).json({ error: error.message });
+      }
+      res.status(500).json({ error: error.message || 'Failed to move card' });
     }
   });
 
