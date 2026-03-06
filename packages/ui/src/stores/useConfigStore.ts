@@ -1064,6 +1064,18 @@ export const useConfigStore = create<ConfigStore>()(
 
                             const safeAgents = Array.isArray(agents) ? agents : [];
 
+                            // Derive agentModelSelections from SDK agent data so the UI
+                            // reflects actual model assignments (e.g. after applying a profile).
+                            const derivedModelSelections: { [agentName: string]: { providerId: string; modelId: string } } = {};
+                            for (const agent of safeAgents) {
+                                if (agent.model?.providerID && agent.model?.modelID) {
+                                    derivedModelSelections[agent.name] = {
+                                        providerId: agent.model.providerID,
+                                        modelId: agent.model.modelID,
+                                    };
+                                }
+                            }
+
                             const providers = get().activeDirectoryKey === directoryKey
                                 ? get().providers
                                 : (get().directoryScoped[directoryKey]?.providers ?? []);
@@ -1102,6 +1114,7 @@ export const useConfigStore = create<ConfigStore>()(
                                     ...baseSnapshot,
                                     providers,
                                     agents: safeAgents,
+                                    agentModelSelections: derivedModelSelections,
                                 };
 
                                 const nextState: Partial<ConfigStore> = {
@@ -1119,6 +1132,7 @@ export const useConfigStore = create<ConfigStore>()(
 
                                 if (state.activeDirectoryKey === directoryKey) {
                                     nextState.agents = safeAgents;
+                                    nextState.agentModelSelections = derivedModelSelections;
                                 }
 
                                 return nextState;
@@ -1275,6 +1289,7 @@ export const useConfigStore = create<ConfigStore>()(
                                     ...baseSnapshot,
                                     providers,
                                     agents: safeAgents,
+                                    agentModelSelections: derivedModelSelections,
                                     currentAgentName: resolvedAgent.name,
                                     currentProviderId: resolvedProviderId ?? baseSnapshot.currentProviderId,
                                     currentModelId: resolvedModelId ?? baseSnapshot.currentModelId,

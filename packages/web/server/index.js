@@ -1923,6 +1923,58 @@ const sanitizeSettingsUpdate = (payload) => {
   if (Array.isArray(candidate.pinnedDirectories)) {
     result.pinnedDirectories = normalizeStringArray(candidate.pinnedDirectories);
   }
+  if (Array.isArray(candidate.profiles)) {
+    const sanitizedProfiles = candidate.profiles.reduce((acc, p) => {
+      if (
+        p &&
+        typeof p === 'object' &&
+        typeof p.id === 'string' && p.id.length > 0 &&
+        typeof p.name === 'string' && p.name.length > 0 && p.name.length <= 64 &&
+        p.agentModels && typeof p.agentModels === 'object' &&
+        typeof p.createdAt === 'string' &&
+        typeof p.updatedAt === 'string'
+      ) {
+        const agentModels = {};
+        for (const [key, val] of Object.entries(p.agentModels)) {
+          if (typeof key === 'string' && typeof val === 'string') {
+            agentModels[key] = val;
+          }
+        }
+        const sanitized = {
+          id: p.id,
+          name: p.name.trim().slice(0, 64),
+          agentModels,
+          createdAt: p.createdAt,
+          updatedAt: p.updatedAt,
+        };
+        if (p.categoryModels && typeof p.categoryModels === 'object' && !Array.isArray(p.categoryModels)) {
+          const categoryModels = {};
+          for (const [key, val] of Object.entries(p.categoryModels)) {
+            if (typeof key === 'string' && typeof val === 'string') {
+              categoryModels[key] = val;
+            }
+          }
+          if (Object.keys(categoryModels).length > 0) {
+            sanitized.categoryModels = categoryModels;
+          }
+        }
+        if (p.omoAgentModels && typeof p.omoAgentModels === 'object' && !Array.isArray(p.omoAgentModels)) {
+          const omoAgentModels = {};
+          for (const [key, val] of Object.entries(p.omoAgentModels)) {
+            if (typeof key === 'string' && typeof val === 'string') {
+              omoAgentModels[key] = val;
+            }
+          }
+          if (Object.keys(omoAgentModels).length > 0) {
+            sanitized.omoAgentModels = omoAgentModels;
+          }
+        }
+        acc.push(sanitized);
+      }
+      return acc;
+    }, []);
+    result.profiles = sanitizedProfiles;
+  }
 
 
   if (typeof candidate.uiFont === 'string' && candidate.uiFont.length > 0) {
@@ -2347,6 +2399,7 @@ const formatSettingsResponse = (settings) => {
     approvedDirectories: approved,
     securityScopedBookmarks: bookmarks,
     pinnedDirectories: normalizeStringArray(settings.pinnedDirectories),
+    profiles: Array.isArray(settings.profiles) ? settings.profiles : [],
     typographySizes: sanitizeTypographySizesPartial(settings.typographySizes),
     showReasoningTraces:
       typeof settings.showReasoningTraces === 'boolean'
@@ -6780,6 +6833,8 @@ async function main(options = {}) {
       req.path.startsWith('/api/config/commands') ||
       req.path.startsWith('/api/config/mcp') ||
       req.path.startsWith('/api/config/settings') ||
+      req.path.startsWith('/api/config/profiles') ||
+      req.path.startsWith('/api/config/oh-my-opencode') ||
       req.path.startsWith('/api/config/skills') ||
       req.path.startsWith('/api/projects') ||
       req.path.startsWith('/api/fs') ||
@@ -8446,6 +8501,10 @@ async function main(options = {}) {
     createMcpConfig,
     updateMcpConfig,
     deleteMcpConfig,
+    isOhMyOpencodeInstalled,
+    readOhMyOpencodeConfig,
+    writeOhMyOpencodeCategories,
+    writeOhMyOpencodeAgents,
   } = await import('./lib/opencode/index.js');
 
   app.get('/api/config/agents/:name', async (req, res) => {
@@ -8486,6 +8545,45 @@ async function main(options = {}) {
     } catch (error) {
       console.error('Failed to get agent config:', error);
       res.status(500).json({ error: 'Failed to get agent configuration' });
+    }
+  });
+
+  app.post('/api/config/agents/batch-update', async (req, res) => {
+    try {
+      const { agents } = req.body;
+      const { directory, error } = await resolveProjectDirectory(req);
+      if (!directory) {
+        return res.status(400).json({ error });
+      }
+      if (!agents || typeof agents !== 'object' || Array.isArray(agents)) {
+        return res.status(400).json({ error: 'agents must be an object mapping agent names to updates' });
+      }
+
+      const updated = [];
+      const failed = [];
+      for (const [agentName, updates] of Object.entries(agents)) {
+        try {
+          updateAgent(agentName, updates, directory);
+          updated.push(agentName);
+        } catch (agentError) {
+          failed.push({ name: agentName, error: agentError.message || String(agentError) });
+        }
+      }
+
+      await refreshOpenCodeAfterConfigChange('batch agent update');
+
+      console.log(`[Server] Batch agent update complete: ${updated.length} updated, ${failed.length} failed`);
+
+      res.json({
+        success: true,
+        updated,
+        failed,
+        requiresReload: true,
+        reloadDelayMs: CLIENT_RELOAD_DELAY_MS,
+      });
+    } catch (error) {
+      console.error('[Server] Failed to batch-update agents:', error);
+      res.status(500).json({ error: error.message || 'Failed to batch-update agents' });
     }
   });
 
@@ -8570,6 +8668,251 @@ async function main(options = {}) {
     } catch (error) {
       console.error('Failed to delete agent:', error);
       res.status(500).json({ error: error.message || 'Failed to delete agent' });
+    }
+  });
+
+  // ============================================================
+  // Profile Routes
+  // ============================================================
+
+  app.get('/api/config/profiles', async (req, res) => {
+    try {
+      const settings = await readSettingsFromDiskMigrated();
+      const profiles = settings.profiles || [];
+      res.json({ profiles });
+    } catch (error) {
+      console.error('[Server] Failed to get profiles:', error);
+      res.status(500).json({ error: error.message || 'Failed to get profiles' });
+    }
+  });
+
+  app.post('/api/config/profiles', async (req, res) => {
+    try {
+      const settings = await readSettingsFromDiskMigrated();
+      const { name, agentModels, categoryModels, omoAgentModels } = req.body;
+
+      const trimmedName = typeof name === 'string' ? name.trim() : '';
+      if (trimmedName.length === 0 || trimmedName.length > 64) {
+        return res.status(400).json({ error: 'name must be a string of 1–64 characters' });
+      }
+      const existingProfiles = settings.profiles || [];
+      if (existingProfiles.some((p) => p.name.toLowerCase() === trimmedName.toLowerCase())) {
+        return res.status(400).json({ error: 'A profile with this name already exists' });
+      }
+      if (!agentModels || typeof agentModels !== 'object' || Array.isArray(agentModels)) {
+        return res.status(400).json({ error: 'agentModels must be an object with string values' });
+      }
+      for (const [key, val] of Object.entries(agentModels)) {
+        if (typeof key !== 'string' || typeof val !== 'string') {
+          return res.status(400).json({ error: 'agentModels must be an object with string values' });
+        }
+      }
+
+      const now = new Date().toISOString();
+      const profile = {
+        id: crypto.randomUUID(),
+        name: trimmedName,
+        agentModels,
+        createdAt: now,
+        updatedAt: now,
+      };
+      if (categoryModels && typeof categoryModels === 'object' && !Array.isArray(categoryModels)) {
+        const validCategoryModels = {};
+        for (const [key, val] of Object.entries(categoryModels)) {
+          if (typeof key === 'string' && typeof val === 'string') {
+            validCategoryModels[key] = val;
+          }
+        }
+        if (Object.keys(validCategoryModels).length > 0) {
+          profile.categoryModels = validCategoryModels;
+        }
+      }
+      if (omoAgentModels && typeof omoAgentModels === 'object' && !Array.isArray(omoAgentModels)) {
+        const validOmoAgentModels = {};
+        for (const [key, val] of Object.entries(omoAgentModels)) {
+          if (typeof key === 'string' && typeof val === 'string') {
+            validOmoAgentModels[key] = val;
+          }
+        }
+        if (Object.keys(validOmoAgentModels).length > 0) {
+          profile.omoAgentModels = validOmoAgentModels;
+        }
+      }
+
+      const profiles = [...(settings.profiles || []), profile];
+      console.log(`[Server] Creating profile: ${profile.name} (${profile.id})`);
+      await persistSettings({ profiles });
+
+      res.json({ success: true, profile });
+    } catch (error) {
+      console.error('[Server] Failed to create profile:', error);
+      res.status(500).json({ error: error.message || 'Failed to create profile' });
+    }
+  });
+
+  app.patch('/api/config/profiles/:id', async (req, res) => {
+    try {
+      const settings = await readSettingsFromDiskMigrated();
+      const profileId = req.params.id;
+      const { name, agentModels, categoryModels, omoAgentModels } = req.body;
+      const profiles = settings.profiles || [];
+      const index = profiles.findIndex((p) => p.id === profileId);
+      if (index === -1) {
+        return res.status(404).json({ error: 'Profile not found' });
+      }
+
+      const existing = profiles[index];
+      const updatedProfile = { ...existing };
+
+      if (name !== undefined) {
+        const trimmedName = typeof name === 'string' ? name.trim() : '';
+        if (trimmedName.length === 0 || trimmedName.length > 64) {
+          return res.status(400).json({ error: 'name must be a string of 1–64 characters' });
+        }
+        if (profiles.some((p, i) => i !== index && p.name.toLowerCase() === trimmedName.toLowerCase())) {
+          return res.status(400).json({ error: 'A profile with this name already exists' });
+        }
+        updatedProfile.name = trimmedName;
+      }
+      if (agentModels !== undefined) {
+        if (!agentModels || typeof agentModels !== 'object' || Array.isArray(agentModels)) {
+          return res.status(400).json({ error: 'agentModels must be an object with string values' });
+        }
+        for (const [key, val] of Object.entries(agentModels)) {
+          if (typeof key !== 'string' || typeof val !== 'string') {
+            return res.status(400).json({ error: 'agentModels must be an object with string values' });
+          }
+        }
+      updatedProfile.agentModels = agentModels;
+      }
+      if (categoryModels !== undefined) {
+        if (categoryModels === null) {
+          delete updatedProfile.categoryModels;
+        } else if (typeof categoryModels === 'object' && !Array.isArray(categoryModels)) {
+          const validCategoryModels = {};
+          for (const [key, val] of Object.entries(categoryModels)) {
+            if (typeof key === 'string' && typeof val === 'string') {
+              validCategoryModels[key] = val;
+            }
+          }
+          if (Object.keys(validCategoryModels).length > 0) {
+            updatedProfile.categoryModels = validCategoryModels;
+          } else {
+            delete updatedProfile.categoryModels;
+          }
+        }
+      }
+      if (omoAgentModels !== undefined) {
+        if (omoAgentModels === null) {
+          delete updatedProfile.omoAgentModels;
+        } else if (typeof omoAgentModels === 'object' && !Array.isArray(omoAgentModels)) {
+          const validOmoAgentModels = {};
+          for (const [key, val] of Object.entries(omoAgentModels)) {
+            if (typeof key === 'string' && typeof val === 'string') {
+              validOmoAgentModels[key] = val;
+            }
+          }
+          if (Object.keys(validOmoAgentModels).length > 0) {
+            updatedProfile.omoAgentModels = validOmoAgentModels;
+          } else {
+            delete updatedProfile.omoAgentModels;
+          }
+        }
+      }
+      updatedProfile.updatedAt = new Date().toISOString();
+
+      const updatedProfiles = [...profiles];
+      updatedProfiles[index] = updatedProfile;
+
+      console.log(`[Server] Updating profile: ${updatedProfile.name} (${profileId})`);
+      await persistSettings({ profiles: updatedProfiles });
+
+      res.json({ success: true, profile: updatedProfile });
+    } catch (error) {
+      console.error('[Server] Failed to update profile:', error);
+      res.status(500).json({ error: error.message || 'Failed to update profile' });
+    }
+  });
+
+  app.delete('/api/config/profiles/:id', async (req, res) => {
+    try {
+      const settings = await readSettingsFromDiskMigrated();
+      const profileId = req.params.id;
+      const profiles = settings.profiles || [];
+      const index = profiles.findIndex((p) => p.id === profileId);
+      if (index === -1) {
+        return res.status(404).json({ error: 'Profile not found' });
+      }
+
+      const updatedProfiles = profiles.filter((p) => p.id !== profileId);
+      console.log(`[Server] Deleting profile: ${profileId}`);
+      await persistSettings({ profiles: updatedProfiles });
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error('[Server] Failed to delete profile:', error);
+      res.status(500).json({ error: error.message || 'Failed to delete profile' });
+    }
+  });
+
+
+  // ============================================================
+  // oh-my-opencode Plugin Routes
+  // ============================================================
+
+  app.get('/api/config/oh-my-opencode', async (req, res) => {
+    try {
+      const installed = isOhMyOpencodeInstalled();
+      if (!installed) {
+        return res.json({ installed: false, categories: {}, agents: {} });
+      }
+      const config = readOhMyOpencodeConfig();
+      res.json({
+        installed: true,
+        categories: config?.categories || {},
+        agents: config?.agents || {},
+      });
+    } catch (error) {
+      console.error('[Server] Failed to get oh-my-opencode config:', error);
+      res.status(500).json({ error: error.message || 'Failed to get oh-my-opencode config' });
+    }
+  });
+
+  app.post('/api/config/oh-my-opencode/categories', async (req, res) => {
+    try {
+      const installed = isOhMyOpencodeInstalled();
+      if (!installed) {
+        return res.status(400).json({ error: 'oh-my-opencode plugin is not installed' });
+      }
+      const { categories } = req.body;
+      if (!categories || typeof categories !== 'object' || Array.isArray(categories)) {
+        return res.status(400).json({ error: 'categories must be an object' });
+      }
+      writeOhMyOpencodeCategories(categories);
+      await refreshOpenCodeAfterConfigChange('oh-my-opencode categories update');
+      res.json({ success: true });
+    } catch (error) {
+      console.error('[Server] Failed to update oh-my-opencode categories:', error);
+      res.status(500).json({ error: error.message || 'Failed to update oh-my-opencode categories' });
+    }
+  });
+
+  app.post('/api/config/oh-my-opencode/agents', async (req, res) => {
+    try {
+      const installed = isOhMyOpencodeInstalled();
+      if (!installed) {
+        return res.status(400).json({ error: 'oh-my-opencode plugin is not installed' });
+      }
+      const { agents } = req.body;
+      if (!agents || typeof agents !== 'object' || Array.isArray(agents)) {
+        return res.status(400).json({ error: 'agents must be an object' });
+      }
+      writeOhMyOpencodeAgents(agents);
+      await refreshOpenCodeAfterConfigChange('oh-my-opencode agents update');
+      res.json({ success: true });
+    } catch (error) {
+      console.error('[Server] Failed to update oh-my-opencode agents:', error);
+      res.status(500).json({ error: error.message || 'Failed to update oh-my-opencode agents' });
     }
   });
 

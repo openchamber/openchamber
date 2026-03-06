@@ -7,6 +7,7 @@ export type SettingsPageSlug =
   | 'providers'
   | 'usage'
   | 'agents'
+  | 'profiles'
   | 'commands'
   | 'mcp'
   | 'skills.installed'
@@ -101,6 +102,13 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     group: 'opencode',
     kind: 'split',
     keywords: ['agent', 'agents', 'prompts', 'tools', 'permissions'],
+  },
+  {
+    slug: 'profiles',
+    title: 'Model Profiles',
+    group: 'opencode',
+    kind: 'split',
+    keywords: ['profile', 'profiles', 'model', 'preset', 'switch'],
   },
   {
     slug: 'commands',

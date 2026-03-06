@@ -64,3 +64,11 @@ export {
   updateMcpConfig,
   deleteMcpConfig,
 } from './mcp.js';
+
+
+export {
+  isOhMyOpencodeInstalled,
+  readOhMyOpencodeConfig,
+  writeOhMyOpencodeCategories,
+  writeOhMyOpencodeAgents,
+} from './oh-my-opencode.js';
