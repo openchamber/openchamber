@@ -13,6 +13,7 @@ import { applyPersistedDirectoryPreferences } from './lib/directoryPersistence'
 import { startTypographyWatcher } from './lib/typographyWatcher'
 import { startModelPrefsAutoSave } from './lib/modelPrefsAutoSave'
 import type { RuntimeAPIs } from './lib/api/types'
+import { LanguageProvider } from '@/contexts/LanguageContext';
 
 declare global {
   interface Window {
@@ -92,9 +93,11 @@ createRoot(rootElement).render(
   <StrictMode>
     <ThemeSystemProvider>
       <ThemeProvider>
-        <SessionAuthGate>
-          <App apis={runtimeAPIs} />
-        </SessionAuthGate>
+        <LanguageProvider>
+          <SessionAuthGate>
+            <App apis={runtimeAPIs} />
+          </SessionAuthGate>
+        </LanguageProvider>
       </ThemeProvider>
     </ThemeSystemProvider>
   </StrictMode>,

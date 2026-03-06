@@ -7,6 +7,7 @@ import { formatTimestampForDisplay } from '../timeFormat';
 import type { ContentChangeReason } from '@/hooks/useChatScrollManager';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { useUIStore } from '@/stores/useUIStore';
+import { useLanguage } from '@/hooks/useLanguage';
 
 type PartWithText = Part & { text?: string; content?: string; time?: { start?: number; end?: number } };
 
@@ -15,12 +16,12 @@ export type ReasoningVariant = 'thinking' | 'justification';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type IconComponent = ComponentType<any>;
 
-const variantConfig: Record<
+const variantIconConfig: Record<
     ReasoningVariant,
-    { label: string; Icon: IconComponent }
+    { Icon: IconComponent }
 > = {
-    thinking: { label: 'Thinking', Icon: RiBrainAi3Line },
-    justification: { label: 'Justification', Icon: RiChatAi3Line },
+    thinking: { Icon: RiBrainAi3Line },
+    justification: { Icon: RiChatAi3Line },
 };
 
 const cleanReasoningText = (text: string): string => {
@@ -98,12 +99,14 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
     blockId,
     time,
 }) => {
+    const { t } = useLanguage();
     const [isExpanded, setIsExpanded] = React.useState(false);
     const isMobile = useUIStore((state) => state.isMobile);
     const showActivityHeaderTimestamps = useUIStore((state) => state.showActivityHeaderTimestamps);
 
     const summary = React.useMemo(() => getReasoningSummary(text), [text]);
-    const { label, Icon } = variantConfig[variant];
+    const { Icon } = variantIconConfig[variant];
+    const label = variant === 'thinking' ? t('reasoningPart.thinking') : t('reasoningPart.justification');
     const timeStart = typeof time?.start === 'number' && Number.isFinite(time.start) ? time.start : undefined;
     const timeEnd = typeof time?.end === 'number' && Number.isFinite(time.end) ? time.end : undefined;
     const endedTimestampText = React.useMemo(() => {

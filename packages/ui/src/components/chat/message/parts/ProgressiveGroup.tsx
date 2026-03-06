@@ -9,6 +9,7 @@ import ToolPart from './ToolPart';
 import ReasoningPart from './ReasoningPart';
 import JustificationBlock from './JustificationBlock';
 import { FadeInOnReveal } from '../FadeInOnReveal';
+import { useLanguage } from '@/hooks/useLanguage';
 
 const MAX_VISIBLE_COLLAPSED = 6;
 
@@ -73,6 +74,7 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
     onContentChange,
     diffStats,
 }) => {
+    const { t } = useLanguage();
     const previousExpandedRef = React.useRef<boolean | undefined>(isExpanded);
     // Track if we just expanded from collapsed state
     const [justExpandedFromCollapsed, setJustExpandedFromCollapsed] = React.useState(false);
@@ -208,7 +210,7 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
                                 <RiStackLine className="h-3.5 w-3.5" style={{ color: 'var(--tools-icon)' }} />
                             )}
                         </div>
-                        <span className="typography-meta font-medium" style={{ color: 'var(--tools-title)' }}>Activity</span>
+                        <span className="typography-meta font-medium" style={{ color: 'var(--tools-title)' }}>{t('progressiveGroup.activity')}</span>
                     </div>
 
                     {diffStats && (diffStats.additions > 0 || diffStats.deletions > 0) && (

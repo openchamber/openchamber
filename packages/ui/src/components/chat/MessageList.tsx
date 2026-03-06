@@ -18,6 +18,7 @@ import { useSessionStore } from '@/stores/useSessionStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useDeviceInfo } from '@/lib/device';
 import { FadeInDisabledProvider } from './message/FadeInOnReveal';
+import { useLanguage } from '@/hooks/useLanguage';
 
 const MESSAGE_VIRTUALIZE_THRESHOLD = 40;
 const MESSAGE_VIRTUAL_OVERSCAN_MOBILE = 2;
@@ -561,6 +562,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     scrollToBottom,
     scrollRef,
 }, ref) => {
+    const { t } = useLanguage();
     const { isMobile } = useDeviceInfo();
     const stickyUserHeader = useUIStore(state => state.stickyUserHeader);
 
@@ -987,7 +989,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                             onClick={onRenderEarlier}
                             className="text-xs uppercase tracking-wide text-muted-foreground/80 hover:text-foreground"
                         >
-                            Render earlier messages
+                            {t('chatAutocomplete.renderEarlierMessages')}
                         </button>
                     </div>
                 )}
@@ -996,7 +998,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                     <div className="flex justify-center py-3">
                         {isLoadingOlder ? (
                             <span className="text-xs uppercase tracking-wide text-muted-foreground/80">
-                                Loading…
+                                {t('chatAutocomplete.loading')}
                             </span>
                         ) : (
                             <button
@@ -1004,7 +1006,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                                 onClick={onLoadOlder}
                                 className="text-xs uppercase tracking-wide text-muted-foreground/80 hover:text-foreground"
                             >
-                                Load older messages
+                                {t('chatAutocomplete.loadOlderMessages')}
                             </button>
                         )}
                     </div>

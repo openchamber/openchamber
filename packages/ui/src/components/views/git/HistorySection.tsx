@@ -15,12 +15,9 @@ import {
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { HistoryCommitRow } from './HistoryCommitRow';
 import type { GitLogEntry, CommitFileEntry } from '@/lib/api/types';
+import { useLanguage } from '@/hooks/useLanguage';
 
-const LOG_SIZE_OPTIONS = [
-  { label: '25 commits', value: 25 },
-  { label: '50 commits', value: 50 },
-  { label: '100 commits', value: 100 },
-];
+const LOG_SIZE_OPTIONS = [{ value: 25 }, { value: 50 }, { value: 100 }];
 
 interface HistorySectionProps {
   log: { all: GitLogEntry[] } | null;
@@ -47,6 +44,7 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
   onCopyHash,
   showHeader = true,
 }) => {
+  const { t } = useLanguage();
   const [isOpen, setIsOpen] = React.useState(true);
 
   if (!log) {
@@ -58,7 +56,7 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
       {log.all.length === 0 ? (
         <div className="flex h-full items-center justify-center p-4">
           <p className="typography-ui-label text-muted-foreground">
-            No commits found
+            {t('historySection.noCommitsFound')}
           </p>
         </div>
       ) : (
@@ -94,7 +92,7 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
       className="rounded-xl border border-border/60 bg-background/70 overflow-hidden"
     >
       <CollapsibleTrigger className="flex w-full items-center justify-between px-3 h-10 hover:bg-transparent">
-        <h3 className="typography-ui-header font-semibold text-foreground">History</h3>
+        <h3 className="typography-ui-header font-semibold text-foreground">{t('historySection.title')}</h3>
         <div className="flex items-center gap-2">
           {isOpen && (
             <div
@@ -111,12 +109,12 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
                   className="data-[size=sm]:h-auto h-7 min-h-7 w-auto justify-between px-2 py-0"
                   disabled={isLogLoading}
                 >
-                  <SelectValue placeholder="Commits" />
+                  <SelectValue placeholder={t('historySection.commitsPlaceholder')} />
                 </SelectTrigger>
                 <SelectContent>
                   {LOG_SIZE_OPTIONS.map((option) => (
                     <SelectItem key={option.value} value={String(option.value)}>
-                      {option.label}
+                      {t('historySection.commitsCount', { count: option.value })}
                     </SelectItem>
                   ))}
                 </SelectContent>

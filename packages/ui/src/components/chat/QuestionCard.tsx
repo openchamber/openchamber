@@ -5,6 +5,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
 import type { QuestionRequest } from '@/types/question';
 import { useSessionStore } from '@/stores/useSessionStore';
+import { useLanguage } from '@/hooks/useLanguage';
 
 interface QuestionCardProps {
   question: QuestionRequest;
@@ -14,6 +15,7 @@ type TabKey = string;
 const SUMMARY_TAB = 'summary';
 
 export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
+  const { t } = useLanguage();
   const { respondToQuestion, rejectQuestion } = useSessionStore();
   const isFromSubagent = useSessionStore(
     React.useCallback((state) => {
@@ -56,10 +58,10 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
     }));
     // Add summary tab when multiple questions
     if (questions.length > 1) {
-      questionTabs.push({ value: SUMMARY_TAB, label: 'Summary' });
+      questionTabs.push({ value: SUMMARY_TAB, label: t('questionCard.summary') });
     }
     return questionTabs;
-  }, [questions]);
+  }, [questions, t]);
 
   // Helper to get answer display for a question index
   const getAnswerDisplay = React.useCallback((index: number): string => {
@@ -194,10 +196,10 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
           <div className="px-2 py-1.5 border-b border-border/20">
             <div className="flex items-center gap-2">
               <RiQuestionLine className="h-3.5 w-3.5 text-primary" />
-              <span className="typography-meta font-medium text-muted-foreground">Input needed</span>
+              <span className="typography-meta font-medium text-muted-foreground">{t('questionCard.inputNeeded')}</span>
               {isFromSubagent ? (
                 <span className="typography-micro text-muted-foreground px-1.5 py-0.5 rounded bg-foreground/5">
-                  From subagent
+                  {t('questionCard.fromSubagent')}
                 </span>
               ) : null}
               {activeHeader ? (
@@ -270,7 +272,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
                 <div className="typography-meta font-medium text-foreground mb-1.5">{activeQuestion.question}</div>
 
                 {isMultiple ? (
-                  <div className="typography-micro text-muted-foreground mb-1.5">Select multiple</div>
+                  <div className="typography-micro text-muted-foreground mb-1.5">{t('questionCard.selectMultiple')}</div>
                 ) : null}
 
                 <div className="space-y-0.5">
@@ -309,7 +311,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
                                 {option.label}
                               </span>
                               {recommended ? (
-                                <span className="typography-micro text-primary/80">recommended</span>
+                                <span className="typography-micro text-primary/80">{t('questionCard.recommended')}</span>
                               ) : null}
                             </div>
                             {option.description ? (
@@ -342,7 +344,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
                         'typography-meta',
                         isCustomActive ? 'text-foreground font-medium' : 'text-muted-foreground'
                       )}>
-                        Other…
+                        {t('questionCard.other')}
                       </span>
                     </div>
                   </button>
@@ -369,7 +371,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
                           el.style.height = `${Math.min(Math.max(el.scrollHeight, minHeight), maxHeight)}px`;
                           setCustomText((prev) => ({ ...prev, [activeIndex]: el.value }));
                         }}
-                        placeholder="Your answer"
+                        placeholder={t('questionCard.yourAnswer')}
                         disabled={isResponding}
                         rows={2}
                         className="w-full bg-transparent border border-border/30 focus:border-primary rounded px-2 py-1 outline-none typography-meta text-foreground placeholder:text-muted-foreground/50 transition-colors resize-none overflow-hidden"

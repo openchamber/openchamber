@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { useDeviceInfo } from '@/lib/device';
+import { useLanguage } from '@/hooks/useLanguage';
 
 export interface InlineCommentInputProps {
   initialText?: string;
@@ -26,6 +27,7 @@ export function InlineCommentInput({
   className,
   maxWidth,
 }: InlineCommentInputProps) {
+  const { t } = useLanguage();
   const themeContext = useOptionalThemeSystem();
   const currentTheme = themeContext?.currentTheme;
   const { isMobile } = useDeviceInfo();
@@ -140,7 +142,7 @@ export function InlineCommentInput({
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Add a comment... (Cmd+Enter to save)"
+          placeholder={t('inlineCommentInput.addCommentPlaceholder')}
           className="min-h-[80px] text-sm resize-y"
           style={{
             backgroundColor: currentTheme?.colors?.surface?.subtle,

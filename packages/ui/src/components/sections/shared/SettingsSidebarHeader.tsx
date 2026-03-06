@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { RiAddLine } from '@remixicon/react';
 import { useDeviceInfo } from '@/lib/device';
 import { cn } from '@/lib/utils';
+import { useLanguage } from '@/hooks/useLanguage';
 
 interface SettingsSidebarHeaderProps {
   /** Total count to display (e.g., "Total 5") */
@@ -29,10 +30,13 @@ interface SettingsSidebarHeaderProps {
 export const SettingsSidebarHeader: React.FC<SettingsSidebarHeaderProps> = ({
   count,
   onAdd,
-  label = 'Total',
-  addButtonLabel = 'Add new item',
+  label,
+  addButtonLabel,
 }) => {
+  const { t } = useLanguage();
   const { isMobile } = useDeviceInfo();
+  const resolvedLabel = label || t('settingsSidebarHeader.total');
+  const resolvedAddButtonLabel = addButtonLabel || t('settingsSidebarHeader.addNewItem');
 
   return (
     <div
@@ -43,7 +47,7 @@ export const SettingsSidebarHeader: React.FC<SettingsSidebarHeaderProps> = ({
     >
       <div className="flex items-center justify-between gap-2">
         <span className="typography-meta text-muted-foreground">
-          {label} {count}
+          {resolvedLabel} {count}
         </span>
         {onAdd && (
           <Button
@@ -52,7 +56,7 @@ export const SettingsSidebarHeader: React.FC<SettingsSidebarHeaderProps> = ({
             size="icon"
             className="h-7 w-7 -my-1 text-muted-foreground"
             onClick={onAdd}
-            aria-label={addButtonLabel}
+            aria-label={resolvedAddButtonLabel}
           >
             <RiAddLine className="size-4" />
           </Button>

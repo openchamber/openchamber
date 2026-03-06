@@ -18,6 +18,7 @@ import {
 } from '@remixicon/react';
 import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
 import { cn } from '@/lib/utils';
+import { useLanguage } from '@/hooks/useLanguage';
 
 export interface SortableProjectItemProps {
   id: string;
@@ -80,6 +81,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   showCreateButtons = true,
   hideHeader = false,
 }) => {
+  const { t } = useLanguage();
   const {
     attributes,
     listeners,
@@ -147,7 +149,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                     onChange={(event) => onRenameValueChange(event.target.value)}
                     className="flex-1 min-w-0 bg-transparent typography-ui-label outline-none placeholder:text-muted-foreground"
                     autoFocus
-                    placeholder="Rename project"
+                    placeholder={t('sessionSidebar.renameProject')}
                     onKeyDown={(event) => {
                       if (event.key === 'Escape') {
                         event.stopPropagation();
@@ -208,7 +210,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                         'inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 hover:text-foreground',
                         mobileVariant ? 'opacity-70' : 'opacity-0 group-hover/project:opacity-100',
                       )}
-                      aria-label="Project menu"
+                      aria-label={t('sessionSidebar.projectMenu')}
                       onClick={(e) => e.stopPropagation()}
                     >
                       <RiMore2Line className="h-3.5 w-3.5" />
@@ -218,31 +220,31 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                     {showCreateButtons && isRepo && !hideDirectoryControls && settingsAutoCreateWorktree && onNewSession && (
                       <DropdownMenuItem onClick={onNewSession}>
                         <RiAddLine className="mr-1.5 h-4 w-4" />
-                        New Session
+                        {t('sessionSidebar.newSession')}
                       </DropdownMenuItem>
                     )}
                     {showCreateButtons && isRepo && !hideDirectoryControls && !settingsAutoCreateWorktree && onNewWorktreeSession && (
                       <DropdownMenuItem onClick={onNewWorktreeSession}>
                         <RiGitBranchLine className="mr-1.5 h-4 w-4" />
-                        New Session in Worktree
+                        {t('sessionSidebar.newSessionInWorktree')}
                       </DropdownMenuItem>
                     )}
                     {showCreateButtons && isRepo && !hideDirectoryControls && (
                       <DropdownMenuItem onClick={onOpenMultiRunLauncher}>
                         <ArrowsMerge className="mr-1.5 h-4 w-4" />
-                        New Multi-Run
+                        {t('sessionSidebar.newMultiRun')}
                       </DropdownMenuItem>
                     )}
                     <DropdownMenuItem onClick={onRenameStart}>
                       <RiPencilAiLine className="mr-1.5 h-4 w-4" />
-                      Rename
+                      {t('sessionSidebar.renameProject')}
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       onClick={onClose}
                       className="text-destructive focus:text-destructive"
                     >
                       <RiCloseLine className="mr-1.5 h-4 w-4" />
-                      Close Project
+                      {t('navigation.closeProject')}
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
@@ -261,13 +263,13 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                         'inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 hover:text-foreground hover:bg-interactive-hover/50 flex-shrink-0',
                         mobileVariant ? 'opacity-70' : 'opacity-100',
                       )}
-                      aria-label="New session in worktree"
+                      aria-label={t('sessionSidebar.newSessionInWorktree')}
                     >
                       <RiGitBranchLine className="h-4 w-4" />
                     </button>
                   </TooltipTrigger>
                   <TooltipContent side="bottom" sideOffset={4}>
-                    <p>New session in worktree</p>
+                    <p>{t('sessionSidebar.newSessionInWorktree')}</p>
                   </TooltipContent>
                 </Tooltip>
               )}
@@ -281,13 +283,13 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                         onNewSession();
                       }}
                       className="inline-flex h-6 w-6 items-center justify-center text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 flex-shrink-0 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-                      aria-label="New session"
+                      aria-label={t('sessionSidebar.newSession')}
                     >
                       <RiAddLine className="h-4 w-4" />
                     </button>
                   </TooltipTrigger>
                   <TooltipContent side="bottom" sideOffset={4}>
-                    <p>New session</p>
+                    <p>{t('sessionSidebar.newSession')}</p>
                   </TooltipContent>
                 </Tooltip>
               )}

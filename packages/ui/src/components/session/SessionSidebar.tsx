@@ -35,6 +35,7 @@ import { useProjectSessionLists } from './sidebar/hooks/useProjectSessionLists';
 import { useSessionFolderCleanup } from './sidebar/hooks/useSessionFolderCleanup';
 import { useStickyProjectHeaders } from './sidebar/hooks/useStickyProjectHeaders';
 import { useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
+import { useLanguage } from '@/hooks/useLanguage';
 import { SessionGroupSection } from './sidebar/SessionGroupSection';
 import { SidebarHeader } from './sidebar/SidebarHeader';
 import { SidebarProjectsList } from './sidebar/SidebarProjectsList';
@@ -141,6 +142,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   hideProjectSelector = true,
   showOnlyMainWorkspace = false,
 }) => {
+  const { t } = useLanguage();
   const [isSessionSearchOpen, setIsSessionSearchOpen] = React.useState(false);
   const [sessionSearchQuery, setSessionSearchQuery] = React.useState('');
   const sessionSearchContainerRef = React.useRef<HTMLDivElement | null>(null);
@@ -387,8 +389,8 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
   const emptyState = (
     <div className="py-6 text-center text-muted-foreground">
-      <p className="typography-ui-label font-semibold">No sessions yet</p>
-      <p className="typography-meta mt-1">Create your first session to start coding.</p>
+      <p className="typography-ui-label font-semibold">{t('sessionSidebar.noSessionsYet')}</p>
+      <p className="typography-meta mt-1">{t('sessionSidebar.createFirstSession')}</p>
     </div>
   );
 
@@ -473,21 +475,21 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         if (result.success && result.path) {
           const added = addProject(result.path, { id: result.projectId });
           if (!added) {
-            toast.error('Failed to add project', {
-              description: 'Please select a valid directory.',
+            toast.error(t('sessionDialogs.failedToOpenDirectory'), {
+              description: t('sessionDialogs.selectValidDirectoryPath'),
             });
           }
         } else if (result.error && result.error !== 'Directory selection cancelled') {
-          toast.error('Failed to select directory', {
+          toast.error(t('sessionDialogs.failedToOpenDirectory'), {
             description: result.error,
           });
         }
       })
       .catch((error) => {
         console.error('Desktop: Error selecting directory:', error);
-        toast.error('Failed to select directory');
+        toast.error(t('sessionDialogs.failedToOpenDirectory'));
       });
-  }, [addProject, tauriIpcAvailable]);
+  }, [addProject, t, tauriIpcAvailable]);
 
   const toggleParent = React.useCallback((sessionId: string) => {
     setExpandedParents((prev) => {
@@ -642,8 +644,8 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
   const searchEmptyState = (
     <div className="py-6 text-center text-muted-foreground">
-      <p className="typography-ui-label font-semibold">No matching sessions</p>
-      <p className="typography-meta mt-1">Try a different title, branch, folder, or path.</p>
+      <p className="typography-ui-label font-semibold">{t('sessionSidebar.noMatchingSessions')}</p>
+      <p className="typography-meta mt-1">{t('sessionSidebar.tryDifferentSearch')}</p>
     </div>
   );
 
@@ -1073,7 +1075,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         <MobileOverlayPanel
           open={projectNotesPanelOpen}
           onClose={() => setProjectNotesPanelOpen(false)}
-          title="Project notes"
+          title={t('sessionSidebar.projectNotes')}
         >
           <ProjectNotesTodoPanel
             projectRef={activeProjectRefForHeader}

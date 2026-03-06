@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { cn } from '@/lib/utils';
+import { useLanguage } from '@/hooks/useLanguage';
 
 interface GridLoaderProps {
   className?: string;
@@ -18,13 +19,14 @@ const getPulseDelayMs = (index: number): number => {
 };
 
 const GridLoader: React.FC<GridLoaderProps> = ({ className, size = 'md' }) => {
+  const { t } = useLanguage();
   const config = sizeConfig[size];
 
   return (
     <span
       className={cn('grid grid-cols-3 place-items-center', config.container, className)}
       style={{ width: '11px', height: '11px' }}
-      aria-label="Loading"
+      aria-label={t('common.loading')}
     >
       {Array.from({ length: 9 }, (_, i) => (
         <span

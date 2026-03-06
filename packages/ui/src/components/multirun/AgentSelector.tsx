@@ -8,6 +8,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { useLanguage } from '@/hooks/useLanguage';
 
 export interface AgentSelectorProps {
   /** Currently selected agent name (empty string for no agent) */
@@ -33,6 +34,7 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
   disabled,
   id,
 }) => {
+  const { t } = useLanguage();
   const getVisibleAgents = useConfigStore((state) => state.getVisibleAgents);
   const loadAgents = useConfigStore((state) => state.loadAgents);
   const defaultAgentName = useConfigStore((state) => state.currentAgentName);
@@ -87,7 +89,7 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
         size="lg"
         className={className ?? 'max-w-full typography-meta text-foreground'}
       >
-        <SelectValue placeholder="Select an agent" />
+        <SelectValue placeholder={t('agentSelector.selectAgent')} />
       </SelectTrigger>
       <SelectContent fitContent>
         {selectableAgents.length > 0 && (
