@@ -24,7 +24,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
-import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { toast } from '@/components/ui/toast';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useKanbanStore } from '@/stores/useKanbanStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -68,7 +68,7 @@ const CLOSED_CREATE_COLUMN_DIALOG: CreateColumnDialogState = {
 
 export const KanbanView: React.FC = () => {
   const activeProject = useProjectsStore((state) => state.getActiveProject());
-  const effectiveDirectory = useEffectiveDirectory();
+  const projectDirectory = activeProject?.path?.trim() ?? null;
   const isMobile = useUIStore((state) => state.isMobile);
 
   const projectId = activeProject?.id ?? null;
@@ -80,7 +80,7 @@ export const KanbanView: React.FC = () => {
     ),
   );
 
-  const ensureProjectBoard = useKanbanStore((state) => state.ensureProjectBoard);
+  const hydrateProjectBoard = useKanbanStore((state) => state.hydrateProjectBoard);
   const createColumn = useKanbanStore((state) => state.createColumn);
   const renameColumn = useKanbanStore((state) => state.renameColumn);
   const deleteColumn = useKanbanStore((state) => state.deleteColumn);
@@ -88,7 +88,9 @@ export const KanbanView: React.FC = () => {
   const updateCard = useKanbanStore((state) => state.updateCard);
   const deleteCard = useKanbanStore((state) => state.deleteCard);
   const moveCard = useKanbanStore((state) => state.moveCard);
-  const reorderCardsInColumn = useKanbanStore((state) => state.reorderCardsInColumn);
+  const isLoadingByProject = useKanbanStore((state) => state.isLoadingByProject);
+  const isMutatingByProject = useKanbanStore((state) => state.isMutatingByProject);
+  const errorByProject = useKanbanStore((state) => state.errorByProject);
 
   const [draggedCardId, setDraggedCardId] = React.useState<string | null>(null);
   const [cardDialog, setCardDialog] = React.useState<CardDialogState>(CLOSED_CARD_DIALOG);
@@ -100,11 +102,17 @@ export const KanbanView: React.FC = () => {
   );
 
   React.useEffect(() => {
-    if (!projectId || board) {
+    if (!projectId || !projectDirectory) {
       return;
     }
-    ensureProjectBoard(projectId);
-  }, [board, ensureProjectBoard, projectId]);
+
+    hydrateProjectBoard(projectId, projectDirectory).catch((error) => {
+      console.error('Failed to hydrate board:', error);
+      toast.error('Failed to load board', {
+        description: error instanceof Error ? error.message : 'Unknown error',
+      });
+    });
+  }, [projectDirectory, hydrateProjectBoard, projectId]);
 
   const columns = React.useMemo(() => {
     if (!board) {
@@ -152,10 +160,15 @@ export const KanbanView: React.FC = () => {
     setDraggedCardId(String(event.active.id));
   }, []);
 
-  const handleDragEnd = React.useCallback((event: DragEndEvent) => {
+  const handleDragEnd = React.useCallback(async (event: DragEndEvent) => {
     setDraggedCardId(null);
 
-    if (!projectId || !board || !event.over) {
+    if (!projectId || !projectDirectory || !board || !event.over) {
+      return;
+    }
+
+    const isMutating = isMutatingByProject.get(projectId) ?? false;
+    if (isMutating) {
       return;
     }
 
@@ -173,7 +186,13 @@ export const KanbanView: React.FC = () => {
     const overColumn = board.columns.find((column) => column.id === overID);
     if (overColumn) {
       const targetCards = (cardsByColumn.get(overColumn.id) ?? []).filter((card) => card.id !== activeID);
-      moveCard(projectId, activeID, overColumn.id, targetCards.length);
+      try {
+        await moveCard(projectId, projectDirectory, activeID, overColumn.id, targetCards.length);
+      } catch (error) {
+        toast.error('Failed to move card', {
+          description: error instanceof Error ? error.message : 'Unknown error',
+        });
+      }
       return;
     }
 
@@ -189,7 +208,13 @@ export const KanbanView: React.FC = () => {
     }
 
     if (activeCard.columnId !== overCard.columnId) {
-      moveCard(projectId, activeID, overCard.columnId, toIndex);
+      try {
+        await moveCard(projectId, projectDirectory, activeID, overCard.columnId, toIndex);
+      } catch (error) {
+        toast.error('Failed to move card', {
+          description: error instanceof Error ? error.message : 'Unknown error',
+        });
+      }
       return;
     }
 
@@ -198,8 +223,14 @@ export const KanbanView: React.FC = () => {
       return;
     }
 
-    reorderCardsInColumn(projectId, overCard.columnId, fromIndex, toIndex);
-  }, [board, cardsByColumn, moveCard, projectId, reorderCardsInColumn]);
+    try {
+      await moveCard(projectId, projectDirectory, activeID, overCard.columnId, toIndex);
+    } catch (error) {
+      toast.error('Failed to move card', {
+        description: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  }, [board, cardsByColumn, projectDirectory, isMutatingByProject, moveCard, projectId]);
 
   const handleAddColumn = React.useCallback(() => {
     setCreateColumnDialog({
@@ -208,8 +239,13 @@ export const KanbanView: React.FC = () => {
     });
   }, []);
 
-  const handleSaveCreateColumn = React.useCallback(() => {
-    if (!projectId || !createColumnDialog.open) {
+  const handleSaveCreateColumn = React.useCallback(async () => {
+    if (!projectId || !projectDirectory || !createColumnDialog.open) {
+      return;
+    }
+
+    const isMutating = isMutatingByProject.get(projectId) ?? false;
+    if (isMutating) {
       return;
     }
 
@@ -218,9 +254,16 @@ export const KanbanView: React.FC = () => {
       return;
     }
 
-    createColumn(projectId, name);
-    closeCreateColumnDialog();
-  }, [closeCreateColumnDialog, createColumn, createColumnDialog, projectId]);
+    try {
+      await createColumn(projectId, projectDirectory, name);
+      closeCreateColumnDialog();
+      toast.success('Column created');
+    } catch (error) {
+      toast.error('Failed to create column', {
+        description: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  }, [closeCreateColumnDialog, createColumn, createColumnDialog, projectDirectory, isMutatingByProject, projectId]);
 
   const handleRenameColumn = React.useCallback((columnID: string, currentName: string) => {
     setRenameDialog({
@@ -230,8 +273,13 @@ export const KanbanView: React.FC = () => {
     });
   }, []);
 
-  const handleSaveRename = React.useCallback(() => {
-    if (!projectId || !renameDialog.open) {
+  const handleSaveRename = React.useCallback(async () => {
+    if (!projectId || !projectDirectory || !renameDialog.open) {
+      return;
+    }
+
+    const isMutating = isMutatingByProject.get(projectId) ?? false;
+    if (isMutating) {
       return;
     }
 
@@ -240,18 +288,37 @@ export const KanbanView: React.FC = () => {
       return;
     }
 
-    renameColumn(projectId, renameDialog.columnId, nextName);
-    closeRenameDialog();
-  }, [closeRenameDialog, projectId, renameColumn, renameDialog]);
+    try {
+      await renameColumn(projectId, projectDirectory, renameDialog.columnId, nextName);
+      closeRenameDialog();
+      toast.success('Column renamed');
+    } catch (error) {
+      toast.error('Failed to rename column', {
+        description: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  }, [closeRenameDialog, projectDirectory, isMutatingByProject, projectId, renameColumn, renameDialog]);
 
-  const handleDeleteColumn = React.useCallback(() => {
-    if (!projectId || !renameDialog.open) {
+  const handleDeleteColumn = React.useCallback(async () => {
+    if (!projectId || !projectDirectory || !renameDialog.open) {
       return;
     }
 
-    deleteColumn(projectId, renameDialog.columnId);
-    closeRenameDialog();
-  }, [closeRenameDialog, deleteColumn, projectId, renameDialog.columnId, renameDialog.open]);
+    const isMutating = isMutatingByProject.get(projectId) ?? false;
+    if (isMutating) {
+      return;
+    }
+
+    try {
+      await deleteColumn(projectId, projectDirectory, renameDialog.columnId);
+      closeRenameDialog();
+      toast.success('Column deleted');
+    } catch (error) {
+      toast.error('Failed to delete column', {
+        description: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  }, [closeRenameDialog, deleteColumn, projectDirectory, isMutatingByProject, projectId, renameDialog.columnId, renameDialog.open]);
 
   const handleCreateCard = React.useCallback((columnID: string) => {
     setCardDialog({
@@ -271,36 +338,73 @@ export const KanbanView: React.FC = () => {
     });
   }, []);
 
-  const handleSaveCard = React.useCallback((data: { title: string; description: string; worktreeId: string }) => {
-    if (!projectId) {
+  const handleSaveCard = React.useCallback(async (data: { title: string; description: string; worktreeId: string }) => {
+    if (!projectId || !projectDirectory) {
       return;
     }
 
-    if (cardDialog.mode === 'create') {
-      createCard(projectId, cardDialog.columnId, data.title, data.description, data.worktreeId);
-      closeCardDialog();
+    const isMutating = isMutatingByProject.get(projectId) ?? false;
+    if (isMutating) {
       return;
     }
 
-    if (cardDialog.card) {
-      updateCard(projectId, cardDialog.card.id, {
-        title: data.title,
-        description: data.description,
-        worktreeId: data.worktreeId,
+    try {
+      if (cardDialog.mode === 'create') {
+        await createCard(projectId, projectDirectory, cardDialog.columnId, data.title, data.description, data.worktreeId);
+        closeCardDialog();
+        toast.success('Card created');
+        return;
+      }
+
+      if (cardDialog.card) {
+        await updateCard(projectId, projectDirectory, cardDialog.card.id, {
+          title: data.title,
+          description: data.description,
+          worktreeId: data.worktreeId,
+        });
+        closeCardDialog();
+        toast.success('Card updated');
+      }
+    } catch (error) {
+      toast.error(cardDialog.mode === 'create' ? 'Failed to create card' : 'Failed to update card', {
+        description: error instanceof Error ? error.message : 'Unknown error',
       });
     }
+  }, [cardDialog, closeCardDialog, createCard, projectDirectory, isMutatingByProject, projectId, updateCard]);
 
-    closeCardDialog();
-  }, [cardDialog, closeCardDialog, createCard, projectId, updateCard]);
-
-  const handleDeleteCard = React.useCallback(() => {
-    if (!projectId || !cardDialog.card) {
+  const handleDeleteCard = React.useCallback(async () => {
+    if (!projectId || !projectDirectory || !cardDialog.card) {
       return;
     }
 
-    deleteCard(projectId, cardDialog.card.id);
-    closeCardDialog();
-  }, [cardDialog.card, closeCardDialog, deleteCard, projectId]);
+    const isMutating = isMutatingByProject.get(projectId) ?? false;
+    if (isMutating) {
+      return;
+    }
+
+    try {
+      await deleteCard(projectId, projectDirectory, cardDialog.card.id);
+      closeCardDialog();
+      toast.success('Card deleted');
+    } catch (error) {
+      toast.error('Failed to delete card', {
+        description: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  }, [cardDialog.card, closeCardDialog, deleteCard, projectDirectory, isMutatingByProject, projectId]);
+
+  const handleRetryLoad = React.useCallback(async () => {
+    if (!projectId || !projectDirectory) {
+      return;
+    }
+    try {
+      await hydrateProjectBoard(projectId, projectDirectory);
+    } catch (error) {
+      toast.error('Failed to load board', {
+        description: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  }, [projectDirectory, hydrateProjectBoard, projectId]);
 
   if (isMobile) {
     return (
@@ -313,7 +417,7 @@ export const KanbanView: React.FC = () => {
     );
   }
 
-  if (!activeProject || !effectiveDirectory) {
+  if (!activeProject || !projectDirectory) {
     return (
       <div className="flex h-full items-center justify-center p-8 text-center">
         <div>
@@ -324,10 +428,29 @@ export const KanbanView: React.FC = () => {
     );
   }
 
-  if (!board) {
+  const isLoading = projectId ? (isLoadingByProject.get(projectId) ?? false) : false;
+  const error = projectId ? errorByProject.get(projectId) : null;
+
+  if (!board && (isLoading || !error)) {
     return (
       <div className="flex h-full items-center justify-center p-8 text-center">
         <p className="typography-ui-label text-foreground">Loading board...</p>
+      </div>
+    );
+  }
+
+  if (!board) {
+    return (
+      <div className="flex h-full items-center justify-center p-8 text-center">
+        <div className="space-y-4">
+          <p className="typography-ui-label text-foreground">Board not found.</p>
+          {error && <p className="typography-micro text-destructive mt-2">{error}</p>}
+          {error && (
+            <Button type="button" variant="outline" onClick={handleRetryLoad}>
+              Retry
+            </Button>
+          )}
+        </div>
       </div>
     );
   }
