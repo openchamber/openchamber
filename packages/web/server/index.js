@@ -4,6 +4,7 @@ import { spawn, spawnSync } from 'child_process';
 import fs from 'fs';
 import http from 'http';
 import net from 'net';
+import { pipeline } from 'stream/promises';
 import { WebSocketServer } from 'ws';
 import { fileURLToPath } from 'url';
 import os from 'os';
@@ -436,6 +437,75 @@ const resolveWorkspacePathFromContext = async (req, targetPath) => {
   }
 
   return resolveWorkspacePathFromWorktrees(targetPath, resolvedProject.directory);
+};
+
+const resolveCanonicalPath = async (targetPath) => {
+  return fsPromises.realpath(targetPath).catch(() => path.resolve(targetPath));
+};
+
+const findNearestExistingPath = async (targetPath) => {
+  let current = path.resolve(targetPath);
+
+  while (true) {
+    try {
+      await fsPromises.lstat(current);
+      return current;
+    } catch (error) {
+      if (!error || typeof error !== 'object' || error.code !== 'ENOENT') {
+        throw error;
+      }
+
+      const parent = path.dirname(current);
+      if (parent === current) {
+        return current;
+      }
+      current = parent;
+    }
+  }
+};
+
+const resolveWritableTargetPath = async (targetPath, basePath) => {
+  const resolvedTargetPath = path.resolve(targetPath);
+  const canonicalBase = await resolveCanonicalPath(basePath);
+
+  let targetExists = false;
+  try {
+    await fsPromises.lstat(resolvedTargetPath);
+    targetExists = true;
+  } catch (error) {
+    if (!error || typeof error !== 'object' || error.code !== 'ENOENT') {
+      throw error;
+    }
+  }
+
+  const validationStartPath = targetExists
+    ? resolvedTargetPath
+    : path.dirname(resolvedTargetPath);
+  const nearestExistingPath = await findNearestExistingPath(validationStartPath);
+  const canonicalNearestExistingPath = await resolveCanonicalPath(nearestExistingPath);
+
+  if (!isPathWithinRoot(canonicalNearestExistingPath, canonicalBase)) {
+    return { ok: false };
+  }
+
+  const targetDirectory = path.dirname(resolvedTargetPath);
+  await fsPromises.mkdir(targetDirectory, { recursive: true });
+
+  const canonicalTargetDirectory = await resolveCanonicalPath(targetDirectory);
+  if (!isPathWithinRoot(canonicalTargetDirectory, canonicalBase)) {
+    return { ok: false };
+  }
+
+  if (targetExists) {
+    const canonicalTargetPath = await resolveCanonicalPath(resolvedTargetPath);
+    if (!isPathWithinRoot(canonicalTargetPath, canonicalBase)) {
+      return { ok: false };
+    }
+
+    return { ok: true, path: canonicalTargetPath };
+  }
+
+  return { ok: true, path: path.join(canonicalTargetDirectory, path.basename(resolvedTargetPath)) };
 };
 
 
@@ -6775,6 +6845,11 @@ async function main(options = {}) {
   });
 
   app.use((req, res, next) => {
+    const isRawFileUploadRoute = req.path === '/api/fs/upload' && (req.method === 'PUT' || req.method === 'POST');
+    if (isRawFileUploadRoute) {
+      return next();
+    }
+
     if (
       req.path.startsWith('/api/config/agents') ||
       req.path.startsWith('/api/config/commands') ||
@@ -6803,6 +6878,16 @@ async function main(options = {}) {
     }
   });
   app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+  app.use((error, req, res, next) => {
+    if (error && typeof error === 'object' && (error.type === 'entity.too.large' || error.status === 413)) {
+      return res.status(413).json({
+        error: 'Request payload is too large for the current upload route. Use streaming upload or reduce file size.',
+      });
+    }
+
+    return next(error);
+  });
 
   app.use((req, res, next) => {
     console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
@@ -11902,6 +11987,51 @@ async function main(options = {}) {
     }
   });
 
+  // Read file or directory metadata
+  app.get('/api/fs/stat', async (req, res) => {
+    const filePath = typeof req.query.path === 'string' ? req.query.path.trim() : '';
+    if (!filePath) {
+      return res.status(400).json({ error: 'Path is required' });
+    }
+
+    try {
+      const resolved = await resolveWorkspacePathFromContext(req, filePath);
+      if (!resolved.ok) {
+        return res.status(400).json({ error: resolved.error });
+      }
+
+      const [canonicalPath, canonicalBase] = await Promise.all([
+        fsPromises.realpath(resolved.resolved),
+        fsPromises.realpath(resolved.base).catch(() => path.resolve(resolved.base)),
+      ]);
+
+      if (!isPathWithinRoot(canonicalPath, canonicalBase)) {
+        return res.status(403).json({ error: 'Access to path denied' });
+      }
+
+      const stats = await fsPromises.stat(canonicalPath);
+      const modifiedTime = Number.isFinite(stats.mtimeMs) ? stats.mtimeMs : undefined;
+
+      res.json({
+        path: canonicalPath,
+        isDirectory: stats.isDirectory(),
+        isFile: stats.isFile(),
+        size: stats.isFile() ? stats.size : undefined,
+        modifiedTime,
+      });
+    } catch (error) {
+      const err = error;
+      if (err && typeof err === 'object' && err.code === 'ENOENT') {
+        return res.status(404).json({ error: 'Path not found' });
+      }
+      if (err && typeof err === 'object' && err.code === 'EACCES') {
+        return res.status(403).json({ error: 'Access to path denied' });
+      }
+      console.error('Failed to stat path:', error);
+      res.status(500).json({ error: (error && error.message) || 'Failed to stat path' });
+    }
+  });
+
   // Read file contents
   app.get('/api/fs/read', async (req, res) => {
     const filePath = typeof req.query.path === 'string' ? req.query.path.trim() : '';
@@ -11973,6 +12103,7 @@ async function main(options = {}) {
 
       const ext = path.extname(canonicalPath).toLowerCase();
       const mimeMap = {
+        // Images
         '.png': 'image/png',
         '.jpg': 'image/jpeg',
         '.jpeg': 'image/jpeg',
@@ -11982,12 +12113,95 @@ async function main(options = {}) {
         '.ico': 'image/x-icon',
         '.bmp': 'image/bmp',
         '.avif': 'image/avif',
+        // PDF
+        '.pdf': 'application/pdf',
+        // Audio
+        '.mp3': 'audio/mpeg',
+        '.wav': 'audio/wav',
+        '.ogg': 'audio/ogg',
+        '.m4a': 'audio/mp4',
+        '.aac': 'audio/aac',
+        '.flac': 'audio/flac',
+        '.opus': 'audio/opus',
+        // Video
+        '.mp4': 'video/mp4',
+        '.webm': 'video/webm',
+        '.ogv': 'video/ogg',
+        '.mov': 'video/quicktime',
+        '.avi': 'video/x-msvideo',
+        '.mkv': 'video/x-matroska',
+        '.m4v': 'video/x-m4v',
       };
       const mimeType = mimeMap[ext] || 'application/octet-stream';
+      const totalBytes = stats.size;
+      const rangeHeader = typeof req.headers.range === 'string' ? req.headers.range : '';
 
-      const content = await fsPromises.readFile(canonicalPath);
       res.setHeader('Cache-Control', 'no-store');
-      res.type(mimeType).send(content);
+      res.setHeader('Accept-Ranges', 'bytes');
+      res.type(mimeType);
+
+      if (rangeHeader) {
+        const match = /^bytes=(\d*)-(\d*)$/.exec(rangeHeader.trim());
+        if (!match) {
+          res.status(416);
+          res.setHeader('Content-Range', `bytes */${totalBytes}`);
+          return res.end();
+        }
+
+        const parsedStart = match[1] ? Number.parseInt(match[1], 10) : Number.NaN;
+        const parsedEnd = match[2] ? Number.parseInt(match[2], 10) : Number.NaN;
+
+        let start = parsedStart;
+        let end = parsedEnd;
+
+        if (Number.isNaN(start)) {
+          if (Number.isNaN(end) || end <= 0) {
+            res.status(416);
+            res.setHeader('Content-Range', `bytes */${totalBytes}`);
+            return res.end();
+          }
+
+          start = Math.max(totalBytes - end, 0);
+          end = totalBytes - 1;
+        } else {
+          if (Number.isNaN(end) || end >= totalBytes) {
+            end = totalBytes - 1;
+          }
+        }
+
+        if (start < 0 || start >= totalBytes || end < start) {
+          res.status(416);
+          res.setHeader('Content-Range', `bytes */${totalBytes}`);
+          return res.end();
+        }
+
+        const chunkLength = end - start + 1;
+        res.status(206);
+        res.setHeader('Content-Range', `bytes ${start}-${end}/${totalBytes}`);
+        res.setHeader('Content-Length', String(chunkLength));
+
+        const rangeStream = fs.createReadStream(canonicalPath, { start, end });
+        rangeStream.on('error', (streamError) => {
+          if (!res.headersSent) {
+            res.status(500).json({ error: streamError?.message || 'Failed to stream file' });
+          } else {
+            res.destroy(streamError);
+          }
+        });
+        rangeStream.pipe(res);
+        return;
+      }
+
+      res.setHeader('Content-Length', String(totalBytes));
+      const fullStream = fs.createReadStream(canonicalPath);
+      fullStream.on('error', (streamError) => {
+        if (!res.headersSent) {
+          res.status(500).json({ error: streamError?.message || 'Failed to stream file' });
+        } else {
+          res.destroy(streamError);
+        }
+      });
+      fullStream.pipe(res);
     } catch (error) {
       const err = error;
       if (err && typeof err === 'object' && err.code === 'ENOENT') {
@@ -12001,14 +12215,114 @@ async function main(options = {}) {
     }
   });
 
+  app.put('/api/fs/upload', async (req, res) => {
+    const filePath = typeof req.query.path === 'string' ? req.query.path.trim() : '';
+    if (!filePath) {
+      return res.status(400).json({ error: 'Path is required' });
+    }
+
+    const expectedSizeHeader = Array.isArray(req.headers['x-openchamber-expected-size'])
+      ? req.headers['x-openchamber-expected-size'][0]
+      : req.headers['x-openchamber-expected-size'];
+    const parsedExpectedSize = typeof expectedSizeHeader === 'string'
+      ? Number.parseInt(expectedSizeHeader, 10)
+      : Number.NaN;
+    const expectedSizeBytes = Number.isFinite(parsedExpectedSize) && parsedExpectedSize >= 0
+      ? parsedExpectedSize
+      : undefined;
+
+    if (typeof expectedSizeHeader === 'string' && expectedSizeBytes === undefined) {
+      return res.status(400).json({ error: 'Invalid expected upload size' });
+    }
+
+    let tempFilePath = '';
+
+    try {
+      const resolved = await resolveWorkspacePathFromContext(req, filePath);
+      if (!resolved.ok) {
+        return res.status(400).json({ error: resolved.error });
+      }
+
+      const writableTarget = await resolveWritableTargetPath(resolved.resolved, resolved.base);
+      if (!writableTarget.ok) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+
+      const targetWritePath = writableTarget.path;
+      tempFilePath = `${targetWritePath}.upload-${Date.now()}-${crypto.randomUUID()}.tmp`;
+
+      let receivedBytes = 0;
+      req.on('data', (chunk) => {
+        if (chunk && typeof chunk.length === 'number') {
+          receivedBytes += chunk.length;
+        }
+      });
+
+      const writeStream = fs.createWriteStream(tempFilePath, { flags: 'w' });
+      await pipeline(req, writeStream);
+
+      if (typeof expectedSizeBytes === 'number' && receivedBytes !== expectedSizeBytes) {
+        await fsPromises.rm(tempFilePath, { force: true });
+        tempFilePath = '';
+        return res.status(400).json({
+          error: `Uploaded size mismatch: expected ${expectedSizeBytes} bytes but received ${receivedBytes} bytes`,
+        });
+      }
+
+      await fsPromises.rename(tempFilePath, targetWritePath);
+      tempFilePath = '';
+
+      const stats = await fsPromises.stat(targetWritePath);
+      const sizeBytes = stats.size;
+
+      if (typeof expectedSizeBytes === 'number' && sizeBytes !== expectedSizeBytes) {
+        await fsPromises.rm(targetWritePath, { force: true });
+        return res.status(400).json({
+          error: `Uploaded size mismatch: expected ${expectedSizeBytes} bytes but wrote ${sizeBytes} bytes`,
+        });
+      }
+
+      return res.json({ success: true, path: resolved.resolved, sizeBytes });
+    } catch (error) {
+      if (tempFilePath) {
+        await fsPromises.rm(tempFilePath, { force: true }).catch(() => undefined);
+      }
+
+      const err = error;
+      if (err && typeof err === 'object' && err.code === 'EACCES') {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+      if (err && typeof err === 'object' && err.code === 'ENOENT') {
+        return res.status(404).json({ error: 'Upload target path not found' });
+      }
+      if (err && typeof err === 'object' && (err.code === 'ERR_STREAM_PREMATURE_CLOSE' || err.code === 'ECONNRESET')) {
+        return res.status(400).json({ error: 'Upload interrupted before completion' });
+      }
+
+      console.error('Failed to upload file:', error);
+      return res.status(500).json({ error: (error && error.message) || 'Failed to upload file' });
+    }
+  });
+
   // Write file contents
   app.post('/api/fs/write', async (req, res) => {
-    const { path: filePath, content } = req.body || {};
+    const { path: filePath, content, encoding, expectedSizeBytes } = req.body || {};
     if (!filePath || typeof filePath !== 'string') {
       return res.status(400).json({ error: 'Path is required' });
     }
     if (typeof content !== 'string') {
       return res.status(400).json({ error: 'Content is required' });
+    }
+
+    const normalizedExpectedSize = Number.isFinite(expectedSizeBytes)
+      ? Math.max(0, Math.trunc(Number(expectedSizeBytes)))
+      : undefined;
+
+    if (expectedSizeBytes !== undefined && normalizedExpectedSize === undefined) {
+      return res.status(400).json({ error: 'expectedSizeBytes must be a non-negative number' });
+    }
+    if (encoding !== undefined && encoding !== 'utf8' && encoding !== 'base64') {
+      return res.status(400).json({ error: 'encoding must be utf8 or base64' });
     }
 
     try {
@@ -12017,10 +12331,56 @@ async function main(options = {}) {
         return res.status(400).json({ error: resolved.error });
       }
 
-      // Ensure parent directory exists
-      await fsPromises.mkdir(path.dirname(resolved.resolved), { recursive: true });
-      await fsPromises.writeFile(resolved.resolved, content, 'utf8');
-      res.json({ success: true, path: resolved.resolved });
+      const writableTarget = await resolveWritableTargetPath(resolved.resolved, resolved.base);
+      if (!writableTarget.ok) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+      const targetWritePath = writableTarget.path;
+
+      let actualContent = content;
+      const hasBase64DataUrlPrefix = /^data:[^;]*;base64,/.test(content);
+      const isBase64 = encoding === 'base64' || (encoding === undefined && hasBase64DataUrlPrefix);
+
+      if (isBase64 && hasBase64DataUrlPrefix) {
+        const commaIndex = content.indexOf(',');
+        actualContent = content.substring(commaIndex + 1);
+      }
+
+      let bytesWritten = 0;
+      if (isBase64) {
+        const buffer = Buffer.from(actualContent, 'base64');
+        bytesWritten = buffer.byteLength;
+
+        if (typeof normalizedExpectedSize === 'number' && bytesWritten !== normalizedExpectedSize) {
+          return res.status(400).json({
+            error: `Uploaded size mismatch: expected ${normalizedExpectedSize} bytes but received ${bytesWritten} bytes`,
+          });
+        }
+
+        await fsPromises.writeFile(targetWritePath, buffer);
+      } else {
+        const buffer = Buffer.from(actualContent, 'utf8');
+        bytesWritten = buffer.byteLength;
+
+        if (typeof normalizedExpectedSize === 'number' && bytesWritten !== normalizedExpectedSize) {
+          return res.status(400).json({
+            error: `Uploaded size mismatch: expected ${normalizedExpectedSize} bytes but received ${bytesWritten} bytes`,
+          });
+        }
+
+        await fsPromises.writeFile(targetWritePath, buffer);
+      }
+
+      const stats = await fsPromises.stat(targetWritePath);
+      const sizeBytes = stats.size;
+
+      if (typeof normalizedExpectedSize === 'number' && sizeBytes !== normalizedExpectedSize) {
+        return res.status(400).json({
+          error: `Uploaded size mismatch: expected ${normalizedExpectedSize} bytes but wrote ${sizeBytes} bytes`,
+        });
+      }
+
+      res.json({ success: true, path: resolved.resolved, sizeBytes });
     } catch (error) {
       const err = error;
       if (err && typeof err === 'object' && err.code === 'EACCES') {
@@ -12415,12 +12775,40 @@ async function main(options = {}) {
     }
   });
 
+  // Helper for limiting concurrency of async operations
+  const mapWithConcurrency = async (items, concurrency, mapper) => {
+    if (items.length === 0) {
+      return [];
+    }
+
+    const workerCount = Math.max(1, Math.min(concurrency, items.length));
+    const results = new Array(items.length);
+    let nextIndex = 0;
+
+    const workers = Array.from({ length: workerCount }, async () => {
+      while (true) {
+        const currentIndex = nextIndex;
+        nextIndex += 1;
+
+        if (currentIndex >= items.length) {
+          return;
+        }
+
+        results[currentIndex] = await mapper(items[currentIndex], currentIndex);
+      }
+    });
+
+    await Promise.all(workers);
+    return results;
+  };
+
   app.get('/api/fs/list', async (req, res) => {
     const rawPath = typeof req.query.path === 'string' && req.query.path.trim().length > 0
       ? req.query.path.trim()
       : os.homedir();
     const respectGitignore = req.query.respectGitignore === 'true';
     let resolvedPath = '';
+    const DIRECTORY_STAT_CONCURRENCY_LIMIT = 32;
 
     const isPlansDirectory = (value) => {
       if (!value || typeof value !== 'string') return false;
@@ -12474,8 +12862,10 @@ async function main(options = {}) {
         }
       }
 
-      const entries = await Promise.all(
-        dirents.map(async (dirent) => {
+      const entries = await mapWithConcurrency(
+        dirents,
+        DIRECTORY_STAT_CONCURRENCY_LIMIT,
+        async (dirent) => {
           const entryPath = path.join(resolvedPath, dirent.name);
 
           // Skip gitignored entries
@@ -12484,14 +12874,29 @@ async function main(options = {}) {
           }
 
           let isDirectory = dirent.isDirectory();
+          let isFile = dirent.isFile();
           const isSymbolicLink = dirent.isSymbolicLink();
+          let size;
+          let modifiedTime;
 
-          if (!isDirectory && isSymbolicLink) {
-            try {
-              const linkStats = await fsPromises.stat(entryPath);
-              isDirectory = linkStats.isDirectory();
-            } catch {
+          try {
+            const entryStats = await fsPromises.lstat(entryPath);
+            if (isSymbolicLink) {
               isDirectory = false;
+              isFile = false;
+            } else {
+              isDirectory = entryStats.isDirectory();
+              isFile = entryStats.isFile();
+            }
+
+            if (isFile) {
+              size = entryStats.size;
+            }
+            modifiedTime = Number.isFinite(entryStats.mtimeMs) ? entryStats.mtimeMs : undefined;
+          } catch {
+            if (isSymbolicLink) {
+              isDirectory = false;
+              isFile = false;
             }
           }
 
@@ -12499,10 +12904,12 @@ async function main(options = {}) {
             name: dirent.name,
             path: entryPath,
             isDirectory,
-            isFile: dirent.isFile(),
-            isSymbolicLink
+            isFile,
+            isSymbolicLink,
+            size,
+            modifiedTime,
           };
-        })
+        }
       );
 
       res.json({

@@ -1,5 +1,6 @@
 import type { FilesAPI } from '@/lib/api/types';
 import { MAX_OPEN_FILE_LINES, countLinesWithLimit } from '@/lib/fileOpenLimits';
+import { getFileTypeInfo, looksLikeBinaryContent } from '@/lib/fileHelpers';
 
 export type ContextFileOpenFailureReason = 'too-large' | 'missing' | 'unreadable';
 
@@ -41,7 +42,21 @@ const readFileContent = async (files: FilesAPI, path: string): Promise<string> =
 
 export const validateContextFileOpen = async (files: FilesAPI, path: string): Promise<ContextFileOpenValidationResult> => {
   try {
+    const fileType = getFileTypeInfo(path);
+    if (fileType.isBinary) {
+      // Binary files (including displayable media like PDF/audio/video/images)
+      // should open via FilesView's dedicated viewers without full text reads.
+      return { ok: true };
+    }
+
     const content = await readFileContent(files, path);
+
+    if (looksLikeBinaryContent(content)) {
+      // Unknown-extension binaries can be misdetected as text by extension alone.
+      // Let FilesView handle them using the binary warning/details flow.
+      return { ok: true };
+    }
+
     const lineCount = countLinesWithLimit(content, MAX_OPEN_FILE_LINES);
     if (lineCount > MAX_OPEN_FILE_LINES) {
       return { ok: false, reason: 'too-large' };

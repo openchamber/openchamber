@@ -42,6 +42,7 @@ import { isTauriShell, isVSCodeRuntime } from '@/lib/desktop';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { StopIcon } from '@/components/icons/StopIcon';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { FileDropOverlay } from '@/components/ui/FileDropOverlay';
 import type { MobileControlsPanel } from './mobileControlsUtils';
 import {
     DropdownMenu,
@@ -54,6 +55,11 @@ import { GitHubIssuePickerDialog } from '@/components/session/GitHubIssuePickerD
 import { GitHubPrPickerDialog } from '@/components/session/GitHubPrPickerDialog';
 import { useChatSearchDirectory } from '@/hooks/useChatSearchDirectory';
 import { opencodeClient } from '@/lib/opencode/client';
+import {
+    collectDesktopDroppedPaths,
+    normalizeDesktopDroppedPath,
+    readDesktopDroppedFile,
+} from '@/lib/desktopDroppedFiles';
 
 const MAX_VISIBLE_TEXTAREA_LINES = 8;
 const EMPTY_QUEUE: QueuedMessage[] = [];
@@ -1830,28 +1836,6 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
         }
     }, [addAttachedFile]);
 
-    const normalizeDroppedPath = React.useCallback((rawPath: string): string => {
-        const input = rawPath.trim();
-        if (!input.toLowerCase().startsWith('file://')) {
-            return input;
-        }
-
-        try {
-            let pathname = decodeURIComponent(new URL(input).pathname || '');
-            if (/^\/[A-Za-z]:\//.test(pathname)) {
-                pathname = pathname.slice(1);
-            }
-            return pathname || input;
-        } catch {
-            const stripped = input.replace(/^file:\/\//i, '');
-            try {
-                return decodeURIComponent(stripped);
-            } catch {
-                return stripped;
-            }
-        }
-    }, []);
-
     const toProjectRelativeMentionPath = React.useCallback((absolutePath: string): string => {
         const normalizedAbsolutePath = absolutePath.replace(/\\/g, '/').trim();
         const normalizedRoot = (chatSearchDirectory || '').replace(/\\/g, '/').replace(/\/+$/, '');
@@ -1995,47 +1979,21 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                         setIsDragging(false);
                         if (!shouldHandleDrop) return;
 
-                        const paths = Array.isArray(typed.paths)
-                            ? typed.paths.filter((p): p is string => typeof p === 'string')
-                            : [];
+                        const paths = collectDesktopDroppedPaths(typed.paths);
                         if (paths.length === 0) return;
 
                         let attachedCount = 0;
                         for (const path of paths) {
                             const sizeBefore = useSessionStore.getState().attachedFiles.length;
                             try {
-                                const normalizedPath = normalizeDroppedPath(path);
-                                const fileName = normalizedPath.split(/[\\/]/).pop() || normalizedPath;
-                                let file: File;
-
-                                // In Tauri shell, dropped paths are local machine paths.
-                                // Read bytes via native command to avoid workspace-bound /api/fs/raw restrictions.
-                                if (isTauriShell()) {
-                                    const { invoke } = await import('@tauri-apps/api/core');
-                                    const result = await invoke<{ mime: string; base64: string }>('desktop_read_file', { path: normalizedPath });
-                                    const byteCharacters = atob(result.base64);
-                                    const byteNumbers = new Array(byteCharacters.length);
-                                    for (let i = 0; i < byteCharacters.length; i++) {
-                                        byteNumbers[i] = byteCharacters.charCodeAt(i);
-                                    }
-                                    const byteArray = new Uint8Array(byteNumbers);
-                                    const blob = new Blob([byteArray], { type: result.mime || 'application/octet-stream' });
-                                    file = new File([blob], fileName, { type: result.mime || 'application/octet-stream' });
-                                } else {
-                                    const response = await fetch(`/api/fs/raw?path=${encodeURIComponent(normalizedPath)}`);
-                                    if (!response.ok) {
-                                        throw new Error(`Failed to read dropped file (${response.status})`);
-                                    }
-                                    const blob = await response.blob();
-                                    file = new File([blob], fileName, { type: blob.type || 'application/octet-stream' });
-                                }
-
+                                const { file } = await readDesktopDroppedFile(path);
                                 await addAttachedFile(file);
                                 const sizeAfter = useSessionStore.getState().attachedFiles.length;
                                 if (sizeAfter > sizeBefore) attachedCount++;
                             } catch (error) {
                                 console.error('Failed to attach dropped file:', path, error);
-                                toast.error(`Failed to attach ${path.split(/[\\/]/).pop() || 'file'}`);
+                                const normalizedPath = normalizeDesktopDroppedPath(path);
+                                toast.error(`Failed to attach ${normalizedPath.split(/[\\/]/).pop() || 'file'}`);
                             }
                         }
                         if (attachedCount > 0) {
@@ -2060,7 +2018,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
             cancelled = true;
             if (unlisten) unlisten();
         };
-    }, [addAttachedFile, normalizeDroppedPath]);
+    }, [addAttachedFile]);
 
     const fileInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -2543,22 +2501,22 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                     onDrop={handleDrop}
                 >
                     {isDragging && (
-                        <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm rounded-xl">
-                            <div className="text-center">
-                                <div className="inline-flex justify-center">
-                                    <button
-                                        type="button"
-                                        className={iconButtonBaseClass}
-                                        onClick={() => handlePickLocalFiles()}
-                                        title="Attach files"
-                                        aria-label="Attach files"
-                                    >
-                                        <RiAttachment2 className={cn(iconSizeClass, 'text-current')} />
-                                    </button>
-                                </div>
-                                <p className="mt-2 typography-ui-label text-muted-foreground">Drop files here to attach</p>
-                            </div>
-                        </div>
+                        <FileDropOverlay
+                            rounded
+                            action={(
+                                <button
+                                    type="button"
+                                    className={iconButtonBaseClass}
+                                    onClick={() => handlePickLocalFiles()}
+                                    title="Attach files"
+                                    aria-label="Attach files"
+                                >
+                                    <RiAttachment2 className={cn(iconSizeClass, 'text-current')} />
+                                </button>
+                            )}
+                            title="Drop files here to attach"
+                            titleClassName="mt-2 typography-ui-label text-muted-foreground"
+                        />
                     )}
 
                     {showCommandAutocomplete && (
