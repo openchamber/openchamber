@@ -1,7 +1,6 @@
 import React from 'react';
 import type { BoardCard } from '@/types/kanban';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
-import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useKanbanStore } from '@/stores/useKanbanStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -12,7 +11,7 @@ import { RiLayoutGridLine } from '@remixicon/react';
 export const BoardSidebarView: React.FC = () => {
   const { currentTheme } = useThemeSystem();
   const activeProject = useProjectsStore((state) => state.getActiveProject());
-  const activeDirectory = useEffectiveDirectory();
+  const activeDirectory = activeProject?.path?.trim() ?? null;
   const projectId = activeProject?.id ?? null;
 
   const board = useKanbanStore(
@@ -21,7 +20,19 @@ export const BoardSidebarView: React.FC = () => {
       [projectId],
     ),
   );
-  const ensureProjectBoard = useKanbanStore((state) => state.ensureProjectBoard);
+  const hydrateProjectBoard = useKanbanStore((state) => state.hydrateProjectBoard);
+  const isLoading = useKanbanStore(
+    React.useCallback(
+      (state) => (projectId ? state.isLoadingByProject.get(projectId) ?? false : false),
+      [projectId],
+    ),
+  );
+  const error = useKanbanStore(
+    React.useCallback(
+      (state) => (projectId ? state.errorByProject.get(projectId) ?? null : null),
+      [projectId],
+    ),
+  );
 
   const openContextBoard = useUIStore((state) => state.openContextBoard);
   const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
@@ -30,8 +41,10 @@ export const BoardSidebarView: React.FC = () => {
     if (!projectId || board) {
       return;
     }
-    ensureProjectBoard(projectId);
-  }, [board, ensureProjectBoard, projectId]);
+    if (activeDirectory) {
+      void hydrateProjectBoard(projectId, activeDirectory).catch(() => undefined);
+    }
+  }, [board, hydrateProjectBoard, projectId, activeDirectory]);
 
   const orderedColumns = React.useMemo(() => {
     if (!board) return [];
@@ -82,6 +95,32 @@ export const BoardSidebarView: React.FC = () => {
             Open a directory to view its board
           </p>
         </div>
+      </div>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center px-6 py-12 text-center">
+        <p
+          className="typography-ui-label"
+          style={{ color: currentTheme.colors.surface.mutedForeground }}
+        >
+          Loading board...
+        </p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center px-6 py-12 text-center">
+        <p
+          className="typography-ui-label"
+          style={{ color: currentTheme.colors.status.error }}
+        >
+          {error}
+        </p>
       </div>
     );
   }
