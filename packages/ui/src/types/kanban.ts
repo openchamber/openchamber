@@ -14,6 +14,7 @@ export interface BoardCard {
   columnId: string;
   order: number;
   status?: BoardCardStatus;
+  sessionId?: string;
 }
 
 export interface ProjectBoard {
