@@ -10,8 +10,10 @@ import {
   moveCard as apiMoveCard,
   renameColumn as apiRenameColumn,
   updateCard as apiUpdateCard,
+  updateColumnAutomation as apiUpdateColumnAutomation,
 } from '@/lib/kanbanApi';
 import type { BoardCard, ProjectBoard } from '@/types/kanban';
+import type { KanbanUpdateColumnAutomationPayload } from '@/lib/api/types';
 
 const getErrorMessage = (error: unknown, fallback: string): string => {
   if (error instanceof Error && error.message.trim()) {
@@ -55,11 +57,26 @@ interface KanbanStore {
   updateCard: (projectId: string, directory: string, cardId: string, updates: Partial<BoardCard>) => Promise<void>;
   deleteCard: (projectId: string, directory: string, cardId: string) => Promise<void>;
   moveCard: (projectId: string, directory: string, cardId: string, toColumnId: string, toOrder?: number) => Promise<void>;
+  updateColumnAutomation: (
+    projectId: string,
+    directory: string,
+    columnId: string,
+    payload: KanbanUpdateColumnAutomationPayload,
+  ) => Promise<void>;
+
+  startBoardSync: (projectId: string, directory: string) => void;
+  stopBoardSync: (projectId: string) => void;
+
+  syncIntervals: Map<string, ReturnType<typeof setInterval>>;
+  syncConsumers: Map<string, number>;
+  syncDirectories: Map<string, string>;
 }
 
 export const useKanbanStore = create<KanbanStore>()(
   devtools(
     (set, get) => {
+      const syncInFlight = new Set<string>();
+
       const setProjectLoading = (projectId: string, isLoading: boolean) => {
         set((state) => {
           const next = new Map(state.isLoadingByProject);
@@ -90,7 +107,93 @@ export const useKanbanStore = create<KanbanStore>()(
           nextBoards.set(projectId, withProjectId(board, projectId));
           return { boards: nextBoards };
         });
+        reconcilePolling(projectId);
       };
+
+      const hasRunningCards = (projectId: string): boolean => {
+        const board = get().boards.get(projectId);
+        if (!board) return false;
+        return board.cards.some((card) => card.status === 'running');
+      };
+
+      const shouldContinuePolling = (projectId: string): boolean => {
+        const consumers = get().syncConsumers.get(projectId) ?? 0;
+        return consumers > 0 || hasRunningCards(projectId);
+      };
+
+      const silentRefreshBoard = async (projectId: string): Promise<void> => {
+        const directory = get().syncDirectories.get(projectId);
+        if (!directory || syncInFlight.has(projectId)) return;
+
+        syncInFlight.add(projectId);
+
+        try {
+          const response = await getBoard(directory);
+          applyBoard(projectId, response.board);
+        } catch (error) {
+          console.error(`[KanbanSync] Background sync failed for ${projectId}:`, error);
+        } finally {
+          syncInFlight.delete(projectId);
+          reconcilePolling(projectId);
+        }
+      };
+
+      const startPolling = (projectId: string): void => {
+        const { syncIntervals, syncDirectories } = get();
+        const directory = syncDirectories.get(projectId);
+
+        if (syncIntervals.has(projectId) || !directory) return;
+
+        const intervalId = setInterval(() => {
+          if (!shouldContinuePolling(projectId)) {
+            reconcilePolling(projectId);
+            return;
+          }
+          void silentRefreshBoard(projectId);
+        }, 2000);
+
+        set((state) => ({
+          syncIntervals: new Map(state.syncIntervals).set(projectId, intervalId),
+        }));
+      };
+
+      const stopPolling = (projectId: string): void => {
+        const { syncIntervals } = get();
+        const intervalId = syncIntervals.get(projectId);
+
+        if (intervalId) {
+          clearInterval(intervalId);
+          set((state) => {
+            const nextIntervals = new Map(state.syncIntervals);
+            nextIntervals.delete(projectId);
+            return { syncIntervals: nextIntervals };
+          });
+        }
+      };
+
+      function reconcilePolling(projectId: string): void {
+        const { syncDirectories, syncIntervals, syncConsumers } = get();
+        const hasDirectory = Boolean(syncDirectories.get(projectId));
+        const shouldPoll = hasDirectory && shouldContinuePolling(projectId);
+        const polling = syncIntervals.has(projectId);
+
+        if (shouldPoll && !polling) {
+          startPolling(projectId);
+          return;
+        }
+
+        if (!shouldPoll && polling) {
+          stopPolling(projectId);
+        }
+
+        if (!shouldPoll && hasDirectory && (syncConsumers.get(projectId) ?? 0) === 0) {
+          set((state) => {
+            const nextDirectories = new Map(state.syncDirectories);
+            nextDirectories.delete(projectId);
+            return { syncDirectories: nextDirectories };
+          });
+        }
+      }
 
       const runProjectMutation = async (
         projectId: string,
@@ -159,6 +262,7 @@ export const useKanbanStore = create<KanbanStore>()(
                 errorByProject: nextErrors,
               };
             });
+            reconcilePolling(projectId);
           } catch (error) {
             setProjectLoading(projectId, false);
             setProjectError(projectId, getErrorMessage(error, 'Failed to load board'));
@@ -167,6 +271,8 @@ export const useKanbanStore = create<KanbanStore>()(
         },
 
         resetProjectBoard: (projectId: string) => {
+          stopPolling(projectId);
+
           set((state) => {
             const nextBoards = new Map(state.boards);
             nextBoards.delete(projectId);
@@ -183,12 +289,20 @@ export const useKanbanStore = create<KanbanStore>()(
             const nextHydrated = new Set(state.hydratedProjects);
             nextHydrated.delete(projectId);
 
+            const nextConsumers = new Map(state.syncConsumers);
+            nextConsumers.delete(projectId);
+
+            const nextDirectories = new Map(state.syncDirectories);
+            nextDirectories.delete(projectId);
+
             return {
               boards: nextBoards,
               isLoadingByProject: nextLoading,
               isMutatingByProject: nextMutating,
               errorByProject: nextErrors,
               hydratedProjects: nextHydrated,
+              syncConsumers: nextConsumers,
+              syncDirectories: nextDirectories,
             };
           });
         },
@@ -269,6 +383,84 @@ export const useKanbanStore = create<KanbanStore>()(
             'Failed to move card',
           );
         },
+
+        updateColumnAutomation: async (
+          projectId: string,
+          directory: string,
+          columnId: string,
+          payload: KanbanUpdateColumnAutomationPayload,
+        ) => {
+          await runProjectMutation(
+            projectId,
+            directory,
+            () => apiUpdateColumnAutomation(directory, columnId, payload),
+            'Failed to update column automation',
+          );
+        },
+
+        startBoardSync: (projectId: string, directory: string) => {
+          const trimmedDirectory = directory.trim();
+          if (!projectId || !trimmedDirectory) {
+            return;
+          }
+
+          set((state) => {
+            const nextConsumers = new Map(state.syncConsumers);
+            const currentConsumers = nextConsumers.get(projectId) ?? 0;
+            nextConsumers.set(projectId, currentConsumers + 1);
+
+            const nextDirectories = new Map(state.syncDirectories);
+            nextDirectories.set(projectId, trimmedDirectory);
+
+            return {
+              syncConsumers: nextConsumers,
+              syncDirectories: nextDirectories,
+            };
+          });
+
+          void silentRefreshBoard(projectId);
+          reconcilePolling(projectId);
+        },
+
+        stopBoardSync: (projectId: string) => {
+          if (!projectId) {
+            return;
+          }
+
+          const { syncConsumers } = get();
+          const currentConsumers = syncConsumers.get(projectId) ?? 0;
+          const nextConsumerCount = Math.max(0, currentConsumers - 1);
+
+          set((state) => {
+            const nextConsumers = new Map(state.syncConsumers);
+            if (nextConsumerCount > 0) {
+              nextConsumers.set(projectId, nextConsumerCount);
+            } else {
+              nextConsumers.delete(projectId);
+            }
+
+            const nextDirectories = new Map(state.syncDirectories);
+            const keepDirectory = nextConsumerCount > 0 || hasRunningCards(projectId);
+            if (!keepDirectory) {
+              nextDirectories.delete(projectId);
+            }
+
+            return {
+              syncConsumers: nextConsumers,
+              syncDirectories: nextDirectories,
+            };
+          });
+
+          reconcilePolling(projectId);
+
+          if (!hasRunningCards(projectId) && nextConsumerCount === 0) {
+            stopPolling(projectId);
+          }
+        },
+
+        syncIntervals: new Map(),
+        syncConsumers: new Map(),
+        syncDirectories: new Map(),
       };
     },
     { name: 'kanban-store' },
