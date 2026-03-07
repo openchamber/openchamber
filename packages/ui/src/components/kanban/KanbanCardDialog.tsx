@@ -32,6 +32,8 @@ export interface KanbanCardDialogProps {
     worktreeId?: string;
   };
   onDelete?: () => void | Promise<void>;
+  status?: string;
+  sessionId?: string;
 }
 
 export const KanbanCardDialog: React.FC<KanbanCardDialogProps> = ({
@@ -41,6 +43,8 @@ export const KanbanCardDialog: React.FC<KanbanCardDialogProps> = ({
   mode,
   initialData,
   onDelete,
+  status,
+  sessionId,
 }) => {
   const { currentTheme } = useThemeSystem();
   const availableWorktreesByProject = useSessionStore(
@@ -132,6 +136,55 @@ export const KanbanCardDialog: React.FC<KanbanCardDialogProps> = ({
               autoFocus
             />
           </div>
+
+          {mode === 'edit' && (status || sessionId) && (
+            <div
+              className="space-y-2 p-3 rounded-md"
+              style={{
+                backgroundColor: currentTheme.colors.surface.elevated,
+                border: `1px solid ${currentTheme.colors.interactive.border}`
+              }}
+            >
+              <label
+                className="typography-ui-label text-xs uppercase tracking-wider"
+                style={{ color: currentTheme.colors.surface.mutedForeground }}
+              >
+                Automation Context
+              </label>
+              {status && (
+                <div className="flex justify-between items-center">
+                  <span
+                    className="typography-ui-label"
+                    style={{ color: currentTheme.colors.surface.foreground }}
+                  >
+                    Status
+                  </span>
+                  <span
+                    className="typography-mono text-xs"
+                    style={{ color: currentTheme.colors.surface.mutedForeground }}
+                  >
+                    {status}
+                  </span>
+                </div>
+              )}
+              {sessionId && (
+                <div className="flex justify-between items-center">
+                  <span
+                    className="typography-ui-label"
+                    style={{ color: currentTheme.colors.surface.foreground }}
+                  >
+                    Session ID
+                  </span>
+                  <span
+                    className="typography-mono text-xs"
+                    style={{ color: currentTheme.colors.surface.mutedForeground }}
+                  >
+                    {sessionId}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="space-y-2">
             <label
