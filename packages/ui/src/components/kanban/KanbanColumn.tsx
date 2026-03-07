@@ -1,5 +1,5 @@
 import React from 'react';
-import { RiAddLine, RiEditLine } from '@remixicon/react';
+import { RiAddLine, RiEditLine, RiSettings3Line } from '@remixicon/react';
 import { useDroppable } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS as DndCSS } from '@dnd-kit/utilities';
@@ -19,7 +19,10 @@ const SortableKanbanCard: React.FC<{
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: card.id });
+  } = useSortable({ 
+    id: card.id,
+    disabled: card.status === 'running'
+  });
 
   const style = {
     transform: DndCSS.Transform.toString(transform),
@@ -31,7 +34,7 @@ const SortableKanbanCard: React.FC<{
       ref={setNodeRef}
       style={style}
       {...attributes}
-      {...listeners}
+      {...(card.status !== 'running' ? listeners : undefined)}
       className={cn(isDragging && 'opacity-50')}
     >
       <KanbanCard card={card} onCardClick={onCardClick} />
@@ -44,6 +47,7 @@ export interface KanbanColumnProps extends React.HTMLAttributes<HTMLDivElement> 
   cards: BoardCard[];
   onRenameClick?: (columnId: string, currentName: string) => void;
   onAddCardClick?: (columnId: string) => void;
+  onSettingsClick?: (column: BoardColumn) => void;
   onCardClick?: (card: BoardCard) => void;
   isDraggingOver?: boolean;
 }
@@ -53,6 +57,7 @@ export const KanbanColumn: React.FC<KanbanColumnProps> = ({
   cards,
   onRenameClick,
   onAddCardClick,
+  onSettingsClick,
   onCardClick,
   isDraggingOver,
   className,
@@ -83,6 +88,17 @@ export const KanbanColumn: React.FC<KanbanColumnProps> = ({
           {column.name}
         </h2>
         <div className="flex items-center gap-1 flex-shrink-0">
+          {onSettingsClick && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 hover:bg-[var(--interactive-hover)]/50"
+              onClick={() => onSettingsClick(column)}
+            >
+              <RiSettings3Line className="h-4 w-4" />
+            </Button>
+          )}
           {onRenameClick && (
             <Button
               type="button"
