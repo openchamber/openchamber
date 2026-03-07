@@ -91,10 +91,16 @@ function validateCard(card) {
     updatedAt: typeof card.updatedAt === 'number' ? card.updatedAt : Date.now(),
   };
   if (typeof card.status === 'string') {
-    result.status = trimString(card.status);
+    const trimmedStatus = trimString(card.status);
+    if (trimmedStatus === 'running' || trimmedStatus === 'done' || trimmedStatus === 'failed') {
+      result.status = trimmedStatus;
+    }
   }
   if (typeof card.sessionId === 'string') {
-    result.sessionId = trimString(card.sessionId);
+    const trimmedSessionId = trimString(card.sessionId);
+    if (trimmedSessionId) {
+      result.sessionId = trimmedSessionId;
+    }
   }
   return result;
 }
@@ -108,12 +114,31 @@ function validateColumn(column) {
   if (!validateId(id) || !name) {
     return null;
   }
-  return {
+  const result = {
     id,
     title: name,
     name,
     order: typeof column.order === 'number' ? column.order : 0,
   };
+  if (column.automation && typeof column.automation === 'object') {
+    const automation = {};
+    const onEnterText = trimString(column.automation.onEnterText);
+    const agent = trimString(column.automation.agent);
+    const providerID = trimString(column.automation.providerID);
+    const modelID = trimString(column.automation.modelID);
+    const variant = column.automation.variant !== undefined ? trimString(column.automation.variant) : undefined;
+    const onFinishMoveTo = column.automation.onFinishMoveTo !== undefined ? trimString(column.automation.onFinishMoveTo) : undefined;
+    if (onEnterText) automation.onEnterText = onEnterText;
+    if (agent) automation.agent = agent;
+    if (providerID) automation.providerID = providerID;
+    if (modelID) automation.modelID = modelID;
+    if (variant) automation.variant = variant;
+    if (onFinishMoveTo) automation.onFinishMoveTo = onFinishMoveTo;
+    if (Object.keys(automation).length > 0) {
+      result.automation = automation;
+    }
+  }
+  return result;
 }
 
 function validateBoard(board) {
