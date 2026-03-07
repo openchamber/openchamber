@@ -7,6 +7,7 @@ import type {
   KanbanRenameColumnPayload,
   KanbanCreateCardPayload,
   KanbanMoveCardPayload,
+  KanbanUpdateColumnAutomationPayload,
 } from '@/lib/api/types';
 
 declare global {
@@ -156,6 +157,19 @@ export async function moveCard(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
+  });
+  return handleResponse<KanbanMutationResponse>(response);
+}
+
+export async function updateColumnAutomation(
+  directory: string,
+  columnId: string,
+  payload: KanbanUpdateColumnAutomationPayload
+): Promise<KanbanMutationResponse> {
+  const response = await fetch(buildUrl(`${API_BASE}/columns/${columnId}/automation`, directory), {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
   });
   return handleResponse<KanbanMutationResponse>(response);
 }
