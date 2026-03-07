@@ -126,6 +126,7 @@ const zhCN = {
     allFilesDesc: '将所有更改的文件堆叠在一起。',
     stickyUserHeader: '固定用户标题',
     showMobileStatusBar: '显示移动端状态栏',
+    showMobileKeyboardTools: '显示移动端键盘工具栏',
     showDotfiles: '显示隐藏文件',
     queueMessages: '默认排队消息',
     queueMessagesTooltip: '启用后，Enter 排队消息。使用 {{modifier}}+Enter 发送。',

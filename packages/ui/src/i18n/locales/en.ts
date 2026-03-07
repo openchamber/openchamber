@@ -126,6 +126,7 @@ const en = {
     allFilesDesc: 'Stack all changed files together.',
     stickyUserHeader: 'Sticky User Header',
     showMobileStatusBar: 'Show Mobile Status Bar',
+    showMobileKeyboardTools: 'Show Mobile Keyboard Tools',
     showDotfiles: 'Show Dotfiles',
     queueMessages: 'Queue Messages by Default',
     queueMessagesTooltip: 'When enabled, Enter queues messages. Use {{modifier}}+Enter to send.',

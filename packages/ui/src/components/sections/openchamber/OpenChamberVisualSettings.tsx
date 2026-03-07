@@ -165,6 +165,7 @@ export type VisibleSetting =
 	| "stickyUserHeader"
 	| "diffLayout"
 	| "mobileStatusBar"
+	| "mobileKeyboardTools"
 	| "dotfiles"
 	| "reasoning"
 	| "queueMode"
@@ -258,6 +259,12 @@ export const OpenChamberVisualSettings: React.FC<
 	);
 	const setShowMobileSessionStatusBar = useUIStore(
 		(state) => state.setShowMobileSessionStatusBar,
+	);
+	const showMobileKeyboardTools = useUIStore(
+		(state) => state.showMobileKeyboardTools,
+	);
+	const setShowMobileKeyboardTools = useUIStore(
+		(state) => state.setShowMobileKeyboardTools,
 	);
 	const {
 		themeMode,
@@ -1156,9 +1163,10 @@ export const OpenChamberVisualSettings: React.FC<
 						</div>
 					)}
 
-					{(shouldShow("stickyUserHeader") ||
-						(shouldShow("mobileStatusBar") && isMobile) ||
-						shouldShow("dotfiles") ||
+				{(shouldShow("stickyUserHeader") ||
+					(shouldShow("mobileStatusBar") && isMobile) ||
+					(shouldShow("mobileKeyboardTools") && isMobile) ||
+					shouldShow("dotfiles") ||
 						shouldShow("queueMode") ||
 						shouldShow("persistDraft") ||
 						shouldShow("reasoning") ||
@@ -1177,18 +1185,31 @@ export const OpenChamberVisualSettings: React.FC<
 								</div>
 							)}
 
-							{shouldShow("mobileStatusBar") && isMobile && (
-								<div className="group flex cursor-pointer items-center gap-2 py-1.5">
-									<Checkbox
-										checked={showMobileSessionStatusBar}
-										onChange={setShowMobileSessionStatusBar}
-										ariaLabel={t("appearance.showMobileStatusBar")}
-									/>
-									<span className="typography-ui-label text-foreground">
-										{t("appearance.showMobileStatusBar")}
-									</span>
-								</div>
-							)}
+						{shouldShow("mobileStatusBar") && isMobile && (
+							<div className="group flex cursor-pointer items-center gap-2 py-1.5">
+								<Checkbox
+									checked={showMobileSessionStatusBar}
+									onChange={setShowMobileSessionStatusBar}
+									ariaLabel={t("appearance.showMobileStatusBar")}
+								/>
+								<span className="typography-ui-label text-foreground">
+									{t("appearance.showMobileStatusBar")}
+								</span>
+							</div>
+						)}
+
+						{shouldShow("mobileKeyboardTools") && isMobile && (
+							<div className="group flex cursor-pointer items-center gap-2 py-1.5">
+								<Checkbox
+									checked={showMobileKeyboardTools}
+									onChange={setShowMobileKeyboardTools}
+									ariaLabel={t("appearance.showMobileKeyboardTools")}
+								/>
+								<span className="typography-ui-label text-foreground">
+									{t("appearance.showMobileKeyboardTools")}
+								</span>
+							</div>
+						)}
 
 							{shouldShow("dotfiles") && !isVSCodeRuntime() && (
 								<div className="group flex cursor-pointer items-center gap-2 py-1.5">

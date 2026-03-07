@@ -653,6 +653,7 @@ interface UIStore {
 	userMessageRenderingMode: UserMessageRenderingMode;
 	stickyUserHeader: boolean;
 	showMobileSessionStatusBar: boolean;
+	showMobileKeyboardTools: boolean;
 	isMobileSessionStatusBarCollapsed: boolean;
 	viewPagerPage: "left" | "center" | "right";
 
@@ -792,6 +793,7 @@ interface UIStore {
 	setUserMessageRenderingMode: (value: UserMessageRenderingMode) => void;
 	setStickyUserHeader: (value: boolean) => void;
 	setShowMobileSessionStatusBar: (value: boolean) => void;
+	setShowMobileKeyboardTools: (value: boolean) => void;
 	setIsMobileSessionStatusBarCollapsed: (value: boolean) => void;
 	setViewPagerPage: (page: "left" | "center" | "right") => void;
 	toggleExpandedInput: () => void;
@@ -901,6 +903,7 @@ export const useUIStore = create<UIStore>()(
 				userMessageRenderingMode: "markdown",
 				stickyUserHeader: true,
 				showMobileSessionStatusBar: true,
+			showMobileKeyboardTools: true,
 				isMobileSessionStatusBarCollapsed: false,
 				isExpandedInput: false,
 				shortcutOverrides: {},
@@ -1971,9 +1974,12 @@ export const useUIStore = create<UIStore>()(
 				setStickyUserHeader: (value) => {
 					set({ stickyUserHeader: value });
 				},
-				setShowMobileSessionStatusBar: (value) => {
-					set({ showMobileSessionStatusBar: value });
-				},
+			setShowMobileSessionStatusBar: (value) => {
+				set({ showMobileSessionStatusBar: value });
+			},
+			setShowMobileKeyboardTools: (value) => {
+				set({ showMobileKeyboardTools: value });
+			},
 				setIsMobileSessionStatusBarCollapsed: (value) => {
 					set({ isMobileSessionStatusBarCollapsed: value });
 				},
@@ -2172,6 +2178,7 @@ export const useUIStore = create<UIStore>()(
 					userMessageRenderingMode: state.userMessageRenderingMode,
 					stickyUserHeader: state.stickyUserHeader,
 					showMobileSessionStatusBar: state.showMobileSessionStatusBar,
+				showMobileKeyboardTools: state.showMobileKeyboardTools,
 					isMobileSessionStatusBarCollapsed:
 						state.isMobileSessionStatusBarCollapsed,
 					shortcutOverrides: state.shortcutOverrides,
