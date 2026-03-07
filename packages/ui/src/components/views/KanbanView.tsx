@@ -14,6 +14,7 @@ import { RiAddLine } from '@remixicon/react';
 import { KanbanCard } from '@/components/kanban/KanbanCard';
 import { KanbanCardDialog } from '@/components/kanban/KanbanCardDialog';
 import { KanbanColumn } from '@/components/kanban/KanbanColumn';
+import { KanbanColumnSettingsDialog } from '@/components/kanban/KanbanColumnSettingsDialog';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -28,7 +29,7 @@ import { toast } from '@/components/ui/toast';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useKanbanStore } from '@/stores/useKanbanStore';
 import { useUIStore } from '@/stores/useUIStore';
-import type { BoardCard, BoardColumn } from '@/types/kanban';
+import type { BoardCard, BoardColumn, BoardColumnAutomation } from '@/types/kanban';
 
 type CardDialogState = {
   open: boolean;
@@ -48,6 +49,11 @@ type CreateColumnDialogState = {
   name: string;
 };
 
+type ColumnSettingsDialogState = {
+  open: boolean;
+  column: BoardColumn | null;
+};
+
 const CLOSED_CARD_DIALOG: CardDialogState = {
   open: false,
   mode: 'create',
@@ -64,6 +70,11 @@ const CLOSED_RENAME_DIALOG: RenameColumnDialogState = {
 const CLOSED_CREATE_COLUMN_DIALOG: CreateColumnDialogState = {
   open: false,
   name: '',
+};
+
+const CLOSED_COLUMN_SETTINGS_DIALOG: ColumnSettingsDialogState = {
+  open: false,
+  column: null,
 };
 
 export const KanbanView: React.FC = () => {
@@ -88,6 +99,9 @@ export const KanbanView: React.FC = () => {
   const updateCard = useKanbanStore((state) => state.updateCard);
   const deleteCard = useKanbanStore((state) => state.deleteCard);
   const moveCard = useKanbanStore((state) => state.moveCard);
+  const updateColumnAutomation = useKanbanStore((state) => state.updateColumnAutomation);
+  const startBoardSync = useKanbanStore((state) => state.startBoardSync);
+  const stopBoardSync = useKanbanStore((state) => state.stopBoardSync);
   const isLoadingByProject = useKanbanStore((state) => state.isLoadingByProject);
   const isMutatingByProject = useKanbanStore((state) => state.isMutatingByProject);
   const errorByProject = useKanbanStore((state) => state.errorByProject);
@@ -96,6 +110,7 @@ export const KanbanView: React.FC = () => {
   const [cardDialog, setCardDialog] = React.useState<CardDialogState>(CLOSED_CARD_DIALOG);
   const [renameDialog, setRenameDialog] = React.useState<RenameColumnDialogState>(CLOSED_RENAME_DIALOG);
   const [createColumnDialog, setCreateColumnDialog] = React.useState<CreateColumnDialogState>(CLOSED_CREATE_COLUMN_DIALOG);
+  const [columnSettingsDialog, setColumnSettingsDialog] = React.useState<ColumnSettingsDialogState>(CLOSED_COLUMN_SETTINGS_DIALOG);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -112,7 +127,13 @@ export const KanbanView: React.FC = () => {
         description: error instanceof Error ? error.message : 'Unknown error',
       });
     });
-  }, [projectDirectory, hydrateProjectBoard, projectId]);
+
+    startBoardSync(projectId, projectDirectory);
+
+    return () => {
+      stopBoardSync(projectId);
+    };
+  }, [projectDirectory, hydrateProjectBoard, projectId, startBoardSync, stopBoardSync]);
 
   const columns = React.useMemo(() => {
     if (!board) {
@@ -120,6 +141,21 @@ export const KanbanView: React.FC = () => {
     }
     return [...board.columns].sort((a, b) => a.order - b.order);
   }, [board]);
+
+  const normalizeAutomationPayload = React.useCallback((automation: BoardColumnAutomation | null) => {
+    if (!automation) {
+      return { onEnterText: undefined };
+    }
+
+    return {
+      onEnterText: automation.onEnterText.trim(),
+      agent: automation.agent.trim(),
+      providerID: automation.providerID.trim(),
+      modelID: automation.modelID.trim(),
+      variant: automation.variant?.trim() || undefined,
+      onFinishMoveTo: automation.onFinishMoveTo?.trim() || undefined,
+    };
+  }, []);
 
   const cardsByColumn = React.useMemo(() => {
     const map = new Map<string, BoardCard[]>();
@@ -156,6 +192,18 @@ export const KanbanView: React.FC = () => {
     setCreateColumnDialog(CLOSED_CREATE_COLUMN_DIALOG);
   }, []);
 
+  const closeColumnSettingsDialog = React.useCallback(() => {
+    setColumnSettingsDialog(CLOSED_COLUMN_SETTINGS_DIALOG);
+  }, []);
+
+  const isConflictError = React.useCallback((error: unknown): boolean => {
+    if (error instanceof Error) {
+      const message = error.message.toLowerCase();
+      return message.includes('409') || message.includes('currently running');
+    }
+    return false;
+  }, []);
+
   const handleDragStart = React.useCallback((event: DragStartEvent) => {
     setDraggedCardId(String(event.active.id));
   }, []);
@@ -189,9 +237,15 @@ export const KanbanView: React.FC = () => {
       try {
         await moveCard(projectId, projectDirectory, activeID, overColumn.id, targetCards.length);
       } catch (error) {
-        toast.error('Failed to move card', {
-          description: error instanceof Error ? error.message : 'Unknown error',
-        });
+        if (isConflictError(error)) {
+          toast.error('Cannot move running card', {
+            description: 'Cards with active automation sessions cannot be moved while running',
+          });
+        } else {
+          toast.error('Failed to move card', {
+            description: error instanceof Error ? error.message : 'Unknown error',
+          });
+        }
       }
       return;
     }
@@ -211,9 +265,15 @@ export const KanbanView: React.FC = () => {
       try {
         await moveCard(projectId, projectDirectory, activeID, overCard.columnId, toIndex);
       } catch (error) {
-        toast.error('Failed to move card', {
-          description: error instanceof Error ? error.message : 'Unknown error',
-        });
+        if (isConflictError(error)) {
+          toast.error('Cannot move running card', {
+            description: 'Cards with active automation sessions cannot be moved while running',
+          });
+        } else {
+          toast.error('Failed to move card', {
+            description: error instanceof Error ? error.message : 'Unknown error',
+          });
+        }
       }
       return;
     }
@@ -226,11 +286,17 @@ export const KanbanView: React.FC = () => {
     try {
       await moveCard(projectId, projectDirectory, activeID, overCard.columnId, toIndex);
     } catch (error) {
-      toast.error('Failed to move card', {
-        description: error instanceof Error ? error.message : 'Unknown error',
-      });
+      if (isConflictError(error)) {
+        toast.error('Cannot move running card', {
+          description: 'Cards with active automation sessions cannot be moved while running',
+        });
+      } else {
+        toast.error('Failed to move card', {
+          description: error instanceof Error ? error.message : 'Unknown error',
+        });
+      }
     }
-  }, [board, cardsByColumn, projectDirectory, isMutatingByProject, moveCard, projectId]);
+  }, [board, cardsByColumn, projectDirectory, isMutatingByProject, moveCard, projectId, isConflictError]);
 
   const handleAddColumn = React.useCallback(() => {
     setCreateColumnDialog({
@@ -270,6 +336,13 @@ export const KanbanView: React.FC = () => {
       open: true,
       columnId: columnID,
       name: currentName,
+    });
+  }, []);
+
+  const handleOpenColumnSettings = React.useCallback((column: BoardColumn) => {
+    setColumnSettingsDialog({
+      open: true,
+      column,
     });
   }, []);
 
@@ -319,6 +392,28 @@ export const KanbanView: React.FC = () => {
       });
     }
   }, [closeRenameDialog, deleteColumn, projectDirectory, isMutatingByProject, projectId, renameDialog.columnId, renameDialog.open]);
+
+  const handleSaveColumnSettings = React.useCallback(async (automation: BoardColumnAutomation | null) => {
+    if (!projectId || !projectDirectory || !columnSettingsDialog.column) {
+      return;
+    }
+
+    const isMutating = isMutatingByProject.get(projectId) ?? false;
+    if (isMutating) {
+      return;
+    }
+
+    try {
+      const payload = normalizeAutomationPayload(automation);
+      await updateColumnAutomation(projectId, projectDirectory, columnSettingsDialog.column.id, payload);
+      closeColumnSettingsDialog();
+      toast.success('Column automation updated');
+    } catch (error) {
+      toast.error('Failed to update column automation', {
+        description: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  }, [closeColumnSettingsDialog, normalizeAutomationPayload, projectDirectory, isMutatingByProject, projectId, updateColumnAutomation, columnSettingsDialog.column]);
 
   const handleCreateCard = React.useCallback((columnID: string) => {
     setCardDialog({
@@ -472,6 +567,7 @@ export const KanbanView: React.FC = () => {
                   column={column}
                   cards={cardsByColumn.get(column.id) ?? []}
                   onRenameClick={handleRenameColumn}
+                  onSettingsClick={handleOpenColumnSettings}
                   onAddCardClick={handleCreateCard}
                   onCardClick={handleEditCard}
                 />
@@ -512,7 +608,24 @@ export const KanbanView: React.FC = () => {
           worktreeId: cardDialog.card.worktreeId,
         } : undefined}
         onDelete={cardDialog.mode === 'edit' ? handleDeleteCard : undefined}
+        status={cardDialog.card?.status}
+        sessionId={cardDialog.card?.sessionId}
       />
+
+      {columnSettingsDialog.column && (
+        <KanbanColumnSettingsDialog
+          open={columnSettingsDialog.open}
+          onOpenChange={(open) => {
+            if (!open) {
+              closeColumnSettingsDialog();
+            }
+          }}
+          column={columnSettingsDialog.column}
+          columns={columns}
+          initialAutomation={columnSettingsDialog.column.automation ?? null}
+          onSave={handleSaveColumnSettings}
+        />
+      )}
 
       <Dialog
         open={renameDialog.open}
