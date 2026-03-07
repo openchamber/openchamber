@@ -4,6 +4,7 @@ import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useKanbanStore } from '@/stores/useKanbanStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { Button } from '@/components/ui/button';
 import { KanbanCard } from '@/components/kanban/KanbanCard';
 import { RiLayoutGridLine } from '@remixicon/react';
@@ -13,6 +14,7 @@ export const BoardSidebarView: React.FC = () => {
   const activeProject = useProjectsStore((state) => state.getActiveProject());
   const activeDirectory = activeProject?.path?.trim() ?? null;
   const projectId = activeProject?.id ?? null;
+  const effectiveDirectory = useEffectiveDirectory();
 
   const board = useKanbanStore(
     React.useCallback(
@@ -21,6 +23,8 @@ export const BoardSidebarView: React.FC = () => {
     ),
   );
   const hydrateProjectBoard = useKanbanStore((state) => state.hydrateProjectBoard);
+  const startBoardSync = useKanbanStore((state) => state.startBoardSync);
+  const stopBoardSync = useKanbanStore((state) => state.stopBoardSync);
   const isLoading = useKanbanStore(
     React.useCallback(
       (state) => (projectId ? state.isLoadingByProject.get(projectId) ?? false : false),
@@ -46,6 +50,16 @@ export const BoardSidebarView: React.FC = () => {
     }
   }, [board, hydrateProjectBoard, projectId, activeDirectory]);
 
+  React.useEffect(() => {
+    if (!projectId || !activeDirectory) {
+      return;
+    }
+    startBoardSync(projectId, activeDirectory);
+    return () => {
+      stopBoardSync(projectId);
+    };
+  }, [projectId, activeDirectory, startBoardSync, stopBoardSync]);
+
   const orderedColumns = React.useMemo(() => {
     if (!board) return [];
     return [...board.columns].sort((a, b) => a.order - b.order);
@@ -64,10 +78,11 @@ export const BoardSidebarView: React.FC = () => {
   }, [board]);
 
   const handleOpenBoard = React.useCallback(() => {
-    if (!activeDirectory) return;
-    openContextBoard(activeDirectory);
+    const directoryToOpen = effectiveDirectory || activeDirectory;
+    if (!directoryToOpen) return;
+    openContextBoard(directoryToOpen);
     setActiveMainTab('chat');
-  }, [activeDirectory, openContextBoard, setActiveMainTab]);
+  }, [activeDirectory, effectiveDirectory, openContextBoard, setActiveMainTab]);
 
   if (!activeProject || !activeDirectory) {
     return (
