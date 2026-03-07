@@ -886,6 +886,25 @@ const renderPathLikeGitChanges = (path: string, grow = true) => {
     );
 };
 
+const splitMultiFilePatch = (patch: string): DiffPatchEntry[] | null => {
+    const segments = patch.split(/(?=^diff --git )/m).filter((s) => s.trim());
+    if (segments.length <= 1) {
+        return null;
+    }
+
+    return segments.map((segment, index) => {
+        const headerLine = segment.match(/^diff --git (.+)$/m)?.[1] ?? '';
+        // lastIndexOf handles filenames that contain spaces
+        const bIdx = headerLine.lastIndexOf(' b/');
+        const title = bIdx !== -1 ? headerLine.slice(bIdx + 3) : `File ${index + 1}`;
+        return {
+            id: `${title}-${index}`,
+            title,
+            patch: segment,
+        } satisfies DiffPatchEntry;
+    });
+};
+
 const getDiffPatchEntries = (
     metadata: Record<string, unknown> | undefined,
     fallbackDiff: string,
@@ -927,6 +946,14 @@ const getDiffPatchEntries = (
         return entries;
     }
 
+    const splitEntries = splitMultiFilePatch(fallbackDiff);
+    if (splitEntries) {
+        return splitEntries.map((entry) => ({
+            ...entry,
+            title: getRelativePath(entry.title, currentDirectory),
+        }));
+    }
+
     return [
         {
             id: 'diff-0',
@@ -935,6 +962,31 @@ const getDiffPatchEntries = (
         },
     ];
 };
+
+class DiffPreviewErrorBoundary extends React.Component<
+    { children: React.ReactNode },
+    { hasError: boolean }
+> {
+    constructor(props: { children: React.ReactNode }) {
+        super(props);
+        this.state = { hasError: false };
+    }
+
+    static getDerivedStateFromError(): { hasError: boolean } {
+        return { hasError: true };
+    }
+
+    render() {
+        if (this.state.hasError) {
+            return (
+                <div className="typography-meta text-muted-foreground/70 p-2">
+                    Unable to render diff preview.
+                </div>
+            );
+        }
+        return this.props.children;
+    }
+}
 
 const DiffPreview: React.FC<DiffPreviewProps> = React.memo(({ diff, pierreTheme, pierreThemeType, diffViewMode }) => {
     return (
@@ -1380,12 +1432,14 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                                     {renderPathLikeGitChanges(entry.title)}
                                 </div>
                             ) : null}
-                            <DiffPreview
-                                diff={entry.patch}
-                                pierreTheme={pierreTheme}
-                                pierreThemeType={pierreThemeType}
-                                diffViewMode={diffViewMode}
-                            />
+                            <DiffPreviewErrorBoundary key={entry.id}>
+                                <DiffPreview
+                                    diff={entry.patch}
+                                    pierreTheme={pierreTheme}
+                                    pierreThemeType={pierreThemeType}
+                                    diffViewMode={diffViewMode}
+                                />
+                            </DiffPreviewErrorBoundary>
                         </div>
                     ))}
                 </div>,
