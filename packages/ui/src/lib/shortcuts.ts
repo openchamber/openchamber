@@ -372,6 +372,13 @@ const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
     label: 'Switch to tab 9',
     description: 'Switch to the ninth tab or project',
   },
+  {
+    id: 'close_tab',
+    defaultCombo: 'mod+w',
+    label: 'Close tab',
+    description: 'Close the current tab or project',
+    customizable: true,
+  },
 ] as const;
 
 export function normalizeCombo(combo: ShortcutCombo): ShortcutCombo {

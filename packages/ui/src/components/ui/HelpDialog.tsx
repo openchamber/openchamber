@@ -170,6 +170,12 @@ export const HelpDialog: React.FC = () => {
           icon: RiTimeLine,
           keys: '',
         },
+        {
+          id: 'close_tab',
+          description: 'Close Context Panel Tab',
+          icon: RiCloseCircleLine,
+          keys: '',
+        },
       ],
     },
     {
