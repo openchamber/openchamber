@@ -184,10 +184,11 @@ export const useLastTurnMessageIds = (): Set<string> => {
 
 interface TurnGroupingProviderProps {
     messages: ChatMessageEntry[];
+    projection?: TurnProjectionResult;
     children: React.ReactNode;
 }
 
-export const TurnGroupingProvider: React.FC<TurnGroupingProviderProps> = ({ messages, children }) => {
+export const TurnGroupingProvider: React.FC<TurnGroupingProviderProps> = ({ messages, projection, children }) => {
     const { isWorking: sessionIsWorking } = useCurrentSessionActivity();
     const toolCallExpansion = useUIStore((state) => state.toolCallExpansion);
     const showTextJustificationActivity = useUIStore((state) => state.showTextJustificationActivity);
@@ -199,11 +200,11 @@ export const TurnGroupingProvider: React.FC<TurnGroupingProviderProps> = ({ mess
     const staticValue = React.useMemo<TurnGroupingStaticData>(() => {
         return {
             structureKey,
-            projection: projectTurnRecords(messages, { showTextJustificationActivity }),
+            projection: projection ?? projectTurnRecords(messages, { showTextJustificationActivity }),
             messageNeighbors: buildNeighborMap(messages),
             defaultActivityExpanded,
         };
-    }, [defaultActivityExpanded, messages, showTextJustificationActivity, structureKey]);
+    }, [defaultActivityExpanded, messages, projection, showTextJustificationActivity, structureKey]);
 
     const [turnUiStates, setTurnUiStates] = React.useState<Map<string, { isExpanded: boolean }>>(() => new Map());
     React.useEffect(() => {

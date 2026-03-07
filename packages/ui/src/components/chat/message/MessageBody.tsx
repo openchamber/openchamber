@@ -3,8 +3,8 @@ import type { Part } from '@opencode-ai/sdk/v2';
 
 import UserTextPart from './parts/UserTextPart';
 import ToolPart from './parts/ToolPart';
-import ProgressiveGroup from './parts/ProgressiveGroup';
 import ReasoningPart from './parts/ReasoningPart';
+import AssistantTextPart from './parts/AssistantTextPart';
 import { MessageFilesDisplay } from '../FileAttachment';
 import type { ToolPart as ToolPartType } from '@opencode-ai/sdk/v2';
 import type { StreamPhase, ToolPopupContent, AgentMentionInfo } from './types';
@@ -32,6 +32,7 @@ import { isVSCodeRuntime } from '@/lib/desktop';
 import { toPng } from 'html-to-image';
 import { toast } from '@/components/ui';
 import { formatTimestampForDisplay } from './timeFormat';
+import TurnActivity from '../components/TurnActivity';
 
 type SubtaskPartLike = Part & {
     type: 'subtask';
@@ -569,8 +570,7 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
     turnGroupingContext,
     errorMessage,
 }) => {
-
-    void _streamPhase;
+    const streamPhase = _streamPhase;
     void _allowAnimation;
     const [copyHintVisible, setCopyHintVisible] = React.useState(false);
     const copyHintTimeoutRef = React.useRef<number | null>(null);
@@ -1071,7 +1071,7 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
                     }
 
                     rendered.push(
-                        <ProgressiveGroup
+                        <TurnActivity
                             key={`progressive-group-${segment.id}`}
                             parts={visibleSegmentParts}
                             isExpanded={turnGroupingContext.isGroupExpanded}
@@ -1121,6 +1121,36 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
         }> = [];
 
         visibleParts.forEach((part, index) => {
+            if (part.type === 'text') {
+                const activity = activityPartsByPart.get(part);
+                const isJustification = activity?.kind === 'justification';
+
+                if (isJustification && shouldRenderActivityGroup) {
+                    return;
+                }
+
+                const textTime = (part as { time?: { end?: number | null | undefined } | null | undefined }).time;
+                const partEndTime = typeof textTime?.end === 'number' ? textTime.end : null;
+
+                partsWithTime.push({
+                    part,
+                    index,
+                    endTime: partEndTime,
+                    element: (
+                        <AssistantTextPart
+                            key={`assistant-text-${part.id ?? `${messageId}-text-${index}`}`}
+                            part={part}
+                            messageId={messageId}
+                            streamPhase={streamPhase}
+                            allowAnimation={streamPhase === 'completed'}
+                            onContentChange={onContentChange}
+                            renderAsReasoning={isJustification}
+                        />
+                    ),
+                });
+                return;
+            }
+
             const activity = activityPartsByPart.get(part);
             if (!activity) {
                 return;
@@ -1229,6 +1259,7 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
         onToggleTool,
         shouldShowTool,
         shouldShowActivityGroup,
+        streamPhase,
         showReasoningTraces,
         syntaxTheme,
         toolConnections,
@@ -1270,6 +1301,7 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
 
     const showSummaryBody =
         turnGroupingContext?.isLastAssistantInTurn &&
+        assistantTextParts.length === 0 &&
         summaryBody &&
         summaryBody.trim().length > 0;
 

@@ -4,6 +4,7 @@ import { MarkdownRenderer } from '../../MarkdownRenderer';
 import type { StreamPhase } from '../types';
 import type { ContentChangeReason } from '@/hooks/useChatScrollManager';
 import { ReasoningTimelineBlock, formatReasoningText } from './ReasoningPart';
+import { useStreamingTextThrottle } from '../../hooks/useStreamingTextThrottle';
 
 type PartWithText = Part & { text?: string; content?: string; value?: string; time?: { start?: number; end?: number } };
 
@@ -35,21 +36,24 @@ const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
     }, [baseTextContent, renderAsReasoning]);
     const isStreamingPhase = streamPhase === 'streaming';
     const isCooldownPhase = streamPhase === 'cooldown';
-    const wasStreamingRef = React.useRef(isStreamingPhase);
+    const isStreaming = isStreamingPhase || isCooldownPhase;
 
-    if (isStreamingPhase || isCooldownPhase) {
-        wasStreamingRef.current = true;
-        return null;
-    }
+    const throttledTextContent = useStreamingTextThrottle({
+        text: textContent,
+        isStreaming,
+        identityKey: `${messageId}:${part.id ?? 'text'}`,
+    });
+
+    const displayTextContent = isStreaming ? throttledTextContent : textContent;
 
     const time = partWithText.time;
     const isFinalized = time && typeof time.end !== 'undefined';
 
-    if (!isFinalized && (!textContent || textContent.trim().length === 0)) {
+    if (!isFinalized && (!displayTextContent || displayTextContent.trim().length === 0)) {
         return null;
     }
 
-    if (!textContent || textContent.trim().length === 0) {
+    if (!displayTextContent || displayTextContent.trim().length === 0) {
         return null;
     }
 
@@ -57,7 +61,7 @@ const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
         return (
             <ReasoningTimelineBlock
                 key={part.id || `${messageId}-text`}
-                text={textContent}
+                text={displayTextContent}
                 variant="justification"
                 onContentChange={onContentChange}
                 blockId={part.id || `${messageId}-reasoning-text`}
@@ -69,11 +73,11 @@ const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
     return (
         <div className="group/assistant-text relative break-words" key={part.id || `${messageId}-text`}>
             <MarkdownRenderer
-                content={textContent}
+                content={displayTextContent}
                 part={part}
                 messageId={messageId}
-                isAnimated={allowAnimation}
-                isStreaming={false}
+                isAnimated={allowAnimation && !isStreaming}
+                isStreaming={isStreaming}
             />
         </div>
     );

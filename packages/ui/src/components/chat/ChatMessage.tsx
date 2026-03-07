@@ -425,8 +425,8 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
             return visibleParts;
         }
 
-        return isMessageCompleted ? visibleParts : [];
-    }, [isUser, isMessageCompleted, visibleParts]);
+        return visibleParts;
+    }, [isUser, visibleParts]);
 
 
     const assistantTextParts = React.useMemo(() => {

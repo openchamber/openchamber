@@ -8,11 +8,13 @@ import type { ReactVirtualizerOptions, VirtualItem } from '@tanstack/react-virtu
 import ChatMessage from './ChatMessage';
 import { PermissionCard } from './PermissionCard';
 import { QuestionCard } from './QuestionCard';
+import TurnItem from './components/TurnItem';
+import TurnList from './components/TurnList';
 import type { PermissionRequest } from '@/types/permission';
 import type { QuestionRequest } from '@/types/question';
 import type { AnimationHandlers, ContentChangeReason } from '@/hooks/useChatScrollManager';
 import { filterSyntheticParts } from '@/lib/messages/synthetic';
-import type { Turn } from './lib/turns/types';
+import type { ChatMessageEntry, Turn } from './lib/turns/types';
 import { TurnGroupingProvider, useMessageNeighbors, useTurnGroupingContextForMessage, useTurnGroupingContextStatic } from './contexts/TurnGroupingContext';
 import { useTurnRecords } from './hooks/useTurnRecords';
 import { useSessionStore } from '@/stores/useSessionStore';
@@ -66,11 +68,6 @@ const useMessageListVirtualizer = <TItemElement extends Element>(
 
     return virtualizer;
 };
-
-interface ChatMessageEntry {
-    info: Message;
-    parts: Part[];
-}
 
 const USER_SHELL_MARKER = 'The following tool was executed by the user';
 
@@ -408,25 +405,7 @@ const TurnBlock: React.FC<TurnBlockProps> = ({
     );
 
     return (
-        <section className="relative w-full" data-turn-id={turn.turnId}>
-            {stickyUserHeader ? (
-                <div className="sticky top-0 z-20 relative bg-[var(--surface-background)] [overflow-anchor:none]">
-                    <div className="relative z-10">
-                        {renderMessage(turn.userMessage)}
-                    </div>
-                    <div
-                        aria-hidden="true"
-                        className="pointer-events-none absolute inset-x-0 top-full z-0 h-4 bg-gradient-to-b from-[var(--surface-background)] to-transparent sm:h-8"
-                    />
-                </div>
-            ) : (
-                renderMessage(turn.userMessage)
-            )}
-
-            <div className="relative z-0">
-                {turn.assistantMessages.map((message) => renderMessage(message))}
-            </div>
-        </section>
+        <TurnItem turn={turn} stickyUserHeader={stickyUserHeader} renderMessage={renderMessage} />
     );
 };
 
@@ -532,19 +511,21 @@ const MessageListContent: React.FC<{
     scrollToBottom?: (options?: { instant?: boolean; force?: boolean }) => void;
     stickyUserHeader: boolean;
 }> = ({ entries, onMessageContentChange, getAnimationHandlers, scrollToBottom, stickyUserHeader }) => {
+    const renderEntry = React.useCallback((entry: RenderEntry) => {
+        return (
+            <MessageListEntry
+                key={entry.key}
+                entry={entry}
+                onMessageContentChange={onMessageContentChange}
+                getAnimationHandlers={getAnimationHandlers}
+                scrollToBottom={scrollToBottom}
+                stickyUserHeader={stickyUserHeader}
+            />
+        );
+    }, [getAnimationHandlers, onMessageContentChange, scrollToBottom, stickyUserHeader]);
+
     return (
-        <>
-            {entries.map((entry) => (
-                <MessageListEntry
-                    key={entry.key}
-                    entry={entry}
-                    onMessageContentChange={onMessageContentChange}
-                    getAnimationHandlers={getAnimationHandlers}
-                    scrollToBottom={scrollToBottom}
-                    stickyUserHeader={stickyUserHeader}
-                />
-            ))}
-        </>
+        <TurnList entries={entries} renderEntry={renderEntry} />
     );
 };
 
@@ -744,8 +725,13 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         return next;
     }, [activeRetryMessage, activeRetryConfirmedAt, activeRetrySessionId, baseDisplayMessages, fallbackRetryTimestamp]);
 
-    const { projection } = useTurnRecords(displayMessages, { showTextJustificationActivity });
-    const turns = projection.turns;
+    const { projection, staticTurns, streamingTurn } = useTurnRecords(displayMessages, { showTextJustificationActivity });
+    const turns = React.useMemo(() => {
+        if (!streamingTurn) {
+            return staticTurns;
+        }
+        return [...staticTurns, streamingTurn];
+    }, [staticTurns, streamingTurn]);
 
     const renderEntries = React.useMemo<RenderEntry[]>(() => {
         const entries: RenderEntry[] = [];
@@ -981,7 +967,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     const disableFadeIn = shouldVirtualize && virtualizer.isScrolling;
 
     return (
-        <TurnGroupingProvider messages={displayMessages}>
+        <TurnGroupingProvider messages={displayMessages} projection={projection}>
             <div>
                 {hasRenderEarlier && (
                     <div className="flex justify-center py-3">
