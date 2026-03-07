@@ -1,0 +1,67 @@
+# syntax=docker/dockerfile:1
+FROM ubuntu:24.04 AS base
+WORKDIR /app
+
+# Install build dependencies in base stage
+RUN apt-get update && \
+  apt-get install -y curl unzip && \
+  curl -fsSL https://bun.sh/install | bash && \
+  rm -rf /var/lib/apt/lists/*
+
+FROM base AS deps
+WORKDIR /app
+COPY package.json bun.lock ./
+COPY packages/ui/package.json ./packages/ui/
+COPY packages/web/package.json ./packages/web/
+COPY packages/desktop/package.json ./packages/desktop/
+COPY packages/vscode/package.json ./packages/vscode/
+RUN /root/.bun/bin/bun install --frozen-lockfile --ignore-scripts
+
+FROM deps AS builder
+WORKDIR /app
+COPY . .
+RUN /root/.bun/bin/bun run build:web
+
+FROM base AS runtime
+
+RUN apt-get update && \
+  apt-get install -y python3 openssh-client git nodejs npm less sudo && \
+  cp /root/.bun/bin/bun /usr/local/bin/bun && \
+  rm -rf /var/lib/apt/lists/*
+
+ENV NODE_ENV=production
+
+# Create openchamber user
+RUN useradd -m -s /bin/bash openchamber
+
+# Add openchamber to sudo group and set password
+RUN usermod -aG sudo openchamber && \
+  echo 'openchamber:openchamber' | chpasswd
+
+# Switch to openchamber user
+USER openchamber
+
+ENV NPM_CONFIG_PREFIX=/home/openchamber/.npm-global
+ENV PATH=${NPM_CONFIG_PREFIX}/bin:${PATH}
+
+RUN npm config set prefix /home/openchamber/.npm-global && mkdir -p /home/openchamber/.npm-global && \
+  mkdir -p /home/openchamber/.config /home/openchamber/.ssh && \
+  npm install -g opencode-ai && \
+  chown -R openchamber:openchamber /home/openchamber/.config /home/openchamber/.ssh
+
+WORKDIR /home/openchamber
+RUN mkdir -p /home/openchamber/.config/openchamber /home/openchamber/.local/share/opencode/bin /home/openchamber/.local/state/opencode /home/openchamber/.config/opencode && \
+  chown -R openchamber:openchamber /home/openchamber/.config /home/openchamber/.local /home/openchamber/.ssh
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/packages/web/node_modules ./packages/web/node_modules
+COPY --from=builder /app/package.json ./package.json
+COPY --from=builder /app/packages/web/package.json ./packages/web/package.json
+COPY --from=builder /app/packages/web/bin ./packages/web/bin
+COPY --from=builder /app/packages/web/server ./packages/web/server
+COPY --from=builder /app/packages/web/dist ./packages/web/dist
+COPY --chmod=755 scripts/docker-entrypoint.sh /app/openchamber-entrypoint.sh
+
+EXPOSE 3000
+
+ENTRYPOINT ["/app/openchamber-entrypoint.sh"]
+
