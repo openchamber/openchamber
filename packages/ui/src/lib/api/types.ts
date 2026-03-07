@@ -773,6 +773,8 @@ export type GitHubPullRequestStatus = {
   pr?: GitHubPullRequest | null;
   checks?: GitHubChecksSummary | null;
   canMerge?: boolean;
+  defaultBranch?: string | null;
+  resolvedRemoteName?: string | null;
 };
 
 export type GitHubPullRequestCreateInput = {

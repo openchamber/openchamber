@@ -9576,6 +9576,9 @@ async function main(options = {}) {
     };
   };
 
+  const isGitHubAuthInvalid = (error) => error?.status === 401 || error?.status === 403;
+  const isGitHubResourceUnavailable = (error) => error?.status === 403 || error?.status === 404;
+
   app.get('/api/github/auth/status', async (_req, res) => {
     try {
       const { getGitHubAuth, getOctokitOrNull, clearGitHubAuth, getGitHubAuthAccounts } = await getGitHubLibraries();
@@ -9594,7 +9597,7 @@ async function main(options = {}) {
       try {
         user = await getGitHubUserSummary(octokit);
       } catch (error) {
-        if (error?.status === 401) {
+        if (isGitHubAuthInvalid(error)) {
           clearGitHubAuth();
           return res.json({ connected: false, accounts: getGitHubAuthAccounts() });
         }
@@ -9730,7 +9733,7 @@ async function main(options = {}) {
       try {
         user = await getGitHubUserSummary(octokit);
       } catch (error) {
-        if (error?.status === 401) {
+        if (isGitHubAuthInvalid(error)) {
           clearGitHubAuth();
           return res.json({ connected: false, accounts: getGitHubAuthAccounts() });
         }
@@ -9770,7 +9773,7 @@ async function main(options = {}) {
       try {
         user = await getGitHubUserSummary(octokit);
       } catch (error) {
-        if (error?.status === 401) {
+        if (isGitHubAuthInvalid(error)) {
           clearGitHubAuth();
           return res.status(401).json({ error: 'GitHub token expired or revoked' });
         }
@@ -9794,100 +9797,26 @@ async function main(options = {}) {
         return res.status(400).json({ error: 'directory and branch are required' });
       }
 
-      const { getOctokitOrNull, getGitHubAuth } = await getGitHubLibraries();
+      const { getOctokitOrNull } = await getGitHubLibraries();
       const octokit = getOctokitOrNull();
       if (!octokit) {
         return res.json({ connected: false });
       }
 
-      const { resolveGitHubRepoFromDirectory } = await import('./lib/github/index.js');
-      const { repo } = await resolveGitHubRepoFromDirectory(directory, remote);
-      if (!repo) {
-        return res.json({ connected: true, repo: null, branch, pr: null, checks: null, canMerge: false });
+      const { resolveGitHubPrStatus } = await import('./lib/github/pr-status.js');
+      const resolvedStatus = await resolveGitHubPrStatus({
+        octokit,
+        directory,
+        branch,
+        remoteName: remote,
+      });
+      const searchRepo = resolvedStatus.repo;
+      const first = resolvedStatus.pr;
+      if (!searchRepo) {
+        return res.json({ connected: true, repo: null, branch, pr: null, checks: null, canMerge: false, defaultBranch: null, resolvedRemoteName: null });
       }
-
-       let originRepo = null;
-       if (remote !== 'origin') {
-         const originResolved = await resolveGitHubRepoFromDirectory(directory, 'origin').catch(() => ({ repo: null }));
-         originRepo = originResolved?.repo || null;
-       }
-
-       const candidateHeadOwners = [];
-       const pushHeadOwner = (owner) => {
-         if (typeof owner !== 'string') return;
-         const normalized = owner.trim();
-         if (!normalized) return;
-         if (candidateHeadOwners.includes(normalized)) return;
-         candidateHeadOwners.push(normalized);
-       };
-
-       // First, use branch tracking remote owner (where branch is usually pushed).
-       const { getStatus } = await import('./lib/git/index.js');
-       const status = await getStatus(directory).catch(() => null);
-       if (status?.tracking) {
-         const trackingRemote = status.tracking.split('/')[0];
-         if (trackingRemote) {
-           const trackingResolved = await resolveGitHubRepoFromDirectory(directory, trackingRemote).catch(() => ({ repo: null }));
-           pushHeadOwner(trackingResolved?.repo?.owner);
-         }
-       }
-
-       // Then same-repo and origin fallback owners.
-       pushHeadOwner(repo.owner);
-       pushHeadOwner(originRepo?.owner);
-
-       const listByHead = async (targetRepo, state, headOwner) => {
-         const resp = await octokit.rest.pulls.list({
-           owner: targetRepo.owner,
-           repo: targetRepo.repo,
-           state,
-           head: `${headOwner}:${branch}`,
-           per_page: 10,
-         });
-         return Array.isArray(resp?.data) ? resp.data[0] : null;
-       };
-
-       const listByHeadRef = async (targetRepo, state) => {
-         const resp = await octokit.rest.pulls.list({
-           owner: targetRepo.owner,
-           repo: targetRepo.repo,
-           state,
-           per_page: 100,
-         });
-         const matches = Array.isArray(resp?.data)
-           ? resp.data.filter((pr) => pr?.head?.ref === branch)
-           : [];
-         return matches[0] ?? null;
-       };
-
-       const tryFindPr = async (targetRepo) => {
-         let found = null;
-         for (const owner of candidateHeadOwners) {
-           found = await listByHead(targetRepo, 'open', owner);
-           if (found) return found;
-           found = await listByHead(targetRepo, 'closed', owner);
-           if (found) return found;
-         }
-         found = await listByHeadRef(targetRepo, 'open');
-         if (found) return found;
-         return listByHeadRef(targetRepo, 'closed');
-       };
-
-       // Try requested remote target repo first, then origin target repo fallback for fork flows.
-       let searchRepo = repo;
-       let first = await tryFindPr(searchRepo);
-       if (!first && originRepo) {
-         const isDifferentRepo = originRepo.owner !== repo.owner || originRepo.repo !== repo.repo;
-         if (isDifferentRepo) {
-           const originMatch = await tryFindPr(originRepo);
-           if (originMatch) {
-             first = originMatch;
-             searchRepo = originRepo;
-           }
-         }
-       }
       if (!first) {
-        return res.json({ connected: true, repo: searchRepo, branch, pr: null, checks: null, canMerge: false });
+        return res.json({ connected: true, repo: searchRepo, branch, pr: null, checks: null, canMerge: false, defaultBranch: resolvedStatus.defaultBranch ?? null, resolvedRemoteName: resolvedStatus.resolvedRemoteName ?? null });
       }
 
       // Enrich with mergeability fields
@@ -10003,12 +9932,26 @@ async function main(options = {}) {
         },
         checks,
         canMerge,
+        defaultBranch: resolvedStatus.defaultBranch ?? null,
+        resolvedRemoteName: resolvedStatus.resolvedRemoteName ?? null,
       });
     } catch (error) {
       if (error?.status === 401) {
         const { clearGitHubAuth } = await getGitHubLibraries();
         clearGitHubAuth();
         return res.json({ connected: false });
+      }
+      if (isGitHubResourceUnavailable(error)) {
+        return res.json({
+          connected: true,
+          repo: null,
+          branch: typeof req.query?.branch === 'string' ? req.query.branch.trim() : '',
+          pr: null,
+          checks: null,
+          canMerge: false,
+          defaultBranch: null,
+          resolvedRemoteName: null,
+        });
       }
       console.error('Failed to load GitHub PR status:', error);
       return res.status(500).json({ error: error.message || 'Failed to load GitHub PR status' });

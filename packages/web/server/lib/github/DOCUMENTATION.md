@@ -9,6 +9,7 @@ This module provides GitHub authentication, OAuth device flow, Octokit client fa
 - `packages/web/server/lib/github/device-flow.js`: OAuth device code flow implementation for browserless auth.
 - `packages/web/server/lib/github/octokit.js`: Octokit client factory backed by current auth.
 - `packages/web/server/lib/github/repo/index.js`: GitHub remote URL parser and directory-to-repo resolver.
+- `packages/web/server/lib/github/pr-status.js`: Pull request status resolution across remotes for sidebar and PR UI flows.
 
 ## Public exports (from index.js)
 

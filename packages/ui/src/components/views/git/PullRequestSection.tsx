@@ -93,7 +93,8 @@ const getPrVisualState = (status: GitHubPullRequestStatus | null): 'draft' | 'op
     return 'draft';
   }
   const checksFailed = status?.checks?.state === 'failure';
-  const notMergeable = status?.canMerge === false || pr.mergeable === false;
+  const mergeableState = typeof pr.mergeableState === 'string' ? pr.mergeableState : '';
+  const notMergeable = pr.mergeable === false || mergeableState === 'blocked' || mergeableState === 'dirty';
   if (checksFailed || notMergeable) {
     return 'blocked';
   }
@@ -1068,6 +1069,18 @@ export const PullRequestSection: React.FC<{
     }
     void refresh({ force: true, silent: true, markInitialResolved: true });
   }, [canShow, refresh, selectedRemote?.name]);
+
+  React.useEffect(() => {
+    const resolvedRemoteName = status?.resolvedRemoteName?.trim();
+    if (!resolvedRemoteName || didUserOverrideRemoteRef.current) {
+      return;
+    }
+    const resolvedRemote = remotes.find((candidate) => candidate.name === resolvedRemoteName);
+    if (!resolvedRemote) {
+      return;
+    }
+    setSelectedRemote((prev) => (prev?.name === resolvedRemote.name ? prev : resolvedRemote));
+  }, [remotes, status?.resolvedRemoteName]);
 
   React.useEffect(() => {
     const isTerminal = status?.pr?.state === 'closed' || status?.pr?.state === 'merged';

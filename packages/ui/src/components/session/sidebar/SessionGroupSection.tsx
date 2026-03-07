@@ -232,9 +232,9 @@ export function SessionGroupSection(props: Props): React.ReactNode {
     ].filter((item): item is string => Boolean(item)).join(', ')
     : null;
   const mergeabilityLabel = prIndicator && prIndicator.state === 'open'
-    ? (prIndicator.canMerge === true
-        ? 'Mergeable'
-        : (prIndicator.canMerge === false ? 'Conflicts or blocked' : null))
+    ? (prIndicator.mergeableState === 'blocked' || prIndicator.mergeableState === 'dirty'
+        ? 'Conflicts or blocked'
+        : (prIndicator.mergeableState === 'clean' || prIndicator.canMerge === true ? 'Mergeable' : null))
     : null;
   const mergeStateLabel = prIndicator && prIndicator.state === 'open' && prIndicator.mergeableState
     ? `Merge state: ${prIndicator.mergeableState}`
