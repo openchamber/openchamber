@@ -1338,7 +1338,7 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
   .animate-grid-pulse,
   .animate-attention-diamond-pulse {
     animation: none;
-}
+  }
 
 
 }

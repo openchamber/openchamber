@@ -678,6 +678,7 @@ interface MarkdownRendererProps {
   part?: Part;
   messageId: string;
   isAnimated?: boolean;
+  skipFadeIn?: boolean;
   className?: string;
   isStreaming?: boolean;
   variant?: MarkdownVariant;
@@ -1325,6 +1326,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
   part,
   messageId,
   isAnimated = true,
+  skipFadeIn = false,
   className,
   isStreaming = false,
   variant = 'assistant',
@@ -1370,7 +1372,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
 
   if (isAnimated) {
     return (
-      <FadeInOnReveal key={componentKey}>
+      <FadeInOnReveal key={componentKey} skipAnimation={skipFadeIn}>
         {markdownContent}
       </FadeInOnReveal>
     );

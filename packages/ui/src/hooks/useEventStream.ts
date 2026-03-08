@@ -180,6 +180,94 @@ const TEXT_SHRINK_TOLERANCE = 50;
 const RESYNC_DEBOUNCE_MS = 750;
 const QUESTION_RECONCILE_COOLDOWN_MS = 1500;
 const PERMISSION_RECONCILE_COOLDOWN_MS = 1500;
+const EVENT_FLUSH_FRAME_MS = 16;
+
+const readEventDirectory = (props: Record<string, unknown>): string => {
+  const directory = readStringProp(props, ['directory']);
+  return directory ?? 'global';
+};
+
+const resolveUpdatedPartIdentity = (props: Record<string, unknown>): { messageId: string; partId: string } | null => {
+  const partRaw = props.part;
+  if (!partRaw || typeof partRaw !== 'object') {
+    return null;
+  }
+
+  const part = partRaw as Record<string, unknown>;
+  const messageId = readStringProp(part, ['messageID', 'messageId']);
+  const partId = readStringProp(part, ['id', 'partID', 'partId']);
+  if (!messageId || !partId) {
+    return null;
+  }
+
+  return { messageId, partId };
+};
+
+const buildCoalescingKey = (event: EventData): string | null => {
+  const props = event.properties;
+  if (!props) {
+    return null;
+  }
+
+  const directory = readEventDirectory(props);
+
+  if (event.type === 'session.status') {
+    const sessionId = readStringProp(props, ['sessionID', 'sessionId']);
+    if (!sessionId) {
+      return null;
+    }
+    return `session.status:${directory}:${sessionId}`;
+  }
+
+  if (event.type === 'message.part.updated') {
+    const identity = resolveUpdatedPartIdentity(props);
+    if (!identity) {
+      return null;
+    }
+    return `message.part.updated:${directory}:${identity.messageId}:${identity.partId}`;
+  }
+
+  return null;
+};
+
+const buildDeltaKey = (event: EventData): string | null => {
+  if (event.type !== 'message.part.delta') {
+    return null;
+  }
+
+  const props = event.properties;
+  if (!props) {
+    return null;
+  }
+
+  const directory = readEventDirectory(props);
+  const messageId = readStringProp(props, ['messageID', 'messageId']);
+  const partId = readStringProp(props, ['partID', 'partId']);
+  if (!messageId || !partId) {
+    return null;
+  }
+
+  return `${directory}:${messageId}:${partId}`;
+};
+
+const buildUpdatedPartDeltaKey = (event: EventData): string | null => {
+  if (event.type !== 'message.part.updated') {
+    return null;
+  }
+
+  const props = event.properties;
+  if (!props) {
+    return null;
+  }
+
+  const directory = readEventDirectory(props);
+  const identity = resolveUpdatedPartIdentity(props);
+  if (!identity) {
+    return null;
+  }
+
+  return `${directory}:${identity.messageId}:${identity.partId}`;
+};
 
 const textLengthCache = new WeakMap<Part[], number>();
 const computeTextLength = (parts: Part[] | undefined | null): number => {
@@ -557,6 +645,12 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
   const lastMessageEventBySessionRef = React.useRef<Map<string, number>>(new Map());
   const pendingMessageStallTimersRef = React.useRef<Map<string, NodeJS.Timeout>>(new Map());
   const lastMessageStallRecoveryBySessionRef = React.useRef<Map<string, number>>(new Map());
+  const queuedEventsRef = React.useRef<EventData[]>([]);
+  const queuedEventIndexRef = React.useRef<Map<string, number>>(new Map());
+  const staleDeltaKeysRef = React.useRef<Set<string>>(new Set());
+  const flushScheduledRef = React.useRef(false);
+  const flushTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastFlushAtRef = React.useRef(0);
 
   const scheduleSoftResyncRef = React.useRef<
     (sessionId: string, reason: string, limit?: number) => Promise<void>
@@ -1043,10 +1137,10 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
         };
 
         let roleInfo = 'assistant';
+        const existingMessage = getMessageFromStore(sessionId, messageId);
         if (messageInfo && typeof (messageInfo as { role?: unknown }).role === 'string') {
           roleInfo = (messageInfo as { role?: string }).role as string;
         } else {
-          const existingMessage = getMessageFromStore(sessionId, messageId);
           if (existingMessage) {
             const existingRole = (existingMessage.info as Record<string, unknown>).role;
             if (typeof existingRole === 'string') {
@@ -2016,6 +2110,82 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
     return bootstrapStateRef.current(reason);
   }, []); // intentionally empty deps
 
+  const flushQueuedEvents = React.useCallback(() => {
+    if (flushTimerRef.current) {
+      clearTimeout(flushTimerRef.current);
+      flushTimerRef.current = null;
+    }
+    flushScheduledRef.current = false;
+
+    if (queuedEventsRef.current.length === 0) {
+      queuedEventIndexRef.current.clear();
+      staleDeltaKeysRef.current.clear();
+      return;
+    }
+
+    const events = queuedEventsRef.current;
+    const staleDeltaKeys = staleDeltaKeysRef.current.size > 0 ? new Set(staleDeltaKeysRef.current) : null;
+
+    queuedEventsRef.current = [];
+    queuedEventIndexRef.current.clear();
+    staleDeltaKeysRef.current.clear();
+    lastFlushAtRef.current = Date.now();
+
+    for (let index = 0; index < events.length; index += 1) {
+      const queued = events[index];
+      if (staleDeltaKeys && queued.type === 'message.part.delta') {
+        const deltaKey = buildDeltaKey(queued);
+        if (deltaKey && staleDeltaKeys.has(deltaKey)) {
+          continue;
+        }
+      }
+      stableHandleEvent(queued);
+    }
+  }, [stableHandleEvent]);
+
+  const scheduleQueuedFlush = React.useCallback(() => {
+    if (flushScheduledRef.current) {
+      return;
+    }
+
+    flushScheduledRef.current = true;
+    const elapsed = Date.now() - lastFlushAtRef.current;
+    const delay = Math.max(0, EVENT_FLUSH_FRAME_MS - elapsed);
+
+    flushTimerRef.current = setTimeout(() => {
+      flushTimerRef.current = null;
+      if (!flushScheduledRef.current) {
+        return;
+      }
+      flushQueuedEvents();
+    }, delay);
+  }, [flushQueuedEvents]);
+
+  const enqueueEvent = React.useCallback((event: EventData) => {
+    const key = buildCoalescingKey(event);
+    if (key) {
+      const existingIndex = queuedEventIndexRef.current.get(key);
+      if (existingIndex !== undefined) {
+        queuedEventsRef.current[existingIndex] = event;
+
+        if (event.type === 'message.part.updated') {
+          const staleDeltaKey = buildUpdatedPartDeltaKey(event);
+          if (staleDeltaKey) {
+            staleDeltaKeysRef.current.add(staleDeltaKey);
+          }
+        }
+
+        scheduleQueuedFlush();
+        return;
+      }
+
+      queuedEventIndexRef.current.set(key, queuedEventsRef.current.length);
+    }
+
+    queuedEventsRef.current.push(event);
+    scheduleQueuedFlush();
+  }, [scheduleQueuedFlush]);
+
   const shouldHoldConnection = React.useCallback(() => {
     const currentVisibility = resolveVisibilityState();
     visibilityStateRef.current = currentVisibility;
@@ -2062,9 +2232,11 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
       }
     }
 
+    flushQueuedEvents();
+
 
     isCleaningUpRef.current = false;
-  }, []);
+  }, [flushQueuedEvents]);
 
   const startStream = React.useCallback(async (options?: { resetAttempts?: boolean }) => {
     debugConnectionState();
@@ -2152,7 +2324,7 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
               ? { ...baseProperties, directory: event.directory }
               : baseProperties;
 
-          stableHandleEvent({
+          enqueueEvent({
             type: typeof (payload as { type?: unknown }).type === 'string' ? (payload as { type: string }).type : '',
             properties,
           });
@@ -2185,7 +2357,7 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
     publishStatus,
     checkConnection,
     requestSessionMetadataRefresh,
-    stableHandleEvent,
+    enqueueEvent,
     stableBootstrapState,
     effectiveDirectory,
     debugConnectionState,

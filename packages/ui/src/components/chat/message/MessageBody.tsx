@@ -19,7 +19,6 @@ import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
 import type { ContentChangeReason } from '@/hooks/useChatScrollManager';
 
 import { SimpleMarkdownRenderer } from '../MarkdownRenderer';
-import { useMessageStore } from '@/stores/messageStore';
 import { useSessionStore } from '@/stores/useSessionStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { flattenAssistantTextParts } from '@/lib/messages/messageText';
@@ -1138,11 +1137,10 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
                     endTime: partEndTime,
                     element: (
                         <AssistantTextPart
-                            key={`assistant-text-${part.id ?? `${messageId}-text-${index}`}`}
+                            key={`assistant-text-${messageId}-${index}`}
                             part={part}
                             messageId={messageId}
                             streamPhase={streamPhase}
-                            allowAnimation={streamPhase === 'completed'}
                             onContentChange={onContentChange}
                             renderAsReasoning={isJustification}
                         />
@@ -1269,32 +1267,18 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
         shouldRenderActivityGroup,
     ]);
 
-    const userMessageId = turnGroupingContext?.turnId;
-    const currentSessionId = useSessionStore((state) => state.currentSessionId);
-
-    const rawSummaryBodyFromStore = useMessageStore((state) => {
-        if (!userMessageId || !currentSessionId) return undefined;
-        const sessionMessages = state.messages.get(currentSessionId);
-        if (!sessionMessages) return undefined;
-        const userMsg = sessionMessages.find((m) => m.info?.id === userMessageId);
-        if (!userMsg) return undefined;
-        const summary = (userMsg.info as { summary?: { body?: string | null | undefined } | null | undefined }).summary;
-        const body = summary?.body;
-        return typeof body === 'string' && body.trim().length > 0 ? body : undefined;
-    });
-
     const summaryCandidate =
         typeof turnGroupingContext?.summaryBody === 'string' && turnGroupingContext.summaryBody.trim().length > 0
             ? turnGroupingContext.summaryBody
-            : rawSummaryBodyFromStore;
+            : undefined;
 
     const summaryBodyRef = React.useRef<string | undefined>(undefined);
     if (summaryCandidate && summaryCandidate.trim().length > 0) {
         summaryBodyRef.current = summaryCandidate;
     }
-    const prevUserMessageId = React.useRef(userMessageId);
-    if (prevUserMessageId.current !== userMessageId) {
-        prevUserMessageId.current = userMessageId;
+    const prevUserMessageId = React.useRef(turnGroupingContext?.turnId);
+    if (prevUserMessageId.current !== turnGroupingContext?.turnId) {
+        prevUserMessageId.current = turnGroupingContext?.turnId;
         summaryBodyRef.current = undefined;
     }
     const summaryBody = summaryBodyRef.current;

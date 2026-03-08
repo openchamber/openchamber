@@ -13,7 +13,6 @@ interface AssistantTextPartProps {
     part: Part;
     messageId: string;
     streamPhase: StreamPhase;
-    allowAnimation: boolean;
     onContentChange?: (reason?: ContentChangeReason, messageId?: string) => void;
     renderAsReasoning?: boolean;
 }
@@ -22,7 +21,6 @@ const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
     part,
     messageId,
     streamPhase,
-    allowAnimation,
     onContentChange,
     renderAsReasoning = false,
 }) => {
@@ -80,7 +78,7 @@ const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
                 content={displayTextContent}
                 part={part}
                 messageId={messageId}
-                isAnimated={allowAnimation && !isStreaming}
+                isAnimated={false}
                 isStreaming={isStreaming}
             />
         </div>

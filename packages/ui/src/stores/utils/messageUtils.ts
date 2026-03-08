@@ -43,22 +43,58 @@ export const extractTextFromPart = (part: unknown): string => {
 };
 
 export const normalizeStreamingPart = (incoming: Part, existing?: Part): Part => {
-    const normalized: { type?: string; text?: string; delta?: unknown; [key: string]: unknown } = { ...incoming } as { type?: string; text?: string; delta?: unknown; [key: string]: unknown };
+    const normalized: { type?: string; text?: string; content?: string; value?: string; delta?: unknown; [key: string]: unknown } = {
+        ...incoming,
+    } as { type?: string; text?: string; content?: string; value?: string; delta?: unknown; [key: string]: unknown };
     normalized.type = normalized.type || 'text';
 
     if (normalized.type === 'text') {
-        const existingText = existing && typeof (existing as { text?: string }).text === 'string' ? (existing as { text: string }).text : '';
-        const directText = typeof normalized.text === 'string' ? normalized.text : '';
+        const existingRecord = (existing ?? {}) as { text?: unknown; content?: unknown; value?: unknown };
+        const existingText = extractTextFromPart(existing);
+        const directText = extractTextFromPart(incoming);
         const deltaText = extractTextFromDelta((incoming as { delta?: unknown }).delta);
+        let mergedText = '';
 
         if (directText) {
-            normalized.text = directText;
+            if (!existingText) {
+                mergedText = directText;
+            } else if (directText.startsWith(existingText)) {
+                mergedText = directText;
+            } else if (existingText.endsWith(directText)) {
+                mergedText = existingText;
+            } else {
+                mergedText = `${existingText}${directText}`;
+            }
         } else if (deltaText) {
-            normalized.text = existingText ? `${existingText}${deltaText}` : deltaText;
+            mergedText = existingText ? `${existingText}${deltaText}` : deltaText;
         } else if (existingText) {
-            normalized.text = existingText;
+            mergedText = existingText;
         } else {
-            normalized.text = '';
+            mergedText = '';
+        }
+
+        const incomingField =
+            typeof normalized.text === 'string'
+                ? 'text'
+                : typeof normalized.content === 'string'
+                    ? 'content'
+                    : typeof normalized.value === 'string'
+                        ? 'value'
+                        : null;
+
+        const targetField = incomingField ?? (
+            typeof existingRecord.text === 'string'
+                ? 'text'
+                : typeof existingRecord.content === 'string'
+                    ? 'content'
+                    : typeof existingRecord.value === 'string'
+                        ? 'value'
+                        : 'text'
+        );
+
+        normalized[targetField] = mergedText;
+        if (targetField !== 'text') {
+            normalized.text = mergedText;
         }
 
         delete normalized.delta;

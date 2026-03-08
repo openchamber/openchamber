@@ -223,7 +223,7 @@ export const useChatTimelineController = ({
             return next > 0 ? next : 0;
         });
 
-        await waitForFrames(2);
+        await waitForFrames(1);
         restoreViewportWithFallback({
             anchor,
             previousHeight,
@@ -262,7 +262,7 @@ export const useChatTimelineController = ({
             }
 
             await loadMoreMessages(targetSessionId, 'up');
-            await waitForFrames(2);
+            await waitForFrames(1);
 
             const afterMessages = messagesRef.current;
             const afterMessageCount = afterMessages.length;

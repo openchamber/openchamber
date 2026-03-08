@@ -22,6 +22,7 @@ export const useTurnRecords = (
     const projection = React.useMemo(() => {
         const rawProjection = projectTurnRecords(messages, {
             showTextJustificationActivity: options.showTextJustificationActivity,
+            previousProjection: previousProjectionRef.current,
         });
         const stabilizedProjection = stabilizeTurnProjection(rawProjection, previousProjectionRef.current);
         previousProjectionRef.current = stabilizedProjection;

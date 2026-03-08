@@ -115,6 +115,7 @@ export interface TurnGroupingContext {
     hasReasoning: boolean;
     diffStats?: TurnDiffStats;
     userMessageCreatedAt?: number;
+    userMessageVariant?: string;
     isWorking: boolean;
     isGroupExpanded: boolean;
     toggleGroup: () => void;

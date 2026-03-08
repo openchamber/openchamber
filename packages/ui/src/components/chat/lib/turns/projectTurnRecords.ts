@@ -32,6 +32,16 @@ const getMessageCompletedAt = (message: ChatMessageEntry): number | undefined =>
     return typeof completed === 'number' ? completed : undefined;
 };
 
+const getUserSummaryBody = (message: ChatMessageEntry): string | undefined => {
+    const summaryBody = (message.info as { summary?: { body?: unknown } | null | undefined })?.summary?.body;
+    if (typeof summaryBody !== 'string') {
+        return undefined;
+    }
+
+    const trimmed = summaryBody.trim();
+    return trimmed.length > 0 ? summaryBody : undefined;
+};
+
 const createTurnMessageRecord = (message: ChatMessageEntry, order: number): TurnMessageRecord => {
     const role = resolveMessageRole(message);
     return {
@@ -72,10 +82,12 @@ const buildTurnStreamState = (userMessage: ChatMessageEntry, assistantMessages: 
 
 interface ProjectTurnRecordsOptions {
     showTextJustificationActivity: boolean;
+    previousProjection?: TurnProjectionResult | null;
 }
 
 const DEFAULT_OPTIONS: ProjectTurnRecordsOptions = {
     showTextJustificationActivity: false,
+    previousProjection: null,
 };
 
 export const projectTurnRecords = (
@@ -89,6 +101,7 @@ export const projectTurnRecords = (
 
     const turns: TurnRecord[] = [];
     const turnByUserId = new Map<string, TurnRecord>();
+    const previousTurnsById = new Map((effectiveOptions.previousProjection?.turns ?? []).map((turn) => [turn.turnId, turn]));
     const groupedMessageIds = new Set<string>();
     let currentTurn: TurnRecord | undefined;
 
@@ -148,8 +161,45 @@ export const projectTurnRecords = (
     });
 
     turns.forEach((turn) => {
+        const previousTurn = previousTurnsById.get(turn.turnId);
+        const canReuseComputed = (() => {
+            if (!previousTurn) {
+                return false;
+            }
+            if (previousTurn.stream.isStreaming) {
+                return false;
+            }
+            if (previousTurn.userMessage !== turn.userMessage) {
+                return false;
+            }
+            if (previousTurn.assistantMessages.length !== turn.assistantMessages.length) {
+                return false;
+            }
+            for (let index = 0; index < turn.assistantMessages.length; index += 1) {
+                if (previousTurn.assistantMessages[index] !== turn.assistantMessages[index]) {
+                    return false;
+                }
+            }
+            return true;
+        })();
+
+        if (canReuseComputed && previousTurn) {
+            turn.summary = previousTurn.summary;
+            turn.summaryText = previousTurn.summaryText;
+            turn.diffStats = previousTurn.diffStats;
+            turn.activityParts = previousTurn.activityParts;
+            turn.activitySegments = previousTurn.activitySegments;
+            turn.hasTools = previousTurn.hasTools;
+            turn.hasReasoning = previousTurn.hasReasoning;
+            turn.stream = previousTurn.stream;
+            turn.startedAt = previousTurn.startedAt;
+            turn.completedAt = previousTurn.completedAt;
+            turn.durationMs = previousTurn.durationMs;
+            return;
+        }
+
         turn.summary = projectTurnSummary(turn.assistantMessages);
-        turn.summaryText = turn.summary.text;
+        turn.summaryText = turn.summary.text ?? getUserSummaryBody(turn.userMessage);
         turn.diffStats = projectTurnDiffStats(turn.userMessage);
 
         const activity = projectTurnActivity({

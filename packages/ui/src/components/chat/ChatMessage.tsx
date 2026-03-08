@@ -5,7 +5,6 @@ import { useShallow } from 'zustand/react/shallow';
 import { defaultCodeDark, defaultCodeLight } from '@/lib/codeTheme';
 import { MessageFreshnessDetector } from '@/lib/messageFreshness';
 import { useSessionStore } from '@/stores/useSessionStore';
-import { useMessageStore } from '@/stores/messageStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useContextStore } from '@/stores/contextStore';
@@ -537,21 +536,22 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
 
     const [hasStartedStreamingHeader, setHasStartedStreamingHeader] = React.useState(false);
 
-    const previousRole = React.useMemo(() => {
-        if (!previousMessage) return null;
-        return deriveMessageRole(previousMessage.info);
-    }, [previousMessage]);
-
     const nextRole = React.useMemo(() => {
         if (!nextMessage) return null;
         return deriveMessageRole(nextMessage.info);
     }, [nextMessage]);
 
+    const hasTurnGrouping = Boolean(turnGroupingContext);
+    const isLastAssistantInTurn = turnGroupingContext?.isLastAssistantInTurn ?? false;
+
     const isFollowedByAssistant = React.useMemo(() => {
         if (isUser) return false;
+        if (hasTurnGrouping) {
+            return !isLastAssistantInTurn;
+        }
         if (!nextRole) return false;
         return !nextRole.isUser && nextRole.role === 'assistant';
-    }, [isUser, nextRole]);
+    }, [hasTurnGrouping, isLastAssistantInTurn, isUser, nextRole]);
 
     const streamPhase: StreamPhase = React.useMemo(() => {
         if (isMessageCompleted) {
@@ -603,10 +603,9 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
             return false;
         }
 
-        // Fallback to original logic when turn grouping is not available
-        if (!previousRole) return true;
-        return previousRole.isUser;
-    }, [hasStartedStreamingHeader, isUser, previousRole, turnGroupingContext, streamPhase, message.info]);
+        // Ungrouped fallback path: always show assistant header.
+        return true;
+    }, [hasStartedStreamingHeader, isUser, turnGroupingContext, streamPhase, message.info.id]);
 
     const handleCopyCode = React.useCallback((code: string) => {
         void copyTextToClipboard(code).then((result) => {
@@ -618,44 +617,20 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         });
     }, []);
 
-    const userMessageIdForTurn = turnGroupingContext?.turnId;
-    const { assistantSummaryFromStore, variantFromTurnStore } = useMessageStore(
-        useShallow((state) => {
-            if (!userMessageIdForTurn || !message.info.sessionID) {
-                return { assistantSummaryFromStore: undefined, variantFromTurnStore: undefined };
-            }
-            const sessionMessages = state.messages.get(message.info.sessionID);
-            if (!sessionMessages) {
-                return { assistantSummaryFromStore: undefined, variantFromTurnStore: undefined };
-            }
-            const userMsg = sessionMessages.find((entry) => entry.info?.id === userMessageIdForTurn);
-            if (!userMsg) {
-                return { assistantSummaryFromStore: undefined, variantFromTurnStore: undefined };
-            }
-            const summary = (userMsg.info as { summary?: { body?: string | null | undefined } | null | undefined }).summary;
-            const body = summary?.body;
-            const variant = (userMsg.info as { variant?: unknown }).variant;
-            return {
-                assistantSummaryFromStore: typeof body === 'string' && body.trim().length > 0 ? body : undefined,
-                variantFromTurnStore: typeof variant === 'string' && variant.trim().length > 0 ? variant : undefined,
-            };
-        })
-    );
-
-    const headerVariantRaw = !isUser ? (variantFromTurnStore ?? previousUserMetadata?.variant) : undefined;
+    const headerVariantRaw = !isUser ? (turnGroupingContext?.userMessageVariant ?? previousUserMetadata?.variant) : undefined;
 
     const headerVariant = !isUser && modelHasVariants ? (headerVariantRaw ?? 'Default') : undefined;
 
     const assistantSummaryCandidate =
         typeof turnGroupingContext?.summaryBody === 'string' && turnGroupingContext.summaryBody.trim().length > 0
             ? turnGroupingContext.summaryBody
-            : assistantSummaryFromStore;
+            : undefined;
 
     const [assistantSummaryForCopy, setAssistantSummaryForCopy] = React.useState<string | undefined>(undefined);
 
     React.useEffect(() => {
         setAssistantSummaryForCopy(undefined);
-    }, [userMessageIdForTurn]);
+    }, [turnGroupingContext?.turnId]);
 
     React.useEffect(() => {
         if (assistantSummaryCandidate && assistantSummaryCandidate.trim().length > 0) {
@@ -780,6 +755,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     const hasRequestedReservationRef = React.useRef(false);
     const animationStartNotifiedRef = React.useRef(false);
     const hasTriggeredReservationOnceRef = React.useRef(false);
+    const hasEverStreamedRef = React.useRef(false);
 
     React.useEffect(() => {
         animationCompletedRef.current = false;
@@ -787,6 +763,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         animationStartNotifiedRef.current = false;
         hasTriggeredReservationOnceRef.current = false;
         hasAnnouncedAuxiliaryScrollRef.current = false;
+        hasEverStreamedRef.current = false;
     }, [message.info.id]);
 
     const handleAuxiliaryContentComplete = React.useCallback(() => {
@@ -816,7 +793,11 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     }, [setImagePreviewOpen]);
 
     const isAnimationSettled = Boolean(getMessageInfoProp(message.info, 'animationSettled'));
-    const isStreamingPhase = streamPhase === 'streaming';
+    const isStreamingPhase = streamPhase === 'streaming' || streamPhase === 'cooldown';
+
+    if (isStreamingPhase) {
+        hasEverStreamedRef.current = true;
+    }
 
     const hasReasoningParts = React.useMemo(() => {
         if (isUser) {
@@ -825,7 +806,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         return visibleParts.some((part) => part.type === 'reasoning');
     }, [isUser, visibleParts]);
 
-    const allowAnimation = shouldAnimateMessage && !isAnimationSettled && !isStreamingPhase;
+    const allowAnimation = shouldAnimateMessage && !isAnimationSettled && !isStreamingPhase && !hasEverStreamedRef.current;
     const shouldReserveAnimationSpace = !isUser && shouldAnimateMessage && assistantTextParts.length > 0 && !shouldCoordinateRendering;
 
     React.useEffect(() => {

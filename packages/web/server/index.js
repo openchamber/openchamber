@@ -4744,6 +4744,224 @@ function parseSseDataPayload(block) {
   }
 }
 
+function parseSseJsonEnvelope(block) {
+  if (!block || typeof block !== 'string') {
+    return null;
+  }
+
+  const dataLines = block
+    .split('\n')
+    .filter((line) => line.startsWith('data:'))
+    .map((line) => line.slice(5).replace(/^\s/, ''));
+
+  if (dataLines.length === 0) {
+    return null;
+  }
+
+  const payloadText = dataLines.join('\n').trim();
+  if (!payloadText) {
+    return null;
+  }
+
+  try {
+    const raw = JSON.parse(payloadText);
+    if (!raw || typeof raw !== 'object') {
+      return null;
+    }
+
+    if (raw.payload && typeof raw.payload === 'object') {
+      return {
+        raw,
+        payload: raw.payload,
+      };
+    }
+
+    return {
+      raw,
+      payload: raw,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function replaceSseDataPayload(block, rawPayload) {
+  if (!block || typeof block !== 'string') {
+    return block;
+  }
+
+  const passthroughLines = block
+    .split('\n')
+    .filter((line) => !line.startsWith('data:'));
+
+  return [...passthroughLines, `data: ${JSON.stringify(rawPayload)}`].join('\n');
+}
+
+function createStreamingTextNormalizerState() {
+  return {
+    partTextByKey: new Map(),
+    maxEntries: 8000,
+  };
+}
+
+function getStreamingTextIdentity(payload) {
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+
+  const props = payload.properties;
+  if (!props || typeof props !== 'object') {
+    return null;
+  }
+
+  const info = props.info && typeof props.info === 'object' ? props.info : {};
+  const part = props.part && typeof props.part === 'object' ? props.part : {};
+  const directory = typeof props.directory === 'string' && props.directory.length > 0 ? props.directory : 'global';
+  const sessionId =
+    (typeof part.sessionID === 'string' && part.sessionID) ||
+    (typeof part.sessionId === 'string' && part.sessionId) ||
+    (typeof info.sessionID === 'string' && info.sessionID) ||
+    (typeof info.sessionId === 'string' && info.sessionId) ||
+    (typeof props.sessionID === 'string' && props.sessionID) ||
+    (typeof props.sessionId === 'string' && props.sessionId) ||
+    null;
+  const messageId =
+    (typeof part.messageID === 'string' && part.messageID) ||
+    (typeof part.messageId === 'string' && part.messageId) ||
+    (typeof info.messageID === 'string' && info.messageID) ||
+    (typeof info.messageId === 'string' && info.messageId) ||
+    (typeof info.id === 'string' && info.id) ||
+    (typeof props.messageID === 'string' && props.messageID) ||
+    (typeof props.messageId === 'string' && props.messageId) ||
+    null;
+  const partId =
+    (typeof part.id === 'string' && part.id) ||
+    (typeof part.partID === 'string' && part.partID) ||
+    (typeof part.partId === 'string' && part.partId) ||
+    (typeof props.partID === 'string' && props.partID) ||
+    (typeof props.partId === 'string' && props.partId) ||
+    null;
+
+  if (!sessionId || !messageId || !partId) {
+    return null;
+  }
+
+  return `${directory}:${sessionId}:${messageId}:${partId}`;
+}
+
+function pruneStreamingTextNormalizerState(state) {
+  if (!state || !(state.partTextByKey instanceof Map)) {
+    return;
+  }
+  const maxEntries = Number.isFinite(state.maxEntries) ? state.maxEntries : 8000;
+  if (state.partTextByKey.size <= maxEntries) {
+    return;
+  }
+
+  const overflow = state.partTextByKey.size - maxEntries;
+  const pruneCount = Math.max(overflow, Math.floor(maxEntries * 0.25));
+  let removed = 0;
+  for (const key of state.partTextByKey.keys()) {
+    state.partTextByKey.delete(key);
+    removed += 1;
+    if (removed >= pruneCount) {
+      break;
+    }
+  }
+}
+
+function mergeCanonicalStreamingText(existingText, incomingText) {
+  if (!incomingText) {
+    return existingText || '';
+  }
+  if (!existingText) {
+    return incomingText;
+  }
+  if (incomingText.startsWith(existingText)) {
+    return incomingText;
+  }
+  if (existingText.endsWith(incomingText)) {
+    return existingText;
+  }
+  return `${existingText}${incomingText}`;
+}
+
+function normalizeStreamingTextPayload(payload, state) {
+  if (!payload || typeof payload !== 'object' || !state || !(state.partTextByKey instanceof Map)) {
+    return false;
+  }
+
+  if (payload.type === 'message.part.delta') {
+    const props = payload.properties;
+    if (!props || typeof props !== 'object') {
+      return false;
+    }
+
+    const field = typeof props.field === 'string' ? props.field : null;
+    const delta = typeof props.delta === 'string' ? props.delta : null;
+    if (!delta || (field !== 'text' && field !== 'content' && field !== 'value')) {
+      return false;
+    }
+
+    const identity = getStreamingTextIdentity(payload);
+    if (!identity) {
+      return false;
+    }
+
+    const existingText = state.partTextByKey.get(identity) || '';
+    state.partTextByKey.set(identity, `${existingText}${delta}`);
+    pruneStreamingTextNormalizerState(state);
+    return false;
+  }
+
+  if (payload.type !== 'message.part.updated') {
+    return false;
+  }
+
+  const props = payload.properties;
+  if (!props || typeof props !== 'object' || !props.part || typeof props.part !== 'object') {
+    return false;
+  }
+
+  const part = props.part;
+  if (part.type !== 'text') {
+    return false;
+  }
+
+  const identity = getStreamingTextIdentity(payload);
+  if (!identity) {
+    return false;
+  }
+
+  const textField =
+    typeof part.text === 'string'
+      ? 'text'
+      : typeof part.content === 'string'
+        ? 'content'
+        : typeof part.value === 'string'
+          ? 'value'
+          : null;
+  if (!textField) {
+    return false;
+  }
+
+  const incomingText = part[textField];
+  const existingText = state.partTextByKey.get(identity) || '';
+  const mergedText = mergeCanonicalStreamingText(existingText, typeof incomingText === 'string' ? incomingText : '');
+  if (mergedText === existingText && incomingText === mergedText) {
+    return false;
+  }
+
+  part[textField] = mergedText;
+  if (textField !== 'text') {
+    part.text = mergedText;
+  }
+
+  state.partTextByKey.set(identity, mergedText);
+  pruneStreamingTextNormalizerState(state);
+  return true;
+}
+
 function extractSessionStatusUpdate(payload) {
   if (!payload || typeof payload !== 'object' || payload.type !== 'session.status') {
     return null;
@@ -7913,13 +8131,20 @@ async function main(options = {}) {
     const decoder = new TextDecoder();
     const reader = upstream.body.getReader();
     let buffer = '';
+    const streamingTextNormalizerState = createStreamingTextNormalizerState();
 
     const forwardBlock = (block) => {
       if (!block) return;
-      res.write(`${block}
+      let outboundBlock = block;
+      const envelope = parseSseJsonEnvelope(block);
+      let payload = envelope ? envelope.payload : parseSseDataPayload(block);
+      if (envelope && normalizeStreamingTextPayload(payload, streamingTextNormalizerState)) {
+        outboundBlock = replaceSseDataPayload(block, envelope.raw);
+      }
+
+      res.write(`${outboundBlock}
 
 `);
-      const payload = parseSseDataPayload(block);
       // Cache session titles from session.updated/session.created events (global stream)
       maybeCacheSessionInfoFromEvent(payload);
 
@@ -8055,13 +8280,20 @@ async function main(options = {}) {
     const decoder = new TextDecoder();
     const reader = upstream.body.getReader();
     let buffer = '';
+    const streamingTextNormalizerState = createStreamingTextNormalizerState();
 
     const forwardBlock = (block) => {
       if (!block) return;
-      res.write(`${block}
+      let outboundBlock = block;
+      const envelope = parseSseJsonEnvelope(block);
+      let payload = envelope ? envelope.payload : parseSseDataPayload(block);
+      if (envelope && normalizeStreamingTextPayload(payload, streamingTextNormalizerState)) {
+        outboundBlock = replaceSseDataPayload(block, envelope.raw);
+      }
+
+      res.write(`${outboundBlock}
 
 `);
-      const payload = parseSseDataPayload(block);
       // Cache session titles from session.updated/session.created events (per-session stream)
       maybeCacheSessionInfoFromEvent(payload);
 

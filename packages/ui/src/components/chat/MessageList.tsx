@@ -28,6 +28,15 @@ const MESSAGE_VIRTUALIZE_THRESHOLD = 40;
 const MESSAGE_VIRTUAL_OVERSCAN_MOBILE = 2;
 const MESSAGE_VIRTUAL_OVERSCAN_DESKTOP = 4;
 
+const useStableEvent = <TArgs extends unknown[], TResult>(handler: (...args: TArgs) => TResult) => {
+    const handlerRef = React.useRef(handler);
+    React.useEffect(() => {
+        handlerRef.current = handler;
+    }, [handler]);
+
+    return React.useCallback((...args: TArgs) => handlerRef.current(...args), []);
+};
+
 type MessageListVirtualizerOptions<TItemElement extends Element> = Omit<
     ReactVirtualizerOptions<HTMLElement, TItemElement>,
     'scrollToFn' | 'observeElementRect' | 'observeElementOffset'
@@ -391,8 +400,20 @@ const TurnBlock: React.FC<TurnBlockProps> = ({
         return { ordered, lookup };
     }, [turn.assistantMessages, turn.userMessage]);
 
+    const assistantIndexById = React.useMemo(() => {
+        const lookup = new Map<string, number>();
+        turn.assistantMessages.forEach((assistant, index) => {
+            lookup.set(assistant.info.id, index);
+        });
+        return lookup;
+    }, [turn.assistantMessages]);
+
     const turnGroupingContextBase = React.useMemo(() => {
         const userCreatedAt = (turn.userMessage.info.time as { created?: number } | undefined)?.created;
+        const rawVariant = (turn.userMessage.info as { variant?: unknown } | undefined)?.variant;
+        const userMessageVariant = typeof rawVariant === 'string' && rawVariant.trim().length > 0
+            ? rawVariant
+            : undefined;
         return {
             turnId: turn.turnId,
             summaryBody: turn.summaryText,
@@ -403,8 +424,9 @@ const TurnBlock: React.FC<TurnBlockProps> = ({
             hasReasoning: turn.hasReasoning,
             diffStats: turn.diffStats,
             userMessageCreatedAt: typeof userCreatedAt === 'number' ? userCreatedAt : undefined,
+            userMessageVariant,
         };
-    }, [turn.activityParts, turn.activitySegments, turn.diffStats, turn.hasReasoning, turn.hasTools, turn.headerMessageId, turn.summaryText, turn.turnId, turn.userMessage.info.time]);
+    }, [turn.activityParts, turn.activitySegments, turn.diffStats, turn.hasReasoning, turn.hasTools, turn.headerMessageId, turn.summaryText, turn.turnId, turn.userMessage.info]);
 
     const renderMessage = React.useCallback(
         (message: ChatMessageEntry) => {
@@ -416,7 +438,7 @@ const TurnBlock: React.FC<TurnBlockProps> = ({
                 ? messageOrder.ordered[messageIndex + 1]
                 : undefined;
 
-            const assistantIndex = turn.assistantMessages.findIndex((assistant) => assistant.info.id === message.info.id);
+            const assistantIndex = assistantIndexById.get(message.info.id) ?? -1;
 
             const turnGroupingContext = assistantIndex >= 0
                 ? {
@@ -451,6 +473,7 @@ const TurnBlock: React.FC<TurnBlockProps> = ({
             onToggleTurnGroup,
             scrollToBottom,
             sessionIsWorking,
+            assistantIndexById,
             turn.assistantMessages,
             turn.turnId,
             turnGroupingContextBase,
@@ -552,11 +575,7 @@ MessageListEntry.displayName = 'MessageListEntry';
 
 function areMessageListEntryPropsEqual(prevProps: MessageListEntryProps, nextProps: MessageListEntryProps): boolean {
     if (prevProps.stickyUserHeader !== nextProps.stickyUserHeader) return false;
-    if (prevProps.onMessageContentChange !== nextProps.onMessageContentChange) return false;
-    if (prevProps.getAnimationHandlers !== nextProps.getAnimationHandlers) return false;
-    if (prevProps.scrollToBottom !== nextProps.scrollToBottom) return false;
     if (prevProps.defaultActivityExpanded !== nextProps.defaultActivityExpanded) return false;
-    if (prevProps.onToggleTurnGroup !== nextProps.onToggleTurnGroup) return false;
 
     const prevEntry = prevProps.entry;
     const nextEntry = nextProps.entry;
@@ -650,6 +669,13 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         toolCallExpansion === 'activity' || toolCallExpansion === 'detailed' || toolCallExpansion === 'changes';
     const [turnUiStates, setTurnUiStates] = React.useState<Map<string, TurnUiState>>(() => new Map());
 
+    const stableOnMessageContentChange = useStableEvent(onMessageContentChange);
+    const stableGetAnimationHandlers = useStableEvent(getAnimationHandlers);
+    const stableOnLoadOlder = useStableEvent(onLoadOlder);
+    const stableScrollToBottom = useStableEvent((options?: { instant?: boolean; force?: boolean }) => {
+        scrollToBottom?.(options);
+    });
+
     React.useEffect(() => {
         setTurnUiStates(new Map());
     }, [toolCallExpansion]);
@@ -667,8 +693,8 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         if (permissions.length === 0 && questions.length === 0) {
             return;
         }
-        onMessageContentChange('permission');
-    }, [permissions, questions, onMessageContentChange]);
+        stableOnMessageContentChange('permission');
+    }, [permissions, questions, stableOnMessageContentChange]);
 
 
     const baseDisplayMessages = React.useMemo(() => {
@@ -1083,7 +1109,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                         ) : (
                             <button
                                 type="button"
-                                onClick={onLoadOlder}
+                                onClick={stableOnLoadOlder}
                                 className="text-xs uppercase tracking-wide text-muted-foreground/80 hover:text-foreground"
                             >
                                 Load older messages
@@ -1122,9 +1148,9 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                                     >
                                         <MessageListEntry
                                             entry={entry}
-                                            onMessageContentChange={onMessageContentChange}
-                                            getAnimationHandlers={getAnimationHandlers}
-                                            scrollToBottom={scrollToBottom}
+                                            onMessageContentChange={stableOnMessageContentChange}
+                                            getAnimationHandlers={stableGetAnimationHandlers}
+                                            scrollToBottom={stableScrollToBottom}
                                             stickyUserHeader={false}
                                             sessionIsWorking={sessionIsWorking}
                                             defaultActivityExpanded={defaultActivityExpanded}
@@ -1138,9 +1164,9 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                     ) : (
                         <MessageListContent
                             entries={stagedEntries}
-                            onMessageContentChange={onMessageContentChange}
-                            getAnimationHandlers={getAnimationHandlers}
-                            scrollToBottom={scrollToBottom}
+                            onMessageContentChange={stableOnMessageContentChange}
+                            getAnimationHandlers={stableGetAnimationHandlers}
+                            scrollToBottom={stableScrollToBottom}
                             stickyUserHeader={stickyUserHeader}
                             sessionIsWorking={sessionIsWorking}
                             defaultActivityExpanded={defaultActivityExpanded}
