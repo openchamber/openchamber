@@ -29,8 +29,23 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 const ToolOutputDialog = React.lazy(() => import('./message/ToolOutputDialog'));
 
 const TOOL_DEFAULT_EXPANSION_BY_MODE = {
-    detailed: new Set(['task', 'edit', 'multiedit', 'write', 'apply_patch', 'bash', 'todowrite']),
-    changes: new Set(['edit', 'multiedit', 'write', 'apply_patch']),
+    detailed: new Set([
+        'task',
+        'question',
+        'edit',
+        'multiedit',
+        'apply_patch',
+        'str_replace',
+        'str_replace_based_edit_tool',
+        'bash',
+        'shell',
+        'cmd',
+        'terminal',
+        'write',
+        'create',
+        'file_write',
+    ]),
+    changes: new Set(['edit', 'multiedit', 'apply_patch', 'str_replace', 'str_replace_based_edit_tool']),
 } as const;
 
 type DefaultExpandedToolMode = keyof typeof TOOL_DEFAULT_EXPANSION_BY_MODE;
@@ -417,9 +432,9 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
 
     const effectiveExpandedTools = React.useMemo(() => {
         // 'collapsed': Activity and tools start collapsed
-        // 'activity': Activity expanded, tools collapsed
-        // 'detailed': Activity expanded, only key tools expanded
-        // 'changes': Activity expanded, only edit/diff tools expanded
+        // 'activity': Activity expanded, tools collapsed (Summary mode)
+        // 'detailed': Activity expanded, all clickable tools expanded by default
+        // 'changes': Activity expanded, edit-like tools expanded by default
 
         if (toolCallExpansion === 'collapsed' || toolCallExpansion === 'activity') {
             // Tools default collapsed: expandedTools contains IDs of tools that ARE expanded

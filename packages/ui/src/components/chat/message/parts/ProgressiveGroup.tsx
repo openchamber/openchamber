@@ -187,14 +187,16 @@ const isActivityRunning = (activity: TurnActivityPart): boolean => {
     if (activity.kind !== 'tool') return false;
     const part = activity.part as ToolPartType;
     const rawStatus = (part.state as { status?: unknown } | undefined)?.status;
-    const status = typeof rawStatus === 'string' ? rawStatus.toLowerCase() : undefined;
+    const status =
+        typeof rawStatus === 'string'
+            ? rawStatus.toLowerCase().trim().replace(/[\s_-]+/g, '')
+            : undefined;
 
     if (
         status === 'running' ||
         status === 'pending' ||
         status === 'started' ||
-        status === 'in_progress' ||
-        status === 'in-progress' ||
+        status === 'inprogress' ||
         status === 'processing' ||
         status === 'executing'
     ) {
@@ -208,8 +210,8 @@ const isActivityRunning = (activity: TurnActivityPart): boolean => {
         status === 'failed' ||
         status === 'aborted' ||
         status === 'timeout' ||
-        status === 'timed_out' ||
-        status === 'timed-out' ||
+        status === 'timedout' ||
+        status === 'done' ||
         status === 'cancelled' ||
         status === 'canceled'
     ) {

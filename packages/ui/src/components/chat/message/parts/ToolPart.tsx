@@ -43,8 +43,7 @@ const ACTIVE_TOOL_STATUSES = new Set([
     'pending',
     'running',
     'started',
-    'in_progress',
-    'in-progress',
+    'inprogress',
     'processing',
     'executing',
 ]);
@@ -56,8 +55,8 @@ const FINAL_TOOL_STATUSES = new Set([
     'failed',
     'aborted',
     'timeout',
-    'timed_out',
-    'timed-out',
+    'timedout',
+    'done',
     'cancelled',
     'canceled',
 ]);
@@ -1621,15 +1620,22 @@ const ToolPart: React.FC<ToolPartProps> = ({
 
     const isTaskTool = part.tool.toLowerCase() === 'task';
 
-    const status = typeof state.status === 'string' ? state.status.toLowerCase() : undefined;
+    const statusRaw = typeof state.status === 'string' ? state.status.toLowerCase().trim() : undefined;
+    const status = statusRaw ? statusRaw.replace(/[\s_-]+/g, '') : undefined;
     const isFinalized = status ? FINAL_TOOL_STATUSES.has(status) : false;
     const isStatusActive = status ? ACTIVE_TOOL_STATUSES.has(status) : false;
-    const isUnknownNonFinal = typeof status !== 'string' && !isFinalized;
+    const isUnknownNonFinal = status ? !isFinalized && !isStatusActive : true;
     const isError = status === 'error' || status === 'failed';
 
     const [activeLatched, setActiveLatched] = React.useState<boolean>(isStatusActive || isUnknownNonFinal);
+    const previousPartIdRef = React.useRef<string | undefined>(part.id);
 
     React.useEffect(() => {
+        if (previousPartIdRef.current === part.id) {
+            return;
+        }
+        previousPartIdRef.current = part.id;
+        // Reset latch only when tool identity changes.
         setActiveLatched(isStatusActive || isUnknownNonFinal);
     }, [part.id, isStatusActive, isUnknownNonFinal]);
 
@@ -1699,7 +1705,15 @@ const ToolPart: React.FC<ToolPartProps> = ({
         });
     }, [time?.end, time?.start]);
 
-    const effectiveTimeStart = pinnedTime.start ?? time?.start ?? localStartAt;
+    const effectiveTimeStart = React.useMemo(() => {
+        const candidates = [pinnedTime.start, time?.start, localStartAt].filter(
+            (value): value is number => typeof value === 'number'
+        );
+        if (candidates.length === 0) {
+            return undefined;
+        }
+        return Math.min(...candidates);
+    }, [localStartAt, pinnedTime.start, time?.start]);
     const effectiveTimeEnd = pinnedTime.end ?? time?.end;
 
     const taskOutputString = React.useMemo(() => {

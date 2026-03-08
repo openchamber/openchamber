@@ -1018,6 +1018,7 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
         if (
             visibleActivityPartsForTurn.length > 1 ||
             (hasTaskSplitSegments && visibleActivityPartsForTurn.length > 0) ||
+            (turnGroupingContext.isWorking && visibleActivityPartsForTurn.length > 0) ||
             hasReasoningActivity
         ) {
             setHasEverHadMultipleVisibleActivities(true);

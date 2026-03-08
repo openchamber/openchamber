@@ -1086,14 +1086,17 @@ export const useMessageStore = create<MessageStore>()(
                                     if (part.type === 'tool') {
                                         const toolPart = part as any;
                                         const stateData = { ...(toolPart.state ?? {}) };
+                                        const status =
+                                            typeof stateData.status === 'string'
+                                                ? stateData.status.toLowerCase().trim().replace(/[\s_-]+/g, '')
+                                                : undefined;
                                         if (
-                                            stateData.status === 'running' ||
-                                            stateData.status === 'pending' ||
-                                            stateData.status === 'started' ||
-                                            stateData.status === 'in_progress' ||
-                                            stateData.status === 'in-progress' ||
-                                            stateData.status === 'processing' ||
-                                            stateData.status === 'executing'
+                                            status === 'running' ||
+                                            status === 'pending' ||
+                                            status === 'started' ||
+                                            status === 'inprogress' ||
+                                            status === 'processing' ||
+                                            status === 'executing'
                                         ) {
                                             stateData.status = 'aborted';
                                         }
@@ -1742,13 +1745,15 @@ export const useMessageStore = create<MessageStore>()(
                                     return part;
                                 }
 
-                                const status = existingState.status;
+                                const status =
+                                    typeof existingState.status === 'string'
+                                        ? existingState.status.toLowerCase().trim().replace(/[\s_-]+/g, '')
+                                        : undefined;
                                 const needsStatusUpdate =
                                     status === "running" ||
                                     status === "pending" ||
                                     status === "started" ||
-                                    status === "in_progress" ||
-                                    status === "in-progress" ||
+                                    status === "inprogress" ||
                                     status === "processing" ||
                                     status === "executing";
                                 const needsEndTimestamp = !existingState.time || typeof existingState.time?.end !== "number";

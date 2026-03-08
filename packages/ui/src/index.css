@@ -766,6 +766,15 @@ html:not(.dark) .chat-scroll {
   font-style: italic;
 }
 
+.streamdown-content.streamdown-reasoning strong,
+.streamdown-content.streamdown-reasoning b,
+.streamdown-content.streamdown-reasoning [data-streamdown="strong"],
+.streamdown-content.streamdown-reasoning [data-streamdown="bold"] {
+  font-weight: inherit !important;
+  color: inherit !important;
+  font-style: inherit !important;
+}
+
 .streamdown-content.streamdown-tool code,
 .streamdown-content.streamdown-tool pre {
   font-size: inherit !important;

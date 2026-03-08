@@ -7,7 +7,7 @@ interface FadeInOnRevealProps {
     skipAnimation?: boolean;
 }
 
-const FADE_ANIMATION_ENABLED = true;
+const FADE_ANIMATION_ENABLED = false;
 
 // Context to allow parent components (like VirtualMessageList) to disable animations
 // for items entering the viewport due to scrolling rather than new content
@@ -66,4 +66,3 @@ export const FadeInOnReveal: React.FC<FadeInOnRevealProps> = ({ children, classN
         </div>
     );
 };
-

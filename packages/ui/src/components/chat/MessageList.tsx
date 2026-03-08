@@ -665,7 +665,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     const stickyUserHeader = useUIStore(state => state.stickyUserHeader);
     const toolCallExpansion = useUIStore((state) => state.toolCallExpansion);
     const showTextJustificationActivity = useUIStore((state) => state.showTextJustificationActivity);
-    const defaultActivityExpanded = false;
+    const defaultActivityExpanded = toolCallExpansion !== 'collapsed';
     const [turnUiStates, setTurnUiStates] = React.useState<Map<string, TurnUiState>>(() => new Map());
 
     const stableOnMessageContentChange = useStableEvent(onMessageContentChange);
