@@ -1,6 +1,7 @@
 import React from 'react';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
+import { useUIStore } from '@/stores/useUIStore';
 
 interface CommitInputProps {
   value: string;
@@ -21,6 +22,7 @@ export const CommitInput: React.FC<CommitInputProps> = ({
   hasTouchInput = false,
 }) => {
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+  const chatInputSpellcheckEnabled = useUIStore((state) => state.chatInputSpellcheckEnabled);
 
   // Auto-resize based on content (layout phase to avoid mount flicker)
   React.useLayoutEffect(() => {
@@ -45,7 +47,7 @@ export const CommitInput: React.FC<CommitInputProps> = ({
       disabled={disabled}
       autoCorrect={hasTouchInput ? 'on' : 'off'}
       autoCapitalize={hasTouchInput ? 'sentences' : 'off'}
-      spellCheck={hasTouchInput ? true : false}
+      spellCheck={hasTouchInput || chatInputSpellcheckEnabled}
       scrollbarClassName="hidden"
       className={cn(
         'rounded-lg bg-transparent resize-none overflow-y-hidden',

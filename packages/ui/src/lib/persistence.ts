@@ -374,6 +374,9 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
       store.setToolCallExpansion(settings.toolCallExpansion);
     }
   }
+  if (typeof settings.chatInputSpellcheckEnabled === 'boolean' && settings.chatInputSpellcheckEnabled !== store.chatInputSpellcheckEnabled) {
+    store.setChatInputSpellcheckEnabled(settings.chatInputSpellcheckEnabled);
+  }
   if (typeof settings.userMessageRenderingMode === 'string'
     && (settings.userMessageRenderingMode === 'markdown' || settings.userMessageRenderingMode === 'plain')) {
     if (settings.userMessageRenderingMode !== store.userMessageRenderingMode) {
@@ -740,6 +743,9 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
       || candidate.toolCallExpansion === 'changes')
   ) {
     result.toolCallExpansion = candidate.toolCallExpansion;
+  }
+  if (typeof candidate.chatInputSpellcheckEnabled === 'boolean') {
+    result.chatInputSpellcheckEnabled = candidate.chatInputSpellcheckEnabled;
   }
   if (typeof candidate.userMessageRenderingMode === 'string'
     && (candidate.userMessageRenderingMode === 'markdown' || candidate.userMessageRenderingMode === 'plain')) {

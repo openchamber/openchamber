@@ -116,6 +116,7 @@ export type DesktopSettings = {
   gitModelId?: string;
   pwaAppName?: string;
   toolCallExpansion?: 'collapsed' | 'activity' | 'detailed' | 'changes';
+  chatInputSpellcheckEnabled?: boolean;
   userMessageRenderingMode?: 'markdown' | 'plain';
   stickyUserHeader?: boolean;
   fontSize?: number;
