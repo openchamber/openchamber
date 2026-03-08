@@ -10,12 +10,8 @@ import {
     windowMessagesByTurn,
     type TurnWindowModel,
 } from '../lib/turns/windowTurns';
-import { deriveTurnHistorySignals, type TurnHistorySignals } from '../lib/turns/historySignals';
-import { getMemoryLimits, type SessionMemoryState } from '@/stores/types/sessionTypes';
-import { isNearTop } from '../lib/scroll/scrollIntent';
-
-const HISTORY_REVEAL_SCROLL_THRESHOLD = 200;
-const HISTORY_REVEAL_COOLDOWN_MS = 180;
+import type { TurnHistorySignals } from '../lib/turns/historySignals';
+import { getMemoryLimits, type SessionHistoryMeta } from '@/stores/types/sessionTypes';
 
 const waitForFrames = async (count = 1): Promise<void> => {
     if (typeof window === 'undefined') {
@@ -33,7 +29,7 @@ type ViewportAnchor = { messageId: string; offsetTop: number };
 interface UseChatTimelineControllerOptions {
     sessionId: string | null;
     messages: ChatMessageEntry[];
-    memoryState: SessionMemoryState | null;
+    historyMeta: SessionHistoryMeta | null;
     scrollRef: React.RefObject<HTMLDivElement | null>;
     messageListRef: React.RefObject<MessageListHandle | null>;
     loadMoreMessages: (sessionId: string, direction: 'up' | 'down') => Promise<void>;
@@ -65,7 +61,7 @@ export interface UseChatTimelineControllerResult {
 export const useChatTimelineController = ({
     sessionId,
     messages,
-    memoryState,
+    historyMeta,
     scrollRef,
     messageListRef,
     loadMoreMessages,
@@ -86,18 +82,25 @@ export const useChatTimelineController = ({
     const isLoadingOlderRef = React.useRef(isLoadingOlder);
     const pendingRevealWorkRef = React.useRef(pendingRevealWork);
     const sessionIdRef = React.useRef<string | null>(sessionId);
+    const messagesRef = React.useRef(messages);
+    const historyMetaRef = React.useRef<SessionHistoryMeta | null>(historyMeta);
     const previousTurnCountRef = React.useRef(turnWindowModel.turnCount);
     const initializedSessionRef = React.useRef<string | null>(null);
 
     const historySignals = React.useMemo(() => {
-        return deriveTurnHistorySignals({
-            memoryState,
-            loadedMessageCount: messages.length,
-            loadedTurnCount: turnWindowModel.turnCount,
-            turnStart,
-            defaultHistoryLimit: getMemoryLimits().HISTORICAL_MESSAGES,
-        });
-    }, [memoryState, messages.length, turnStart, turnWindowModel.turnCount]);
+        const defaultLimit = getMemoryLimits().HISTORICAL_MESSAGES;
+        const hasBufferedTurns = turnStart > 0;
+        const hasMoreAboveTurns = historyMeta
+            ? !historyMeta.complete
+            : messages.length >= defaultLimit;
+        const historyLoading = Boolean(historyMeta?.loading);
+        return {
+            hasBufferedTurns,
+            hasMoreAboveTurns,
+            historyLoading,
+            canLoadEarlier: hasBufferedTurns || hasMoreAboveTurns,
+        };
+    }, [historyMeta, messages.length, turnStart]);
 
     const historySignalsRef = React.useRef(historySignals);
 
@@ -128,6 +131,14 @@ export const useChatTimelineController = ({
     React.useEffect(() => {
         sessionIdRef.current = sessionId;
     }, [sessionId]);
+
+    React.useEffect(() => {
+        messagesRef.current = messages;
+    }, [messages]);
+
+    React.useEffect(() => {
+        historyMetaRef.current = historyMeta;
+    }, [historyMeta]);
 
     React.useEffect(() => {
         if (initializedSessionRef.current === sessionId) {
@@ -236,6 +247,10 @@ export const useChatTimelineController = ({
         const container = scrollRef.current;
         const previousHeight = input.preserveViewport ? (container?.scrollHeight ?? null) : null;
         const previousTop = input.preserveViewport ? (container?.scrollTop ?? null) : null;
+        const beforeMessages = messagesRef.current;
+        const beforeMessageCount = beforeMessages.length;
+        const beforeOldestMessageId = beforeMessages[0]?.info?.id ?? null;
+        const beforeLimit = historyMetaRef.current?.limit ?? getMemoryLimits().HISTORICAL_MESSAGES;
 
         setPendingRevealWork(true);
         setIsLoadingOlder(true);
@@ -249,6 +264,16 @@ export const useChatTimelineController = ({
             await loadMoreMessages(targetSessionId, 'up');
             await waitForFrames(2);
 
+            const afterMessages = messagesRef.current;
+            const afterMessageCount = afterMessages.length;
+            const afterOldestMessageId = afterMessages[0]?.info?.id ?? null;
+            const afterLimit = historyMetaRef.current?.limit ?? beforeLimit;
+            const historyGrew =
+                afterMessageCount > beforeMessageCount
+                || (typeof beforeOldestMessageId === 'string'
+                    && typeof afterOldestMessageId === 'string'
+                    && beforeOldestMessageId !== afterOldestMessageId);
+
             if (input.preserveViewport) {
                 restoreViewportWithFallback({
                     anchor,
@@ -257,7 +282,7 @@ export const useChatTimelineController = ({
                 });
             }
 
-            return true;
+            return historyGrew || afterLimit > beforeLimit;
         } finally {
             setIsLoadingOlder(false);
             setPendingRevealWork(false);
@@ -378,44 +403,6 @@ export const useChatTimelineController = ({
         setIsLoadingOlder(false);
         scrollToBottom({ force: true });
     }, [scrollToBottom]);
-
-    React.useEffect(() => {
-        const container = scrollRef.current;
-        if (!container) {
-            return;
-        }
-
-        let cooldownUntil = 0;
-        const onScroll = () => {
-            if (isPinnedRef.current) {
-                return;
-            }
-
-            if (!isNearTop(container.scrollTop, HISTORY_REVEAL_SCROLL_THRESHOLD)) {
-                return;
-            }
-
-            const now = Date.now();
-            if (now < cooldownUntil) {
-                return;
-            }
-            cooldownUntil = now + HISTORY_REVEAL_COOLDOWN_MS;
-
-            if (turnStartRef.current > 0) {
-                void revealBufferedTurns();
-                return;
-            }
-
-            if (historySignalsRef.current.hasMoreAboveTurns && !isLoadingOlderRef.current) {
-                void fetchOlderHistory({ preserveViewport: true });
-            }
-        };
-
-        container.addEventListener('scroll', onScroll, { passive: true });
-        return () => {
-            container.removeEventListener('scroll', onScroll);
-        };
-    }, [fetchOlderHistory, revealBufferedTurns, scrollRef]);
 
     const handleActiveTurnChange = React.useCallback((turnId: string | null) => {
         setActiveTurnId(turnId);

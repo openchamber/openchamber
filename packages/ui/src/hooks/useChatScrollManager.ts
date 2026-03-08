@@ -67,7 +67,6 @@ interface UseChatScrollManagerResult {
 }
 
 const PROGRAMMATIC_SCROLL_SUPPRESS_MS = 200;
-const DIRECT_SCROLL_INTENT_WINDOW_MS = 250;
 // Threshold for re-pinning: 10% of container height (matches bottom spacer)
 const PIN_THRESHOLD_RATIO = 0.10;
 
@@ -98,7 +97,6 @@ export const useChatScrollManager = ({
 
     const lastSessionIdRef = React.useRef<string | null>(null);
     const suppressUserScrollUntilRef = React.useRef<number>(0);
-    const lastDirectScrollIntentAtRef = React.useRef<number>(0);
     const isPinnedRef = React.useRef(true);
     const lastScrollTopRef = React.useRef<number>(0);
 
@@ -184,25 +182,24 @@ export const useChatScrollManager = ({
 
         const now = Date.now();
         const isProgrammatic = now < suppressUserScrollUntilRef.current;
-        const hasDirectIntent = now - lastDirectScrollIntentAtRef.current <= DIRECT_SCROLL_INTENT_WINDOW_MS;
 
         scrollEngine.handleScroll();
         updateScrollButtonVisibility();
 
         // Handle pin/unpin logic
         const currentScrollTop = container.scrollTop;
+        const distanceFromBottom = getDistanceFromBottom();
 
-        // Unpin requires strict user intent check
-        if (event?.isTrusted && !isProgrammatic && hasDirectIntent) {
-            const scrollingUp = currentScrollTop < lastScrollTopRef.current;
-            if (scrollingUp && isPinnedRef.current) {
+        // Unpin whenever trusted user scroll moves away from bottom.
+        // This keeps drag-scroll/keyboard/trackpad behavior consistent.
+        if (event?.isTrusted && !isProgrammatic && isPinnedRef.current) {
+            if (!isNearBottom(distanceFromBottom, getPinThreshold())) {
                 updatePinnedState(false);
             }
         }
 
         // Re-pin at bottom should always work (even momentum scroll)
         if (!isPinnedRef.current) {
-            const distanceFromBottom = getDistanceFromBottom();
             if (isNearBottom(distanceFromBottom, getPinThreshold())) {
                 updatePinnedState(true);
             }
@@ -226,8 +223,6 @@ export const useChatScrollManager = ({
     ]);
 
     const handleWheelIntent = React.useCallback((event: WheelEvent) => {
-        lastDirectScrollIntentAtRef.current = Date.now();
-
         if (!isPinnedRef.current) {
             return;
         }
@@ -237,7 +232,11 @@ export const useChatScrollManager = ({
             return;
         }
 
-        const delta = normalizeWheelDelta(event);
+        const delta = normalizeWheelDelta({
+            deltaY: event.deltaY,
+            deltaMode: event.deltaMode,
+            rootHeight: container.clientHeight,
+        });
         if (shouldPauseAutoScrollOnWheel({
             root: container,
             target: event.target,
@@ -251,20 +250,12 @@ export const useChatScrollManager = ({
         const container = scrollRef.current;
         if (!container) return;
 
-        const markDirectIntent = () => {
-            lastDirectScrollIntentAtRef.current = Date.now();
-        };
-
         container.addEventListener('scroll', handleScrollEvent as EventListener, { passive: true });
         container.addEventListener('wheel', handleWheelIntent as EventListener, { passive: true });
-        container.addEventListener('touchstart', markDirectIntent as EventListener, { passive: true });
-        container.addEventListener('touchmove', markDirectIntent as EventListener, { passive: true });
 
         return () => {
             container.removeEventListener('scroll', handleScrollEvent as EventListener);
             container.removeEventListener('wheel', handleWheelIntent as EventListener);
-            container.removeEventListener('touchstart', markDirectIntent as EventListener);
-            container.removeEventListener('touchmove', markDirectIntent as EventListener);
         };
     }, [handleScrollEvent, handleWheelIntent]);
 

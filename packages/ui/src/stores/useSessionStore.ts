@@ -90,6 +90,7 @@ export const useSessionStore = create<SessionStore>()(
             lastLoadedDirectory: null,
             messages: new Map(),
             sessionMemoryState: new Map(),
+            sessionHistoryMeta: new Map(),
             messageStreamStates: new Map(),
             sessionCompactionUntil: new Map(),
             sessionAbortFlags: new Map(),
@@ -326,11 +327,10 @@ export const useSessionStore = create<SessionStore>()(
                     if (id) {
 
                         const existingMessages = get().messages.get(id);
-                        const memoryState = get().sessionMemoryState.get(id);
+                        const historyMeta = get().sessionHistoryMeta.get(id);
                         const needsHistoryBootstrap =
-                            !memoryState ||
-                            memoryState.historyComplete === undefined ||
-                            memoryState.loadedTurnCount === undefined;
+                            !historyMeta ||
+                            typeof historyMeta.complete !== 'boolean';
 
                         if (!existingMessages || needsHistoryBootstrap) {
 
@@ -920,6 +920,7 @@ useMessageStore.subscribe((state, prevState) => {
     if (
         state.messages === prevState.messages &&
         state.sessionMemoryState === prevState.sessionMemoryState &&
+        state.sessionHistoryMeta === prevState.sessionHistoryMeta &&
         state.messageStreamStates === prevState.messageStreamStates &&
         state.sessionCompactionUntil === prevState.sessionCompactionUntil &&
         state.sessionAbortFlags === prevState.sessionAbortFlags &&
@@ -947,6 +948,7 @@ useMessageStore.subscribe((state, prevState) => {
         useSessionStore.setState({
             messages: latest.messages,
             sessionMemoryState: latest.sessionMemoryState,
+            sessionHistoryMeta: latest.sessionHistoryMeta,
             messageStreamStates: latest.messageStreamStates,
             sessionCompactionUntil: latest.sessionCompactionUntil,
             sessionAbortFlags: latest.sessionAbortFlags,
@@ -1092,6 +1094,7 @@ useSessionStore.setState({
     availableWorktreesByProject: useSessionManagementStore.getState().availableWorktreesByProject,
     messages: useMessageStore.getState().messages,
     sessionMemoryState: useMessageStore.getState().sessionMemoryState,
+    sessionHistoryMeta: useMessageStore.getState().sessionHistoryMeta,
     messageStreamStates: useMessageStore.getState().messageStreamStates,
     sessionCompactionUntil: useMessageStore.getState().sessionCompactionUntil,
     sessionAbortFlags: useMessageStore.getState().sessionAbortFlags,

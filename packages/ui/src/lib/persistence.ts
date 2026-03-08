@@ -312,14 +312,6 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
     }
   }
 
-  // Apply server-persisted message limit. Ignore stale legacy values.
-  const STALE_LIMITS = new Set([90, 120, 180, 220]);
-  if (typeof settings.messageLimit === 'number' && Number.isFinite(settings.messageLimit)) {
-    if (!STALE_LIMITS.has(settings.messageLimit)) {
-      store.setMessageLimit(settings.messageLimit);
-    }
-  }
-
   if (typeof settings.queueModeEnabled === 'boolean' && settings.queueModeEnabled !== queueStore.queueModeEnabled) {
     queueStore.setQueueMode(settings.queueModeEnabled);
   }
@@ -799,10 +791,6 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.pwaAppName === 'string') {
     const normalized = candidate.pwaAppName.trim().replace(/\s+/g, ' ').slice(0, 64);
     result.pwaAppName = normalized.length > 0 ? normalized : '';
-  }
-
-  if (typeof candidate.messageLimit === 'number' && Number.isFinite(candidate.messageLimit)) {
-    result.messageLimit = candidate.messageLimit;
   }
 
   const skillCatalogs = sanitizeSkillCatalogs(candidate.skillCatalogs);

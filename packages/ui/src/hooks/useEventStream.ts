@@ -1165,22 +1165,55 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
 
         const existingMessage = getMessageFromStore(sessionId, messageId);
         const existingPart = existingMessage?.parts?.find((item) => item?.id === partId);
+        const existingRole = (existingMessage?.info as Record<string, unknown> | undefined)?.role;
+        const roleInfo = typeof existingRole === 'string' ? existingRole : 'assistant';
+
         if (!existingPart) {
+          const bootstrapAllowed = field === 'text' || field === 'content' || field === 'value';
+          if (!bootstrapAllowed) {
+            break;
+          }
+
+          if (roleInfo === 'assistant' && delta.length > 0) {
+            const currentStatus = useSessionStore.getState().sessionStatus?.get(sessionId);
+            const recentlyConfirmedIdle =
+              currentStatus?.type === 'idle' &&
+              typeof currentStatus.confirmedAt === 'number' &&
+              Date.now() - currentStatus.confirmedAt < 1200;
+            if (!currentStatus || currentStatus.type === 'idle') {
+              if (!recentlyConfirmedIdle) {
+                updateSessionStatus(sessionId, { type: 'busy' }, 'sse:message.part.delta.bootstrap');
+              }
+            }
+          }
+
+          const bootstrappedPart = {
+            id: partId,
+            type: 'text',
+            sessionID: sessionId,
+            messageID: messageId,
+            text: delta,
+            [field]: delta,
+          } as unknown as Part;
+
+          trackMessage(messageId, 'part_delta_bootstrap', { role: roleInfo, field });
+          addStreamingPart(sessionId, messageId, bootstrappedPart, roleInfo);
           break;
         }
 
         const existingPartRecord = existingPart as Record<string, unknown>;
         const existingFieldValue = existingPartRecord[field];
-        const updatedPart: Part = {
+        const updatedPartRecord: Record<string, unknown> = {
           ...existingPart,
           [field]: `${typeof existingFieldValue === 'string' ? existingFieldValue : ''}${delta}`,
-        } as Part;
+        };
 
-        let roleInfo = 'assistant';
-        const existingRole = (existingMessage?.info as Record<string, unknown> | undefined)?.role;
-        if (typeof existingRole === 'string') {
-          roleInfo = existingRole;
+        if (existingPartRecord.type === 'text' && field !== 'text') {
+          const currentText = typeof existingPartRecord.text === 'string' ? existingPartRecord.text : '';
+          updatedPartRecord.text = `${currentText}${delta}`;
         }
+
+        const updatedPart = updatedPartRecord as Part;
 
         if (roleInfo === 'assistant' && delta.length > 0) {
           const currentStatus = useSessionStore.getState().sessionStatus?.get(sessionId);

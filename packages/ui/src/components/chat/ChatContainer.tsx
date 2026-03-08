@@ -106,9 +106,9 @@ export const ChatContainer: React.FC = () => {
         return flattenBlockingRequests(blockingRequestState.questions, scopedSessionIds);
     }, [blockingRequestState.questions, scopedSessionIds]);
 
-    const memoryState = useSessionStore(
+    const historyMeta = useSessionStore(
         React.useCallback(
-            (state) => (currentSessionId ? state.sessionMemoryState.get(currentSessionId) ?? null : null),
+            (state) => (currentSessionId ? state.sessionHistoryMeta.get(currentSessionId) ?? null : null),
             [currentSessionId]
         )
     );
@@ -210,7 +210,7 @@ export const ChatContainer: React.FC = () => {
     const timelineController = useChatTimelineController({
         sessionId: currentSessionId,
         messages: sessionMessages,
-        memoryState,
+        historyMeta,
         scrollRef,
         messageListRef,
         loadMoreMessages,
@@ -260,15 +260,8 @@ export const ChatContainer: React.FC = () => {
     }, [currentSessionId, isDesktopExpandedInput, scrollRef]);
 
     const hasHistoryMetadata = React.useMemo(() => {
-        if (!memoryState) {
-            return false;
-        }
-        return (
-            memoryState.hasMoreAbove !== undefined
-            || memoryState.hasMoreTurnsAbove !== undefined
-            || memoryState.historyComplete !== undefined
-        );
-    }, [memoryState]);
+        return Boolean(historyMeta);
+    }, [historyMeta]);
 
     React.useEffect(() => {
         if (!currentSessionId) {

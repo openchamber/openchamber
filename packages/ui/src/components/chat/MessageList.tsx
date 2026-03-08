@@ -670,6 +670,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         onMessageContentChange('permission');
     }, [permissions, questions, onMessageContentChange]);
 
+
     const baseDisplayMessages = React.useMemo(() => {
         const seenIdsFromTail = new Set<string>();
 
@@ -1085,7 +1086,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                                 onClick={onLoadOlder}
                                 className="text-xs uppercase tracking-wide text-muted-foreground/80 hover:text-foreground"
                             >
-                                {turnStart > 0 ? 'Reveal earlier turns' : 'Load older messages'}
+                                Load older messages
                             </button>
                         )}
                     </div>

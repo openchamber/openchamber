@@ -43,6 +43,12 @@ export interface SessionMemoryState {
     lastUserMessageAt?: number; // Timestamp when user last sent a message
 }
 
+export interface SessionHistoryMeta {
+    limit: number;
+    complete: boolean;
+    loading: boolean;
+}
+
 export interface SessionContextUsage {
     totalTokens: number;
     percentage: number;
@@ -67,14 +73,9 @@ export const MEMORY_CONSTANTS = {
     ZOMBIE_TIMEOUT: 10 * 60 * 1000,
 } as const;
 
-// Dynamic accessors — read user setting from UI store.
-// NOTE: do not use require() here (breaks in browser/desktop runtime bundles).
-import { useUIStore } from "../useUIStore";
-
-/** User-configured (or default) message limit. */
+/** OpenCode parity: fixed page/window size for message history. */
 export const getMessageLimit = (): number => {
-    const state = useUIStore.getState?.();
-    return state?.messageLimit ?? DEFAULT_MESSAGE_LIMIT;
+    return DEFAULT_MESSAGE_LIMIT;
 };
 
 /** Background trim target — automatic, not user-facing. */
@@ -145,6 +146,7 @@ export interface SessionStore {
     lastLoadedDirectory: string | null;
     messages: Map<string, { info: Message; parts: Part[] }[]>;
     sessionMemoryState: Map<string, SessionMemoryState>;
+    sessionHistoryMeta: Map<string, SessionHistoryMeta>;
     messageStreamStates: Map<string, MessageStreamLifecycle>;
     sessionCompactionUntil: Map<string, number>;
     permissions: Map<string, PermissionRequest[]>;

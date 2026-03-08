@@ -1,14 +1,15 @@
-export const normalizeWheelDelta = (event: Pick<WheelEvent, 'deltaY' | 'deltaMode'>): number => {
-    const lineMode = typeof WheelEvent !== 'undefined' ? WheelEvent.DOM_DELTA_LINE : 1;
-    const pageMode = typeof WheelEvent !== 'undefined' ? WheelEvent.DOM_DELTA_PAGE : 2;
-
-    if (event.deltaMode === lineMode) {
-        return event.deltaY * 16;
+export const normalizeWheelDelta = (input: {
+    deltaY: number;
+    deltaMode: number;
+    rootHeight?: number;
+}): number => {
+    if (input.deltaMode === 1) {
+        return input.deltaY * 40;
     }
-    if (event.deltaMode === pageMode) {
-        return event.deltaY * 120;
+    if (input.deltaMode === 2) {
+        return input.deltaY * (input.rootHeight ?? 120);
     }
-    return event.deltaY;
+    return input.deltaY;
 };
 
 export const shouldMarkBoundaryGesture = (input: {
@@ -17,10 +18,21 @@ export const shouldMarkBoundaryGesture = (input: {
     scrollHeight: number;
     clientHeight: number;
 }): boolean => {
-    if (input.delta < 0) {
-        return input.scrollTop <= 0;
+    const max = input.scrollHeight - input.clientHeight;
+    if (max <= 1) {
+        return true;
     }
-    return input.scrollTop + input.clientHeight >= input.scrollHeight;
+
+    if (!input.delta) {
+        return false;
+    }
+
+    if (input.delta < 0) {
+        return input.scrollTop + input.delta <= 0;
+    }
+
+    const remaining = max - input.scrollTop;
+    return input.delta > remaining;
 };
 
 export const boundaryTarget = (root: HTMLElement, target: EventTarget | null): HTMLElement => {
