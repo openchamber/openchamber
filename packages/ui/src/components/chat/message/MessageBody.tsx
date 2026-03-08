@@ -3,7 +3,6 @@ import type { Part } from '@opencode-ai/sdk/v2';
 
 import UserTextPart from './parts/UserTextPart';
 import ToolPart from './parts/ToolPart';
-import ReasoningPart from './parts/ReasoningPart';
 import AssistantTextPart from './parts/AssistantTextPart';
 import { MessageFilesDisplay } from '../FileAttachment';
 import type { ToolPart as ToolPartType } from '@opencode-ai/sdk/v2';
@@ -579,6 +578,7 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
     const isMessageCopied = Boolean(copiedMessage);
     const isTouchContext = Boolean(hasTouchInput ?? isMobile);
     const awaitingMessageCompletion = !isMessageCompleted;
+    const animateActivityRows = awaitingMessageCompletion || Boolean(turnGroupingContext?.isWorking);
 
     const visibleParts = React.useMemo(() => {
         return parts
@@ -947,24 +947,7 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
         };
     }, [clearCopyHintTimeout]);
 
-    const toolConnections = React.useMemo(() => {
-        const connections: Record<string, { hasPrev: boolean; hasNext: boolean }> = {};
-        const displayableTools = toolParts.filter((toolPart) => {
-            if (isActivityStandaloneTool(toolPart.tool)) {
-                return false;
-            }
-            return shouldShowTool(toolPart);
-        });
 
-        displayableTools.forEach((toolPart, index) => {
-            connections[toolPart.id] = {
-                hasPrev: index > 0,
-                hasNext: index < displayableTools.length - 1,
-            };
-        });
-
-        return connections;
-    }, [toolParts, shouldShowTool]);
 
     const activityPartsForTurn = React.useMemo(() => {
         return turnGroupingContext?.activityParts ?? [];
@@ -988,13 +971,23 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
         return map;
     }, [activityPartsForMessage]);
 
+    const activityPartsByPartId = React.useMemo(() => {
+        const map = new Map<string, (typeof activityPartsForMessage)[number]>();
+        activityPartsForMessage.forEach((activity) => {
+            const partId = (activity.part as { id?: unknown }).id;
+            if (typeof partId === 'string' && partId.length > 0) {
+                map.set(partId, activity);
+            }
+        });
+        return map;
+    }, [activityPartsForMessage]);
+
 
     const visibleActivityPartsForTurn = React.useMemo(() => {
         if (!turnGroupingContext) return [];
 
-        // Filter out reasoning if showReasoningTraces is off.
-        // Justification parts are already filtered at canonical turn projection source
-        // based on showTextJustificationActivity, so we keep them here.
+        // Filter out reasoning if traces are disabled.
+        // Justification parts are already filtered at canonical projection source.
         const base = !showReasoningTraces
             ? activityPartsForTurn.filter((activity) => activity.kind !== 'reasoning')
             : activityPartsForTurn;
@@ -1020,9 +1013,7 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
             (segment) => segment.afterToolPartId !== null
         );
 
-        const hasReasoningActivity = visibleActivityPartsForTurn.some(
-            (activity) => activity.kind === 'reasoning'
-        );
+        const hasReasoningActivity = visibleActivityPartsForTurn.some((activity) => activity.kind === 'reasoning');
 
         if (
             visibleActivityPartsForTurn.length > 1 ||
@@ -1058,9 +1049,8 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
             activityGroupSegmentsForMessage
                 .filter((segment) => (segment.afterToolPartId ?? null) === afterToolPartId)
                 .forEach((segment) => {
-                    // Filter out reasoning if showReasoningTraces is off.
-                    // Justification parts are already filtered at canonical turn projection source
-                    // based on showTextJustificationActivity, so we keep them here.
+                    // Filter out reasoning if traces are disabled.
+                    // Justification parts are already filtered at canonical source.
                     const visibleSegmentParts = !showReasoningTraces
                         ? segment.parts.filter((activity) => activity.kind !== 'reasoning')
                         : segment.parts;
@@ -1081,6 +1071,9 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
                             onToggleTool={onToggleTool}
                             onShowPopup={onShowPopup}
                             onContentChange={onContentChange}
+                            streamPhase={streamPhase}
+                            showHeader={!turnGroupingContext.isWorking}
+                            animateRows={animateActivityRows}
                             diffStats={turnGroupingContext.diffStats}
                         />
                     );
@@ -1103,8 +1096,8 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
                         isMobile={isMobile}
                         onContentChange={onContentChange}
                         onShowPopup={onShowPopup}
-                        hasPrevTool={false}
-                        hasNextTool={false}
+                        animateTailText={animateActivityRows}
+
                     />
                 </FadeInOnReveal>
             );
@@ -1121,10 +1114,14 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
 
         visibleParts.forEach((part, index) => {
             if (part.type === 'text') {
-                const activity = activityPartsByPart.get(part);
-                const isJustification = activity?.kind === 'justification';
 
-                if (isJustification && shouldRenderActivityGroup) {
+                // Skip justification text parts — they render inline in ProgressiveGroup
+                const activity =
+                    activityPartsByPart.get(part)
+                    || (typeof (part as { id?: unknown }).id === 'string'
+                        ? activityPartsByPartId.get((part as { id: string }).id)
+                        : undefined);
+                if (activity?.kind === 'justification' && shouldRenderActivityGroup) {
                     return;
                 }
 
@@ -1142,14 +1139,17 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
                             messageId={messageId}
                             streamPhase={streamPhase}
                             onContentChange={onContentChange}
-                            renderAsReasoning={isJustification}
                         />
                     ),
                 });
                 return;
             }
 
-            const activity = activityPartsByPart.get(part);
+            const activity =
+                activityPartsByPart.get(part)
+                || (typeof (part as { id?: unknown }).id === 'string'
+                    ? activityPartsByPartId.get((part as { id: string }).id)
+                    : undefined);
             if (!activity) {
                 return;
             }
@@ -1177,8 +1177,6 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
                             return;
                         }
 
-                    const connection = toolConnections[toolPart.id];
-
                     const toolElement = (
                         <FadeInOnReveal key={`tool-${toolPart.id}`}>
                             <ToolPart
@@ -1189,31 +1187,13 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
                                 isMobile={isMobile}
                                 onContentChange={onContentChange}
                                 onShowPopup={onShowPopup}
-                                hasPrevTool={connection?.hasPrev ?? false}
-                                hasNextTool={connection?.hasNext ?? false}
+                                animateTailText={animateActivityRows}
                             />
                         </FadeInOnReveal>
                     );
 
                     element = toolElement;
                     endTime = isFinalized && typeof time?.end === 'number' ? time.end : null;
-                } else if (activity.kind === 'reasoning' && showReasoningTraces) {
-                    // Fallback rendering for reasoning when Activity group isn't shown
-                    const time = (part as { time?: { end?: number | null | undefined } | null | undefined }).time;
-                    const partEndTime = typeof time?.end === 'number' ? time.end : null;
-
-                    const reasoningElement = (
-                        <FadeInOnReveal key={`reasoning-${activity.id}`}>
-                            <ReasoningPart
-                                part={part}
-                                messageId={messageId}
-                                onContentChange={onContentChange}
-                            />
-                        </FadeInOnReveal>
-                    );
-
-                    element = reasoningElement;
-                    endTime = partEndTime;
                 }
 
                 if (element) {
@@ -1247,6 +1227,7 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
         return rendered;
     }, [
         activityPartsByPart,
+        activityPartsByPartId,
         activityGroupSegmentsForMessage,
         expandedTools,
         isMobile,
@@ -1260,7 +1241,8 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
         streamPhase,
         showReasoningTraces,
         syntaxTheme,
-        toolConnections,
+        animateActivityRows,
+
         turnGroupingContext,
         visibleParts,
         standaloneToolParts,

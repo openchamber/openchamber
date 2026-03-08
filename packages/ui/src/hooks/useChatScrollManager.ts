@@ -41,7 +41,6 @@ interface UseChatScrollManagerOptions {
     isSyncing: boolean;
     isMobile: boolean;
     messageStreamStates: Map<string, unknown>;
-    trimToViewportWindow: (sessionId: string, targetSize?: number) => void;
     onActiveTurnChange?: (turnId: string | null) => void;
 }
 

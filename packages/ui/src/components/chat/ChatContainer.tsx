@@ -40,7 +40,6 @@ export const ChatContainer: React.FC = () => {
         updateViewportAnchor,
         openNewSessionDraft,
         setCurrentSession,
-        trimToViewportWindow,
         newSessionDraft,
     } = useSessionStore(
         useShallow((state) => ({
@@ -51,7 +50,6 @@ export const ChatContainer: React.FC = () => {
             updateViewportAnchor: state.updateViewportAnchor,
             openNewSessionDraft: state.openNewSessionDraft,
             setCurrentSession: state.setCurrentSession,
-            trimToViewportWindow: state.trimToViewportWindow,
             newSessionDraft: state.newSessionDraft,
         }))
     );
@@ -201,7 +199,6 @@ export const ChatContainer: React.FC = () => {
         isMobile,
         messageStreamStates,
         sessionPermissions: sessionBlockingCards,
-        trimToViewportWindow,
         onActiveTurnChange: (turnId) => {
             activeTurnChangeRef.current(turnId);
         },

@@ -4,7 +4,6 @@ import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { RiAiAgentLine, RiArrowDownSLine, RiArrowRightSLine, RiBookLine, RiExternalLinkLine, RiFileEditLine, RiFileList2Line, RiFileSearchLine, RiFileTextLine, RiFolder6Line, RiGitBranchLine, RiGlobalLine, RiListCheck2, RiListCheck3, RiMenuSearchLine, RiPencilLine, RiSurveyLine, RiTaskLine, RiTerminalBoxLine, RiToolsLine } from '@remixicon/react';
 import { File as PierreFile, PatchDiff } from '@pierre/diffs/react';
 import { cn } from '@/lib/utils';
-import { formatTimestampForDisplay } from '../timeFormat';
 import { SimpleMarkdownRenderer } from '../../MarkdownRenderer';
 import { getToolMetadata, getLanguageFromExtension, isImageFile, getImageMimeType } from '@/lib/toolHelpers';
 import type { ToolPart as ToolPartType, ToolState as ToolStateUnion } from '@opencode-ai/sdk/v2';
@@ -16,6 +15,8 @@ import { useSessionStore } from '@/stores/useSessionStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { opencodeClient } from '@/lib/opencode/client';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { Text } from '@/components/ui/text';
+import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import type { ContentChangeReason } from '@/hooks/useChatScrollManager';
 import type { ToolPopupContent } from '../types';
 import { ensurePierreThemeRegistered } from '@/lib/shiki/appThemeRegistry';
@@ -34,6 +35,7 @@ import {
 } from '../toolRenderers';
 import { DiffViewToggle, type DiffViewMode } from '../DiffViewToggle';
 import { VirtualizedCodeBlock, type CodeLine } from './VirtualizedCodeBlock';
+import { MinDurationShineText } from './MinDurationShineText';
 
 type ToolStateWithMetadata = ToolStateUnion & { metadata?: Record<string, unknown>; input?: Record<string, unknown>; output?: string; error?: string; time?: { start: number; end?: number } };
 
@@ -45,8 +47,7 @@ interface ToolPartProps {
     isMobile: boolean;
     onContentChange?: (reason?: ContentChangeReason) => void;
     onShowPopup?: (content: ToolPopupContent) => void;
-    hasPrevTool?: boolean;
-    hasNextTool?: boolean;
+    animateTailText?: boolean;
 }
 
 // eslint-disable-next-line react-refresh/only-export-components
@@ -341,7 +342,7 @@ const formatStructuredOutputDescription = (input: Record<string, unknown> | unde
     }
 
     if (!input || typeof input !== 'object') {
-        return 'Result';
+        return '';
     }
 
     const rawValue = Object.prototype.hasOwnProperty.call(input, 'result') ? input.result : input;
@@ -374,7 +375,7 @@ const formatStructuredOutputDescription = (input: Record<string, unknown> | unde
 
     const preview = toPreview(rawValue).trim();
     if (!preview) {
-        return 'Result';
+        return '';
     }
 
     const maxLength = 100;
@@ -435,7 +436,7 @@ const getToolDescription = (part: ToolPartType, state: ToolStateUnion, currentDi
         if (files.length > 1) {
             return `${files.length} files`;
         }
-        return 'Patch';
+        return '';
     }
 
     // Question tool: show "Asked N question(s)"
@@ -467,6 +468,27 @@ const getToolDescription = (part: ToolPartType, state: ToolStateUnion, currentDi
 
     const desc = input?.description || metadata?.description || ('title' in state && state.title) || '';
     return typeof desc === 'string' ? desc : '';
+};
+
+const getFetchedUrl = (part: ToolPartType, state: ToolStateUnion): string | null => {
+    const tool = part.tool.toLowerCase();
+    if (tool !== 'webfetch' && tool !== 'fetch' && tool !== 'curl' && tool !== 'wget') {
+        return null;
+    }
+
+    const stateWithData = state as ToolStateWithMetadata;
+    const input = stateWithData.input;
+    const metadata = stateWithData.metadata;
+
+    const candidate =
+        (typeof input?.url === 'string' && input.url) ||
+        (typeof input?.URL === 'string' && input.URL) ||
+        (typeof metadata?.url === 'string' && metadata.url) ||
+        (typeof metadata?.URL === 'string' && metadata.URL) ||
+        '';
+
+    const url = candidate.trim();
+    return url.length > 0 ? url : null;
 };
 
 interface ToolScrollableSectionProps {
@@ -702,13 +724,11 @@ const TaskToolSummary: React.FC<{
     entries: TaskToolSummaryEntry[];
     isExpanded: boolean;
     isMobile: boolean;
-    hasPrevTool: boolean;
-    hasNextTool: boolean;
     output?: string;
     sessionId?: string;
     onShowPopup?: (content: ToolPopupContent) => void;
     input?: Record<string, unknown>;
-}> = ({ entries, isExpanded, isMobile, hasPrevTool, hasNextTool, output, sessionId, onShowPopup, input }) => {
+}> = ({ entries, isExpanded, isMobile, output, sessionId, onShowPopup, input }) => {
     const setCurrentSession = useSessionStore((state) => state.setCurrentSession);
     const displayEntries = React.useMemo(() => {
         const nonPending = entries.filter((entry) => entry.state?.status !== 'pending');
@@ -742,10 +762,7 @@ const TaskToolSummary: React.FC<{
     return (
         <div
             className={cn(
-                'relative pr-2 pb-2 pt-2 space-y-2 pl-[1.4375rem]',
-                'before:absolute before:left-[0.4375rem] before:w-px before:bg-border/80 before:content-[""]',
-                hasPrevTool ? 'before:top-[-0.45rem]' : 'before:top-[-0.25rem]',
-                hasNextTool ? 'before:bottom-[-0.6rem]' : 'before:bottom-0'
+                'relative pr-2 pb-2 pt-2 space-y-2 pl-4'
             )}
         >
             {displayEntries.length > 0 ? (
@@ -881,6 +898,51 @@ const renderPathLikeGitChanges = (path: string, grow = true) => {
             <span className="flex-shrink-0">
                 <span className="text-muted-foreground">/</span>
                 <span className="text-foreground">{name}</span>
+            </span>
+        </span>
+    );
+};
+
+const renderAnimatedPathWithIcon = (path: string, isMobile: boolean, animate = true, grow = true) => {
+    const lastSlash = path.lastIndexOf('/');
+
+    if (lastSlash === -1) {
+        return (
+            <span className={cn('min-w-0 inline-flex items-center gap-1', grow && 'flex-1')} title={path}>
+                <FileTypeIcon filePath={path} className="h-3.5 w-3.5 flex-shrink-0" />
+                <Text
+                    variant={animate ? 'generate-effect' : undefined}
+                    className={cn('min-w-0 typography-meta', isMobile ? 'break-words' : 'truncate')}
+                    style={{ color: 'var(--tools-title)' }}
+                >
+                    {path}
+                </Text>
+            </span>
+        );
+    }
+
+    const dir = path.slice(0, lastSlash);
+    const name = path.slice(lastSlash + 1);
+
+    return (
+        <span className={cn('min-w-0 inline-flex items-center gap-1 overflow-hidden', grow && 'flex-1')} title={path}>
+            <FileTypeIcon filePath={path} className="h-3.5 w-3.5 flex-shrink-0" />
+            <span className={cn('min-w-0 inline-flex items-baseline overflow-hidden typography-meta', grow && 'flex-1')}>
+                <Text
+                    variant={animate ? 'generate-effect' : undefined}
+                    className="min-w-0 truncate typography-meta"
+                    style={{ color: 'var(--tools-description)', direction: 'rtl', textAlign: 'left' }}
+                >
+                    {dir}
+                </Text>
+                <span className="flex-shrink-0 inline-flex items-baseline">
+                    <Text variant={animate ? 'generate-effect' : undefined} className="typography-meta" style={{ color: 'var(--tools-description)' }}>
+                        /
+                    </Text>
+                    <Text variant={animate ? 'generate-effect' : undefined} className="typography-meta" style={{ color: 'var(--tools-title)' }}>
+                        {name}
+                    </Text>
+                </span>
             </span>
         </span>
     );
@@ -1151,8 +1213,6 @@ interface ToolExpandedContentProps {
     isMobile: boolean;
     currentDirectory: string;
     onShowPopup?: (content: ToolPopupContent) => void;
-    hasPrevTool: boolean;
-    hasNextTool: boolean;
 }
 
 const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
@@ -1162,8 +1222,6 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     isMobile,
     currentDirectory,
     onShowPopup,
-    hasPrevTool,
-    hasNextTool,
 }) => {
     const { pierreTheme, pierreThemeType } = usePierreThemeConfig();
     const [diffViewMode, setDiffViewMode] = React.useState<DiffViewMode>('unified');
@@ -1440,18 +1498,9 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     return (
         <div
             className={cn(
-                'relative pr-2 pb-2 pt-2 space-y-2 pl-[1.4375rem]'
+                'relative pr-2 pb-2 pt-2 space-y-2 pl-4'
             )}
         >
-            <div 
-                className="absolute left-[0.4375rem] w-px"
-                style={{
-                    backgroundColor: 'var(--tools-border)',
-                    top: hasPrevTool ? '-0.45rem' : '-0.25rem',
-                    bottom: hasNextTool ? '-0.6rem' : '0',
-                    width: '1px'
-                }}
-            ></div>
             {(part.tool === 'todowrite' || part.tool === 'todoread' || part.tool === 'question') ? (
                 renderResultContent()
             ) : (
@@ -1535,18 +1584,20 @@ const ToolPart: React.FC<ToolPartProps> = ({
     isMobile,
     onContentChange,
     onShowPopup,
-    hasPrevTool = false,
-    hasNextTool = false,
+    animateTailText = true,
 }) => {
     const state = part.state;
     const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
-    const showActivityHeaderTimestamps = useUIStore((store) => store.showActivityHeaderTimestamps);
 
     const isTaskTool = part.tool.toLowerCase() === 'task';
 
     const status = state.status as string | undefined;
     const isFinalized = status === 'completed' || status === 'error';
-    const isActive = status === 'running' || status === 'pending' || status === 'started';
+    const isActive =
+        status === 'running' ||
+        status === 'pending' ||
+        status === 'started' ||
+        (typeof status !== 'string' && !isFinalized);
     const isError = state.status === 'error';
 
 
@@ -1568,10 +1619,22 @@ const ToolPart: React.FC<ToolPartProps> = ({
     const time = stateWithData.time;
 
     const [pinnedTime, setPinnedTime] = React.useState<{ start?: number; end?: number }>({});
+    const [localStartAt, setLocalStartAt] = React.useState<number | undefined>(undefined);
 
     React.useEffect(() => {
         setPinnedTime({});
+        setLocalStartAt(undefined);
     }, [part.id]);
+
+    React.useEffect(() => {
+        if (!isActive) {
+            return;
+        }
+        if (typeof time?.start === 'number') {
+            return;
+        }
+        setLocalStartAt((prev) => prev ?? Date.now());
+    }, [isActive, time?.start]);
 
     React.useEffect(() => {
         setPinnedTime((prev) => {
@@ -1592,17 +1655,8 @@ const ToolPart: React.FC<ToolPartProps> = ({
         });
     }, [time?.end, time?.start]);
 
-    const effectiveTimeStart = pinnedTime.start ?? time?.start;
+    const effectiveTimeStart = pinnedTime.start ?? time?.start ?? localStartAt;
     const effectiveTimeEnd = pinnedTime.end ?? time?.end;
-
-    const endedTimestampText = React.useMemo(() => {
-        if (typeof effectiveTimeEnd !== 'number' || !Number.isFinite(effectiveTimeEnd)) {
-            return null;
-        }
-
-        const formatted = formatTimestampForDisplay(effectiveTimeEnd);
-        return formatted.length > 0 ? formatted : null;
-    }, [effectiveTimeEnd]);
 
     const taskOutputString = React.useMemo(() => {
         return typeof stateWithData.output === 'string' ? stateWithData.output : undefined;
@@ -1720,6 +1774,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
     const diffStats = (part.tool === 'edit' || part.tool === 'multiedit' || part.tool === 'apply_patch') ? parseDiffStats(metadata) : null;
     const descriptionPath = getToolDescriptionPath(part, state, currentDirectory);
     const description = getToolDescription(part, state, currentDirectory);
+    const fetchedUrl = getFetchedUrl(part, state);
     const displayName = getToolMetadata(part.tool).displayName;
     
     // Get justification text (tool title/description) when setting is enabled
@@ -1838,69 +1893,85 @@ const ToolPart: React.FC<ToolPartProps> = ({
                             {isExpanded ? <RiArrowDownSLine className="h-3.5 w-3.5" /> : <RiArrowRightSLine className="h-3.5 w-3.5" />}
                         </div>
                     </div>
-                    <span
+                    <MinDurationShineText
+                        active={Boolean(isActive && !isError)}
+                        minDurationMs={300}
                         className="typography-meta font-medium"
                         style={!isTaskTool && isError ? { color: 'var(--status-error)' } : { color: 'var(--tools-title)' }}
+                        title={displayName}
                     >
                         {displayName}
-                    </span>
+                    </MinDurationShineText>
+                    {typeof effectiveTimeStart === 'number' ? (
+                        <span className="flex-shrink-0 tabular-nums text-muted-foreground/80 typography-meta">
+                            <LiveDuration
+                                start={effectiveTimeStart}
+                                end={typeof effectiveTimeEnd === 'number' ? effectiveTimeEnd : undefined}
+                                active={Boolean(isActive && typeof effectiveTimeEnd !== 'number')}
+                            />
+                        </span>
+                    ) : null}
                 </div>
 
                 <div className="flex items-center gap-1 flex-1 min-w-0 typography-meta" style={{ color: 'var(--tools-description)' }}>
                     <div className="flex items-center gap-1 flex-1 min-w-0">
                         {justificationText && (
-                            <span className="min-w-0 truncate" style={{ color: 'var(--tools-description)', opacity: 0.8 }}>
+                            <span
+                                className="min-w-0 truncate typography-meta"
+                                style={{ color: 'var(--tools-description)', opacity: 0.8 }}
+                                title={justificationText}
+                            >
                                 {justificationText}
                             </span>
                         )}
-                        {!justificationText && description && (
+                        {!justificationText && fetchedUrl && (
+                            <a
+                                href={fetchedUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="min-w-0 truncate underline decoration-[color:var(--status-info)] underline-offset-2 hover:opacity-90"
+                                style={{ color: 'var(--status-info)' }}
+                                onClick={(event) => event.stopPropagation()}
+                                onKeyDown={(event) => event.stopPropagation()}
+                                title={fetchedUrl}
+                            >
+                                <Text
+                                    variant={animateTailText ? 'generate-effect' : undefined}
+                                    className="min-w-0 truncate typography-meta"
+                                    style={{ color: 'var(--status-info)' }}
+                                >
+                                    {fetchedUrl}
+                                </Text>
+                            </a>
+                        )}
+                        {!justificationText && !fetchedUrl && description && (
                             descriptionPath && description === descriptionPath ? (
-                                renderPathLikeGitChanges(descriptionPath, false)
+                                renderAnimatedPathWithIcon(descriptionPath, isMobile, animateTailText, false)
                             ) : (
-                                <span className="min-w-0 truncate">
+                                <Text
+                                    variant={animateTailText ? 'generate-effect' : undefined}
+                                    className="min-w-0 truncate typography-meta"
+                                    style={{ color: 'var(--tools-description)' }}
+                                    title={description}
+                                >
                                     {description}
-                                </span>
+                                </Text>
                             )
                         )}
                         {diffStats && (
-                            <span className="text-muted-foreground/60 flex-shrink-0">
-                                <span style={{ color: 'var(--status-success)' }}>+{diffStats.added}</span>
-                                {' '}
-                                <span style={{ color: 'var(--status-error)' }}>-{diffStats.removed}</span>
+                            <span className="flex-shrink-0 inline-flex items-center gap-0">
+                                <Text variant={animateTailText ? 'generate-effect' : undefined} className="typography-meta" style={{ color: 'var(--status-success)' }}>
+                                    +{diffStats.added}
+                                </Text>
+                                <Text variant={animateTailText ? 'generate-effect' : undefined} className="typography-meta" style={{ color: 'var(--tools-description)' }}>
+                                    /
+                                </Text>
+                                <Text variant={animateTailText ? 'generate-effect' : undefined} className="typography-meta" style={{ color: 'var(--status-error)' }}>
+                                    -{diffStats.removed}
+                                </Text>
                             </span>
                         )}
                     </div>
-                    {typeof effectiveTimeStart === 'number' ? (
-                        <span className="ml-auto relative flex-shrink-0 tabular-nums text-right">
-                            <span
-                                className={cn(
-                                    'text-muted-foreground/80 transition-opacity duration-150',
-                                    !isMobile && endedTimestampText && showActivityHeaderTimestamps && 'group-hover/tool:opacity-0'
-                                )}
-                            >
-                                <LiveDuration
-                                    start={effectiveTimeStart}
-                                    end={typeof effectiveTimeEnd === 'number' ? effectiveTimeEnd : undefined}
-                                    active={Boolean(isActive && typeof effectiveTimeEnd !== 'number')}
-                                />
-                            </span>
-                            {!isMobile && endedTimestampText && showActivityHeaderTimestamps ? (
-                                <span
-                                    className={cn(
-                                        'pointer-events-none absolute right-0 top-0 z-10 whitespace-nowrap rounded-sm bg-[var(--surface-background)] px-1 text-muted-foreground/70 transition-opacity duration-150',
-                                        'opacity-0 group-hover/tool:opacity-100'
-                                    )}
-                                >
-                                    {endedTimestampText}
-                                </span>
-                            ) : null}
-                        </span>
-                    ) : null}
-                    {typeof effectiveTimeStart !== 'number' && !isMobile && endedTimestampText && showActivityHeaderTimestamps ? (
-                        <span className="ml-auto text-muted-foreground/70 flex-shrink-0 tabular-nums">
-                            {endedTimestampText}
-                        </span>
-                    ) : null}
                 </div>
             </div>
 
@@ -1910,8 +1981,6 @@ const ToolPart: React.FC<ToolPartProps> = ({
                     entries={taskSummaryEntries}
                     isExpanded={isExpanded}
                     isMobile={isMobile}
-                    hasPrevTool={hasPrevTool}
-                    hasNextTool={hasNextTool}
                     output={taskOutputString}
                     sessionId={taskSessionId}
                     onShowPopup={onShowPopup}
@@ -1927,8 +1996,6 @@ const ToolPart: React.FC<ToolPartProps> = ({
                     isMobile={isMobile}
                     currentDirectory={currentDirectory}
                     onShowPopup={onShowPopup}
-                    hasPrevTool={hasPrevTool}
-                    hasNextTool={hasNextTool}
                 />
             ) : null}
         </div>

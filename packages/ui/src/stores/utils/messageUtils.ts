@@ -46,9 +46,14 @@ export const normalizeStreamingPart = (incoming: Part, existing?: Part): Part =>
     const normalized: { type?: string; text?: string; content?: string; value?: string; delta?: unknown; [key: string]: unknown } = {
         ...incoming,
     } as { type?: string; text?: string; content?: string; value?: string; delta?: unknown; [key: string]: unknown };
-    normalized.type = normalized.type || 'text';
+    const existingType = typeof (existing as { type?: unknown } | undefined)?.type === 'string'
+        ? (existing as { type: string }).type
+        : undefined;
+    normalized.type = normalized.type || existingType || 'text';
 
-    if (normalized.type === 'text') {
+    const isStreamingTextLikePart = normalized.type === 'text' || normalized.type === 'reasoning';
+
+    if (isStreamingTextLikePart) {
         const existingRecord = (existing ?? {}) as { text?: unknown; content?: unknown; value?: unknown };
         const existingText = extractTextFromPart(existing);
         const directText = extractTextFromPart(incoming);

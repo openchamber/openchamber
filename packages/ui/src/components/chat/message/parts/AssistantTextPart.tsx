@@ -3,7 +3,6 @@ import type { Part } from '@opencode-ai/sdk/v2';
 import { MarkdownRenderer } from '../../MarkdownRenderer';
 import type { StreamPhase } from '../types';
 import type { ContentChangeReason } from '@/hooks/useChatScrollManager';
-import { ReasoningTimelineBlock, formatReasoningText } from './ReasoningPart';
 import { useStreamingTextThrottle } from '../../hooks/useStreamingTextThrottle';
 import { resolveAssistantDisplayText, shouldRenderAssistantText } from './assistantTextVisibility';
 
@@ -14,25 +13,16 @@ interface AssistantTextPartProps {
     messageId: string;
     streamPhase: StreamPhase;
     onContentChange?: (reason?: ContentChangeReason, messageId?: string) => void;
-    renderAsReasoning?: boolean;
 }
 
 const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
     part,
     messageId,
     streamPhase,
-    onContentChange,
-    renderAsReasoning = false,
 }) => {
     const partWithText = part as PartWithText;
     const rawText = partWithText.text;
-    const baseTextContent = typeof rawText === 'string' ? rawText : partWithText.content || partWithText.value || '';
-    const textContent = React.useMemo(() => {
-        if (renderAsReasoning) {
-            return formatReasoningText(baseTextContent);
-        }
-        return baseTextContent;
-    }, [baseTextContent, renderAsReasoning]);
+    const textContent = typeof rawText === 'string' ? rawText : partWithText.content || partWithText.value || '';
     const isStreamingPhase = streamPhase === 'streaming';
     const isCooldownPhase = streamPhase === 'cooldown';
     const isStreaming = isStreamingPhase || isCooldownPhase;
@@ -52,24 +42,16 @@ const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
     const time = partWithText.time;
     const isFinalized = Boolean(time && typeof time.end !== 'undefined');
 
+    const isRenderableTextPart = part.type === 'text' || part.type === 'reasoning';
+    if (!isRenderableTextPart) {
+        return null;
+    }
+
     if (!shouldRenderAssistantText({
         displayTextContent,
         isFinalized,
     })) {
         return null;
-    }
-
-    if (renderAsReasoning) {
-        return (
-            <ReasoningTimelineBlock
-                key={part.id || `${messageId}-text`}
-                text={displayTextContent}
-                variant="justification"
-                onContentChange={onContentChange}
-                blockId={part.id || `${messageId}-reasoning-text`}
-                time={time}
-            />
-        );
     }
 
     return (
@@ -80,6 +62,7 @@ const AssistantTextPart: React.FC<AssistantTextPartProps> = ({
                 messageId={messageId}
                 isAnimated={false}
                 isStreaming={isStreaming}
+                variant={part.type === 'reasoning' ? 'reasoning' : 'assistant'}
             />
         </div>
     );

@@ -289,25 +289,6 @@ const computeTextLength = (parts: Part[] | undefined | null): number => {
   return length;
 };
 
-const MIN_SORTABLE_LENGTH = 10;
-const extractSortableId = (id: unknown): string | null => {
-  if (typeof id !== 'string') return null;
-  const trimmed = id.trim();
-  if (!trimmed) return null;
-  const underscoreIndex = trimmed.indexOf('_');
-  const candidate = underscoreIndex >= 0 ? trimmed.slice(underscoreIndex + 1) : trimmed;
-  if (!candidate || candidate.length < MIN_SORTABLE_LENGTH) return null;
-  return candidate;
-};
-
-const isIdNewer = (id: string, referenceId: string): boolean => {
-  const currentSortable = extractSortableId(id);
-  const referenceSortable = extractSortableId(referenceId);
-  if (!currentSortable || !referenceSortable) return true;
-  if (currentSortable.length !== referenceSortable.length) return true;
-  return currentSortable > referenceSortable;
-};
-
 const MAX_MESSAGE_CACHE_SIZE = 500;
 const MESSAGE_CACHE_EVICT_COUNT = 100;
 const messageCache = new Map<string, { sessionId: string; message: { info: Message; parts: Part[] } | null }>();
@@ -648,6 +629,7 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
   const queuedEventsRef = React.useRef<EventData[]>([]);
   const queuedEventIndexRef = React.useRef<Map<string, number>>(new Map());
   const staleDeltaKeysRef = React.useRef<Set<string>>(new Set());
+  const partTypeHintsByKeyRef = React.useRef<Map<string, string>>(new Map());
   const flushScheduledRef = React.useRef(false);
   const flushTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastFlushAtRef = React.useRef(0);
@@ -656,6 +638,17 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
     (sessionId: string, reason: string, limit?: number) => Promise<void>
   >(() => Promise.resolve());
   const scheduleReconnectRef = React.useRef<(hint?: string) => void>(() => {});
+
+  const writePartTypeHint = React.useCallback((key: string, type: string) => {
+    const map = partTypeHintsByKeyRef.current;
+    map.set(key, type);
+    if (map.size > 4000) {
+      const firstKey = map.keys().next().value;
+      if (typeof firstKey === 'string') {
+        map.delete(firstKey);
+      }
+    }
+  }, []);
 
   const isNotificationContextHidden = React.useCallback((isVSCodeRuntime: boolean): boolean => {
     if (visibilityStateRef.current === 'hidden') {
@@ -1102,18 +1095,6 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
           pendingMessageStallTimersRef.current.delete(sessionId);
         }
 
-        const trimmedHeadMaxId = useSessionStore.getState().sessionMemoryState.get(sessionId)?.trimmedHeadMaxId;
-        if (trimmedHeadMaxId && !isIdNewer(messageId, trimmedHeadMaxId)) {
-          if (streamDebugEnabled()) {
-            console.debug('[useEventStream] Skipping message.part.updated for trimmed message', {
-              sessionId,
-              messageId,
-              trimmedHeadMaxId,
-            });
-          }
-          break;
-        }
-
         const shouldKeepSyntheticUserText = (value: unknown): boolean => {
           const text = typeof value === 'string' ? value.trim() : '';
           if (!text) return false;
@@ -1138,6 +1119,10 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
 
         let roleInfo = 'assistant';
         const existingMessage = getMessageFromStore(sessionId, messageId);
+        const existingPartForType = existingMessage?.parts?.find((item) => item?.id === partExt.id);
+        const existingPartType = typeof (existingPartForType as { type?: unknown } | undefined)?.type === 'string'
+          ? (existingPartForType as { type: string }).type
+          : undefined;
         if (messageInfo && typeof (messageInfo as { role?: unknown }).role === 'string') {
           roleInfo = (messageInfo as { role?: string }).role as string;
         } else {
@@ -1163,10 +1148,25 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
           }
         }
 
+        const updatedPartId = readStringProp(partExt, ['id', 'partID', 'partId']);
+        const directory = readEventDirectory(props);
+        const partTypeHintKey = updatedPartId ? `${directory}:${messageId}:${updatedPartId}` : null;
+        const hintedPartType = partTypeHintKey ? partTypeHintsByKeyRef.current.get(partTypeHintKey) : undefined;
+
+        const resolvedPartType =
+          part.type ||
+          existingPartType ||
+          hintedPartType ||
+          'text';
+
         const messagePart: Part = {
           ...part,
-          type: part.type || 'text',
+          type: resolvedPartType,
         } as Part;
+
+        if (partTypeHintKey && typeof resolvedPartType === 'string' && resolvedPartType.length > 0) {
+          writePartTypeHint(partTypeHintKey, resolvedPartType);
+        }
 
         if (roleInfo === 'assistant') {
           const partType = (messagePart as { type?: unknown }).type;
@@ -1245,22 +1245,13 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
           pendingMessageStallTimersRef.current.delete(sessionId);
         }
 
-        const trimmedHeadMaxId = useSessionStore.getState().sessionMemoryState.get(sessionId)?.trimmedHeadMaxId;
-        if (trimmedHeadMaxId && !isIdNewer(messageId, trimmedHeadMaxId)) {
-          if (streamDebugEnabled()) {
-            console.debug('[useEventStream] Skipping message.part.delta for trimmed message', {
-              sessionId,
-              messageId,
-              trimmedHeadMaxId,
-            });
-          }
-          break;
-        }
-
         const existingMessage = getMessageFromStore(sessionId, messageId);
         const existingPart = existingMessage?.parts?.find((item) => item?.id === partId);
         const existingRole = (existingMessage?.info as Record<string, unknown> | undefined)?.role;
         const roleInfo = typeof existingRole === 'string' ? existingRole : 'assistant';
+        const directory = readEventDirectory(props);
+        const partTypeHintKey = `${directory}:${messageId}:${partId}`;
+        const hintedPartType = partTypeHintsByKeyRef.current.get(partTypeHintKey);
 
         if (!existingPart) {
           const bootstrapAllowed = field === 'text' || field === 'content' || field === 'value';
@@ -1281,14 +1272,28 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
             }
           }
 
+          const deltaPartTypeHint =
+            readStringProp(props, ['partType', 'type', 'part_type']) ||
+            readStringProp(props, ['kind']);
+          const bootstrappedPartType =
+            typeof deltaPartTypeHint === 'string' && deltaPartTypeHint.trim().length > 0
+              ? deltaPartTypeHint
+              : (typeof hintedPartType === 'string' && hintedPartType.trim().length > 0
+                ? hintedPartType
+                : 'text');
+
           const bootstrappedPart = {
             id: partId,
-            type: 'text',
+            type: bootstrappedPartType,
             sessionID: sessionId,
             messageID: messageId,
             text: delta,
             [field]: delta,
           } as unknown as Part;
+
+          if (typeof bootstrappedPartType === 'string' && bootstrappedPartType.length > 0) {
+            writePartTypeHint(partTypeHintKey, bootstrappedPartType);
+          }
 
           trackMessage(messageId, 'part_delta_bootstrap', { role: roleInfo, field });
           addStreamingPart(sessionId, messageId, bootstrappedPart, roleInfo);
@@ -1302,7 +1307,11 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
           [field]: `${typeof existingFieldValue === 'string' ? existingFieldValue : ''}${delta}`,
         };
 
-        if (existingPartRecord.type === 'text' && field !== 'text') {
+        if (typeof hintedPartType === 'string' && hintedPartType.trim().length > 0) {
+          updatedPartRecord.type = hintedPartType;
+        }
+
+        if ((existingPartRecord.type === 'text' || existingPartRecord.type === 'reasoning') && field !== 'text') {
           const currentText = typeof existingPartRecord.text === 'string' ? existingPartRecord.text : '';
           updatedPartRecord.text = `${currentText}${delta}`;
         }
@@ -1357,18 +1366,6 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
         if (pendingTimer) {
           clearTimeout(pendingTimer);
           pendingMessageStallTimersRef.current.delete(sessionId);
-        }
-
-        const trimmedHeadMaxId = useSessionStore.getState().sessionMemoryState.get(sessionId)?.trimmedHeadMaxId;
-        if (trimmedHeadMaxId && !isIdNewer(messageId, trimmedHeadMaxId)) {
-          if (streamDebugEnabled()) {
-            console.debug('[useEventStream] Skipping message.updated for trimmed message', {
-              sessionId,
-              messageId,
-              trimmedHeadMaxId,
-            });
-          }
-          break;
         }
 
         if (streamDebugEnabled()) {
@@ -1531,7 +1528,7 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
             if (!missingMessageHydrationRef.current.has(hydrateKey)) {
               missingMessageHydrationRef.current.add(hydrateKey);
               void opencodeClient
-                .getSessionMessages(sessionId, 50)
+                .getSessionMessages(sessionId)
                 .then((messages) => {
                   useSessionStore.getState().syncMessages(sessionId, messages);
                 })
@@ -1542,6 +1539,7 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
           }
 
           if (partsArray.length > 0) {
+            const directory = readEventDirectory(props);
             for (let i = 0; i < partsArray.length; i++) {
               const serverPart = partsArray[i];
               const isSynthetic = (serverPart as Record<string, unknown>).synthetic === true;
@@ -1561,6 +1559,9 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
                 sessionID: (serverPart as { sessionID?: string })?.sessionID || sessionId,
                 messageID: (serverPart as { messageID?: string })?.messageID || messageId,
               } as Part;
+              if (typeof enrichedPart.id === 'string' && typeof enrichedPart.type === 'string') {
+                writePartTypeHint(`${directory}:${messageId}:${enrichedPart.id}`, enrichedPart.type);
+              }
               addStreamingPart(sessionId, messageId, enrichedPart, 'user');
             }
           }
@@ -1660,6 +1661,7 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
           );
 
           const partsToInject = partsArray;
+          const directory = readEventDirectory(props);
 
           for (let i = 0; i < partsToInject.length; i++) {
             const serverPart = partsToInject[i];
@@ -1669,6 +1671,9 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
               sessionID: serverPart?.sessionID || sessionId,
               messageID: serverPart?.messageID || messageId,
             } as Part;
+            if (typeof enrichedPart.id === 'string' && typeof enrichedPart.type === 'string') {
+              writePartTypeHint(`${directory}:${messageId}:${enrichedPart.id}`, enrichedPart.type);
+            }
             addStreamingPart(sessionId, messageId, enrichedPart, (messageExt as { role?: string }).role as string);
             trackMessage(messageId, `server_part_${i}`);
           }
@@ -2085,6 +2090,7 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
     effectiveDirectory,
     updateSessionStatus,
     dispatchRuntimeNotification,
+    writePartTypeHint,
   ]);
 
   // --- Stable callback refs (Part A) ---

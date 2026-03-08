@@ -124,7 +124,7 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-export type VisibleSetting = 'theme' | 'pwaInstallName' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'cornerRadius' | 'inputBarOffset' | 'navRail' | 'toolOutput' | 'mermaidRendering' | 'userMessageRendering' | 'stickyUserHeader' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'reasoning' | 'queueMode' | 'textJustificationActivity' | 'activityHeaderTimestamps' | 'terminalQuickKeys' | 'persistDraft';
+export type VisibleSetting = 'theme' | 'pwaInstallName' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'cornerRadius' | 'inputBarOffset' | 'navRail' | 'toolOutput' | 'mermaidRendering' | 'userMessageRendering' | 'stickyUserHeader' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'reasoning' | 'queueMode' | 'textJustificationActivity' | 'terminalQuickKeys' | 'persistDraft';
 
 interface OpenChamberVisualSettingsProps {
     /** Which settings to show. If undefined, shows all. */
@@ -139,8 +139,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setShowReasoningTraces = useUIStore(state => state.setShowReasoningTraces);
     const showTextJustificationActivity = useUIStore(state => state.showTextJustificationActivity);
     const setShowTextJustificationActivity = useUIStore(state => state.setShowTextJustificationActivity);
-    const showActivityHeaderTimestamps = useUIStore(state => state.showActivityHeaderTimestamps);
-    const setShowActivityHeaderTimestamps = useUIStore(state => state.setShowActivityHeaderTimestamps);
     const toolCallExpansion = useUIStore(state => state.toolCallExpansion);
     const setToolCallExpansion = useUIStore(state => state.setToolCallExpansion);
     const mermaidRenderingMode = useUIStore(state => state.mermaidRenderingMode);
@@ -244,7 +242,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         || shouldShow('reasoning')
         || shouldShow('queueMode')
         || shouldShow('textJustificationActivity')
-        || shouldShow('activityHeaderTimestamps')
         || shouldShow('persistDraft');
     const selectedToolExpansionOption = TOOL_EXPANSION_OPTIONS.find((option) => option.value === toolCallExpansion);
 
@@ -1060,28 +1057,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         </div>
                                     )}
 
-                                    {shouldShow('activityHeaderTimestamps') && (
-                                        <div
-                                            className="group flex cursor-pointer items-center gap-2 py-1.5"
-                                            role="button"
-                                            tabIndex={0}
-                                            aria-pressed={showActivityHeaderTimestamps}
-                                            onClick={() => setShowActivityHeaderTimestamps(!showActivityHeaderTimestamps)}
-                                            onKeyDown={(event) => {
-                                                if (event.key === ' ' || event.key === 'Enter') {
-                                                    event.preventDefault();
-                                                    setShowActivityHeaderTimestamps(!showActivityHeaderTimestamps);
-                                                }
-                                            }}
-                                        >
-                                            <Checkbox
-                                                checked={showActivityHeaderTimestamps}
-                                                onChange={setShowActivityHeaderTimestamps}
-                                                ariaLabel="Show tool and reasoning header timestamps"
-                                            />
-                                            <span className="typography-ui-label text-foreground">Show Activity Header Timestamps</span>
-                                        </div>
-                                    )}
                                 </section>
                             )}
 

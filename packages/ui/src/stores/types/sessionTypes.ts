@@ -38,7 +38,6 @@ export interface SessionMemoryState {
     historyLoading?: boolean;
     historyComplete?: boolean;
     historyLimit?: number;
-    trimmedHeadMaxId?: string;
     streamingCooldownUntil?: number;
     lastUserMessageAt?: number; // Timestamp when user last sent a message
 }
@@ -267,8 +266,6 @@ export interface SessionStore {
     clearAttachedFiles: () => void;
 
     updateViewportAnchor: (sessionId: string, anchor: number) => void;
-    trimToViewportWindow: (sessionId: string, targetSize?: number) => void;
-    evictLeastRecentlyUsed: () => void;
     loadMoreMessages: (sessionId: string, direction: "up" | "down") => Promise<void>;
 
     saveSessionModelSelection: (sessionId: string, providerId: string, modelId: string) => void;

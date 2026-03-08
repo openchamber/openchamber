@@ -4924,7 +4924,7 @@ function normalizeStreamingTextPayload(payload, state) {
   }
 
   const part = props.part;
-  if (part.type !== 'text') {
+  if (part.type !== 'text' && part.type !== 'reasoning') {
     return false;
   }
 

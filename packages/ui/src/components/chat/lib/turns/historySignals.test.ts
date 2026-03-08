@@ -28,7 +28,7 @@ test('deriveTurnHistorySignals honors buffered turns even when history complete'
     assert.equal(signals.canLoadEarlier, true, 'buffered turns should still allow reveal action');
 });
 
-test('deriveTurnHistorySignals keeps hasMoreAbove for trimmed/background metadata', () => {
+test('deriveTurnHistorySignals keeps hasMoreAbove for background metadata', () => {
     const memoryState: SessionMemoryState = {
         lastAccessedAt: Date.now(),
         viewportAnchor: 0,
@@ -36,7 +36,6 @@ test('deriveTurnHistorySignals keeps hasMoreAbove for trimmed/background metadat
         historyComplete: false,
         hasMoreAbove: true,
         hasMoreTurnsAbove: true,
-        trimmedHeadMaxId: 'msg_400',
         loadedTurnCount: 8,
         backgroundMessageCount: 12,
     };
@@ -50,5 +49,5 @@ test('deriveTurnHistorySignals keeps hasMoreAbove for trimmed/background metadat
     });
 
     assert.equal(signals.hasMoreAboveTurns, true, 'explicit turn metadata should drive load-more availability');
-    assert.equal(signals.canLoadEarlier, true, 'trimmed metadata should keep navigation path active');
+    assert.equal(signals.canLoadEarlier, true, 'background metadata should keep navigation path active');
 });

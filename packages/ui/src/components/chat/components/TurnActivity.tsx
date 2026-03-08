@@ -3,6 +3,7 @@ import React from 'react';
 import ProgressiveGroup from '../message/parts/ProgressiveGroup';
 import type { TurnActivityRecord } from '../lib/turns/types';
 import type { ToolPopupContent } from '../message/types';
+import type { StreamPhase } from '../message/types';
 import type { ContentChangeReason } from '@/hooks/useChatScrollManager';
 
 interface DiffStats {
@@ -21,6 +22,9 @@ interface TurnActivityProps {
     onToggleTool: (toolId: string) => void;
     onShowPopup: (content: ToolPopupContent) => void;
     onContentChange?: (reason?: ContentChangeReason) => void;
+    streamPhase: StreamPhase;
+    showHeader: boolean;
+    animateRows?: boolean;
     diffStats?: DiffStats;
 }
 

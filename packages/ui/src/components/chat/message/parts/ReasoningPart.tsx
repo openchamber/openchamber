@@ -3,10 +3,8 @@ import type { ComponentType } from 'react';
 import type { Part } from '@opencode-ai/sdk/v2';
 import { RiArrowDownSLine, RiArrowRightSLine, RiBrainAi3Line, RiChatAi3Line } from '@remixicon/react';
 import { cn } from '@/lib/utils';
-import { formatTimestampForDisplay } from '../timeFormat';
 import type { ContentChangeReason } from '@/hooks/useChatScrollManager';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
-import { useUIStore } from '@/stores/useUIStore';
 
 type PartWithText = Part & { text?: string; content?: string; time?: { start?: number; end?: number } };
 
@@ -99,21 +97,11 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
     time,
 }) => {
     const [isExpanded, setIsExpanded] = React.useState(false);
-    const isMobile = useUIStore((state) => state.isMobile);
-    const showActivityHeaderTimestamps = useUIStore((state) => state.showActivityHeaderTimestamps);
 
     const summary = React.useMemo(() => getReasoningSummary(text), [text]);
     const { label, Icon } = variantConfig[variant];
     const timeStart = typeof time?.start === 'number' && Number.isFinite(time.start) ? time.start : undefined;
     const timeEnd = typeof time?.end === 'number' && Number.isFinite(time.end) ? time.end : undefined;
-    const endedTimestampText = React.useMemo(() => {
-        if (typeof timeEnd !== 'number') {
-            return null;
-        }
-
-        const formatted = formatTimestampForDisplay(timeEnd);
-        return formatted.length > 0 ? formatted : null;
-    }, [timeEnd]);
 
     React.useEffect(() => {
         if (text.trim().length === 0) {
@@ -158,38 +146,18 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
                     <span className="typography-meta font-medium">{label}</span>
                 </div>
 
-                {(summary || typeof timeStart === 'number' || endedTimestampText) ? (
+                {(summary || typeof timeStart === 'number') ? (
                     <div className="flex items-center gap-1 flex-1 min-w-0 typography-meta text-muted-foreground/70">
                         {summary ? <span className="flex-1 min-w-0 truncate italic">{summary}</span> : null}
                         {typeof timeStart === 'number' ? (
                             <span className="relative flex-shrink-0 tabular-nums text-right">
-                                <span
-                                        className={cn(
-                                            'text-muted-foreground/80 transition-opacity duration-150',
-                                            !isMobile && endedTimestampText && showActivityHeaderTimestamps && 'group-hover/tool:opacity-0'
-                                        )}
-                                    >
+                                <span className="text-muted-foreground/80 transition-opacity duration-150">
                                     <LiveDuration
                                         start={timeStart}
                                         end={timeEnd}
                                         active={typeof timeEnd !== 'number'}
                                     />
                                 </span>
-                                {!isMobile && endedTimestampText && showActivityHeaderTimestamps ? (
-                                    <span
-                                        className={cn(
-                                            'pointer-events-none absolute right-0 top-0 z-10 whitespace-nowrap rounded-sm bg-[var(--surface-background)] px-1 text-muted-foreground/70 transition-opacity duration-150',
-                                            'opacity-0 group-hover/tool:opacity-100'
-                                        )}
-                                    >
-                                        {endedTimestampText}
-                                    </span>
-                                ) : null}
-                            </span>
-                        ) : null}
-                        {typeof timeStart !== 'number' && !isMobile && endedTimestampText && showActivityHeaderTimestamps ? (
-                            <span className="text-muted-foreground/70 flex-shrink-0 tabular-nums">
-                                {endedTimestampText}
                             </span>
                         ) : null}
                     </div>
@@ -199,9 +167,7 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
             {isExpanded && (
                 <div
                     className={cn(
-                        'relative pr-2 pb-2 pt-2 pl-[1.4375rem]',
-                        'before:absolute before:left-[0.4375rem] before:w-px before:bg-border/80 before:content-[""]',
-                        'before:top-[-0.25rem] before:bottom-0'
+                        'relative pr-2 pb-2 pt-2 pl-4'
                     )}
                 >
                     <ScrollableOverlay

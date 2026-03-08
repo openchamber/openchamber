@@ -5,7 +5,6 @@ import type { Session, Message, Part } from "@opencode-ai/sdk/v2";
 import type { PermissionRequest, PermissionResponse } from "@/types/permission";
 import type { QuestionRequest } from "@/types/question";
 import type { SessionStore, AttachedFile, EditPermissionMode, SyntheticContextPart } from "./types/sessionTypes";
-import { getMessageLimit, getBackgroundTrimLimit } from "./types/sessionTypes";
 
 import { useSessionStore as useSessionManagementStore } from "./sessionStore";
 import { useMessageStore } from "./messageStore";
@@ -47,7 +46,6 @@ const normalizePath = (value?: string | null): string | null => {
 };
 
 const sessionChoiceAnalysisSignature = new Map<string, string>();
-const ENABLE_ACTIVE_SESSION_TRIM = false;
 
 const buildSessionChoiceAnalysisSignature = (messages: Array<{ info: Message; parts: Part[] }>): string => {
     const lastMessage = messages[messages.length - 1];
@@ -317,8 +315,6 @@ export const useSessionStore = create<SessionStore>()(
                             if (previousMessages.length > 0) {
                                 get().updateViewportAnchor(previousSessionId, previousMessages.length - 1);
                             }
-
-                            get().trimToViewportWindow(previousSessionId, getBackgroundTrimLimit());
                         }
                     }
 
@@ -337,10 +333,6 @@ export const useSessionStore = create<SessionStore>()(
                             await get().loadMessages(id);
                         }
 
-                        if (ENABLE_ACTIVE_SESSION_TRIM) {
-                            get().trimToViewportWindow(id, getMessageLimit());
-                        }
-
                         // Analyze session messages to extract agent/model/variant choices
                         // This ensures context is available even when ModelControls isn't mounted
                         const sessionMessages = get().messages.get(id);
@@ -349,7 +341,6 @@ export const useSessionStore = create<SessionStore>()(
                             if (agents.length > 0) {
                                 const analysisSignature = buildSessionChoiceAnalysisSignature(sessionMessages);
                                 if (sessionChoiceAnalysisSignature.get(id) === analysisSignature) {
-                                    get().evictLeastRecentlyUsed();
                                     return;
                                 }
                                 try {
@@ -366,7 +357,6 @@ export const useSessionStore = create<SessionStore>()(
                         }
                     }
 
-                    get().evictLeastRecentlyUsed();
                 },
                 loadMessages: (sessionId: string, limit?: number) => useMessageStore.getState().loadMessages(sessionId, limit),
                 sendMessage: async (content: string, providerID: string, modelID: string, agent?: string, attachments?: AttachedFile[], agentMentionName?: string, additionalParts?: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean }>, variant?: string, inputMode: 'normal' | 'shell' = 'normal') => {
@@ -589,19 +579,6 @@ export const useSessionStore = create<SessionStore>()(
                 clearAttachedFiles: () => useFileStore.getState().clearAttachedFiles(),
 
                 updateViewportAnchor: (sessionId: string, anchor: number) => useMessageStore.getState().updateViewportAnchor(sessionId, anchor),
-                trimToViewportWindow: (sessionId: string, targetSize?: number) => {
-                    const currentSessionId = useSessionManagementStore.getState().currentSessionId;
-                    // Skip trimming while session is working (busy/retry)
-                    const status = get().sessionStatus?.get(sessionId);
-                    if (status?.type === 'busy' || status?.type === 'retry') {
-                        return;
-                    }
-                    return useMessageStore.getState().trimToViewportWindow(sessionId, targetSize, currentSessionId || undefined);
-                },
-                evictLeastRecentlyUsed: () => {
-                    const currentSessionId = useSessionManagementStore.getState().currentSessionId;
-                    return useMessageStore.getState().evictLeastRecentlyUsed(currentSessionId || undefined);
-                },
                 loadMoreMessages: (sessionId: string, direction: "up" | "down") => useMessageStore.getState().loadMoreMessages(sessionId, direction),
 
                 saveSessionModelSelection: (sessionId: string, providerId: string, modelId: string) => useContextStore.getState().saveSessionModelSelection(sessionId, providerId, modelId),
