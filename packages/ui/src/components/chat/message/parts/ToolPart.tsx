@@ -39,6 +39,29 @@ import { MinDurationShineText } from './MinDurationShineText';
 
 type ToolStateWithMetadata = ToolStateUnion & { metadata?: Record<string, unknown>; input?: Record<string, unknown>; output?: string; error?: string; time?: { start: number; end?: number } };
 
+const ACTIVE_TOOL_STATUSES = new Set([
+    'pending',
+    'running',
+    'started',
+    'in_progress',
+    'in-progress',
+    'processing',
+    'executing',
+]);
+
+const FINAL_TOOL_STATUSES = new Set([
+    'completed',
+    'complete',
+    'error',
+    'failed',
+    'aborted',
+    'timeout',
+    'timed_out',
+    'timed-out',
+    'cancelled',
+    'canceled',
+]);
+
 interface ToolPartProps {
     part: ToolPartType;
     isExpanded: boolean;
@@ -911,6 +934,7 @@ const renderAnimatedPathWithIcon = (path: string, isMobile: boolean, animate = t
             <span className={cn('min-w-0 inline-flex items-center gap-1', grow && 'flex-1')} title={path}>
                 <FileTypeIcon filePath={path} className="h-3.5 w-3.5 flex-shrink-0" />
                 <Text
+                    key={animate ? `path-full-${path}` : undefined}
                     variant={animate ? 'generate-effect' : undefined}
                     className={cn('min-w-0 typography-meta', isMobile ? 'break-words' : 'truncate')}
                     style={{ color: 'var(--tools-title)' }}
@@ -929,6 +953,7 @@ const renderAnimatedPathWithIcon = (path: string, isMobile: boolean, animate = t
             <FileTypeIcon filePath={path} className="h-3.5 w-3.5 flex-shrink-0" />
             <span className={cn('min-w-0 inline-flex items-baseline overflow-hidden typography-meta', grow && 'flex-1')}>
                 <Text
+                    key={animate ? `path-dir-${dir}` : undefined}
                     variant={animate ? 'generate-effect' : undefined}
                     className="min-w-0 truncate typography-meta"
                     style={{ color: 'var(--tools-description)', direction: 'rtl', textAlign: 'left' }}
@@ -939,7 +964,12 @@ const renderAnimatedPathWithIcon = (path: string, isMobile: boolean, animate = t
                     <Text variant={animate ? 'generate-effect' : undefined} className="typography-meta" style={{ color: 'var(--tools-description)' }}>
                         /
                     </Text>
-                    <Text variant={animate ? 'generate-effect' : undefined} className="typography-meta" style={{ color: 'var(--tools-title)' }}>
+                    <Text
+                        key={animate ? `path-name-${name}` : undefined}
+                        variant={animate ? 'generate-effect' : undefined}
+                        className="typography-meta"
+                        style={{ color: 'var(--tools-title)' }}
+                    >
                         {name}
                     </Text>
                 </span>
@@ -1591,14 +1621,28 @@ const ToolPart: React.FC<ToolPartProps> = ({
 
     const isTaskTool = part.tool.toLowerCase() === 'task';
 
-    const status = state.status as string | undefined;
-    const isFinalized = status === 'completed' || status === 'error';
-    const isActive =
-        status === 'running' ||
-        status === 'pending' ||
-        status === 'started' ||
-        (typeof status !== 'string' && !isFinalized);
-    const isError = state.status === 'error';
+    const status = typeof state.status === 'string' ? state.status.toLowerCase() : undefined;
+    const isFinalized = status ? FINAL_TOOL_STATUSES.has(status) : false;
+    const isStatusActive = status ? ACTIVE_TOOL_STATUSES.has(status) : false;
+    const isUnknownNonFinal = typeof status !== 'string' && !isFinalized;
+    const isError = status === 'error' || status === 'failed';
+
+    const [activeLatched, setActiveLatched] = React.useState<boolean>(isStatusActive || isUnknownNonFinal);
+
+    React.useEffect(() => {
+        setActiveLatched(isStatusActive || isUnknownNonFinal);
+    }, [part.id, isStatusActive, isUnknownNonFinal]);
+
+    React.useEffect(() => {
+        if (isFinalized) {
+            return;
+        }
+        if (isStatusActive || isUnknownNonFinal) {
+            setActiveLatched(true);
+        }
+    }, [isFinalized, isStatusActive, isUnknownNonFinal]);
+
+    const isActive = !isFinalized && (isStatusActive || isUnknownNonFinal || activeLatched);
 
 
 
@@ -1960,13 +2004,23 @@ const ToolPart: React.FC<ToolPartProps> = ({
                         )}
                         {diffStats && (
                             <span className="flex-shrink-0 inline-flex items-center gap-0">
-                                <Text variant={animateTailText ? 'generate-effect' : undefined} className="typography-meta" style={{ color: 'var(--status-success)' }}>
+                                <Text
+                                    key={animateTailText ? `diff-added-${diffStats.added}` : undefined}
+                                    variant={animateTailText ? 'generate-effect' : undefined}
+                                    className="typography-meta"
+                                    style={{ color: 'var(--status-success)' }}
+                                >
                                     +{diffStats.added}
                                 </Text>
                                 <Text variant={animateTailText ? 'generate-effect' : undefined} className="typography-meta" style={{ color: 'var(--tools-description)' }}>
                                     /
                                 </Text>
-                                <Text variant={animateTailText ? 'generate-effect' : undefined} className="typography-meta" style={{ color: 'var(--status-error)' }}>
+                                <Text
+                                    key={animateTailText ? `diff-removed-${diffStats.removed}` : undefined}
+                                    variant={animateTailText ? 'generate-effect' : undefined}
+                                    className="typography-meta"
+                                    style={{ color: 'var(--status-error)' }}
+                                >
                                     -{diffStats.removed}
                                 </Text>
                             </span>

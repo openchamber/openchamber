@@ -23,7 +23,6 @@ import { filterVisibleParts } from './message/partUtils';
 import { normalizeUserDisplayParts } from './message/normalizeUserDisplayParts';
 import { flattenAssistantTextParts } from '@/lib/messages/messageText';
 import { isLikelyProviderAuthFailure, PROVIDER_AUTH_FAILURE_MESSAGE } from '@/lib/messages/providerAuthError';
-import { FadeInOnReveal } from './message/FadeInOnReveal';
 import type { TurnGroupingContext } from './lib/turns/types';
 import { copyTextToClipboard } from '@/lib/clipboard';
 
@@ -931,7 +930,6 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                 <div className="chat-message-column relative">
                     {isUser ? (
                         displayParts.length === 0 ? null : (
-                        <FadeInOnReveal>
                             <div className={cn('relative flex justify-end', !isMobile ? 'group/user-shell' : undefined)}>
                                 <div className="max-w-[85%]">
                                     <div style={{ backgroundColor: 'var(--chat-user-message-bg)' }} className="rounded-[var(--radius-xl)] rounded-br-[var(--radius-sm)] px-5 py-3 shadow-none border border-primary/5">
@@ -1001,7 +999,6 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                 </div>
                                 {showStickyInlineHoverRow ? <div aria-hidden="true" className="pointer-events-none absolute left-0 right-0 top-full h-11" /> : null}
                             </div>
-                        </FadeInOnReveal>
                         )
                     ) : (
                         <div className="relative">

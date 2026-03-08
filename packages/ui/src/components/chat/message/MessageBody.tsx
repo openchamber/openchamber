@@ -503,17 +503,17 @@ const UserMessageBody: React.FC<{
                 {userContentParts.map((part, index) => {
                     if (isSubtaskPart(part)) {
                         return (
-                            <FadeInOnReveal key={part.id ?? `user-subtask-${index}`}>
+                            <React.Fragment key={part.id ?? `user-subtask-${index}`}>
                                 <UserSubtaskPart part={part} />
-                            </FadeInOnReveal>
+                            </React.Fragment>
                         );
                     }
 
                     if (isShellActionPart(part)) {
                         return (
-                            <FadeInOnReveal key={part.id ?? `user-shell-${index}`}>
+                            <React.Fragment key={part.id ?? `user-shell-${index}`}>
                                 <UserShellActionPart part={part} />
-                            </FadeInOnReveal>
+                            </React.Fragment>
                         );
                     }
 
@@ -526,14 +526,14 @@ const UserMessageBody: React.FC<{
                         }
                     }
                     return (
-                        <FadeInOnReveal key={part.id ?? `user-text-${index}`}>
+                        <React.Fragment key={part.id ?? `user-text-${index}`}>
                             <UserTextPart
                                 part={part}
                                 messageId={messageId}
                                 isMobile={isMobile}
                                 agentMention={mentionForPart}
                             />
-                        </FadeInOnReveal>
+                        </React.Fragment>
                     );
                 })}
             </div>

@@ -186,10 +186,36 @@ const toDisplayFileName = (filePath: string): string => {
 const isActivityRunning = (activity: TurnActivityPart): boolean => {
     if (activity.kind !== 'tool') return false;
     const part = activity.part as ToolPartType;
-    const status = (part.state as { status?: unknown } | undefined)?.status;
-    if (status === 'running' || status === 'pending' || status === 'started') {
+    const rawStatus = (part.state as { status?: unknown } | undefined)?.status;
+    const status = typeof rawStatus === 'string' ? rawStatus.toLowerCase() : undefined;
+
+    if (
+        status === 'running' ||
+        status === 'pending' ||
+        status === 'started' ||
+        status === 'in_progress' ||
+        status === 'in-progress' ||
+        status === 'processing' ||
+        status === 'executing'
+    ) {
         return true;
     }
+
+    if (
+        status === 'completed' ||
+        status === 'complete' ||
+        status === 'error' ||
+        status === 'failed' ||
+        status === 'aborted' ||
+        status === 'timeout' ||
+        status === 'timed_out' ||
+        status === 'timed-out' ||
+        status === 'cancelled' ||
+        status === 'canceled'
+    ) {
+        return false;
+    }
+
     return typeof activity.endedAt !== 'number';
 };
 
@@ -434,88 +460,82 @@ const StaticToolRow: React.FC<{
     return (
         <div
             className={cn(
-                'flex items-center gap-2 pr-2 pl-px py-1 rounded-xl',
-                isMobile ? 'flex-wrap' : ''
+                'flex w-full flex-wrap items-center gap-x-2 gap-y-1 pr-2 pl-px py-1 rounded-xl'
             )}
         >
-            <div className="flex items-center gap-2 flex-shrink-0" style={{ color: 'var(--tools-icon)' }}>
+            <div className="inline-flex h-5 items-center flex-shrink-0" style={{ color: 'var(--tools-icon)' }}>
                 {icon}
-                <MinDurationShineText
-                    active={hasRunningActivity}
-                    minDurationMs={300}
-                    className="typography-meta font-medium"
-                    style={{ color: 'var(--tools-title)' }}
-                    title={displayName}
-                >
-                    {displayName}
-                </MinDurationShineText>
             </div>
-            {isReadGroup && readFileEntries.length > 0 ? (
-                <div className="flex items-center gap-2 flex-1 min-w-0 flex-wrap">
-                    {readFileEntries.map((entry) => (
-                        <span key={entry.path} className="inline-flex items-center gap-1 min-w-0 typography-meta" style={{ color: 'var(--tools-description)' }}>
-                            <FileTypeIcon filePath={entry.path} className="h-3.5 w-3.5" />
-                            <Text
-                                variant={animateTailText ? 'generate-effect' : undefined}
-                                className={cn('min-w-0 typography-meta', isMobile ? 'break-words' : 'truncate')}
-                                style={{ color: 'var(--tools-description)' }}
-                                title={entry.path}
-                            >
-                                {entry.name}
-                            </Text>
-                        </span>
-                    ))}
-                </div>
-            ) : isSearchGroup && descriptions.length > 0 ? (
-                <div className="flex items-center gap-1.5 flex-1 min-w-0 flex-wrap typography-meta" style={{ color: 'var(--tools-description)' }}>
-                    {descriptions.map((desc, index) => (
-                        <span key={`${desc}-${index}`} className="inline-flex min-w-0">
-                            <Text
-                                variant={animateTailText ? 'generate-effect' : undefined}
-                                className={cn('min-w-0 typography-meta', isMobile ? 'break-words' : 'truncate')}
-                                style={{ color: 'var(--tools-description)' }}
-                                title={desc}
-                            >
-                                "{desc}"
-                            </Text>
-                        </span>
-                    ))}
-                </div>
-            ) : isFetchGroup && descriptions.length > 0 ? (
-                <div className="flex items-center gap-2 flex-1 min-w-0 flex-wrap typography-meta" style={{ color: 'var(--tools-description)' }}>
-                    {descriptions.map((url, index) => (
-                        <a
-                            key={`${url}-${index}`}
-                            href={url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className={cn(
-                                'min-w-0 underline decoration-[color:var(--status-info)] underline-offset-2 hover:opacity-90',
-                                isMobile ? 'break-words' : 'truncate max-w-[20rem]'
-                            )}
-                            style={{ color: 'var(--status-info)' }}
-                            title={url}
+            <MinDurationShineText
+                active={hasRunningActivity}
+                minDurationMs={1000}
+                className="typography-meta font-medium inline-flex h-5 items-center flex-shrink-0 opacity-85"
+                style={{ color: 'var(--tools-title)' }}
+                title={displayName}
+            >
+                {displayName}
+            </MinDurationShineText>
+            {isReadGroup && readFileEntries.length > 0
+                ? readFileEntries.map((entry) => (
+                    <span key={entry.path} className="inline-flex items-center gap-1 min-w-0 typography-meta" style={{ color: 'var(--tools-description)' }}>
+                        <FileTypeIcon filePath={entry.path} className="h-3.5 w-3.5" />
+                        <Text
+                            variant={animateTailText ? 'generate-effect' : undefined}
+                            className={cn('min-w-0 typography-meta', isMobile ? 'break-words' : 'truncate')}
+                            style={{ color: 'var(--tools-description)' }}
+                            title={entry.path}
                         >
-                            <Text
-                                variant={animateTailText ? 'generate-effect' : undefined}
-                                className={cn('min-w-0 typography-meta', isMobile ? 'break-words' : 'truncate max-w-[20rem]')}
-                                style={{ color: 'var(--status-info)' }}
-                            >
-                                {url}
-                            </Text>
-                        </a>
-                    ))}
-                </div>
-            ) : descriptions.length > 0 ? (
-                <div className="flex items-center gap-1.5 flex-1 min-w-0 typography-meta" style={{ color: 'var(--tools-description)' }}>
-                    <Text
-                        variant={animateTailText ? 'generate-effect' : undefined}
-                        className={cn('min-w-0 typography-meta', isMobile ? 'break-words' : 'truncate')}
-                        style={{ color: 'var(--tools-description)' }}
+                            {entry.name}
+                        </Text>
+                    </span>
+                ))
+                : null}
+            {isSearchGroup && descriptions.length > 0
+                ? descriptions.map((desc, index) => (
+                    <span key={`${desc}-${index}`} className="inline-flex min-w-0">
+                        <Text
+                            variant={animateTailText ? 'generate-effect' : undefined}
+                            className={cn('min-w-0 typography-meta', isMobile ? 'break-words' : 'truncate')}
+                            style={{ color: 'var(--tools-description)' }}
+                            title={desc}
+                        >
+                            "{desc}"
+                        </Text>
+                    </span>
+                ))
+                : null}
+            {isFetchGroup && descriptions.length > 0
+                ? descriptions.map((url, index) => (
+                    <a
+                        key={`${url}-${index}`}
+                        href={url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={cn(
+                            'min-w-0 underline decoration-[color:var(--status-info)] underline-offset-2 hover:opacity-90',
+                            isMobile ? 'break-words' : 'truncate max-w-[20rem]'
+                        )}
+                        style={{ color: 'var(--status-info)' }}
+                        title={url}
                     >
-                        {descriptions.join(' ')}
-                    </Text>
-                </div>
+                        <Text
+                            variant={animateTailText ? 'generate-effect' : undefined}
+                            className={cn('min-w-0 typography-meta', isMobile ? 'break-words' : 'truncate max-w-[20rem]')}
+                            style={{ color: 'var(--status-info)' }}
+                        >
+                            {url}
+                        </Text>
+                    </a>
+                ))
+                : null}
+            {!isReadGroup && !isSearchGroup && !isFetchGroup && descriptions.length > 0 ? (
+                <Text
+                    variant={animateTailText ? 'generate-effect' : undefined}
+                    className={cn('min-w-0 typography-meta', isMobile ? 'break-words' : 'truncate')}
+                    style={{ color: 'var(--tools-description)' }}
+                >
+                    {descriptions.join(' ')}
+                </Text>
             ) : null}
         </div>
     );
@@ -700,31 +720,36 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
             <div className="my-1">
                 <button
                     type="button"
-                    className="group/tool flex w-full items-center gap-2 pr-2 pl-px pt-0 pb-1.5 rounded-xl text-left"
+                    className="group/tool flex w-full flex-wrap items-center gap-x-2 gap-y-0.5 pr-2 pl-px pt-0 pb-1.5 rounded-xl text-left"
                     onClick={onToggle}
                 >
-                    <RiStackLine className="h-3.5 w-3.5" style={{ color: 'var(--tools-icon)' }} />
-                    <span className="typography-meta font-medium" style={{ color: 'var(--tools-title)' }}>
+                    <span className="inline-flex h-5 items-center flex-shrink-0" style={{ color: 'var(--tools-icon)' }}>
+                        <RiStackLine className="h-3.5 w-3.5" />
+                    </span>
+                    <span className="typography-meta font-medium inline-flex h-5 items-center flex-shrink-0" style={{ color: 'var(--tools-title)' }}>
                         Activity
                     </span>
-                    <span className="min-w-0 flex-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 typography-meta text-muted-foreground/70">
-                        {hasToolMetric ? (
-                            <span className="flex-shrink-0">{toolCount} {toolCount === 1 ? 'tool' : 'tools'}</span>
-                        ) : null}
-                        {aggregatedFileDiffs.map((entry, index) => (
-                            <span key={`${entry.filePath}-${index}`} className="inline-flex min-w-0 items-center gap-1">
-                                <FileTypeIcon filePath={entry.filePath} className="h-3.5 w-3.5" />
-                                <span className="truncate max-w-[12rem]" style={{ color: 'var(--tools-title)' }} title={entry.filePath}>
-                                    {toDisplayFileName(entry.filePath)}
-                                </span>
-                                <span className="flex-shrink-0 inline-flex items-center gap-0">
-                                    <span style={{ color: 'var(--status-success)' }}>+{entry.added}</span>
-                                    <span style={{ color: 'var(--tools-description)' }}>/</span>
-                                    <span style={{ color: 'var(--status-error)' }}>-{entry.removed}</span>
-                                </span>
+                    {hasToolMetric ? (
+                        <span className="typography-meta text-muted-foreground/70 flex-shrink-0">
+                            {toolCount} {toolCount === 1 ? 'tool' : 'tools'}
+                        </span>
+                    ) : null}
+                    {aggregatedFileDiffs.map((entry, index) => (
+                        <span
+                            key={`${entry.filePath}-${index}`}
+                            className="inline-flex min-w-0 items-center gap-1 typography-meta text-muted-foreground/70"
+                        >
+                            <FileTypeIcon filePath={entry.filePath} className="h-3.5 w-3.5" />
+                            <span className="truncate max-w-[12rem]" style={{ color: 'var(--tools-title)' }} title={entry.filePath}>
+                                {toDisplayFileName(entry.filePath)}
                             </span>
-                        ))}
-                    </span>
+                            <span className="flex-shrink-0 inline-flex items-center gap-0">
+                                <span style={{ color: 'var(--status-success)' }}>+{entry.added}</span>
+                                <span style={{ color: 'var(--tools-description)' }}>/</span>
+                                <span style={{ color: 'var(--status-error)' }}>-{entry.removed}</span>
+                            </span>
+                        </span>
+                    ))}
                 </button>
                 {isExpanded ? renderedRows : null}
             </div>

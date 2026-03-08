@@ -238,10 +238,39 @@ const getPartKey = (part: Part | undefined): string | undefined => {
     }
     if (part.type) {
         const reason = (part as Record<string, unknown>).reason;
-        const callId = (part as Record<string, unknown>).callID;
-        return `${part.type}-${reason ?? ""}-${callId ?? ""}`;
+        const toolName = typeof (part as Record<string, unknown>).tool === "string"
+            ? ((part as Record<string, unknown>).tool as string)
+            : "";
+        const directCallId = (part as Record<string, unknown>).callID;
+        const nestedTool = (part as Record<string, unknown>).tool;
+        const nestedCallId =
+            nestedTool && typeof nestedTool === "object"
+                ? (nestedTool as Record<string, unknown>).callID
+                : undefined;
+        const callId = directCallId ?? nestedCallId;
+        return `${part.type}-${toolName}-${reason ?? ""}-${callId ?? ""}`;
     }
     return undefined;
+};
+
+const findMatchingPartIndex = (parts: Part[], incoming: Part): number => {
+    if (!Array.isArray(parts) || parts.length === 0) {
+        return -1;
+    }
+
+    if (typeof incoming.id === "string" && incoming.id.length > 0) {
+        const byId = parts.findIndex((part) => part?.id === incoming.id);
+        if (byId !== -1) {
+            return byId;
+        }
+    }
+
+    const incomingKey = getPartKey(incoming);
+    if (!incomingKey) {
+        return -1;
+    }
+
+    return parts.findIndex((part) => getPartKey(part) === incomingKey);
 };
 
 const ignoredAssistantMessageIds = new Set<string>();
@@ -1057,7 +1086,15 @@ export const useMessageStore = create<MessageStore>()(
                                     if (part.type === 'tool') {
                                         const toolPart = part as any;
                                         const stateData = { ...(toolPart.state ?? {}) };
-                                        if (stateData.status === 'running' || stateData.status === 'pending') {
+                                        if (
+                                            stateData.status === 'running' ||
+                                            stateData.status === 'pending' ||
+                                            stateData.status === 'started' ||
+                                            stateData.status === 'in_progress' ||
+                                            stateData.status === 'in-progress' ||
+                                            stateData.status === 'processing' ||
+                                            stateData.status === 'executing'
+                                        ) {
                                             stateData.status = 'aborted';
                                         }
                                         return {
@@ -1479,10 +1516,19 @@ export const useMessageStore = create<MessageStore>()(
 
                             const pendingEntry = state.pendingAssistantParts.get(messageId);
                             const pendingParts = pendingEntry ? [...pendingEntry.parts] : [];
-                            const pendingIndex = pendingParts.findIndex((existing) => existing.id === normalizedPart.id);
+                            const pendingIndex = findMatchingPartIndex(pendingParts, normalizedPart);
 
                             if (pendingIndex !== -1) {
-                                pendingParts[pendingIndex] = normalizedPart;
+                                const existingPendingPart = pendingParts[pendingIndex];
+                                const normalizedRecord = normalizedPart as Record<string, unknown>;
+                                if (
+                                    normalizedRecord.type === 'tool' &&
+                                    typeof existingPendingPart?.id === 'string' &&
+                                    existingPendingPart.id.length > 0
+                                ) {
+                                    normalizedRecord.id = existingPendingPart.id;
+                                }
+                                pendingParts[pendingIndex] = normalizedRecord as Part;
                             } else {
                                 pendingParts.push(normalizedPart);
                             }
@@ -1563,12 +1609,20 @@ export const useMessageStore = create<MessageStore>()(
                         } else {
 
                             const existingMessage = messagesArray[messageIndex];
-                            const existingPartIndex = existingMessage.parts.findIndex((p) => p.id === part.id);
+                            const existingPartIndex = findMatchingPartIndex(existingMessage.parts, part);
+                            const existingPart = existingPartIndex !== -1 ? existingMessage.parts[existingPartIndex] : undefined;
 
                             const normalizedPart = normalizeStreamingPart(
                                 part,
-                                existingPartIndex !== -1 ? existingMessage.parts[existingPartIndex] : undefined
+                                existingPart
                             );
+                            if (
+                                (normalizedPart as Record<string, unknown>).type === 'tool' &&
+                                typeof existingPart?.id === 'string' &&
+                                existingPart.id.length > 0
+                            ) {
+                                (normalizedPart as Record<string, unknown>).id = existingPart.id;
+                            }
                             (window as any).__messageTracker?.(messageId, `part_type:${(normalizedPart as any).type || 'unknown'}`);
 
                             const updatedMessage = { ...existingMessage };
@@ -1689,7 +1743,14 @@ export const useMessageStore = create<MessageStore>()(
                                 }
 
                                 const status = existingState.status;
-                                const needsStatusUpdate = status === "running" || status === "pending" || status === "started";
+                                const needsStatusUpdate =
+                                    status === "running" ||
+                                    status === "pending" ||
+                                    status === "started" ||
+                                    status === "in_progress" ||
+                                    status === "in-progress" ||
+                                    status === "processing" ||
+                                    status === "executing";
                                 const needsEndTimestamp = !existingState.time || typeof existingState.time?.end !== "number";
 
                                 if (needsStatusUpdate || needsEndTimestamp) {
