@@ -19,7 +19,6 @@ import { getSafeStorage } from "./utils/safeStorage";
 import { useFileStore } from "./fileStore";
 import { useSessionStore } from "./sessionStore";
 import { useContextStore } from "./contextStore";
-import { getToolLifecycleState } from "@/lib/toolStatus";
 
 // Helper function to clean up pending user message metadata
 const cleanupPendingUserMessageMeta = (

@@ -1936,7 +1936,10 @@ const ToolPart: React.FC<ToolPartProps> = ({
                 if (childPart?.type !== 'tool') {
                     continue;
                 }
-                const childStatus = (childPart as any)?.state?.status;
+                const childStatus =
+                    typeof childPart === 'object' && childPart !== null && 'state' in childPart
+                        ? (childPart.state as { status?: string } | undefined)?.status
+                        : undefined;
                 if (childStatus === 'running' || childStatus === 'pending' || childStatus === 'started') {
                     return true;
                 }

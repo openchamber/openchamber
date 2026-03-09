@@ -449,6 +449,7 @@ export const StaticToolRow: React.FC<{
             {isFetchGroup && descriptions.length > 0
                 ? descriptions.map((url, index) => (
                     <a
+                        key={`${url}-${index}`}
                         href={url}
                         target="_blank"
                         rel="noopener noreferrer"

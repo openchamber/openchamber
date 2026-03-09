@@ -34,7 +34,6 @@ const IDLE_SESSION_STATUS = { type: 'idle' as const };
 export const ChatContainer: React.FC = () => {
     const {
         currentSessionId,
-        isLoading,
         loadMessages,
         loadMoreMessages,
         updateViewportAnchor,
@@ -44,7 +43,6 @@ export const ChatContainer: React.FC = () => {
     } = useSessionStore(
         useShallow((state) => ({
             currentSessionId: state.currentSessionId,
-            isLoading: state.isLoading,
             loadMessages: state.loadMessages,
             loadMoreMessages: state.loadMoreMessages,
             updateViewportAnchor: state.updateViewportAnchor,
@@ -260,6 +258,10 @@ export const ChatContainer: React.FC = () => {
         return Boolean(historyMeta);
     }, [historyMeta]);
 
+    const isSessionHydrating =
+        Boolean(currentSessionId)
+        && (!hasSessionMessagesEntry || !hasHistoryMetadata || historyMeta?.loading === true);
+
     React.useEffect(() => {
         if (!currentSessionId) {
             return;
@@ -332,32 +334,29 @@ export const ChatContainer: React.FC = () => {
         return null;
     }
 
-    if (isLoading && sessionMessages.length === 0 && !streamingMessageId) {
-        const hasMessagesEntry = hasSessionMessagesEntry;
-        if (!hasMessagesEntry) {
-            return (
-                <div
-                    className="relative flex flex-col h-full bg-background gap-0"
-                    style={isMobile ? { paddingBottom: 'var(--oc-keyboard-inset, 0px)' } : undefined}
-                >
-                    {returnToParentButton}
-                    <div className="flex-1 overflow-y-auto p-4 bg-background">
-                        <div className="chat-message-column space-y-4">
-                            {[1, 2, 3].map((i) => (
-                                <div key={i} className="flex gap-3 p-4">
-                                    <Skeleton className="h-8 w-8 rounded-full" />
-                                    <div className="flex-1 space-y-2">
-                                        <Skeleton className="h-4 w-24" />
-                                        <Skeleton className="h-20 w-full" />
-                                    </div>
+    if (isSessionHydrating && sessionMessages.length === 0 && !streamingMessageId) {
+        return (
+            <div
+                className="relative flex flex-col h-full bg-background gap-0"
+                style={isMobile ? { paddingBottom: 'var(--oc-keyboard-inset, 0px)' } : undefined}
+            >
+                {returnToParentButton}
+                <div className="flex-1 overflow-y-auto p-4 bg-background">
+                    <div className="chat-message-column space-y-4">
+                        {[1, 2, 3].map((i) => (
+                            <div key={i} className="flex gap-3 p-4">
+                                <Skeleton className="h-8 w-8 rounded-full" />
+                                <div className="flex-1 space-y-2">
+                                    <Skeleton className="h-4 w-24" />
+                                    <Skeleton className="h-20 w-full" />
                                 </div>
-                            ))}
-                        </div>
+                            </div>
+                        ))}
                     </div>
-                    <ChatInput scrollToBottom={scrollToBottom} />
                 </div>
-            );
-        }
+                <ChatInput scrollToBottom={scrollToBottom} />
+            </div>
+        );
     }
 
     if (sessionMessages.length === 0 && !streamingMessageId) {
