@@ -3,7 +3,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { startCloudflareManagedLocalTunnel } from './cloudflare-tunnel.js';
+import { startCloudflareManagedLocalTunnel, startCloudflareManagedRemoteTunnel } from './cloudflare-tunnel.js';
 
 const originalPath = process.env.PATH || '';
 const activeControllers = [];
@@ -45,6 +45,57 @@ afterEach(() => {
     controller?.stop?.();
   }
   process.env.PATH = originalPath;
+});
+
+describe('managed remote cloudflare tunnel token-file', () => {
+  it('uses --token-file instead of --token in process args', async () => {
+    const cleanupBinary = createFakeCloudflaredBinary();
+    try {
+      const controller = await startCloudflareManagedRemoteTunnel({
+        token: 'test-secret-token',
+        hostname: 'remote.example.com',
+      });
+      activeControllers.push(controller);
+
+      // Verify the token is not visible in the spawned process args
+      const spawnArgs = controller.process?.spawnargs || [];
+      const hasTokenFlag = spawnArgs.includes('--token');
+      const hasTokenValue = spawnArgs.includes('test-secret-token');
+      const hasTokenFileFlag = spawnArgs.includes('--token-file');
+      expect(hasTokenFlag).toBe(false);
+      expect(hasTokenValue).toBe(false);
+      expect(hasTokenFileFlag).toBe(true);
+
+      expect(controller.getPublicUrl()).toBe('https://remote.example.com');
+    } finally {
+      cleanupBinary();
+    }
+  });
+
+  it('accepts explicit tokenFilePath', async () => {
+    const cleanupBinary = createFakeCloudflaredBinary();
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-cf-tokenfile-'));
+    try {
+      const tokenPath = path.join(tempDir, 'token');
+      fs.writeFileSync(tokenPath, 'my-file-token', { encoding: 'utf8', mode: 0o600 });
+
+      const controller = await startCloudflareManagedRemoteTunnel({
+        token: 'my-file-token',
+        hostname: 'tokenfile.example.com',
+        tokenFilePath: tokenPath,
+      });
+      activeControllers.push(controller);
+
+      const spawnArgs = controller.process?.spawnargs || [];
+      expect(spawnArgs.includes('--token')).toBe(false);
+      expect(spawnArgs.includes('my-file-token')).toBe(false);
+      expect(spawnArgs.includes('--token-file')).toBe(true);
+      expect(spawnArgs.includes(tokenPath)).toBe(true);
+    } finally {
+      cleanupBinary();
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('managed local cloudflare tunnel startup', () => {

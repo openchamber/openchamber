@@ -22,6 +22,7 @@
     "start": "node bin/cli.js serve"
   },
   "dependencies": {
+    "@clack/prompts": "^1.1.0",
     "@codemirror/lang-cpp": "^6.0.3",
     "@codemirror/lang-go": "^6.0.1",
     "@fontsource/ibm-plex-mono": "^5.2.7",

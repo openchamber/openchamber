@@ -8021,10 +8021,16 @@ async function main(options = {}) {
         || ((runtimeManagedRemoteTunnelHostname && hostname && runtimeManagedRemoteTunnelHostname === hostname) ? runtimeManagedRemoteTunnelToken : '')
         || configManagedRemoteToken
         || storedManagedRemoteToken;
-      const bootstrapTtlMs = settings?.tunnelBootstrapTtlMs === null
+      const requestConnectTtlMs = typeof _req?.body?.connectTtlMs === 'number' && Number.isFinite(_req.body.connectTtlMs)
+        ? normalizeTunnelBootstrapTtlMs(_req.body.connectTtlMs)
+        : undefined;
+      const requestSessionTtlMs = typeof _req?.body?.sessionTtlMs === 'number' && Number.isFinite(_req.body.sessionTtlMs)
+        ? normalizeTunnelSessionTtlMs(_req.body.sessionTtlMs)
+        : undefined;
+      const bootstrapTtlMs = requestConnectTtlMs ?? (settings?.tunnelBootstrapTtlMs === null
         ? null
-        : normalizeTunnelBootstrapTtlMs(settings?.tunnelBootstrapTtlMs);
-      const sessionTtlMs = normalizeTunnelSessionTtlMs(settings?.tunnelSessionTtlMs);
+        : normalizeTunnelBootstrapTtlMs(settings?.tunnelBootstrapTtlMs));
+      const sessionTtlMs = requestSessionTtlMs ?? normalizeTunnelSessionTtlMs(settings?.tunnelSessionTtlMs);
 
       const { publicUrl, provider: activeProvider, providerMetadata } = await startTunnelWithNormalizedRequest({
         provider,

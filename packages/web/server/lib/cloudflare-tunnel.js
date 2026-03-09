@@ -124,6 +124,43 @@ const normalizeHostname = (value) => {
   }
 };
 
+export function normalizeCloudflareTunnelHostname(value) {
+  return normalizeHostname(value);
+}
+
+export async function checkCloudflareApiReachability({ fetchImpl = globalThis.fetch, timeoutMs = 5000 } = {}) {
+  if (typeof fetchImpl !== 'function') {
+    return {
+      reachable: false,
+      status: null,
+      error: 'Fetch API is unavailable in this runtime.',
+    };
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetchImpl('https://api.trycloudflare.com/', {
+      method: 'GET',
+      signal: controller.signal,
+    });
+    return {
+      reachable: true,
+      status: response.status,
+      error: null,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      reachable: false,
+      status: null,
+      error: message,
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 const READY_LOG_PATTERNS = [
   /registered tunnel connection/i,
   /connection[^\n]*registered/i,
@@ -214,6 +251,53 @@ const extractHostnameFromCloudflaredConfig = (configPath) => {
 };
 
 const getDefaultCloudflaredConfigPath = () => path.join(os.homedir(), '.cloudflared', 'config.yml');
+
+export function inspectManagedLocalCloudflareConfig({ configPath, hostname } = {}) {
+  const requestedPath = typeof configPath === 'string' ? configPath.trim() : '';
+  const effectiveConfigPath = requestedPath || getDefaultCloudflaredConfigPath();
+
+  try {
+    if (requestedPath) {
+      assertReadableFile(effectiveConfigPath, 'Managed local tunnel config');
+    } else {
+      assertReadableFile(effectiveConfigPath, 'Managed local tunnel default config');
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      effectiveConfigPath,
+      resolvedHostname: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+
+  const configHostnameResult = extractHostnameFromCloudflaredConfigDetailed(effectiveConfigPath);
+  if (configHostnameResult.parseError) {
+    return {
+      ok: false,
+      effectiveConfigPath,
+      resolvedHostname: null,
+      error: configHostnameResult.parseError.message,
+    };
+  }
+
+  const resolvedHostname = normalizeHostname(hostname) || configHostnameResult.hostname;
+  if (!resolvedHostname) {
+    return {
+      ok: false,
+      effectiveConfigPath,
+      resolvedHostname: null,
+      error: 'Managed local tunnel hostname is required (set --hostname or include ingress hostname in config).',
+    };
+  }
+
+  return {
+    ok: true,
+    effectiveConfigPath,
+    resolvedHostname,
+    error: null,
+  };
+}
 
 async function waitForManagedTunnelReady(child, { modeLabel }) {
   await new Promise((resolve, reject) => {
@@ -367,7 +451,7 @@ export async function startCloudflareQuickTunnel({ originUrl }) {
   };
 }
 
-export async function startCloudflareManagedRemoteTunnel({ token, hostname }) {
+export async function startCloudflareManagedRemoteTunnel({ token, hostname, tokenFilePath }) {
   const cfCheck = await checkCloudflaredAvailable();
 
   if (!cfCheck.available) {
@@ -385,7 +469,17 @@ export async function startCloudflareManagedRemoteTunnel({ token, hostname }) {
     throw new Error('Managed remote tunnel hostname is required');
   }
 
-  const child = spawnCloudflared(['tunnel', 'run', '--token', normalizedToken]);
+  let effectiveTokenFilePath = typeof tokenFilePath === 'string' ? tokenFilePath : null;
+  let tempTokenFile = null;
+
+  if (!effectiveTokenFilePath) {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-cf-token-'));
+    effectiveTokenFilePath = path.join(tempDir, 'token');
+    fs.writeFileSync(effectiveTokenFilePath, normalizedToken, { encoding: 'utf8', mode: 0o600 });
+    tempTokenFile = { dir: tempDir, path: effectiveTokenFilePath };
+  }
+
+  const child = spawnCloudflared(['tunnel', 'run', '--token-file', effectiveTokenFilePath]);
   const publicUrl = `https://${normalizedHost}`;
 
   child.stdout.on('data', () => {
@@ -397,8 +491,25 @@ export async function startCloudflareManagedRemoteTunnel({ token, hostname }) {
     process.stderr.write(text);
   });
 
+  const cleanupTempTokenFile = () => {
+    if (tempTokenFile) {
+      try {
+        if (fs.existsSync(tempTokenFile.dir)) {
+          fs.rmSync(tempTokenFile.dir, { recursive: true, force: true });
+        }
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
+  };
+
   child.on('error', (error) => {
     console.error(`Cloudflared error: ${error.message}`);
+    cleanupTempTokenFile();
+  });
+
+  child.on('exit', () => {
+    cleanupTempTokenFile();
   });
 
   await waitForManagedTunnelReady(child, { modeLabel: 'managed-remote tunnel' });
@@ -411,6 +522,7 @@ export async function startCloudflareManagedRemoteTunnel({ token, hostname }) {
       } catch {
         // Ignore
       }
+      cleanupTempTokenFile();
     },
     process: child,
     getPublicUrl: () => publicUrl,

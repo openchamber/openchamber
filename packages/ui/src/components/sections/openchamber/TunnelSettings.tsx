@@ -389,33 +389,21 @@ export const TunnelSettings: React.FC = () => {
         ? settingsData.managedLocalTunnelConfigPath.trim() || null
         : null;
 
+      const loadedPresetsFromStatus = sanitizePresets(statusData?.managedRemoteTunnelPresets);
       const loadedHostname = typeof statusData.managedRemoteTunnelHostname === 'string'
         ? statusData.managedRemoteTunnelHostname
-        : typeof settingsData?.managedRemoteTunnelHostname === 'string'
-          ? settingsData.managedRemoteTunnelHostname
-          : '';
-
-      const loadedPresetsFromSettings = sanitizePresets(settingsData?.managedRemoteTunnelPresets);
-      const loadedPresetsFromStatus = sanitizePresets(statusData?.managedRemoteTunnelPresets);
-      const presets = loadedPresetsFromSettings.length > 0
-        ? loadedPresetsFromSettings
-        : loadedPresetsFromStatus.length > 0
-          ? loadedPresetsFromStatus
-          : (loadedHostname
-            ? [{
-              id: `legacy-${normalizePresetHostname(loadedHostname)}`,
-              name: loadedHostname,
-              hostname: normalizePresetHostname(loadedHostname),
-            }]
-            : []);
-
-      const requestedPresetId = typeof settingsData?.managedRemoteTunnelSelectedPresetId === 'string'
-        ? settingsData.managedRemoteTunnelSelectedPresetId.trim()
         : '';
+      const presets = loadedPresetsFromStatus.length > 0
+        ? loadedPresetsFromStatus
+        : (loadedHostname
+          ? [{
+            id: `legacy-${normalizePresetHostname(loadedHostname)}`,
+            name: loadedHostname,
+            hostname: normalizePresetHostname(loadedHostname),
+          }]
+          : []);
 
-      const selectedId = (requestedPresetId && presets.some((preset) => preset.id === requestedPresetId))
-        ? requestedPresetId
-        : presets[0]?.id || '';
+      const selectedId = presets[0]?.id || '';
 
       setBootstrapTtlMs(loadedBootstrapTtl);
       setSessionTtlMs(loadedSessionTtl);
@@ -548,9 +536,7 @@ export const TunnelSettings: React.FC = () => {
     tunnelProvider?: string;
     tunnelMode?: TunnelMode;
     managedLocalTunnelConfigPath?: string | null;
-    managedRemoteTunnelHostname?: string;
     managedRemoteTunnelPresets?: ManagedRemoteTunnelPreset[];
-    managedRemoteTunnelSelectedPresetId?: string;
     managedRemoteTunnelPresetTokens?: Record<string, string>;
     tunnelBootstrapTtlMs?: number | null;
     tunnelSessionTtlMs?: number;
@@ -569,9 +555,6 @@ export const TunnelSettings: React.FC = () => {
       }
       if (Object.prototype.hasOwnProperty.call(payload, 'managedRemoteTunnelPresets') && payload.managedRemoteTunnelPresets) {
         setManagedRemoteTunnelPresets(payload.managedRemoteTunnelPresets);
-      }
-      if (Object.prototype.hasOwnProperty.call(payload, 'managedRemoteTunnelSelectedPresetId')) {
-        setSelectedPresetId(payload.managedRemoteTunnelSelectedPresetId || '');
       }
     } catch {
       toast.error('Failed to save tunnel settings');
@@ -715,9 +698,7 @@ export const TunnelSettings: React.FC = () => {
 
         await saveTunnelSettings({
           tunnelMode: 'managed-remote',
-          managedRemoteTunnelHostname,
           managedRemoteTunnelPresets,
-          managedRemoteTunnelSelectedPresetId: selectedPreset.id,
         });
       }
 
@@ -852,20 +833,15 @@ export const TunnelSettings: React.FC = () => {
       setState('idle');
     }
 
-    const nextHostname = value === 'managed-remote' && selectedPreset ? selectedPreset.hostname : undefined;
     await saveTunnelSettings({
       tunnelMode: value,
-      ...(nextHostname ? { managedRemoteTunnelHostname: nextHostname } : {}),
       managedRemoteTunnelPresets,
-      managedRemoteTunnelSelectedPresetId: selectedPresetId || undefined,
     });
-  }, [managedRemoteTunnelPresets, saveTunnelSettings, selectedPreset, selectedPresetId, state]);
+  }, [managedRemoteTunnelPresets, saveTunnelSettings, state]);
 
   const persistSelectedPreset = React.useCallback(async (preset: ManagedRemoteTunnelPreset, presets: ManagedRemoteTunnelPreset[]) => {
     try {
       await updateDesktopSettings({
-        managedRemoteTunnelSelectedPresetId: preset.id,
-        managedRemoteTunnelHostname: preset.hostname,
         managedRemoteTunnelPresets: presets,
       });
     } catch {
@@ -926,9 +902,7 @@ export const TunnelSettings: React.FC = () => {
 
     await saveTunnelSettings({
       tunnelMode: 'managed-remote',
-      managedRemoteTunnelHostname: nextPreset.hostname,
       managedRemoteTunnelPresets: nextPresets,
-      managedRemoteTunnelSelectedPresetId: nextPreset.id,
       managedRemoteTunnelPresetTokens: {
         ...sessionTokensByPresetId,
         [nextPreset.id]: token,
@@ -952,8 +926,6 @@ export const TunnelSettings: React.FC = () => {
     const nextPresets = managedRemoteTunnelPresets.filter((entry) => entry.id !== preset.id);
     const fallbackSelectedId = nextPresets[0]?.id || '';
     const nextSelectedId = selectedPresetId === preset.id ? fallbackSelectedId : selectedPresetId;
-    const nextSelectedPreset = nextPresets.find((entry) => entry.id === nextSelectedId) || null;
-    const nextHostname = nextSelectedPreset?.hostname;
     const nextTokenMap = Object.fromEntries(
       Object.entries(sessionTokensByPresetId)
         .filter(([id, tokenValue]) => id !== preset.id && tokenValue.trim().length > 0)
@@ -980,8 +952,6 @@ export const TunnelSettings: React.FC = () => {
 
     await saveTunnelSettings({
       managedRemoteTunnelPresets: nextPresets,
-      managedRemoteTunnelSelectedPresetId: nextSelectedId || undefined,
-      managedRemoteTunnelHostname: nextHostname,
       managedRemoteTunnelPresetTokens: nextTokenMap,
     });
 
