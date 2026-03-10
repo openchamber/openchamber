@@ -1247,7 +1247,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                 </div>
 
                 {/* Bottom spacer */}
-                <div className="flex-shrink-0" style={{ height: isMobile ? '8px' : '10vh' }} aria-hidden="true" />
+                <div className="flex-shrink-0" style={{ height: isMobile ? '40px' : '10vh' }} aria-hidden="true" />
         </div>
     );
 });
