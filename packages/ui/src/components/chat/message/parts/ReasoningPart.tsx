@@ -5,6 +5,7 @@ import { RiArrowDownSLine, RiArrowRightSLine, RiBrainAi3Line, RiChatAi3Line } fr
 import { cn } from '@/lib/utils';
 import type { ContentChangeReason } from '@/hooks/useChatScrollManager';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { useUIStore } from '@/stores/useUIStore';
 
 type PartWithText = Part & { text?: string; content?: string; time?: { start?: number; end?: number } };
 
@@ -87,6 +88,7 @@ type ReasoningTimelineBlockProps = {
     onContentChange?: (reason?: ContentChangeReason) => void;
     blockId: string;
     time?: { start?: number; end?: number };
+    showDuration?: boolean;
 };
 
 export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
@@ -95,6 +97,7 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
     onContentChange,
     blockId,
     time,
+    showDuration = true,
 }) => {
     const [isExpanded, setIsExpanded] = React.useState(false);
 
@@ -146,10 +149,10 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
                     <span className="typography-meta font-medium">{label}</span>
                 </div>
 
-                {(summary || typeof timeStart === 'number') ? (
+                {(summary || (showDuration && typeof timeStart === 'number')) ? (
                     <div className="flex items-center gap-1 flex-1 min-w-0 typography-meta text-muted-foreground/70">
                         {summary ? <span className="flex-1 min-w-0 truncate italic">{summary}</span> : null}
-                        {typeof timeStart === 'number' ? (
+                        {showDuration && typeof timeStart === 'number' ? (
                             <span className="relative flex-shrink-0 tabular-nums text-right">
                                 <span className="text-muted-foreground/80 transition-opacity duration-150">
                                     <LiveDuration
@@ -194,6 +197,7 @@ const ReasoningPart: React.FC<ReasoningPartProps> = ({
     onContentChange,
     messageId,
 }) => {
+    const chatRenderMode = useUIStore((state) => state.chatRenderMode);
     const partWithText = part as PartWithText;
     const rawText = partWithText.text || partWithText.content || '';
     const textContent = React.useMemo(() => cleanReasoningText(rawText), [rawText]);
@@ -212,6 +216,7 @@ const ReasoningPart: React.FC<ReasoningPartProps> = ({
             onContentChange={onContentChange}
             blockId={part.id || `${messageId}-reasoning`}
             time={time}
+            showDuration={chatRenderMode !== 'sorted'}
         />
     );
 };

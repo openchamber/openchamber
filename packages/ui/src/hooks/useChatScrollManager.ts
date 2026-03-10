@@ -40,6 +40,7 @@ interface UseChatScrollManagerOptions {
     updateViewportAnchor: (sessionId: string, anchor: number) => void;
     isSyncing: boolean;
     isMobile: boolean;
+    chatRenderMode?: 'sorted' | 'live';
     messageStreamStates: Map<string, unknown>;
     onActiveTurnChange?: (turnId: string | null) => void;
 }
@@ -72,6 +73,7 @@ const DIRECT_SCROLL_INTENT_WINDOW_MS = 250;
 const PIN_THRESHOLD_RATIO = 0.10;
 const REPIN_BLOCK_AFTER_RELEASE_MS = 4000;
 const STRICT_REPIN_DISTANCE_PX = 160;
+const SORTED_PIN_THRESHOLD_PX = 24;
 
 export const useChatScrollManager = ({
     currentSessionId,
@@ -80,6 +82,7 @@ export const useChatScrollManager = ({
     updateViewportAnchor,
     isSyncing,
     isMobile,
+    chatRenderMode = 'live',
     onActiveTurnChange,
 }: UseChatScrollManagerOptions): UseChatScrollManagerResult => {
     const scrollRef = React.useRef<HTMLDivElement | null>(null);
@@ -93,6 +96,13 @@ export const useChatScrollManager = ({
         const raw = container.clientHeight * PIN_THRESHOLD_RATIO;
         return Math.max(24, Math.min(200, raw));
     }, []);
+
+    const getAutoFollowThreshold = React.useCallback(() => {
+        if (chatRenderMode === 'sorted') {
+            return SORTED_PIN_THRESHOLD_PX;
+        }
+        return getPinThreshold();
+    }, [chatRenderMode, getPinThreshold]);
 
     const [showScrollButton, setShowScrollButton] = React.useState(false);
     const [isPinned, setIsPinned] = React.useState(true);
@@ -145,8 +155,13 @@ export const useChatScrollManager = ({
             return;
         }
 
+        if (chatRenderMode === 'sorted') {
+            scrollToBottomInternal({ followBottom: true });
+            return;
+        }
+
         scrollToBottomInternal({ instant: true });
-    }, [scrollToBottomInternal, streamingMessageId]);
+    }, [chatRenderMode, scrollToBottomInternal, streamingMessageId]);
 
     const updateScrollButtonVisibility = React.useCallback(() => {
         const container = scrollRef.current;
@@ -379,10 +394,10 @@ export const useChatScrollManager = ({
 
         // When pinned and content grows, follow bottom with fast smooth scroll
         const distanceFromBottom = getDistanceFromBottom();
-        if (distanceFromBottom > getPinThreshold()) {
+        if (distanceFromBottom > getAutoFollowThreshold()) {
             scrollPinnedToBottom();
         }
-    }, [getDistanceFromBottom, getPinThreshold, isSyncing, scrollPinnedToBottom, sessionMessages]);
+    }, [getAutoFollowThreshold, getDistanceFromBottom, isSyncing, scrollPinnedToBottom, sessionMessages]);
 
     // Use ResizeObserver to detect content changes and maintain pin
     React.useEffect(() => {
@@ -395,7 +410,7 @@ export const useChatScrollManager = ({
             // Maintain pin when content grows - fast smooth follow
             if (isPinnedRef.current && Date.now() >= repinBlockedUntilRef.current) {
                 const distanceFromBottom = getDistanceFromBottom();
-                if (distanceFromBottom > getPinThreshold()) {
+                if (distanceFromBottom > getAutoFollowThreshold()) {
                     scrollPinnedToBottom();
                 }
             }
@@ -407,7 +422,7 @@ export const useChatScrollManager = ({
         const childObserver = new MutationObserver(() => {
             if (isPinnedRef.current && Date.now() >= repinBlockedUntilRef.current) {
                 const distanceFromBottom = getDistanceFromBottom();
-                if (distanceFromBottom > getPinThreshold()) {
+                if (distanceFromBottom > getAutoFollowThreshold()) {
                     scrollPinnedToBottom();
                 }
             }
@@ -419,7 +434,7 @@ export const useChatScrollManager = ({
             observer.disconnect();
             childObserver.disconnect();
         };
-    }, [getDistanceFromBottom, getPinThreshold, scrollPinnedToBottom, updateScrollButtonVisibility]);
+    }, [getAutoFollowThreshold, getDistanceFromBottom, scrollPinnedToBottom, updateScrollButtonVisibility]);
 
     React.useEffect(() => {
         if (typeof window === 'undefined') {
@@ -444,11 +459,11 @@ export const useChatScrollManager = ({
         // Maintain pin when content changes - fast smooth follow
         if (isPinnedRef.current && Date.now() >= repinBlockedUntilRef.current) {
             const distanceFromBottom = getDistanceFromBottom();
-            if (distanceFromBottom > getPinThreshold()) {
+            if (distanceFromBottom > getAutoFollowThreshold()) {
                 scrollPinnedToBottom();
             }
         }
-    }, [getDistanceFromBottom, getPinThreshold, scrollPinnedToBottom, updateScrollButtonVisibility]);
+    }, [getAutoFollowThreshold, getDistanceFromBottom, scrollPinnedToBottom, updateScrollButtonVisibility]);
 
     const getAnimationHandlers = React.useCallback((messageId: string): AnimationHandlers => {
         const existing = animationHandlersRef.current.get(messageId);
@@ -461,7 +476,7 @@ export const useChatScrollManager = ({
                 updateScrollButtonVisibility();
                 if (isPinnedRef.current && Date.now() >= repinBlockedUntilRef.current) {
                     const distanceFromBottom = getDistanceFromBottom();
-                    if (distanceFromBottom > getPinThreshold()) {
+                    if (distanceFromBottom > getAutoFollowThreshold()) {
                         scrollPinnedToBottom();
                     }
                 }
@@ -475,7 +490,7 @@ export const useChatScrollManager = ({
                 updateScrollButtonVisibility();
                 if (isPinnedRef.current && Date.now() >= repinBlockedUntilRef.current) {
                     const distanceFromBottom = getDistanceFromBottom();
-                    if (distanceFromBottom > getPinThreshold()) {
+                    if (distanceFromBottom > getAutoFollowThreshold()) {
                         scrollPinnedToBottom();
                     }
                 }
@@ -486,7 +501,7 @@ export const useChatScrollManager = ({
 
         animationHandlersRef.current.set(messageId, handlers);
         return handlers;
-    }, [getDistanceFromBottom, getPinThreshold, scrollPinnedToBottom, updateScrollButtonVisibility]);
+    }, [getAutoFollowThreshold, getDistanceFromBottom, scrollPinnedToBottom, updateScrollButtonVisibility]);
 
     React.useEffect(() => {
         if (!onActiveTurnChange) {

@@ -36,6 +36,19 @@ const getMessageFinish = (message: ChatMessageEntry): string | undefined => {
     return typeof finish === 'string' ? finish : undefined;
 };
 
+const isAssistantMessageCompleted = (message: ChatMessageEntry): boolean => {
+    const info = message.info as { time?: { completed?: unknown }; status?: unknown };
+    const completed = info.time?.completed;
+    const status = info.status;
+    if (typeof completed !== 'number' || completed <= 0) {
+        return false;
+    }
+    if (typeof status === 'string') {
+        return status === 'completed';
+    }
+    return true;
+};
+
 const buildTurnPartRecord = (
     turnId: string,
     messageId: string,
@@ -101,7 +114,16 @@ export const projectTurnActivity = (input: ProjectActivityInput): ProjectActivit
                 return;
             }
 
-            if (getMessageFinish(message) === 'stop') {
+            if (!isAssistantMessageCompleted(message)) {
+                return;
+            }
+
+            const finish = getMessageFinish(message);
+            if (!finish) {
+                return;
+            }
+
+            if (finish === 'stop') {
                 return;
             }
 

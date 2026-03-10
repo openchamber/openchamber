@@ -65,6 +65,7 @@ export const ChatContainer: React.FC = () => {
         setTimelineDialogOpen,
         isExpandedInput,
         stickyUserHeader,
+        chatRenderMode,
     } = useUIStore();
 
     const sessionMessages = useSessionStore(
@@ -196,6 +197,7 @@ export const ChatContainer: React.FC = () => {
         updateViewportAnchor,
         isSyncing,
         isMobile,
+        chatRenderMode,
         messageStreamStates,
         sessionPermissions: sessionBlockingCards,
         onActiveTurnChange: (turnId) => {

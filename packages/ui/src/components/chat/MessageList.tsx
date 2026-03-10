@@ -441,11 +441,22 @@ const TurnBlock: React.FC<TurnBlockProps> = ({
         if (chatRenderMode === 'live') {
             return turn.assistantMessages;
         }
-        const filtered = turn.assistantMessages.filter(isAssistantMessageCompleted);
-        if (filtered.length === turn.assistantMessages.length) {
+        const completed = turn.assistantMessages.filter(isAssistantMessageCompleted);
+        if (completed.length === turn.assistantMessages.length) {
             return turn.assistantMessages;
         }
-        return filtered;
+        if (completed.length > 0) {
+            return completed;
+        }
+        const firstAssistant = turn.assistantMessages[0];
+        return firstAssistant ? [firstAssistant] : [];
+    }, [chatRenderMode, turn.assistantMessages]);
+
+    const completedAssistantMessages = React.useMemo(() => {
+        if (chatRenderMode !== 'sorted') {
+            return turn.assistantMessages;
+        }
+        return turn.assistantMessages.filter(isAssistantMessageCompleted);
     }, [chatRenderMode, turn.assistantMessages]);
 
     const visibleAssistantIds = React.useMemo(() => {
@@ -456,34 +467,34 @@ const TurnBlock: React.FC<TurnBlockProps> = ({
         return ids;
     }, [visibleAssistantMessages]);
 
-    const visibleAssistantIdSet = React.useMemo(() => {
-        return new Set(visibleAssistantMessages.map((assistant) => assistant.info.id));
-    }, [visibleAssistantMessages]);
+    const completedAssistantIdSet = React.useMemo(() => {
+        return new Set(completedAssistantMessages.map((assistant) => assistant.info.id));
+    }, [completedAssistantMessages]);
 
     const visibleActivityParts = React.useMemo(() => {
         if (chatRenderMode !== 'sorted') {
             return turn.activityParts;
         }
-        if (visibleAssistantMessages === turn.assistantMessages) {
+        if (completedAssistantMessages.length === turn.assistantMessages.length) {
             return turn.activityParts;
         }
-        return turn.activityParts.filter((activity) => visibleAssistantIdSet.has(activity.messageId));
-    }, [chatRenderMode, turn.activityParts, turn.assistantMessages, visibleAssistantIdSet, visibleAssistantMessages]);
+        return turn.activityParts.filter((activity) => completedAssistantIdSet.has(activity.messageId));
+    }, [chatRenderMode, completedAssistantIdSet, completedAssistantMessages.length, turn.activityParts, turn.assistantMessages.length]);
 
     const visibleActivitySegments = React.useMemo(() => {
         if (chatRenderMode !== 'sorted') {
             return turn.activitySegments;
         }
-        if (visibleAssistantMessages === turn.assistantMessages) {
+        if (completedAssistantMessages.length === turn.assistantMessages.length) {
             return turn.activitySegments;
         }
         return turn.activitySegments
             .map((segment) => {
-                const parts = segment.parts.filter((activity) => visibleAssistantIdSet.has(activity.messageId));
+                const parts = segment.parts.filter((activity) => completedAssistantIdSet.has(activity.messageId));
                 if (parts.length === 0) {
                     return null;
                 }
-                const anchorMessageId = visibleAssistantIdSet.has(segment.anchorMessageId)
+                const anchorMessageId = completedAssistantIdSet.has(segment.anchorMessageId)
                     ? segment.anchorMessageId
                     : parts[0]?.messageId;
                 if (!anchorMessageId) {
@@ -496,7 +507,7 @@ const TurnBlock: React.FC<TurnBlockProps> = ({
                 };
             })
             .filter((segment): segment is NonNullable<typeof segment> => segment !== null);
-    }, [chatRenderMode, turn.activitySegments, turn.assistantMessages, visibleAssistantIdSet, visibleAssistantMessages]);
+    }, [chatRenderMode, completedAssistantIdSet, completedAssistantMessages.length, turn.activitySegments, turn.assistantMessages.length]);
 
     const turnGroupingContextBase = React.useMemo(() => {
         const userCreatedAt = (turn.userMessage.info.time as { created?: number } | undefined)?.created;

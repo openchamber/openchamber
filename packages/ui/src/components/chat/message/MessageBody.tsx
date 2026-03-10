@@ -1030,6 +1030,7 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
                         streamPhase={streamPhase}
                         showHeader={true}
                         animateRows={animateActivityRows}
+                        animateNewTools={shouldAnimateNewToolMount}
                         diffStats={turnGroupingContext.diffStats}
                     />
                 );
