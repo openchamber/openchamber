@@ -12,7 +12,7 @@ import { ToolRevealOnMount } from './ToolRevealOnMount';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { Text } from '@/components/ui/text';
 import { FadeInOnReveal } from '../FadeInOnReveal';
-import { getToolIcon } from './ToolPart';
+import { getToolIcon } from './toolPresentation';
 import { getToolMetadata } from '@/lib/toolHelpers';
 import { getStaticGroupToolName, isExpandableTool, isStandaloneTool, isStaticTool } from './toolRenderUtils';
 import ReasoningPart from './ReasoningPart';

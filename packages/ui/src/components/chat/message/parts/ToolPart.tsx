@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
-import { RiAiAgentLine, RiArrowDownSLine, RiArrowRightSLine, RiBookLine, RiExternalLinkLine, RiFileEditLine, RiFileList2Line, RiFileSearchLine, RiFileTextLine, RiFolder6Line, RiGitBranchLine, RiGlobalLine, RiListCheck2, RiListCheck3, RiMenuSearchLine, RiPencilLine, RiSurveyLine, RiTaskLine, RiTerminalBoxLine, RiToolsLine } from '@remixicon/react';
+import { RiArrowDownSLine, RiArrowRightSLine, RiExternalLinkLine } from '@remixicon/react';
 import { File as PierreFile, PatchDiff } from '@pierre/diffs/react';
 import { cn } from '@/lib/utils';
 import { SimpleMarkdownRenderer } from '../../MarkdownRenderer';
@@ -23,20 +23,14 @@ import { getDefaultTheme } from '@/lib/theme/themes';
 import type { MessageRecord } from '@/lib/messageCompletion';
 
 import {
-    renderListOutput,
-    renderGrepOutput,
-    renderGlobOutput,
-    renderTodoOutput,
-    renderWebSearchOutput,
     formatEditOutput,
     detectLanguageFromOutput,
     formatInputForDisplay,
-    parseReadToolOutput,
 } from '../toolRenderers';
 import { DiffViewToggle, type DiffViewMode } from '../DiffViewToggle';
-import { VirtualizedCodeBlock, type CodeLine } from './VirtualizedCodeBlock';
 import { MinDurationShineText } from './MinDurationShineText';
 import { ToolRevealOnMount } from './ToolRevealOnMount';
+import { getToolIcon } from './toolPresentation';
 
 type ToolStateWithMetadata = ToolStateUnion & { metadata?: Record<string, unknown>; input?: Record<string, unknown>; output?: string; error?: string; time?: { start: number; end?: number } };
 
@@ -50,74 +44,6 @@ interface ToolPartProps {
     onShowPopup?: (content: ToolPopupContent) => void;
     animateTailText?: boolean;
 }
-
-// eslint-disable-next-line react-refresh/only-export-components
-export const getToolIcon = (toolName: string) => {
-    const iconClass = 'h-3.5 w-3.5 flex-shrink-0';
-    const tool = toolName.toLowerCase();
-
-    if (tool === 'edit' || tool === 'multiedit' || tool === 'apply_patch' || tool === 'str_replace' || tool === 'str_replace_based_edit_tool') {
-        return <RiPencilLine className={iconClass} />;
-    }
-    if (tool === 'write' || tool === 'create' || tool === 'file_write') {
-        return <RiFileEditLine className={iconClass} />;
-    }
-    if (tool === 'read' || tool === 'view' || tool === 'file_read' || tool === 'cat') {
-        return <RiFileTextLine className={iconClass} />;
-    }
-    if (tool === 'bash' || tool === 'shell' || tool === 'cmd' || tool === 'terminal') {
-        return <RiTerminalBoxLine className={iconClass} />;
-    }
-    if (tool === 'list' || tool === 'ls' || tool === 'dir' || tool === 'list_files') {
-        return <RiFolder6Line className={iconClass} />;
-    }
-    if (tool === 'search' || tool === 'grep' || tool === 'find' || tool === 'ripgrep') {
-        return <RiMenuSearchLine className={iconClass} />;
-    }
-    if (tool === 'glob') {
-        return <RiFileSearchLine className={iconClass} />;
-    }
-    if (tool === 'fetch' || tool === 'curl' || tool === 'wget' || tool === 'webfetch') {
-        return <RiGlobalLine className={iconClass} />;
-    }
-    if (
-        tool === 'web-search' ||
-        tool === 'websearch' ||
-        tool === 'search_web' ||
-        tool === 'codesearch' ||
-        tool === 'google' ||
-        tool === 'bing' ||
-        tool === 'duckduckgo' ||
-        tool === 'perplexity'
-    ) {
-        return <RiGlobalLine className={iconClass} />;
-    }
-    if (tool === 'todowrite' || tool === 'todoread') {
-        return <RiListCheck3 className={iconClass} />;
-    }
-    if (tool === 'structuredoutput' || tool === 'structured_output') {
-        return <RiListCheck2 className={iconClass} />;
-    }
-    if (tool === 'skill') {
-        return <RiBookLine className={iconClass} />;
-    }
-    if (tool === 'task') {
-        return <RiAiAgentLine className={iconClass} />;
-    }
-    if (tool === 'question') {
-        return <RiSurveyLine className={iconClass} />;
-    }
-    if (tool === 'plan_enter') {
-        return <RiFileList2Line className={iconClass} />;
-    }
-    if (tool === 'plan_exit') {
-        return <RiTaskLine className={iconClass} />;
-    }
-    if (tool.startsWith('git')) {
-        return <RiGitBranchLine className={iconClass} />;
-    }
-    return <RiToolsLine className={iconClass} />;
-};
 
 const getMultiFileDescription = (
     metadata: Record<string, unknown> | undefined,
@@ -439,55 +365,6 @@ const parseQuestionOutput = (output: string): Array<{ question: string; answer: 
     return pairs.length > 0 ? pairs : null;
 };
 
-const formatStructuredOutputDescription = (input: Record<string, unknown> | undefined, output: unknown): string => {
-    if (typeof output === 'string' && output.trim().length > 0) {
-        const maxLength = 100;
-        const text = output.trim();
-        return text.length > maxLength ? `${text.substring(0, maxLength)}...` : text;
-    }
-
-    if (!input || typeof input !== 'object') {
-        return '';
-    }
-
-    const rawValue = Object.prototype.hasOwnProperty.call(input, 'result') ? input.result : input;
-
-    const toPreview = (value: unknown): string => {
-        if (typeof value === 'string') {
-            return value;
-        }
-        if (typeof value === 'number' || typeof value === 'boolean') {
-            return String(value);
-        }
-        if (Array.isArray(value)) {
-            const joined = value
-                .map((item) => (typeof item === 'string' ? item : JSON.stringify(item)))
-                .join(', ');
-            return joined;
-        }
-        if (value && typeof value === 'object') {
-            const record = value as Record<string, unknown>;
-            if (typeof record.subject === 'string' && record.subject.trim().length > 0) {
-                return record.subject;
-            }
-            if (typeof record.title === 'string' && record.title.trim().length > 0) {
-                return record.title;
-            }
-            return JSON.stringify(value);
-        }
-        return '';
-    };
-
-    const preview = toPreview(rawValue).trim();
-    if (!preview) {
-        return '';
-    }
-
-    const maxLength = 100;
-    const truncated = preview.length > maxLength ? `${preview.substring(0, maxLength)}...` : preview;
-    return truncated;
-};
-
 const getToolDescriptionPath = (part: ToolPartType, state: ToolStateUnion, currentDirectory: string): string | null => {
     const stateWithData = state as ToolStateWithMetadata;
     const metadata = stateWithData.metadata;
@@ -511,7 +388,7 @@ const getToolDescriptionPath = (part: ToolPartType, state: ToolStateUnion, curre
         }
     }
 
-    if (['write', 'create', 'file_write', 'read', 'view', 'file_read', 'cat'].includes(part.tool) && input) {
+    if (['write', 'create', 'file_write'].includes(part.tool) && input) {
         const filePath = input?.filePath || input?.file_path || input?.path;
         if (typeof filePath === 'string') {
             return getRelativePath(filePath, currentDirectory);
@@ -525,11 +402,6 @@ const getToolDescription = (part: ToolPartType, state: ToolStateUnion, currentDi
     const stateWithData = state as ToolStateWithMetadata;
     const metadata = stateWithData.metadata;
     const input = stateWithData.input;
-    const tool = part.tool.toLowerCase();
-
-    if (tool === 'structuredoutput' || tool === 'structured_output') {
-        return formatStructuredOutputDescription(input, stateWithData.output);
-    }
 
     const filePathLabel = getToolDescriptionPath(part, state, currentDirectory);
     if (filePathLabel) {
@@ -559,41 +431,8 @@ const getToolDescription = (part: ToolPartType, state: ToolStateUnion, currentDi
         return input.description.substring(0, 80);
     }
 
-    if (part.tool === 'skill' && input?.name && typeof input.name === 'string') {
-        return input.name;
-    }
-
-    if (part.tool === 'plan_enter') {
-        return 'Switching to planning';
-    }
-
-    if (part.tool === 'plan_exit') {
-        return 'Switching to building';
-    }
-
     const desc = input?.description || metadata?.description || ('title' in state && state.title) || '';
     return typeof desc === 'string' ? desc : '';
-};
-
-const getFetchedUrl = (part: ToolPartType, state: ToolStateUnion): string | null => {
-    const tool = part.tool.toLowerCase();
-    if (tool !== 'webfetch' && tool !== 'fetch' && tool !== 'curl' && tool !== 'wget') {
-        return null;
-    }
-
-    const stateWithData = state as ToolStateWithMetadata;
-    const input = stateWithData.input;
-    const metadata = stateWithData.metadata;
-
-    const candidate =
-        (typeof input?.url === 'string' && input.url) ||
-        (typeof input?.URL === 'string' && input.URL) ||
-        (typeof metadata?.url === 'string' && metadata.url) ||
-        (typeof metadata?.URL === 'string' && metadata.URL) ||
-        '';
-
-    const url = candidate.trim();
-    return url.length > 0 ? url : null;
 };
 
 interface ToolScrollableSectionProps {
@@ -1247,96 +1086,6 @@ const WriteInputPreview: React.FC<WriteInputPreviewProps> = React.memo(({
 
 WriteInputPreview.displayName = 'WriteInputPreview';
 
-// ── PERF-007: Read tool output with virtualised highlighting ─────────
-interface ReadToolVirtualizedProps {
-    outputString: string;
-    input?: Record<string, unknown>;
-    syntaxTheme: { [key: string]: React.CSSProperties };
-    toolName: string;
-    currentDirectory: string;
-    pierreTheme: { light: string; dark: string };
-    pierreThemeType: 'light' | 'dark';
-    renderScrollableBlock: (
-        content: React.ReactNode,
-        options?: { maxHeightClass?: string; className?: string; disableHorizontal?: boolean; outerClassName?: string }
-    ) => React.ReactNode;
-}
-
-const ReadToolVirtualized: React.FC<ReadToolVirtualizedProps> = React.memo(({
-    outputString,
-    input,
-    syntaxTheme,
-    toolName,
-    currentDirectory,
-    pierreTheme,
-    pierreThemeType,
-    renderScrollableBlock,
-}) => {
-    const parsedReadOutput = React.useMemo(() => parseReadToolOutput(outputString), [outputString]);
-
-    const language = React.useMemo(() => {
-        const contentForLanguage = parsedReadOutput.lines.map((l) => l.text).join('\n');
-        return detectLanguageFromOutput(contentForLanguage, toolName, input as Record<string, unknown>);
-    }, [parsedReadOutput, toolName, input]);
-
-    const rawFilePath =
-        typeof input?.filePath === 'string'
-            ? input.filePath
-            : typeof input?.file_path === 'string'
-                ? input.file_path
-                : typeof input?.path === 'string'
-                    ? input.path
-                    : 'read-output';
-    const displayPath = getRelativePath(rawFilePath, currentDirectory);
-
-    const codeLines: CodeLine[] = React.useMemo(() => parsedReadOutput.lines.map((line) => ({
-        text: line.text,
-        lineNumber: line.lineNumber,
-        isInfo: line.isInfo,
-    })), [parsedReadOutput]);
-
-    if (parsedReadOutput.type === 'file') {
-        const fileContent = parsedReadOutput.lines.map((line) => line.text).join('\n');
-        const lineCount = Math.max(parsedReadOutput.lines.length, 1);
-        const headerLineLabel = lineCount === 1 ? 'line 1' : `lines 1-${lineCount}`;
-        return renderScrollableBlock(
-            <div className="w-full min-w-0">
-                <div className="bg-muted/20 px-2 py-1 rounded-lg mb-1 flex items-center gap-2 min-w-0" style={{ borderWidth: '1px', borderColor: 'var(--tools-border)' }}>
-                    {renderPathLikeGitChanges(displayPath)}
-                    <span className="typography-meta text-muted-foreground/80 flex-shrink-0">({headerLineLabel})</span>
-                </div>
-                <PierreFile
-                    file={{
-                        name: displayPath,
-                        contents: fileContent,
-                        lang: language || undefined,
-                    }}
-                    options={{
-                        disableFileHeader: true,
-                        overflow: 'wrap',
-                        theme: pierreTheme,
-                        themeType: pierreThemeType,
-                    }}
-                    className="block w-full"
-                />
-            </div>,
-            { className: 'p-1' }
-        ) as React.ReactElement;
-    }
-
-    return renderScrollableBlock(
-        <VirtualizedCodeBlock
-            lines={codeLines}
-            language={language}
-            syntaxTheme={syntaxTheme}
-            maxHeight="55vh"
-        />,
-        { className: 'p-1' }
-    ) as React.ReactElement;
-});
-
-ReadToolVirtualized.displayName = 'ReadToolVirtualized';
-
 interface ImagePreviewProps {
     content: string;
     filePath: string;
@@ -1383,7 +1132,6 @@ interface ToolExpandedContentProps {
     part: ToolPartType;
     state: ToolStateUnion;
     syntaxTheme: { [key: string]: React.CSSProperties };
-    isMobile: boolean;
     currentDirectory: string;
     onShowPopup?: (content: ToolPopupContent) => void;
 }
@@ -1392,7 +1140,6 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     part,
     state,
     syntaxTheme,
-    isMobile,
     currentDirectory,
     onShowPopup,
 }) => {
@@ -1505,95 +1252,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
             return <div className="typography-meta text-muted-foreground">Awaiting response...</div>;
         }
 
-        if (part.tool === 'todowrite' || part.tool === 'todoread') {
-            if (state.status === 'completed' && hasStringOutput) {
-                const todoContent = renderTodoOutput(outputString, { unstyled: true });
-                return renderScrollableBlock(
-                    todoContent ?? (
-                        <div className="typography-meta text-muted-foreground">Unable to parse todo list</div>
-                    )
-                );
-            }
-
-            if (state.status === 'error' && 'error' in state) {
-                return (
-                    <div>
-                        <div className="typography-meta font-medium text-muted-foreground mb-1">Error:</div>
-                        <div className="typography-meta p-2 rounded-xl border" style={{
-                            backgroundColor: 'var(--status-error-background)',
-                            color: 'var(--status-error)',
-                            borderColor: 'var(--status-error-border)',
-                        }}>
-                            {state.error}
-                        </div>
-                    </div>
-                );
-            }
-
-            return <div className="typography-meta text-muted-foreground">Processing todo list...</div>;
-        }
-
-        if (part.tool === 'list' && hasStringOutput) {
-            const listOutput = renderListOutput(outputString, { unstyled: true });
-            return renderScrollableBlock(
-                listOutput ?? (
-                    <pre className="typography-code font-mono whitespace-pre-wrap break-words w-full min-w-0">
-                        {outputString}
-                    </pre>
-                )
-            );
-        }
-
-        if (part.tool === 'grep' && hasStringOutput) {
-            const grepOutput = renderGrepOutput(outputString, isMobile, { unstyled: true });
-            return renderScrollableBlock(
-                grepOutput ?? (
-                    <pre className="typography-code font-mono whitespace-pre-wrap break-words w-full min-w-0">
-                        {outputString}
-                    </pre>
-                )
-            );
-        }
-
-        if (part.tool === 'glob' && hasStringOutput) {
-            const globOutput = renderGlobOutput(outputString, isMobile, { unstyled: true });
-            return renderScrollableBlock(
-                globOutput ?? (
-                    <pre className="typography-code font-mono whitespace-pre-wrap break-words w-full min-w-0">
-                        {outputString}
-                    </pre>
-                )
-            );
-        }
-
         if (part.tool === 'task' && hasStringOutput) {
-            return renderScrollableBlock(
-                <div className="w-full min-w-0">
-                    <SimpleMarkdownRenderer content={outputString} variant="tool" onShowPopup={onShowPopup} />
-                </div>
-            );
-        }
-
-        if ((part.tool === 'web-search' || part.tool === 'websearch' || part.tool === 'search_web') && hasStringOutput) {
-            const webSearchContent = renderWebSearchOutput(outputString, syntaxTheme, { unstyled: true });
-            return renderScrollableBlock(
-                webSearchContent ?? (
-                    <pre className="typography-code font-mono whitespace-pre-wrap break-words w-full min-w-0">
-                        {outputString}
-                    </pre>
-                )
-            );
-        }
-
-        if (part.tool === 'codesearch' && hasStringOutput) {
-            return renderScrollableBlock(
-                <div className="w-full min-w-0">
-                    <SimpleMarkdownRenderer content={outputString} variant="tool" onShowPopup={onShowPopup} />
-                </div>
-            );
-        }
-
-        if (part.tool === 'skill' && hasStringOutput) {
             return renderScrollableBlock(
                 <div className="w-full min-w-0">
                     <SimpleMarkdownRenderer content={outputString} variant="tool" onShowPopup={onShowPopup} />
@@ -1625,19 +1284,6 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         }
 
         if (hasStringOutput && outputString.trim()) {
-            if (part.tool === 'read') {
-                return <ReadToolVirtualized
-                    outputString={outputString}
-                    input={input}
-                    syntaxTheme={syntaxTheme}
-                    toolName={part.tool}
-                    currentDirectory={currentDirectory}
-                    pierreTheme={pierreTheme}
-                    pierreThemeType={pierreThemeType}
-                    renderScrollableBlock={renderScrollableBlock}
-                />;
-            }
-
             return renderScrollableBlock(
                 <SyntaxHighlighter
                     style={syntaxTheme}
@@ -1674,7 +1320,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                 'relative pr-2 pb-2 pt-2 space-y-2 pl-4'
             )}
         >
-            {(part.tool === 'todowrite' || part.tool === 'todoread' || part.tool === 'question') ? (
+            {part.tool === 'question' ? (
                 renderResultContent()
             ) : (
                 <>
@@ -2045,7 +1691,6 @@ const ToolPart: React.FC<ToolPartProps> = ({
     const normalizedPart = normalizedPartTool !== part.tool ? ({ ...part, tool: normalizedPartTool } as ToolPartType) : part;
     const descriptionPath = getToolDescriptionPath(normalizedPart, state, currentDirectory);
     const description = getToolDescription(normalizedPart, state, currentDirectory);
-    const fetchedUrl = getFetchedUrl(normalizedPart, state);
     const displayName = getToolMetadata(normalizedPartTool || part.tool).displayName;
     
     // Tool title/description — shown inline as context
@@ -2059,7 +1704,6 @@ const ToolPart: React.FC<ToolPartProps> = ({
         ) {
             return null;
         }
-        if (normalizedPartTool === 'structuredoutput' || normalizedPartTool === 'structured_output') return null;
         const title = (stateWithData as { title?: string }).title;
         if (typeof title === 'string' && title.trim().length > 0) {
             return title;
@@ -2096,7 +1740,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
             if (typeof filePath === 'string') {
                 toolDiff = getPrimaryDiffFromMetadata(part.tool, metadata, filePath);
             }
-        } else if (['write', 'create', 'file_write', 'read', 'view', 'file_read', 'cat'].includes(part.tool)) {
+        } else if (['write', 'create', 'file_write'].includes(part.tool)) {
             filePath = input?.filePath || input?.file_path || input?.path || metadata?.filePath || metadata?.file_path || metadata?.path;
         }
 
@@ -2204,20 +1848,6 @@ const ToolPart: React.FC<ToolPartProps> = ({
                                 >
                                     {displayName}
                                 </MinDurationShineText>
-                                {!justificationText && fetchedUrl && (
-                                    <a
-                                        href={fetchedUrl}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="min-w-0 truncate underline decoration-[color:var(--status-info)] underline-offset-2 hover:opacity-90 typography-meta font-medium"
-                                        style={{ color: 'var(--status-info)' }}
-                                        onClick={(event) => event.stopPropagation()}
-                                        onKeyDown={(event) => event.stopPropagation()}
-                                        title={fetchedUrl}
-                                    >
-                                        {fetchedUrl}
-                                    </a>
-                                )}
                             </div>
                             {typeof effectiveTimeStart === 'number' ? (
                                 <span className="flex-shrink-0 tabular-nums text-muted-foreground/80 typography-meta">
@@ -2295,7 +1925,6 @@ const ToolPart: React.FC<ToolPartProps> = ({
                     part={part}
                     state={state}
                     syntaxTheme={syntaxTheme}
-                    isMobile={isMobile}
                     currentDirectory={currentDirectory}
                     onShowPopup={onShowPopup}
                 />
