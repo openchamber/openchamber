@@ -243,7 +243,7 @@
     --oc-safe-area-top: env(safe-area-inset-top, 0);
     --oc-safe-area-right: env(safe-area-inset-right, 0);
     --oc-safe-area-bottom: env(safe-area-inset-bottom, 0);
-    --oc-safe-area-bottom-visual: clamp(0px, calc(var(--oc-safe-area-bottom) * 0.05), 4px);
+    --oc-safe-area-bottom-visual: clamp(0px, calc(var(--oc-safe-area-bottom) * 0.6), 22px);
     --oc-safe-area-left: env(safe-area-inset-left, 0);
   }
 
@@ -261,7 +261,7 @@
       --oc-safe-area-top: env(safe-area-inset-top, 0);
       --oc-safe-area-right: env(safe-area-inset-right, 0);
       --oc-safe-area-bottom: env(safe-area-inset-bottom, 0);
-      --oc-safe-area-bottom-visual: clamp(0px, calc(var(--oc-safe-area-bottom) * 0.05), 4px);
+      --oc-safe-area-bottom-visual: clamp(0px, calc(var(--oc-safe-area-bottom) * 0.6), 22px);
       --oc-safe-area-left: env(safe-area-inset-left, 0);
     }
 
@@ -289,7 +289,7 @@
 
     /* iOS keyboard home indicator safe area - used when keyboard is open */
     .ios-keyboard-safe-area {
-      padding-bottom: calc(var(--oc-keyboard-home-indicator, 34px) + var(--oc-safe-area-bottom-visual, 0px)) !important;
+      padding-bottom: var(--oc-keyboard-home-indicator, 34px) !important;
     }
 
     /* Prevent keyboard-induced page scroll on iOS PWA */
@@ -362,7 +362,7 @@
       --oc-safe-area-top: env(safe-area-inset-top, 0);
       --oc-safe-area-right: env(safe-area-inset-right, 0);
       --oc-safe-area-bottom: env(safe-area-inset-bottom, 0);
-      --oc-safe-area-bottom-visual: clamp(0px, calc(var(--oc-safe-area-bottom) * 0.05), 4px);
+      --oc-safe-area-bottom-visual: clamp(0px, calc(var(--oc-safe-area-bottom) * 0.6), 22px);
       --oc-safe-area-left: env(safe-area-inset-left, 0);
     }
 
@@ -445,7 +445,7 @@
     bottom: 0;
     left: 0;
     right: 0;
-    height: var(--oc-safe-area-bottom-visual, var(--oc-safe-area-bottom, env(safe-area-inset-bottom, 0)));
+    height: var(--oc-safe-area-bottom, env(safe-area-inset-bottom, 0));
     background: linear-gradient(
       to top,
       var(--background) 0%,

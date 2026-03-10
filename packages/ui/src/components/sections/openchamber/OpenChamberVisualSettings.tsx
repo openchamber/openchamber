@@ -124,7 +124,7 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-export type VisibleSetting = 'theme' | 'pwaInstallName' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'cornerRadius' | 'inputBarOffset' | 'navRail' | 'toolOutput' | 'mermaidRendering' | 'userMessageRendering' | 'stickyUserHeader' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'reasoning' | 'queueMode' | 'textJustificationActivity' | 'activityHeaderTimestamps' | 'terminalQuickKeys' | 'persistDraft';
+export type VisibleSetting = 'theme' | 'pwaInstallName' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'cornerRadius' | 'inputBarOffset' | 'navRail' | 'toolOutput' | 'mermaidRendering' | 'userMessageRendering' | 'stickyUserHeader' | 'diffLayout' | 'mobileStatusBar' | 'mobileKeyboardTools' | 'dotfiles' | 'reasoning' | 'queueMode' | 'textJustificationActivity' | 'activityHeaderTimestamps' | 'terminalQuickKeys' | 'persistDraft';
 
 interface OpenChamberVisualSettingsProps {
     /** Which settings to show. If undefined, shows all. */
@@ -173,6 +173,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setNavRailExpanded = useUIStore(state => state.setNavRailExpanded);
     const showMobileSessionStatusBar = useUIStore(state => state.showMobileSessionStatusBar);
     const setShowMobileSessionStatusBar = useUIStore(state => state.setShowMobileSessionStatusBar);
+    const showMobileKeyboardTools = useUIStore(state => state.showMobileKeyboardTools);
+    const setShowMobileKeyboardTools = useUIStore(state => state.setShowMobileKeyboardTools);
     const {
         themeMode,
         setThemeMode,
@@ -240,6 +242,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         || shouldShow('stickyUserHeader')
         || shouldShow('diffLayout')
         || (shouldShow('mobileStatusBar') && isMobile)
+        || (shouldShow('mobileKeyboardTools') && isMobile)
         || shouldShow('dotfiles')
         || shouldShow('reasoning')
         || shouldShow('queueMode')
@@ -887,7 +890,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 </div>
                             )}
 
-                            {(shouldShow('stickyUserHeader') || (shouldShow('mobileStatusBar') && isMobile) || shouldShow('dotfiles') || shouldShow('queueMode') || shouldShow('persistDraft') || shouldShow('reasoning') || shouldShow('textJustificationActivity')) && (
+                            {(shouldShow('stickyUserHeader') || (shouldShow('mobileStatusBar') && isMobile) || (shouldShow('mobileKeyboardTools') && isMobile) || shouldShow('dotfiles') || shouldShow('queueMode') || shouldShow('persistDraft') || shouldShow('reasoning') || shouldShow('textJustificationActivity')) && (
                                 <section className="p-2 space-y-0.5">
                                     {shouldShow('stickyUserHeader') && (
                                         <div
@@ -932,6 +935,29 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 ariaLabel="Show mobile status bar"
                                             />
                                             <span className="typography-ui-label text-foreground">Show Mobile Status Bar</span>
+                                        </div>
+                                    )}
+
+                                    {shouldShow('mobileKeyboardTools') && isMobile && (
+                                        <div
+                                            className="group flex cursor-pointer items-center gap-2 py-1.5"
+                                            role="button"
+                                            tabIndex={0}
+                                            aria-pressed={showMobileKeyboardTools}
+                                            onClick={() => setShowMobileKeyboardTools(!showMobileKeyboardTools)}
+                                            onKeyDown={(event) => {
+                                                if (event.key === ' ' || event.key === 'Enter') {
+                                                    event.preventDefault();
+                                                    setShowMobileKeyboardTools(!showMobileKeyboardTools);
+                                                }
+                                            }}
+                                        >
+                                            <Checkbox
+                                                checked={showMobileKeyboardTools}
+                                                onChange={setShowMobileKeyboardTools}
+                                                ariaLabel="Show mobile keyboard tools"
+                                            />
+                                            <span className="typography-ui-label text-foreground">Show Mobile Keyboard Tools</span>
                                         </div>
                                     )}
 
