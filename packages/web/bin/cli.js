@@ -2194,8 +2194,29 @@ function followFile(filePath, onLine) {
 }
 
 async function handleTunnelProfileSubcommand(options, action) {
-  const sub = action || 'list';
+  const sub = typeof action === 'string' ? action.trim().toLowerCase() : '';
   const store = ensureTunnelProfilesMigrated();
+
+  if (!sub) {
+    if (options.json) {
+      console.log(JSON.stringify({
+        command: 'tunnel profile',
+        subcommands: ['list', 'show', 'add', 'remove'],
+      }, null, 2));
+      return;
+    }
+
+    if (!options.quiet) {
+      clackIntro('Tunnel Profile');
+      logStatus('info', 'Available subcommands', 'list, show, add, remove');
+      clackLog.step('List profiles: `openchamber tunnel profile list`');
+      clackLog.step('Show one profile: `openchamber tunnel profile show --name <name>`');
+      clackLog.step('Add profile: `openchamber tunnel profile add --provider cloudflare --mode managed-remote --name <name> --hostname <host> --token <token>`');
+      clackLog.step('Remove profile: `openchamber tunnel profile remove --name <name>`');
+      clackOutro('Choose a subcommand');
+    }
+    return;
+  }
 
   if (sub === 'list') {
     const providerFilter = normalizeProfileProvider(options.provider);
@@ -2754,9 +2775,46 @@ const commands = {
 
         // Phase 2: Provider diagnostics via the doctor endpoint
         doctorSpin?.message('Checking provider...');
-        const providerOption = typeof options.provider === 'string' && options.provider.trim().length > 0
+        let providerOption = typeof options.provider === 'string' && options.provider.trim().length > 0
           ? options.provider.trim().toLowerCase()
           : '';
+
+        let doctorProfile = null;
+        let doctorHostnameOverride = typeof options.hostname === 'string' ? options.hostname.trim() : '';
+        const explicitTokenProvided = Boolean(options.tokenStdin)
+          || (typeof options.token === 'string' && options.token.trim().length > 0)
+          || (typeof options.tokenFile === 'string' && options.tokenFile.trim().length > 0);
+        let doctorTokenValue = resolveToken(options);
+        const normalizedMode = typeof options.mode === 'string' ? options.mode.trim().toLowerCase() : '';
+
+        if (typeof options.profile === 'string' && options.profile.trim().length > 0) {
+          const store = ensureTunnelProfilesMigrated();
+          const resolved = resolveProfileByName(store.profiles, options.profile, providerOption || options.provider);
+          if (!resolved.profile) {
+            throw new Error(resolved.error);
+          }
+          doctorProfile = resolved.profile;
+        } else if (!doctorHostnameOverride && !explicitTokenProvided && (!normalizedMode || normalizedMode === 'managed-remote')) {
+          const store = ensureTunnelProfilesMigrated();
+          const remoteProfiles = store.profiles.filter((entry) => {
+            if (entry.mode !== 'managed-remote') return false;
+            if (!providerOption) return true;
+            return entry.provider === providerOption;
+          });
+          if (remoteProfiles.length === 1) {
+            doctorProfile = remoteProfiles[0];
+          }
+        }
+
+        if (doctorProfile) {
+          providerOption = providerOption || doctorProfile.provider;
+          if (!doctorHostnameOverride && typeof doctorProfile.hostname === 'string') {
+            doctorHostnameOverride = doctorProfile.hostname.trim();
+          }
+          if ((!doctorTokenValue || doctorTokenValue.trim().length === 0) && typeof doctorProfile.token === 'string') {
+            doctorTokenValue = doctorProfile.token.trim();
+          }
+        }
 
         let doctorResult = null;
         let doctorError = null;
@@ -2768,10 +2826,9 @@ const commands = {
             query.set('mode', options.mode.trim().toLowerCase());
           }
           if (typeof options.configPath === 'string') query.set('configPath', options.configPath);
-          if (typeof options.hostname === 'string' && options.hostname.trim().length > 0) {
-            query.set('managedRemoteTunnelHostname', options.hostname);
+          if (doctorHostnameOverride.length > 0) {
+            query.set('managedRemoteTunnelHostname', doctorHostnameOverride);
           }
-          const doctorTokenValue = resolveToken(options);
           if (typeof doctorTokenValue === 'string' && doctorTokenValue.trim().length > 0) {
             query.set('managedRemoteTunnelToken', doctorTokenValue);
           }
@@ -2865,6 +2922,11 @@ const commands = {
         }
         clackOutro(`${cliPorts.length} CLI ${cliPorts.length === 1 ? 'port' : 'ports'} available`);
         console.log('');
+
+        if (doctorProfile) {
+          logStatus('info', 'Using saved profile for managed-remote checks', `${doctorProfile.name} (${doctorProfile.provider}/${doctorProfile.mode})`);
+          console.log('');
+        }
 
         // ── Section 2: Provider ─────────────────────────────────
         if (doctorError) {
