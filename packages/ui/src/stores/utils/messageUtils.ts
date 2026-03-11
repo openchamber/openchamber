@@ -150,15 +150,13 @@ export const normalizeStreamingPart = (incoming: Part, existing?: Part): Part =>
         : undefined;
     normalized.type = normalized.type || existingType || 'text';
 
-    const isStreamingTextPart = normalized.type === 'text';
-    const isStreamingReasoningPart = normalized.type === 'reasoning';
+    const isStreamingTextLikePart = normalized.type === 'text' || normalized.type === 'reasoning';
 
-    if (isStreamingTextPart || isStreamingReasoningPart) {
+    if (isStreamingTextLikePart) {
         const existingRecord = (existing ?? {}) as { text?: unknown; content?: unknown; value?: unknown };
         const existingText = extractTextFromPart(existing);
         const directText = extractTextFromPart(incoming);
         const deltaText = extractTextFromDelta((incoming as { delta?: unknown }).delta);
-        const incomingEnded = typeof (incoming as { time?: { end?: unknown } }).time?.end === 'number';
         let mergedText = '';
 
         const incomingField =
@@ -180,46 +178,11 @@ export const normalizeStreamingPart = (incoming: Part, existing?: Part): Part =>
                         : 'text'
         );
 
-        if (isStreamingReasoningPart) {
-            if (deltaText) {
-                mergedText = existingText ? `${existingText}${deltaText}` : deltaText;
-            } else if (directText) {
-                mergedText = directText;
-            } else {
-                mergedText = existingText;
-            }
+        if (deltaText) {
+            mergedText = existingText ? `${existingText}${deltaText}` : deltaText;
+        } else if (directText) {
+            mergedText = directText;
         } else {
-            if (deltaText) {
-                const isPureDeltaPayload = directText === deltaText;
-                const directExtendsExisting = Boolean(existingText) && Boolean(directText) && directText.startsWith(existingText);
-
-                if (isPureDeltaPayload || (existingText.length > 0 && !directExtendsExisting)) {
-                    mergedText = existingText ? `${existingText}${deltaText}` : deltaText;
-                } else {
-                    mergedText = directText || (existingText ? `${existingText}${deltaText}` : deltaText);
-                }
-            } else if (directText) {
-                if (!existingText) {
-                    mergedText = directText;
-                } else if (directText.startsWith(existingText)) {
-                    mergedText = directText;
-                } else if (existingText.endsWith(directText)) {
-                    mergedText = existingText;
-                } else if (directText.includes(existingText)) {
-                    mergedText = directText;
-                } else if (existingText.includes(directText)) {
-                    mergedText = existingText;
-                } else {
-                    mergedText = incomingEnded
-                        ? (directText.length >= existingText.length ? directText : existingText)
-                        : existingText;
-                }
-            } else {
-                mergedText = existingText || '';
-            }
-        }
-
-        if (isStreamingTextPart && !incomingEnded && existingText.length > 0 && mergedText.length < existingText.length) {
             mergedText = existingText;
         }
 

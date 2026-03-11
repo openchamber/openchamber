@@ -176,140 +176,13 @@ declare global {
   }
 }
 
-const TEXT_SHRINK_TOLERANCE = 50;
 const RESYNC_DEBOUNCE_MS = 750;
 const QUESTION_RECONCILE_COOLDOWN_MS = 1500;
 const PERMISSION_RECONCILE_COOLDOWN_MS = 1500;
-const EVENT_FLUSH_FRAME_MS = 16;
 
 const readEventDirectory = (props: Record<string, unknown>): string => {
   const directory = readStringProp(props, ['directory']);
   return directory ?? 'global';
-};
-
-const resolveUpdatedPartIdentity = (props: Record<string, unknown>): { messageId: string; partId: string } | null => {
-  const partRaw = props.part;
-  if (!partRaw || typeof partRaw !== 'object') {
-    return null;
-  }
-
-  const part = partRaw as Record<string, unknown>;
-  const messageId = readStringProp(part, ['messageID', 'messageId']);
-  const partId = readStringProp(part, ['id', 'partID', 'partId']);
-  if (!messageId || !partId) {
-    return null;
-  }
-
-  return { messageId, partId };
-};
-
-const buildQueuedPartEventKey = (props: Record<string, unknown>): string | null => {
-  const directory = readEventDirectory(props);
-  const partRaw = props.part;
-  const part = partRaw && typeof partRaw === 'object' ? (partRaw as Record<string, unknown>) : null;
-  const info = props.info && typeof props.info === 'object' ? (props.info as Record<string, unknown>) : null;
-
-  const sessionId =
-    readStringProp(part ?? {}, ['sessionID', 'sessionId']) ||
-    readStringProp(info ?? {}, ['sessionID', 'sessionId']) ||
-    readStringProp(props, ['sessionID', 'sessionId']);
-
-  const messageId =
-    readStringProp(part ?? {}, ['messageID', 'messageId']) ||
-    readStringProp(info ?? {}, ['messageID', 'messageId', 'id']) ||
-    readStringProp(props, ['messageID', 'messageId']);
-
-  const partId =
-    readStringProp(part ?? {}, ['id', 'partID', 'partId']) ||
-    readStringProp(props, ['partID', 'partId']);
-
-  if (!messageId || !partId) {
-    return null;
-  }
-
-  return `${directory}:${sessionId ?? 'unknown'}:${messageId}:${partId}`;
-};
-
-const buildQueuedDeltaEventKey = (event: EventData): string | null => {
-  if (!event.properties) {
-    return null;
-  }
-
-  if (event.type === 'message.part.updated') {
-    return buildQueuedPartEventKey(event.properties);
-  }
-
-  if (event.type !== 'message.part.delta') {
-    return null;
-  }
-
-  return buildQueuedPartEventKey(event.properties);
-};
-
-const buildPartStreamKey = (sessionId: string, messageId: string, partId: string): string => {
-  return `${sessionId}:${messageId}:${partId}`;
-};
-
-const getPartTextLength = (part: Part | null | undefined): number => {
-  if (!part || typeof part !== 'object') {
-    return 0;
-  }
-  const record = part as Record<string, unknown>;
-  const text = typeof record.text === 'string' ? record.text : '';
-  const content = typeof record.content === 'string' ? record.content : '';
-  const value = typeof record.value === 'string' ? record.value : '';
-  return Math.max(text.length, content.length, value.length);
-};
-
-const buildCoalescingKey = (event: EventData): string | null => {
-  const props = event.properties;
-  if (!props) {
-    return null;
-  }
-
-  const directory = readEventDirectory(props);
-
-  if (event.type === 'session.status') {
-    const sessionId = readStringProp(props, ['sessionID', 'sessionId']);
-    if (!sessionId) {
-      return null;
-    }
-    return `session.status:${directory}:${sessionId}`;
-  }
-
-  if (event.type === 'message.part.updated') {
-    const identity = resolveUpdatedPartIdentity(props);
-    if (!identity) {
-      return null;
-    }
-    return `message.part.updated:${directory}:${identity.messageId}:${identity.partId}`;
-  }
-
-  return null;
-};
-
-const textLengthCache = new WeakMap<Part[], number>();
-
-const computeTextLength = (parts: Part[] | undefined | null): number => {
-  if (!parts || !Array.isArray(parts)) return 0;
-
-  const cached = textLengthCache.get(parts);
-  if (cached !== undefined) return cached;
-
-  let length = 0;
-  for (let i = 0; i < parts.length; i++) {
-    const part = parts[i];
-    if (part?.type === 'text' || part?.type === 'reasoning') {
-      const text =
-        (part as { text?: string; content?: string; value?: string }).text
-        ?? (part as { text?: string; content?: string; value?: string }).content
-        ?? (part as { text?: string; content?: string; value?: string }).value;
-      if (typeof text === 'string') length += text.length;
-    }
-  }
-
-  textLengthCache.set(parts, length);
-  return length;
 };
 
 const MAX_MESSAGE_CACHE_SIZE = 500;
@@ -656,21 +529,7 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
   const lastMessageEventBySessionRef = React.useRef<Map<string, number>>(new Map());
   const pendingMessageStallTimersRef = React.useRef<Map<string, NodeJS.Timeout>>(new Map());
   const lastMessageStallRecoveryBySessionRef = React.useRef<Map<string, number>>(new Map());
-  const queuedEventsRef = React.useRef<EventData[]>([]);
-  const queuedEventIndexRef = React.useRef<Map<string, number>>(new Map());
   const partTypeHintsByKeyRef = React.useRef<Map<string, string>>(new Map());
-  const deltaDrivenPartKeysRef = React.useRef<Set<string>>(new Set());
-  // Tracks mutable bootstrap Part objects sitting in the streamingPartQueue.
-  // When additional deltas arrive before the queue flushes (part still absent
-  // from the store), we append to the already-queued object instead of pushing
-  // a second bootstrap whose tiny text fragment would be dropped by
-  // normalizeStreamingPart.  Entries are removed once the part exists in store
-  // (i.e. applyPartDelta takes over) or when the queue flushes.
-  const pendingDeltaBootstrapsRef = React.useRef<Map<string, { part: Record<string, unknown>; field: string }>>(new Map());
-  const flushScheduledRef = React.useRef(false);
-  const flushTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastFlushAtRef = React.useRef(0);
-
   const scheduleSoftResyncRef = React.useRef<
     (sessionId: string, reason: string, limit?: number) => Promise<void>
   >(() => Promise.resolve());
@@ -1196,9 +1055,13 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
           hintedPartType ||
           'text';
 
-        const messagePart: Part = {
+        const messagePartBase: Part = {
           ...part,
           type: resolvedPartType,
+        } as Part;
+
+        const messagePart: Part = {
+          ...messagePartBase,
         } as Part;
 
         if (partTypeHintKey && typeof resolvedPartType === 'string' && resolvedPartType.length > 0) {
@@ -1209,31 +1072,6 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
           const partType = (messagePart as { type?: unknown }).type;
           const partTime = (messagePart as { time?: { end?: unknown } }).time;
           const partHasEnded = typeof partTime?.end === 'number';
-          const partStreamKey = updatedPartId ? buildPartStreamKey(sessionId, messageId, updatedPartId) : null;
-          const hasDeltaDrivenStream = partStreamKey ? deltaDrivenPartKeysRef.current.has(partStreamKey) : false;
-
-          if (
-            (partType === 'text' || partType === 'reasoning') &&
-            hasDeltaDrivenStream &&
-            !partHasEnded
-          ) {
-            // Delta stream is the authoritative source for text content during
-            // active streaming.  `part.updated` snapshots are often shorter /
-            // stale because they race with the delta accumulation, and due to
-            // rAF batching the store text may already be ahead of what we read
-            // here.  Skip unconditionally until the part ends.
-            trackMessage(messageId, 'part_updated_skipped_delta_preferred', {
-              type: partType as string,
-              incomingTextLength: getPartTextLength(messagePart),
-              existingTextLength: getPartTextLength(existingPartForType as Part | undefined),
-            });
-            break;
-          }
-
-          if (partHasEnded && partStreamKey) {
-            deltaDrivenPartKeysRef.current.delete(partStreamKey);
-          }
-
           const toolState = (messagePart as { state?: { status?: unknown } }).state?.status;
           const toolName = typeof (messagePart as { tool?: unknown }).tool === 'string'
             ? (messagePart as { tool: string }).tool.toLowerCase()
@@ -1268,10 +1106,9 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
               typeof currentStatus.confirmedAt === 'number' &&
               Date.now() - currentStatus.confirmedAt < 1200;
             if (!currentStatus || currentStatus.type === 'idle') {
-              if (recentlyConfirmedIdle) {
-                break;
+              if (!recentlyConfirmedIdle) {
+                updateSessionStatus(sessionId, { type: 'busy' }, 'sse:message.part.updated');
               }
-              updateSessionStatus(sessionId, { type: 'busy' }, 'sse:message.part.updated');
             }
           }
         }
@@ -1300,12 +1137,6 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
           break;
         }
 
-        const partStreamKey = buildPartStreamKey(sessionId, messageId, partId);
-        if (deltaDrivenPartKeysRef.current.size > 5000) {
-          deltaDrivenPartKeysRef.current.clear();
-        }
-        deltaDrivenPartKeysRef.current.add(partStreamKey);
-
         lastMessageEventBySessionRef.current.set(sessionId, Date.now());
         const pendingTimer = pendingMessageStallTimersRef.current.get(sessionId);
         if (pendingTimer) {
@@ -1317,99 +1148,39 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
         const existingPart = existingMessage?.parts?.find((item) => item?.id === partId);
         const existingRole = (existingMessage?.info as Record<string, unknown> | undefined)?.role;
         const roleInfo = typeof existingRole === 'string' ? existingRole : 'assistant';
-        const directory = readEventDirectory(props);
-        const partTypeHintKey = `${directory}:${messageId}:${partId}`;
-        const hintedPartType = partTypeHintsByKeyRef.current.get(partTypeHintKey);
-
-        if (existingPart) {
-          const existingPartType = typeof (existingPart as { type?: unknown }).type === 'string'
-            ? (existingPart as { type: string }).type
-            : null;
-          const existingPartEnded = typeof (existingPart as { time?: { end?: unknown } }).time?.end === 'number';
-
-          if (
-            existingPartEnded &&
-            (existingPartType === 'text' || existingPartType === 'reasoning')
-          ) {
-            pendingDeltaBootstrapsRef.current.delete(partStreamKey);
-            trackMessage(messageId, 'part_delta_skipped_ended_part', { role: roleInfo, field, type: existingPartType });
-            break;
-          }
-        }
 
         if (!existingPart) {
-          const bootstrapAllowed = field === 'text' || field === 'content' || field === 'value';
-          if (!bootstrapAllowed) {
-            break;
-          }
+          if (field === 'text' || field === 'content' || field === 'value') {
+            const directory = readEventDirectory(props);
+            const deltaPartTypeHint =
+              readStringProp(props, ['partType', 'type', 'part_type']) ||
+              readStringProp(props, ['kind']);
+            const partTypeHintKey = `${directory}:${messageId}:${partId}`;
+            const hintedPartType = partTypeHintsByKeyRef.current.get(partTypeHintKey);
+            const bootstrappedPartType =
+              typeof deltaPartTypeHint === 'string' && deltaPartTypeHint.trim().length > 0
+                ? deltaPartTypeHint
+                : (typeof hintedPartType === 'string' && hintedPartType.trim().length > 0
+                  ? hintedPartType
+                  : 'text');
 
-          // If a bootstrap for this part is already sitting in the queue
-          // (from an earlier delta in the same rAF frame), accumulate into
-          // the raw delta buffer instead of materializing a second snapshot.
-          // This keeps delta semantics intact and matches upstream behavior:
-          // delta mutates text, it does not become an authoritative part body.
-          const pendingBootstrap = pendingDeltaBootstrapsRef.current.get(partStreamKey);
-          if (pendingBootstrap) {
-            const prev = typeof pendingBootstrap.part.delta === 'string'
-              ? pendingBootstrap.part.delta
-              : '';
-            const next = `${prev}${delta}`;
-            pendingBootstrap.part.delta = next;
-            trackMessage(messageId, 'part_delta_bootstrap_append', { role: roleInfo, field, len: next.length });
-            break;
-          }
+            const bootstrappedPart = {
+              id: partId,
+              type: bootstrappedPartType,
+              sessionID: sessionId,
+              messageID: messageId,
+              delta,
+              [field]: '',
+            } as unknown as Part;
 
-          if (roleInfo === 'assistant' && delta.length > 0) {
-            const currentStatus = useSessionStore.getState().sessionStatus?.get(sessionId);
-            const recentlyConfirmedIdle =
-              currentStatus?.type === 'idle' &&
-              typeof currentStatus.confirmedAt === 'number' &&
-              Date.now() - currentStatus.confirmedAt < 1200;
-            if (!currentStatus || currentStatus.type === 'idle') {
-              if (!recentlyConfirmedIdle) {
-                updateSessionStatus(sessionId, { type: 'busy' }, 'sse:message.part.delta.bootstrap');
-              }
+            if (typeof bootstrappedPartType === 'string' && bootstrappedPartType.length > 0) {
+              writePartTypeHint(partTypeHintKey, bootstrappedPartType);
             }
+
+            addStreamingPart(sessionId, messageId, bootstrappedPart, roleInfo);
           }
-
-          const deltaPartTypeHint =
-            readStringProp(props, ['partType', 'type', 'part_type']) ||
-            readStringProp(props, ['kind']);
-          const bootstrappedPartType =
-            typeof deltaPartTypeHint === 'string' && deltaPartTypeHint.trim().length > 0
-              ? deltaPartTypeHint
-              : (typeof hintedPartType === 'string' && hintedPartType.trim().length > 0
-                ? hintedPartType
-                : 'text');
-
-          const bootstrappedPart = {
-            id: partId,
-            type: bootstrappedPartType,
-            sessionID: sessionId,
-            messageID: messageId,
-            delta,
-            [field]: '',
-          } as unknown as Part;
-
-          // Track this mutable object so subsequent deltas (before queue
-          // flush) can append to it rather than creating new queue entries.
-          pendingDeltaBootstrapsRef.current.set(partStreamKey, {
-            part: bootstrappedPart as unknown as Record<string, unknown>,
-            field,
-          });
-
-          if (typeof bootstrappedPartType === 'string' && bootstrappedPartType.length > 0) {
-            writePartTypeHint(partTypeHintKey, bootstrappedPartType);
-          }
-
-          trackMessage(messageId, 'part_delta_bootstrap', { role: roleInfo, field });
-          addStreamingPart(sessionId, messageId, bootstrappedPart, roleInfo);
           break;
         }
-
-        // Part exists in store — bootstrap phase is over for this part.
-        // Clean up pending bootstrap ref so it doesn't leak.
-        pendingDeltaBootstrapsRef.current.delete(partStreamKey);
 
         if (roleInfo === 'assistant' && delta.length > 0) {
           const currentStatus = useSessionStore.getState().sessionStatus?.get(sessionId);
@@ -1664,7 +1435,6 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
         }
 
         const existingMessage = getMessageFromStore(sessionId, messageId);
-        const existingLen = computeTextLength(existingMessage?.parts || []);
         const existingStopMarker = (existingMessage?.info as { finish?: string } | undefined)?.finish === 'stop';
 
         const serverParts = (props as { parts?: unknown }).parts || (messageExt as { parts?: unknown }).parts;
@@ -1682,26 +1452,10 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
 
         if (!hasParts && !completedFromServer && !hasCompletedStatus && !eventHasStopFinish && !eventHasErrorFinish) break;
 
-        if ((messageExt as { role?: unknown }).role === 'assistant' && hasParts) {
-          const hasQuestionTool = partsArray.some((part) => (
-            part?.type === 'tool'
-            && typeof (part as { tool?: unknown }).tool === 'string'
-            && (part as { tool: string }).tool.toLowerCase() === 'question'
-          ));
-          if (hasQuestionTool) {
-            requestPendingQuestionsRefresh();
-          }
+        const messageInfoOnly = { ...messageExt } as Record<string, unknown>;
+        delete messageInfoOnly.parts;
 
-          const incomingLen = computeTextLength(partsArray);
-          const wouldShrink = existingLen > 0 && incomingLen + TEXT_SHRINK_TOLERANCE < existingLen;
-
-          if (wouldShrink && !eventHasStopFinish) {
-            trackMessage(messageId, 'skipped_shrinking_update', { incomingLen, existingLen });
-            break;
-          }
-        }
-
-        updateMessageInfo(sessionId, messageId, message as unknown as Message);
+        updateMessageInfo(sessionId, messageId, messageInfoOnly as unknown as Message);
 
         const messageRole = typeof (message as { role?: unknown }).role === 'string'
           ? (message as { role: string }).role
@@ -1738,56 +1492,6 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
                 tag: `error-${sessionId}`,
               });
             }
-          }
-        }
-
-        if (hasParts && (messageExt as { role?: unknown }).role !== 'user') {
-          const storeState = useSessionStore.getState();
-          const existingMessages = storeState.messages.get(sessionId) || [];
-          const existingMessageForSession = existingMessages.find((m) => m.info.id === messageId);
-          const needsInjection = !existingMessageForSession || existingMessageForSession.parts.length === 0;
-
-          trackMessage(
-            messageId,
-            needsInjection ? 'server_parts_injected' : 'server_parts_refreshed',
-            { count: partsArray.length }
-          );
-
-          const partsToInject = partsArray;
-          const directory = readEventDirectory(props);
-
-          for (let i = 0; i < partsToInject.length; i++) {
-            const serverPart = partsToInject[i];
-            const enrichedPart: Part = {
-              ...serverPart,
-              type: serverPart?.type || 'text',
-              sessionID: serverPart?.sessionID || sessionId,
-              messageID: serverPart?.messageID || messageId,
-            } as Part;
-            if (typeof enrichedPart.id === 'string' && typeof enrichedPart.type === 'string') {
-              writePartTypeHint(`${directory}:${messageId}:${enrichedPart.id}`, enrichedPart.type);
-            }
-
-            // Skip delta-driven text/reasoning parts that haven't ended —
-            // same guard as message.part.updated to prevent snapshot text
-            // from overwriting delta-accumulated content.
-            const enrichedPartId = typeof enrichedPart.id === 'string' ? enrichedPart.id : '';
-            const enrichedPartType = enrichedPart.type;
-            const enrichedPartEnded = typeof (enrichedPart as { time?: { end?: unknown } }).time?.end === 'number';
-            if (
-              (enrichedPartType === 'text' || enrichedPartType === 'reasoning') &&
-              enrichedPartId &&
-              !enrichedPartEnded
-            ) {
-              const msgUpdPartStreamKey = buildPartStreamKey(sessionId, messageId, enrichedPartId);
-              if (deltaDrivenPartKeysRef.current.has(msgUpdPartStreamKey)) {
-                trackMessage(messageId, 'message_updated_part_skipped_delta_preferred', { type: enrichedPartType, index: i });
-                continue;
-              }
-            }
-
-            addStreamingPart(sessionId, messageId, enrichedPart, (messageExt as { role?: string }).role as string);
-            trackMessage(messageId, `server_part_${i}`);
           }
         }
 
@@ -2229,91 +1933,6 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
     return bootstrapStateRef.current(reason);
   }, []); // intentionally empty deps
 
-  const flushQueuedEvents = React.useCallback(() => {
-    if (flushTimerRef.current) {
-      clearTimeout(flushTimerRef.current);
-      flushTimerRef.current = null;
-    }
-    flushScheduledRef.current = false;
-
-    if (queuedEventsRef.current.length === 0) {
-      queuedEventIndexRef.current.clear();
-      return;
-    }
-
-    const events = queuedEventsRef.current;
-    const supersededDeltaKeys = new Set<string>();
-    const laterUpdatedKeys = new Set<string>();
-
-    for (let index = events.length - 1; index >= 0; index -= 1) {
-      const queued = events[index];
-      const eventKey = buildQueuedDeltaEventKey(queued);
-      if (!eventKey) {
-        continue;
-      }
-
-      if (queued.type === 'message.part.updated') {
-        laterUpdatedKeys.add(eventKey);
-        continue;
-      }
-
-      if (queued.type === 'message.part.delta' && laterUpdatedKeys.has(eventKey)) {
-        supersededDeltaKeys.add(eventKey);
-      }
-    }
-
-    queuedEventsRef.current = [];
-    queuedEventIndexRef.current.clear();
-    lastFlushAtRef.current = Date.now();
-
-    for (let index = 0; index < events.length; index += 1) {
-      const queued = events[index];
-      if (queued.type === 'message.part.delta') {
-        const eventKey = buildQueuedDeltaEventKey(queued);
-        if (eventKey && supersededDeltaKeys.has(eventKey)) {
-          continue;
-        }
-      }
-      stableHandleEvent(queued);
-    }
-  }, [stableHandleEvent]);
-
-  const scheduleQueuedFlush = React.useCallback(() => {
-    if (flushScheduledRef.current) {
-      return;
-    }
-
-    flushScheduledRef.current = true;
-    const elapsed = Date.now() - lastFlushAtRef.current;
-    const delay = Math.max(0, EVENT_FLUSH_FRAME_MS - elapsed);
-
-    flushTimerRef.current = setTimeout(() => {
-      flushTimerRef.current = null;
-      if (!flushScheduledRef.current) {
-        return;
-      }
-      flushQueuedEvents();
-    }, delay);
-  }, [flushQueuedEvents]);
-
-  const enqueueEvent = React.useCallback((event: EventData) => {
-    const key = buildCoalescingKey(event);
-    if (key) {
-      const existingIndex = queuedEventIndexRef.current.get(key);
-      if (existingIndex !== undefined) {
-        queuedEventsRef.current[existingIndex] = event;
-
-        scheduleQueuedFlush();
-        return;
-      }
-
-      queuedEventIndexRef.current.set(key, queuedEventsRef.current.length);
-    }
-
-    queuedEventsRef.current.push(event);
-    scheduleQueuedFlush();
-  }, [scheduleQueuedFlush]);
-
   const shouldHoldConnection = React.useCallback(() => {
     const currentVisibility = resolveVisibilityState();
     visibilityStateRef.current = currentVisibility;
@@ -2360,11 +1979,8 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
       }
     }
 
-    flushQueuedEvents();
-
-
     isCleaningUpRef.current = false;
-  }, [flushQueuedEvents]);
+  }, []);
 
   const startStream = React.useCallback(async (options?: { resetAttempts?: boolean }) => {
     debugConnectionState();
@@ -2452,7 +2068,7 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
               ? { ...baseProperties, directory: event.directory }
               : baseProperties;
 
-          enqueueEvent({
+          stableHandleEvent({
             type: typeof (payload as { type?: unknown }).type === 'string' ? (payload as { type: string }).type : '',
             properties,
           });
@@ -2485,7 +2101,7 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
     publishStatus,
     checkConnection,
     requestSessionMetadataRefresh,
-    enqueueEvent,
+    stableHandleEvent,
     stableBootstrapState,
     effectiveDirectory,
     debugConnectionState,

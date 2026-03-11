@@ -37,108 +37,6 @@ const timeoutRegistry = new Map<string, ReturnType<typeof setTimeout>>();
 const lastContentRegistry = new Map<string, string>();
 const streamingCooldownTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-// --- rAF batching for streaming parts ---
-// Buffer incoming streaming parts and flush them in a single requestAnimationFrame
-// callback. This coalesces N SSE tokens per frame into one synchronous flush,
-// which React 18 + Zustand batch into a single re-render.
-interface QueuedStreamingPart {
-    sessionId: string;
-    messageId: string;
-    part: Part;
-    role?: string;
-    currentSessionId?: string;
-}
-const streamingPartQueue: QueuedStreamingPart[] = [];
-let streamingFlushScheduled = false;
-let streamingFlushRafId: number | null = null;
-let streamingFlushTimeoutId: ReturnType<typeof setTimeout> | null = null;
-const STREAMING_FLUSH_TIMEOUT_MS = 50;
-const STREAMING_QUEUE_HARD_LIMIT = 3000;
-
-type StreamingPartImmediateHandler = (
-    sessionId: string,
-    messageId: string,
-    part: Part,
-    role?: string,
-    currentSessionId?: string,
-) => void;
-
-const cancelScheduledStreamingFlush = (): void => {
-    if (streamingFlushRafId !== null) {
-        cancelAnimationFrame(streamingFlushRafId);
-        streamingFlushRafId = null;
-    }
-    if (streamingFlushTimeoutId !== null) {
-        clearTimeout(streamingFlushTimeoutId);
-        streamingFlushTimeoutId = null;
-    }
-    streamingFlushScheduled = false;
-};
-
-const flushQueuedStreamingParts = (immediateHandler: StreamingPartImmediateHandler): void => {
-    if (streamingPartQueue.length === 0) {
-        cancelScheduledStreamingFlush();
-        return;
-    }
-
-    cancelScheduledStreamingFlush();
-
-    const batch = streamingPartQueue.splice(0);
-    if (batch.length === 0) {
-        return;
-    }
-
-    for (const entry of batch) {
-        immediateHandler(entry.sessionId, entry.messageId, entry.part, entry.role, entry.currentSessionId);
-    }
-};
-
-const discardQueuedStreamingPartsForSession = (sessionId: string): void => {
-    if (streamingPartQueue.length === 0) {
-        return;
-    }
-
-    for (let i = streamingPartQueue.length - 1; i >= 0; i--) {
-        if (streamingPartQueue[i].sessionId === sessionId) {
-            streamingPartQueue.splice(i, 1);
-        }
-    }
-
-    if (streamingPartQueue.length === 0) {
-        cancelScheduledStreamingFlush();
-    }
-};
-
-const scheduleStreamingFlush = (flush: () => void): void => {
-    if (streamingFlushScheduled) {
-        return;
-    }
-
-    streamingFlushScheduled = true;
-
-    const shouldUseRaf =
-        typeof requestAnimationFrame === "function" &&
-        (typeof document === "undefined" || !document.hidden);
-
-    if (shouldUseRaf) {
-        streamingFlushRafId = requestAnimationFrame(() => {
-            streamingFlushRafId = null;
-            if (!streamingFlushScheduled) {
-                return;
-            }
-            flush();
-        });
-    }
-
-    streamingFlushTimeoutId = setTimeout(() => {
-        streamingFlushTimeoutId = null;
-        if (!streamingFlushScheduled) {
-            return;
-        }
-        flush();
-    }, STREAMING_FLUSH_TIMEOUT_MS);
-};
-
 const MIN_SORTABLE_LENGTH = 10;
 
 const extractSortableId = (id: unknown): string | null => {
@@ -200,25 +98,6 @@ const streamDebugEnabled = (): boolean => {
     }
 };
 
-const computePartsTextLength = (parts: Part[] | undefined): number => {
-    if (!Array.isArray(parts) || parts.length === 0) {
-        return 0;
-    }
-    return parts.reduce((sum, part) => {
-        if (!part || (part.type !== "text" && part.type !== "reasoning")) {
-            return sum;
-        }
-        const content =
-            (part as Record<string, unknown>).text
-            ?? (part as Record<string, unknown>).content
-            ?? (part as Record<string, unknown>).value;
-        if (typeof content === "string") {
-            return sum + content.length;
-        }
-        return sum;
-    }, 0);
-};
-
 const toFileUrl = (inputPath: string): string => {
     const normalized = inputPath.replace(/\\/g, "/").trim();
     if (normalized.startsWith("file://")) {
@@ -226,10 +105,6 @@ const toFileUrl = (inputPath: string): string => {
     }
     const withLeadingSlash = normalized.startsWith("/") ? normalized : `/${normalized}`;
     return `file://${encodeURI(withLeadingSlash)}`;
-};
-
-const hasFinishStop = (info: { finish?: string } | undefined): boolean => {
-    return info?.finish === "stop";
 };
 
 const getPartKey = (part: Part | undefined): string | undefined => {
@@ -267,14 +142,7 @@ const findMatchingPartIndex = (parts: Part[], incoming: Part): number => {
             return byId;
         }
 
-        if (incoming.type === "text" || incoming.type === "reasoning") {
-            for (let i = parts.length - 1; i >= 0; i -= 1) {
-                const candidate = parts[i];
-                if (candidate?.type === incoming.type) {
-                    return i;
-                }
-            }
-        }
+        return -1;
     }
 
     const incomingKey = getPartKey(incoming);
@@ -287,54 +155,17 @@ const findMatchingPartIndex = (parts: Part[], incoming: Part): number => {
 
 const ignoredAssistantMessageIds = new Set<string>();
 
-const mergePreferExistingParts = (existing: Part[] = [], incoming: Part[] = []): Part[] => {
-    if (!incoming.length) {
-        return [...existing];
-    }
-    const merged = [...existing];
-
-    incoming.forEach((part) => {
-        if (!part) {
-            return;
-        }
-        const existingIndex = findMatchingPartIndex(merged, part);
-        if (existingIndex !== -1) {
-            merged[existingIndex] = normalizeStreamingPart(part, merged[existingIndex]);
-            return;
-        }
-        merged.push(part);
-    });
-
-    return merged;
-};
-
 const mergeDuplicateMessage = (
     existing: { info: any; parts: Part[] },
     incoming: { info: any; parts: Part[] }
 ): { info: any; parts: Part[] } => {
-    const existingParts = Array.isArray(existing.parts) ? existing.parts : [];
-    const incomingParts = Array.isArray(incoming.parts) ? incoming.parts : [];
-    const existingLen = computePartsTextLength(existingParts);
-    const incomingLen = computePartsTextLength(incomingParts);
-    const existingStop = hasFinishStop(existing.info);
-    const incomingStop = hasFinishStop(incoming.info);
-
-    let parts = incomingParts;
-    if (existingStop && existingLen >= incomingLen) {
-        parts = mergePreferExistingParts(existingParts, incomingParts);
-    } else if (incomingStop && incomingLen >= existingLen) {
-        parts = mergePreferExistingParts(incomingParts, existingParts);
-    } else if (existingLen >= incomingLen) {
-        parts = existingParts;
-    }
-
     return {
         ...incoming,
         info: {
             ...existing.info,
             ...incoming.info,
         },
-        parts,
+        parts: Array.isArray(incoming.parts) ? incoming.parts : [],
     };
 };
 
@@ -570,12 +401,6 @@ export const useMessageStore = create<MessageStore>()(
                             set((state) => {
                             const newMessages = new Map(state.messages);
                             const previousMessages = state.messages.get(sessionId) || [];
-                            const previousMessagesById = new Map(
-                                previousMessages
-                                    .filter((msg) => typeof msg.info?.id === "string")
-                                    .map((msg) => [msg.info.id as string, msg])
-                            );
-
                             const normalizedMessages = messagesToKeep.map((message) => {
                                 const infoWithMarker = normalizeMessageInfoForProjection(message.info as Message) as any;
 
@@ -588,29 +413,6 @@ export const useMessageStore = create<MessageStore>()(
                                     }
                                     return part;
                                 });
-                                const existingEntry = infoWithMarker?.id
-                                    ? previousMessagesById.get(infoWithMarker.id as string)
-                                    : undefined;
-
-                                if (
-                                    existingEntry &&
-                                    existingEntry.info.role === "assistant"
-                                ) {
-                                    const existingParts = Array.isArray(existingEntry.parts) ? existingEntry.parts : [];
-                                    const existingLen = computePartsTextLength(existingParts);
-                                    const serverLen = computePartsTextLength(serverParts);
-                                    const storeHasStop = hasFinishStop(existingEntry.info);
-
-                                    if (storeHasStop && existingLen > serverLen) {
-                                        const mergedParts = mergePreferExistingParts(existingParts, serverParts);
-                                        return {
-                                            ...message,
-                                            info: infoWithMarker,
-                                            parts: mergedParts,
-                                        };
-                                    }
-                                }
-
                                 return {
                                     ...message,
                                     info: infoWithMarker,
@@ -1014,8 +816,6 @@ export const useMessageStore = create<MessageStore>()(
                     if (!currentSessionId) {
                         return;
                     }
-
-                    discardQueuedStreamingPartsForSession(currentSessionId);
 
                     const stateSnapshot = get();
                     const { abortControllers, messages: storeMessages } = stateSnapshot;
@@ -1663,18 +1463,7 @@ export const useMessageStore = create<MessageStore>()(
                 },
 
                 addStreamingPart: (sessionId: string, messageId: string, part: Part, role?: string, currentSessionId?: string) => {
-                    streamingPartQueue.push({ sessionId, messageId, part, role, currentSessionId });
-
-                    const flushQueuedParts = () => {
-                        flushQueuedStreamingParts(get()._addStreamingPartImmediate);
-                    };
-
-                    if (streamingPartQueue.length >= STREAMING_QUEUE_HARD_LIMIT) {
-                        flushQueuedParts();
-                        return;
-                    }
-
-                    scheduleStreamingFlush(flushQueuedParts);
+                    get()._addStreamingPartImmediate(sessionId, messageId, part, role, currentSessionId);
                 },
 
                 applyPartDelta: (sessionId: string, messageId: string, partId: string, field: string, delta: string, role?: string, currentSessionId?: string) => {
@@ -1693,31 +1482,6 @@ export const useMessageStore = create<MessageStore>()(
 
                         const existingPart = targetMessage.parts[partIndex] as Record<string, unknown>;
                         const existingField = existingPart[field];
-                        const partType = typeof existingPart.type === 'string' ? existingPart.type : null;
-                        const isStreamingTextLikePart = partType === 'text';
-
-                        if (isStreamingTextLikePart && typeof existingField === 'string') {
-                            const normalizedExisting = existingField.trimEnd();
-                            const normalizedDelta = delta.trimEnd();
-
-                            if (
-                                delta.length > 0 && (
-                                    existingField === delta ||
-                                    (normalizedDelta.length > 0 && normalizedExisting === normalizedDelta)
-                                )
-                            ) {
-                                if (streamDebugEnabled() && role !== 'user') {
-                                    console.info('[STREAM-TRACE] delta_skip_duplicate_full_payload', {
-                                        messageId,
-                                        partId,
-                                        field,
-                                        deltaLen: delta.length,
-                                        partType,
-                                    });
-                                }
-                                return state;
-                            }
-                        }
 
                         const nextFieldValue = `${typeof existingField === 'string' ? existingField : ''}${delta}`;
                         const nextPart: Record<string, unknown> = {
@@ -1999,22 +1763,6 @@ export const useMessageStore = create<MessageStore>()(
                         const messageIndex = normalizedSessionMessages.findIndex((msg) => msg.info.id === messageId);
                         const pendingEntry = state.pendingAssistantParts.get(messageId);
 
-                        const mergeParts = (existingParts: Part[] = [], incomingParts: Part[] = []) => {
-                            if (!incomingParts.length) {
-                                return existingParts;
-                            }
-                            const merged = [...existingParts];
-                            incomingParts.forEach((incomingPart) => {
-                                const idx = merged.findIndex((part) => part.id === incomingPart.id);
-                                if (idx === -1) {
-                                    merged.push(incomingPart);
-                                } else {
-                                    merged[idx] = incomingPart;
-                                }
-                            });
-                            return merged;
-                        };
-
                         const ensureClientRole = (info: any) => {
                             if (!info) {
                                 return info;
@@ -2215,14 +1963,10 @@ export const useMessageStore = create<MessageStore>()(
                             updatedInfo.userMessageMarker = true;
                         }
 
-                        const mergedParts = pendingEntry?.parts
-                            ? mergeParts(existingMessage.parts, pendingEntry.parts)
-                            : existingMessage.parts;
-
                         const updatedMessage = {
                             ...existingMessage,
                             info: updatedInfo,
-                            parts: mergedParts,
+                            parts: existingMessage.parts,
                         };
 
                         const newMessages = new Map(state.messages);
@@ -2255,8 +1999,6 @@ export const useMessageStore = create<MessageStore>()(
                 },
 
                 completeStreamingMessage: (sessionId: string, messageId: string) => {
-                    flushQueuedStreamingParts(get()._addStreamingPartImmediate);
-
                     const state = get();
 
                     (window as any).__messageTracker?.(
@@ -2372,12 +2114,6 @@ export const useMessageStore = create<MessageStore>()(
                     set((state) => {
                         const newMessages = new Map(state.messages);
                         const previousMessages = state.messages.get(sessionId) || [];
-                        const previousMessagesById = new Map(
-                            previousMessages
-                                .filter((msg) => typeof msg.info?.id === "string")
-                                .map((msg) => [msg.info.id as string, msg])
-                        );
-
                         const normalizedIncomingMessages = messagesFiltered.map((message) => {
                             const infoWithMarker = {
                                 ...normalizeMessageInfoForProjection(message.info as Message),
@@ -2396,25 +2132,6 @@ export const useMessageStore = create<MessageStore>()(
                                 }
                                 return part;
                             });
-                            const messageId = typeof infoWithMarker?.id === "string" ? (infoWithMarker.id as string) : undefined;
-                            const existingEntry = messageId ? previousMessagesById.get(messageId) : undefined;
-
-                            if (existingEntry && existingEntry.info.role === "assistant") {
-                                const existingParts = Array.isArray(existingEntry.parts) ? existingEntry.parts : [];
-                                const existingLen = computePartsTextLength(existingParts);
-                                const serverLen = computePartsTextLength(serverParts);
-                                const storeHasStop = hasFinishStop(existingEntry.info);
-
-                                if (storeHasStop && existingLen > serverLen) {
-                                    const mergedParts = mergePreferExistingParts(existingParts, serverParts);
-                                    return {
-                                        ...message,
-                                        info: infoWithMarker,
-                                        parts: mergedParts,
-                                    };
-                                }
-                            }
-
                             return {
                                 ...message,
                                 info: infoWithMarker,
