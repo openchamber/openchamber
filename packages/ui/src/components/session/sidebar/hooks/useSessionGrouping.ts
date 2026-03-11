@@ -144,7 +144,7 @@ export const useSessionGrouping = (args: Args) => {
         sessions: groupedNodes.get(rootKey) ?? [],
       }];
 
-      // Calculate activity info for each worktree
+      // Calculate activity info for each worktree to determine sorting priority
       const worktreeActivityInfo = new Map<string, { hasActiveSession: boolean; lastUpdatedAt: number }>();
       availableWorktrees.forEach((meta) => {
         const directory = normalizePath(meta.path) ?? meta.path;
@@ -152,7 +152,10 @@ export const useSessionGrouping = (args: Args) => {
         const hasActiveSession = sessionsInWorktree.length > 0;
         // Calculate the latest update time among all sessions in this worktree
         const lastUpdatedAt = sessionsInWorktree.reduce((max, node) => {
-          const updatedAt = toFiniteNumber(node.session.time?.updated) ?? toFiniteNumber(node.session.time?.created) ?? 0;
+          const updatedAt = Number(node.session.time?.updated ?? node.session.time?.created ?? 0);
+          if (!Number.isFinite(updatedAt)) {
+            return max;
+          }
           return Math.max(max, updatedAt);
         }, 0);
 
