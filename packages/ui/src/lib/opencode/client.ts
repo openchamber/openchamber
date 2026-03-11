@@ -151,7 +151,6 @@ class OpencodeService {
 
   private globalSseAbortController: AbortController | null = null;
   private globalSseTask: Promise<void> | null = null;
-  private globalSseLastEventId: string | undefined;
   private globalSseIsConnected = false;
   private globalSseListeners: Set<(event: RoutedOpencodeEvent) => void> = new Set();
   private globalSseOpenListeners: Set<() => void> = new Set();
@@ -1199,41 +1198,6 @@ class OpencodeService {
       return response.data || [];
     } catch {
       return [];
-    }
-  }
-
-  private parseSseBlock(block: string): { data: unknown; id?: string } | null {
-    if (!block) return null;
-
-    const lines = block.split('\n');
-    const dataLines: string[] = [];
-    let eventId: string | undefined;
-
-    for (const line of lines) {
-      if (line.startsWith('data:')) {
-        dataLines.push(line.slice(5).replace(/^\s/, ''));
-      } else if (line.startsWith('id:')) {
-        const candidate = line.slice(3).trim();
-        if (candidate) {
-          eventId = candidate;
-        }
-      }
-    }
-
-    if (dataLines.length === 0) {
-      return null;
-    }
-
-    const payloadText = dataLines.join('\n').trim();
-    if (!payloadText) {
-      return null;
-    }
-
-    try {
-      const data = JSON.parse(payloadText) as unknown;
-      return { data, id: eventId };
-    } catch {
-      return null;
     }
   }
 

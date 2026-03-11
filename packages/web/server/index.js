@@ -4744,72 +4744,6 @@ function parseSseDataPayload(block) {
   }
 }
 
-function parseSseJsonEnvelope(block) {
-  if (!block || typeof block !== 'string') {
-    return null;
-  }
-
-  const dataLines = block
-    .split('\n')
-    .filter((line) => line.startsWith('data:'))
-    .map((line) => line.slice(5).replace(/^\s/, ''));
-
-  if (dataLines.length === 0) {
-    return null;
-  }
-
-  const payloadText = dataLines.join('\n').trim();
-  if (!payloadText) {
-    return null;
-  }
-
-  try {
-    const raw = JSON.parse(payloadText);
-    if (!raw || typeof raw !== 'object') {
-      return null;
-    }
-
-    if (raw.payload && typeof raw.payload === 'object') {
-      return {
-        raw,
-        payload: raw.payload,
-      };
-    }
-
-    return {
-      raw,
-      payload: raw,
-    };
-  } catch {
-    return null;
-  }
-}
-
-function replaceSseDataPayload(block, rawPayload) {
-  if (!block || typeof block !== 'string') {
-    return block;
-  }
-
-  const passthroughLines = block
-    .split('\n')
-    .filter((line) => !line.startsWith('data:'));
-
-  return [...passthroughLines, `data: ${JSON.stringify(rawPayload)}`].join('\n');
-}
-
-function createStreamingTextNormalizerState() {
-  return {
-    partTextByKey: new Map(),
-    maxEntries: 8000,
-  };
-}
-
-function normalizeStreamingTextPayload(payload, state) {
-  void payload;
-  void state;
-  return false;
-}
-
 function extractSessionStatusUpdate(payload) {
   if (!payload || typeof payload !== 'object' || payload.type !== 'session.status') {
     return null;
@@ -7979,18 +7913,12 @@ async function main(options = {}) {
     const decoder = new TextDecoder();
     const reader = upstream.body.getReader();
     let buffer = '';
-    const streamingTextNormalizerState = createStreamingTextNormalizerState();
 
     const forwardBlock = (block) => {
       if (!block) return;
-      let outboundBlock = block;
-      const envelope = parseSseJsonEnvelope(block);
-      let payload = envelope ? envelope.payload : parseSseDataPayload(block);
-      if (envelope && normalizeStreamingTextPayload(payload, streamingTextNormalizerState)) {
-        outboundBlock = replaceSseDataPayload(block, envelope.raw);
-      }
+      const payload = parseSseDataPayload(block);
 
-      res.write(`${outboundBlock}
+      res.write(`${block}
 
 `);
       // Cache session titles from session.updated/session.created events (global stream)
@@ -8128,18 +8056,12 @@ async function main(options = {}) {
     const decoder = new TextDecoder();
     const reader = upstream.body.getReader();
     let buffer = '';
-    const streamingTextNormalizerState = createStreamingTextNormalizerState();
 
     const forwardBlock = (block) => {
       if (!block) return;
-      let outboundBlock = block;
-      const envelope = parseSseJsonEnvelope(block);
-      let payload = envelope ? envelope.payload : parseSseDataPayload(block);
-      if (envelope && normalizeStreamingTextPayload(payload, streamingTextNormalizerState)) {
-        outboundBlock = replaceSseDataPayload(block, envelope.raw);
-      }
+      const payload = parseSseDataPayload(block);
 
-      res.write(`${outboundBlock}
+      res.write(`${block}
 
 `);
       // Cache session titles from session.updated/session.created events (per-session stream)
