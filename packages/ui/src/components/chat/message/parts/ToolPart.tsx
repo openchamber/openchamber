@@ -14,7 +14,7 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSessionStore } from '@/stores/useSessionStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { opencodeClient } from '@/lib/opencode/client';
-import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { Text } from '@/components/ui/text';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import type { ContentChangeReason } from '@/hooks/useChatScrollManager';
@@ -452,17 +452,84 @@ const ToolScrollableSection: React.FC<ToolScrollableSectionProps> = ({
     outerClassName,
     disableHorizontal = false,
 }) => (
-    <ScrollableOverlay
-        outerClassName={cn('w-full min-w-0 flex-none overflow-hidden', maxHeightClass, outerClassName)}
-        className={cn('tool-output-surface p-2 rounded-xl w-full min-w-0 bg-transparent', className)}
-        style={{ borderWidth: '1px', borderColor: 'var(--tools-border)' }}
-        disableHorizontal={disableHorizontal}
-    >
-        <div className="w-full min-w-0">
-            {children}
-        </div>
-    </ScrollableOverlay>
+    <div className={cn('w-full min-w-0 flex-none overflow-hidden', outerClassName)}>
+        <ScrollShadow
+            className={cn(
+                'tool-output-surface p-2 rounded-xl w-full min-w-0',
+                maxHeightClass,
+                disableHorizontal ? 'overflow-y-auto overflow-x-hidden' : 'overflow-auto',
+                className,
+            )}
+            size={24}
+        >
+            <div className="w-full min-w-0">
+                {children}
+            </div>
+        </ScrollShadow>
+    </div>
 );
+
+const getToolOutputLanguage = (
+    output: string,
+    part: ToolPartType,
+    metadata: Record<string, unknown> | undefined,
+    input: Record<string, unknown> | undefined,
+): string => {
+    if (part.tool === 'bash') {
+        return 'bash';
+    }
+
+    return detectLanguageFromOutput(formatEditOutput(output, part.tool, metadata), part.tool, input);
+};
+
+const getToolOutputText = (
+    output: string,
+    part: ToolPartType,
+    metadata: Record<string, unknown> | undefined,
+): string => {
+    if (part.tool === 'bash') {
+        return output;
+    }
+
+    return formatEditOutput(output, part.tool, metadata);
+};
+
+const ToolScrollableTextOutput: React.FC<{
+    output: string;
+    part: ToolPartType;
+    metadata: Record<string, unknown> | undefined;
+    input: Record<string, unknown> | undefined;
+    syntaxTheme: { [key: string]: React.CSSProperties };
+}> = ({ output, part, metadata, input, syntaxTheme }) => {
+    const renderedOutput = getToolOutputText(output, part, metadata);
+    const outputLanguage = getToolOutputLanguage(output, part, metadata, input);
+
+    return (
+        <div className={part.tool === 'bash' ? 'typography-code text-muted-foreground/90' : undefined}>
+            <SyntaxHighlighter
+                style={syntaxTheme}
+                language={outputLanguage}
+                PreTag="div"
+                customStyle={{
+                    ...toolDisplayStyles.getCollapsedStyles(),
+                    padding: 0,
+                    overflow: 'visible',
+                }}
+                codeTagProps={{
+                    style: {
+                        background: 'transparent',
+                        backgroundColor: 'transparent',
+                    },
+                }}
+                wrapLongLines
+            >
+                {renderedOutput}
+            </SyntaxHighlighter>
+        </div>
+    );
+};
+
+ToolScrollableTextOutput.displayName = 'ToolScrollableTextOutput';
 
 type TaskToolSummaryEntry = {
     id?: string;
@@ -1065,7 +1132,7 @@ const WriteInputPreview: React.FC<WriteInputPreviewProps> = React.memo(({
 
     return (
         <div className="w-full min-w-0">
-            <div className="bg-muted/20 px-2 py-1 rounded-lg mb-1 flex items-center gap-2 min-w-0" style={{ borderWidth: '1px', borderColor: 'var(--tools-border)' }}>
+            <div className="bg-muted/20 px-2 py-1 rounded-lg mb-1 flex items-center gap-2 min-w-0">
                 {renderPathLikeGitChanges(displayPath)}
                 <span className="typography-meta text-muted-foreground/80 flex-shrink-0">({headerLineLabel})</span>
             </div>
@@ -1114,10 +1181,10 @@ const ImagePreview: React.FC<ImagePreviewProps> = React.memo(({ content, filePat
 
     return (
         <div className="w-full min-w-0">
-            <div className="bg-muted/20 px-2 py-1 rounded-lg mb-2 flex items-center min-w-0" style={{ borderWidth: '1px', borderColor: 'var(--tools-border)' }}>
+            <div className="bg-muted/20 px-2 py-1 rounded-lg mb-2 flex items-center min-w-0">
                 {renderPathLikeGitChanges(displayPath)}
             </div>
-            <div className="flex justify-center p-4 bg-muted/10 rounded-lg" style={{ borderWidth: '1px', borderColor: 'var(--tools-border)' }}>
+            <div className="flex justify-center p-4 bg-muted/10 rounded-lg">
                 <img
                     src={imageSrc}
                     alt={displayPath}
@@ -1269,7 +1336,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                     {diffEntries.map((entry) => (
                         <div key={entry.id} className="w-full min-w-0">
                             {diffEntries.length > 1 ? (
-                                <div className="bg-muted/20 px-2 py-1 typography-meta font-medium text-muted-foreground rounded-lg mb-1" style={{ borderWidth: '1px', borderColor: 'var(--tools-border)' }}>
+                                <div className="bg-muted/20 px-2 py-1 typography-meta font-medium text-muted-foreground rounded-lg mb-1">
                                     {renderPathLikeGitChanges(entry.title)}
                                 </div>
                             ) : null}
@@ -1288,25 +1355,13 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
 
         if (hasStringOutput && outputString.trim()) {
             return renderScrollableBlock(
-                <SyntaxHighlighter
-                    style={syntaxTheme}
-                    language={detectLanguageFromOutput(formatEditOutput(outputString, part.tool, metadata), part.tool, input)}
-                    PreTag="div"
-                    customStyle={{
-                        ...toolDisplayStyles.getCollapsedStyles(),
-                        padding: 0,
-                        overflow: 'visible',
-                    }}
-                    codeTagProps={{
-                        style: {
-                            background: 'transparent',
-                            backgroundColor: 'transparent',
-                        },
-                    }}
-                    wrapLongLines
-                >
-                    {formatEditOutput(outputString, part.tool, metadata)}
-                </SyntaxHighlighter>,
+                <ToolScrollableTextOutput
+                    output={outputString}
+                    part={part}
+                    metadata={metadata}
+                    input={input}
+                    syntaxTheme={syntaxTheme}
+                />,
                 { className: 'p-1' }
             );
         }
@@ -1352,28 +1407,34 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                     ) : hasInputText ? (
                         <div className="my-1">
                             {renderScrollableBlock(
-                                <blockquote className="tool-input-text whitespace-pre-wrap break-words typography-meta italic text-muted-foreground/70">
-                                    {inputTextContent}
-                                </blockquote>,
-                                { maxHeightClass: 'max-h-60', className: 'tool-input-surface' }
+                                part.tool === 'bash' ? (
+                                    <pre className="tool-input-text whitespace-pre-wrap break-words typography-code text-muted-foreground/90 m-0 p-0">
+                                        {inputTextContent}
+                                    </pre>
+                                ) : (
+                                    <blockquote className="tool-input-text whitespace-pre-wrap break-words typography-meta italic text-muted-foreground/70">
+                                        {inputTextContent}
+                                    </blockquote>
+                                ),
+                                {
+                                    maxHeightClass: 'max-h-60',
+                                    className: part.tool === 'bash' ? 'tool-input-surface p-0' : 'tool-input-surface',
+                                }
                             )}
                         </div>
                     ) : null}
 
                     {part.tool !== 'write' && state.status === 'completed' && 'output' in state && (
                         <div>
-                            <div className="mb-1 flex items-center justify-between gap-2">
-                                <div className="typography-meta font-medium text-muted-foreground/80">
-                                    Result:
-                                </div>
-                                {(part.tool === 'edit' || part.tool === 'multiedit' || part.tool === 'apply_patch') && diffContent ? (
+                            {(part.tool === 'edit' || part.tool === 'multiedit' || part.tool === 'apply_patch') && diffContent ? (
+                                <div className="mb-1 flex items-center justify-end gap-2">
                                     <DiffViewToggle
                                         mode={diffViewMode}
                                         onModeChange={setDiffViewMode}
                                         className="h-5 w-5 p-0"
                                     />
-                                ) : null}
-                            </div>
+                                </div>
+                            ) : null}
                             {renderResultContent()}
                         </div>
                     )}
@@ -1925,13 +1986,20 @@ const ToolPart: React.FC<ToolPartProps> = ({
             ) : null}
 
             {!isTaskTool && isExpanded ? (
-                <ToolExpandedContent
-                    part={part}
-                    state={state}
-                    syntaxTheme={syntaxTheme}
-                    currentDirectory={currentDirectory}
-                    onShowPopup={onShowPopup}
-                />
+                <div className="relative ml-2 pl-3">
+                    <span
+                        aria-hidden="true"
+                        className="pointer-events-none absolute left-0 top-px bottom-0 w-px"
+                        style={{ backgroundColor: 'var(--tools-border)' }}
+                    />
+                    <ToolExpandedContent
+                        part={part}
+                        state={state}
+                        syntaxTheme={syntaxTheme}
+                        currentDirectory={currentDirectory}
+                        onShowPopup={onShowPopup}
+                    />
+                </div>
             ) : null}
         </div>
     );
