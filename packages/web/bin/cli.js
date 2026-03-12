@@ -2788,6 +2788,9 @@ const commands = {
     }
 
     if (isQuietMode(options)) {
+      if (options.suppressQuietOutput) {
+        return resolvedPort;
+      }
       process.stdout.write(`${resolvedPort}\n`);
       return resolvedPort;
     }
@@ -2807,8 +2810,10 @@ const commands = {
 
   async stop(options) {
     const showOutput = shouldRenderHumanOutput(options);
+    const suppressQuietOutput = options?.suppressQuietOutput === true;
     const jsonResults = [];
     const printQuietStopResults = () => {
+      if (suppressQuietOutput) return;
       if (!isQuietMode(options) || isJsonMode(options)) return;
       if (jsonResults.length === 0) {
         process.stdout.write('none\n');
@@ -3036,22 +3041,40 @@ const commands = {
 
     for (const instance of runningInstances) {
       const storedOptions = readInstanceOptions(instance.instanceFilePath) || { port: instance.port };
-      if (showOutput) {
+      const restartSpin = showOutput ? createSpinner(options) : null;
+      if (showOutput && !restartSpin) {
         logStatus('info', `restarting port ${instance.port}`);
       }
-      await this.stop({ explicitPort: true, port: instance.port, quiet: true });
-      await new Promise((resolve) => setTimeout(resolve, 500));
-      const restartedPort = await this.serve({
-        port: options.explicitPort ? options.port : (storedOptions.port || instance.port),
-        explicitPort: true,
-        uiPassword: options.explicitUiPassword ? options.uiPassword : storedOptions.uiPassword,
-        suppressStartupSummary: true,
-        quiet: true,
-        suppressUiPasswordWarning: true,
-      });
-      restarted.push({ fromPort: instance.port, toPort: restartedPort, ok: true });
-      if (showOutput) {
-        logStatus('success', `port ${restartedPort} restarted`);
+      restartSpin?.start(`Restarting OpenChamber on port ${instance.port}...`);
+      try {
+        await this.stop({
+          explicitPort: true,
+          port: instance.port,
+          quiet: true,
+          suppressQuietOutput: true,
+        });
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        const restartedPort = await this.serve({
+          port: options.explicitPort ? options.port : (storedOptions.port || instance.port),
+          explicitPort: true,
+          uiPassword: options.explicitUiPassword ? options.uiPassword : storedOptions.uiPassword,
+          suppressStartupSummary: true,
+          quiet: true,
+          suppressUiPasswordWarning: true,
+          suppressQuietOutput: true,
+        });
+        restarted.push({ fromPort: instance.port, toPort: restartedPort, ok: true });
+        restartSpin?.stop(`Restarted OpenChamber on port ${restartedPort}`);
+        if (showOutput && !restartSpin) {
+          logStatus('success', `port ${restartedPort} restarted`);
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        restartSpin?.error(`Failed to restart OpenChamber on port ${instance.port}`);
+        if (showOutput && !restartSpin) {
+          logStatus('error', `failed to restart port ${instance.port}`, message);
+        }
+        throw error;
       }
     }
 
