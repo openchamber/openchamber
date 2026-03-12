@@ -149,38 +149,19 @@ Do not rely on prompts to enforce policy.
 - `--quiet` suppresses non-essential output only; it does not weaken validation.
 - `--json` changes output shape only; it does not weaken validation.
 
-### CLI UX standard with @clack/prompts
+Detailed Clack UX patterns (primitives, prompt gating, and implementation checklist)
+are defined in the `clack-cli-patterns` skill and should not be duplicated here.
 
-Use Clack primitives deliberately:
+## Clack CLI Skill (MANDATORY for terminal CLI work)
 
-- Flow framing: `intro`, `outro`, `cancel`
-- Status lines: `log.info`, `log.success`, `log.warn`, `log.error`, `log.step`
-- Guidance blocks: `note` (default), `box` (high-severity warnings only)
-- Input prompts: `select`, `confirm`, `text`, `password`
-- Long-running feedback:
-  - `spinner` for unknown-duration operations
-  - `progress` for known max-duration waits
-  - `tasks` for multi-stage workflows
-- Streaming/subprocess output when needed: `taskLog`, `stream.*`
+When working on terminal CLI commands, prompts, or output formatting, agents **MUST** study the Clack CLI skill first.
 
-### Prompt usage constraints
+**Before starting terminal CLI work:**
+```
+skill({ name: "clack-cli-patterns" })
+```
 
-Prompts are allowed only when all are true:
-
-- stdout is interactive (`TTY`)
-- not in `--quiet`
-- not in `--json`
-- not in automated/non-interactive context
-
-Otherwise, commands MUST proceed non-interactively or fail with actionable errors.
-
-### Implementation checklist for CLI changes
-
-1. Add/update core validator(s) first.
-2. Ensure validator runs in all modes (`TTY`, non-`TTY`, `--quiet`, `--json`).
-3. Add interactive Clack UX only as enhancement.
-4. Verify equivalent behavior in interactive and non-interactive paths.
-5. Ensure failures are deterministic and script-safe.
+Scope: terminal CLI only (for example `packages/web/bin/*`). Do not apply this requirement to VS Code or web UI work.
 
 ## Theme System (MANDATORY for UI work)
 
