@@ -144,7 +144,42 @@ export const useSessionGrouping = (args: Args) => {
         sessions: groupedNodes.get(rootKey) ?? [],
       }];
 
+      // Calculate activity info for each worktree to determine sorting priority
+      const worktreeActivityInfo = new Map<string, { hasActiveSession: boolean; lastUpdatedAt: number }>();
+      availableWorktrees.forEach((meta) => {
+        const directory = normalizePath(meta.path) ?? meta.path;
+        const sessionsInWorktree = groupedNodes.get(directory) ?? [];
+        const hasActiveSession = sessionsInWorktree.length > 0;
+        // Calculate the latest update time among all sessions in this worktree
+        const lastUpdatedAt = sessionsInWorktree.reduce((max, node) => {
+          const updatedAt = Number(node.session.time?.updated ?? node.session.time?.created ?? 0);
+          if (!Number.isFinite(updatedAt)) {
+            return max;
+          }
+          return Math.max(max, updatedAt);
+        }, 0);
+
+        worktreeActivityInfo.set(directory, { hasActiveSession, lastUpdatedAt });
+      });
+
+      // Sort worktrees: active first (by last updated desc), then inactive (by label asc)
       const sortedWorktrees = [...availableWorktrees].sort((a, b) => {
+        const aDir = normalizePath(a.path) ?? a.path;
+        const bDir = normalizePath(b.path) ?? b.path;
+        const aInfo = worktreeActivityInfo.get(aDir) ?? { hasActiveSession: false, lastUpdatedAt: 0 };
+        const bInfo = worktreeActivityInfo.get(bDir) ?? { hasActiveSession: false, lastUpdatedAt: 0 };
+
+        // First priority: active status (active first)
+        if (aInfo.hasActiveSession !== bInfo.hasActiveSession) {
+          return aInfo.hasActiveSession ? -1 : 1;
+        }
+
+        // Second priority: for active worktrees, sort by last updated (desc)
+        if (aInfo.hasActiveSession && bInfo.hasActiveSession) {
+          return bInfo.lastUpdatedAt - aInfo.lastUpdatedAt;
+        }
+
+        // Third priority: for inactive worktrees, sort by label (asc)
         const aLabel = (a.label || a.branch || a.name || a.path || '').toLowerCase();
         const bLabel = (b.label || b.branch || b.name || b.path || '').toLowerCase();
         return aLabel.localeCompare(bLabel);

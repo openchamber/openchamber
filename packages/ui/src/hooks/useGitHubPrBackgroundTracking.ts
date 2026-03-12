@@ -8,8 +8,10 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionStore } from '@/stores/useSessionStore';
 
 const MAX_BACKGROUND_PR_DIRECTORIES = 50;
-const BRANCH_REFRESH_TTL_MS = 2 * 60_000;
-const BRANCH_REFRESH_INTERVAL_MS = 60_000;
+const ACTIVE_DIRECTORY_REFRESH_TTL_MS = 15_000;
+const BACKGROUND_DIRECTORY_REFRESH_TTL_MS = 2 * 60_000;
+const BRANCH_REFRESH_INTERVAL_MS = 15_000;
+const PR_EVENTUAL_CONSISTENCY_REFRESH_DELAY_MS = 5_000;
 
 const normalizePath = (value?: string | null): string | null => {
   if (typeof value !== 'string') {
@@ -33,7 +35,47 @@ type SessionLike = Session & {
 
 type BranchCacheEntry = {
   branch: string | null;
+  tracking: string | null;
+  ahead: number;
+  behind: number;
   fetchedAt: number;
+};
+
+type PrTarget = {
+  directory: string;
+  branch: string;
+  remoteName?: string | null;
+};
+
+const getBranchRefreshTtl = (directory: string, currentDirectory: string | null): number => {
+  return directory === currentDirectory ? ACTIVE_DIRECTORY_REFRESH_TTL_MS : BACKGROUND_DIRECTORY_REFRESH_TTL_MS;
+};
+
+const hasRepoSignalChanged = (previous: BranchCacheEntry | undefined, next: BranchCacheEntry): boolean => {
+  if (!previous) {
+    return Boolean(next.branch);
+  }
+
+  return previous.branch !== next.branch
+    || previous.tracking !== next.tracking
+    || previous.ahead !== next.ahead
+    || previous.behind !== next.behind;
+};
+
+const toPrTargets = (cache: Map<string, BranchCacheEntry>, directories: string[]): PrTarget[] => {
+  const result: PrTarget[] = [];
+  directories.forEach((directory) => {
+    const cached = cache.get(directory);
+    if (!cached?.branch) {
+      return;
+    }
+    result.push({
+      directory,
+      branch: cached.branch,
+      remoteName: null,
+    });
+  });
+  return result;
 };
 
 export const useGitHubPrBackgroundTracking = (
@@ -52,13 +94,46 @@ export const useGitHubPrBackgroundTracking = (
   const refreshGitHubAuthStatus = useGitHubAuthStore((state) => state.refreshStatus);
 
   const syncBackgroundTargets = useGitHubPrStatusStore((state) => state.syncBackgroundTargets);
+  const refreshPrTargets = useGitHubPrStatusStore((state) => state.refreshTargets);
 
   const [branchCache, setBranchCache] = React.useState<Map<string, BranchCacheEntry>>(new Map());
   const branchCacheRef = React.useRef<Map<string, BranchCacheEntry>>(new Map());
+  const targetsRef = React.useRef<PrTarget[]>([]);
+  const burstTimeoutsRef = React.useRef<Map<string, number>>(new Map());
 
   React.useEffect(() => {
     branchCacheRef.current = branchCache;
   }, [branchCache]);
+
+  const scheduleBurstRefresh = React.useCallback((targetsToRefresh: PrTarget[]) => {
+    if (targetsToRefresh.length === 0) {
+      return;
+    }
+
+    const dedupedTargets = new Map<string, PrTarget>();
+    targetsToRefresh.forEach((target) => {
+      const key = `${target.directory}::${target.branch}`;
+      dedupedTargets.set(key, target);
+    });
+
+    dedupedTargets.forEach((target, key) => {
+      const existing = burstTimeoutsRef.current.get(key);
+      if (typeof existing === 'number') {
+        window.clearTimeout(existing);
+      }
+
+      const timeoutId = window.setTimeout(() => {
+        burstTimeoutsRef.current.delete(key);
+        void refreshPrTargets([target], {
+          force: true,
+          silent: true,
+          markInitialResolved: true,
+        });
+      }, PR_EVENTUAL_CONSISTENCY_REFRESH_DELAY_MS);
+
+      burstTimeoutsRef.current.set(key, timeoutId);
+    });
+  }, [refreshPrTargets]);
 
   React.useEffect(() => {
     if (!github || githubAuthChecked) {
@@ -104,7 +179,7 @@ export const useGitHubPrBackgroundTracking = (
   React.useEffect(() => {
     let cancelled = false;
 
-    const refreshBranches = async (force = false) => {
+    const refreshBranches = async (force = false): Promise<PrTarget[]> => {
       const now = Date.now();
       const directoriesToFetch = candidateDirectories.filter((directory) => {
         const cached = branchCacheRef.current.get(directory);
@@ -114,11 +189,11 @@ export const useGitHubPrBackgroundTracking = (
         if (force) {
           return true;
         }
-        return now - cached.fetchedAt > BRANCH_REFRESH_TTL_MS;
+        return now - cached.fetchedAt > getBranchRefreshTtl(directory, currentDirectory);
       });
 
       if (directoriesToFetch.length === 0) {
-        return;
+        return toPrTargets(branchCacheRef.current, candidateDirectories);
       }
 
       const results = await Promise.all(
@@ -126,38 +201,84 @@ export const useGitHubPrBackgroundTracking = (
           try {
             const status = await git.getGitStatus(directory);
             const branch = typeof status.current === 'string' ? status.current.trim() : '';
-            return { directory, branch: branch && branch !== 'HEAD' ? branch : null };
+            return {
+              directory,
+              branch: branch && branch !== 'HEAD' ? branch : null,
+              tracking: typeof status.tracking === 'string' ? status.tracking : null,
+              ahead: typeof status.ahead === 'number' ? status.ahead : 0,
+              behind: typeof status.behind === 'number' ? status.behind : 0,
+            };
           } catch {
-            return { directory, branch: null };
+            return { directory, branch: null, tracking: null, ahead: 0, behind: 0 };
           }
         }),
       );
 
       if (cancelled) {
-        return;
+        return [];
       }
 
-      setBranchCache((prev) => {
-        const next = new Map(prev);
-        let changed = false;
-        results.forEach(({ directory, branch }) => {
-          const previous = next.get(directory);
-          const fetchedAt = Date.now();
-          if (!previous || previous.branch !== branch) {
-            changed = true;
-          }
-          if (!previous || previous.fetchedAt !== fetchedAt || previous.branch !== branch) {
-            next.set(directory, { branch, fetchedAt });
-          }
-        });
+      const nextCache = new Map(branchCacheRef.current);
+      const changedTargets: PrTarget[] = [];
 
-        if (!changed && results.length > 0) {
+      results.forEach(({ directory, branch, tracking, ahead, behind }) => {
+        const previous = nextCache.get(directory);
+        const nextEntry = {
+          branch,
+          tracking,
+          ahead,
+          behind,
+          fetchedAt: Date.now(),
+        };
+
+        nextCache.set(directory, nextEntry);
+
+        if (branch && hasRepoSignalChanged(previous, nextEntry)) {
+          changedTargets.push({
+            directory,
+            branch,
+            remoteName: null,
+          });
+        }
+      });
+
+      setBranchCache((prev) => {
+        let changed = false;
+        if (prev.size !== nextCache.size) {
+          changed = true;
+        } else {
+          for (const [key, value] of nextCache.entries()) {
+            const previous = prev.get(key);
+            if (!previous
+              || previous.branch !== value.branch
+              || previous.tracking !== value.tracking
+              || previous.ahead !== value.ahead
+              || previous.behind !== value.behind) {
+              changed = true;
+              break;
+            }
+          }
+        }
+
+        branchCacheRef.current = nextCache;
+
+        if (!changed) {
           return prev;
         }
 
-        branchCacheRef.current = next;
-        return next;
+        return nextCache;
       });
+
+      if (changedTargets.length > 0) {
+        void refreshPrTargets(changedTargets, {
+          force: true,
+          silent: true,
+          markInitialResolved: true,
+        });
+        scheduleBurstRefresh(changedTargets);
+      }
+
+      return toPrTargets(nextCache, candidateDirectories);
     };
 
     void refreshBranches();
@@ -169,11 +290,48 @@ export const useGitHubPrBackgroundTracking = (
       void refreshBranches();
     }, BRANCH_REFRESH_INTERVAL_MS);
 
+    const refreshOnResume = () => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+        return;
+      }
+
+      void refreshBranches(true).then((nextTargets) => {
+        const currentTargets = nextTargets.length > 0 ? nextTargets : targetsRef.current;
+        if (currentTargets.length === 0) {
+          return;
+        }
+
+        const activeTargets = currentDirectory
+          ? currentTargets.filter((target) => target.directory === currentDirectory)
+          : [];
+
+        if (activeTargets.length > 0) {
+          void refreshPrTargets(activeTargets, {
+            force: true,
+            silent: true,
+            markInitialResolved: true,
+          });
+        }
+
+        void refreshPrTargets(currentTargets, {
+          force: true,
+          onlyExistingPr: true,
+          silent: true,
+          markInitialResolved: true,
+        });
+      });
+    };
+
+    window.addEventListener('focus', refreshOnResume);
+    document.addEventListener('visibilitychange', refreshOnResume);
+
     return () => {
       cancelled = true;
       window.clearInterval(intervalId);
+      window.removeEventListener('focus', refreshOnResume);
+      document.removeEventListener('visibilitychange', refreshOnResume);
     };
-  }, [candidateDirectories, git]);
+  }, [candidateDirectories, currentDirectory, git, refreshPrTargets, scheduleBurstRefresh]);
 
   React.useEffect(() => {
     const validDirectories = new Set(candidateDirectories);
@@ -196,20 +354,22 @@ export const useGitHubPrBackgroundTracking = (
   }, [candidateDirectories]);
 
   const targets = React.useMemo(() => {
-    const result: Array<{ directory: string; branch: string; remoteName?: string | null }> = [];
-    candidateDirectories.forEach((directory) => {
-      const cached = branchCache.get(directory);
-      if (!cached?.branch) {
-        return;
-      }
-      result.push({
-        directory,
-        branch: cached.branch,
-        remoteName: null,
-      });
-    });
-    return result;
+    return toPrTargets(branchCache, candidateDirectories);
   }, [branchCache, candidateDirectories]);
+
+  React.useEffect(() => {
+    targetsRef.current = targets;
+  }, [targets]);
+
+  React.useEffect(() => {
+    const burstTimeouts = burstTimeoutsRef.current;
+    return () => {
+      burstTimeouts.forEach((timeoutId) => {
+        window.clearTimeout(timeoutId);
+      });
+      burstTimeouts.clear();
+    };
+  }, []);
 
   React.useEffect(() => {
     syncBackgroundTargets({
