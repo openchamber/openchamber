@@ -10,7 +10,7 @@ const STORAGE_DIR = OPENCHAMBER_DATA_DIR;
 const STORAGE_FILE = path.join(STORAGE_DIR, 'github-auth.json');
 const SETTINGS_FILE = path.join(OPENCHAMBER_DATA_DIR, 'settings.json');
 
-const DEFAULT_GITHUB_CLIENT_ID = 'Ov23liNd8TxDcMXtAHHM';
+const DEFAULT_GITHUB_CLIENT_ID = 'Ov23lizomPOC3eFYo56r';
 const DEFAULT_GITHUB_SCOPES = 'repo read:org workflow read:user user:email';
 
 function ensureStorageDir() {

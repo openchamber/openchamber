@@ -29,9 +29,14 @@ export const buildPierreLineAnnotations = (
   const annotations: DiffLineAnnotation<PierreAnnotationData>[] = [];
 
   for (const draft of drafts) {
+    if (!Number.isFinite(draft.endLine)) {
+      continue;
+    }
+
+    const lineNumber = Math.max(1, Math.floor(draft.endLine));
     const side: AnnotationSide = draft.side === 'original' ? 'deletions' : 'additions';
     annotations.push({
-      lineNumber: draft.endLine,
+      lineNumber,
       side,
       metadata: {
         type: draft.id === editingDraftId ? 'edit' : 'saved',

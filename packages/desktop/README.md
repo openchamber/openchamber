@@ -25,8 +25,34 @@ Download from [Releases](https://github.com/btriapitsyn/openchamber/releases). A
 
 Plus everything from the shared OpenChamber UI: branchable timeline, Git sidebar, terminal, voice mode, and more.
 
-<details>
-<summary>Development</summary>
+## Features
+
+### Core UI
+
+- Branchable chat timeline with `/undo`, `/redo`, and one-click forks from earlier turns
+- Smart tool UIs for diffs, file operations, permissions, and long-running task progress
+- Multi-agent runs from one prompt with isolated worktrees for safe comparisons
+- Git workflows in-app: identities, commits, PR creation, checks, and merge actions
+- Context visibility tools (token/cost breakdowns, raw message inspection, and activity summaries)
+- Integrated terminal with per-directory sessions and stable performance on heavy output
+
+### Desktop (macOS)
+
+- Native macOS menu integration with polished app actions and deep-link handling
+- Multi-window support for parallel project/session workflows
+- "Open In" shortcuts for Finder, Terminal, and your preferred editor
+- Fast switching between local and remote instances
+- Workspace-first startup flow with directory picker and steadier window restore behavior
+
+### Remote Tunnel (Desktop)
+
+- Configure in **Settings -> OpenChamber -> Remote Tunnel**.
+- Supported Cloudflare modes: **Quick**, **Managed Remote**, **Managed Local**.
+- One active tunnel per Desktop instance. Starting a different mode replaces the current tunnel.
+- Replacing or stopping a tunnel revokes existing connect links and invalidates remote tunnel sessions.
+- Connect links are one-time tokens; generate a new link for each new connection attempt.
+
+## Development
 
 ```bash
 git clone https://github.com/btriapitsyn/openchamber.git

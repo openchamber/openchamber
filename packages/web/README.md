@@ -21,48 +21,30 @@ Or install manually: `bun add -g @openchamber/web` (or npm, pnpm, yarn).
 ## Usage
 
 ```bash
-openchamber                    # Start on port 3000
-openchamber --port 8080        # Custom port
-openchamber --ui-password secret   # Password-protect
-openchamber stop               # Stop server
-openchamber update             # Update to latest
+openchamber                          # Start on port 3000
+openchamber --port 8080              # Custom port
+openchamber --ui-password secret     # Password-protect UI
+openchamber tunnel help              # Tunnel lifecycle commands
+openchamber tunnel providers         # Show provider capabilities
+openchamber tunnel profile add --provider cloudflare --mode managed-remote --name prod-main --hostname app.example.com --token <token>
+openchamber tunnel start --profile prod-main
+openchamber tunnel start --provider cloudflare --mode quick --qr
+openchamber tunnel start --provider cloudflare --mode managed-local --config ~/.cloudflared/config.yml
+openchamber tunnel status --all      # Show tunnel state across instances
+openchamber tunnel stop --port 3000  # Stop tunnel only (server stays running)
+openchamber logs                     # Follow latest instance logs
+OPENCODE_PORT=4096 OPENCODE_SKIP_START=true openchamber                    # Connect to external OpenCode server
+OPENCODE_HOST=https://myhost:4096 OPENCODE_SKIP_START=true openchamber  # Connect via custom host/HTTPS
+openchamber stop                     # Stop server
+openchamber update                   # Update to latest version
 ```
 
-<details>
-<summary>Remote access & tunnels</summary>
+### Tunnel behavior notes
 
-```bash
-openchamber --try-cf-tunnel                          # Cloudflare Quick Tunnel
-openchamber --try-cf-tunnel --tunnel-qr              # + QR code for mobile
-openchamber --try-cf-tunnel --tunnel-password-url     # + password in URL
-```
-
-Named Tunnel mode is configured in-app at **Settings > OpenChamber > Tunnel**. Requires [cloudflared](https://github.com/cloudflare/cloudflared/releases).
-
-</details>
-
-<details>
-<summary>Connect to external OpenCode server</summary>
-
-```bash
-OPENCODE_PORT=4096 OPENCODE_SKIP_START=true openchamber
-OPENCODE_HOST=https://myhost:4096 OPENCODE_SKIP_START=true openchamber
-```
-
-| Variable | Description |
-|----------|-------------|
-| `OPENCODE_HOST` | Full base URL of external server (overrides `OPENCODE_PORT`) |
-| `OPENCODE_PORT` | Port of external server |
-| `OPENCODE_SKIP_START` | Skip starting embedded OpenCode server |
-
-</details>
-
-<details>
-<summary>Docker</summary>
-
-```bash
-docker compose up -d    # Available at http://localhost:3000
-```
+- One active tunnel per running OpenChamber instance (port).
+- Starting a different tunnel mode/provider on the same instance replaces the active tunnel.
+- Replacing or stopping a tunnel revokes existing connect links and invalidates remote tunnel sessions.
+- Connect links are one-time tokens; generating a new link revokes the previous unused link.
 
 **Optional env vars:**
 ```yaml
@@ -97,7 +79,11 @@ openchamber stop        # Stop background server
 - **Self-update** - update and restart from the UI, server settings stay intact
 - **Cross-tab tracking** - session activity stays in sync across browser tabs
 
-Plus everything from the shared OpenChamber UI: branchable timeline, Git sidebar, terminal, voice mode, and more.
+- Cloudflare tunnel access with Quick, managed-remote, and managed-local modes
+- One-scan onboarding with tunnel QR + password URL helpers
+- Mobile-first experience: optimized chat controls, keyboard-safe layouts, and attachment-friendly UI
+- Background notifications plus reliable cross-tab session activity tracking
+- Built-in self-update + restart flow that keeps your server settings intact
 
 ## License
 

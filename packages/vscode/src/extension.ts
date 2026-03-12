@@ -162,6 +162,13 @@ export async function activate(context: vscode.ExtensionContext) {
   sessionEditorProvider = new SessionEditorPanelProvider(context, context.extensionUri, openCodeManager);
 
   context.subscriptions.push(
+    vscode.commands.registerCommand('openchamber.internal.settingsSynced', (settings: unknown) => {
+      chatViewProvider?.notifySettingsSynced(settings);
+      sessionEditorProvider?.notifySettingsSynced(settings);
+    })
+  );
+
+  context.subscriptions.push(
     vscode.commands.registerCommand('openchamber.openAgentManager', () => {
       agentManagerProvider?.createOrShow();
     })

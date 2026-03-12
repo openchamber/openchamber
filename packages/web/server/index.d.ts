@@ -25,4 +25,13 @@ export declare function startWebUiServer(
 export declare function gracefulShutdown(options?: { exitProcess?: boolean }): Promise<void>;
 export declare function setupProxy(app: Express): void;
 export declare function restartOpenCode(): Promise<void>;
-export declare function parseArgs(argv?: string[]): { port: number; uiPassword: string | null };
+export declare function parseArgs(argv?: string[]): {
+  port: number;
+  uiPassword: string | null;
+  tryCfTunnel: boolean;
+  tunnelProvider?: string;
+  tunnelMode?: string;
+  tunnelConfigPath?: string | null;
+  tunnelToken?: string;
+  tunnelHostname?: string;
+};

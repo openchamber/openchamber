@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.8.6] - 2026-03-13
+
+- Tunnel/CLI: rebuilt tunnel workflows around clearer managed modes and provider-aware lifecycle commands, with safer startup checks, improved diagnostics, and cleaner CLI output for everyday remote access (thanks to @yulia-ivashko).
+- Chat: completed a turn-based rendering pipeline that keeps streaming, activity rows, and tool progress more stable in long runs, with smoother auto-follow and fewer jumpy updates.
+- Chat/Settings: added richer chat render controls, including sorted/live behavior, compact live Activity previews, and options to keep Bash/Edit outputs open by default.
+- Sessions/GitHub: overhauled sidebar session loading and GitHub PR tracking, and added a new minimal sidebar sessions mode on Desktop/Web, so lists stay easier to scan while PR badges and state refreshes remain accurate across active branches and remotes.
+- Sessions: worktrees with active sessions now surface earlier in the sidebar, making it faster to jump back into in-progress work (thanks to @GhostFlying).
+- Chat: fixed narrow-layout send behavior for modified Enter shortcuts, so keyboard sending is more reliable in compact views (thanks to @eengad).
+- Chat: fixed queue-button behavior and focus-mode composer sizing, keeping input controls reachable in long prompts (thanks to @shekohex).
+- Projects/Desktop: project action inputs now submit with Enter, and Desktop settings now include a spell-check toggle for writing comfort (thanks to @DocterZed).
+- Mobile/PWA: install metadata now honors orientation lock more consistently, improving expected behavior on rotation-restricted devices (thanks to @atgehrhardt).
+
 ## [1.8.5] - 2026-03-04
 
 - Desktop: startup now opens the app shell much earlier while background services continue loading, so the app feels ready faster after launch.

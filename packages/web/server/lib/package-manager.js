@@ -258,7 +258,6 @@ export async function getLatestVersion() {
     const data = await response.json();
     return data['dist-tags']?.latest || null;
   } catch (error) {
-    console.warn('Failed to fetch latest version from npm:', error.message);
     return null;
   }
 }
@@ -345,10 +344,12 @@ export async function checkForUpdates() {
 /**
  * Execute the update (used by CLI)
  */
-export function executeUpdate(pm = detectPackageManager()) {
+export function executeUpdate(pm = detectPackageManager(), options = {}) {
   const command = getUpdateCommand(pm);
-  console.log(`Updating ${PACKAGE_NAME} using ${pm}...`);
-  console.log(`Running: ${command}`);
+  if (!options?.silent) {
+    console.log(`Updating ${PACKAGE_NAME} using ${pm}...`);
+    console.log(`Running: ${command}`);
+  }
 
   const result = spawnSync(command, {
     stdio: 'inherit',

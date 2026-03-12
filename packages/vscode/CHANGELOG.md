@@ -1,3 +1,15 @@
+## [1.8.6] - 2026-03-13
+
+- Chat: completed a turn-based render pipeline with steadier streaming, smoother auto-follow, and more stable activity/tool progress behavior during long responses.
+- Chat/Settings: added richer render controls with sorted/live modes, compact Activity previews, and default-open Bash/Edit options for faster review.
+- Reliability: switched extension event streaming to an SDK-based SSE proxy path, improving consistency for live updates and session activity signals across chat surfaces.
+- Settings: chat display changes now sync across sidebar and session editor views right away, so preferences stay consistent in every open panel.
+- Sessions: worktrees with active chats are now prioritized in the sidebar, so in-progress work is easier to resume (thanks to @GhostFlying).
+- Sessions: archived-session behavior in the extension is now scoped to the active workspace with cleaner sidebar presentation.
+- Chat: fixed modified Enter send shortcuts in narrow layouts, so Ctrl/Cmd+Enter send works more consistently when the panel is compact (thanks to @eengad).
+- Chat: fixed queue button behavior and focus-mode composer sizing so input actions stay visible during longer prompts (thanks to @shekohex).
+- Diff: edit result comparisons now preserve original file extensions in virtual "before" files, improving syntax highlighting while reviewing changes.
+
 ## [1.8.5] - 2026-03-04
 
 - Chat/Files: edit-style tool results now open in a VS Code diff editor with focus on the first changed line, making review and follow-up edits much faster.

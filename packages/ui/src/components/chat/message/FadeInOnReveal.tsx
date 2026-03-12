@@ -5,9 +5,12 @@ interface FadeInOnRevealProps {
     children: React.ReactNode;
     className?: string;
     skipAnimation?: boolean;
+    forceAnimation?: boolean;
+    ignoreContextDisabled?: boolean;
+    respectReducedMotion?: boolean;
 }
 
-const FADE_ANIMATION_ENABLED = true;
+const FADE_ANIMATION_ENABLED = false;
 
 // Context to allow parent components (like VirtualMessageList) to disable animations
 // for items entering the viewport due to scrolling rather than new content
@@ -19,13 +22,26 @@ export const FadeInDisabledProvider: React.FC<{ disabled: boolean; children: Rea
     </FadeInDisabledContext.Provider>
 );
 
-export const FadeInOnReveal: React.FC<FadeInOnRevealProps> = ({ children, className, skipAnimation }) => {
+export const FadeInOnReveal: React.FC<FadeInOnRevealProps> = ({
+    children,
+    className,
+    skipAnimation,
+    forceAnimation = false,
+    ignoreContextDisabled = false,
+    respectReducedMotion = false,
+}) => {
     const contextDisabled = React.useContext(FadeInDisabledContext);
-    const shouldSkip = skipAnimation || contextDisabled;
+    const reducedMotion =
+        respectReducedMotion &&
+        typeof window !== 'undefined' &&
+        typeof window.matchMedia === 'function' &&
+        window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const shouldSkip = Boolean(skipAnimation) || (!ignoreContextDisabled && contextDisabled) || reducedMotion;
+    const animationEnabled = FADE_ANIMATION_ENABLED || forceAnimation;
     const [visible, setVisible] = React.useState(shouldSkip);
 
     React.useEffect(() => {
-        if (!FADE_ANIMATION_ENABLED || shouldSkip) {
+        if (!animationEnabled || shouldSkip) {
             return;
         }
 
@@ -48,9 +64,9 @@ export const FadeInOnReveal: React.FC<FadeInOnRevealProps> = ({ children, classN
                 window.cancelAnimationFrame(frame);
             }
         };
-    }, [shouldSkip]);
+    }, [animationEnabled, shouldSkip]);
 
-    if (!FADE_ANIMATION_ENABLED || shouldSkip) {
+    if (!animationEnabled || shouldSkip) {
         return <>{children}</>;
     }
 
@@ -66,4 +82,3 @@ export const FadeInOnReveal: React.FC<FadeInOnRevealProps> = ({ children, classN
         </div>
     );
 };
-

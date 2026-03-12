@@ -8,12 +8,16 @@ type OverlayScrollbarProps = {
   className?: string;
   disableHorizontal?: boolean;
   observeMutations?: boolean;
+  suppressVisibility?: boolean;
+  userIntentOnly?: boolean;
 };
 
 type ThumbMetrics = {
   length: number;
   offset: number;
 };
+
+const USER_SCROLL_INTENT_WINDOW_MS = 1000;
 
 export const OverlayScrollbar: React.FC<OverlayScrollbarProps> = ({
   containerRef,
@@ -22,6 +26,8 @@ export const OverlayScrollbar: React.FC<OverlayScrollbarProps> = ({
   className,
   disableHorizontal = false,
   observeMutations = true,
+  suppressVisibility = false,
+  userIntentOnly = false,
 }) => {
   const [visible, setVisible] = React.useState(false);
   const [vertical, setVertical] = React.useState<ThumbMetrics>({ length: 0, offset: 0 });
@@ -29,6 +35,7 @@ export const OverlayScrollbar: React.FC<OverlayScrollbarProps> = ({
   const hideTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const frameRef = React.useRef<number | null>(null);
   const isDraggingRef = React.useRef(false);
+  const lastUserIntentAtRef = React.useRef(0);
   const dragStartRef = React.useRef<{
     pointerX: number;
     pointerY: number;
@@ -76,26 +83,61 @@ export const OverlayScrollbar: React.FC<OverlayScrollbarProps> = ({
     hideTimeoutRef.current = setTimeout(() => setVisible(false), hideDelayMs);
   }, [hideDelayMs]);
 
+  const markUserIntent = React.useCallback(() => {
+    lastUserIntentAtRef.current = Date.now();
+  }, []);
+
   const handleScroll = React.useCallback(() => {
     if (frameRef.current) {
       cancelAnimationFrame(frameRef.current);
     }
     frameRef.current = requestAnimationFrame(() => {
       updateMetrics();
+      if (suppressVisibility && !isDraggingRef.current) {
+        setVisible(false);
+        return;
+      }
+      if (userIntentOnly && !isDraggingRef.current) {
+        const hasRecentUserIntent = Date.now() - lastUserIntentAtRef.current <= USER_SCROLL_INTENT_WINDOW_MS;
+        if (!hasRecentUserIntent) {
+          setVisible(false);
+          return;
+        }
+      }
       setVisible(true);
       scheduleHide();
     });
-  }, [scheduleHide, updateMetrics]);
+  }, [scheduleHide, suppressVisibility, updateMetrics, userIntentOnly]);
 
   React.useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
     updateMetrics();
-    setVisible(true);
-    scheduleHide();
+    setVisible(false);
 
-    container.addEventListener("scroll", handleScroll, { passive: true });
+    const onScroll = () => handleScroll();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.key === 'ArrowUp'
+        || event.key === 'ArrowDown'
+        || event.key === 'PageUp'
+        || event.key === 'PageDown'
+        || event.key === 'Home'
+        || event.key === 'End'
+        || event.key === ' '
+      ) {
+        markUserIntent();
+      }
+    };
+
+    container.addEventListener("scroll", onScroll, { passive: true });
+    if (userIntentOnly) {
+      container.addEventListener("wheel", markUserIntent, { passive: true });
+      container.addEventListener("touchstart", markUserIntent, { passive: true });
+      container.addEventListener("touchmove", markUserIntent, { passive: true });
+      container.addEventListener("keydown", onKeyDown);
+    }
 
     const resizeObserver =
       typeof ResizeObserver !== "undefined"
@@ -110,13 +152,33 @@ export const OverlayScrollbar: React.FC<OverlayScrollbarProps> = ({
     mutationObserver?.observe(container, { childList: true, subtree: true, characterData: true });
 
     return () => {
-      container.removeEventListener("scroll", handleScroll);
+      container.removeEventListener("scroll", onScroll);
+      if (userIntentOnly) {
+        container.removeEventListener("wheel", markUserIntent);
+        container.removeEventListener("touchstart", markUserIntent);
+        container.removeEventListener("touchmove", markUserIntent);
+        container.removeEventListener("keydown", onKeyDown);
+      }
       resizeObserver?.disconnect();
       mutationObserver?.disconnect();
       if (hideTimeoutRef.current) clearTimeout(hideTimeoutRef.current);
       if (frameRef.current) cancelAnimationFrame(frameRef.current);
     };
-  }, [containerRef, handleScroll, observeMutations, scheduleHide, updateMetrics]);
+  }, [containerRef, handleScroll, markUserIntent, observeMutations, updateMetrics, userIntentOnly]);
+
+  React.useEffect(() => {
+    if (!suppressVisibility) {
+      return;
+    }
+    if (isDraggingRef.current) {
+      return;
+    }
+    setVisible(false);
+    if (hideTimeoutRef.current) {
+      clearTimeout(hideTimeoutRef.current);
+      hideTimeoutRef.current = null;
+    }
+  }, [suppressVisibility]);
 
   const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>, axis: "vertical" | "horizontal") => {
     const container = containerRef.current;
@@ -130,6 +192,7 @@ export const OverlayScrollbar: React.FC<OverlayScrollbarProps> = ({
       scrollLeft: container.scrollLeft,
     };
     dragAxisRef.current = axis;
+    markUserIntent();
     setVisible(true);
     if (hideTimeoutRef.current) clearTimeout(hideTimeoutRef.current);
     event.currentTarget.setPointerCapture(event.pointerId);

@@ -34,6 +34,7 @@ import {
   RiUnpinLine,
 } from '@remixicon/react';
 import { cn } from '@/lib/utils';
+import { isVSCodeRuntime } from '@/lib/desktop';
 import { DraggableSessionRow } from './sessionFolderDnd';
 import type { SessionNode, SessionSummaryMeta } from './types';
 import { formatSessionDateLabel, normalizePath, renderHighlightedText, resolveSessionDiffStats } from './utils';
@@ -140,6 +141,7 @@ export function SessionNodeItem(props: Props): React.ReactNode {
 
   const displayMode = useSessionDisplayStore((state) => state.displayMode);
   const isMinimalMode = displayMode === 'minimal';
+  const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
 
   const session = node.session;
   const sessionDirectory =
@@ -463,22 +465,24 @@ export function SessionNodeItem(props: Props): React.ReactNode {
                     );
                   })() : null}
 
-                  <DropdownMenuItem
-                    disabled={!sessionDirectory}
-                    onClick={() => {
-                      if (!sessionDirectory) return;
-                      openContextPanelTab(sessionDirectory, {
-                        mode: 'chat',
-                        dedupeKey: `session:${session.id}`,
-                        label: sessionTitle,
-                      });
-                    }}
-                    className="[&>svg]:mr-1"
-                  >
-                    <RiChat4Line className="mr-1 h-4 w-4" />
-                    <span className="truncate">Open in Side Panel</span>
-                    <span className="shrink-0 typography-micro px-1 rounded leading-none pb-px text-[var(--status-warning)] bg-[var(--status-warning)]/10">beta</span>
-                  </DropdownMenuItem>
+                  {!isVSCode ? (
+                    <DropdownMenuItem
+                      disabled={!sessionDirectory}
+                      onClick={() => {
+                        if (!sessionDirectory) return;
+                        openContextPanelTab(sessionDirectory, {
+                          mode: 'chat',
+                          dedupeKey: `session:${session.id}`,
+                          label: sessionTitle,
+                        });
+                      }}
+                      className="[&>svg]:mr-1"
+                    >
+                      <RiChat4Line className="mr-1 h-4 w-4" />
+                      <span className="truncate">Open in Side Panel</span>
+                      <span className="shrink-0 typography-micro px-1 rounded leading-none pb-px text-[var(--status-warning)] bg-[var(--status-warning)]/10">beta</span>
+                    </DropdownMenuItem>
+                  ) : null}
 
                   <DropdownMenuSeparator />
                   <DropdownMenuItem className="text-destructive focus:text-destructive [&>svg]:mr-1" onClick={() => handleDeleteSession(session, { archivedBucket })}>

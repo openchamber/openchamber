@@ -32,13 +32,20 @@ export interface SessionMemoryState {
     backgroundMessageCount: number;
     isZombie?: boolean;
     totalAvailableMessages?: number;
+    loadedTurnCount?: number;
     hasMoreAbove?: boolean;
+    hasMoreTurnsAbove?: boolean;
     historyLoading?: boolean;
     historyComplete?: boolean;
     historyLimit?: number;
-    trimmedHeadMaxId?: string;
     streamingCooldownUntil?: number;
     lastUserMessageAt?: number; // Timestamp when user last sent a message
+}
+
+export interface SessionHistoryMeta {
+    limit: number;
+    complete: boolean;
+    loading: boolean;
 }
 
 export interface SessionContextUsage {
@@ -61,18 +68,12 @@ export const STUCK_SESSION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
 export const MEMORY_CONSTANTS = {
     MAX_SESSIONS: 3,
-    BACKGROUND_STREAMING_BUFFER: 120,
     ZOMBIE_TIMEOUT: 10 * 60 * 1000,
 } as const;
 
-// Dynamic accessors — read user setting from UI store.
-// NOTE: do not use require() here (breaks in browser/desktop runtime bundles).
-import { useUIStore } from "../useUIStore";
-
-/** User-configured (or default) message limit. */
+/** OpenCode parity: fixed page/window size for message history. */
 export const getMessageLimit = (): number => {
-    const state = useUIStore.getState?.();
-    return state?.messageLimit ?? DEFAULT_MESSAGE_LIMIT;
+    return DEFAULT_MESSAGE_LIMIT;
 };
 
 /** Background trim target — automatic, not user-facing. */
@@ -87,7 +88,6 @@ export const DEFAULT_MEMORY_LIMITS = {
     FETCH_BUFFER: 20,
     HISTORY_CHUNK: DEFAULT_MESSAGE_LIMIT,
     STREAMING_BUFFER: Infinity,
-    BACKGROUND_STREAMING_BUFFER: MEMORY_CONSTANTS.BACKGROUND_STREAMING_BUFFER,
     ZOMBIE_TIMEOUT: MEMORY_CONSTANTS.ZOMBIE_TIMEOUT,
 } as const;
 
@@ -143,6 +143,7 @@ export interface SessionStore {
     lastLoadedDirectory: string | null;
     messages: Map<string, { info: Message; parts: Part[] }[]>;
     sessionMemoryState: Map<string, SessionMemoryState>;
+    sessionHistoryMeta: Map<string, SessionHistoryMeta>;
     messageStreamStates: Map<string, MessageStreamLifecycle>;
     sessionCompactionUntil: Map<string, number>;
     permissions: Map<string, PermissionRequest[]>;
@@ -230,11 +231,12 @@ export interface SessionStore {
     setCurrentSession: (id: string | null) => void;
     loadMessages: (sessionId: string, limit?: number) => Promise<void>;
     sendMessage: (content: string, providerID: string, modelID: string, agent?: string, attachments?: AttachedFile[], agentMentionName?: string, additionalParts?: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean }>, variant?: string, inputMode?: 'normal' | 'shell') => Promise<void>;
-    abortCurrentOperation: () => Promise<void>;
+    abortCurrentOperation: (sessionIdOverride?: string) => Promise<void>;
     acknowledgeSessionAbort: (sessionId: string) => void;
     armAbortPrompt: (durationMs?: number) => number | null;
     clearAbortPrompt: () => void;
     addStreamingPart: (sessionId: string, messageId: string, part: Part, role?: string) => void;
+    applyPartDelta: (sessionId: string, messageId: string, partId: string, field: string, delta: string, role?: string) => void;
     completeStreamingMessage: (sessionId: string, messageId: string) => void;
     markMessageStreamSettled: (messageId: string) => void;
     updateMessageInfo: (sessionId: string, messageId: string, messageInfo: Message) => void;
@@ -253,7 +255,11 @@ export interface SessionStore {
     getDirectoryForSession: (sessionId: string) => string | null;
     getLastMessageModel: (sessionId: string) => { providerID?: string; modelID?: string } | null;
     getCurrentAgent: (sessionId: string) => string | undefined;
-    syncMessages: (sessionId: string, messages: { info: Message; parts: Part[] }[]) => void;
+    syncMessages: (
+      sessionId: string,
+      messages: { info: Message; parts: Part[] }[],
+      options?: { replace?: boolean }
+    ) => void;
     applySessionMetadata: (sessionId: string, metadata: Partial<Session>) => void;
     setSessionDirectory: (sessionId: string, directory: string | null) => void;
 
@@ -263,8 +269,6 @@ export interface SessionStore {
     clearAttachedFiles: () => void;
 
     updateViewportAnchor: (sessionId: string, anchor: number) => void;
-    trimToViewportWindow: (sessionId: string, targetSize?: number) => void;
-    evictLeastRecentlyUsed: () => void;
     loadMoreMessages: (sessionId: string, direction: "up" | "down") => Promise<void>;
 
     saveSessionModelSelection: (sessionId: string, providerId: string, modelId: string) => void;

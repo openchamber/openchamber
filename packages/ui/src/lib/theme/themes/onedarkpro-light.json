@@ -20,14 +20,14 @@
       "background": "#F5F6F8",
       "foreground": "#2B303B",
       "muted": "#EEF0F4",
-      "mutedForeground": "#6B717F",
+      "mutedForeground": "#6e727b",
       "elevated": "#f0f5fa",
       "elevatedForeground": "#2B303B",
       "overlay": "#0E111820",
       "subtle": "#eaedf4"
     },
     "interactive": {
-      "border": "#DEE2EB",
+      "border": "#cccfd6",
       "borderHover": "#D4D9E3",
       "borderFocus": "#A6ADBF",
       "selection": "#d8dde6",

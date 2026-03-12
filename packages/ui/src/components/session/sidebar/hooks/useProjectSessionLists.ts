@@ -50,9 +50,34 @@ export const useProjectSessionLists = (args: Args) => {
 
   const getArchivedSessionsForProject = React.useCallback(
     (project: { normalizedPath: string }) => {
-      const directories = isVSCode
-        ? [project.normalizedPath]
-        : getProjectDirectories(project.normalizedPath, availableWorktreesByProject);
+      if (isVSCode) {
+        const archived = archivedSessions.filter((session) => {
+          const sessionDirectory = normalizePath((session as Session & { directory?: string | null }).directory ?? null);
+          const projectWorktree = normalizePath((session as Session & { project?: { worktree?: string | null } | null }).project?.worktree ?? null);
+
+          if (sessionDirectory) {
+            return sessionDirectory === project.normalizedPath;
+          }
+
+          return projectWorktree === project.normalizedPath;
+        });
+
+        const unassignedLive = sessions.filter((session) => {
+          if (session.time?.archived) {
+            return false;
+          }
+          const sessionDirectory = normalizePath((session as Session & { directory?: string | null }).directory ?? null);
+          if (sessionDirectory) {
+            return false;
+          }
+          const projectWorktree = normalizePath((session as Session & { project?: { worktree?: string | null } | null }).project?.worktree ?? null);
+          return projectWorktree === project.normalizedPath;
+        });
+
+        return dedupeSessionsById([...archived, ...unassignedLive]);
+      }
+
+      const directories = getProjectDirectories(project.normalizedPath, availableWorktreesByProject);
       const validDirectories = new Set<string>(directories);
 
       const collect = (input: Session[]): Session[] => input.filter((session) =>

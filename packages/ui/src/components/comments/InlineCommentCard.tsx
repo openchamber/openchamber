@@ -30,10 +30,11 @@ export function InlineCommentCard({
   const themeContext = useOptionalThemeSystem();
   const currentTheme = themeContext?.currentTheme;
   const [isOpen, setIsOpen] = useState(false);
+  const draftText = typeof draft.text === 'string' ? draft.text : '';
   
   // Check if content is long enough to warrant collapsing (rough estimate)
   // In a real app we might measure line height, but length check is a good proxy for now
-  const isLongContent = draft.text.length > 150 || draft.text.split('\n').length > 3;
+  const isLongContent = draftText.length > 150 || draftText.split('\n').length > 3;
 
   return (
     <div
@@ -61,7 +62,7 @@ export function InlineCommentCard({
           
           <Collapsible open={isOpen || !isLongContent} onOpenChange={setIsOpen}>
             <div className={cn("text-sm whitespace-pre-wrap break-words leading-relaxed", !isOpen && isLongContent && "line-clamp-3")}>
-              {draft.text}
+              {draftText}
             </div>
             
             {isLongContent && (

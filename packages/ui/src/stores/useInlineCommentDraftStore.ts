@@ -35,6 +35,70 @@ interface InlineCommentDraftActions {
 
 type InlineCommentDraftStore = InlineCommentDraftState & InlineCommentDraftActions;
 
+const isValidSource = (value: unknown): value is InlineCommentSource =>
+  value === 'diff' || value === 'plan' || value === 'file';
+
+const isValidSide = (value: unknown): value is 'original' | 'modified' =>
+  value === 'original' || value === 'modified';
+
+const toPositiveLine = (value: unknown): number | null => {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  return Math.max(1, Math.floor(parsed));
+};
+
+const sanitizeDraft = (input: unknown): InlineCommentDraft | null => {
+  if (!input || typeof input !== 'object') return null;
+  const draft = input as Partial<InlineCommentDraft>;
+
+  if (typeof draft.sessionKey !== 'string' || draft.sessionKey.trim().length === 0) return null;
+  if (!isValidSource(draft.source)) return null;
+
+  const startLine = toPositiveLine(draft.startLine);
+  const endLine = toPositiveLine(draft.endLine);
+  if (!startLine || !endLine) return null;
+
+  const id = typeof draft.id === 'string' && draft.id.trim().length > 0
+    ? draft.id
+    : `icd-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+
+  return {
+    id,
+    sessionKey: draft.sessionKey,
+    source: draft.source,
+    fileLabel: typeof draft.fileLabel === 'string' ? draft.fileLabel : 'unknown',
+    startLine,
+    endLine,
+    side: isValidSide(draft.side) ? draft.side : undefined,
+    code: typeof draft.code === 'string' ? draft.code : '',
+    language: typeof draft.language === 'string' ? draft.language : 'text',
+    text: typeof draft.text === 'string' ? draft.text : '',
+    createdAt: Number.isFinite(draft.createdAt) ? Number(draft.createdAt) : Date.now(),
+  };
+};
+
+const sanitizeDraftMap = (input: unknown): Record<string, InlineCommentDraft[]> => {
+  if (!input || typeof input !== 'object') return {};
+
+  const entries = Object.entries(input as Record<string, unknown>);
+  const result: Record<string, InlineCommentDraft[]> = {};
+
+  for (const [sessionKey, sessionDrafts] of entries) {
+    if (!Array.isArray(sessionDrafts)) continue;
+
+    const sanitized = sessionDrafts
+      .map(sanitizeDraft)
+      .filter((draft): draft is InlineCommentDraft => Boolean(draft))
+      .filter((draft) => draft.sessionKey === sessionKey);
+
+    if (sanitized.length > 0) {
+      result[sessionKey] = sanitized;
+    }
+  }
+
+  return result;
+};
+
 export const useInlineCommentDraftStore = create<InlineCommentDraftStore>()(
   devtools(
     persist(
@@ -144,6 +208,17 @@ export const useInlineCommentDraftStore = create<InlineCommentDraftStore>()(
       {
         name: 'openchamber-inline-comment-drafts',
         storage: createJSONStorage(() => getSafeStorage()),
+        version: 1,
+        migrate: (persistedState: unknown) => {
+          if (!persistedState || typeof persistedState !== 'object') {
+            return { drafts: {} };
+          }
+
+          const state = persistedState as { drafts?: unknown };
+          return {
+            drafts: sanitizeDraftMap(state.drafts),
+          };
+        },
       }
     ),
     { name: 'inline-comment-draft-store' }

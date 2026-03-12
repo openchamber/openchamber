@@ -29,7 +29,7 @@ export type SkillCatalogConfig = {
   gitIdentityId?: string;
 };
 
-export type NamedTunnelPreset = {
+export type ManagedRemoteTunnelPreset = {
   id: string;
   name: string;
   hostname: string;
@@ -55,7 +55,6 @@ export type DesktopSettings = {
   securityScopedBookmarks?: string[];
   pinnedDirectories?: string[];
   showReasoningTraces?: boolean;
-  showTextJustificationActivity?: boolean;
   showDeletionDialog?: boolean;
   nativeNotificationsEnabled?: boolean;
   notificationMode?: 'always' | 'hidden-only';
@@ -94,15 +93,17 @@ export type DesktopSettings = {
   }>;  // Per-provider custom model groups configuration
   autoDeleteEnabled?: boolean;
   autoDeleteAfterDays?: number;
-  tunnelMode?: 'quick' | 'named';
+  tunnelProvider?: string;
+  tunnelMode?: 'quick' | 'managed-remote' | 'managed-local';
   tunnelBootstrapTtlMs?: number | null;
   tunnelSessionTtlMs?: number;
-  namedTunnelHostname?: string;
-  namedTunnelToken?: string | null;
-  hasNamedTunnelToken?: boolean;
-  namedTunnelPresets?: NamedTunnelPreset[];
-  namedTunnelSelectedPresetId?: string;
-  namedTunnelPresetTokens?: Record<string, string>;
+  managedLocalTunnelConfigPath?: string | null;
+  managedRemoteTunnelHostname?: string;
+  managedRemoteTunnelToken?: string | null;
+  hasManagedRemoteTunnelToken?: boolean;
+  managedRemoteTunnelPresets?: ManagedRemoteTunnelPreset[];
+  managedRemoteTunnelSelectedPresetId?: string;
+  managedRemoteTunnelPresetTokens?: Record<string, string>;
   defaultModel?: string; // format: "provider/model"
   defaultVariant?: string;
   defaultAgent?: string;
@@ -115,7 +116,13 @@ export type DesktopSettings = {
   gitProviderId?: string;
   gitModelId?: string;
   pwaAppName?: string;
-  toolCallExpansion?: 'collapsed' | 'activity' | 'detailed' | 'changes';
+  inputSpellcheckEnabled?: boolean;
+  showToolFileIcons?: boolean;
+  showExpandedBashTools?: boolean;
+  showExpandedEditTools?: boolean;
+  chatRenderMode?: 'sorted' | 'live';
+  activityRenderMode?: 'collapsed' | 'summary';
+  mermaidRenderingMode?: 'svg' | 'ascii';
   userMessageRenderingMode?: 'markdown' | 'plain';
   stickyUserHeader?: boolean;
   fontSize?: number;
@@ -285,6 +292,31 @@ export const requestDirectoryAccess = async (
   }
 
   return { success: true, path: directoryPath };
+};
+
+export const requestFileAccess = async (
+  options?: { filters?: Array<{ name: string; extensions: string[] }> }
+): Promise<{ success: boolean; path?: string; error?: string }> => {
+  if (isTauriShell() && isDesktopLocalOriginActive()) {
+    try {
+      const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
+      const selected = await tauri?.dialog?.open?.({
+        directory: false,
+        multiple: false,
+        title: 'Select File',
+        ...(options?.filters ? { filters: options.filters } : {}),
+      });
+      if (!selected || typeof selected !== 'string') {
+        return { success: false, error: 'File selection cancelled' };
+      }
+      return { success: true, path: selected };
+    } catch (error) {
+      console.warn('Failed to request file access (tauri)', error);
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
+  return { success: false, error: 'Native file picker not available' };
 };
 
 export const startAccessingDirectory = async (

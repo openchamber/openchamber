@@ -3,6 +3,7 @@ import { devtools } from 'zustand/middleware';
 import { getSafeStorage } from './utils/safeStorage';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { useDirectoryStore } from './useDirectoryStore';
+import { isVSCodeRuntime } from '@/lib/desktop';
 
 // --- Types ---
 
@@ -49,6 +50,18 @@ let diskWriteTimer: ReturnType<typeof setTimeout> | null = null;
 let diskHydrated = false;
 let diskHydrationInFlight = false;
 
+const isVSCodeWebview = (): boolean => {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  if (isVSCodeRuntime()) {
+    return true;
+  }
+
+  return (window as { __VSCODE_CONFIG__?: unknown }).__VSCODE_CONFIG__ !== undefined;
+};
+
 const getSessionsDirectoriesPath = (): string | null => {
   const directoryState = useDirectoryStore.getState();
   const homeDirectory = typeof directoryState.homeDirectory === 'string' && directoryState.homeDirectory.length > 0
@@ -72,6 +85,10 @@ const getParentDirectory = (path: string): string | null => {
 
 const schedulePersistToDisk = (foldersMap: SessionFoldersMap, collapsedFolderIds: Set<string>): void => {
   if (typeof window === 'undefined') {
+    return;
+  }
+
+  if (isVSCodeWebview()) {
     return;
   }
 
@@ -418,6 +435,11 @@ export const useSessionFoldersStore = create<SessionFoldersStore>()(
 
 const hydrateSessionFoldersFromDisk = async (): Promise<void> => {
   if (diskHydrated || diskHydrationInFlight || typeof window === 'undefined') {
+    return;
+  }
+
+  if (isVSCodeWebview()) {
+    diskHydrated = true;
     return;
   }
 

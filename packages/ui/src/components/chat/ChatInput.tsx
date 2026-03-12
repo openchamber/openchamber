@@ -155,7 +155,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
     const { currentProviderId, currentModelId, currentVariant, currentAgentName, setAgent, getVisibleAgents } = useConfigStore();
     const agents = getVisibleAgents();
     const primaryAgents = React.useMemo(() => agents.filter((agent) => agent.mode === 'primary'), [agents]);
-    const { isMobile, inputBarOffset, isKeyboardOpen, setTimelineDialogOpen, cornerRadius, persistChatDraft, isExpandedInput, setExpandedInput } = useUIStore();
+    const { isMobile, inputBarOffset, isKeyboardOpen, setTimelineDialogOpen, cornerRadius, persistChatDraft, inputSpellcheckEnabled, isExpandedInput, setExpandedInput } = useUIStore();
     const { working } = useAssistantStatus();
     const { currentTheme } = useThemeSystem();
     const chatSearchDirectory = useChatSearchDirectory();
@@ -1054,7 +1054,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
         }
 
         // Handle Enter/Ctrl+Enter based on queue mode
-        if (e.key === 'Enter' && !e.shiftKey && !isMobile) {
+        if (e.key === 'Enter' && !e.shiftKey && (!isMobile || e.ctrlKey || e.metaKey)) {
             e.preventDefault();
 
             const isCtrlEnter = e.ctrlKey || e.metaKey;
@@ -1224,8 +1224,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
         clearAbortPrompt();
         startAbortIndicator();
 
-        void abortCurrentOperation();
-    }, [abortCurrentOperation, clearAbortPrompt, startAbortIndicator]);
+        void abortCurrentOperation(currentSessionId || undefined);
+    }, [abortCurrentOperation, clearAbortPrompt, currentSessionId, startAbortIndicator]);
 
     const handleCycleAgent = React.useCallback(() => {
         if (primaryAgents.length <= 1) return;
@@ -2381,19 +2381,6 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
             data-keyboard-avoid="true"
             style={isMobile && inputBarOffset > 0 && !isKeyboardOpen ? { marginBottom: `${inputBarOffset}px` } : undefined}
         >
-            {/* Absolute positioned above input - no layout shift */}
-            <div className="absolute bottom-full left-0 right-0">
-                <StatusRow
-                    isWorking={working.isWorking}
-                    statusText={workingStatusText}
-                    isGenericStatus={working.isGenericStatus}
-                    isWaitingForPermission={working.isWaitingForPermission}
-                    wasAborted={working.wasAborted}
-                    abortActive={working.abortActive}
-                    retryInfo={working.retryInfo}
-                    showAbortStatus={showAbortStatus}
-                />
-            </div>
             <div className={cn('chat-column relative overflow-visible', isDesktopExpanded && 'flex flex-1 min-h-0 flex-col')}>
                 <AttachedFilesList />
                 <QueuedMessageChips
@@ -2521,6 +2508,18 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                         </button>
                     </div>
                 )}
+                <StatusRow
+                    isWorking={working.isWorking}
+                    statusText={workingStatusText}
+                    isGenericStatus={working.isGenericStatus}
+                    isWaitingForPermission={working.isWaitingForPermission}
+                    wasAborted={working.wasAborted}
+                    abortActive={working.abortActive}
+                    retryInfo={working.retryInfo}
+                    showAbortStatus={showAbortStatus}
+                    showAssistantStatus={false}
+                    showTodos
+                />
                 <div
                     className={cn(
                         "flex flex-col relative overflow-visible",
@@ -2682,7 +2681,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                             disabled={!currentSessionId && !newSessionDraftOpen}
                             autoCorrect={isMobile ? "on" : "off"}
                             autoCapitalize={isMobile ? "sentences" : "off"}
-                            spellCheck={isMobile}
+                            spellCheck={isMobile || inputSpellcheckEnabled}
                             fillContainer={isDesktopExpanded}
                             outerClassName={cn('focus-within:ring-0', isDesktopExpanded && 'flex-1 min-h-0')}
                             className={cn(

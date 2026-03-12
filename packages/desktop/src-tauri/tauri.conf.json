@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/schema.json",
   "productName": "OpenChamber",
-  "version": "1.8.5",
+  "version": "1.8.6",
   "identifier": "ai.opencode.openchamber",
   "build": {
     "beforeDevCommand": "node ./scripts/dev-web-server.mjs",
@@ -78,7 +78,7 @@
       "endpoints": [
         "https://github.com/btriapitsyn/openchamber/releases/latest/download/latest.json"
       ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEU0NjI5NDJGNEU0QzFEMTYKUldRV0hVeE9MNVJpNUdRemdsbm8wQ2YxQkU4KzBOOEg3TkpXZzIzb244N3Y0R3I4N2FtUk1NMUEK"
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDIwRDMyQUQzNjNFRTc1ODIKUldTQ2RlNWoweXJUSUdpVWVWNm84R1pHamYzNVFhYWgyWmlpWFVzem5nUTlHd1dlRlNTV0FFc3IK"
     }
   }
 }

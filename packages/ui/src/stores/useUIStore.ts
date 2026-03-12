@@ -10,6 +10,8 @@ export type RightSidebarTab = 'git' | 'files' | 'board';
 export type ContextPanelMode = 'diff' | 'file' | 'context' | 'plan' | 'chat' | 'board';
 export type MermaidRenderingMode = 'svg' | 'ascii';
 export type UserMessageRenderingMode = 'markdown' | 'plain';
+export type ChatRenderMode = 'sorted' | 'live';
+export type ActivityRenderMode = 'collapsed' | 'summary';
 
 type ContextPanelTab = {
   id: string;
@@ -497,15 +499,13 @@ interface UIStore {
   eventStreamStatus: EventStreamStatus;
   eventStreamHint: string | null;
   showReasoningTraces: boolean;
-  showTextJustificationActivity: boolean;
-  showActivityHeaderTimestamps: boolean;
+  chatRenderMode: ChatRenderMode;
+  activityRenderMode: ActivityRenderMode;
   showDeletionDialog: boolean;
   autoDeleteEnabled: boolean;
   autoDeleteAfterDays: number;
   autoDeleteLastRunAt: number | null;
   messageLimit: number;
-
-  toolCallExpansion: 'collapsed' | 'activity' | 'detailed' | 'changes';
   fontSize: number;
   terminalFontSize: number;
   padding: number;
@@ -550,6 +550,10 @@ interface UIStore {
 
   showTerminalQuickKeysOnDesktop: boolean;
   persistChatDraft: boolean;
+  inputSpellcheckEnabled: boolean;
+  showToolFileIcons: boolean;
+  showExpandedBashTools: boolean;
+  showExpandedEditTools: boolean;
   mermaidRenderingMode: MermaidRenderingMode;
   userMessageRenderingMode: UserMessageRenderingMode;
   stickyUserHeader: boolean;
@@ -614,14 +618,13 @@ interface UIStore {
   setSettingsRemoteInstancesSelectedId: (instanceId: string | null) => void;
   setEventStreamStatus: (status: EventStreamStatus, hint?: string | null) => void;
   setShowReasoningTraces: (value: boolean) => void;
-  setShowTextJustificationActivity: (value: boolean) => void;
-  setShowActivityHeaderTimestamps: (value: boolean) => void;
+  setChatRenderMode: (value: ChatRenderMode) => void;
+  setActivityRenderMode: (value: ActivityRenderMode) => void;
   setShowDeletionDialog: (value: boolean) => void;
   setAutoDeleteEnabled: (value: boolean) => void;
   setAutoDeleteAfterDays: (days: number) => void;
   setAutoDeleteLastRunAt: (timestamp: number | null) => void;
   setMessageLimit: (value: number) => void;
-  setToolCallExpansion: (value: 'collapsed' | 'activity' | 'detailed' | 'changes') => void;
   setFontSize: (size: number) => void;
   setTerminalFontSize: (size: number) => void;
   setPadding: (size: number) => void;
@@ -661,6 +664,10 @@ interface UIStore {
   setSummaryLength: (value: number) => void;
   setMaxLastMessageLength: (value: number) => void;
   setPersistChatDraft: (value: boolean) => void;
+  setInputSpellcheckEnabled: (value: boolean) => void;
+  setShowToolFileIcons: (value: boolean) => void;
+  setShowExpandedBashTools: (value: boolean) => void;
+  setShowExpandedEditTools: (value: boolean) => void;
   setMermaidRenderingMode: (value: MermaidRenderingMode) => void;
   setUserMessageRenderingMode: (value: UserMessageRenderingMode) => void;
   setStickyUserHeader: (value: boolean) => void;
@@ -723,14 +730,13 @@ export const useUIStore = create<UIStore>()(
         eventStreamStatus: 'idle',
         eventStreamHint: null,
         showReasoningTraces: true,
-        showTextJustificationActivity: false,
-        showActivityHeaderTimestamps: false,
+        chatRenderMode: 'sorted',
+        activityRenderMode: 'summary',
         showDeletionDialog: true,
         autoDeleteEnabled: false,
         autoDeleteAfterDays: 30,
         autoDeleteLastRunAt: null,
         messageLimit: 200,
-        toolCallExpansion: 'collapsed',
         fontSize: 100,
         terminalFontSize: 13,
         padding: 100,
@@ -771,6 +777,10 @@ export const useUIStore = create<UIStore>()(
 
         showTerminalQuickKeysOnDesktop: false,
         persistChatDraft: true,
+        inputSpellcheckEnabled: false,
+        showToolFileIcons: true,
+        showExpandedBashTools: false,
+        showExpandedEditTools: false,
         mermaidRenderingMode: 'svg',
         userMessageRenderingMode: 'markdown',
         stickyUserHeader: true,
@@ -1302,12 +1312,12 @@ export const useUIStore = create<UIStore>()(
           set({ showReasoningTraces: value });
         },
 
-        setShowTextJustificationActivity: (value) => {
-          set({ showTextJustificationActivity: value });
+        setChatRenderMode: (value) => {
+          set({ chatRenderMode: value });
         },
 
-        setShowActivityHeaderTimestamps: (value) => {
-          set({ showActivityHeaderTimestamps: value });
+        setActivityRenderMode: (value) => {
+          set({ activityRenderMode: value });
         },
 
         setShowDeletionDialog: (value) => {
@@ -1330,10 +1340,6 @@ export const useUIStore = create<UIStore>()(
         setMessageLimit: (value) => {
           const clamped = Math.max(10, Math.min(500, Math.round(value)));
           set({ messageLimit: clamped });
-        },
-
-        setToolCallExpansion: (value) => {
-          set({ toolCallExpansion: value });
         },
 
         setFontSize: (size) => {
@@ -1678,6 +1684,18 @@ export const useUIStore = create<UIStore>()(
         setPersistChatDraft: (value) => {
           set({ persistChatDraft: value });
         },
+        setInputSpellcheckEnabled: (value) => {
+          set({ inputSpellcheckEnabled: value });
+        },
+        setShowToolFileIcons: (value) => {
+          set({ showToolFileIcons: value });
+        },
+        setShowExpandedBashTools: (value) => {
+          set({ showExpandedBashTools: value });
+        },
+        setShowExpandedEditTools: (value) => {
+          set({ showExpandedEditTools: value });
+        },
         setMermaidRenderingMode: (value) => {
           set({ mermaidRenderingMode: value });
         },
@@ -1830,14 +1848,13 @@ export const useUIStore = create<UIStore>()(
           isSessionCreateDialogOpen: state.isSessionCreateDialogOpen,
           // Note: isSettingsDialogOpen intentionally NOT persisted
           showReasoningTraces: state.showReasoningTraces,
-          showTextJustificationActivity: state.showTextJustificationActivity,
-          showActivityHeaderTimestamps: state.showActivityHeaderTimestamps,
+          chatRenderMode: state.chatRenderMode,
+          activityRenderMode: state.activityRenderMode,
           showDeletionDialog: state.showDeletionDialog,
           autoDeleteEnabled: state.autoDeleteEnabled,
           autoDeleteAfterDays: state.autoDeleteAfterDays,
           autoDeleteLastRunAt: state.autoDeleteLastRunAt,
           messageLimit: state.messageLimit,
-          toolCallExpansion: state.toolCallExpansion,
           fontSize: state.fontSize,
           terminalFontSize: state.terminalFontSize,
           padding: state.padding,
@@ -1864,6 +1881,10 @@ export const useUIStore = create<UIStore>()(
           summaryLength: state.summaryLength,
           maxLastMessageLength: state.maxLastMessageLength,
           persistChatDraft: state.persistChatDraft,
+          inputSpellcheckEnabled: state.inputSpellcheckEnabled,
+          showToolFileIcons: state.showToolFileIcons,
+          showExpandedBashTools: state.showExpandedBashTools,
+          showExpandedEditTools: state.showExpandedEditTools,
           mermaidRenderingMode: state.mermaidRenderingMode,
           userMessageRenderingMode: state.userMessageRenderingMode,
           stickyUserHeader: state.stickyUserHeader,

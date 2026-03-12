@@ -119,6 +119,50 @@ All scripts are in `package.json`.
 - No new deps unless asked.
 - Never add secrets (`.env`, keys) or log sensitive data.
 
+## CLI Parity and Safety Policy (MANDATORY)
+
+### Principle: policy-first, UX-second
+
+All safety and correctness rules MUST be enforced in core command logic, independent of output mode.
+
+Interactive/pretty UX (`@clack/prompts`) is a presentation layer only.
+It must never be the only place where validation or restriction is enforced.
+
+### Required parity across modes
+
+The same functional outcome and safety gates MUST hold for all execution modes:
+
+- Interactive TTY (full Clack UX)
+- Non-interactive shells (piped/stdin-less automation)
+- `--quiet`
+- `--json`
+- Fully pre-specified flags (no prompts)
+
+In all modes, invalid operations MUST fail with non-zero exit code and deterministic error semantics.
+
+### Non-negotiable rule
+
+Do not rely on prompts to enforce policy.
+
+- Prompts MAY help users choose valid inputs.
+- Core validators MUST run even when prompts are unavailable or skipped.
+- `--quiet` suppresses non-essential output only; it does not weaken validation.
+- `--json` changes output shape only; it does not weaken validation.
+
+Detailed Clack UX patterns (primitives, prompt gating, and implementation checklist)
+are defined in the `clack-cli-patterns` skill and should not be duplicated here.
+
+## Clack CLI Skill (MANDATORY for terminal CLI work)
+
+When working on terminal CLI commands, prompts, or output formatting, agents **MUST** study the Clack CLI skill first.
+
+**Before starting terminal CLI work:**
+```
+skill({ name: "clack-cli-patterns" })
+```
+
+Scope: terminal CLI only (for example `packages/web/bin/*`). Do not apply this requirement to VS Code or web UI work.
+
 ## Theme System (MANDATORY for UI work)
 
 When working on any UI components, styling, or visual changes, agents **MUST** study the theme system skill first.

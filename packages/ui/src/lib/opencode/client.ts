@@ -151,7 +151,6 @@ class OpencodeService {
 
   private globalSseAbortController: AbortController | null = null;
   private globalSseTask: Promise<void> | null = null;
-  private globalSseLastEventId: string | undefined;
   private globalSseIsConnected = false;
   private globalSseListeners: Set<(event: RoutedOpencodeEvent) => void> = new Set();
   private globalSseOpenListeners: Set<() => void> = new Set();
@@ -159,6 +158,7 @@ class OpencodeService {
   private globalSseQueue: Array<RoutedOpencodeEvent | undefined> = [];
   private globalSseBuffer: Array<RoutedOpencodeEvent | undefined> = [];
   private globalSseCoalesced: Map<string, number> = new Map();
+  private globalSseStaleDeltas: Set<string> = new Set();
   private globalSseFlushTimer: ReturnType<typeof setTimeout> | null = null;
   private globalSseLastFlushAt = 0;
 
@@ -1201,41 +1201,6 @@ class OpencodeService {
     }
   }
 
-  private parseSseBlock(block: string): { data: unknown; id?: string } | null {
-    if (!block) return null;
-
-    const lines = block.split('\n');
-    const dataLines: string[] = [];
-    let eventId: string | undefined;
-
-    for (const line of lines) {
-      if (line.startsWith('data:')) {
-        dataLines.push(line.slice(5).replace(/^\s/, ''));
-      } else if (line.startsWith('id:')) {
-        const candidate = line.slice(3).trim();
-        if (candidate) {
-          eventId = candidate;
-        }
-      }
-    }
-
-    if (dataLines.length === 0) {
-      return null;
-    }
-
-    const payloadText = dataLines.join('\n').trim();
-    if (!payloadText) {
-      return null;
-    }
-
-    try {
-      const data = JSON.parse(payloadText) as unknown;
-      return { data, id: eventId };
-    } catch {
-      return null;
-    }
-  }
-
   private normalizeRoutedSsePayload(raw: unknown): RoutedOpencodeEvent | null {
     if (!raw || typeof raw !== 'object') {
       return null;
@@ -1344,6 +1309,71 @@ class OpencodeService {
     this.globalSseQueue.length = 0;
     this.globalSseBuffer.length = 0;
     this.globalSseCoalesced.clear();
+    this.globalSseStaleDeltas.clear();
+  }
+
+  private getGlobalSseDeltaKey(event: RoutedOpencodeEvent): string | null {
+    const payload = event.payload as unknown as Record<string, unknown>;
+    const eventType = typeof payload.type === 'string' ? payload.type : null;
+    if (eventType !== 'message.part.delta') {
+      return null;
+    }
+
+    const properties =
+      typeof payload.properties === 'object' && payload.properties !== null
+        ? (payload.properties as Record<string, unknown>)
+        : null;
+    const messageId = typeof properties?.messageID === 'string'
+      ? properties.messageID
+      : typeof properties?.messageId === 'string'
+        ? properties.messageId
+        : null;
+    const partId = typeof properties?.partID === 'string'
+      ? properties.partID
+      : typeof properties?.partId === 'string'
+        ? properties.partId
+        : null;
+
+    if (!messageId || !partId) {
+      return null;
+    }
+
+    return `${event.directory}:${messageId}:${partId}`;
+  }
+
+  private getGlobalSseUpdatedPartKey(event: RoutedOpencodeEvent): string | null {
+    const payload = event.payload as unknown as Record<string, unknown>;
+    const eventType = typeof payload.type === 'string' ? payload.type : null;
+    if (eventType !== 'message.part.updated') {
+      return null;
+    }
+
+    const properties =
+      typeof payload.properties === 'object' && payload.properties !== null
+        ? (payload.properties as Record<string, unknown>)
+        : null;
+    const part =
+      properties?.part && typeof properties.part === 'object'
+        ? (properties.part as Record<string, unknown>)
+        : null;
+    const messageId = typeof part?.messageID === 'string'
+      ? part.messageID
+      : typeof part?.messageId === 'string'
+        ? part.messageId
+        : null;
+    const partId = typeof part?.id === 'string'
+      ? part.id
+      : typeof part?.partID === 'string'
+        ? part.partID
+        : typeof part?.partId === 'string'
+          ? part.partId
+          : null;
+
+    if (!messageId || !partId) {
+      return null;
+    }
+
+    return `${event.directory}:${messageId}:${partId}`;
   }
 
   private getGlobalSseCoalesceKey(event: RoutedOpencodeEvent): string | null {
@@ -1382,6 +1412,14 @@ class OpencodeService {
       return `openchamber:session-status:${sessionId}`;
     }
 
+    if (eventType === 'message.part.updated') {
+      const partKey = this.getGlobalSseUpdatedPartKey(event);
+      if (!partKey) {
+        return null;
+      }
+      return `message.part.updated:${partKey}`;
+    }
+
     return null;
   }
 
@@ -1396,14 +1434,22 @@ class OpencodeService {
     }
 
     const events = this.globalSseQueue;
+    const skip = this.globalSseStaleDeltas.size > 0 ? new Set(this.globalSseStaleDeltas) : undefined;
     this.globalSseQueue = this.globalSseBuffer;
     this.globalSseBuffer = events;
     this.globalSseQueue.length = 0;
     this.globalSseCoalesced.clear();
+    this.globalSseStaleDeltas.clear();
     this.globalSseLastFlushAt = Date.now();
 
     for (const event of events) {
       if (!event) continue;
+      if (skip) {
+        const deltaKey = this.getGlobalSseDeltaKey(event);
+        if (deltaKey && skip.has(deltaKey)) {
+          continue;
+        }
+      }
       for (const listener of this.globalSseListeners) {
         try {
           listener(event);
@@ -1431,6 +1477,10 @@ class OpencodeService {
       const existingIndex = this.globalSseCoalesced.get(key);
       if (existingIndex !== undefined) {
         this.globalSseQueue[existingIndex] = undefined;
+        const updatedPartKey = this.getGlobalSseUpdatedPartKey(event);
+        if (updatedPartKey) {
+          this.globalSseStaleDeltas.add(updatedPartKey);
+        }
       }
       this.globalSseCoalesced.set(key, this.globalSseQueue.length);
     }
@@ -1440,28 +1490,22 @@ class OpencodeService {
   }
 
   private async runGlobalSseLoop(abortController: AbortController): Promise<void> {
-    const globalEndpoint = `${this.baseUrl.replace(/\/+$/, '')}/global/event`;
     let attempt = 0;
+    const RECONNECT_DELAY_MS = 250;
+    const STREAM_YIELD_MS = 8;
+    const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
     while (!abortController.signal.aborted) {
       try {
-        const headers: Record<string, string> = {
-          Accept: 'text/event-stream',
-          'Cache-Control': 'no-cache',
-        };
-        if (this.globalSseLastEventId) {
-          headers['Last-Event-ID'] = this.globalSseLastEventId;
-        }
-
-        const response = await fetch(globalEndpoint, {
-          method: 'GET',
-          headers,
+        const result = await this.client.global.event({
           signal: abortController.signal,
+          onSseError: (error: unknown) => {
+            if ((error as Error)?.name === 'AbortError' || abortController.signal.aborted) {
+              return;
+            }
+            this.notifyGlobalSseError(error);
+          },
         });
-
-        if (!response.ok || !response.body) {
-          throw new Error(`Global SSE connect failed with status ${response.status}`);
-        }
 
         attempt = 0;
         this.globalSseIsConnected = true;
@@ -1469,47 +1513,31 @@ class OpencodeService {
           this.notifyGlobalSseOpen();
         }
 
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
+        let yielded = Date.now();
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          if (abortController.signal.aborted) break;
-          if (!value || value.length === 0) continue;
+        for await (const event of result.stream) {
+          if (abortController.signal.aborted) {
+            break;
+          }
 
-          buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n');
-          const blocks = buffer.split('\n\n');
-          buffer = blocks.pop() ?? '';
+          const directory = typeof event.directory === 'string' && event.directory.length > 0
+            ? event.directory
+            : 'global';
+          const routed = this.normalizeRoutedSsePayload({
+            directory,
+            payload: event.payload,
+          });
+          if (!routed) {
+            continue;
+          }
 
-          for (const block of blocks) {
-            const parsed = this.parseSseBlock(block);
-            if (!parsed) continue;
-            if (parsed.id) {
-              this.globalSseLastEventId = parsed.id;
-            }
-
-            const routed = this.normalizeRoutedSsePayload(parsed.data);
-            if (routed) {
-              this.emitGlobalSseEvent(routed);
-            }
+          this.emitGlobalSseEvent(routed);
+          if (Date.now() - yielded >= STREAM_YIELD_MS) {
+            yielded = Date.now();
+            await wait(0);
           }
         }
 
-        const remaining = buffer.trim();
-        if (remaining && !abortController.signal.aborted) {
-          const parsed = this.parseSseBlock(remaining);
-          if (parsed?.id) {
-            this.globalSseLastEventId = parsed.id;
-          }
-          const routed = parsed ? this.normalizeRoutedSsePayload(parsed.data) : null;
-          if (routed) {
-            this.emitGlobalSseEvent(routed);
-          }
-        }
-
-        // Stream ended; force reconnect.
         this.globalSseIsConnected = false;
       } catch (error: unknown) {
         this.globalSseIsConnected = false;
@@ -1525,8 +1553,7 @@ class OpencodeService {
       }
 
       attempt += 1;
-      const delay = Math.min(3000 * Math.pow(2, attempt), 30000);
-      await new Promise((resolve) => setTimeout(resolve, delay));
+      await wait(Math.min(RECONNECT_DELAY_MS * Math.max(attempt, 1), 2000));
     }
 
     this.flushGlobalSseQueue();

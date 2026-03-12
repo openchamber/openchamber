@@ -499,7 +499,7 @@ export const ProjectActionsButton = ({
       };
 
       const normalizedCommand = stripControlChars(action.command.trim().replace(/\r\n|\r/g, '\n'));
-      await terminal.sendInput(activeSessionId, `${normalizedCommand}\n\u0004`);
+      await terminal.sendInput(activeSessionId, `${normalizedCommand}\r`);
     } catch (error) {
       setRunningByKey((prev) => {
         const next = { ...prev };

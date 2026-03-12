@@ -1012,6 +1012,13 @@ onCommand('showSettings', () => {
   window.dispatchEvent(new CustomEvent('openchamber:navigate', { detail: { view: 'settings' } }));
 });
 
+// Listen for settings sync command from extension (broadcast to all VS Code webviews)
+onCommand('settingsSynced', () => {
+  import('@openchamber/ui/lib/persistence').then(({ syncDesktopSettings }) => {
+    void syncDesktopSettings();
+  });
+});
+
 import('@/main')
   .then(async () => {
     await waitForUiMount();

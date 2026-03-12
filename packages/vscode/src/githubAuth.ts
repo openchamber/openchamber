@@ -8,7 +8,7 @@ const API_USER_URL = 'https://api.github.com/user';
 const API_EMAILS_URL = 'https://api.github.com/user/emails';
 const DEVICE_GRANT_TYPE = 'urn:ietf:params:oauth:grant-type:device_code';
 
-export const DEFAULT_GITHUB_CLIENT_ID = 'Ov23liNd8TxDcMXtAHHM';
+export const DEFAULT_GITHUB_CLIENT_ID = 'Ov23lizomPOC3eFYo56r';
 export const DEFAULT_GITHUB_SCOPES = 'repo read:org workflow read:user user:email';
 
 type StoredAuth = {

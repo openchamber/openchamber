@@ -214,7 +214,8 @@ const createVirtualOriginalDiffUri = (modifiedPath: string, content: string): vs
   const fileName = path.basename(modifiedPath) || 'file';
   return vscode.Uri.from({
     scheme: VIRTUAL_DIFF_SCHEME,
-    path: `/${fileName} (before)`,
+    // Keep real filename (incl extension) so VS Code can infer language for syntax highlighting.
+    path: `/${fileName}`,
     query: `key=${encodeURIComponent(key)}`,
   });
 };

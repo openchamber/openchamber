@@ -5,7 +5,6 @@ import type { Session, Message, Part } from "@opencode-ai/sdk/v2";
 import type { PermissionRequest, PermissionResponse } from "@/types/permission";
 import type { QuestionRequest } from "@/types/question";
 import type { SessionStore, AttachedFile, EditPermissionMode, SyntheticContextPart } from "./types/sessionTypes";
-import { getMessageLimit, getBackgroundTrimLimit } from "./types/sessionTypes";
 
 import { useSessionStore as useSessionManagementStore } from "./sessionStore";
 import { useMessageStore } from "./messageStore";
@@ -19,7 +18,9 @@ import { useConfigStore } from "./useConfigStore";
 import { useProjectsStore } from "./useProjectsStore";
 import { useSessionFoldersStore } from "./useSessionFoldersStore";
 import { EXECUTION_FORK_META_TEXT } from "@/lib/messages/executionMeta";
+import { markPendingUserSendAnimation } from "@/lib/userSendAnimation";
 import { flattenAssistantTextParts } from "@/lib/messages/messageText";
+import { normalizeMessageRecordsForProjection } from "./utils/messageProjectors";
 
 export type { AttachedFile, EditPermissionMode };
 export { MEMORY_LIMITS, ACTIVE_SESSION_WINDOW } from "./types/sessionTypes";
@@ -46,7 +47,6 @@ const normalizePath = (value?: string | null): string | null => {
 };
 
 const sessionChoiceAnalysisSignature = new Map<string, string>();
-const ENABLE_ACTIVE_SESSION_TRIM = false;
 
 const buildSessionChoiceAnalysisSignature = (messages: Array<{ info: Message; parts: Part[] }>): string => {
     const lastMessage = messages[messages.length - 1];
@@ -89,6 +89,7 @@ export const useSessionStore = create<SessionStore>()(
             lastLoadedDirectory: null,
             messages: new Map(),
             sessionMemoryState: new Map(),
+            sessionHistoryMeta: new Map(),
             messageStreamStates: new Map(),
             sessionCompactionUntil: new Map(),
             sessionAbortFlags: new Map(),
@@ -315,8 +316,6 @@ export const useSessionStore = create<SessionStore>()(
                             if (previousMessages.length > 0) {
                                 get().updateViewportAnchor(previousSessionId, previousMessages.length - 1);
                             }
-
-                            get().trimToViewportWindow(previousSessionId, getBackgroundTrimLimit());
                         }
                     }
 
@@ -325,18 +324,14 @@ export const useSessionStore = create<SessionStore>()(
                     if (id) {
 
                         const existingMessages = get().messages.get(id);
-                        const memoryState = get().sessionMemoryState.get(id);
+                        const historyMeta = get().sessionHistoryMeta.get(id);
                         const needsHistoryBootstrap =
-                            !memoryState ||
-                            memoryState.historyComplete === undefined;
+                            !historyMeta ||
+                            typeof historyMeta.complete !== 'boolean';
 
                         if (!existingMessages || needsHistoryBootstrap) {
 
                             await get().loadMessages(id);
-                        }
-
-                        if (ENABLE_ACTIVE_SESSION_TRIM) {
-                            get().trimToViewportWindow(id, getMessageLimit());
                         }
 
                         // Analyze session messages to extract agent/model/variant choices
@@ -347,7 +342,6 @@ export const useSessionStore = create<SessionStore>()(
                             if (agents.length > 0) {
                                 const analysisSignature = buildSessionChoiceAnalysisSignature(sessionMessages);
                                 if (sessionChoiceAnalysisSignature.get(id) === analysisSignature) {
-                                    get().evictLeastRecentlyUsed();
                                     return;
                                 }
                                 try {
@@ -364,7 +358,6 @@ export const useSessionStore = create<SessionStore>()(
                         }
                     }
 
-                    get().evictLeastRecentlyUsed();
                 },
                 loadMessages: (sessionId: string, limit?: number) => useMessageStore.getState().loadMessages(sessionId, limit),
                 sendMessage: async (content: string, providerID: string, modelID: string, agent?: string, attachments?: AttachedFile[], agentMentionName?: string, additionalParts?: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean }>, variant?: string, inputMode: 'normal' | 'shell' = 'normal') => {
@@ -460,6 +453,7 @@ export const useSessionStore = create<SessionStore>()(
                             : additionalParts;
 
                         try {
+                            markPendingUserSendAnimation(created.id);
                             return await useMessageStore
                                 .getState()
                                 .sendMessage(content, providerID, modelID, effectiveDraftAgent, created.id, attachments, agentMentionName, mergedAdditionalParts, variant, inputMode);
@@ -517,6 +511,9 @@ export const useSessionStore = create<SessionStore>()(
                     }
 
                     try {
+                        if (currentSessionId) {
+                            markPendingUserSendAnimation(currentSessionId);
+                        }
                         return await useMessageStore.getState().sendMessage(content, providerID, modelID, effectiveAgent, currentSessionId || undefined, attachments, agentMentionName, additionalParts, variant, inputMode);
                     } catch (error) {
                         if (currentSessionId) {
@@ -525,9 +522,9 @@ export const useSessionStore = create<SessionStore>()(
                         throw error;
                     }
                 },
-                abortCurrentOperation: () => {
-                    const currentSessionId = useSessionManagementStore.getState().currentSessionId;
-                    return useMessageStore.getState().abortCurrentOperation(currentSessionId || undefined);
+                abortCurrentOperation: (sessionIdOverride?: string) => {
+                    const sessionId = sessionIdOverride || useSessionManagementStore.getState().currentSessionId;
+                    return useMessageStore.getState().abortCurrentOperation(sessionId || undefined);
                 },
                 armAbortPrompt: (durationMs = 3000) => {
                     const sessionId = useSessionManagementStore.getState().currentSessionId;
@@ -552,6 +549,11 @@ export const useSessionStore = create<SessionStore>()(
 
                     const effectiveCurrent = currentSessionId || sessionId;
                     return useMessageStore.getState().addStreamingPart(sessionId, messageId, part, role, effectiveCurrent);
+                },
+                applyPartDelta: (sessionId: string, messageId: string, partId: string, field: string, delta: string, role?: string) => {
+                    const currentSessionId = useSessionManagementStore.getState().currentSessionId;
+                    const effectiveCurrent = currentSessionId || sessionId;
+                    return useMessageStore.getState().applyPartDelta(sessionId, messageId, partId, field, delta, role, effectiveCurrent);
                 },
                 completeStreamingMessage: (sessionId: string, messageId: string) => useMessageStore.getState().completeStreamingMessage(sessionId, messageId),
                 markMessageStreamSettled: (messageId: string) => useMessageStore.getState().markMessageStreamSettled(messageId),
@@ -578,7 +580,11 @@ export const useSessionStore = create<SessionStore>()(
                 getDirectoryForSession: (sessionId: string) => useSessionManagementStore.getState().getDirectoryForSession(sessionId),
                 getLastMessageModel: (sessionId: string) => useMessageStore.getState().getLastMessageModel(sessionId),
                 getCurrentAgent: (sessionId: string) => useContextStore.getState().getCurrentAgent(sessionId),
-                syncMessages: (sessionId: string, messages: { info: Message; parts: Part[] }[]) => useMessageStore.getState().syncMessages(sessionId, messages),
+                syncMessages: (
+                    sessionId: string,
+                    messages: { info: Message; parts: Part[] }[],
+                    options?: { replace?: boolean }
+                ) => useMessageStore.getState().syncMessages(sessionId, messages, options),
                 applySessionMetadata: (sessionId: string, metadata: Partial<Session>) => useSessionManagementStore.getState().applySessionMetadata(sessionId, metadata),
 
                 addAttachedFile: (file: File) => useFileStore.getState().addAttachedFile(file),
@@ -587,19 +593,6 @@ export const useSessionStore = create<SessionStore>()(
                 clearAttachedFiles: () => useFileStore.getState().clearAttachedFiles(),
 
                 updateViewportAnchor: (sessionId: string, anchor: number) => useMessageStore.getState().updateViewportAnchor(sessionId, anchor),
-                trimToViewportWindow: (sessionId: string, targetSize?: number) => {
-                    const currentSessionId = useSessionManagementStore.getState().currentSessionId;
-                    // Skip trimming while session is working (busy/retry)
-                    const status = get().sessionStatus?.get(sessionId);
-                    if (status?.type === 'busy' || status?.type === 'retry') {
-                        return;
-                    }
-                    return useMessageStore.getState().trimToViewportWindow(sessionId, targetSize, currentSessionId || undefined);
-                },
-                evictLeastRecentlyUsed: () => {
-                    const currentSessionId = useSessionManagementStore.getState().currentSessionId;
-                    return useMessageStore.getState().evictLeastRecentlyUsed(currentSessionId || undefined);
-                },
                 loadMoreMessages: (sessionId: string, direction: "up" | "down") => useMessageStore.getState().loadMoreMessages(sessionId, direction),
 
                 saveSessionModelSelection: (sessionId: string, providerId: string, modelId: string) => useContextStore.getState().saveSessionModelSelection(sessionId, providerId, modelId),
@@ -639,7 +632,9 @@ export const useSessionStore = create<SessionStore>()(
                     return useContextStore.getState().initializeSessionContextUsage(sessionId, contextLimit, outputLimit, messages);
                 },
                 debugSessionMessages: async (sessionId: string) => {
-                    const messages = useMessageStore.getState().messages.get(sessionId) || [];
+                    const messages = normalizeMessageRecordsForProjection(
+                        useMessageStore.getState().messages.get(sessionId) || []
+                    );
                     const session = useSessionManagementStore.getState().sessions.find(s => s.id === sessionId);
                     console.log(`Debug session ${sessionId}:`, {
                         session,
@@ -689,12 +684,17 @@ export const useSessionStore = create<SessionStore>()(
                     const revertMessageId = updatedSession.revert?.messageID;
 
                     if (revertMessageId) {
-                        // Find the index of the revert message
-                        const revertIndex = currentMessages.findIndex((m) => m.info.id === revertMessageId);
+                        // Keep only messages before the revert point.
+                        // Fallback to the originally clicked message if SDK returns an id
+                        // that is not loaded in the current in-memory window.
+                        let revertIndex = currentMessages.findIndex((m) => m.info.id === revertMessageId);
+                        if (revertIndex === -1) {
+                            revertIndex = currentMessages.findIndex((m) => m.info.id === messageId);
+                        }
+
                         if (revertIndex !== -1) {
-                            // Keep only messages before the revert point
                             const filteredMessages = currentMessages.slice(0, revertIndex);
-                            useMessageStore.getState().syncMessages(sessionId, filteredMessages);
+                            useMessageStore.getState().syncMessages(sessionId, filteredMessages, { replace: true });
                         }
                     }
 
@@ -916,6 +916,7 @@ useMessageStore.subscribe((state, prevState) => {
     if (
         state.messages === prevState.messages &&
         state.sessionMemoryState === prevState.sessionMemoryState &&
+        state.sessionHistoryMeta === prevState.sessionHistoryMeta &&
         state.messageStreamStates === prevState.messageStreamStates &&
         state.sessionCompactionUntil === prevState.sessionCompactionUntil &&
         state.sessionAbortFlags === prevState.sessionAbortFlags &&
@@ -943,6 +944,7 @@ useMessageStore.subscribe((state, prevState) => {
         useSessionStore.setState({
             messages: latest.messages,
             sessionMemoryState: latest.sessionMemoryState,
+            sessionHistoryMeta: latest.sessionHistoryMeta,
             messageStreamStates: latest.messageStreamStates,
             sessionCompactionUntil: latest.sessionCompactionUntil,
             sessionAbortFlags: latest.sessionAbortFlags,
@@ -1088,6 +1090,7 @@ useSessionStore.setState({
     availableWorktreesByProject: useSessionManagementStore.getState().availableWorktreesByProject,
     messages: useMessageStore.getState().messages,
     sessionMemoryState: useMessageStore.getState().sessionMemoryState,
+    sessionHistoryMeta: useMessageStore.getState().sessionHistoryMeta,
     messageStreamStates: useMessageStore.getState().messageStreamStates,
     sessionCompactionUntil: useMessageStore.getState().sessionCompactionUntil,
     sessionAbortFlags: useMessageStore.getState().sessionAbortFlags,

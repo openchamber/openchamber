@@ -28,7 +28,53 @@
 
 </details>
 
-## Highlights
+## Why use OpenChamber?
+
+- **Cross-device continuity**: Start in TUI, continue on tablet/phone, return to terminal - same session
+- **Remote access**: Use OpenCode from anywhere via browser
+- **Familiarity**: A visual alternative for developers who prefer GUI workflows
+
+## Features
+
+### Core (all app versions)
+
+- Branchable chat timeline with `/undo`, `/redo`, and one-click forks from earlier turns
+- Smart tool UIs for diffs, file operations, permissions, and long-running task progress
+- Voice mode with speech input and read-aloud responses for hands-free workflows
+- Multi-agent runs from one prompt with isolated worktrees for safe side-by-side comparisons
+- Git workflows in-app: identities, commits, PR creation, checks, and merge actions
+- GitHub-native workflows: start sessions from issues and pull requests with context already attached
+- Plan/Build mode with a dedicated plan view for drafting and iterating implementation steps
+- Inline comment drafts on diffs, files, and plans that can be sent back to the agent
+- Context visibility tools (token/cost breakdowns, raw message inspection, and activity summaries)
+- Integrated terminal with per-directory sessions and stable performance on heavy output
+- Built-in skills catalog and local skill management for reusable automation workflows
+
+### Web / PWA
+
+- Provider-aware tunnel access model with Cloudflare `quick`, `managed-remote`, and `managed-local` modes
+- One-scan onboarding with tunnel QR + password URL helpers
+- Mobile-first experience: optimized chat controls, keyboard-safe layouts, and attachment-friendly UI
+- Background notifications plus reliable cross-tab session activity tracking
+- Built-in self-update + restart flow that keeps your server settings intact
+
+### Desktop (macOS)
+
+- Native macOS menu integration with polished app actions and deep-link handling
+- Multi-window support for parallel project/session workflows
+- "Open In" shortcuts for Finder, Terminal, and your preferred editor
+- Fast switching between local and remote instances
+- Workspace-first startup flow with directory picker and steadier window restore behavior
+
+### VS Code Extension
+
+- Editor-native workflow: open files directly from tool output and keep sessions beside your code
+- Agent Manager for parallel multi-model runs from a single prompt
+- Right-click actions to add context, explain selections, and improve code in-place
+- In-extension settings, responsive layout, and theme mapping that matches your editor
+- Hardened runtime lifecycle and health checks for faster startup and fewer stuck reconnect states
+
+### Custom Themes
 
 - **Use it from anywhere** - Cloudflare tunnel with QR code onboarding. Scan, connect, code from your couch.
 - **Branchable chat timeline** - Undo, redo, fork from any turn. Explore different approaches without losing your place.
@@ -59,11 +105,18 @@ openchamber --ui-password be-creative-here --daemon
 
 ```bash
 openchamber --port 8080              # Custom port
-openchamber --daemon                 # Background mode
 openchamber --ui-password secret     # Password-protect UI
-openchamber --try-cf-tunnel          # Cloudflare Quick Tunnel
-openchamber --try-cf-tunnel --tunnel-qr              # + QR code
-openchamber --try-cf-tunnel --tunnel-password-url     # + password in URL
+openchamber tunnel help              # Tunnel lifecycle commands
+openchamber tunnel providers         # Show provider capabilities
+openchamber tunnel profile add --provider cloudflare --mode managed-remote --name prod-main --hostname app.example.com --token <token>
+openchamber tunnel start --profile prod-main
+openchamber tunnel start --provider cloudflare --mode quick --qr
+openchamber tunnel start --provider cloudflare --mode managed-local --config ~/.cloudflared/config.yml
+openchamber tunnel status --all      # Show tunnel state across instances
+openchamber tunnel stop --port 3000  # Stop tunnel only (server stays running)
+openchamber logs                     # Follow latest instance logs
+OPENCODE_PORT=4096 OPENCODE_SKIP_START=true openchamber                    # Connect to external OpenCode server
+OPENCODE_HOST=https://myhost:4096 OPENCODE_SKIP_START=true openchamber  # Connect via custom host/HTTPS
 openchamber stop                     # Stop server
 openchamber update                   # Update to latest
 ```
@@ -103,7 +156,24 @@ environment:
 | `qr`       | Enable tunnel + QR code         |
 | `password` | Enable tunnel + password in URL |
 
-**Data directory permissions:** The `data/` directory is mounted for persistent storage. Before running:
+### Managed Cloudflare Tunnel (persistent hostname)
+
+OpenChamber also supports managed-remote mode for more reliable long-lived access with your Cloudflare account and custom hostname.
+
+- Configure it in-app at **Settings -> OpenChamber -> Tunnel** and switch mode to **Managed Remote Tunnel**.
+- Managed-remote tunnels require a domain in your Cloudflare account.
+- Cloudflare setup guide: https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/get-started/create-remote-tunnel/
+- Managed-local mode uses your local cloudflared config, for example:
+  - `openchamber tunnel start --provider cloudflare --mode managed-local --config ~/.cloudflared/config.yml`
+
+### Tunnel behavior notes
+
+- OpenChamber supports one active tunnel per running instance (port).
+- Starting a tunnel with a different mode/provider on the same instance replaces the current tunnel.
+- Replacing or stopping a tunnel revokes existing connect links and invalidates remote tunnel sessions for that instance.
+- Connect links are one-time tokens; generating a new link revokes the previous unused link.
+
+**Data Directory Permission Note:** The `data/` directory is mounted into the container for persistent storage (config, sessions, SSH keys, workspaces). Before running, ensure the directory exists and has proper permissions:
 
 ```bash
 mkdir -p data/openchamber data/opencode/share data/opencode/config data/ssh
@@ -117,6 +187,9 @@ chown -R 1000:1000 data/
 <details>
 <summary>Named Cloudflare Tunnel (persistent hostname)</summary>
 
+- [OpenCode CLI](https://opencode.ai) installed
+- Node.js 20+ (for web version)
+- [cloudflared](https://github.com/cloudflare/cloudflared/releases) (required for Cloudflare tunnel modes)
 For reliable long-lived access with a custom hostname from your Cloudflare account:
 
 - Configure in-app at **Settings > OpenChamber > Tunnel**, switch to **Named** mode.

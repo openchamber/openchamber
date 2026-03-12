@@ -105,6 +105,7 @@ export const CommitSection: React.FC<CommitSectionProps> = ({
             placeholder="Commit message"
             disabled={commitAction !== null}
             hasTouchInput={hasTouchInput}
+            isMobile={isMobile}
           />
 
           {gitmojiEnabled && (
