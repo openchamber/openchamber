@@ -81,7 +81,25 @@ export type AgentWithExtras = Agent & {
   native?: boolean;
   hidden?: boolean;
   options?: { hidden?: boolean };
+  scope?: AgentScope;
+  /** Subfolder name parsed from file path, e.g. "business", "development" */
+  group?: string;
 };
+
+/** Parse the subfolder group name from an agent file path.
+ *  e.g. "~/.config/opencode/agents/business/ceo.md" → "business"
+ *  e.g. "~/.config/opencode/agents/ceo.md"          → undefined
+ */
+function parseAgentGroup(path: string | null | undefined): string | undefined {
+  if (!path) return undefined;
+  const normalizedPath = path.replace(/\\/g, '/');
+  const idx = normalizedPath.lastIndexOf('/agents/');
+  if (idx === -1) return undefined;
+  const relative = normalizedPath.substring(idx + '/agents/'.length);
+  const parts = relative.split('/');
+  // parts[0] = group, parts[1] = filename; need at least 2 parts
+  return parts.length > 1 ? parts[0] : undefined;
+}
 
 // Helper to check if agent is built-in (handles both SDK 'builtIn' and API 'native')
 export const isAgentBuiltIn = (agent: Agent): boolean => {
@@ -202,12 +220,16 @@ export const useAgentsStore = create<AgentsStore>()(
                           ?? sources.json?.scope;
                       }
 
+                      // Parse subfolder group from file path
+                      const mdPath: string | null | undefined = data.sources?.md?.path;
+                      const group = parseAgentGroup(mdPath);
+
                       if (scope === 'project' || scope === 'user') {
-                        return { ...agent, scope: scope as AgentScope };
+                        return { ...agent, scope: scope as AgentScope, group };
                       }
                       
                       // Explicitly set null scope if not found, to clear stale state
-                      return { ...agent, scope: undefined };
+                      return { ...agent, scope: undefined, group };
                     }
                   } catch (err) {
                     console.warn(`[AgentsStore] Failed to fetch config for agent ${agent.name}:`, err);

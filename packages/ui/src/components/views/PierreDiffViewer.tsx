@@ -63,7 +63,7 @@ const WEBKIT_SCROLL_FIX_CSS = `
   pre[data-interactive-line-numbers] [data-line-number] {
     touch-action: manipulation;
   }
-  /* Match OpenCode hunk separator sizing */
+
   [data-diff-header],
   [data-diff] {
     [data-separator] {
@@ -201,7 +201,7 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
   layout = 'fill',
 }) => {
   const themeContext = useOptionalThemeSystem();
-  
+
   const isDark = themeContext?.currentTheme.metadata.variant === 'dark';
   const lightTheme = themeContext?.availableThemes.find(t => t.metadata.id === themeContext.lightThemeId) ?? getDefaultTheme(false);
   const darkTheme = themeContext?.availableThemes.find(t => t.metadata.id === themeContext.darkThemeId) ?? getDefaultTheme(true);

@@ -29,21 +29,43 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 
 const ToolOutputDialog = React.lazy(() => import('./message/ToolOutputDialog'));
 
-const DETAILED_DEFAULT_TOOLS = new Set(['task', 'edit', 'multiedit', 'write', 'bash']);
+const TOOL_DEFAULT_EXPANSION_BY_MODE = {
+    detailed: new Set(['task', 'edit', 'multiedit', 'write', 'apply_patch', 'bash', 'todowrite']),
+    changes: new Set(['edit', 'multiedit', 'write', 'apply_patch']),
+} as const;
 
-const isDetailedDefaultTool = (toolName: unknown): boolean =>
-    typeof toolName === 'string' && DETAILED_DEFAULT_TOOLS.has(toolName.toLowerCase());
+type DefaultExpandedToolMode = keyof typeof TOOL_DEFAULT_EXPANSION_BY_MODE;
+const EXPANDED_TOOLS_CACHE_MAX = 4000;
+const expandedToolsStateCache = new Map<string, Set<string>>();
 
-function useStickyDisplayValue<T>(value: T | null | undefined): T | null | undefined {
-    const ref = React.useRef<{ hasValue: boolean; value: T | null | undefined }>({ hasValue: false, value: undefined as T | null | undefined });
+const readExpandedToolsCache = (messageId: string): Set<string> => {
+    const cached = expandedToolsStateCache.get(messageId);
+    return cached ? new Set(cached) : new Set();
+};
 
-    if (value !== undefined && value !== null) {
-        if (!ref.current.hasValue || ref.current.value !== value) {
-            ref.current = { hasValue: true, value };
+const writeExpandedToolsCache = (messageId: string, value: Set<string>): void => {
+    if (expandedToolsStateCache.size >= EXPANDED_TOOLS_CACHE_MAX && !expandedToolsStateCache.has(messageId)) {
+        const oldest = expandedToolsStateCache.keys().next().value;
+        if (typeof oldest === 'string') {
+            expandedToolsStateCache.delete(oldest);
         }
     }
+    expandedToolsStateCache.set(messageId, new Set(value));
+};
 
-    return ref.current.hasValue ? ref.current.value : value;
+const isDefaultExpandedTool = (toolName: unknown, mode: DefaultExpandedToolMode): boolean =>
+    typeof toolName === 'string' && TOOL_DEFAULT_EXPANSION_BY_MODE[mode].has(toolName.toLowerCase());
+
+function useStickyDisplayValue<T>(value: T | null | undefined): T | null | undefined {
+    const [stickyValue, setStickyValue] = React.useState<T | null | undefined>(value);
+
+    React.useEffect(() => {
+        if (value !== undefined && value !== null) {
+            setStickyValue(value);
+        }
+    }, [value]);
+
+    return value ?? stickyValue;
 }
 
 const getMessageInfoProp = (info: unknown, key: string): unknown => {
@@ -114,10 +136,11 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     } = sessionState;
 
     const providers = useConfigStore((state) => state.providers);
-    const { showReasoningTraces, toolCallExpansion } = useUIStore(
+    const { showReasoningTraces, toolCallExpansion, stickyUserHeader } = useUIStore(
         useShallow((state) => ({
             showReasoningTraces: state.showReasoningTraces,
             toolCallExpansion: state.toolCallExpansion,
+            stickyUserHeader: state.stickyUserHeader,
         }))
     );
 
@@ -129,7 +152,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
 
     const [copiedCode, setCopiedCode] = React.useState<string | null>(null);
     const [copiedMessage, setCopiedMessage] = React.useState(false);
-    const [expandedTools, setExpandedTools] = React.useState<Set<string>>(new Set());
+    const [expandedTools, setExpandedTools] = React.useState<Set<string>>(() => readExpandedToolsCache(message.info.id));
     const [popupContent, setPopupContent] = React.useState<ToolPopupContent>({
         open: false,
         title: '',
@@ -137,11 +160,18 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     });
 
     React.useEffect(() => {
+        setExpandedTools(readExpandedToolsCache(message.info.id));
+    }, [message.info.id]);
+
+    React.useEffect(() => {
+        expandedToolsStateCache.clear();
         setExpandedTools(new Set());
-    }, [message.info.id, toolCallExpansion]);
+    }, [toolCallExpansion]);
 
     const messageRole = React.useMemo(() => deriveMessageRole(message.info), [message.info]);
     const isUser = messageRole.isUser;
+    const useExternalUserActionsRow = isUser && (isMobile || !stickyUserHeader);
+    const showStickyInlineHoverRow = isUser && !isMobile && stickyUserHeader && !useExternalUserActionsRow;
 
     const sessionId = message.info.sessionID;
 
@@ -367,6 +397,11 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         return typeof timeInfo?.completed === 'number' ? timeInfo.completed : null;
     }, [message.info.time]);
 
+    const messageCreatedAt = React.useMemo(() => {
+        const timeInfo = message.info.time as { created?: number } | undefined;
+        return typeof timeInfo?.created === 'number' ? timeInfo.created : null;
+    }, [message.info.time]);
+
     const isMessageCompleted = React.useMemo(() => {
         if (isUser) return true;
         return Boolean(messageCompletedAt && messageCompletedAt > 0);
@@ -413,19 +448,29 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         // 'collapsed': Activity and tools start collapsed
         // 'activity': Activity expanded, tools collapsed
         // 'detailed': Activity expanded, only key tools expanded
+        // 'changes': Activity expanded, only edit/diff tools expanded
 
         if (toolCallExpansion === 'collapsed' || toolCallExpansion === 'activity') {
             // Tools default collapsed: expandedTools contains IDs of tools that ARE expanded
             return expandedTools;
         }
 
-        // 'detailed': expand only allowlisted tools by default.
+        const defaultExpansionMode =
+            toolCallExpansion === 'detailed' || toolCallExpansion === 'changes'
+                ? toolCallExpansion
+                : null;
+
+        if (!defaultExpansionMode) {
+            return expandedTools;
+        }
+
+        // 'detailed'/'changes': expand only allowlisted tools by default.
         // expandedTools acts as a "toggled" set (XOR with defaults).
         const defaultExpandedToolIds = new Set<string>();
 
         for (const part of toolParts) {
             const toolName = (part as { tool?: unknown }).tool;
-            if (part.id && isDetailedDefaultTool(toolName)) {
+            if (part.id && isDefaultExpandedTool(toolName, defaultExpansionMode)) {
                 defaultExpandedToolIds.add(part.id);
             }
         }
@@ -437,8 +482,13 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                 }
 
                 const toolPart = activity.part as unknown as { id?: string; tool?: unknown };
-                if (toolPart.id && isDetailedDefaultTool(toolPart.tool)) {
-                    defaultExpandedToolIds.add(toolPart.id);
+                if (isDefaultExpandedTool(toolPart.tool, defaultExpansionMode)) {
+                    if (toolPart.id) {
+                        defaultExpandedToolIds.add(toolPart.id);
+                    }
+                    if (activity.id) {
+                        defaultExpandedToolIds.add(activity.id);
+                    }
                 }
             }
         }
@@ -512,8 +562,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         return freshnessDetector.shouldAnimateMessage(message.info, currentSessionId || message.info.sessionID);
     }, [message.info, currentSessionId, isUser]);
 
-    // Track if this message should show header to prevent flickering
-    const shouldShowHeaderRef = React.useRef(false);
+    const [hasStartedStreamingHeader, setHasStartedStreamingHeader] = React.useState(false);
 
     const previousRole = React.useMemo(() => {
         if (!previousMessage) return null;
@@ -541,6 +590,22 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         return isStreamingMessage ? 'streaming' : 'completed';
     }, [isMessageCompleted, lifecyclePhase, isStreamingMessage]);
 
+    React.useEffect(() => {
+        setHasStartedStreamingHeader(false);
+    }, [message.info.id]);
+
+    React.useEffect(() => {
+        const headerMessageId = turnGroupingContext?.headerMessageId;
+        if (isUser || !headerMessageId || headerMessageId !== message.info.id) {
+            return;
+        }
+
+        const isCurrentlyStreaming = streamPhase === 'streaming' || streamPhase === 'cooldown';
+        if (isCurrentlyStreaming) {
+            setHasStartedStreamingHeader(true);
+        }
+    }, [isUser, message.info.id, streamPhase, turnGroupingContext?.headerMessageId]);
+
     const shouldShowHeader = React.useMemo(() => {
         if (isUser) return true;
 
@@ -558,15 +623,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
 
                 // For streaming messages: show header when streaming starts and keep it visible
                 const isCurrentlyStreaming = streamPhase === 'streaming' || streamPhase === 'cooldown';
-                const hasStartedStreaming = shouldShowHeaderRef.current;
-
-                // Update the ref when streaming starts
-                if (isCurrentlyStreaming && !hasStartedStreaming) {
-                    shouldShowHeaderRef.current = true;
-                }
-
-                // Show header if streaming has started or is currently active
-                return hasStartedStreaming || isCurrentlyStreaming;
+                return hasStartedStreamingHeader || isCurrentlyStreaming;
             }
 
             // For non-first assistant messages, don't show header
@@ -576,7 +633,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         // Fallback to original logic when turn grouping is not available
         if (!previousRole) return true;
         return previousRole.isUser;
-    }, [isUser, previousRole, turnGroupingContext, streamPhase, message.info]);
+    }, [hasStartedStreamingHeader, isUser, previousRole, turnGroupingContext, streamPhase, message.info]);
 
     const handleCopyCode = React.useCallback((code: string) => {
         void copyTextToClipboard(code).then((result) => {
@@ -621,16 +678,17 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
             ? turnGroupingContext.summaryBody
             : assistantSummaryFromStore;
 
-    const assistantSummaryRef = React.useRef<string | undefined>(undefined);
-    if (assistantSummaryCandidate && assistantSummaryCandidate.trim().length > 0) {
-        assistantSummaryRef.current = assistantSummaryCandidate;
-    }
-    const prevUserMessageIdForCopy = React.useRef(userMessageIdForTurn);
-    if (prevUserMessageIdForCopy.current !== userMessageIdForTurn) {
-        prevUserMessageIdForCopy.current = userMessageIdForTurn;
-        assistantSummaryRef.current = undefined;
-    }
-    const assistantSummaryForCopy = assistantSummaryRef.current;
+    const [assistantSummaryForCopy, setAssistantSummaryForCopy] = React.useState<string | undefined>(undefined);
+
+    React.useEffect(() => {
+        setAssistantSummaryForCopy(undefined);
+    }, [userMessageIdForTurn]);
+
+    React.useEffect(() => {
+        if (assistantSummaryCandidate && assistantSummaryCandidate.trim().length > 0) {
+            setAssistantSummaryForCopy(assistantSummaryCandidate);
+        }
+    }, [assistantSummaryCandidate]);
 
     const assistantErrorText = React.useMemo(() => {
         if (isUser) {
@@ -737,9 +795,10 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
             } else {
                 next.add(toolId);
             }
+            writeExpandedToolsCache(message.info.id, next);
             return next;
         });
-    }, []);
+    }, [message.info.id]);
 
     const resolvedAnimationHandlers = animationHandlers ?? null;
     const hasAnnouncedAuxiliaryScrollRef = React.useRef(false);
@@ -772,7 +831,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
 
     const handleShowPopup = React.useCallback((content: ToolPopupContent) => {
 
-        if (content.image) {
+        if (content.image || content.mermaid) {
             setPopupContent(content);
             setImagePreviewOpen(true);
         }
@@ -899,12 +958,16 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         return null;
     }
 
+    const assistantTopPaddingClass = !isUser && shouldShowHeader
+        ? (stickyUserHeader ? (isMobile ? 'pt-4' : 'pt-6') : 'pt-0')
+        : 'pt-0';
+
     return (
         <>
             <div
                 className={cn(
                     'group w-full',
-                    shouldShowHeader ? (isMobile ? 'pt-10' : 'pt-6') : 'pt-0',
+                    isUser ? (isMobile ? 'pt-2' : 'pt-6') : assistantTopPaddingClass,
                     isUser ? 'pb-0' : isFollowedByAssistant ? 'pb-0' : 'pb-8'
                 )}
                 data-message-id={message.info.id}
@@ -914,37 +977,74 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                     {isUser ? (
                         displayParts.length === 0 ? null : (
                         <FadeInOnReveal>
-                            <div className="flex justify-end">
-                                <div style={{ backgroundColor: 'var(--chat-user-message-bg)' }} className="max-w-[85%] rounded-2xl rounded-br-sm px-5 py-3 shadow-sm border border-primary/5">
-                                    <MessageBody
-                                        messageId={message.info.id}
-                                        parts={displayParts}
-                                        isUser={isUser}
-                                        isMessageCompleted={isMessageCompleted}
-                                        messageFinish={messageFinish}
-                                        syntaxTheme={syntaxTheme}
-                                        isMobile={isMobile}
-                                        hasTouchInput={hasTouchInput}
-                                        copiedCode={copiedCode}
-                                        onCopyCode={handleCopyCode}
-                                        expandedTools={expandedTools}
-                                        onToggleTool={handleToggleTool}
-                                        onShowPopup={handleShowPopup}
-                                        streamPhase={streamPhase}
-                                        allowAnimation={allowAnimation}
-                                        onContentChange={onContentChange}
-                                        shouldShowHeader={false}
-                                        hasTextContent={hasTextContent}
-                                        onCopyMessage={handleCopyMessage}
-                                        copiedMessage={copiedMessage}
-                                        showReasoningTraces={showReasoningTraces}
-                                        onAuxiliaryContentComplete={handleAuxiliaryContentComplete}
-                                        agentMention={agentMention}
-                                        onRevert={handleRevert}
-                                        onFork={isUser ? handleFork : undefined}
-                                        errorMessage={assistantErrorText}
-                                    />
+                            <div className={cn('relative flex justify-end', !isMobile ? 'group/user-shell' : undefined)}>
+                                <div className="max-w-[85%]">
+                                    <div style={{ backgroundColor: 'var(--chat-user-message-bg)' }} className="rounded-[var(--radius-xl)] rounded-br-[var(--radius-sm)] px-5 py-3 shadow-none border border-primary/5">
+                                        <MessageBody
+                                            messageId={message.info.id}
+                                            parts={displayParts}
+                                            isUser={isUser}
+                                            isMessageCompleted={isMessageCompleted}
+                                            messageFinish={messageFinish}
+                                            syntaxTheme={syntaxTheme}
+                                            isMobile={isMobile}
+                                            hasTouchInput={hasTouchInput}
+                                            copiedCode={copiedCode}
+                                            onCopyCode={handleCopyCode}
+                                            expandedTools={expandedTools}
+                                            onToggleTool={handleToggleTool}
+                                            onShowPopup={handleShowPopup}
+                                            streamPhase={streamPhase}
+                                            allowAnimation={allowAnimation}
+                                            onContentChange={onContentChange}
+                                            shouldShowHeader={false}
+                                            hasTextContent={hasTextContent}
+                                            onCopyMessage={handleCopyMessage}
+                                            copiedMessage={copiedMessage}
+                                            showReasoningTraces={showReasoningTraces}
+                                            onAuxiliaryContentComplete={handleAuxiliaryContentComplete}
+                                            agentMention={agentMention}
+                                            onRevert={handleRevert}
+                                            onFork={isUser ? handleFork : undefined}
+                                            errorMessage={assistantErrorText}
+                                            userActionsMode={useExternalUserActionsRow ? 'external-content' : 'inline'}
+                                            stickyUserHeaderEnabled={stickyUserHeader}
+                                        />
+                                    </div>
+                                    {useExternalUserActionsRow ? (
+                                        <MessageBody
+                                            messageId={message.info.id}
+                                            parts={displayParts}
+                                            isUser={isUser}
+                                            isMessageCompleted={isMessageCompleted}
+                                            messageFinish={messageFinish}
+                                            syntaxTheme={syntaxTheme}
+                                            isMobile={isMobile}
+                                            hasTouchInput={hasTouchInput}
+                                            copiedCode={copiedCode}
+                                            onCopyCode={handleCopyCode}
+                                            expandedTools={expandedTools}
+                                            onToggleTool={handleToggleTool}
+                                            onShowPopup={handleShowPopup}
+                                            streamPhase={streamPhase}
+                                            allowAnimation={allowAnimation}
+                                            onContentChange={onContentChange}
+                                            shouldShowHeader={false}
+                                            hasTextContent={hasTextContent}
+                                            onCopyMessage={handleCopyMessage}
+                                            copiedMessage={copiedMessage}
+                                            showReasoningTraces={showReasoningTraces}
+                                            onAuxiliaryContentComplete={handleAuxiliaryContentComplete}
+                                            agentMention={agentMention}
+                                            onRevert={handleRevert}
+                                            onFork={isUser ? handleFork : undefined}
+                                            errorMessage={assistantErrorText}
+                                            userActionsMode="external-actions"
+                                            stickyUserHeaderEnabled={stickyUserHeader}
+                                        />
+                                    ) : null}
                                 </div>
+                                {showStickyInlineHoverRow ? <div aria-hidden="true" className="pointer-events-none absolute left-0 right-0 top-full h-11" /> : null}
                             </div>
                         </FadeInOnReveal>
                         )
@@ -968,6 +1068,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                 isMessageCompleted={isMessageCompleted}
                                 messageFinish={messageFinish}
                                 messageCompletedAt={messageCompletedAt ?? undefined}
+                                messageCreatedAt={messageCreatedAt ?? undefined}
                                 syntaxTheme={syntaxTheme}
                                 isMobile={isMobile}
                                 hasTouchInput={hasTouchInput}

@@ -1,8 +1,9 @@
-import React from 'react';
-import { Button } from '@/components/ui/button';
+import React, { useMemo } from 'react';
+import { ButtonSmall } from '@/components/ui/button-small';
 import { ButtonLarge } from '@/components/ui/button-large';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui';
+import { isMobileDeviceViaCSS } from '@/lib/device';
 import {
   Dialog,
   DialogContent,
@@ -19,11 +20,10 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { RiAddLine, RiDeleteBinLine, RiFileCopyLine, RiMore2Line, RiEditLine, RiBookOpenLine } from '@remixicon/react';
 import { useSkillsStore, type DiscoveredSkill } from '@/stores/useSkillsStore';
-import { useUIStore } from '@/stores/useUIStore';
-import { useDeviceInfo } from '@/lib/device';
-import { isVSCodeRuntime } from '@/lib/desktop';
 import { cn } from '@/lib/utils';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { SettingsProjectSelector } from '@/components/sections/shared/SettingsProjectSelector';
+import { SidebarGroup } from '@/components/sections/shared/SidebarGroup';
 
 interface SkillsSidebarProps {
   onItemSelect?: () => void;
@@ -34,6 +34,7 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
   const [renameNewName, setRenameNewName] = React.useState('');
   const [deleteDialogSkill, setDeleteDialogSkill] = React.useState<DiscoveredSkill | null>(null);
   const [isDeletePending, setIsDeletePending] = React.useState(false);
+  const [openMenuSkill, setOpenMenuSkill] = React.useState<string | null>(null);
 
   const {
     selectedSkillName,
@@ -42,20 +43,12 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
     setSkillDraft,
     createSkill,
     deleteSkill,
-    loadSkills,
     getSkillDetail,
   } = useSkillsStore();
 
-  const { setSidebarOpen } = useUIStore();
-  const { isMobile } = useDeviceInfo();
+  // Skills are loaded by the Settings shell when this page is active.
 
-  const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
-
-  React.useEffect(() => {
-    loadSkills();
-  }, [loadSkills]);
-
-  const bgClass = isVSCode ? 'bg-background' : 'bg-sidebar';
+  const bgClass = 'bg-background';
 
   const handleCreateNew = () => {
     // Generate unique name
@@ -72,9 +65,7 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
     setSelectedSkill(newName);
     onItemSelect?.();
 
-    if (isMobile) {
-      setSidebarOpen(false);
-    }
+
   };
 
   const handleDeleteSkill = async (skill: DiscoveredSkill) => {
@@ -124,9 +115,7 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
       });
     setSelectedSkill(newName);
 
-    if (isMobile) {
-      setSidebarOpen(false);
-    }
+
   };
 
   const handleOpenRenameDialog = (skill: DiscoveredSkill) => {
@@ -190,20 +179,41 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
   const projectSkills = skills.filter((s) => s.scope === 'project');
   const userSkills = skills.filter((s) => s.scope === 'user');
 
+  // Helper: group a list of skills by their domain folder
+  function groupSkillsByFolder(list: DiscoveredSkill[]) {
+    const groups: Record<string, DiscoveredSkill[]> = {};
+    const ungrouped: DiscoveredSkill[] = [];
+    for (const skill of list) {
+      if (skill.group) {
+        if (!groups[skill.group]) groups[skill.group] = [];
+        groups[skill.group].push(skill);
+      } else {
+        ungrouped.push(skill);
+      }
+    }
+    const sortedGroups = Object.keys(groups)
+      .sort((a, b) => a.localeCompare(b))
+      .map((name) => ({ name, skills: groups[name] }));
+    return { sortedGroups, ungrouped };
+  }
+
+  const groupedProjectSkills = useMemo(() => groupSkillsByFolder(projectSkills), [projectSkills]);
+  const groupedUserSkills = useMemo(() => groupSkillsByFolder(userSkills), [userSkills]);
+
   return (
     <div className={cn('flex h-full flex-col', bgClass)}>
-      <div className={cn('border-b px-3', isMobile ? 'mt-2 py-3' : 'py-3')}>
+      <div className="border-b px-3 pt-4 pb-3">
+        <h2 className="text-base font-semibold text-foreground mb-3">Skills</h2>
+        <SettingsProjectSelector className="mb-3" />
         <div className="flex items-center justify-between gap-2">
           <span className="typography-meta text-muted-foreground">Total {skills.length}</span>
-          <Button
-            type="button"
+          <ButtonSmall
             variant="ghost"
-            size="icon"
-            className="h-7 w-7 -my-1 text-muted-foreground"
+            className="h-7 w-7 px-0 -my-1 text-muted-foreground"
             onClick={handleCreateNew}
           >
-            <RiAddLine className="size-4" />
-          </Button>
+            <RiAddLine className="h-3.5 w-3.5" />
+          </ButtonSmall>
         </div>
       </div>
 
@@ -221,7 +231,33 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
                 <div className="px-2 pb-1.5 pt-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   Project Skills
                 </div>
-                {projectSkills.map((skill) => (
+                {groupedProjectSkills.sortedGroups.map(({ name: groupName, skills: groupSkills }) => (
+                  <SidebarGroup
+                    key={groupName}
+                    label={groupName}
+                    count={groupSkills.length}
+                    storageKey="project-skills"
+                  >
+                    {groupSkills.map((skill) => (
+                      <SkillListItem
+                        key={skill.name}
+                        skill={skill}
+                        isSelected={selectedSkillName === skill.name}
+                        onSelect={() => {
+                          setSelectedSkill(skill.name);
+                          onItemSelect?.();
+
+                        }}
+                        onRename={() => handleOpenRenameDialog(skill)}
+                        onDelete={() => handleDeleteSkill(skill)}
+                        onDuplicate={() => handleDuplicateSkill(skill)}
+                        isMenuOpen={openMenuSkill === skill.name}
+                        onMenuOpenChange={(open) => setOpenMenuSkill(open ? skill.name : null)}
+                      />
+                    ))}
+                  </SidebarGroup>
+                ))}
+                {groupedProjectSkills.ungrouped.map((skill) => (
                   <SkillListItem
                     key={skill.name}
                     skill={skill}
@@ -229,13 +265,13 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
                     onSelect={() => {
                       setSelectedSkill(skill.name);
                       onItemSelect?.();
-                      if (isMobile) {
-                        setSidebarOpen(false);
-                      }
+
                     }}
                     onRename={() => handleOpenRenameDialog(skill)}
                     onDelete={() => handleDeleteSkill(skill)}
                     onDuplicate={() => handleDuplicateSkill(skill)}
+                    isMenuOpen={openMenuSkill === skill.name}
+                    onMenuOpenChange={(open) => setOpenMenuSkill(open ? skill.name : null)}
                   />
                 ))}
               </>
@@ -246,7 +282,33 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
                 <div className="px-2 pb-1.5 pt-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   User Skills
                 </div>
-                {userSkills.map((skill) => (
+                {groupedUserSkills.sortedGroups.map(({ name: groupName, skills: groupSkills }) => (
+                  <SidebarGroup
+                    key={groupName}
+                    label={groupName}
+                    count={groupSkills.length}
+                    storageKey="user-skills"
+                  >
+                    {groupSkills.map((skill) => (
+                      <SkillListItem
+                        key={skill.name}
+                        skill={skill}
+                        isSelected={selectedSkillName === skill.name}
+                        onSelect={() => {
+                          setSelectedSkill(skill.name);
+                          onItemSelect?.();
+
+                        }}
+                        onRename={() => handleOpenRenameDialog(skill)}
+                        onDelete={() => handleDeleteSkill(skill)}
+                        onDuplicate={() => handleDuplicateSkill(skill)}
+                        isMenuOpen={openMenuSkill === skill.name}
+                        onMenuOpenChange={(open) => setOpenMenuSkill(open ? skill.name : null)}
+                      />
+                    ))}
+                  </SidebarGroup>
+                ))}
+                {groupedUserSkills.ungrouped.map((skill) => (
                   <SkillListItem
                     key={skill.name}
                     skill={skill}
@@ -254,13 +316,13 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
                     onSelect={() => {
                       setSelectedSkill(skill.name);
                       onItemSelect?.();
-                      if (isMobile) {
-                        setSidebarOpen(false);
-                      }
+
                     }}
                     onRename={() => handleOpenRenameDialog(skill)}
                     onDelete={() => handleDeleteSkill(skill)}
                     onDuplicate={() => handleDuplicateSkill(skill)}
+                    isMenuOpen={openMenuSkill === skill.name}
+                    onMenuOpenChange={(open) => setOpenMenuSkill(open ? skill.name : null)}
                   />
                 ))}
               </>
@@ -285,14 +347,14 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button
+            <ButtonLarge
               variant="ghost"
               onClick={() => setDeleteDialogSkill(null)}
               disabled={isDeletePending}
               className="text-foreground hover:bg-interactive-hover hover:text-foreground"
             >
               Cancel
-            </Button>
+            </ButtonLarge>
             <ButtonLarge onClick={handleConfirmDeleteSkill} disabled={isDeletePending}>
               Delete
             </ButtonLarge>
@@ -321,13 +383,13 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
             }}
           />
           <DialogFooter>
-            <Button
+            <ButtonLarge
               variant="ghost"
               onClick={() => setRenameDialogSkill(null)}
               className="text-foreground hover:bg-interactive-hover hover:text-foreground"
             >
               Cancel
-            </Button>
+            </ButtonLarge>
             <ButtonLarge onClick={handleRenameSkill}>
               Rename
             </ButtonLarge>
@@ -345,6 +407,8 @@ interface SkillListItemProps {
   onDelete: () => void;
   onRename: () => void;
   onDuplicate: () => void;
+  isMenuOpen: boolean;
+  onMenuOpenChange: (open: boolean) => void;
 }
 
 const SkillListItem: React.FC<SkillListItemProps> = ({
@@ -354,13 +418,20 @@ const SkillListItem: React.FC<SkillListItemProps> = ({
   onDelete,
   onRename,
   onDuplicate,
+  isMenuOpen,
+  onMenuOpenChange,
 }) => {
+  const isMobile = isMobileDeviceViaCSS();
   return (
     <div
       className={cn(
-        'group relative flex items-center rounded-md px-1.5 py-1 transition-all duration-200',
+        'group relative flex items-center rounded-md px-1.5 py-1 transition-all duration-200 select-none',
         isSelected ? 'bg-interactive-selection' : 'hover:bg-interactive-hover'
       )}
+      onContextMenu={!isMobile ? (e) => {
+        e.preventDefault();
+        onMenuOpenChange(true);
+      } : undefined}
     >
       <div className="flex min-w-0 flex-1 items-center">
         <button
@@ -388,15 +459,14 @@ const SkillListItem: React.FC<SkillListItemProps> = ({
           </div>
         </button>
 
-        <DropdownMenu>
+        <DropdownMenu open={isMenuOpen} onOpenChange={onMenuOpenChange}>
           <DropdownMenuTrigger asChild>
-            <Button
-              size="icon"
+            <ButtonSmall
               variant="ghost"
-              className="h-6 w-6 flex-shrink-0 -mr-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100"
+              className="h-6 w-6 px-0 flex-shrink-0 -mr-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100"
             >
               <RiMore2Line className="h-3.5 w-3.5" />
-            </Button>
+            </ButtonSmall>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-fit min-w-20">
             <DropdownMenuItem

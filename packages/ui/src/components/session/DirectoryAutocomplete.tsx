@@ -276,7 +276,7 @@ export const DirectoryAutocomplete = React.forwardRef<DirectoryAutocompleteHandl
   return (
     <div
       ref={containerRef}
-      className="absolute z-[100] w-full max-h-48 bg-background border border-border rounded-lg shadow-lg top-full mt-1 left-0 flex flex-col overflow-hidden"
+      className="absolute z-[100] w-full max-h-48 bg-background border border-border rounded-lg shadow-none top-full mt-1 left-0 flex flex-col overflow-hidden"
     >
       {loading ? (
         <div className="flex items-center justify-center py-3">

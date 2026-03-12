@@ -35,21 +35,31 @@ export const createVSCodeFilesAPI = (): FilesAPI => ({
   },
 
   async search(payload: FileSearchQuery): Promise<FileSearchResult[]> {
-    const data = await sendBridgeMessage<{ files: Array<{ path: string; relativePath?: string }> }>('api:fs:search', {
-      directory: normalizePath(payload.directory),
-      query: payload.query,
-      limit: payload.maxResults,
-      includeHidden: payload.includeHidden,
-      respectGitignore: payload.respectGitignore,
-    });
+    const directory = normalizePath(payload.directory);
+    const params = new URLSearchParams();
+    if (directory) {
+      params.set('directory', directory);
+    }
+    params.set('query', payload.query);
+    params.set('dirs', 'false');
+    params.set('type', 'file');
+    if (typeof payload.maxResults === 'number' && Number.isFinite(payload.maxResults)) {
+      params.set('limit', String(payload.maxResults));
+    }
 
-    const files = Array.isArray(data?.files) ? data.files : [];
-    return files
-      .filter((file) => file && typeof file.path === 'string')
-      .map((file) => ({
-        path: normalizePath(file.path),
-        preview: file.relativePath ? [normalizePath(file.relativePath)] : undefined,
-      }));
+    const response = await fetch(`/api/find/file?${params.toString()}`);
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: response.statusText }));
+      throw new Error((error as { error?: string }).error || 'Failed to search files');
+    }
+
+    const result = (await response.json()) as string[];
+    const files = Array.isArray(result) ? result : [];
+
+    return files.map((relativePath) => ({
+      path: normalizePath(`${directory}/${relativePath}`),
+      preview: [normalizePath(relativePath)],
+    }));
   },
 
   async createDirectory(path: string): Promise<{ success: boolean; path: string }> {

@@ -3,7 +3,7 @@ import type { Part } from '@opencode-ai/sdk/v2';
 import type { ContentChangeReason } from '@/hooks/useChatScrollManager';
 import { ReasoningTimelineBlock } from './ReasoningPart';
 
-type PartWithText = Part & { text?: string; content?: string };
+type PartWithText = Part & { text?: string; content?: string; time?: { start?: number; end?: number } };
 
 const cleanJustificationText = (text: string): string => {
     if (typeof text !== 'string' || text.trim().length === 0) {
@@ -32,6 +32,7 @@ const JustificationBlock: React.FC<JustificationBlockProps> = ({
     const partWithText = part as PartWithText;
     const rawText = partWithText.text || partWithText.content || '';
     const textContent = React.useMemo(() => cleanJustificationText(rawText), [rawText]);
+    const time = partWithText.time;
 
     // Don't render if there's no text content
     if (!textContent || textContent.trim().length === 0) {
@@ -44,6 +45,7 @@ const JustificationBlock: React.FC<JustificationBlockProps> = ({
             variant="justification"
             onContentChange={onContentChange}
             blockId={part.id || `${messageId}-justification`}
+            time={time}
         />
     );
 };

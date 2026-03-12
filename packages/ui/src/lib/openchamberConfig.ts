@@ -59,6 +59,26 @@ export interface OpenChamberConfig {
   'setup-worktree'?: string[];
   projectNotes?: string;
   projectTodos?: OpenChamberProjectTodoItem[];
+  projectActions?: OpenChamberProjectAction[];
+  projectActionsPrimaryId?: string;
+}
+
+export type OpenChamberProjectActionPlatform = 'macos' | 'linux' | 'windows';
+
+export interface OpenChamberProjectAction {
+  id: string;
+  name: string;
+  command: string;
+  icon?: string | null;
+  platforms?: OpenChamberProjectActionPlatform[];
+  autoOpenUrl?: boolean;
+  openUrl?: string;
+  desktopOpenSshForward?: string;
+}
+
+export interface OpenChamberProjectActionsState {
+  actions: OpenChamberProjectAction[];
+  primaryActionId: string | null;
 }
 
 export interface OpenChamberProjectTodoItem {
@@ -75,6 +95,12 @@ export interface OpenChamberProjectNotesTodos {
 
 export const OPENCHAMBER_PROJECT_NOTES_MAX_LENGTH = 1000;
 export const OPENCHAMBER_PROJECT_TODO_TEXT_MAX_LENGTH = 120;
+export const OPENCHAMBER_PROJECT_ACTION_NAME_MAX_LENGTH = 80;
+export const OPENCHAMBER_PROJECT_ACTION_COMMAND_MAX_LENGTH = 4000;
+export const OPENCHAMBER_PROJECT_ACTION_OPEN_URL_MAX_LENGTH = 2000;
+export const OPENCHAMBER_PROJECT_ACTION_DESKTOP_FORWARD_MAX_LENGTH = 300;
+
+const OPENCHAMBER_ACTION_PLATFORM_SET = new Set<OpenChamberProjectActionPlatform>(['macos', 'linux', 'windows']);
 
 const normalize = (value: string): string => {
   if (!value) return '';
@@ -344,6 +370,105 @@ const sanitizeProjectTodoItems = (value: unknown): OpenChamberProjectTodoItem[] 
   return sanitized;
 };
 
+const sanitizeProjectActionPlatforms = (value: unknown): OpenChamberProjectActionPlatform[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const unique: OpenChamberProjectActionPlatform[] = [];
+  const seen = new Set<OpenChamberProjectActionPlatform>();
+  for (const entry of value) {
+    if (typeof entry !== 'string') {
+      continue;
+    }
+    const normalized = entry.trim().toLowerCase() as OpenChamberProjectActionPlatform;
+    if (!OPENCHAMBER_ACTION_PLATFORM_SET.has(normalized) || seen.has(normalized)) {
+      continue;
+    }
+    seen.add(normalized);
+    unique.push(normalized);
+  }
+
+  return unique;
+};
+
+const sanitizeProjectActions = (value: unknown): OpenChamberProjectAction[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const sanitized: OpenChamberProjectAction[] = [];
+  const seenIds = new Set<string>();
+
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object') {
+      continue;
+    }
+
+    const record = entry as {
+      id?: unknown;
+      name?: unknown;
+      command?: unknown;
+      icon?: unknown;
+      platforms?: unknown;
+      autoOpenUrl?: unknown;
+      openUrl?: unknown;
+      desktopOpenSshForward?: unknown;
+    };
+
+    const id = typeof record.id === 'string' ? record.id.trim() : '';
+    const name = trimToMaxLength(typeof record.name === 'string' ? record.name.trim() : '', OPENCHAMBER_PROJECT_ACTION_NAME_MAX_LENGTH);
+    const command = trimToMaxLength(typeof record.command === 'string' ? record.command.trim() : '', OPENCHAMBER_PROJECT_ACTION_COMMAND_MAX_LENGTH);
+
+    if (!id || !name || !command || seenIds.has(id)) {
+      continue;
+    }
+    seenIds.add(id);
+
+    const iconRaw = typeof record.icon === 'string' ? record.icon.trim() : '';
+    const platforms = sanitizeProjectActionPlatforms(record.platforms);
+    const autoOpenUrl = record.autoOpenUrl === true;
+    const openUrlRaw = typeof record.openUrl === 'string' ? record.openUrl.trim() : '';
+    const openUrl = trimToMaxLength(openUrlRaw, OPENCHAMBER_PROJECT_ACTION_OPEN_URL_MAX_LENGTH);
+    const desktopOpenSshForwardRaw = typeof record.desktopOpenSshForward === 'string'
+      ? record.desktopOpenSshForward.trim()
+      : '';
+    const desktopOpenSshForward = trimToMaxLength(
+      desktopOpenSshForwardRaw,
+      OPENCHAMBER_PROJECT_ACTION_DESKTOP_FORWARD_MAX_LENGTH
+    );
+
+    sanitized.push({
+      id,
+      name,
+      command,
+      icon: iconRaw || null,
+      ...(autoOpenUrl ? { autoOpenUrl: true } : {}),
+      ...(openUrl ? { openUrl } : {}),
+      ...(desktopOpenSshForward ? { desktopOpenSshForward } : {}),
+      ...(platforms.length > 0 ? { platforms } : {}),
+    });
+  }
+
+  return sanitized;
+};
+
+const sanitizeProjectActionsState = (value: {
+  actions?: unknown;
+  primaryActionId?: unknown;
+} | null | undefined): OpenChamberProjectActionsState => {
+  const actions = sanitizeProjectActions(value?.actions);
+  const primaryRaw = typeof value?.primaryActionId === 'string' ? value.primaryActionId.trim() : '';
+  const primaryActionId = primaryRaw && actions.some((entry) => entry.id === primaryRaw)
+    ? primaryRaw
+    : null;
+
+  return {
+    actions,
+    primaryActionId,
+  };
+};
+
 const sanitizeProjectNotesAndTodos = (value: {
   notes?: unknown;
   todos?: unknown;
@@ -501,6 +626,29 @@ export async function saveProjectNotesAndTodos(
   return updateOpenChamberConfig(project, {
     projectNotes: sanitized.notes,
     projectTodos: sanitized.todos,
+  });
+}
+
+export async function getProjectActionsState(project: ProjectRef): Promise<OpenChamberProjectActionsState> {
+  const config = await readOpenChamberConfig(project);
+  return sanitizeProjectActionsState({
+    actions: config?.projectActions,
+    primaryActionId: config?.projectActionsPrimaryId,
+  });
+}
+
+export async function saveProjectActionsState(
+  project: ProjectRef,
+  value: OpenChamberProjectActionsState
+): Promise<boolean> {
+  const sanitized = sanitizeProjectActionsState({
+    actions: value.actions,
+    primaryActionId: value.primaryActionId,
+  });
+
+  return updateOpenChamberConfig(project, {
+    projectActions: sanitized.actions,
+    projectActionsPrimaryId: sanitized.primaryActionId ?? undefined,
   });
 }
 

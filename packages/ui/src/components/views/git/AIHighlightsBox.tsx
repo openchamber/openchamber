@@ -24,7 +24,7 @@ export const AIHighlightsBox: React.FC<AIHighlightsBoxProps> = ({
   };
 
   return (
-    <div className="space-y-2 rounded-xl border border-border/60 bg-background/60 px-3 py-2">
+    <div className="space-y-2 rounded-xl border border-border/60 bg-transparent px-3 py-2">
       <div className="flex items-center justify-between gap-2">
         <p className="typography-micro text-muted-foreground">AI highlights</p>
         <Tooltip delayDuration={1000}>

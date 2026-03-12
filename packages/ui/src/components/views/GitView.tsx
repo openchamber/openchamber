@@ -1,7 +1,6 @@
 import React from 'react';
 import { useSessionStore } from '@/stores/useSessionStore';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useFireworksCelebration } from '@/contexts/FireworksContext';
 import type { GitIdentityProfile, CommitFileEntry } from '@/lib/api/types';
 import { useGitIdentitiesStore } from '@/stores/useGitIdentitiesStore';
@@ -26,7 +25,7 @@ import {
   RiSplitCellsHorizontal,
 } from '@remixicon/react';
 import { toast } from '@/components/ui';
-import { AnimatedTabs } from '@/components/ui/animated-tabs';
+import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import {
   Dialog,
   DialogContent,
@@ -59,9 +58,9 @@ import { StashDialog } from './git/StashDialog';
 import { InProgressOperationBanner } from './git/InProgressOperationBanner';
 import { BranchIntegrationSection, type OperationLogEntry } from './git/BranchIntegrationSection';
 import type { GitRemote } from '@/lib/gitApi';
-import { BranchPickerDialog } from '@/components/session/BranchPickerDialog';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { cn } from '@/lib/utils';
+import { generateCommitMessage as generateSessionCommitMessage } from '@/lib/gitApi';
 
 type SyncAction = 'fetch' | 'pull' | 'push' | null;
 type CommitAction = 'commit' | 'commitAndPush' | null;
@@ -96,6 +95,8 @@ type GitmojiCachePayload = {
 const GITMOJI_CACHE_KEY = 'gitmojiCache';
 const GITMOJI_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 const GITMOJI_CACHE_VERSION = '1';
+const GIT_DIFF_PRIORITY_PREFETCH_LIMIT = 40;
+const GIT_DIFF_PRIORITY_BASELINE_LIMIT = 20;
 const GITMOJI_SOURCE_URL =
   'https://raw.githubusercontent.com/carloscuesta/gitmoji/master/packages/gitmojis/src/gitmojis.json';
 
@@ -214,17 +215,47 @@ const gitViewSnapshots = new Map<string, GitViewSnapshot>();
 const normalizePath = (value?: string | null): string =>
   (value || '').replace(/\\/g, '/').replace(/\/+$/, '');
 
-interface GitViewProps {
-  mode?: 'full' | 'sidebar';
-}
-
-export const GitView: React.FC<GitViewProps> = ({ mode = 'full' }) => {
+export const GitView: React.FC = () => {
   const { git } = useRuntimeAPIs();
   const currentDirectory = useEffectiveDirectory();
-  const { currentSessionId, worktreeMetadata: worktreeMap } = useSessionStore();
-  const worktreeMetadata = currentSessionId
-    ? worktreeMap.get(currentSessionId) ?? undefined
-    : undefined;
+  const {
+    currentSessionId,
+    worktreeMetadata: worktreeMap,
+    availableWorktrees,
+    newSessionDraft,
+  } = useSessionStore();
+  const normalizedCurrentDirectory = normalizePath(currentDirectory);
+  const inferredWorktreeMetadata = React.useMemo(() => {
+    if (!normalizedCurrentDirectory) {
+      return undefined;
+    }
+
+    const fromAvailable = availableWorktrees.find(
+      (metadata) => normalizePath(metadata.path) === normalizedCurrentDirectory
+    );
+    if (fromAvailable) {
+      return fromAvailable;
+    }
+
+    for (const metadata of worktreeMap.values()) {
+      if (normalizePath(metadata.path) === normalizedCurrentDirectory) {
+        return metadata;
+      }
+    }
+
+    return undefined;
+  }, [availableWorktrees, normalizedCurrentDirectory, worktreeMap]);
+  const worktreeMetadata = React.useMemo(() => {
+    if (currentSessionId) {
+      return worktreeMap.get(currentSessionId) ?? inferredWorktreeMetadata;
+    }
+
+    if (newSessionDraft?.open) {
+      return inferredWorktreeMetadata;
+    }
+
+    return undefined;
+  }, [currentSessionId, inferredWorktreeMetadata, newSessionDraft?.open, worktreeMap]);
 
 
   const { profiles, globalIdentity, defaultGitIdentityId, loadProfiles, loadGlobalIdentity, loadDefaultGitIdentityId } =
@@ -244,8 +275,13 @@ export const GitView: React.FC<GitViewProps> = ({ mode = 'full' }) => {
     fetchBranches,
     fetchLog,
     fetchIdentity,
+    prefetchDiffs,
     setLogMaxCount,
   } = useGitStore();
+  const isMobile = useUIStore((state) => state.isMobile);
+  const openContextDiff = useUIStore((state) => state.openContextDiff);
+  const navigateToDiff = useUIStore((state) => state.navigateToDiff);
+  const setRightSidebarOpen = useUIStore((state) => state.setRightSidebarOpen);
 
   const initialSnapshot = React.useMemo(() => {
     if (!currentDirectory) return null;
@@ -253,8 +289,6 @@ export const GitView: React.FC<GitViewProps> = ({ mode = 'full' }) => {
   }, [currentDirectory]);
 
   const settingsGitmojiEnabled = useConfigStore((state) => state.settingsGitmojiEnabled);
-  const projects = useProjectsStore((state) => state.projects);
-  const [isBranchPickerOpen, setIsBranchPickerOpen] = React.useState(false);
   const [rootBranchHint, setRootBranchHint] = React.useState<string | null>(null);
 
   React.useEffect(() => {
@@ -282,29 +316,10 @@ export const GitView: React.FC<GitViewProps> = ({ mode = 'full' }) => {
     };
   }, [worktreeMetadata?.projectDirectory]);
 
-  const branchPickerProject = React.useMemo(() => {
-    const current = normalizePath(currentDirectory);
-    const worktreeRoot = normalizePath(worktreeMetadata?.projectDirectory);
-    const best = projects
-      .map((project) => ({
-        id: project.id,
-        path: project.path,
-        label: project.label,
-        normalizedPath: normalizePath(project.path),
-      }))
-      .sort((a, b) => b.normalizedPath.length - a.normalizedPath.length)
-      .find((project) => {
-        if (!project.normalizedPath) return false;
-        if (worktreeRoot && project.normalizedPath === worktreeRoot) return true;
-        return current === project.normalizedPath || current.startsWith(`${project.normalizedPath}/`);
-      });
-
-    return best ?? null;
-  }, [currentDirectory, projects, worktreeMetadata?.projectDirectory]);
-
   const [commitMessage, setCommitMessage] = React.useState(
     initialSnapshot?.commitMessage ?? ''
   );
+  const [visibleChangePaths, setVisibleChangePaths] = React.useState<string[]>([]);
   const [isGitmojiPickerOpen, setIsGitmojiPickerOpen] = React.useState(false);
   const actionPanelScrollRef = React.useRef<HTMLElement | null>(null);
   const [syncAction, setSyncAction] = React.useState<SyncAction>(null);
@@ -312,7 +327,6 @@ export const GitView: React.FC<GitViewProps> = ({ mode = 'full' }) => {
   const [logMaxCountLocal, setLogMaxCountLocal] = React.useState<number>(25);
   const [isSettingIdentity, setIsSettingIdentity] = React.useState(false);
   const { triggerFireworks } = useFireworksCelebration();
-  const isSidebarMode = mode === 'sidebar';
 
   const autoAppliedDefaultRef = React.useRef<Map<string, string>>(new Map());
   const identityApplyCountRef = React.useRef(0);
@@ -334,6 +348,7 @@ export const GitView: React.FC<GitViewProps> = ({ mode = 'full' }) => {
   );
   const [hasUserAdjustedSelection, setHasUserAdjustedSelection] = React.useState(false);
   const [revertingPaths, setRevertingPaths] = React.useState<Set<string>>(new Set());
+  const [isRevertingAll, setIsRevertingAll] = React.useState(false);
   const [integrateRefreshKey, setIntegrateRefreshKey] = React.useState(0);
   const [isGeneratingMessage, setIsGeneratingMessage] = React.useState(false);
   const [generatedHighlights, setGeneratedHighlights] = React.useState<string[]>(
@@ -397,6 +412,13 @@ export const GitView: React.FC<GitViewProps> = ({ mode = 'full' }) => {
   const [gitmojiEmojis, setGitmojiEmojis] = React.useState<GitmojiEntry[]>([]);
   const [gitmojiSearch, setGitmojiSearch] = React.useState('');
   const [isHistoryDialogOpen, setIsHistoryDialogOpen] = React.useState(false);
+
+  const actionTabItems = React.useMemo(() => [
+    { id: 'commit', label: 'Commit', icon: <RiGitCommitLine className="h-3.5 w-3.5" /> },
+    { id: 'branch', label: 'Update', icon: <RiGitMergeLine className="h-3.5 w-3.5" /> },
+    { id: 'pr', label: 'PR', icon: <RiGitPullRequestLine className="h-3.5 w-3.5" /> },
+    { id: 'worktree', label: 'Worktree', icon: <RiSplitCellsHorizontal className="h-3.5 w-3.5" /> },
+  ], []);
   const [actionTab, setActionTab] = React.useState<ActionTab>(() => {
     if (typeof window === 'undefined') {
       return 'commit';
@@ -615,10 +637,12 @@ export const GitView: React.FC<GitViewProps> = ({ mode = 'full' }) => {
 
       const dirState = useGitStore.getState().directories.get(currentDirectory);
       if (!dirState?.status) {
-        fetchAll(currentDirectory, git, { force: true });
+        void fetchAll(currentDirectory, git, { force: true });
+      } else {
+        void fetchStatus(currentDirectory, git, { silent: true });
       }
     }
-  }, [currentDirectory, setActiveDirectory, fetchAll, git]);
+  }, [currentDirectory, setActiveDirectory, fetchAll, fetchStatus, git]);
 
   const refreshStatusAndBranches = React.useCallback(
     async (showErrors = true) => {
@@ -700,6 +724,39 @@ export const GitView: React.FC<GitViewProps> = ({ mode = 'full' }) => {
 
     return Array.from(unique.values()).sort((a, b) => a.path.localeCompare(b.path));
   }, [status]);
+
+  React.useEffect(() => {
+    if (!currentDirectory || changeEntries.length === 0) {
+      return;
+    }
+
+    const orderedPaths: string[] = [];
+    const seen = new Set<string>();
+
+    const pushPath = (path: string) => {
+      if (!path || seen.has(path)) {
+        return;
+      }
+      seen.add(path);
+      orderedPaths.push(path);
+    };
+
+    Array.from(selectedPaths).forEach(pushPath);
+    visibleChangePaths.forEach(pushPath);
+    changeEntries.slice(0, GIT_DIFF_PRIORITY_BASELINE_LIMIT).forEach((entry) => pushPath(entry.path));
+
+    if (orderedPaths.length === 0) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      void prefetchDiffs(currentDirectory, git, orderedPaths, { maxFiles: GIT_DIFF_PRIORITY_PREFETCH_LIMIT });
+    }, 120);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [changeEntries, currentDirectory, git, prefetchDiffs, selectedPaths, visibleChangePaths]);
 
 
   React.useEffect(() => {
@@ -816,14 +873,14 @@ export const GitView: React.FC<GitViewProps> = ({ mode = 'full' }) => {
       return;
     }
 
+    console.error('[git-generation][browser] generate button clicked', {
+      directory: currentDirectory,
+      selectedFiles: selectedPaths.size,
+    });
+
     setIsGeneratingMessage(true);
     try {
-      const zenModel = useConfigStore.getState().settingsZenModel;
-      const { message } = await git.generateCommitMessage(
-        currentDirectory,
-        Array.from(selectedPaths),
-        zenModel ? { zenModel } : undefined
-      );
+      const { message } = await generateSessionCommitMessage(currentDirectory, Array.from(selectedPaths));
       const subject = message.subject?.trim() ?? '';
       const highlights = Array.isArray(message.highlights) ? message.highlights : [];
 
@@ -844,13 +901,17 @@ export const GitView: React.FC<GitViewProps> = ({ mode = 'full' }) => {
 
       scrollActionPanelToBottom();
     } catch (error) {
+      console.error('[git-generation][browser] GitView generate handler failed', {
+        message: error instanceof Error ? error.message : String(error),
+        error,
+      });
       const message =
         error instanceof Error ? error.message : 'Failed to generate commit message';
       toast.error(message);
     } finally {
       setIsGeneratingMessage(false);
     }
-  }, [currentDirectory, selectedPaths, git, settingsGitmojiEnabled, gitmojiEmojis, scrollActionPanelToBottom]);
+  }, [currentDirectory, selectedPaths, settingsGitmojiEnabled, gitmojiEmojis, scrollActionPanelToBottom]);
 
   const handleCreateBranch = async (branchName: string, remote?: GitRemote) => {
     if (!currentDirectory || !status) return;
@@ -1129,13 +1190,14 @@ export const GitView: React.FC<GitViewProps> = ({ mode = 'full' }) => {
 
   const selectedCount = selectedPaths.size;
   const isBusy = isLoading || syncAction !== null || commitAction !== null;
+  const currentBranch = status?.current ?? null;
   const canShowIntegrateCommitsSection = Boolean(
     worktreeMetadata && repoRootForIntegrate && sourceBranchForIntegrate && shouldShowIntegrateCommits
   );
   const canShowPullRequestSection = Boolean(
-    currentDirectory && status?.current && status?.tracking && status.current !== baseBranch
+    currentDirectory && currentBranch && status?.tracking && currentBranch !== baseBranch
   );
-  const canShowBranchWorkflows = Boolean(status?.current);
+  const canShowBranchWorkflows = Boolean(currentBranch);
   const integrateCommitsProps =
     canShowIntegrateCommitsSection && repoRootForIntegrate && sourceBranchForIntegrate && worktreeMetadata
       ? {
@@ -1144,13 +1206,15 @@ export const GitView: React.FC<GitViewProps> = ({ mode = 'full' }) => {
           worktreeMetadata,
         }
       : null;
-  const pullRequestProps =
-    canShowPullRequestSection && currentDirectory && status?.current
-      ? {
-          directory: currentDirectory,
-          branch: status.current,
-        }
-      : null;
+  const pullRequestProps = React.useMemo(() => {
+    if (!canShowPullRequestSection || !currentDirectory || !currentBranch) {
+      return null;
+    }
+    return {
+      directory: currentDirectory,
+      branch: currentBranch,
+    };
+  }, [canShowPullRequestSection, currentBranch, currentDirectory]);
   // Keep these sections stable in layout; individual cards render placeholders when unavailable.
 
   const toggleFileSelection = (path: string) => {
@@ -1203,6 +1267,56 @@ export const GitView: React.FC<GitViewProps> = ({ mode = 'full' }) => {
       }
     },
     [currentDirectory, refreshStatusAndBranches, git]
+  );
+
+  const handleRevertAll = React.useCallback(
+    async (paths: string[]) => {
+      if (!currentDirectory || paths.length === 0 || isRevertingAll) {
+        return;
+      }
+
+      const uniquePaths = Array.from(new Set(paths));
+      setIsRevertingAll(true);
+      setRevertingPaths((previous) => {
+        const next = new Set(previous);
+        uniquePaths.forEach((path) => next.add(path));
+        return next;
+      });
+
+      const failed: Array<{ path: string; message: string }> = [];
+
+      try {
+        await Promise.all(uniquePaths.map(async (filePath) => {
+          try {
+            await git.revertGitFile(currentDirectory, filePath);
+          } catch (err) {
+            failed.push({
+              path: filePath,
+              message: err instanceof Error ? err.message : 'Failed to revert changes',
+            });
+          }
+        }));
+
+        await refreshStatusAndBranches(false);
+
+        if (failed.length === 0) {
+          toast.success(`Reverted ${uniquePaths.length} file${uniquePaths.length === 1 ? '' : 's'}`);
+        } else if (failed.length === uniquePaths.length) {
+          toast.error(failed[0]?.message || 'Failed to revert changes');
+        } else {
+          const successCount = uniquePaths.length - failed.length;
+          toast.warning(`Reverted ${successCount} file${successCount === 1 ? '' : 's'}, ${failed.length} failed`);
+        }
+      } finally {
+        setRevertingPaths((previous) => {
+          const next = new Set(previous);
+          uniquePaths.forEach((path) => next.delete(path));
+          return next;
+        });
+        setIsRevertingAll(false);
+      }
+    },
+    [currentDirectory, git, isRevertingAll, refreshStatusAndBranches]
   );
 
   const handleInsertHighlights = React.useCallback(() => {
@@ -1619,7 +1733,7 @@ export const GitView: React.FC<GitViewProps> = ({ mode = 'full' }) => {
   }
 
   return (
-    <div className="flex h-full flex-col overflow-hidden bg-background" data-keyboard-avoid="true">
+    <div className={cn('flex h-full flex-col overflow-hidden', 'bg-transparent')} data-keyboard-avoid="true">
       <GitHeader
         status={status}
         localBranches={localBranches}
@@ -1638,9 +1752,7 @@ export const GitView: React.FC<GitViewProps> = ({ mode = 'full' }) => {
         onSelectIdentity={handleApplyIdentity}
         isApplyingIdentity={isSettingIdentity}
         isWorktreeMode={!!worktreeMetadata}
-        isSidebarMode={isSidebarMode}
         onOpenHistory={() => setIsHistoryDialogOpen(true)}
-        onOpenBranchPicker={!isSidebarMode && branchPickerProject ? () => setIsBranchPickerOpen(true) : undefined}
       />
 
       {/* In-progress operation banner */}
@@ -1661,29 +1773,24 @@ export const GitView: React.FC<GitViewProps> = ({ mode = 'full' }) => {
 
       <div className="flex-1 min-h-0 overflow-hidden">
         <div className="h-full min-h-0 flex flex-col">
-          <div className={cn('min-w-0 min-h-0 h-full bg-muted/10 flex flex-col', isSidebarMode && 'border-t border-border/40')}>
-            <div className="px-3 py-1.5">
-              <AnimatedTabs<ActionTab>
-                value={actionTab}
-                onValueChange={setActionTab}
-                size="sm"
-                collapseLabelsOnSmall
-                collapseLabelsOnNarrow={isSidebarMode}
-                tabs={[
-                  { value: 'commit', label: 'Commit', icon: RiGitCommitLine },
-                  { value: 'branch', label: 'Update', icon: RiGitMergeLine },
-                  { value: 'pr', label: 'PR', icon: RiGitPullRequestLine },
-                  { value: 'worktree', label: 'Worktree', icon: RiSplitCellsHorizontal },
-                ]}
+          <div className={cn('min-w-0 min-h-0 h-full flex flex-col', 'bg-transparent')}>
+            <div className={cn(isMobile ? 'h-10 px-1.5' : 'h-8 px-2')}>
+              <SortableTabsStrip
+                items={actionTabItems}
+                activeId={actionTab}
+                onSelect={(tabID) => setActionTab(tabID as ActionTab)}
+                layoutMode="fit"
+                variant="active-pill"
+                inactiveTabsIconOnly={isMobile}
+                className="h-full"
               />
             </div>
-            <div className="h-px bg-border/40" />
 
             <ScrollableOverlay
               as={ScrollShadow}
               ref={actionPanelScrollRef}
               outerClassName="flex-1 min-h-0"
-              className="px-4 py-4"
+              className={cn('px-4', 'pt-1 pb-4')}
               disableHorizontal
               preventOverscroll
             >
@@ -1695,20 +1802,26 @@ export const GitView: React.FC<GitViewProps> = ({ mode = 'full' }) => {
                         variant="plain"
                         maxListHeightClassName="max-h-[40vh]"
                         changeEntries={changeEntries}
+                        onVisiblePathsChange={setVisibleChangePaths}
                         selectedPaths={selectedPaths}
                         diffStats={status?.diffStats}
                         revertingPaths={revertingPaths}
                         onToggleFile={toggleFileSelection}
                         onSelectAll={selectAll}
                         onClearSelection={clearSelection}
+                        onRevertAll={handleRevertAll}
                         onViewDiff={(path) => {
-                          if (isSidebarMode && currentDirectory) {
-                            useUIStore.getState().openContextDiff(currentDirectory, path);
+                          if (currentDirectory && !isMobile) {
+                            openContextDiff(currentDirectory, path);
                             return;
                           }
-                          useUIStore.getState().navigateToDiff(path);
+                          navigateToDiff(path);
+                          if (isMobile) {
+                            setRightSidebarOpen(false);
+                          }
                         }}
                         onRevertFile={handleRevertFile}
+                        isRevertingAll={isRevertingAll}
                       />
 
                       <CommitSection
@@ -1767,52 +1880,56 @@ export const GitView: React.FC<GitViewProps> = ({ mode = 'full' }) => {
               ) : null}
 
               {actionTab === 'worktree' ? (
-                integrateCommitsProps ? (
-                  <IntegrateCommitsSection
-                    variant="plain"
-                    repoRoot={integrateCommitsProps.repoRoot}
-                    sourceBranch={integrateCommitsProps.sourceBranch}
-                    worktreeMetadata={integrateCommitsProps.worktreeMetadata}
-                    localBranches={localBranches}
-                    defaultTargetBranch={defaultTargetBranch}
-                    refreshKey={integrateRefreshKey}
-                    onRefresh={() => {
-                      if (!currentDirectory) return;
-                      fetchStatus(currentDirectory, git);
-                      fetchBranches(currentDirectory, git);
-                      fetchLog(currentDirectory, git, logMaxCountLocal);
-                    }}
-                  />
-                ) : (
-                  <div className="space-y-1">
-                    <div className="typography-ui-header font-semibold text-foreground">Re-integrate commits</div>
-                    <div className="typography-micro text-muted-foreground">
-                      Available in worktree mode.
+                <div className="space-y-4">
+                  {integrateCommitsProps ? (
+                    <IntegrateCommitsSection
+                      variant="plain"
+                      repoRoot={integrateCommitsProps.repoRoot}
+                      sourceBranch={integrateCommitsProps.sourceBranch}
+                      worktreeMetadata={integrateCommitsProps.worktreeMetadata}
+                      localBranches={localBranches}
+                      defaultTargetBranch={defaultTargetBranch}
+                      refreshKey={integrateRefreshKey}
+                      onRefresh={() => {
+                        if (!currentDirectory) return;
+                        fetchStatus(currentDirectory, git);
+                        fetchBranches(currentDirectory, git);
+                        fetchLog(currentDirectory, git, logMaxCountLocal);
+                      }}
+                    />
+                  ) : (
+                    <div className="space-y-1 pt-3">
+                      <div className="typography-ui-header font-semibold text-foreground">Re-integrate commits</div>
+                      <div className="typography-micro text-muted-foreground">
+                        Available in worktree mode.
+                      </div>
                     </div>
-                  </div>
-                )
+                  )}
+                </div>
               ) : null}
 
               {actionTab === 'pr' ? (
-                pullRequestProps ? (
-                  <PullRequestSection
-                    variant="plain"
-                    directory={pullRequestProps.directory}
-                    branch={pullRequestProps.branch}
-                    baseBranch={baseBranch}
-                    trackingBranch={status?.tracking ?? undefined}
-                    remotes={remotes}
-                    remoteBranches={remoteBranches}
-                    onGeneratedDescription={scrollActionPanelToBottom}
-                  />
-                ) : (
-                  <div className="space-y-1">
-                    <div className="typography-ui-header font-semibold text-foreground">Pull Request</div>
-                    <div className="typography-micro text-muted-foreground">
-                      Push a non-base branch (with upstream) to create a PR.
+                <div className="space-y-4">
+                  {pullRequestProps ? (
+                    <PullRequestSection
+                      variant="plain"
+                      directory={pullRequestProps.directory}
+                      branch={pullRequestProps.branch}
+                      baseBranch={baseBranch}
+                      trackingBranch={status?.tracking ?? undefined}
+                      remotes={remotes}
+                      remoteBranches={remoteBranches}
+                      onGeneratedDescription={scrollActionPanelToBottom}
+                    />
+                  ) : (
+                    <div className="space-y-1">
+                      <div className="typography-ui-header font-semibold text-foreground">Pull Request</div>
+                      <div className="typography-micro text-muted-foreground">
+                        Push a non-base branch (with upstream) to create a PR.
+                      </div>
                     </div>
-                  </div>
-                )
+                  )}
+                </div>
               ) : null}
             </ScrollableOverlay>
           </div>
@@ -1903,12 +2020,6 @@ export const GitView: React.FC<GitViewProps> = ({ mode = 'full' }) => {
         operation={stashDialogOperation}
         targetBranch={stashDialogBranch}
         onConfirm={handleStashAndRetry}
-      />
-
-      <BranchPickerDialog
-        open={isBranchPickerOpen}
-        onOpenChange={setIsBranchPickerOpen}
-        project={branchPickerProject}
       />
 
     </div>

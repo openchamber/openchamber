@@ -5,6 +5,7 @@ export type ScrollShadowProps = React.HTMLAttributes<HTMLDivElement> & {
   offset?: number;
   size?: number;
   isEnabled?: boolean;
+  hideTopShadow?: boolean;
   hideBottomShadow?: boolean;
   observeMutations?: boolean;
   onVisibilityChange?: (state: "both" | "none" | "top" | "bottom" | "left" | "right") => void;
@@ -29,6 +30,7 @@ export const ScrollShadow = React.forwardRef<HTMLDivElement, ScrollShadowProps>(
         offset = 0,
         size = 48,
         isEnabled = true,
+        hideTopShadow = false,
         hideBottomShadow = false,
         observeMutations = true,
         onVisibilityChange,
@@ -91,18 +93,20 @@ export const ScrollShadow = React.forwardRef<HTMLDivElement, ScrollShadowProps>(
           ? el.scrollTop + el.clientHeight + offset < el.scrollHeight
           : el.scrollLeft + el.clientWidth + offset < el.scrollWidth;
 
+      const effectiveHasBefore = hideTopShadow && orientation === "vertical" ? false : hasBefore;
+
       if (hideBottomShadow && orientation === "vertical") {
         hasAfter = false;
       }
 
-      setAttributes(el, hasBefore, hasAfter, orientation === "vertical" ? "top" : "left", orientation === "vertical" ? "bottom" : "right");
+      setAttributes(el, effectiveHasBefore, hasAfter, orientation === "vertical" ? "top" : "left", orientation === "vertical" ? "bottom" : "right");
 
-      const next = hasBefore && hasAfter ? "both" : hasBefore ? (orientation === "vertical" ? "top" : "left") : hasAfter ? (orientation === "vertical" ? "bottom" : "right") : "none";
+      const next = effectiveHasBefore && hasAfter ? "both" : effectiveHasBefore ? (orientation === "vertical" ? "top" : "left") : hasAfter ? (orientation === "vertical" ? "bottom" : "right") : "none";
       if (next !== visibleRef.current) {
         visibleRef.current = next;
         onVisibilityChange?.(next);
       }
-    }, [clearAttributes, hideBottomShadow, isEnabled, offset, onVisibilityChange, orientation, setAttributes]);
+    }, [clearAttributes, hideTopShadow, hideBottomShadow, isEnabled, offset, onVisibilityChange, orientation, setAttributes]);
 
     React.useEffect(() => {
       const el = internalRef.current;
@@ -127,7 +131,12 @@ export const ScrollShadow = React.forwardRef<HTMLDivElement, ScrollShadowProps>(
 
       el.addEventListener("scroll", handleScroll, { passive: true });
       resizeObserver?.observe(el);
-      mutationObserver?.observe(el, { childList: true, subtree: true });
+      mutationObserver?.observe(el, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        characterData: true,
+      });
 
       return () => {
         if (rafId !== null) cancelAnimationFrame(rafId);

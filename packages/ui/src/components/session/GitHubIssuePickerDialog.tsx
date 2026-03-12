@@ -8,6 +8,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { toast } from '@/components/ui';
 import {
   RiCheckboxBlankLine,
@@ -66,15 +67,20 @@ const buildIssueContextText = (args: {
 export function GitHubIssuePickerDialog({
   open,
   onOpenChange,
+  mode = 'createSession',
+  onSelect,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  mode?: 'createSession' | 'select';
+  onSelect?: (issue: { number: number; title: string; url: string; contextText: string; author?: { login: string; avatarUrl?: string } }) => void;
 }) {
   const { github } = useRuntimeAPIs();
   const githubAuthStatus = useGitHubAuthStore((state) => state.status);
   const githubAuthChecked = useGitHubAuthStore((state) => state.hasChecked);
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
-  const setSidebarSection = useUIStore((state) => state.setSidebarSection);
+  const setSettingsPage = useUIStore((state) => state.setSettingsPage);
+  const isMobile = useUIStore((state) => state.isMobile);
   const activeProject = useProjectsStore((state) => state.getActiveProject());
 
   const projectDirectory = activeProject?.path ?? null;
@@ -181,9 +187,9 @@ export function GitHubIssuePickerDialog({
   const repoUrl = result?.repo?.url ?? null;
 
   const openGitHubSettings = React.useCallback(() => {
-    setSidebarSection('settings');
+    setSettingsPage('github');
     setSettingsDialogOpen(true);
-  }, [setSettingsDialogOpen, setSidebarSection]);
+  }, [setSettingsDialogOpen, setSettingsPage]);
 
   const filtered = React.useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -259,6 +265,68 @@ export function GitHubIssuePickerDialog({
   }, []);
 
   const startSession = React.useCallback(async (issueNumber: number) => {
+    if (mode === 'select') {
+      // In select mode, fetch full issue details and return via onSelect
+      if (!projectDirectory) {
+        toast.error('No active project');
+        return;
+      }
+      if (!github?.issueGet || !github?.issueComments) {
+        toast.error('GitHub runtime API unavailable');
+        return;
+      }
+      if (startingIssueNumber) return;
+      setStartingIssueNumber(issueNumber);
+      try {
+        const issueRes = await github.issueGet(projectDirectory, issueNumber);
+        if (issueRes.connected === false) {
+          toast.error('GitHub not connected');
+          return;
+        }
+        if (!issueRes.repo) {
+          toast.error('Repo not resolvable', {
+            description: 'origin remote must be a GitHub URL',
+          });
+          return;
+        }
+        const issue = issueRes.issue;
+        if (!issue) {
+          toast.error('Issue not found');
+          return;
+        }
+
+        const commentsRes = await github.issueComments(projectDirectory, issueNumber);
+        if (commentsRes.connected === false) {
+          toast.error('GitHub not connected');
+          return;
+        }
+        const comments = commentsRes.comments ?? [];
+
+        // Build full context text like in createSession mode
+        const contextText = buildIssueContextText({ repo: issueRes.repo, issue, comments });
+
+        if (onSelect) {
+          onSelect({ 
+            number: issue.number, 
+            title: issue.title, 
+            url: issue.url,
+            contextText,
+            author: issue.author ? {
+              login: issue.author.login,
+              avatarUrl: issue.author.avatarUrl,
+            } : undefined,
+          });
+        }
+        onOpenChange(false);
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        toast.error('Failed to load issue details', { description: message });
+      } finally {
+        setStartingIssueNumber(null);
+      }
+      return;
+    }
+
     if (!projectDirectory) {
       toast.error('No active project');
       return;
@@ -444,32 +512,26 @@ Do not implement changes until I confirm; end with: “Next actions: <1 sentence
     } finally {
       setStartingIssueNumber(null);
     }
-  }, [createInWorktree, github, onOpenChange, projectDirectory, resolveDefaultAgentName, resolveDefaultModelSelection, resolveDefaultVariant, startingIssueNumber]);
+  }, [createInWorktree, github, mode, onOpenChange, onSelect, projectDirectory, resolveDefaultAgentName, resolveDefaultModelSelection, resolveDefaultVariant, startingIssueNumber]);
 
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[70vh] flex flex-col">
-        <DialogHeader className="flex-shrink-0">
-          <DialogTitle className="flex items-center gap-2">
-            <RiGithubLine className="h-5 w-5" />
-            New Session From GitHub Issue
-          </DialogTitle>
-          <DialogDescription>
-            Seeds a new session with hidden issue context (title/body/labels/comments).
-          </DialogDescription>
-        </DialogHeader>
+  const title = mode === 'select' ? 'Link GitHub Issue' : 'New Session From GitHub Issue';
+  const description = mode === 'select'
+    ? 'Select an issue to link to this session.'
+    : 'Seeds a new session with hidden issue context (title/body/labels/comments).';
 
-        <div className="relative mt-2">
-          <RiSearchLine className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search by title or #123, or paste issue URL"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="pl-9 w-full"
-          />
-        </div>
+  const content = (
+    <>
+      <div className="relative mt-2">
+        <RiSearchLine className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+        <Input
+          placeholder="Search by title or #123, or paste issue URL"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          className="pl-9 w-full"
+        />
+      </div>
 
-        <div className="flex-1 overflow-y-auto mt-2">
+      <div className={cn(isMobile ? 'min-h-0 mt-2' : 'flex-1 overflow-y-auto mt-2')}>
           {!projectDirectory ? (
             <div className="text-center text-muted-foreground py-8">No active project selected.</div>
           ) : null}
@@ -581,8 +643,9 @@ Do not implement changes until I confirm; end with: “Next actions: <1 sentence
               </button>
             </div>
           ) : null}
-        </div>
+      </div>
 
+      {mode !== 'select' && (
         <div className="mt-4 p-3 bg-muted/30 rounded-lg">
           <p className="typography-meta text-muted-foreground font-medium mb-2">Actions</p>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-2">
@@ -634,6 +697,45 @@ Do not implement changes until I confirm; end with: “Next actions: <1 sentence
             </div>
           </div>
         </div>
+      )}
+    </>
+  );
+
+  if (isMobile) {
+    return (
+      <MobileOverlayPanel
+        open={open}
+        title={title}
+        onClose={() => onOpenChange(false)}
+        renderHeader={(closeButton) => (
+          <div className="flex flex-col gap-1.5 px-3 py-2 border-b border-border/40">
+            <div className="flex items-center justify-between">
+              <h2 className="typography-ui-label font-semibold text-foreground">{title}</h2>
+              {closeButton}
+            </div>
+            <p className="typography-small text-muted-foreground">{description}</p>
+          </div>
+        )}
+      >
+        {content}
+      </MobileOverlayPanel>
+    );
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl max-h-[70vh] flex flex-col">
+        <DialogHeader className="flex-shrink-0">
+          <DialogTitle className="flex items-center gap-2">
+            <RiGithubLine className="h-5 w-5" />
+            {title}
+          </DialogTitle>
+          <DialogDescription>
+            {description}
+          </DialogDescription>
+        </DialogHeader>
+
+        {content}
       </DialogContent>
     </Dialog>
   );

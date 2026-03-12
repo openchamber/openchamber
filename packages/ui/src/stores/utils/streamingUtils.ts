@@ -19,7 +19,6 @@ export const touchStreamingLifecycle = (
     return next;
 };
 
-
 export const removeLifecycleEntries = (
     source: Map<string, MessageStreamLifecycle>,
     ids: Iterable<string>

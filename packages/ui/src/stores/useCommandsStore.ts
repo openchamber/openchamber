@@ -20,7 +20,6 @@ export interface CommandConfig {
   agent?: string | null;
   model?: string | null;
   template?: string;
-  subtask?: boolean;
   scope?: CommandScope;
 }
 
@@ -74,7 +73,6 @@ export interface CommandDraft {
   agent?: string | null;
   model?: string | null;
   template?: string;
-  subtask?: boolean;
 }
 
 interface CommandsStore {
@@ -204,7 +202,6 @@ export const useCommandsStore = create<CommandsStore>()(
             if (config.description) commandConfig.description = config.description;
             if (config.agent) commandConfig.agent = config.agent;
             if (config.model) commandConfig.model = config.model;
-            if (config.subtask !== undefined) commandConfig.subtask = config.subtask;
             if (config.scope) commandConfig.scope = config.scope;
 
             console.log('[CommandsStore] Command config to save:', commandConfig);
@@ -267,7 +264,6 @@ export const useCommandsStore = create<CommandsStore>()(
             if (config.agent !== undefined) commandConfig.agent = config.agent;
             if (config.model !== undefined) commandConfig.model = config.model;
             if (config.template !== undefined) commandConfig.template = config.template;
-            if (config.subtask !== undefined) commandConfig.subtask = config.subtask;
 
             console.log('[CommandsStore] Command config to update:', commandConfig);
 

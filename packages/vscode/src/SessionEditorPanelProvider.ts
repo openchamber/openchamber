@@ -179,7 +179,12 @@ export class SessionEditorPanelProvider {
 
     const { path, headers } = (payload || {}) as { path?: string; headers?: Record<string, string> };
     const normalizedPath = typeof path === 'string' && path.trim().length > 0 ? path.trim() : '/event';
-    const shouldInjectActivity = normalizedPath === '/event' || normalizedPath === '/global/event';
+    const normalizedPathname = (() => {
+      const rawPathname = normalizedPath.split('?')[0];
+      if (rawPathname === '/') return '/';
+      return rawPathname.replace(/\/+$/, '');
+    })();
+    const shouldInjectActivity = normalizedPathname === '/event' || normalizedPathname === '/global/event';
 
     if (!apiBaseUrl) {
       return {
@@ -213,7 +218,7 @@ export class SessionEditorPanelProvider {
 
       // Fallback: OpenCode versions without /global/event.
       // VS Code is single-workspace, so we can wrap /event into { directory, payload }.
-      if ((!response.ok || !response.body) && normalizedPath === '/global/event') {
+      if ((!response.ok || !response.body) && normalizedPathname === '/global/event') {
         const fallbackUrl = new URL('event', base).toString();
         response = await fetch(fallbackUrl, {
           method: 'GET',
@@ -282,7 +287,7 @@ export class SessionEditorPanelProvider {
               const chunk = decoder.decode(value, { stream: true });
               if (!chunk) continue;
 
-              sseBuffer += shouldInjectActivity ? chunk.replace(/\r\n/g, '\n') : chunk;
+              sseBuffer += chunk.replace(/\r\n/g, '\n');
               const blocks = sseBuffer.split('\n\n');
               sseBuffer = blocks.pop() ?? '';
               if (blocks.length > 0) {
@@ -298,7 +303,7 @@ export class SessionEditorPanelProvider {
 
           const tail = decoder.decode();
           if (tail) {
-            sseBuffer += shouldInjectActivity ? tail.replace(/\r\n/g, '\n') : tail;
+            sseBuffer += tail.replace(/\r\n/g, '\n');
           }
           if (sseBuffer) {
             if (shouldInjectActivity) {

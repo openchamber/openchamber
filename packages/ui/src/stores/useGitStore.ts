@@ -12,8 +12,10 @@ const GIT_POLL_MAX_INTERVAL = 10000;
 const GIT_POLL_BACKOFF_STEP = 5000;
 const LOG_STALE_THRESHOLD = 10000;
 const DIFF_PREFETCH_MAX_FILES = 25;
+const DIFF_PREFETCH_FOCUS_MAX_FILES = 40;
 const DIFF_PREFETCH_CONCURRENCY = 4;
 const DIFF_PREFETCH_TIMEOUT_MS = 15000;
+const RECENT_DIRECTORIES_LIMIT = 3;
 
 // Diff cache limits to prevent memory bloat with many modified files
 const DIFF_CACHE_MAX_ENTRIES = 30;
@@ -37,6 +39,7 @@ interface GitStore {
   directories: Map<string, DirectoryGitState>;
 
   activeDirectory: string | null;
+  recentDirectories: string[];
 
   isLoadingStatus: boolean;
   isLoadingLog: boolean;
@@ -53,12 +56,13 @@ interface GitStore {
   fetchBranches: (directory: string, git: GitAPI) => Promise<void>;
   fetchLog: (directory: string, git: GitAPI, maxCount?: number) => Promise<void>;
   fetchIdentity: (directory: string, git: GitAPI) => Promise<void>;
-  fetchAll: (directory: string, git: GitAPI, options?: { force?: boolean }) => Promise<void>;
+  fetchAll: (directory: string, git: GitAPI, options?: { force?: boolean; silentIfCached?: boolean }) => Promise<void>;
 
   getDiff: (directory: string, filePath: string) => { original: string; modified: string; fetchedAt: number; isBinary?: boolean } | null;
   setDiff: (directory: string, filePath: string, diff: { original: string; modified: string; isBinary?: boolean }) => void;
   clearDiffCache: (directory: string) => void;
   fetchAllDiffs: (directory: string, git: GitAPI) => Promise<void>;
+  prefetchDiffs: (directory: string, git: GitAPI, filePaths: string[], options?: { maxFiles?: number }) => Promise<void>;
 
   setLogMaxCount: (directory: string, maxCount: number) => void;
 
@@ -83,6 +87,28 @@ interface GitAPI {
   getCurrentGitIdentity: (directory: string) => Promise<GitIdentitySummary | null>;
   getGitFileDiff: (directory: string, options: { path: string }) => Promise<GitFileDiffResponse>;
 }
+
+const inFlightDiffFetchesByDirectory = new Map<string, Set<string>>();
+const diffFetchGenerationByDirectory = new Map<string, number>();
+
+const getDiffFetchGeneration = (directory: string): number =>
+  diffFetchGenerationByDirectory.get(directory) ?? 0;
+
+const bumpDiffFetchGeneration = (directory: string): number => {
+  const next = getDiffFetchGeneration(directory) + 1;
+  diffFetchGenerationByDirectory.set(directory, next);
+  return next;
+};
+
+const getInFlightDiffs = (directory: string): Set<string> => {
+  const existing = inFlightDiffFetchesByDirectory.get(directory);
+  if (existing) {
+    return existing;
+  }
+  const created = new Set<string>();
+  inFlightDiffFetchesByDirectory.set(directory, created);
+  return created;
+};
 
 const createEmptyDirectoryState = (): DirectoryGitState => ({
   isGitRepo: null,
@@ -241,6 +267,7 @@ export const useGitStore = create<GitStore>()(
     (set, get) => ({
       directories: new Map(),
       activeDirectory: null,
+      recentDirectories: [],
       isLoadingStatus: false,
       isLoadingLog: false,
       isLoadingBranches: false,
@@ -249,15 +276,26 @@ export const useGitStore = create<GitStore>()(
       currentPollInterval: GIT_POLL_BASE_INTERVAL,
 
       setActiveDirectory: (directory) => {
-        const { activeDirectory, directories } = get();
+        const { activeDirectory, directories, recentDirectories } = get();
         if (activeDirectory === directory) return;
+
+        if (activeDirectory) {
+          bumpDiffFetchGeneration(activeDirectory);
+        }
+        if (directory) {
+          bumpDiffFetchGeneration(directory);
+        }
+
+        const nextRecentDirectories = directory
+          ? [directory, ...recentDirectories.filter((entry) => entry !== directory)].slice(0, RECENT_DIRECTORIES_LIMIT)
+          : recentDirectories;
 
         if (directory && !directories.has(directory)) {
           const newDirectories = new Map(directories);
           newDirectories.set(directory, createEmptyDirectoryState());
-          set({ activeDirectory: directory, directories: newDirectories });
+          set({ activeDirectory: directory, recentDirectories: nextRecentDirectories, directories: newDirectories });
         } else {
-          set({ activeDirectory: directory });
+          set({ activeDirectory: directory, recentDirectories: nextRecentDirectories });
         }
       },
 
@@ -322,6 +360,9 @@ export const useGitStore = create<GitStore>()(
             }
 
             const hasFileContentChange = changedPaths.size > 0;
+            if (hasFileContentChange) {
+              bumpDiffFetchGeneration(directory);
+            }
 
             newDirectories.set(directory, {
               ...currentDirState,
@@ -423,10 +464,12 @@ export const useGitStore = create<GitStore>()(
           set({ directories: newDirectories });
         }
 
-        const { force = false } = options;
+        const { force = false, silentIfCached = false } = options;
         const now = Date.now();
 
-        await get().fetchStatus(directory, git);
+        await get().fetchStatus(directory, git, {
+          silent: silentIfCached && Boolean(dirState?.status),
+        });
 
         const updatedDirState = get().directories.get(directory);
         if (!updatedDirState?.isGitRepo) return;
@@ -462,6 +505,7 @@ export const useGitStore = create<GitStore>()(
       },
 
       clearDiffCache: (directory) => {
+        bumpDiffFetchGeneration(directory);
         const newDirectories = new Map(get().directories);
         const dirState = newDirectories.get(directory);
         if (dirState) {
@@ -474,13 +518,49 @@ export const useGitStore = create<GitStore>()(
         const dirState = get().directories.get(directory);
         if (!dirState?.status?.files || dirState.status.files.length === 0) return;
 
-        const files = dirState.status.files;
+        const limitedFilesToFetch = dirState.status.files
+          .map((file) => file.path)
+          .slice(0, DIFF_PREFETCH_MAX_FILES);
+        await get().prefetchDiffs(directory, git, limitedFilesToFetch, { maxFiles: DIFF_PREFETCH_MAX_FILES });
+      },
 
-        // Find files that need fetching (no cache)
-        const filesToFetch = files.filter((file) => !dirState.diffCache.has(file.path));
+      prefetchDiffs: async (directory, git, filePaths, options = {}) => {
+        const dirState = get().directories.get(directory);
+        if (!dirState?.status?.files || dirState.status.files.length === 0 || filePaths.length === 0) return;
 
-        const limitedFilesToFetch = filesToFetch.slice(0, DIFF_PREFETCH_MAX_FILES);
-        if (limitedFilesToFetch.length === 0) return;
+        const { maxFiles = DIFF_PREFETCH_FOCUS_MAX_FILES } = options;
+        const availablePaths = new Set(dirState.status.files.map((file) => file.path));
+        const inFlight = getInFlightDiffs(directory);
+
+        const dedupedPaths: string[] = [];
+        const seen = new Set<string>();
+        for (const filePath of filePaths) {
+          if (!filePath || seen.has(filePath)) {
+            continue;
+          }
+          seen.add(filePath);
+          if (!availablePaths.has(filePath)) {
+            continue;
+          }
+          if (dirState.diffCache.has(filePath)) {
+            continue;
+          }
+          if (inFlight.has(filePath)) {
+            continue;
+          }
+          dedupedPaths.push(filePath);
+        }
+
+        const limitedFilePaths = dedupedPaths.slice(0, Math.max(1, maxFiles));
+        if (limitedFilePaths.length === 0) return;
+
+        const generation = getDiffFetchGeneration(directory);
+
+        if (typeof document !== 'undefined' && document.hidden) {
+          return;
+        }
+
+        limitedFilePaths.forEach((path) => inFlight.add(path));
 
         let nextIndex = 0;
         const results: Array<{ path: string; diff: { original: string; modified: string; isBinary?: boolean } }> = [];
@@ -488,7 +568,7 @@ export const useGitStore = create<GitStore>()(
         const takeNext = () => {
           const current = nextIndex;
           nextIndex += 1;
-          return current < limitedFilesToFetch.length ? limitedFilesToFetch[current] : null;
+          return current < limitedFilePaths.length ? limitedFilePaths[current] : null;
         };
 
         const fetchWithTimeout = async (filePath: string) => {
@@ -505,18 +585,29 @@ export const useGitStore = create<GitStore>()(
 
         const worker = async () => {
           for (;;) {
+            if (generation !== getDiffFetchGeneration(directory)) {
+              return;
+            }
             const next = takeNext();
             if (!next) return;
             try {
-              results.push(await fetchWithTimeout(next.path));
+              results.push(await fetchWithTimeout(next));
             } catch {
               // Ignore individual failures/timeouts during prefetch.
+            } finally {
+              inFlight.delete(next);
             }
           }
         };
 
-        const workerCount = Math.min(DIFF_PREFETCH_CONCURRENCY, limitedFilesToFetch.length);
+        const workerCount = Math.min(DIFF_PREFETCH_CONCURRENCY, limitedFilePaths.length);
         await Promise.allSettled(Array.from({ length: workerCount }, () => worker()));
+
+        limitedFilePaths.forEach((path) => inFlight.delete(path));
+
+        if (generation !== getDiffFetchGeneration(directory)) {
+          return;
+        }
 
         // Update diff cache with results
         const newDirectories = new Map(get().directories);
@@ -559,17 +650,34 @@ export const useGitStore = create<GitStore>()(
               return;
             }
 
-            const { activeDirectory } = get();
+            const { activeDirectory, recentDirectories } = get();
             if (!activeDirectory) {
               set({ pollIntervalId: schedulePoll() });
               return;
             }
 
-            const statusChanged = await get().fetchStatus(activeDirectory, git, { silent: true });
-            if (statusChanged) {
-              await get().fetchLog(activeDirectory, git);
-              // Pre-fetch all diffs so they're ready when user opens Diff tab
-              void get().fetchAllDiffs(activeDirectory, git);
+            const pollTargets = [
+              activeDirectory,
+              ...recentDirectories
+                .filter((directory) => directory !== activeDirectory)
+                .slice(0, Math.max(0, RECENT_DIRECTORIES_LIMIT - 1)),
+            ];
+
+            let anyStatusChanged = false;
+
+            for (const targetDirectory of pollTargets) {
+              const statusChanged = await get().fetchStatus(targetDirectory, git, { silent: true });
+              if (statusChanged) {
+                anyStatusChanged = true;
+                if (targetDirectory === activeDirectory) {
+                  await get().fetchLog(activeDirectory, git);
+                  // Pre-fetch all diffs so they're ready when user opens Diff tab
+                  void get().fetchAllDiffs(activeDirectory, git);
+                }
+              }
+            }
+
+            if (anyStatusChanged) {
               // Reset to base interval on changes
               set({ currentPollInterval: GIT_POLL_BASE_INTERVAL });
             } else {

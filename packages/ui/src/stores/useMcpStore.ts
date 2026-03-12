@@ -25,6 +25,14 @@ const normalizeDirectory = (directory: string | null | undefined): string | null
 
 const toKey = (directory: string | null | undefined): string => normalizeDirectory(directory) ?? '__global__';
 
+const getMcpApiClient = (directory: string | null | undefined) => {
+  const normalized = normalizeDirectory(directory);
+  if (!normalized) {
+    return opencodeClient.getApiClient();
+  }
+  return opencodeClient.getScopedApiClient(normalized);
+};
+
 export const computeMcpHealth = (status: McpStatusMap | null | undefined): McpHealth => {
   const entries = Object.entries(status ?? {});
   const connected = entries.filter(([, s]) => s?.status === 'connected').length;
@@ -73,8 +81,8 @@ export const useMcpStore = create<McpStore>()(
       }
 
       try {
-        const api = opencodeClient.getApiClient();
-        const result = await api.mcp.status(directory ? { directory } : undefined);
+        const api = getMcpApiClient(directory);
+        const result = await api.mcp.status();
         const data = (result.data ?? {}) as McpStatusMap;
 
         set((state) => ({
@@ -93,18 +101,17 @@ export const useMcpStore = create<McpStore>()(
 
     connect: async (name, directory) => {
       const normalized = normalizeDirectory(directory ?? useDirectoryStore.getState().currentDirectory);
-      const api = opencodeClient.getApiClient();
-      await api.mcp.connect({ name, ...(normalized ? { directory: normalized } : {}) }, { throwOnError: true });
+      const api = getMcpApiClient(normalized);
+      await api.mcp.connect({ name }, { throwOnError: true });
       await get().refresh({ directory: normalized, silent: true });
     },
 
     disconnect: async (name, directory) => {
       const normalized = normalizeDirectory(directory ?? useDirectoryStore.getState().currentDirectory);
-      const api = opencodeClient.getApiClient();
-      await api.mcp.disconnect({ name, ...(normalized ? { directory: normalized } : {}) }, { throwOnError: true });
+      const api = getMcpApiClient(normalized);
+      await api.mcp.disconnect({ name }, { throwOnError: true });
       await get().refresh({ directory: normalized, silent: true });
     },
 
   }))
 );
-

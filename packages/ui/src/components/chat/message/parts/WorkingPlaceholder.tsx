@@ -11,6 +11,46 @@ interface WorkingPlaceholderProps {
 
 const STATUS_DISPLAY_TIME_MS = 1200;
 
+const EPOCH_SECONDS_THRESHOLD = 1_000_000_000;
+const EPOCH_MILLISECONDS_THRESHOLD = 1_000_000_000_000;
+
+const toRetryTargetTimestamp = (next: number): number => {
+  if (next >= EPOCH_MILLISECONDS_THRESHOLD) {
+    return next;
+  }
+  if (next >= EPOCH_SECONDS_THRESHOLD) {
+    return next * 1000;
+  }
+  return Date.now() + next;
+};
+
+const formatRetryCountdown = (seconds: number): string => {
+  if (seconds < 60) {
+    return `${seconds}s`;
+  }
+
+  if (seconds < 3600) {
+    const minutes = Math.floor(seconds / 60);
+    const remainderSeconds = seconds % 60;
+    return remainderSeconds > 0 ? `${minutes}m ${remainderSeconds}s` : `${minutes}m`;
+  }
+
+  if (seconds < 86400) {
+    const hours = Math.floor(seconds / 3600);
+    const remainderMinutes = Math.floor((seconds % 3600) / 60);
+    return remainderMinutes > 0 ? `${hours}h ${remainderMinutes}m` : `${hours}h`;
+  }
+
+  const days = Math.floor(seconds / 86400);
+  const remainderHours = Math.floor((seconds % 86400) / 3600);
+  if (remainderHours > 0) {
+    return `${days}d ${remainderHours}h`;
+  }
+
+  return `${days}d`;
+
+};
+
 export function WorkingPlaceholder({
   isWorking,
   statusText,
@@ -26,26 +66,19 @@ export function WorkingPlaceholder({
   const processQueueTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Countdown state for retry mode
-  const retryNextRef = React.useRef<number | null>(null);
-  const retryStartRef = React.useRef<number | null>(null);
   const [retryCountdown, setRetryCountdown] = React.useState<number | null>(null);
 
   React.useEffect(() => {
-    const next = retryInfo?.next;
-    if (!next || next <= 0) {
-      retryNextRef.current = null;
-      retryStartRef.current = null;
+    const rawNext = retryInfo?.next;
+    if (!rawNext || rawNext <= 0) {
       setRetryCountdown(null);
       return;
     }
 
-    // Start a fresh countdown when next value or attempt changes
-    retryNextRef.current = next;
-    retryStartRef.current = Date.now();
+    const retryTargetAt = toRetryTargetTimestamp(rawNext);
 
     const update = () => {
-      const elapsed = Date.now() - (retryStartRef.current ?? Date.now());
-      const remaining = Math.max(0, next - elapsed);
+      const remaining = Math.max(0, retryTargetAt - Date.now());
       setRetryCountdown(Math.ceil(remaining / 1000));
     };
 
@@ -151,7 +184,9 @@ export function WorkingPlaceholder({
   // Retry state: show countdown and attempt info
   if (retryInfo) {
     const attemptLabel = retryInfo.attempt && retryInfo.attempt > 1 ? ` (attempt ${retryInfo.attempt})` : '';
-    const countdownLabel = retryCountdown !== null && retryCountdown > 0 ? ` in ${retryCountdown}s` : '';
+    const countdownLabel = retryCountdown !== null && retryCountdown > 0
+      ? ` in ${formatRetryCountdown(retryCountdown)}`
+      : '';
     const retryText = `Retrying${countdownLabel}${attemptLabel}...`;
 
     return (

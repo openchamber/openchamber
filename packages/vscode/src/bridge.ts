@@ -79,6 +79,16 @@ type ApiProxyResponsePayload = {
   bodyBase64: string;
 };
 
+type NotificationBridgePayload = {
+  title?: string;
+  body?: string;
+  tag?: string;
+};
+
+type NotificationsNotifyRequestPayload = {
+  payload?: NotificationBridgePayload;
+};
+
 interface FileEntry {
   name: string;
   path: string;
@@ -97,10 +107,191 @@ export interface BridgeContext {
 
 const SETTINGS_KEY = 'openchamber.settings';
 const CLIENT_RELOAD_DELAY_MS = 800;
+const MAX_FILE_ATTACH_SIZE_BYTES = 10 * 1024 * 1024;
 const execFileAsync = promisify(execFile);
 const gpgconfCandidates = ['gpgconf', '/opt/homebrew/bin/gpgconf', '/usr/local/bin/gpgconf'];
 
 const OPENCHAMBER_SHARED_SETTINGS_PATH = path.join(os.homedir(), '.config', 'openchamber', 'settings.json');
+
+const guessMimeTypeFromExtension = (ext: string) => {
+  switch (ext) {
+    case '.png':
+    case '.jpg':
+    case '.jpeg':
+    case '.gif':
+    case '.bmp':
+    case '.webp':
+      return `image/${ext.replace('.', '')}`;
+    case '.pdf':
+      return 'application/pdf';
+    case '.txt':
+    case '.log':
+      return 'text/plain';
+    case '.json':
+      return 'application/json';
+    case '.md':
+    case '.markdown':
+      return 'text/markdown';
+    default:
+      return 'application/octet-stream';
+  }
+};
+
+const readUriAsAttachment = async (
+  uri: vscode.Uri,
+  fallbackName?: string,
+): Promise<
+  | { file: { name: string; mimeType: string; size: number; dataUrl: string } }
+  | { skipped: { name: string; reason: string } }
+> => {
+  const name = path.basename(uri.fsPath || uri.path || fallbackName || 'file');
+
+  try {
+    const stat = await vscode.workspace.fs.stat(uri);
+    if ((stat.type & vscode.FileType.Directory) !== 0) {
+      return { skipped: { name, reason: 'Folders are not supported' } };
+    }
+
+    const size = stat.size ?? 0;
+    if (size > MAX_FILE_ATTACH_SIZE_BYTES) {
+      return { skipped: { name, reason: 'File exceeds 10MB limit' } };
+    }
+
+    const bytes = await vscode.workspace.fs.readFile(uri);
+    const ext = path.extname(name).toLowerCase();
+    const mimeType = guessMimeTypeFromExtension(ext);
+    const base64 = Buffer.from(bytes).toString('base64');
+    const dataUrl = `data:${mimeType};base64,${base64}`;
+
+    return { file: { name, mimeType, size, dataUrl } };
+  } catch (error) {
+    return { skipped: { name, reason: error instanceof Error ? error.message : 'Failed to read file' } };
+  }
+};
+
+type ParsedDiffHunk = {
+  newStart: number;
+  oldLines: string[];
+  newLines: string[];
+};
+
+const VIRTUAL_DIFF_SCHEME = 'openchamber-diff';
+const virtualDiffContents = new Map<string, string>();
+let virtualDiffCounter = 0;
+let virtualDiffProviderDisposable: vscode.Disposable | null = null;
+
+const ensureVirtualDiffProviderRegistered = (ctx?: BridgeContext): void => {
+  if (virtualDiffProviderDisposable) {
+    return;
+  }
+
+  virtualDiffProviderDisposable = vscode.workspace.registerTextDocumentContentProvider(
+    VIRTUAL_DIFF_SCHEME,
+    {
+      provideTextDocumentContent: (uri: vscode.Uri) => {
+        const key = new URLSearchParams(uri.query).get('key') || '';
+        return virtualDiffContents.get(key) ?? '';
+      },
+    },
+  );
+
+  if (ctx?.context) {
+    ctx.context.subscriptions.push(virtualDiffProviderDisposable);
+  }
+};
+
+const createVirtualOriginalDiffUri = (modifiedPath: string, content: string): vscode.Uri => {
+  const key = `${Date.now()}-${++virtualDiffCounter}`;
+  virtualDiffContents.set(key, content);
+
+  if (virtualDiffContents.size > 100) {
+    const firstKey = virtualDiffContents.keys().next().value;
+    if (typeof firstKey === 'string') {
+      virtualDiffContents.delete(firstKey);
+    }
+  }
+
+  const fileName = path.basename(modifiedPath) || 'file';
+  return vscode.Uri.from({
+    scheme: VIRTUAL_DIFF_SCHEME,
+    path: `/${fileName} (before)`,
+    query: `key=${encodeURIComponent(key)}`,
+  });
+};
+
+const parseUnifiedDiffHunks = (patch: string): ParsedDiffHunk[] => {
+  if (typeof patch !== 'string' || patch.trim().length === 0) {
+    return [];
+  }
+
+  const lines = patch.split('\n');
+  const hunks: ParsedDiffHunk[] = [];
+  let current: ParsedDiffHunk | null = null;
+
+  for (const rawLine of lines) {
+    const line = rawLine.replace(/\r$/, '');
+    const headerMatch = line.match(/^@@\s+-\d+(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s+@@/);
+    if (headerMatch) {
+      if (current) {
+        hunks.push(current);
+      }
+      const newStart = Number.parseInt(headerMatch[1] ?? '', 10);
+      current = {
+        newStart: Number.isFinite(newStart) ? Math.max(1, newStart) : 1,
+        oldLines: [],
+        newLines: [],
+      };
+      continue;
+    }
+
+    if (!current) {
+      continue;
+    }
+
+    if (line.startsWith(' ')) {
+      const text = line.slice(1);
+      current.oldLines.push(text);
+      current.newLines.push(text);
+      continue;
+    }
+
+    if (line.startsWith('+') && !line.startsWith('+++')) {
+      current.newLines.push(line.slice(1));
+      continue;
+    }
+
+    if (line.startsWith('-') && !line.startsWith('---')) {
+      current.oldLines.push(line.slice(1));
+      continue;
+    }
+  }
+
+  if (current) {
+    hunks.push(current);
+  }
+
+  return hunks;
+};
+
+const reconstructOriginalContentFromPatch = (modifiedContent: string, patch: string): string | null => {
+  const hunks = parseUnifiedDiffHunks(patch);
+  if (hunks.length === 0) {
+    return null;
+  }
+
+  const lines = modifiedContent.split('\n');
+  for (let index = hunks.length - 1; index >= 0; index -= 1) {
+    const hunk = hunks[index];
+    if (!hunk) {
+      continue;
+    }
+    const startIndex = Math.max(0, hunk.newStart - 1);
+    const replaceCount = hunk.newLines.length;
+    lines.splice(startIndex, replaceCount, ...hunk.oldLines);
+  }
+
+  return lines.join('\n');
+};
 
 const isPathInside = (candidatePath: string, parentPath: string): boolean => {
   const normalizedCandidate = path.resolve(candidatePath);
@@ -304,28 +495,253 @@ const normalizeMergeMethod = (value: string): 'merge' | 'squash' | 'rebase' => {
   return 'merge';
 };
 
-const extractZenOutputText = (value: unknown): string | null => {
-  if (!value || typeof value !== 'object') return null;
-  const root = value as Record<string, unknown>;
-  const output = root.output;
-  if (!Array.isArray(output)) return null;
+const BRIDGE_ZEN_DEFAULT_MODEL = 'gpt-5-nano';
+const BRIDGE_GIT_GENERATION_TIMEOUT_MS = 2 * 60 * 1000;
+const BRIDGE_GIT_GENERATION_POLL_INTERVAL_MS = 500;
+let bridgeGitModelCatalogCache: Set<string> | null = null;
+let bridgeGitModelCatalogCacheAt = 0;
+const BRIDGE_GIT_MODEL_CATALOG_CACHE_TTL_MS = 30 * 1000;
 
-  const messageItem = output.find((item) => {
-    if (!item || typeof item !== 'object') return false;
-    return (item as Record<string, unknown>).type === 'message';
-  }) as Record<string, unknown> | undefined;
-  if (!messageItem) return null;
+const sleep = (ms: number) => new Promise<void>((resolve) => {
+  setTimeout(resolve, ms);
+});
 
-  const content = messageItem.content;
-  if (!Array.isArray(content)) return null;
+const fetchBridgeGitModelCatalog = async (
+  apiUrl: string,
+  authHeaders?: Record<string, string>
+): Promise<Set<string>> => {
+  const now = Date.now();
+  if (bridgeGitModelCatalogCache && now - bridgeGitModelCatalogCacheAt < BRIDGE_GIT_MODEL_CATALOG_CACHE_TTL_MS) {
+    return bridgeGitModelCatalogCache;
+  }
 
-  const textItem = content.find((item) => {
-    if (!item || typeof item !== 'object') return false;
-    return (item as Record<string, unknown>).type === 'output_text';
-  }) as Record<string, unknown> | undefined;
+  const headers = authHeaders || {};
+  const modelsUrl = new URL(`${apiUrl.replace(/\/+$/, '')}/model`);
+  const response = await fetch(modelsUrl.toString(), {
+    method: 'GET',
+    headers: {
+      Accept: 'application/json',
+      ...headers,
+    },
+    signal: AbortSignal.timeout(8_000),
+  });
 
-  const text = typeof textItem?.text === 'string' ? textItem.text.trim() : '';
-  return text || null;
+  if (!response.ok) {
+    throw new Error('Failed to fetch model catalog');
+  }
+
+  const payload = await response.json().catch(() => null) as unknown;
+  const refs = new Set<string>();
+  if (Array.isArray(payload)) {
+    for (const item of payload) {
+      if (!item || typeof item !== 'object') {
+        continue;
+      }
+      const record = item as Record<string, unknown>;
+      const providerID = typeof record.providerID === 'string' ? record.providerID.trim() : '';
+      const modelID = typeof record.modelID === 'string' ? record.modelID.trim() : '';
+      if (providerID && modelID) {
+        refs.add(`${providerID}/${modelID}`);
+      }
+    }
+  }
+
+  bridgeGitModelCatalogCache = refs;
+  bridgeGitModelCatalogCacheAt = now;
+  return refs;
+};
+
+const resolveBridgeGitGenerationModel = async (
+  payloadModel: { providerId?: string; modelId?: string; zenModel?: string },
+  settings: Record<string, unknown>,
+  apiUrl: string,
+  authHeaders?: Record<string, string>
+): Promise<{ providerID: string; modelID: string }> => {
+  let catalog: Set<string> | null = null;
+  try {
+    catalog = await fetchBridgeGitModelCatalog(apiUrl, authHeaders);
+  } catch {
+    catalog = null;
+  }
+
+  const hasModel = (providerID: string, modelID: string): boolean => {
+    if (!catalog) {
+      return false;
+    }
+    return catalog.has(`${providerID}/${modelID}`);
+  };
+
+  const requestProviderId = typeof payloadModel.providerId === 'string' ? payloadModel.providerId.trim() : '';
+  const requestModelId = typeof payloadModel.modelId === 'string' ? payloadModel.modelId.trim() : '';
+  if (requestProviderId && requestModelId && hasModel(requestProviderId, requestModelId)) {
+    return { providerID: requestProviderId, modelID: requestModelId };
+  }
+
+  const settingsProviderId = readStringField(settings, 'gitProviderId');
+  const settingsModelId = readStringField(settings, 'gitModelId');
+  if (settingsProviderId && settingsModelId && hasModel(settingsProviderId, settingsModelId)) {
+    return { providerID: settingsProviderId, modelID: settingsModelId };
+  }
+
+  const payloadZenModel = typeof payloadModel.zenModel === 'string' ? payloadModel.zenModel.trim() : '';
+  const settingsZenModel = readStringField(settings, 'zenModel');
+  return {
+    providerID: 'zen',
+    modelID: payloadZenModel || settingsZenModel || BRIDGE_ZEN_DEFAULT_MODEL,
+  };
+};
+
+const extractTextFromMessageParts = (parts: unknown): string => {
+  if (!Array.isArray(parts)) {
+    return '';
+  }
+
+  const textParts = parts
+    .filter((part) => {
+      if (!part || typeof part !== 'object') return false;
+      const record = part as Record<string, unknown>;
+      return record.type === 'text' && typeof record.text === 'string';
+    })
+    .map((part) => (part as Record<string, unknown>).text as string)
+    .map((text) => text.trim())
+    .filter((text) => text.length > 0);
+
+  return textParts.join('\n').trim();
+};
+
+const generateBridgeTextWithSessionFlow = async ({
+  apiUrl,
+  directory,
+  prompt,
+  providerID,
+  modelID,
+  authHeaders,
+}: {
+  apiUrl: string;
+  directory: string;
+  prompt: string;
+  providerID: string;
+  modelID: string;
+  authHeaders?: Record<string, string>;
+}): Promise<string> => {
+  const headers = authHeaders || {};
+  const apiBase = apiUrl.replace(/\/+$/, '');
+  const deadlineAt = Date.now() + BRIDGE_GIT_GENERATION_TIMEOUT_MS;
+  const remainingMs = () => Math.max(1_000, deadlineAt - Date.now());
+  let sessionId: string | null = null;
+
+  try {
+    const sessionUrl = new URL(`${apiBase}/session`);
+    if (directory) {
+      sessionUrl.searchParams.set('directory', directory);
+    }
+
+    const createResponse = await fetch(sessionUrl.toString(), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...headers,
+      },
+      body: JSON.stringify({ title: 'Git Generation' }),
+      signal: AbortSignal.timeout(remainingMs()),
+    });
+
+    if (!createResponse.ok) {
+      throw new Error('Failed to create OpenCode session');
+    }
+
+    const session = await createResponse.json().catch(() => null) as unknown;
+    const sessionObj = session && typeof session === 'object' ? session as Record<string, unknown> : null;
+    const createdSessionId = sessionObj && typeof sessionObj.id === 'string' ? sessionObj.id : '';
+    if (!createdSessionId) {
+      throw new Error('Invalid session response');
+    }
+    sessionId = createdSessionId;
+
+    const promptUrl = new URL(`${apiBase}/session/${encodeURIComponent(sessionId)}/prompt_async`);
+    if (directory) {
+      promptUrl.searchParams.set('directory', directory);
+    }
+
+    const promptResponse = await fetch(promptUrl.toString(), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...headers,
+      },
+      body: JSON.stringify({
+        model: {
+          providerID,
+          modelID,
+        },
+        parts: [{ type: 'text', text: prompt }],
+      }),
+      signal: AbortSignal.timeout(remainingMs()),
+    });
+
+    if (!promptResponse.ok) {
+      throw new Error('Failed to send prompt');
+    }
+
+    const messagesUrl = new URL(`${apiBase}/session/${encodeURIComponent(sessionId)}/message`);
+    if (directory) {
+      messagesUrl.searchParams.set('directory', directory);
+    }
+    messagesUrl.searchParams.set('limit', '10');
+
+    while (Date.now() < deadlineAt) {
+      await sleep(BRIDGE_GIT_GENERATION_POLL_INTERVAL_MS);
+
+      const messagesResponse = await fetch(messagesUrl.toString(), {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+          ...headers,
+        },
+        signal: AbortSignal.timeout(remainingMs()),
+      });
+
+      if (!messagesResponse.ok) {
+        continue;
+      }
+
+      const messages = await messagesResponse.json().catch(() => null) as unknown;
+      if (!Array.isArray(messages)) {
+        continue;
+      }
+
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const message = messages[i] as Record<string, unknown> | null;
+        if (!message || typeof message !== 'object') {
+          continue;
+        }
+        const info = message.info as Record<string, unknown> | undefined;
+        if (info?.role !== 'assistant' || info?.finish !== 'stop') {
+          continue;
+        }
+
+        const text = extractTextFromMessageParts(message.parts);
+        if (text) {
+          return text;
+        }
+      }
+    }
+
+    throw new Error('Timeout waiting for generation to complete');
+  } finally {
+    if (sessionId) {
+      const deleteUrl = new URL(`${apiBase}/session/${encodeURIComponent(sessionId)}`);
+      try {
+        await fetch(deleteUrl.toString(), {
+          method: 'DELETE',
+          headers,
+          signal: AbortSignal.timeout(5_000),
+        });
+      } catch {
+        // ignore cleanup failures
+      }
+    }
+  }
 };
 
 const parseJsonObjectSafe = (value: string): Record<string, unknown> | null => {
@@ -909,18 +1325,134 @@ const sanitizeForwardHeaders = (input: Record<string, string> | undefined): Reco
   return headers;
 };
 
+const getFsAccessRoot = (): string => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir();
+
+const getFsMimeType = (filePath: string): string => {
+  const ext = path.extname(filePath).toLowerCase();
+  const mimeMap: Record<string, string> = {
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif',
+    '.webp': 'image/webp',
+    '.svg': 'image/svg+xml',
+    '.txt': 'text/plain; charset=utf-8',
+    '.md': 'text/markdown; charset=utf-8',
+    '.markdown': 'text/markdown; charset=utf-8',
+    '.mmd': 'text/plain; charset=utf-8',
+    '.mermaid': 'text/plain; charset=utf-8',
+    '.json': 'application/json; charset=utf-8',
+    '.pdf': 'application/pdf',
+  };
+  return mimeMap[ext] || 'application/octet-stream';
+};
+
+type FsReadPathResolution =
+  | { ok: true; resolvedPath: string }
+  | { ok: false; status: number; error: string };
+
+const resolveFileReadPath = async (targetPath: string): Promise<FsReadPathResolution> => {
+  const trimmed = targetPath.trim();
+  if (!trimmed) {
+    return { ok: false, status: 400, error: 'Path is required' };
+  }
+
+  const baseRoot = getFsAccessRoot();
+  const resolved = resolveUserPath(trimmed, baseRoot);
+  if (!resolved) {
+    return { ok: false, status: 400, error: 'Path is required' };
+  }
+
+  try {
+    const [canonicalPath, canonicalBase] = await Promise.all([
+      fs.promises.realpath(resolved),
+      fs.promises.realpath(baseRoot).catch(() => path.resolve(baseRoot)),
+    ]);
+
+    if (!isPathInside(canonicalPath, canonicalBase)) {
+      return { ok: false, status: 403, error: 'Access to file denied' };
+    }
+
+    return { ok: true, resolvedPath: canonicalPath };
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
+    if (err?.code === 'ENOENT') {
+      return { ok: false, status: 404, error: 'File not found' };
+    }
+    return { ok: false, status: 500, error: 'Failed to resolve file path' };
+  }
+};
+
+const buildProxyJsonError = (status: number, error: string): ApiProxyResponsePayload => ({
+  status,
+  headers: { 'content-type': 'application/json' },
+  bodyBase64: base64EncodeUtf8(JSON.stringify({ error })),
+});
+
+const tryHandleLocalFsProxy = async (method: string, requestPath: string): Promise<ApiProxyResponsePayload | null> => {
+  let parsed: URL;
+  try {
+    parsed = new URL(requestPath, 'https://openchamber.local');
+  } catch {
+    return buildProxyJsonError(400, 'Invalid request path');
+  }
+
+  if (parsed.pathname !== '/api/fs/read' && parsed.pathname !== '/api/fs/raw') {
+    return null;
+  }
+
+  if (method !== 'GET' && method !== 'HEAD') {
+    return buildProxyJsonError(405, 'Method not allowed');
+  }
+
+  const targetPath = parsed.searchParams.get('path') || '';
+  const resolution = await resolveFileReadPath(targetPath);
+  if (!resolution.ok) {
+    return buildProxyJsonError(resolution.status, resolution.error);
+  }
+
+  try {
+    const stats = await fs.promises.stat(resolution.resolvedPath);
+    if (!stats.isFile()) {
+      return buildProxyJsonError(400, 'Specified path is not a file');
+    }
+
+    if (parsed.pathname === '/api/fs/read') {
+      const content = await fs.promises.readFile(resolution.resolvedPath, 'utf8');
+      return {
+        status: 200,
+        headers: {
+          'content-type': 'text/plain; charset=utf-8',
+          'cache-control': 'no-store',
+        },
+        bodyBase64: base64EncodeUtf8(content),
+      };
+    }
+
+    const raw = await fs.promises.readFile(resolution.resolvedPath);
+    return {
+      status: 200,
+      headers: {
+        'content-type': getFsMimeType(resolution.resolvedPath),
+        'cache-control': 'no-store',
+      },
+      bodyBase64: Buffer.from(raw).toString('base64'),
+    };
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
+    if (err?.code === 'ENOENT') {
+      return buildProxyJsonError(404, 'File not found');
+    }
+    return buildProxyJsonError(500, 'Unable to read file');
+  }
+};
+
 export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeContext): Promise<BridgeResponse> {
   const { id, type, payload } = message;
 
   try {
     switch (type) {
       case 'api:proxy': {
-        const apiUrl = ctx?.manager?.getApiUrl();
-        if (!apiUrl) {
-          const data = buildUnavailableApiResponse();
-          return { id, type, success: true, data };
-        }
-
         const { method, path: requestPath, headers, bodyBase64 } = (payload || {}) as ApiProxyRequestPayload;
         const normalizedMethod = typeof method === 'string' && method.trim() ? method.trim().toUpperCase() : 'GET';
         const normalizedPath =
@@ -929,6 +1461,17 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
               ? requestPath.trim()
               : `/${requestPath.trim()}`
             : '/';
+
+        const localFsResponse = await tryHandleLocalFsProxy(normalizedMethod, normalizedPath);
+        if (localFsResponse) {
+          return { id, type, success: true, data: localFsResponse };
+        }
+
+        const apiUrl = ctx?.manager?.getApiUrl();
+        if (!apiUrl) {
+          const data = buildUnavailableApiResponse();
+          return { id, type, success: true, data };
+        }
 
         const base = `${apiUrl.replace(/\/+$/, '')}/`;
         const targetUrl = new URL(normalizedPath.replace(/^\/+/, ''), base).toString();
@@ -1145,13 +1688,15 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
         if (!target) {
           return { id, type, success: false, error: 'Path is required' };
         }
+
+        const resolution = await resolveFileReadPath(target);
+        if (!resolution.ok) {
+          return { id, type, success: false, error: resolution.error };
+        }
+
         try {
-          const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir();
-          const resolvedPath = resolveUserPath(target, workspaceRoot);
-          const uri = vscode.Uri.file(resolvedPath);
-          const bytes = await vscode.workspace.fs.readFile(uri);
-          const content = Buffer.from(bytes).toString('utf8');
-          return { id, type, success: true, data: { content, path: normalizeFsPath(resolvedPath) } };
+          const content = await fs.promises.readFile(resolution.resolvedPath, 'utf8');
+          return { id, type, success: true, data: { content, path: normalizeFsPath(resolution.resolvedPath) } };
         } catch (error) {
           const message = error instanceof Error ? error.message : 'Failed to read file';
           return { id, type, success: false, error: message };
@@ -1296,7 +1841,6 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
       }
 
       case 'api:files/pick': {
-        const MAX_SIZE = 10 * 1024 * 1024;
         const allowMany = (payload as { allowMany?: boolean })?.allowMany !== false;
         const defaultUri = vscode.workspace.workspaceFolders?.[0]?.uri;
 
@@ -1315,54 +1859,99 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
         const files: Array<{ name: string; mimeType: string; size: number; dataUrl: string }> = [];
         const skipped: Array<{ name: string; reason: string }> = [];
 
-        const guessMime = (ext: string) => {
-          switch (ext) {
-            case '.png':
-            case '.jpg':
-            case '.jpeg':
-            case '.gif':
-            case '.bmp':
-            case '.webp':
-              return `image/${ext.replace('.', '')}`;
-            case '.pdf':
-              return 'application/pdf';
-            case '.txt':
-            case '.log':
-              return 'text/plain';
-            case '.json':
-              return 'application/json';
-            case '.md':
-            case '.markdown':
-              return 'text/markdown';
-            default:
-              return 'application/octet-stream';
-          }
-        };
-
         for (const uri of picks) {
-          try {
-            const stat = await vscode.workspace.fs.stat(uri);
-            const size = stat.size ?? 0;
-            const name = path.basename(uri.fsPath);
-
-            if (size > MAX_SIZE) {
-              skipped.push({ name, reason: 'File exceeds 10MB limit' });
-              continue;
-            }
-
-            const bytes = await vscode.workspace.fs.readFile(uri);
-            const ext = path.extname(name).toLowerCase();
-            const mimeType = guessMime(ext);
-            const base64 = Buffer.from(bytes).toString('base64');
-            const dataUrl = `data:${mimeType};base64,${base64}`;
-            files.push({ name, mimeType, size, dataUrl });
-          } catch (error) {
-            const name = path.basename(uri.fsPath);
-            skipped.push({ name, reason: error instanceof Error ? error.message : 'Failed to read file' });
+          const result = await readUriAsAttachment(uri);
+          if ('file' in result) {
+            files.push(result.file);
+          } else {
+            skipped.push(result.skipped);
           }
         }
 
         return { id, type, success: true, data: { files, skipped } };
+      }
+
+      case 'api:files/drop': {
+        const uris = Array.isArray((payload as { uris?: unknown[] })?.uris)
+          ? (payload as { uris: unknown[] }).uris.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+          : [];
+
+        if (uris.length === 0) {
+          return { id, type, success: true, data: { files: [], skipped: [] } };
+        }
+
+        const files: Array<{ name: string; mimeType: string; size: number; dataUrl: string }> = [];
+        const skipped: Array<{ name: string; reason: string }> = [];
+
+        const dedupedUris = Array.from(new Set(uris.map((value) => value.trim())));
+
+        for (const rawUri of dedupedUris) {
+          let uri: vscode.Uri;
+          try {
+            uri = vscode.Uri.parse(rawUri, true);
+          } catch (error) {
+            skipped.push({
+              name: rawUri,
+              reason: error instanceof Error ? error.message : 'Invalid URI',
+            });
+            continue;
+          }
+
+          if (uri.scheme !== 'file') {
+            skipped.push({
+              name: rawUri,
+              reason: `Unsupported URI scheme: ${uri.scheme}`,
+            });
+            continue;
+          }
+
+          const name = path.basename(uri.fsPath || uri.path || rawUri);
+
+          const result = await readUriAsAttachment(uri, name);
+          if ('file' in result) {
+            files.push(result.file);
+          } else {
+            skipped.push(result.skipped);
+          }
+        }
+
+        return { id, type, success: true, data: { files, skipped } };
+      }
+
+      case 'api:files/save-image': {
+        const rawFileName = (payload as { fileName?: unknown })?.fileName;
+        const rawDataUrl = (payload as { dataUrl?: unknown })?.dataUrl;
+        const dataUrl = typeof rawDataUrl === 'string' ? rawDataUrl.trim() : '';
+        if (!dataUrl.startsWith('data:image/')) {
+          return { id, type, success: false, error: 'Invalid image payload' };
+        }
+
+        const defaultFileName = typeof rawFileName === 'string' && rawFileName.trim().length > 0
+          ? rawFileName.trim()
+          : `message-${Date.now()}.png`;
+
+        const saveUri = await vscode.window.showSaveDialog({
+          saveLabel: 'Save image',
+          defaultUri: vscode.workspace.workspaceFolders?.[0]
+            ? vscode.Uri.joinPath(vscode.workspace.workspaceFolders[0].uri, defaultFileName)
+            : undefined,
+          filters: { Images: ['png'] },
+        });
+
+        if (!saveUri) {
+          return { id, type, success: true, data: { saved: false, canceled: true } };
+        }
+
+        const commaIndex = dataUrl.indexOf(',');
+        if (commaIndex === -1) {
+          return { id, type, success: false, error: 'Invalid image data URL' };
+        }
+
+        const base64 = dataUrl.slice(commaIndex + 1);
+        const bytes = Buffer.from(base64, 'base64');
+        await vscode.workspace.fs.writeFile(saveUri, bytes);
+
+        return { id, type, success: true, data: { saved: true, path: saveUri.fsPath || saveUri.toString() } };
       }
 
       case 'api:config/settings:get': {
@@ -2318,16 +2907,44 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
       }
 
       case 'editor:openDiff': {
-        const { original, modified, label } = payload as { original: string; modified: string; label?: string };
+        const { original, modified, label, line, patch } = payload as {
+          original: string;
+          modified: string;
+          label?: string;
+          line?: number;
+          patch?: string;
+        };
         try {
-          // If the paths are just content, we need to create virtual documents or temp files.
-          // However, 'editor:openDiff' usually implies comparing two URIs.
-          // If the payload contains file paths:
-          const originalUri = vscode.Uri.file(original);
           const modifiedUri = vscode.Uri.file(modified);
-          const title = label || `${path.basename(original)} ↔ ${path.basename(modified)}`;
-          
+          const modifiedDoc = await vscode.workspace.openTextDocument(modifiedUri);
+          let originalUri = original ? vscode.Uri.file(original) : modifiedUri;
+
+          if (typeof patch === 'string' && patch.trim().length > 0) {
+            const originalContent = reconstructOriginalContentFromPatch(modifiedDoc.getText(), patch);
+            if (typeof originalContent === 'string') {
+              ensureVirtualDiffProviderRegistered(ctx);
+              originalUri = createVirtualOriginalDiffUri(modified, originalContent);
+            }
+          }
+
+          const leftLabel = original ? path.basename(original) : `${path.basename(modified)} (before)`;
+          const title = label || `${leftLabel} ↔ ${path.basename(modified)}`;
+
           await vscode.commands.executeCommand('vscode.diff', originalUri, modifiedUri, title);
+
+          if (typeof line === 'number' && Number.isFinite(line)) {
+            const targetLine = Math.max(0, Math.trunc(line) - 1);
+            await new Promise((resolve) => setTimeout(resolve, 0));
+            const targetEditor = vscode.window.visibleTextEditors.find(
+              (editor) => editor.document.uri.toString() === modifiedUri.toString(),
+            );
+            if (targetEditor) {
+              const target = new vscode.Position(targetLine, 0);
+              targetEditor.selection = new vscode.Selection(target, target);
+              targetEditor.revealRange(new vscode.Range(target, target), vscode.TextEditorRevealType.InCenter);
+            }
+          }
+
           return { id, type, success: true };
         } catch (error) {
            const errorMessage = error instanceof Error ? error.message : String(error);
@@ -2436,6 +3053,28 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
           const errorMessage = error instanceof Error ? error.message : String(error);
           return { id, type, success: false, error: errorMessage };
         }
+      }
+
+      case 'notifications:can-notify': {
+        return { id, type, success: true, data: true };
+      }
+
+      case 'notifications:notify': {
+        const request = (payload || {}) as NotificationsNotifyRequestPayload;
+        const notification = request.payload || {};
+        const title = typeof notification.title === 'string' ? notification.title.trim() : '';
+        const body = typeof notification.body === 'string' ? notification.body.trim() : '';
+
+        const message = title && body
+          ? `${title}: ${body}`
+          : title || body;
+
+        if (!message) {
+          return { id, type, success: true, data: { shown: false } };
+        }
+
+        void vscode.window.showInformationMessage(message);
+        return { id, type, success: true, data: { shown: true } };
       }
 
       // ============== Git Operations ==============
@@ -2791,10 +3430,14 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
       }
 
       case 'api:git/pr-description': {
-        const { directory, base, head } = (payload || {}) as {
+        const { directory, base, head, context, providerId, modelId, zenModel: payloadZenModel } = (payload || {}) as {
           directory?: string;
           base?: string;
           head?: string;
+          context?: string;
+          providerId?: string;
+          modelId?: string;
+          zenModel?: string;
         };
         if (!directory) {
           return { id, type, success: false, error: 'Directory is required' };
@@ -2832,31 +3475,33 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
           return { id, type, success: false, error: 'No diffs available for selected files' };
         }
 
-        const prompt = `You are drafting a GitHub Pull Request title + description. Respond in JSON of the shape {"title": string, "body": string} (ONLY JSON in response, no markdown fences) with these rules:\n- title: concise, sentence case, <= 80 chars, no trailing punctuation, no commit-style prefixes (no "feat:", "fix:")\n- body: GitHub-flavored markdown with these sections in this order: Summary, Testing, Notes\n- Summary: 3-6 bullet points describing user-visible changes; avoid internal helper function names\n- Testing: bullet list ("- Not tested" allowed)\n- Notes: bullet list; include breaking/rollout notes only when relevant\n\nContext:\n- base branch: ${base}\n- head branch: ${head}\n\nDiff summary:\n${diffSummaries}`;
+        const prompt = `You are drafting a GitHub Pull Request title + description. Respond in JSON of the shape {"title": string, "body": string} (ONLY JSON in response, no markdown fences) with these rules:\n- title: concise, sentence case, <= 80 chars, no trailing punctuation, no commit-style prefixes (no "feat:", "fix:")\n- body: GitHub-flavored markdown with these sections in this order: Summary, Testing, Notes\n- Summary: 3-6 bullet points describing user-visible changes; avoid internal helper function names\n- Testing: bullet list ("- Not tested" allowed)\n- Notes: bullet list; include breaking/rollout notes only when relevant\n\nContext:\n- base branch: ${base}\n- head branch: ${head}${context?.trim() ? `\n- Additional context: ${context.trim()}` : ''}\n\nDiff summary:\n${diffSummaries}`;
 
         try {
-          const zenSettings = readSettings(ctx) as Record<string, unknown>;
-          const zenModelRaw = typeof zenSettings?.zenModel === 'string' ? (zenSettings.zenModel as string).trim() : '';
-          const zenModel = zenModelRaw.length > 0 ? zenModelRaw : 'gpt-5-nano';
-          const response = await fetch('https://opencode.ai/zen/v1/responses', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              model: zenModel,
-              input: [{ role: 'user', content: prompt }],
-              max_output_tokens: 1200,
-              stream: false,
-              reasoning: { effort: 'low' },
-            }),
-          });
-          if (!response.ok) {
-            return { id, type, success: false, error: 'Failed to generate PR description' };
+          const apiUrl = ctx?.manager?.getApiUrl();
+          if (!apiUrl) {
+            return { id, type, success: false, error: 'OpenCode API unavailable' };
           }
-          const data = await response.json().catch(() => null) as unknown;
-          const raw = extractZenOutputText(data);
+
+          const settings = readSettings(ctx) as Record<string, unknown>;
+          const { providerID, modelID } = await resolveBridgeGitGenerationModel(
+            { providerId, modelId, zenModel: payloadZenModel },
+            settings,
+            apiUrl,
+            ctx?.manager?.getOpenCodeAuthHeaders()
+          );
+          const raw = await generateBridgeTextWithSessionFlow({
+            apiUrl,
+            directory,
+            prompt,
+            providerID,
+            modelID,
+            authHeaders: ctx?.manager?.getOpenCodeAuthHeaders(),
+          });
           if (!raw) {
             return { id, type, success: false, error: 'No PR description returned by generator' };
           }
+
           const cleaned = String(raw)
             .trim()
             .replace(/^```json\s*/i, '')

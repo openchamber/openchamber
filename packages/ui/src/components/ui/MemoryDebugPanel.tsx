@@ -1,5 +1,6 @@
 import React from 'react';
 import { useSessionStore, MEMORY_LIMITS } from '@/stores/useSessionStore';
+import { useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
 import { getMessageLimit, getBackgroundTrimLimit } from '@/stores/types/sessionTypes';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -20,6 +21,7 @@ export const MemoryDebugPanel: React.FC<MemoryDebugPanelProps> = ({ onClose }) =
     trimToViewportWindow,
     evictLeastRecentlyUsed
   } = useSessionStore();
+  const totalGitHubRequests = useGitHubPrStatusStore((state) => state.totalRequestCount);
 
   const totalMessages = React.useMemo(() => {
     let total = 0;
@@ -95,6 +97,10 @@ export const MemoryDebugPanel: React.FC<MemoryDebugPanelProps> = ({ onClose }) =
           <div className="flex justify-between">
             <span className="text-muted-foreground">Zombie Timeout:</span>
             <span>{MEMORY_LIMITS.ZOMBIE_TIMEOUT / 1000 / 60} minutes</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">GitHub Total Requests:</span>
+            <span>{totalGitHubRequests}</span>
           </div>
         </div>
 

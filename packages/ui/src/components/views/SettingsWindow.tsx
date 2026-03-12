@@ -14,18 +14,47 @@ interface SettingsWindowProps {
  */
 export const SettingsWindow: React.FC<SettingsWindowProps> = ({ open, onOpenChange }) => {
   const descriptionId = React.useId();
+  const skipNextOverlayClickRef = React.useRef(false);
+
+  const hasOpenFloatingMenu = React.useCallback(() => {
+    if (typeof document === 'undefined') {
+      return false;
+    }
+
+    return Boolean(
+      document.querySelector('[data-slot="dropdown-menu-content"][data-state="open"], [data-slot="select-content"][data-state="open"]')
+    );
+  }, []);
+
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay
           className="fixed inset-0 z-50 bg-black/50 backdrop-blur-md"
+          onPointerDown={() => {
+            skipNextOverlayClickRef.current = hasOpenFloatingMenu();
+          }}
+          onClick={(event) => {
+            event.stopPropagation();
+            if (skipNextOverlayClickRef.current) {
+              skipNextOverlayClickRef.current = false;
+              return;
+            }
+            if (hasOpenFloatingMenu()) {
+              return;
+            }
+            onOpenChange(false);
+          }}
         />
         <DialogPrimitive.Content
           aria-describedby={descriptionId}
+          onPointerDownOutside={(event) => {
+            event.preventDefault();
+          }}
           className={cn(
             'fixed z-50 top-[50%] left-[50%] translate-x-[-50%] translate-y-[-50%]',
-            'w-[90vw] max-w-[1200px] h-[85vh] max-h-[900px]',
-            'rounded-xl border shadow-2xl overflow-hidden',
+            'w-[90vw] max-w-[960px] h-[85vh] max-h-[900px]',
+            'rounded-xl border shadow-none overflow-hidden',
             'bg-background'
           )}
         >

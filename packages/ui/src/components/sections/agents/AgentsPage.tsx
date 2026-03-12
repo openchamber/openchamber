@@ -1,15 +1,16 @@
 import React from 'react';
-import { Button } from '@/components/ui/button';
 import { ButtonSmall } from '@/components/ui/button-small';
 import { Input } from '@/components/ui/input';
+import { NumberInput } from '@/components/ui/number-input';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui';
 import { useAgentsStore, type AgentConfig, type AgentScope } from '@/stores/useAgentsStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { usePermissionStore } from '@/stores/permissionStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useDeviceInfo } from '@/lib/device';
 import { opencodeClient } from '@/lib/opencode/client';
-import { RiAddLine, RiAiAgentFill, RiAiAgentLine, RiInformationLine, RiRobot2Line, RiRobotLine, RiSaveLine, RiSubtractLine, RiUser3Line, RiFolderLine } from '@remixicon/react';
+import { RiCloseLine, RiInformationLine, RiRobot2Line, RiSubtractLine, RiUser3Line, RiFolderLine } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import { ModelSelector } from './ModelSelector';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -19,6 +20,7 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
+  SelectValue,
 } from '@/components/ui/select';
 
 type PermissionAction = 'allow' | 'ask' | 'deny';
@@ -180,6 +182,7 @@ const buildPermissionConfigWithGlobal = (
 
 
 export const AgentsPage: React.FC = () => {
+  const { isMobile } = useDeviceInfo();
   const { selectedAgentName, getAgentByName, createAgent, updateAgent, agents, agentDraft, setAgentDraft } = useAgentsStore();
   useConfigStore();
 
@@ -593,604 +596,501 @@ export const AgentsPage: React.FC = () => {
 
   return (
     <ScrollableOverlay keyboardAvoid outerClassName="h-full" className="w-full">
-      <div className="mx-auto max-w-3xl space-y-6 p-6">
-      {/* Header */}
-      <div className="space-y-1">
-        <h1 className="typography-ui-header font-semibold text-lg">
-          {isNewAgent ? 'New Agent' : selectedAgentName}
-        </h1>
-      </div>
+      <div className="mx-auto w-full max-w-3xl p-3 sm:p-6 sm:pt-8">
 
-      {}
-      <div className="space-y-4">
-        <div className="space-y-1">
-          <h2 className="typography-ui-header font-semibold text-foreground">Basic Information</h2>
-          <p className="typography-meta text-muted-foreground/80">
-            Configure agent identity and behavior mode
-          </p>
+        {/* Header & Actions */}
+        <div className="mb-4 flex items-center justify-between gap-4">
+          <div className="min-w-0">
+            <h2 className="typography-ui-header font-semibold text-foreground truncate">
+              {isNewAgent ? 'New Agent' : selectedAgentName}
+            </h2>
+            <p className="typography-meta text-muted-foreground truncate">
+              {isNewAgent ? 'Configure a new assistant persona' : 'Edit agent settings'}
+            </p>
+          </div>
         </div>
 
-        {isNewAgent && (
-          <div className="space-y-2">
-            <label className="typography-ui-label font-medium text-foreground">
-              Agent Name & Scope
-            </label>
-            <div className="flex items-center gap-2">
-              <div className="flex items-center flex-1">
-                <span className="typography-ui-label text-muted-foreground mr-1">@</span>
-                <Input
-                  value={draftName}
-                  onChange={(e) => setDraftName(e.target.value)}
-                  placeholder="agent-name"
-                  className="flex-1 text-foreground placeholder:text-muted-foreground"
+        {/* Identity & Role */}
+        <div className="mb-8">
+          <div className="mb-1 px-1">
+            <h3 className="typography-ui-header font-medium text-foreground">
+              Identity & Role
+            </h3>
+          </div>
+
+          <section className="px-2 pb-2 pt-0 space-y-0">
+
+            {isNewAgent && (
+              <div className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
+                <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
+                  <span className="typography-ui-label text-foreground">Agent Name</span>
+                </div>
+                <div className="flex min-w-0 flex-1 items-center gap-2 sm:w-fit sm:flex-initial">
+                  <div className="flex items-center">
+                    <span className="typography-ui-label text-muted-foreground mr-1">@</span>
+                    <Input
+                      value={draftName}
+                      onChange={(e) => setDraftName(e.target.value)}
+                      placeholder="agent-name"
+                      className="h-7 w-40 px-2"
+                    />
+                  </div>
+                  <Select value={draftScope} onValueChange={(v) => setDraftScope(v as AgentScope)}>
+                    <SelectTrigger className="w-fit min-w-[100px]">
+                      <SelectValue placeholder="Scope" />
+                    </SelectTrigger>
+                    <SelectContent align="end">
+                      <SelectItem value="user">
+                        <div className="flex items-center gap-2">
+                          <RiUser3Line className="h-3.5 w-3.5" />
+                          <span>Global</span>
+                        </div>
+                      </SelectItem>
+                      <SelectItem value="project">
+                        <div className="flex items-center gap-2">
+                          <RiFolderLine className="h-3.5 w-3.5" />
+                          <span>Project</span>
+                        </div>
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
+
+            <div className="py-1.5">
+              <span className="typography-ui-label text-foreground">Description</span>
+              <div className="mt-1.5">
+                <Textarea
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="What does this agent do?"
+                  rows={2}
+                  className="w-full resize-none min-h-[60px] bg-transparent"
                 />
               </div>
-              <Select value={draftScope} onValueChange={(v) => setDraftScope(v as AgentScope)}>
-                <SelectTrigger className="!h-9 w-auto gap-1.5">
-                  {draftScope === 'user' ? (
-                    <RiUser3Line className="h-4 w-4" />
-                  ) : (
-                    <RiFolderLine className="h-4 w-4" />
-                  )}
-                  <span className="capitalize">{draftScope}</span>
-                </SelectTrigger>
-                <SelectContent align="end">
-                  <SelectItem value="user" className="pr-2 [&>span:first-child]:hidden">
-                    <div className="flex flex-col gap-0.5">
-                      <div className="flex items-center gap-2">
-                        <RiUser3Line className="h-4 w-4" />
-                        <span>User</span>
-                      </div>
-                      <span className="typography-micro text-muted-foreground ml-6">Available in all projects</span>
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="project" className="pr-2 [&>span:first-child]:hidden">
-                    <div className="flex flex-col gap-0.5">
-                      <div className="flex items-center gap-2">
-                        <RiFolderLine className="h-4 w-4" />
-                        <span>Project</span>
-                      </div>
-                      <span className="typography-micro text-muted-foreground ml-6">Only in current project</span>
-                    </div>
-                  </SelectItem>
-                </SelectContent>
-              </Select>
             </div>
-          </div>
-        )}
 
-        <div className="space-y-2">
-          <label className="typography-ui-label font-medium text-foreground">
-            Description
-          </label>
-          <Textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="What does this agent do?"
-            rows={3}
-          />
-        </div>
-
-        <div className="space-y-2">
-          <label className="typography-ui-label font-medium text-foreground">
-            Mode
-          </label>
-          <div className="flex gap-1 w-fit">
-            <ButtonSmall
-              variant={mode === 'primary' ? 'default' : 'outline'}
-              onClick={() => setMode('primary')}
-              className={cn('gap-2', mode === 'primary' ? undefined : 'text-foreground')}
-            >
-              <RiAiAgentLine className="h-3 w-3" />
-              Primary
-            </ButtonSmall>
-            <ButtonSmall
-              variant={mode === 'subagent' ? 'default' : 'outline'}
-              onClick={() => setMode('subagent')}
-              className={cn('gap-2', mode === 'subagent' ? undefined : 'text-foreground')}
-            >
-              <RiRobotLine className="h-3 w-3" />
-              Subagent
-            </ButtonSmall>
-            <ButtonSmall
-              variant={mode === 'all' ? 'default' : 'outline'}
-              onClick={() => setMode('all')}
-              className={cn('gap-2', mode === 'all' ? undefined : 'text-foreground')}
-            >
-              <RiAiAgentFill className="h-3 w-3" />
-              All
-            </ButtonSmall>
-          </div>
-          <p className="typography-meta text-muted-foreground">
-            Primary: main agent, Subagent: helper agent, All: both modes
-          </p>
-        </div>
-      </div>
-
-      {}
-      <div className="space-y-4">
-        <div className="space-y-1">
-          <h2 className="typography-h2 font-semibold text-foreground">Model Configuration</h2>
-          <p className="typography-meta text-muted-foreground/80">
-            Configure model and generation parameters
-          </p>
-        </div>
-
-        <div className="space-y-2">
-          <label className="typography-ui-label font-medium text-foreground">
-            Model
-          </label>
-          <ModelSelector
-            providerId={model ? model.split('/')[0] : ''}
-            modelId={model ? model.split('/')[1] : ''}
-            onChange={(providerId: string, modelId: string) => {
-              if (providerId && modelId) {
-                setModel(`${providerId}/${modelId}`);
-              } else {
-                setModel('');
-              }
-            }}
-          />
-        </div>
-
-        <div className="flex gap-4">
-          <div className="space-y-2">
-            <label className="typography-ui-label font-medium text-foreground flex items-center gap-2">
-              Temperature
-              <Tooltip delayDuration={1000}>
-                <TooltipTrigger asChild>
-                  <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
-                </TooltipTrigger>
-                <TooltipContent sideOffset={8} className="max-w-xs">
-                  Controls randomness in responses.<br />
-                  Higher values make output more creative and unpredictable,<br />
-                  lower values make it more focused and deterministic.
-                </TooltipContent>
-              </Tooltip>
-            </label>
-            <div className="relative w-32">
-              <button
-                type="button"
-                onClick={() => {
-                  const current = temperature !== undefined ? temperature : 0.7;
-                  const newValue = Math.max(0, current - 0.1);
-                  setTemperature(parseFloat(newValue.toFixed(1)));
-                }}
-                className="absolute left-2 top-1/2 -translate-y-1/2 flex items-center justify-center h-6 w-6 rounded hover:bg-interactive-hover text-muted-foreground hover:text-foreground"
-              >
-                <RiSubtractLine className="h-3.5 w-3.5" />
-              </button>
-              <Input
-                type="text"
-                inputMode="decimal"
-                value={temperature !== undefined ? temperature : ''}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  if (value === '') {
-                    setTemperature(undefined);
-                    return;
-                  }
-                  const parsed = parseFloat(value);
-                  if (!isNaN(parsed) && parsed >= 0 && parsed <= 2) {
-                    setTemperature(parsed);
-                  }
-                }}
-                onBlur={(e) => {
-                  const value = e.target.value;
-                  if (value !== '') {
-                    const parsed = parseFloat(value);
-                    if (!isNaN(parsed)) {
-                      const clamped = Math.max(0, Math.min(2, parsed));
-                      setTemperature(parseFloat(clamped.toFixed(1)));
-                    }
-                  }
-                }}
-                placeholder="—"
-                className="text-center px-10 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  const current = temperature !== undefined ? temperature : 0.7;
-                  const newValue = Math.min(2, current + 0.1);
-                  setTemperature(parseFloat(newValue.toFixed(1)));
-                }}
-                className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center justify-center h-6 w-6 rounded hover:bg-interactive-hover text-muted-foreground hover:text-foreground"
-              >
-                <RiAddLine className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <label className="typography-ui-label font-medium text-foreground flex items-center gap-2">
-              Top P
-              <Tooltip delayDuration={1000}>
-                <TooltipTrigger asChild>
-                  <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
-                </TooltipTrigger>
-                <TooltipContent sideOffset={8} className="max-w-xs">
-                  Controls diversity via nucleus sampling.<br />
-                  Lower values focus on most likely tokens,<br />
-                  higher values consider more possibilities.
-                </TooltipContent>
-              </Tooltip>
-            </label>
-            <div className="relative w-32">
-              <button
-                type="button"
-                onClick={() => {
-                  const current = topP !== undefined ? topP : 0.9;
-                  const newValue = Math.max(0, current - 0.1);
-                  setTopP(parseFloat(newValue.toFixed(1)));
-                }}
-                className="absolute left-2 top-1/2 -translate-y-1/2 flex items-center justify-center h-6 w-6 rounded hover:bg-interactive-hover text-muted-foreground hover:text-foreground"
-              >
-                <RiSubtractLine className="h-3.5 w-3.5" />
-              </button>
-              <Input
-                type="text"
-                inputMode="decimal"
-                value={topP !== undefined ? topP : ''}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  if (value === '') {
-                    setTopP(undefined);
-                    return;
-                  }
-                  const parsed = parseFloat(value);
-                  if (!isNaN(parsed) && parsed >= 0 && parsed <= 1) {
-                    setTopP(parsed);
-                  }
-                }}
-                onBlur={(e) => {
-                  const value = e.target.value;
-                  if (value !== '') {
-                    const parsed = parseFloat(value);
-                    if (!isNaN(parsed)) {
-                      const clamped = Math.max(0, Math.min(1, parsed));
-                      setTopP(parseFloat(clamped.toFixed(1)));
-                    }
-                  }
-                }}
-                placeholder="—"
-                className="text-center px-10 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  const current = topP !== undefined ? topP : 0.9;
-                  const newValue = Math.min(1, current + 0.1);
-                  setTopP(parseFloat(newValue.toFixed(1)));
-                }}
-                className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center justify-center h-6 w-6 rounded hover:bg-interactive-hover text-muted-foreground hover:text-foreground"
-              >
-                <RiAddLine className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {}
-      <div className="space-y-4">
-        <div className="space-y-1">
-          <h2 className="typography-h2 font-semibold text-foreground">System Prompt</h2>
-          <p className="typography-meta text-muted-foreground/80">
-            Override the default system prompt for this agent
-          </p>
-        </div>
-        <Textarea
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          placeholder="Custom system prompt for this agent..."
-          rows={8}
-          className="font-mono typography-meta"
-        />
-      </div>
-
-      {}
-      <div className="space-y-4">
-        <div className="space-y-1">
-          <h2 className="typography-h2 font-semibold text-foreground">Tool Access</h2>
-          <p className="typography-meta text-muted-foreground/80">
-            OpenCode v1.1.1+ configures tool access via the permissions below.
-          </p>
-        </div>
-      </div>
-
-      {}
-      <div className="space-y-4">
-        <div className="space-y-1">
-          <div className="flex items-center justify-between gap-2">
-            <h2 className="typography-h2 font-semibold text-foreground">Permissions</h2>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setShowPermissionEditor((prev) => !prev)}
-              className="h-8"
-            >
-              {showPermissionEditor ? 'Hide' : 'Edit'}
-            </Button>
-          </div>
-          <p className="typography-meta text-muted-foreground/80">
-            {showPermissionEditor
-              ? 'Set a global default; tools only saved when different from global.'
-              : 'Summary shows default actions; edit to manage granular rules.'}
-          </p>
-        </div>
-
-        {!showPermissionEditor ? (
-          <div className="rounded-lg border border-border/40 divide-y divide-border/40">
-            {summaryPermissionNames.map((permissionName) => {
-              const { defaultAction, patternRulesCount, patternSummary, hasDefaultHint } = getPermissionSummary(permissionName);
-              const label = formatPermissionLabel(permissionName);
-              const summary = hasDefaultHint
-                ? `${defaultAction} (env blocked)`
-                : defaultAction;
-              return (
-                <div key={permissionName} className="flex items-center justify-between gap-3 px-3 py-2">
-                  <div className="flex items-center gap-2">
-                    <span className="typography-ui-label font-medium text-foreground">{label}</span>
-                    <span className="typography-micro text-muted-foreground font-mono">{permissionName}</span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    {patternRulesCount > 0 ? (
-                      <span className="typography-micro text-muted-foreground">Global: {summary}</span>
-                    ) : (
-                      <span className="typography-micro text-muted-foreground">{summary}</span>
-                    )}
-                    {patternRulesCount > 0 ? (
-                      <span className="typography-micro text-muted-foreground">Patterns: {patternSummary}</span>
-                    ) : null}
-                  </div>
+            <div className="pb-1.5 pt-0.5">
+              <div className="flex min-w-0 flex-col gap-1.5">
+                <div className="flex items-center gap-1.5">
+                  <span className="typography-ui-label text-foreground">Mode</span>
+                  <Tooltip delayDuration={1000}>
+                    <TooltipTrigger asChild>
+                      <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+                    </TooltipTrigger>
+                    <TooltipContent sideOffset={8} className="max-w-xs">
+                      Primary vs Subagent visibility
+                    </TooltipContent>
+                  </Tooltip>
                 </div>
-              );
-            })}
-          </div>
-        ) : (
-          <div className="space-y-6">
-            <div className="space-y-2">
-              <h3 className="typography-ui-header font-semibold text-foreground">All Rules</h3>
-              <p className="typography-meta text-muted-foreground/80">
-                Each rule is shown as permission + pattern. Editing updates the action only.
-              </p>
+                <div className="flex flex-wrap items-center gap-1">
+                <ButtonSmall
+                  variant="outline"
+                  size="xs"
+                  onClick={() => setMode('primary')}
+                  className={cn(
+                    '!font-normal',
+                    mode === 'primary'
+                      ? 'border-[var(--primary-base)] text-[var(--primary-base)] bg-[var(--primary-base)]/10 hover:text-[var(--primary-base)]'
+                      : 'text-foreground'
+                  )}
+                >
+                  Primary
+                </ButtonSmall>
+                <ButtonSmall
+                  variant="outline"
+                  size="xs"
+                  onClick={() => setMode('subagent')}
+                  className={cn(
+                    '!font-normal',
+                    mode === 'subagent'
+                      ? 'border-[var(--primary-base)] text-[var(--primary-base)] bg-[var(--primary-base)]/10 hover:text-[var(--primary-base)]'
+                      : 'text-foreground'
+                  )}
+                >
+                  Subagent
+                </ButtonSmall>
+                <ButtonSmall
+                  variant="outline"
+                  size="xs"
+                  onClick={() => setMode('all')}
+                  className={cn(
+                    '!font-normal',
+                    mode === 'all'
+                      ? 'border-[var(--primary-base)] text-[var(--primary-base)] bg-[var(--primary-base)]/10 hover:text-[var(--primary-base)]'
+                      : 'text-foreground'
+                  )}
+                >
+                  All
+                </ButtonSmall>
+                </div>
+              </div>
             </div>
 
-            <div className="rounded-lg border border-border/40">
-              <div className="flex items-center justify-between gap-3 px-3 py-2">
+          </section>
+        </div>
+
+        {/* Model & Parameters */}
+        <div className="mb-8">
+          <div className="mb-1 px-1">
+            <h3 className="typography-ui-header font-medium text-foreground">
+              Model & Parameters
+            </h3>
+          </div>
+
+          <section className="px-2 pb-2 pt-0 space-y-0">
+
+            <div className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
+              <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
+                <span className="typography-ui-label text-foreground">Override Model</span>
+              </div>
+              <div className="flex min-w-0 flex-1 items-center gap-2 sm:w-fit sm:flex-initial">
+                <ModelSelector
+                  providerId={model ? model.split('/')[0] : ''}
+                  modelId={model ? model.split('/')[1] : ''}
+                  onChange={(providerId: string, modelId: string) => {
+                    if (providerId && modelId) {
+                      setModel(`${providerId}/${modelId}`);
+                    } else {
+                      setModel('');
+                    }
+                  }}
+                />
+              </div>
+            </div>
+
+            <div className={cn("py-1.5", isMobile ? "flex flex-col gap-3" : "flex items-center gap-8")}>
+              <div className={cn("flex min-w-0 flex-col", isMobile ? "w-full" : "sm:w-56 shrink-0")}>
+                <div className="flex items-center gap-1.5">
+                  <span className="typography-ui-label text-foreground">Temperature</span>
+                  <Tooltip delayDuration={1000}>
+                    <TooltipTrigger asChild>
+                      <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+                    </TooltipTrigger>
+                    <TooltipContent sideOffset={8} className="max-w-xs">
+                      Controls randomness. Higher = creative, Lower = focused.
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+                <span className="typography-meta text-muted-foreground">0.0 to 2.0</span>
+              </div>
+              <div className={cn("flex items-center gap-2", isMobile ? "w-full" : "w-fit")}>
+                <NumberInput
+                  value={temperature}
+                  fallbackValue={0.7}
+                  onValueChange={setTemperature}
+                  onClear={() => setTemperature(undefined)}
+                  min={0}
+                  max={2}
+                  step={0.1}
+                  inputMode="decimal"
+                  placeholder="—"
+                  emptyLabel="—"
+                  className="w-16"
+                />
+                {temperature !== undefined && (
+                  <ButtonSmall
+                    type="button"
+                    variant="ghost"
+                    onClick={() => setTemperature(undefined)}
+                    className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
+                    aria-label="Clear temperature override"
+                    title="Clear"
+                  >
+                    <RiCloseLine className="h-3.5 w-3.5" />
+                  </ButtonSmall>
+                )}
+              </div>
+            </div>
+
+            <div className={cn("py-1.5", isMobile ? "flex flex-col gap-3" : "flex items-center gap-8")}>
+              <div className={cn("flex min-w-0 flex-col", isMobile ? "w-full" : "sm:w-56 shrink-0")}>
+                <div className="flex items-center gap-1.5">
+                  <span className="typography-ui-label text-foreground">Top P</span>
+                  <Tooltip delayDuration={1000}>
+                    <TooltipTrigger asChild>
+                      <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+                    </TooltipTrigger>
+                    <TooltipContent sideOffset={8} className="max-w-xs">
+                      Nucleus sampling diversity. Lower = likely tokens only.
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+                <span className="typography-meta text-muted-foreground">0.0 to 1.0</span>
+              </div>
+              <div className={cn("flex items-center gap-2", isMobile ? "w-full" : "w-fit")}>
+                <NumberInput
+                  value={topP}
+                  fallbackValue={0.9}
+                  onValueChange={setTopP}
+                  onClear={() => setTopP(undefined)}
+                  min={0}
+                  max={1}
+                  step={0.1}
+                  inputMode="decimal"
+                  placeholder="—"
+                  emptyLabel="—"
+                  className="w-16"
+                />
+                {topP !== undefined && (
+                  <ButtonSmall
+                    type="button"
+                    variant="ghost"
+                    onClick={() => setTopP(undefined)}
+                    className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
+                    aria-label="Clear top p override"
+                    title="Clear"
+                  >
+                    <RiCloseLine className="h-3.5 w-3.5" />
+                  </ButtonSmall>
+                )}
+              </div>
+            </div>
+
+          </section>
+        </div>
+
+        {/* System Prompt */}
+        <div className="mb-8">
+          <div className="mb-1 px-1">
+            <h3 className="typography-ui-header font-medium text-foreground">
+              System Prompt
+            </h3>
+          </div>
+
+          <section className="px-2 pb-2 pt-0">
+            <Textarea
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              placeholder="You are an expert coding assistant..."
+              rows={8}
+              className="w-full font-mono typography-meta min-h-[120px] max-h-[60vh] bg-transparent resize-y"
+            />
+          </section>
+        </div>
+
+        {/* Tool Permissions */}
+        <div className="mb-2">
+          <div className="mb-1 px-1 flex items-center justify-between gap-4">
+            <h3 className="typography-ui-header font-medium text-foreground">
+              Tool Permissions
+            </h3>
+            <ButtonSmall
+              variant="outline"
+              size="xs"
+              className="!font-normal"
+              onClick={() => setShowPermissionEditor((prev) => !prev)}
+            >
+              {showPermissionEditor ? 'Hide Editor' : 'Advanced Editor'}
+            </ButtonSmall>
+          </div>
+
+          {!showPermissionEditor ? (
+            <section className="px-2 pb-2 pt-0 space-y-0">
+              {summaryPermissionNames.map((permissionName, index) => {
+                const { defaultAction, patternRulesCount, patternSummary, hasDefaultHint } = getPermissionSummary(permissionName);
+                const label = formatPermissionLabel(permissionName);
+                const summary = hasDefaultHint ? `${defaultAction} (env blocked)` : defaultAction;
+                return (
+                  <div key={permissionName} className={cn("flex flex-col gap-1 py-1.5 sm:flex-row sm:items-center sm:justify-between sm:gap-8", index > 0 && "border-t border-[var(--surface-subtle)]")}>
+                    <div className="flex items-center gap-2">
+                      <span className="typography-ui-label text-foreground">{label}</span>
+                      <span className="typography-micro text-muted-foreground/70 font-mono hidden sm:inline-block">{permissionName}</span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      {patternRulesCount > 0 ? (
+                        <span className="typography-micro text-muted-foreground bg-[var(--surface-muted)] px-1.5 py-0.5 rounded">Global: {summary}</span>
+                      ) : (
+                        <span className={cn("typography-micro capitalize px-1.5 py-0.5 rounded", summary === 'allow' ? "text-[var(--status-success)] bg-[var(--status-success)]/10" : summary === 'deny' ? "text-[var(--status-error)] bg-[var(--status-error)]/10" : "text-[var(--status-warning)] bg-[var(--status-warning)]/10")}>{summary}</span>
+                      )}
+                      {patternRulesCount > 0 && (
+                        <span className="typography-micro text-muted-foreground bg-[var(--surface-muted)] px-1.5 py-0.5 rounded">Rules: {patternSummary}</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </section>
+          ) : (
+            <div className="space-y-6 px-2">
+              <div className="flex items-center justify-between gap-4 py-1.5">
                 <div className="flex items-center gap-2">
-                  <span className="typography-ui-label font-medium text-foreground">Global</span>
-                  <span className="typography-micro text-muted-foreground font-mono">*</span>
+                  <span className="typography-ui-label text-foreground">Global Default</span>
+                  <span className="typography-micro text-muted-foreground/70 font-mono">*</span>
                 </div>
                 <Select
                   value={globalPermission}
                   onValueChange={(value) => setGlobalPermissionAndPrune(value as PermissionAction)}
                 >
-                  <SelectTrigger className="h-6 w-24 text-xs">
-                    <span className="capitalize">{globalPermission}</span>
+                  <SelectTrigger className="w-[100px]">
+                    <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="allow" className="pr-2 [&>span:first-child]:hidden">Allow</SelectItem>
-                    <SelectItem value="ask" className="pr-2 [&>span:first-child]:hidden">Ask</SelectItem>
-                    <SelectItem value="deny" className="pr-2 [&>span:first-child]:hidden">Deny</SelectItem>
+                    <SelectItem value="allow">Allow</SelectItem>
+                    <SelectItem value="ask">Ask</SelectItem>
+                    <SelectItem value="deny">Deny</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
-            </div>
 
-            <div className="space-y-6">
-              {summaryPermissionNames.filter((name) => name !== '*').map((permissionName) => {
-                const label = formatPermissionLabel(permissionName);
-                const { defaultAction, patternRulesCount, patternSummary } = getPermissionSummary(permissionName);
-                const wildcardOverride = getWildcardOverride(permissionName);
-                const wildcardValue: string = wildcardOverride ?? 'global';
-                const patternRules = getPatternRules(permissionName);
+              <div className="space-y-4">
+                {summaryPermissionNames.filter((name) => name !== '*').map((permissionName) => {
+                  const label = formatPermissionLabel(permissionName);
+                  const { defaultAction, patternRulesCount } = getPermissionSummary(permissionName);
+                  const wildcardOverride = getWildcardOverride(permissionName);
+                  const wildcardValue: string = wildcardOverride ?? 'global';
+                  const patternRules = getPatternRules(permissionName);
+                  const wildcardOptions = (['allow', 'ask', 'deny'] as const).filter((action) => action !== globalPermission);
 
-                const wildcardOptions = (['allow', 'ask', 'deny'] as const).filter((action) => action !== globalPermission);
-
-                return (
-                  <div key={permissionName} className="rounded-lg border border-border/40">
-                    <div className="flex items-center justify-between gap-3 px-3 py-2">
-                      <div className="flex items-center gap-2">
-                        <span className="typography-ui-label font-medium text-foreground">{label}</span>
-                        <span className="typography-micro text-muted-foreground font-mono">{permissionName}</span>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        {patternRulesCount > 0 ? (
-                          <span className="typography-micro text-muted-foreground">Global: {defaultAction}</span>
-                        ) : (
-                          <span className="typography-micro text-muted-foreground">{defaultAction}</span>
-                        )}
-                        {patternRulesCount > 0 ? (
-                          <span className="typography-micro text-muted-foreground">Patterns: {patternSummary}</span>
-                        ) : null}
-                      </div>
-                    </div>
-
-                    <div className="space-y-2 border-t border-border/40 px-3 py-2">
-                      <div className="flex flex-wrap items-center justify-between gap-2 p-2">
+                  return (
+                    <div key={permissionName} className="border-t border-[var(--surface-subtle)] pt-2">
+                      <div className="flex items-center justify-between py-1">
                         <div className="flex items-center gap-2">
-                          <span className="typography-micro text-muted-foreground">Pattern</span>
-                          <span className="typography-micro font-mono text-foreground">*</span>
-                          {wildcardOverride ? (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => revertRule(permissionName, '*')}
-                              className="h-5 px-2 text-[11px] gap-1"
-                            >
-                              <RiSubtractLine className="h-3 w-3" />
-                              Revert
-                            </Button>
-                          ) : null}
+                          <span className="typography-ui-label text-foreground">{label}</span>
+                          <span className="typography-micro text-muted-foreground/70 font-mono">{permissionName}</span>
                         </div>
-
-                        <Select
-                          value={wildcardValue}
-                          onValueChange={(value) => {
-                            if (value === 'global') {
-                              removeRule(permissionName, '*');
-                              return;
-                            }
-                            upsertRule(permissionName, '*', value as PermissionAction);
-                          }}
-                        >
-                          <SelectTrigger className="h-6 w-24 text-xs">
-                            <span className="capitalize">{wildcardValue === 'global' ? 'Global' : wildcardValue}</span>
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="global" className="pr-2 [&>span:first-child]:hidden">Global</SelectItem>
-                            {wildcardOptions.map((action) => (
-                              <SelectItem key={action} value={action} className="pr-2 [&>span:first-child]:hidden">
-                                {action.charAt(0).toUpperCase() + action.slice(1)}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        <div className="typography-micro text-muted-foreground">
+                          {patternRulesCount > 0 ? `Global: ${defaultAction}` : defaultAction}
+                        </div>
                       </div>
 
-                      {patternRules.map((rule) => {
-                        const ruleKey = buildRuleKey(rule.permission, rule.pattern);
-                        const baselineRule = baselineRuleMap.get(ruleKey);
-                        const isAdded = !baselineRule;
-                        const isModified = Boolean(baselineRule && baselineRule.action !== rule.action);
-
-                        return (
-                          <div key={ruleKey} className="flex flex-wrap items-center justify-between gap-2 p-2">
-                            <div className="flex items-center gap-2">
-                              <span className="typography-micro text-muted-foreground">Pattern</span>
-                              <span className="typography-micro font-mono text-foreground">{rule.pattern}</span>
-                              {isAdded ? (
-                                <span className="typography-micro text-emerald-500">New</span>
-                              ) : null}
-                              {isModified ? (
-                                <span className="typography-micro text-amber-500">Modified</span>
-                              ) : null}
-                              {isAdded ? (
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => removeRule(rule.permission, rule.pattern)}
-                                  className="h-5 px-2 text-[11px] gap-1"
-                                >
-                                  <RiSubtractLine className="h-3 w-3" />
-                                  Remove
-                                </Button>
-                              ) : isModified ? (
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => revertRule(rule.permission, rule.pattern)}
-                                  className="h-5 px-2 text-[11px] gap-1"
-                                >
-                                  <RiSubtractLine className="h-3 w-3" />
-                                  Revert
-                                </Button>
-                              ) : null}
-                            </div>
-
-                            <Select
-                              value={rule.action}
-                              onValueChange={(value) => setRuleAction(rule.permission, rule.pattern, value as PermissionAction)}
-                            >
-                              <SelectTrigger className="h-6 w-24 text-xs">
-                                <span className="capitalize">{rule.action}</span>
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="allow" className="pr-2 [&>span:first-child]:hidden">Allow</SelectItem>
-                                <SelectItem value="ask" className="pr-2 [&>span:first-child]:hidden">Ask</SelectItem>
-                                <SelectItem value="deny" className="pr-2 [&>span:first-child]:hidden">Deny</SelectItem>
-                              </SelectContent>
-                            </Select>
+                      <div className="space-y-1 pl-2 mt-1">
+                        <div className="flex flex-wrap items-center justify-between gap-2 py-0.5">
+                          <div className="flex items-center gap-2">
+                            <span className="typography-micro text-muted-foreground">Pattern</span>
+                            <span className="typography-micro font-mono text-foreground bg-[var(--surface-muted)] px-1 rounded">*</span>
+                            {wildcardOverride && (
+                              <ButtonSmall
+                                variant="ghost"
+                                onClick={() => revertRule(permissionName, '*')}
+                                className="px-1.5 py-0 h-5"
+                              >
+                                <RiSubtractLine className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground" />
+                              </ButtonSmall>
+                            )}
                           </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="space-y-2">
-              <h3 className="typography-ui-header font-semibold text-foreground">Add Rule</h3>
-              <p className="typography-meta text-muted-foreground/80">
-                Choose a permission key, set a pattern, and pick an action.
-              </p>
-
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                <Select value={pendingRuleName} onValueChange={setPendingRuleName}>
-                  <SelectTrigger className="h-8 min-h-8 w-full sm:w-64">
-                    {pendingRuleName ? (
-                      <span className="truncate">{formatPermissionLabel(pendingRuleName)}</span>
-                    ) : (
-                      <span className="text-muted-foreground">Permission…</span>
-                    )}
-                  </SelectTrigger>
-                  <SelectContent>
-                    {availablePermissionNames.map((name) => (
-                      <SelectItem key={name} value={name} className="pr-2 [&>span:first-child]:hidden">
-                        <div className="flex items-center justify-between gap-4">
-                          <span>{formatPermissionLabel(name)}</span>
-                          <span className="typography-micro text-muted-foreground font-mono">{name}</span>
+                          <Select
+                            value={wildcardValue}
+                            onValueChange={(value) => {
+                              if (value === 'global') {
+                                removeRule(permissionName, '*');
+                                return;
+                              }
+                              upsertRule(permissionName, '*', value as PermissionAction);
+                            }}
+                          >
+                            <SelectTrigger className="w-[90px]">
+                               <SelectValue />
+                             </SelectTrigger>
+                             <SelectContent>
+                               <SelectItem value="global">Global</SelectItem>
+                              {wildcardOptions.map((action) => (
+                                <SelectItem key={action} value={action} className="capitalize">
+                                  {action}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                         </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
 
-                <Input
-                  value={pendingRulePattern}
-                  onChange={(e) => setPendingRulePattern(e.target.value)}
-                  placeholder="Pattern (e.g. *)"
-                  className="h-8 sm:w-64 font-mono"
-                />
+                        {patternRules.map((rule) => {
+                          const ruleKey = buildRuleKey(rule.permission, rule.pattern);
+                          const baselineRule = baselineRuleMap.get(ruleKey);
+                          const isAdded = !baselineRule;
+                          const isModified = Boolean(baselineRule && baselineRule.action !== rule.action);
 
-                <div className="flex gap-1 w-fit">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => applyPendingRule('allow')}
-                    className="h-8 px-3 text-xs"
-                  >
-                    Allow
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => applyPendingRule('ask')}
-                    className="h-8 px-3 text-xs"
-                  >
-                    Ask
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => applyPendingRule('deny')}
-                    className="h-8 px-3 text-xs"
-                  >
-                    Deny
-                  </Button>
+                          return (
+                            <div key={ruleKey} className="flex flex-wrap items-center justify-between gap-2 py-0.5 border-t border-[var(--surface-subtle)]">
+                              <div className="flex items-center gap-2">
+                                <span className="typography-micro text-muted-foreground">Pattern</span>
+                                <span className="typography-micro font-mono text-foreground bg-[var(--surface-muted)] px-1 rounded">{rule.pattern}</span>
+                                {isAdded && <span className="typography-micro text-[var(--status-success)]">New</span>}
+                                {isModified && <span className="typography-micro text-[var(--status-warning)]">Modified</span>}
+                                {(isAdded || isModified) && (
+                                  <ButtonSmall
+                                    variant="ghost"
+                                    onClick={() => isAdded ? removeRule(rule.permission, rule.pattern) : revertRule(rule.permission, rule.pattern)}
+                                    className="px-1.5 py-0 h-5"
+                                  >
+                                    <RiSubtractLine className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground" />
+                                  </ButtonSmall>
+                                )}
+                              </div>
+                              <Select
+                                value={rule.action}
+                                onValueChange={(value) => setRuleAction(rule.permission, rule.pattern, value as PermissionAction)}
+                              >
+                                 <SelectTrigger className="w-[90px]">
+                                   <SelectValue />
+                                 </SelectTrigger>
+                                 <SelectContent>
+                                   <SelectItem value="allow">Allow</SelectItem>
+                                  <SelectItem value="ask">Ask</SelectItem>
+                                  <SelectItem value="deny">Deny</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="border-t border-[var(--surface-subtle)] pt-3">
+                <h4 className="typography-ui-label text-foreground mb-2">Add Custom Rule</h4>
+                <div className="flex flex-col sm:flex-row items-end sm:items-center gap-2">
+                  <Select value={pendingRuleName} onValueChange={setPendingRuleName}>
+                    <SelectTrigger className="w-full sm:w-[160px]">
+                      {pendingRuleName ? (
+                        <span className="truncate">{formatPermissionLabel(pendingRuleName)}</span>
+                      ) : (
+                        <span className="text-muted-foreground">Permission...</span>
+                      )}
+                    </SelectTrigger>
+                    <SelectContent>
+                      {availablePermissionNames.map((name) => (
+                        <SelectItem key={name} value={name}>
+                          <div className="flex items-center justify-between gap-2 w-full">
+                            <span>{formatPermissionLabel(name)}</span>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  <Input
+                    value={pendingRulePattern}
+                    onChange={(e) => setPendingRulePattern(e.target.value)}
+                    placeholder="Pattern (e.g. *)"
+                    className="h-7 flex-1 font-mono text-xs"
+                  />
+
+                  <div className="flex gap-1">
+                    <ButtonSmall variant="outline" size="xs" className="!font-normal" onClick={() => applyPendingRule('allow')}>Allow</ButtonSmall>
+                    <ButtonSmall variant="outline" size="xs" className="!font-normal" onClick={() => applyPendingRule('ask')}>Ask</ButtonSmall>
+                    <ButtonSmall variant="outline" size="xs" className="!font-normal" onClick={() => applyPendingRule('deny')}>Deny</ButtonSmall>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
 
-        {}
-        <div className="flex justify-end border-t border-border/40 pt-4">
-          <Button
-            size="sm"
-            variant="default"
+        {/* Save action */}
+        <div className="px-2 py-1">
+          <ButtonSmall
             onClick={handleSave}
             disabled={isSaving || !isDirty}
-            className="gap-2 h-6 px-2 text-xs w-fit"
+            size="xs"
+            className="!font-normal"
           >
-            <RiSaveLine className="h-3 w-3" />
             {isSaving ? 'Saving...' : 'Save Changes'}
-          </Button>
+          </ButtonSmall>
         </div>
-      </div>
+
       </div>
     </ScrollableOverlay>
   );

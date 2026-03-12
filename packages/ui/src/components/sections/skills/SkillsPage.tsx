@@ -1,12 +1,10 @@
 import React from 'react';
-import type { Extension } from '@codemirror/state';
-import { EditorView } from '@codemirror/view';
-import { Button } from '@/components/ui/button';
+import { ButtonSmall } from '@/components/ui/button-small';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui';
 import { useSkillsStore, type SkillConfig, type SkillScope, type SupportingFile, type PendingFile } from '@/stores/useSkillsStore';
-import { RiAddLine, RiBookOpenLine, RiDeleteBinLine, RiFileLine, RiFolderLine, RiRobot2Line, RiSaveLine, RiUser3Line } from '@remixicon/react';
+import { RiAddLine, RiBookOpenLine, RiDeleteBinLine, RiFileLine, RiFolderLine, RiRobot2Line, RiUser3Line } from '@remixicon/react';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import {
   Select,
@@ -23,10 +21,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { ButtonLarge } from '@/components/ui/button-large';
-import { AnimatedTabs } from '@/components/ui/animated-tabs';
 import { SkillsCatalogPage } from './catalog/SkillsCatalogPage';
-import { createFlexokiCodeMirrorTheme } from '@/lib/codemirror/flexokiTheme';
-import { useThemeSystem } from '@/contexts/useThemeSystem';
 import {
   SKILL_LOCATION_OPTIONS,
   locationLabel,
@@ -35,13 +30,15 @@ import {
   type SkillLocationValue,
 } from './skillLocations';
 
-const LazyCodeMirrorEditor = React.lazy(async () => {
-  const module = await import('@/components/ui/CodeMirrorEditor');
-  return { default: module.CodeMirrorEditor };
-});
+export interface SkillsPageProps {
+  view?: 'installed' | 'catalog';
+}
 
-export const SkillsPage: React.FC = () => {
-  const { currentTheme } = useThemeSystem();
+const SkillsCatalogStandalone: React.FC = () => (
+  <SkillsCatalogPage mode="external" onModeChange={() => {}} showModeTabs={false} />
+);
+
+const SkillsInstalledPage: React.FC = () => {
   const { 
     selectedSkillName, 
     getSkillByName, 
@@ -58,35 +55,13 @@ export const SkillsPage: React.FC = () => {
   const isNewSkill = Boolean(skillDraft && skillDraft.name === selectedSkillName && !selectedSkill);
   const hasStaleSelection = Boolean(selectedSkillName && !selectedSkill && !skillDraft);
 
-  type SkillsMode = 'manual' | 'external';
-  const [mode, setMode] = React.useState<SkillsMode>('manual');
-
-  React.useEffect(() => {
-    if (!isNewSkill && mode !== 'manual') {
-      setMode('manual');
-    }
-  }, [isNewSkill, mode]);
-
   React.useEffect(() => {
     if (!hasStaleSelection) {
       return;
     }
 
-    // Clear persisted selection if it points to a non-existent skill.
     setSelectedSkill(null);
   }, [hasStaleSelection, setSelectedSkill]);
-
-  const modeTabs = isNewSkill ? (
-    <AnimatedTabs
-      tabs={[
-        { value: 'manual', label: 'Manual' },
-        { value: 'external', label: 'External' },
-      ]}
-      value={mode}
-      onValueChange={setMode}
-      animate={false}
-    />
-  ) : null;
 
   const [draftName, setDraftName] = React.useState('');
   const [draftScope, setDraftScope] = React.useState<SkillScope>('user');
@@ -94,119 +69,33 @@ export const SkillsPage: React.FC = () => {
   const [description, setDescription] = React.useState('');
   const [instructions, setInstructions] = React.useState('');
   const [supportingFiles, setSupportingFiles] = React.useState<SupportingFile[]>([]);
-  const [pendingFiles, setPendingFiles] = React.useState<PendingFile[]>([]); // For new skills
+  const [pendingFiles, setPendingFiles] = React.useState<PendingFile[]>([]);
   const [isSaving, setIsSaving] = React.useState(false);
   const [isLoading, setIsLoading] = React.useState(false);
   
-  // Track original values to detect changes
   const [originalDescription, setOriginalDescription] = React.useState('');
   const [originalInstructions, setOriginalInstructions] = React.useState('');
   
-  // File dialog state
   const [isFileDialogOpen, setIsFileDialogOpen] = React.useState(false);
   const [newFileName, setNewFileName] = React.useState('');
   const [newFileContent, setNewFileContent] = React.useState('');
-  const [editingFilePath, setEditingFilePath] = React.useState<string | null>(null); // null = adding, string = editing
+  const [editingFilePath, setEditingFilePath] = React.useState<string | null>(null);
   const [isLoadingFile, setIsLoadingFile] = React.useState(false);
-  const [originalFileContent, setOriginalFileContent] = React.useState(''); // Track original for change detection
+  const [originalFileContent, setOriginalFileContent] = React.useState('');
   const [deleteFilePath, setDeleteFilePath] = React.useState<string | null>(null);
   const [isDeletingFile, setIsDeletingFile] = React.useState(false);
-  const [instructionsEditorHeight, setInstructionsEditorHeight] = React.useState(320);
-  const [instructionsLanguage, setInstructionsLanguage] = React.useState<Extension | null>(null);
-  const [supportingFileLanguage, setSupportingFileLanguage] = React.useState<Extension | null>(null);
-
-  React.useEffect(() => {
-    let cancelled = false;
-
-    const loadInstructionsLanguage = async () => {
-      const { languageByExtension } = await import('@/lib/codemirror/languageByExtension');
-      if (cancelled) return;
-      setInstructionsLanguage(languageByExtension('SKILL.md'));
-    };
-
-    void loadInstructionsLanguage();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  React.useEffect(() => {
-    let cancelled = false;
-
-    const loadSupportingFileLanguage = async () => {
-      const targetPath = newFileName.trim();
-      if (!targetPath) {
-        setSupportingFileLanguage(null);
-        return;
-      }
-
-      const { languageByExtension } = await import('@/lib/codemirror/languageByExtension');
-      if (cancelled) return;
-      setSupportingFileLanguage(languageByExtension(targetPath));
-    };
-
-    void loadSupportingFileLanguage();
-    return () => {
-      cancelled = true;
-    };
-  }, [newFileName]);
-
-  const instructionsEditorExtensions = React.useMemo(() => {
-    const extensions: Extension[] = [createFlexokiCodeMirrorTheme(currentTheme), EditorView.lineWrapping];
-    if (instructionsLanguage) {
-      extensions.push(instructionsLanguage);
-    }
-    return extensions;
-  }, [currentTheme, instructionsLanguage]);
-
-  const supportingFileEditorExtensions = React.useMemo(() => {
-    const extensions: Extension[] = [createFlexokiCodeMirrorTheme(currentTheme), EditorView.lineWrapping];
-    if (supportingFileLanguage) {
-      extensions.push(supportingFileLanguage);
-    }
-    return extensions;
-  }, [currentTheme, supportingFileLanguage]);
-
-  const handleStartInstructionsResize = React.useCallback((event: React.MouseEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    const startY = event.clientY;
-    const startHeight = instructionsEditorHeight;
-
-    const onMouseMove = (moveEvent: MouseEvent) => {
-      const deltaY = moveEvent.clientY - startY;
-      const viewportMax = typeof window !== 'undefined' ? Math.floor(window.innerHeight * 0.75) : 800;
-      const nextHeight = Math.max(220, Math.min(viewportMax, startHeight + deltaY));
-      setInstructionsEditorHeight(nextHeight);
-    };
-
-    const onMouseUp = () => {
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mouseup', onMouseUp);
-    };
-
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mouseup', onMouseUp);
-  }, [instructionsEditorHeight]);
   
-  // Detect if skill-level fields have changed
   const hasSkillChanges = isNewSkill 
     ? (draftName.trim() !== '' || description.trim() !== '' || instructions.trim() !== '' || pendingFiles.length > 0)
     : (description !== originalDescription || instructions !== originalInstructions);
   
-  // Detect if file content has changed
   const hasFileChanges = editingFilePath 
     ? newFileContent !== originalFileContent
-    : newFileName.trim() !== ''; // For new files, just need a name
+    : newFileName.trim() !== '';
 
-  // Load skill details when selection changes
   React.useEffect(() => {
-    if (mode === 'external') {
-      return;
-    }
-
     const loadSkillDetails = async () => {
       if (isNewSkill && skillDraft) {
-        // Prefill from draft (for new or duplicated skills)
         setDraftName(skillDraft.name || '');
         setDraftScope(skillDraft.scope || 'user');
         setDraftSource(skillDraft.source === 'agents' ? 'agents' : 'opencode');
@@ -221,7 +110,6 @@ export const SkillsPage: React.FC = () => {
         try {
           const detail = await getSkillDetail(selectedSkillName);
           if (detail) {
-            // Get actual content from the API response
             const md = detail.sources.md;
             setDescription(md.description || '');
             setInstructions(md.instructions || '');
@@ -238,7 +126,7 @@ export const SkillsPage: React.FC = () => {
     };
 
     loadSkillDetails();
-  }, [selectedSkill, isNewSkill, selectedSkillName, skills, skillDraft, getSkillDetail, mode]);
+  }, [selectedSkill, isNewSkill, selectedSkillName, skills, skillDraft, getSkillDetail]);
 
   const handleSave = async () => {
     const skillName = isNewSkill ? draftName.trim().replace(/\s+/g, '-').toLowerCase() : selectedSkillName?.trim();
@@ -248,7 +136,6 @@ export const SkillsPage: React.FC = () => {
       return;
     }
 
-    // Validate skill name format
     if (!/^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/.test(skillName) || skillName.length > 64) {
       toast.error('Skill name must be 1-64 lowercase alphanumeric characters with hyphens, cannot start or end with hyphen');
       return;
@@ -259,7 +146,6 @@ export const SkillsPage: React.FC = () => {
       return;
     }
 
-    // Check for duplicate name when creating new skill
     if (isNewSkill && skills.some((s) => s.name === skillName)) {
       toast.error('A skill with this name already exists');
       return;
@@ -274,7 +160,6 @@ export const SkillsPage: React.FC = () => {
         instructions: instructions.trim() || undefined,
         scope: isNewSkill ? draftScope : undefined,
         source: isNewSkill ? draftSource : undefined,
-        // Include pending files when creating new skill
         supportingFiles: isNewSkill && pendingFiles.length > 0 ? pendingFiles : undefined,
       };
 
@@ -282,14 +167,13 @@ export const SkillsPage: React.FC = () => {
       if (isNewSkill) {
         success = await createSkill(config);
         if (success) {
-          setSkillDraft(null); // Clear draft after successful creation
-          setPendingFiles([]); // Clear pending files
-          setSelectedSkill(skillName); // Select the newly created skill
+          setSkillDraft(null);
+          setPendingFiles([]);
+          setSelectedSkill(skillName);
         }
       } else {
         success = await updateSkill(skillName, config);
         if (success) {
-          // Update original values to reflect saved state
           setOriginalDescription(description.trim());
           setOriginalInstructions(instructions.trim());
         }
@@ -320,7 +204,6 @@ export const SkillsPage: React.FC = () => {
     setEditingFilePath(filePath);
     setNewFileName(filePath);
     
-    // For new skills, get content from pending files
     if (isNewSkill) {
       const pendingFile = pendingFiles.find(f => f.path === filePath);
       const content = pendingFile?.content || '';
@@ -330,7 +213,6 @@ export const SkillsPage: React.FC = () => {
       return;
     }
     
-    // For existing skills, load content from server
     if (!selectedSkillName) return;
     
     setIsLoadingFile(true);
@@ -359,16 +241,13 @@ export const SkillsPage: React.FC = () => {
     const filePath = newFileName.trim();
     const isEditing = editingFilePath !== null;
 
-    // For new skills, add/update pending files
     if (isNewSkill) {
       if (isEditing) {
-        // Update existing pending file
         setPendingFiles(prev => prev.map(f => 
           f.path === editingFilePath ? { path: filePath, content: newFileContent } : f
         ));
         toast.success(`File "${filePath}" updated`);
       } else {
-        // Check for duplicate
         if (pendingFiles.some(f => f.path === filePath)) {
           toast.error('A file with this name already exists');
           return;
@@ -381,7 +260,6 @@ export const SkillsPage: React.FC = () => {
       return;
     }
 
-    // For existing skills, write directly to disk
     if (!selectedSkillName) {
       toast.error('No skill selected');
       return;
@@ -394,7 +272,6 @@ export const SkillsPage: React.FC = () => {
       toast.success(isEditing ? `File "${filePath}" updated` : `File "${filePath}" created`);
       setIsFileDialogOpen(false);
       setEditingFilePath(null);
-      // Refresh skill details to get updated file list
       const detail = await getSkillDetail(selectedSkillName);
       if (detail) {
         setSupportingFiles(detail.sources.md.supportingFiles || []);
@@ -405,14 +282,12 @@ export const SkillsPage: React.FC = () => {
   };
 
   const handleDeleteFile = (filePath: string) => {
-    // For new skills, remove from pending files
     if (isNewSkill) {
       setPendingFiles(prev => prev.filter(f => f.path !== filePath));
       toast.success(`File "${filePath}" removed`);
       return;
     }
 
-    // For existing skills, delete from disk
     if (!selectedSkillName) {
       return;
     }
@@ -443,12 +318,6 @@ export const SkillsPage: React.FC = () => {
     setIsDeletingFile(false);
   };
 
-  if (isNewSkill && mode === 'external') {
-    return <SkillsCatalogPage mode={mode} onModeChange={setMode} />;
-  }
-
-
-  // Show empty state when nothing is selected or selection is stale
   if ((!selectedSkillName && !skillDraft) || hasStaleSelection) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -473,225 +342,185 @@ export const SkillsPage: React.FC = () => {
 
   return (
     <ScrollableOverlay keyboardAvoid outerClassName="h-full" className="w-full">
-      <div className="mx-auto max-w-3xl space-y-6 p-6">
-      {isNewSkill ? modeTabs : null}
+      <div className="mx-auto w-full max-w-3xl p-3 sm:p-6 sm:pt-8">
 
-      {/* Header */}
-      <div className="space-y-1">
-        <h1 className="typography-ui-header font-semibold text-lg">
-          {isNewSkill ? 'New Skill' : selectedSkillName}
-        </h1>
-        {selectedSkill && (
-          <p className="typography-meta text-muted-foreground">
-            {locationLabel(selectedSkill.scope, selectedSkill.source)} skill
-            {selectedSkill.source === 'claude' && ' (Claude-compatible)'}
-          </p>
-        )}
-      </div>
-
-      {/* Basic Information */}
-      <div className="space-y-4">
-        <div className="space-y-1">
-          <h2 className="typography-ui-header font-semibold text-foreground">Basic Information</h2>
-          <p className="typography-meta text-muted-foreground/80">
-            Configure skill identity and description
-          </p>
-        </div>
-
-        {isNewSkill && (
-          <div className="space-y-2">
-            <label className="typography-ui-label font-medium text-foreground">
-              Skill Name & Location
-            </label>
-            <div className="flex items-center gap-2">
-              <Input
-                value={draftName}
-                onChange={(e) => setDraftName(e.target.value.toLowerCase().replace(/\s+/g, '-'))}
-                placeholder="skill-name"
-                className="flex-1 text-foreground placeholder:text-muted-foreground"
-              />
-              <Select
-                value={locationValueFrom(draftScope, draftSource)}
-                onValueChange={(v) => {
-                  const next = locationPartsFrom(v as SkillLocationValue);
-                  setDraftScope(next.scope);
-                  setDraftSource(next.source === 'agents' ? 'agents' : 'opencode');
-                }}
-              >
-                <SelectTrigger className="!h-9 w-auto gap-1.5">
-                  {draftScope === 'user' ? (
-                    <RiUser3Line className="h-4 w-4" />
-                  ) : (
-                    <RiFolderLine className="h-4 w-4" />
-                  )}
-                  {draftSource === 'agents' ? <RiRobot2Line className="h-4 w-4" /> : null}
-                  <span>{locationLabel(draftScope, draftSource)}</span>
-                </SelectTrigger>
-                <SelectContent align="end">
-                  {SKILL_LOCATION_OPTIONS.map((option) => (
-                    <SelectItem key={option.value} value={option.value} className="pr-2 [&>span:first-child]:hidden">
-                      <div className="flex flex-col gap-0.5">
-                        <div className="flex items-center gap-2">
-                          {option.scope === 'user' ? <RiUser3Line className="h-4 w-4" /> : <RiFolderLine className="h-4 w-4" />}
-                          {option.source === 'agents' ? <RiRobot2Line className="h-4 w-4" /> : null}
-                          <span>{option.label}</span>
-                        </div>
-                        <span className="typography-micro text-muted-foreground ml-6">{option.description}</span>
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <p className="typography-meta text-muted-foreground">
-              Lowercase letters, numbers, and hyphens only. Cannot start or end with hyphen.
-            </p>
-          </div>
-        )}
-
-        <div className="space-y-2">
-          <label className="typography-ui-label font-medium text-foreground">
-            Description <span className="text-destructive">*</span>
-          </label>
-          <Textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="Brief description of what this skill does..."
-            rows={2}
-            className="max-h-32 resize-none"
-          />
-          <p className="typography-meta text-muted-foreground">
-            The agent uses this to decide when to load the skill
-          </p>
-        </div>
-      </div>
-
-      {/* Instructions */}
-      <div className="space-y-4">
-        <div className="space-y-1">
-          <h2 className="typography-h2 font-semibold text-foreground">Instructions</h2>
-          <p className="typography-meta text-muted-foreground/80">
-            Detailed instructions for the agent when this skill is loaded
-          </p>
-        </div>
-        <div
-          className="relative min-h-[220px] max-h-[75vh] rounded-md border border-[var(--interactive-border)] bg-[var(--surface-elevated)] overflow-hidden flex flex-col"
-          style={{ height: `${instructionsEditorHeight}px` }}
-        >
-          <div className="flex-1 min-h-0">
-            <React.Suspense
-              fallback={(
-                <Textarea
-                  value={instructions}
-                  onChange={(e) => setInstructions(e.target.value)}
-                  placeholder="Step-by-step instructions, guidelines, or reference content..."
-                  rows={12}
-                  className="h-full border-0 rounded-none font-mono typography-meta resize-none"
-                />
+        {/* Header */}
+        <div className="mb-4">
+          <div className="min-w-0">
+            <h2 className="typography-ui-header font-semibold text-foreground truncate flex items-center gap-2">
+              {isNewSkill ? 'New Skill' : selectedSkillName}
+              {selectedSkill?.source === 'claude' && (
+                <span className="typography-micro font-normal bg-[var(--surface-muted)] text-muted-foreground px-1.5 py-0.5 rounded">
+                  Claude-compatible
+                </span>
               )}
-            >
-              <LazyCodeMirrorEditor
-                value={instructions}
-                onChange={setInstructions}
-                extensions={instructionsEditorExtensions}
-                className="h-full"
-              />
-            </React.Suspense>
-          </div>
-          <div
-            role="separator"
-            aria-label="Resize instructions editor"
-            onMouseDown={handleStartInstructionsResize}
-            className="absolute right-1.5 bottom-1.5 z-10 h-4 w-4 cursor-nwse-resize opacity-80 hover:opacity-100"
-          >
-            <svg viewBox="0 0 16 16" className="h-4 w-4 text-[var(--surface-muted-foreground)]" aria-hidden="true">
-              <path d="M6 14L14 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-              <path d="M10 14L14 10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-              <path d="M2 14L14 2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-            </svg>
-          </div>
-        </div>
-      </div>
-
-      {/* Supporting Files */}
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <div className="space-y-1">
-            <h2 className="typography-h2 font-semibold text-foreground">Supporting Files</h2>
-            <p className="typography-meta text-muted-foreground/80">
-              Reference documentation, scripts, or templates
+            </h2>
+            <p className="typography-meta text-muted-foreground truncate">
+              {selectedSkill ? `${locationLabel(selectedSkill.scope, selectedSkill.source)} skill` : 'Configure a new skill'}
             </p>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleAddFile}
-            className="gap-1.5"
-          >
-            <RiAddLine className="h-3.5 w-3.5" />
-            Add File
-          </Button>
         </div>
 
-        {(() => {
-          // For new skills, show pending files
-          const filesToShow = isNewSkill ? pendingFiles : supportingFiles;
-          
-          if (filesToShow.length === 0) {
-            return (
-              <p className="typography-meta text-muted-foreground py-2">
-                {isNewSkill ? 'No files yet. Use "Add File" to include reference materials.' : 'No supporting files. Use "Add File" to include reference materials.'}
-              </p>
-            );
-          }
-          
-          return (
-            <div className="space-y-2">
-              {filesToShow.map((file) => (
-                <div
-                  key={file.path}
-                  className="flex items-center justify-between px-3 py-2 rounded-lg border bg-muted/30 hover:bg-interactive-hover cursor-pointer transition-colors"
-                  onClick={() => handleEditFile(file.path)}
-                >
-                  <div className="flex items-center gap-2 min-w-0">
-                    <RiFileLine className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                    <span className="typography-ui-label truncate">{file.path}</span>
-                    {isNewSkill && (
-                      <span className="typography-micro text-muted-foreground bg-muted px-1 rounded flex-shrink-0 leading-none pb-px border border-border/50">
-                        pending
-                      </span>
-                    )}
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDeleteFile(file.path);
+        {/* Basic Information */}
+        <div className="mb-8">
+          <div className="mb-1 px-1">
+            <h3 className="typography-ui-header font-medium text-foreground">
+              Basic Information
+            </h3>
+          </div>
+
+          <section className="px-2 pb-2 pt-0 space-y-0">
+
+            {isNewSkill && (
+              <div className="py-1.5">
+                <span className="typography-ui-label text-foreground">Skill Name & Location</span>
+                <span className="typography-meta text-muted-foreground ml-2">Lowercase, numbers, hyphens</span>
+                <div className="flex items-center gap-2 mt-1.5">
+                  <Input
+                    value={draftName}
+                    onChange={(e) => setDraftName(e.target.value.toLowerCase().replace(/\s+/g, '-'))}
+                    placeholder="skill-name"
+                    className="h-7 w-40 px-2"
+                  />
+                  <Select
+                    value={locationValueFrom(draftScope, draftSource)}
+                    onValueChange={(v) => {
+                      const next = locationPartsFrom(v as SkillLocationValue);
+                      setDraftScope(next.scope);
+                      setDraftSource(next.source === 'agents' ? 'agents' : 'opencode');
                     }}
                   >
-                    <RiDeleteBinLine className="h-3.5 w-3.5" />
-                  </Button>
+                    <SelectTrigger className="w-fit gap-1.5">
+                      {draftScope === 'user' ? (
+                        <RiUser3Line className="h-3.5 w-3.5" />
+                      ) : (
+                        <RiFolderLine className="h-3.5 w-3.5" />
+                      )}
+                      {draftSource === 'agents' ? <RiRobot2Line className="h-3.5 w-3.5" /> : null}
+                      <span>{locationLabel(draftScope, draftSource)}</span>
+                    </SelectTrigger>
+                    <SelectContent align="start">
+                      {SKILL_LOCATION_OPTIONS.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          <div className="flex flex-col gap-0.5">
+                            <div className="flex items-center gap-2">
+                              {option.scope === 'user' ? <RiUser3Line className="h-3.5 w-3.5" /> : <RiFolderLine className="h-3.5 w-3.5" />}
+                              {option.source === 'agents' ? <RiRobot2Line className="h-3.5 w-3.5" /> : null}
+                              <span>{option.label}</span>
+                            </div>
+                            <span className="typography-micro text-muted-foreground ml-6">{option.description}</span>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
-              ))}
-            </div>
-          );
-        })()}
-      </div>
+              </div>
+            )}
 
-      {/* Save Button */}
-      <div className="flex justify-end border-t border-border/40 pt-4">
-        <Button
-          size="sm"
-          variant="default"
-          onClick={handleSave}
-          disabled={isSaving || !hasSkillChanges}
-          className="gap-2 h-6 px-2 text-xs w-fit"
-        >
-          <RiSaveLine className="h-3 w-3" />
-          {isSaving ? 'Saving...' : isNewSkill ? 'Create Skill' : 'Save Changes'}
-        </Button>
+            <div className="py-1.5">
+              <span className="typography-ui-label text-foreground">Description <span className="text-[var(--status-error)]">*</span></span>
+              <span className="typography-meta text-muted-foreground ml-2">The agent uses this to decide when to load the skill</span>
+              <div className="mt-1.5">
+                <Textarea
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="Brief description of what this skill does..."
+                  rows={2}
+                  className="w-full resize-none min-h-[60px] max-h-32 bg-transparent"
+                />
+              </div>
+            </div>
+
+          </section>
+        </div>
+
+        {/* Instructions */}
+        <div className="mb-8">
+          <div className="mb-1 px-1">
+            <h3 className="typography-ui-header font-medium text-foreground">
+              Instructions
+            </h3>
+          </div>
+
+          <section className="px-2 pb-2 pt-0">
+            <Textarea
+              value={instructions}
+              onChange={(e) => setInstructions(e.target.value)}
+              placeholder="Step-by-step instructions, guidelines, or reference content..."
+              className="min-h-[220px] max-h-[60vh] font-mono typography-meta"
+            />
+          </section>
+        </div>
+
+        {/* Supporting Files */}
+        <div className="mb-2">
+          <div className="mb-1 px-1 flex items-center gap-2">
+            <h3 className="typography-ui-header font-medium text-foreground">
+              Supporting Files
+            </h3>
+            <ButtonSmall variant="outline" size="xs" className="!font-normal gap-1" onClick={handleAddFile}>
+              <RiAddLine className="h-3.5 w-3.5" /> Add File
+            </ButtonSmall>
+          </div>
+
+          <section className="px-2 pb-2 pt-0">
+            {(() => {
+              const filesToShow = isNewSkill ? pendingFiles : supportingFiles;
+
+              if (filesToShow.length === 0) {
+                return (
+                  <p className="typography-meta text-muted-foreground py-1.5">
+                    No supporting files. Use "Add File" to include reference materials.
+                  </p>
+                );
+              }
+
+              return (
+                <div className="divide-y divide-[var(--surface-subtle)]">
+                  {filesToShow.map((file) => (
+                    <div
+                      key={file.path}
+                      className="flex items-center gap-2 py-1.5 cursor-pointer group"
+                      onClick={() => handleEditFile(file.path)}
+                    >
+                      <RiFileLine className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                      <span className="typography-ui-label text-foreground truncate">{file.path}</span>
+                      {isNewSkill && (
+                        <span className="typography-micro text-[var(--status-warning)] bg-[var(--status-warning)]/10 px-1.5 py-0.5 rounded flex-shrink-0">
+                          pending
+                        </span>
+                      )}
+                      <ButtonSmall
+                        variant="ghost"
+                        className="h-5 w-5 px-0 flex-shrink-0 text-muted-foreground hover:text-[var(--status-error)] opacity-0 group-hover:opacity-100 transition-opacity"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteFile(file.path);
+                        }}
+                      >
+                        <RiDeleteBinLine className="h-3 w-3" />
+                      </ButtonSmall>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+          </section>
+        </div>
+
+        {/* Save action */}
+        <div className="px-2 py-1">
+          <ButtonSmall
+            onClick={handleSave}
+            disabled={isSaving || !hasSkillChanges}
+            size="xs"
+            className="!font-normal"
+          >
+            {isSaving ? 'Saving...' : isNewSkill ? 'Create Skill' : 'Save Changes'}
+          </ButtonSmall>
+        </div>
+
       </div>
 
       {/* Add/Edit File Dialog */}
@@ -711,15 +540,14 @@ export const SkillsPage: React.FC = () => {
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button
+            <ButtonLarge
               variant="ghost"
               onClick={() => setDeleteFilePath(null)}
               disabled={isDeletingFile}
-              className="text-foreground hover:bg-interactive-hover hover:text-foreground"
             >
               Cancel
-            </Button>
-            <ButtonLarge onClick={handleConfirmDeleteFile} disabled={isDeletingFile}>
+            </ButtonLarge>
+            <ButtonLarge onClick={handleConfirmDeleteFile} disabled={isDeletingFile} className="bg-[var(--status-error)] hover:bg-[var(--status-error)]/90 text-white border-0">
               Delete
             </ButtonLarge>
           </DialogFooter>
@@ -730,7 +558,7 @@ export const SkillsPage: React.FC = () => {
         setIsFileDialogOpen(open);
         if (!open) setEditingFilePath(null);
       }}>
-        <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col" keyboardAvoid>
+        <DialogContent className="max-w-3xl max-h-[85vh] flex flex-col" keyboardAvoid>
           <DialogHeader className="flex-shrink-0">
             <DialogTitle>{editingFilePath ? 'Edit Supporting File' : 'Add Supporting File'}</DialogTitle>
             <DialogDescription>
@@ -742,7 +570,7 @@ export const SkillsPage: React.FC = () => {
               <span className="typography-meta text-muted-foreground">Loading file content...</span>
             </div>
           ) : (
-            <div className="space-y-4 flex-1 min-h-0 flex flex-col">
+            <div className="space-y-4 flex-1 min-h-0 flex flex-col pt-2">
               <div className="space-y-2 flex-shrink-0">
                 <label className="typography-ui-label font-medium text-foreground">
                   File Path
@@ -751,7 +579,7 @@ export const SkillsPage: React.FC = () => {
                   value={newFileName}
                   onChange={(e) => setNewFileName(e.target.value)}
                   placeholder="example.md or docs/reference.txt"
-                  className="text-foreground placeholder:text-muted-foreground"
+                  className="text-foreground placeholder:text-muted-foreground focus-visible:ring-[var(--primary-base)]"
                   disabled={editingFilePath !== null}
                 />
                 {!editingFilePath && (
@@ -764,46 +592,36 @@ export const SkillsPage: React.FC = () => {
                 <label className="typography-ui-label font-medium text-foreground flex-shrink-0">
                   Content
                 </label>
-                <div className="h-[45vh] min-h-[220px] max-h-[55vh] rounded-md border border-[var(--interactive-border)] bg-[var(--surface-elevated)] overflow-hidden">
-                  <React.Suspense
-                    fallback={(
-                      <Textarea
-                        value={newFileContent}
-                        onChange={(e) => setNewFileContent(e.target.value)}
-                        placeholder="File content..."
-                        className="h-full border-0 rounded-none font-mono typography-meta resize-none"
-                      />
-                    )}
-                  >
-                    <LazyCodeMirrorEditor
-                      value={newFileContent}
-                      onChange={setNewFileContent}
-                      extensions={supportingFileEditorExtensions}
-                      className="h-full"
-                    />
-                  </React.Suspense>
-                </div>
+                <Textarea
+                  value={newFileContent}
+                  onChange={(e) => setNewFileContent(e.target.value)}
+                  placeholder="File content..."
+                  outerClassName="h-[45vh] min-h-[250px] max-h-[55vh]"
+                  className="h-full min-h-0 font-mono typography-meta"
+                />
               </div>
             </div>
           )}
-          <DialogFooter>
-            <Button
+          <DialogFooter className="mt-4">
+            <ButtonLarge
               variant="ghost"
               onClick={() => {
                 setIsFileDialogOpen(false);
                 setEditingFilePath(null);
               }}
-              className="text-foreground hover:bg-interactive-hover hover:text-foreground"
             >
               Cancel
-            </Button>
+            </ButtonLarge>
             <ButtonLarge onClick={handleSaveFile} disabled={isLoadingFile || !hasFileChanges}>
               {editingFilePath ? 'Save Changes' : 'Create File'}
             </ButtonLarge>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      </div>
     </ScrollableOverlay>
   );
+};
+
+export const SkillsPage: React.FC<SkillsPageProps> = ({ view = 'installed' }) => {
+  return view === 'catalog' ? <SkillsCatalogStandalone /> : <SkillsInstalledPage />;
 };

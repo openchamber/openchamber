@@ -13,20 +13,16 @@ declare global {
 
 window.__OPENCHAMBER_RUNTIME_APIS__ = createWebAPIs();
 
-registerSW({
-  onRegistered(registration: ServiceWorkerRegistration | undefined) {
-    if (!registration) {
-      return;
-    }
-
-    // Periodic update check (best-effort)
-    setInterval(() => {
-      void registration.update();
-    }, 60 * 60 * 1000);
-  },
-  onRegisterError(error: unknown) {
-    console.warn('[PWA] service worker registration failed:', error);
-  },
-});
+if (import.meta.env.PROD) {
+  registerSW({
+    onRegisterError(error: unknown) {
+      console.warn('[PWA] service worker registration failed:', error);
+    },
+  });
+} else if ('serviceWorker' in navigator) {
+  void navigator.serviceWorker.getRegistrations()
+    .then((registrations) => Promise.all(registrations.map((registration) => registration.unregister())))
+    .catch(() => {});
+}
 
 import('@openchamber/ui/main');

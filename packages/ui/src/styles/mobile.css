@@ -126,6 +126,7 @@
     user-select: text;
   }
 
+
   /* Allow system context menu only when explicitly requested via the "More" button */
   :root.mobile-pointer:not(.desktop-runtime) .message-content-text.show-system-menu {
     -webkit-touch-callout: default;
@@ -146,6 +147,13 @@
   :root.mobile-pointer:not(.desktop-runtime) .overflow-hidden {
     overflow-x: hidden !important;
     overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Keep Streamdown code blocks horizontally scrollable on mobile. */
+  :root.mobile-pointer:not(.desktop-runtime) .streamdown-content [data-streamdown="code-block-body"] {
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
     -webkit-overflow-scrolling: touch;
   }
 
@@ -271,6 +279,12 @@
     /* Safe area for bottom fixed/bottom-0 elements */
     .bottom-safe-area {
       padding-bottom: var(--oc-safe-area-bottom-visual) !important;
+    }
+
+    /* Drawer safe area - only top/bottom padding, no positioning */
+    .drawer-safe-area {
+      padding-top: var(--oc-safe-area-top);
+      padding-bottom: var(--oc-safe-area-bottom-visual);
     }
 
     /* iOS keyboard home indicator safe area - used when keyboard is open */

@@ -45,7 +45,8 @@ export const triggerSessionStatusPoll = () => {
  * Architecture: server maintains authoritative state, client applies snapshots.
  * SSE remains the primary transport; snapshots repair missed updates.
  */
-export function useServerSessionStatus() {
+export function useServerSessionStatus(options?: { enabled?: boolean }) {
+  const enabled = options?.enabled ?? true;
   const isSyncingRef = React.useRef(false);
   const hasPendingImmediateSyncRef = React.useRef(false);
   const lastSyncAtRef = React.useRef(0);
@@ -78,6 +79,10 @@ export function useServerSessionStatus() {
           headers: { Accept: 'application/json' },
         }).then(async (r) => {
           if (!r.ok) {
+            console.warn('[useServerSessionStatus] API returned', r.status);
+            if (r.status === 401) {
+              console.warn('[useServerSessionStatus] Authentication required - session may have expired');
+            }
             throw new Error(String(r.status));
           }
           return (await r.json()) as ServerSnapshotResponse;
@@ -256,6 +261,10 @@ export function useServerSessionStatus() {
 
   // Initial snapshot sync on mount
   React.useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+
     void fetchSessionStatus(true);
 
     return () => {
@@ -266,10 +275,14 @@ export function useServerSessionStatus() {
         clearTimeout(followUpTimeoutRef.current);
       }
     };
-  }, [fetchSessionStatus]);
+  }, [enabled, fetchSessionStatus]);
 
   // Sync snapshot when tab becomes visible
   React.useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         triggerImmediatePoll();
@@ -280,15 +293,20 @@ export function useServerSessionStatus() {
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [triggerImmediatePoll]);
+  }, [enabled, triggerImmediatePoll]);
 
   // Update the ref for external access
   React.useEffect(() => {
+    if (!enabled) {
+      triggerImmediatePollRef = null;
+      return;
+    }
+
     triggerImmediatePollRef = triggerImmediatePoll;
     return () => {
       triggerImmediatePollRef = null;
     };
-  }, [triggerImmediatePoll]);
+  }, [enabled, triggerImmediatePoll]);
 
   return {
     fetchSessionStatus,

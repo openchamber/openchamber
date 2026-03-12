@@ -33,7 +33,6 @@
   height: var(--particle-size, 6px);
   border-radius: 999px;
   background: var(--firework-color, var(--status-success));
-  box-shadow: 0 0 12px rgba(255, 255, 255, 0.25);
   opacity: 0;
   transform: translate(-50%, -50%) scale(0.4);
   animation: firework-pop var(--firework-duration, var(--fireworks-duration-ms)) ease-out forwards;

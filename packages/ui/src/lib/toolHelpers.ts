@@ -186,6 +186,20 @@ export const TOOL_METADATA: Record<string, ToolMetadata> = {
       category: 'ai',
       outputLanguage: 'text',
       inputFields: []
+    },
+
+    StructuredOutput: {
+      displayName: 'Structured Output',
+      category: 'ai',
+      outputLanguage: 'json',
+      inputFields: []
+    },
+
+    structuredoutput: {
+      displayName: 'Structured Output',
+      category: 'ai',
+      outputLanguage: 'json',
+      inputFields: []
     }
   };
 

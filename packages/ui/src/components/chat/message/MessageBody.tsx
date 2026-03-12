@@ -14,7 +14,7 @@ import { isEmptyTextPart, extractTextContent } from './partUtils';
 import { FadeInOnReveal } from './FadeInOnReveal';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { RiCheckLine, RiFileCopyLine, RiChatNewLine, RiArrowGoBackLine, RiGitBranchLine, RiHourglassLine, RiVolumeUpLine, RiStopLine } from '@remixicon/react';
+import { RiCheckLine, RiFileCopyLine, RiChatNewLine, RiArrowGoBackLine, RiGitBranchLine, RiHourglassLine, RiTimeLine, RiVolumeUpLine, RiStopLine, RiImageDownloadLine, RiLoader4Line } from '@remixicon/react';
 import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
 import type { ContentChangeReason } from '@/hooks/useChatScrollManager';
 
@@ -28,6 +28,10 @@ import { useMessageTTS } from '@/hooks/useMessageTTS';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { TextSelectionMenu } from './TextSelectionMenu';
 import { copyTextToClipboard } from '@/lib/clipboard';
+import { isVSCodeRuntime } from '@/lib/desktop';
+import { toPng } from 'html-to-image';
+import { toast } from '@/components/ui';
+import { formatTimestampForDisplay } from './timeFormat';
 
 type SubtaskPartLike = Part & {
     type: 'subtask';
@@ -257,6 +261,7 @@ interface MessageBodyProps {
     isMessageCompleted: boolean;
     messageFinish?: string;
     messageCompletedAt?: number;
+    messageCreatedAt?: number;
 
     syntaxTheme: { [key: string]: React.CSSProperties };
 
@@ -282,6 +287,8 @@ interface MessageBodyProps {
     onRevert?: () => void;
     onFork?: () => void;
     errorMessage?: string;
+    userActionsMode?: 'inline' | 'external-content' | 'external-actions';
+    stickyUserHeaderEnabled?: boolean;
 }
 
 const UserMessageBody: React.FC<{
@@ -296,7 +303,9 @@ const UserMessageBody: React.FC<{
     agentMention?: AgentMentionInfo;
     onRevert?: () => void;
     onFork?: () => void;
-}> = ({ messageId, parts, isMobile, hasTouchInput, hasTextContent, onCopyMessage, copiedMessage, onShowPopup, agentMention, onRevert, onFork }) => {
+    userActionsMode?: 'inline' | 'external-content' | 'external-actions';
+    stickyUserHeaderEnabled?: boolean;
+}> = ({ messageId, parts, isMobile, hasTouchInput, hasTextContent, onCopyMessage, copiedMessage, onShowPopup, agentMention, onRevert, onFork, userActionsMode = 'inline', stickyUserHeaderEnabled = true }) => {
     const [copyHintVisible, setCopyHintVisible] = React.useState(false);
     const copyHintTimeoutRef = React.useRef<number | null>(null);
 
@@ -322,6 +331,9 @@ const UserMessageBody: React.FC<{
     const isMessageCopied = Boolean(copiedMessage);
     const isTouchContext = Boolean(hasTouchInput ?? isMobile);
     const hasCopyableText = Boolean(hasTextContent);
+    const showUserContent = userActionsMode !== 'external-actions';
+    const showUserActions = userActionsMode !== 'external-content';
+    const useStickyScrollableUserContent = stickyUserHeaderEnabled && userActionsMode === 'inline';
 
     const clearCopyHintTimeout = React.useCallback(() => {
         if (copyHintTimeoutRef.current !== null && typeof window !== 'undefined') {
@@ -367,13 +379,128 @@ const UserMessageBody: React.FC<{
         [hasCopyableText, isTouchContext, onCopyMessage, revealCopyHint]
     );
 
+    const actionsBlock = ((canCopyMessage && hasCopyableText) || onRevert || onFork) && showUserActions ? (
+        <div className={cn(
+            'group/user-actions',
+            isMobile
+                ? userActionsMode === 'inline'
+                    ? 'flex items-center justify-end pt-2 pb-3'
+                    : stickyUserHeaderEnabled
+                        ? 'flex h-9 items-start justify-end pt-0'
+                        : 'flex h-11 items-start justify-end pt-0'
+                : userActionsMode === 'inline'
+                    ? 'absolute top-full left-0 right-0 z-10 pt-5'
+                    : 'flex h-8 items-start justify-end pt-2'
+        )}>
+            <div
+                className={cn(
+                    'flex items-center justify-end gap-1',
+                    isMobile
+                        ? userActionsMode === 'inline'
+                            ? 'translate-x-5'
+                            : 'translate-x-0'
+                        : userActionsMode === 'inline'
+                            ? 'translate-x-5'
+                            : 'translate-x-0',
+                    isMobile
+                        ? 'pointer-events-auto opacity-100'
+                        : 'pointer-events-none opacity-0 transition-opacity duration-150 group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-hover/user-actions:pointer-events-auto group-hover/user-actions:opacity-100 group-hover/user-shell:pointer-events-auto group-hover/user-shell:opacity-100'
+                )}
+            >
+                {onRevert && (
+                    <Tooltip delayDuration={1000}>
+                        <TooltipTrigger asChild>
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-primary/50"
+                                aria-label="Revert to this message"
+                                onPointerDown={(event) => event.stopPropagation()}
+                                onClick={(event) => {
+                                    event.stopPropagation();
+                                    onRevert();
+                                }}
+                            >
+                                <RiArrowGoBackLine className="h-3 w-3" />
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent sideOffset={6}>Revert from here</TooltipContent>
+                    </Tooltip>
+                )}
+                {onFork && (
+                    <Tooltip delayDuration={1000}>
+                        <TooltipTrigger asChild>
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-primary/50"
+                                aria-label="Fork from this message"
+                                onPointerDown={(event) => event.stopPropagation()}
+                                onClick={(event) => {
+                                    event.stopPropagation();
+                                    onFork();
+                                }}
+                            >
+                                <RiGitBranchLine className="h-3 w-3" />
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent sideOffset={6}>Fork from here</TooltipContent>
+                    </Tooltip>
+                )}
+                {canCopyMessage && hasCopyableText && (
+                    <Tooltip delayDuration={1000}>
+                        <TooltipTrigger asChild>
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                data-visible={copyHintVisible || isMessageCopied ? 'true' : undefined}
+                                className="h-6 w-6 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-primary/50"
+                                aria-label="Copy message text"
+                                onPointerDown={(event) => event.stopPropagation()}
+                                onClick={handleCopyButtonClick}
+                                onFocus={() => setCopyHintVisible(true)}
+                                onBlur={() => {
+                                    if (!isMessageCopied) {
+                                        setCopyHintVisible(false);
+                                    }
+                                }}
+                            >
+                                {isMessageCopied ? (
+                                    <RiCheckLine className="h-3 w-3 text-[color:var(--status-success)]" />
+                                ) : (
+                                    <RiFileCopyLine className="h-3 w-3" />
+                                )}
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent sideOffset={6}>Copy message</TooltipContent>
+                    </Tooltip>
+                )}
+            </div>
+        </div>
+    ) : null;
+
+    if (!showUserContent) {
+        return <>{actionsBlock}</>;
+    }
+
     return (
         <div
             className="relative w-full group/message"
             style={{ contain: 'layout', transform: 'translateZ(0)' }}
             onTouchStart={isTouchContext && canCopyMessage && hasCopyableText ? revealCopyHint : undefined}
         >
-            <div className="leading-relaxed overflow-hidden text-foreground/90 text-base">
+            <div
+                className={cn(
+                    'leading-relaxed text-foreground/90 text-base overflow-x-hidden',
+                    useStickyScrollableUserContent
+                        ? 'overflow-y-auto overscroll-contain scrollbar-none'
+                        : 'overflow-y-hidden'
+                )}
+                style={useStickyScrollableUserContent ? { maxHeight: 'calc(var(--chat-scroll-height, 100dvh) * 0.4)' } : undefined}
+            >
                 {userContentParts.map((part, index) => {
                     if (isSubtaskPart(part)) {
                         return (
@@ -412,92 +539,7 @@ const UserMessageBody: React.FC<{
                 })}
             </div>
             <MessageFilesDisplay files={parts} onShowPopup={onShowPopup} compact />
-            {(canCopyMessage && hasCopyableText) || onRevert || onFork ? (
-                <div className={cn(
-                    "absolute top-full left-0 right-0 z-10 group/user-actions",
-                    isMobile ? "pt-2 pb-3" : "pt-5"
-                )}>
-                    <div
-                        className={cn(
-                            "flex translate-x-5 items-center justify-end gap-1",
-                            isMobile
-                                ? "pointer-events-auto opacity-100"
-                                : "pointer-events-none opacity-0 transition-opacity duration-150 group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-hover/user-actions:pointer-events-auto group-hover/user-actions:opacity-100"
-                        )}
-                    >
-                    {onRevert && (
-                        <Tooltip delayDuration={1000}>
-                            <TooltipTrigger asChild>
-                                <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-6 w-6 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-primary/50"
-                                    aria-label="Revert to this message"
-                                    onPointerDown={(event) => event.stopPropagation()}
-                                    onClick={(event) => {
-                                        event.stopPropagation();
-                                        onRevert();
-                                    }}
-                                >
-                                    <RiArrowGoBackLine className="h-3 w-3" />
-                                </Button>
-                            </TooltipTrigger>
-                            <TooltipContent sideOffset={6}>Revert from here</TooltipContent>
-                        </Tooltip>
-                    )}
-                    {onFork && (
-                        <Tooltip delayDuration={1000}>
-                            <TooltipTrigger asChild>
-                                <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-6 w-6 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-primary/50"
-                                    onPointerDown={(event) => event.stopPropagation()}
-                                    onClick={(event) => {
-                                        event.stopPropagation();
-                                        onFork();
-                                    }}
-                                >
-                                    <RiGitBranchLine className="h-3 w-3" />
-                                </Button>
-                            </TooltipTrigger>
-                            <TooltipContent sideOffset={6}>Fork from here</TooltipContent>
-                        </Tooltip>
-                    )}
-                    {canCopyMessage && hasCopyableText && (
-                        <Tooltip delayDuration={1000}>
-                            <TooltipTrigger asChild>
-                                <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="icon"
-                                    data-visible={copyHintVisible || isMessageCopied ? 'true' : undefined}
-                                    className="h-6 w-6 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-primary/50"
-                                    aria-label="Copy message text"
-                                    onPointerDown={(event) => event.stopPropagation()}
-                                    onClick={handleCopyButtonClick}
-                                    onFocus={() => setCopyHintVisible(true)}
-                                    onBlur={() => {
-                                        if (!isMessageCopied) {
-                                            setCopyHintVisible(false);
-                                        }
-                                    }}
-                                >
-                                    {isMessageCopied ? (
-                                        <RiCheckLine className="h-3 w-3 text-[color:var(--status-success)]" />
-                                    ) : (
-                                        <RiFileCopyLine className="h-3 w-3" />
-                                    )}
-                                </Button>
-                            </TooltipTrigger>
-                            <TooltipContent sideOffset={6}>Copy message</TooltipContent>
-                        </Tooltip>
-                    )}
-                    </div>
-                </div>
-            ) : null}
+            {actionsBlock}
         </div>
     );
 };
@@ -508,6 +550,7 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
     isMessageCompleted,
     messageFinish,
     messageCompletedAt,
+    messageCreatedAt,
 
     syntaxTheme,
     isMobile,
@@ -584,6 +627,12 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
         });
     }, [toolParts]);
 
+    const isActiveTool = React.useCallback((toolPart: ToolPartType): boolean => {
+        const state = (toolPart as Record<string, unknown>).state as Record<string, unknown> | undefined ?? {};
+        const status = state?.status;
+        return status === 'pending' || status === 'running' || status === 'started';
+    }, []);
+
     const isToolFinalized = React.useCallback((toolPart: ToolPartType) => {
         const state = (toolPart as Record<string, unknown>).state as Record<string, unknown> | undefined ?? {};
         const status = state?.status;
@@ -601,6 +650,10 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
         }
         return true;
     }, []);
+
+    const shouldShowTool = React.useCallback((toolPart: ToolPartType): boolean => {
+        return isActiveTool(toolPart) || isToolFinalized(toolPart);
+    }, [isActiveTool, isToolFinalized]);
 
     const allToolsFinalized = React.useMemo(() => {
         if (toolParts.length === 0) {
@@ -776,6 +829,119 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
         [assistantTextParts, isTTSPlaying, playTTS, stopTTS]
     );
 
+    const [isSharing, setIsSharing] = React.useState(false);
+
+    const handleShareImage = React.useCallback(
+        async (event: React.MouseEvent<HTMLButtonElement>) => {
+            event.stopPropagation();
+            event.preventDefault();
+
+            if (!messageContentRef.current || isSharing) return;
+
+            setIsSharing(true);
+            let wrapper: HTMLDivElement | null = null;
+            try {
+                const originalElement = messageContentRef.current;
+                const computedStyle = window.getComputedStyle(originalElement);
+                const rootStyle = window.getComputedStyle(document.documentElement);
+                const resolvedBackgroundColor =
+                    rootStyle.getPropertyValue('--surface-background').trim() ||
+                    computedStyle.backgroundColor ||
+                    window.getComputedStyle(document.body).backgroundColor;
+                const paddingSize = 24;
+
+                wrapper = document.createElement('div');
+                wrapper.style.cssText = `
+                    padding: ${paddingSize}px;
+                    background-color: ${resolvedBackgroundColor};
+                    display: inline-block;
+                `;
+
+                const clone = originalElement.cloneNode(true) as HTMLElement;
+                clone.style.cssText = `
+                    ${computedStyle.cssText}
+                    transform: none;
+                    contain: none;
+                `;
+
+                const timestampElements = clone.querySelectorAll<HTMLElement>('[aria-label^="Message time:"]');
+                const footerRowsAdjusted = new Set<HTMLElement>();
+                timestampElements.forEach((element) => {
+                    const label = element.getAttribute('aria-label');
+                    const timestamp = label?.replace('Message time:', '').trim();
+                    if (!timestamp || element.textContent?.includes(timestamp)) {
+                        return;
+                    }
+
+                    const timestampText = document.createElement('span');
+                    timestampText.style.marginLeft = '4px';
+                    timestampText.textContent = timestamp;
+                    element.appendChild(timestampText);
+
+                    const metaGroup = element.parentElement;
+                    const footerRow = metaGroup?.parentElement as HTMLElement | null;
+                    const actionsGroup = footerRow?.firstElementChild as HTMLElement | null;
+                    if (!footerRow || !actionsGroup || actionsGroup === metaGroup || footerRowsAdjusted.has(footerRow)) {
+                        return;
+                    }
+
+                    actionsGroup.style.display = 'none';
+                    footerRow.style.justifyContent = 'flex-start';
+                    footerRowsAdjusted.add(footerRow);
+                });
+
+                wrapper.appendChild(clone);
+                document.body.appendChild(wrapper);
+
+                const dataUrl = await toPng(wrapper, {
+                    quality: 1,
+                    pixelRatio: 2,
+                    backgroundColor: resolvedBackgroundColor,
+                });
+
+                const fileName = `message-${messageId}.png`;
+
+                if (isVSCodeRuntime()) {
+                    const response = await fetch('/api/vscode/save-image', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ fileName, dataUrl }),
+                    });
+
+                    if (!response.ok) {
+                        throw new Error('Failed to save image in VS Code');
+                    }
+
+                    const payload = await response.json() as { saved?: boolean; canceled?: boolean; error?: string };
+                    if (payload.saved !== true) {
+                        if (payload.canceled) {
+                            return;
+                        }
+                        throw new Error(payload.error || 'Failed to save image in VS Code');
+                    }
+                } else {
+                    const link = document.createElement('a');
+                    link.download = fileName;
+                    link.href = dataUrl;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                }
+
+                toast.success('Image saved');
+            } catch (error) {
+                console.error('Failed to generate image:', error);
+                toast.error('Failed to generate image');
+            } finally {
+                if (wrapper && wrapper.parentNode) {
+                    wrapper.parentNode.removeChild(wrapper);
+                }
+                setIsSharing(false);
+            }
+        },
+        [messageId, isSharing]
+    );
+
     React.useEffect(() => {
         return () => {
             clearCopyHintTimeout();
@@ -788,10 +954,7 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
             if (isActivityStandaloneTool(toolPart.tool)) {
                 return false;
             }
-            if (shouldHoldTools) {
-                return false;
-            }
-            return isToolFinalized(toolPart);
+            return shouldShowTool(toolPart);
         });
 
         displayableTools.forEach((toolPart, index) => {
@@ -802,7 +965,7 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
         });
 
         return connections;
-    }, [toolParts, shouldHoldTools, isToolFinalized]);
+    }, [toolParts, shouldShowTool]);
 
     const activityPartsForTurn = React.useMemo(() => {
         return turnGroupingContext?.activityParts ?? [];
@@ -940,6 +1103,7 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
                         syntaxTheme={syntaxTheme}
                         isMobile={isMobile}
                         onContentChange={onContentChange}
+                        onShowPopup={onShowPopup}
                         hasPrevTool={false}
                         hasNextTool={false}
                     />
@@ -969,22 +1133,21 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
             let endTime: number | null = null;
             let element: React.ReactNode | null = null;
 
-            if (!shouldShowActivityGroup) {
-                if (activity.kind === 'tool') {
-                    const toolPart = part as ToolPartType;
+                if (!shouldShowActivityGroup) {
+                    if (activity.kind === 'tool') {
+                        const toolPart = part as ToolPartType;
 
-                    if (isActivityStandaloneTool(toolPart.tool)) {
-                        return;
-                    }
+                        if (isActivityStandaloneTool(toolPart.tool)) {
+                            return;
+                        }
 
-                    const toolState = (toolPart as { state?: { time?: { end?: number | null | undefined } | null | undefined } | null | undefined }).state;
-                    const time = toolState?.time;
-                    const isFinalized = isToolFinalized(toolPart);
-                    const shouldShowTool = !shouldHoldTools && isFinalized;
+                        const toolState = (toolPart as { state?: { time?: { end?: number | null | undefined } | null | undefined } | null | undefined }).state;
+                        const time = toolState?.time;
+                        const isFinalized = isToolFinalized(toolPart);
 
-                    if (!shouldShowTool) {
-                        return;
-                    }
+                        if (!shouldShowTool(toolPart)) {
+                            return;
+                        }
 
                     const connection = toolConnections[toolPart.id];
 
@@ -997,6 +1160,7 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
                                 syntaxTheme={syntaxTheme}
                                 isMobile={isMobile}
                                 onContentChange={onContentChange}
+                                onShowPopup={onShowPopup}
                                 hasPrevTool={connection?.hasPrev ?? false}
                                 hasNextTool={connection?.hasNext ?? false}
                             />
@@ -1063,7 +1227,7 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
         onContentChange,
         onShowPopup,
         onToggleTool,
-        shouldHoldTools,
+        shouldShowTool,
         shouldShowActivityGroup,
         showReasoningTraces,
         syntaxTheme,
@@ -1121,6 +1285,18 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
         return formatTurnDuration(messageCompletedAt - userCreatedAt);
     }, [isLastAssistantInTurn, hasStopFinish, turnGroupingContext?.userMessageCreatedAt, messageCompletedAt]);
 
+    const footerTimestamp = React.useMemo(() => {
+        const timestamp = typeof messageCompletedAt === 'number' && messageCompletedAt > 0
+            ? messageCompletedAt
+            : (typeof messageCreatedAt === 'number' && messageCreatedAt > 0 ? messageCreatedAt : null);
+        if (timestamp === null) return null;
+
+        const formatted = formatTimestampForDisplay(timestamp);
+        return formatted.length > 0 ? formatted : null;
+    }, [messageCompletedAt, messageCreatedAt]);
+
+    const footerTimestampClassName = 'text-sm text-muted-foreground/60 tabular-nums flex items-center gap-1';
+
     const footerButtons = (
          <>
               {onCopyMessage && (
@@ -1157,25 +1333,48 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
                                   <RiFileCopyLine className="h-3.5 w-3.5" />
                               )}
                           </Button>
-                      </TooltipTrigger>
-                      <TooltipContent sideOffset={6}>Copy answer</TooltipContent>
-                  </Tooltip>
-              )}
-              <Tooltip delayDuration={1000}>
-                  <TooltipTrigger asChild>
-                      <Button
-                          type="button"
-                          size="icon"
-                          variant="ghost"
-                          className="h-8 w-8 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-primary/50"
-                          onPointerDown={(event) => event.stopPropagation()}
-                          onClick={handleForkClick}
-                      >
-                          <RiChatNewLine className="h-4 w-4" />
-                      </Button>
-                  </TooltipTrigger>
-                  <TooltipContent sideOffset={6}>Start new session from this answer</TooltipContent>
-              </Tooltip>
+                       </TooltipTrigger>
+                       <TooltipContent sideOffset={6}>Copy answer</TooltipContent>
+                   </Tooltip>
+               )}
+               <Tooltip delayDuration={1000}>
+                   <TooltipTrigger asChild>
+                       <Button
+                           type="button"
+                           size="icon"
+                           variant="ghost"
+                           disabled={isSharing || !hasCopyableText}
+                           className={cn(
+                               'h-8 w-8 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-primary/50',
+                               (!hasCopyableText || isSharing) && 'opacity-50'
+                           )}
+                           onPointerDown={(event) => event.stopPropagation()}
+                           onClick={handleShareImage}
+                       >
+                            {isSharing ? (
+                                <RiLoader4Line className="h-4 w-4 animate-spin" />
+                            ) : (
+                                <RiImageDownloadLine className="h-4 w-4" />
+                            )}
+                        </Button>
+                    </TooltipTrigger>
+                    <TooltipContent sideOffset={6}>{isSharing ? 'Saving image...' : 'Save as image'}</TooltipContent>
+                </Tooltip>
+               <Tooltip delayDuration={1000}>
+                   <TooltipTrigger asChild>
+                       <Button
+                           type="button"
+                           size="icon"
+                           variant="ghost"
+                           className="h-8 w-8 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-primary/50"
+                           onPointerDown={(event) => event.stopPropagation()}
+                           onClick={handleForkClick}
+                       >
+                           <RiChatNewLine className="h-4 w-4" />
+                       </Button>
+                   </TooltipTrigger>
+                   <TooltipContent sideOffset={6}>Start new session from this answer</TooltipContent>
+               </Tooltip>
               <Tooltip delayDuration={1000}>
                   <TooltipTrigger asChild>
                       <Button
@@ -1242,7 +1441,7 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
                     {showErrorMessage && (
                         <FadeInOnReveal key="assistant-error">
                             <div className="group/assistant-text relative break-words">
-                                <SimpleMarkdownRenderer content={errorMessage ?? ''} />
+                                <SimpleMarkdownRenderer content={errorMessage ?? ''} onShowPopup={onShowPopup} />
                             </div>
                         </FadeInOnReveal>
                     )}
@@ -1251,18 +1450,29 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
                             <div
                                 className="group/assistant-text relative break-words"
                             >
-                                <SimpleMarkdownRenderer content={summaryBody} />
+                                <SimpleMarkdownRenderer content={summaryBody} onShowPopup={onShowPopup} />
                                 {shouldShowFooter && (
                                     <div className="mt-2 mb-1 flex items-center justify-start gap-1.5">
                                         <div className="flex items-center gap-1.5">
                                             {footerButtons}
                                         </div>
-                                        {turnDurationText ? (
-                                            <span className="text-sm text-muted-foreground/60 tabular-nums flex items-center gap-1">
-                                                <RiHourglassLine className="h-3.5 w-3.5" />
-                                                {turnDurationText}
-                                            </span>
-                                        ) : null}
+                                        <div className="flex items-center gap-1.5">
+                                            {turnDurationText ? (
+                                                <span className="text-sm text-muted-foreground/60 tabular-nums flex items-center gap-1">
+                                                    <RiHourglassLine className="h-3.5 w-3.5" />
+                                                    {turnDurationText}
+                                                </span>
+                                            ) : null}
+                                            {footerTimestamp ? (
+                                                <span
+                                                    className={footerTimestampClassName}
+                                                    aria-label={`Message time: ${footerTimestamp}`}
+                                                >
+                                                    <RiTimeLine className="h-3.5 w-3.5" />
+                                                    {footerTimestamp}
+                                                </span>
+                                            ) : null}
+                                        </div>
                                     </div>
                                 )}
                             </div>
@@ -1275,12 +1485,23 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
                         <div className="flex items-center gap-1.5">
                             {footerButtons}
                         </div>
-                        {turnDurationText ? (
-                            <span className="text-sm text-muted-foreground/60 tabular-nums flex items-center gap-1">
-                                <RiHourglassLine className="h-3.5 w-3.5" />
-                                {turnDurationText}
-                            </span>
-                        ) : null}
+                        <div className="flex items-center gap-1.5">
+                            {turnDurationText ? (
+                                <span className="text-sm text-muted-foreground/60 tabular-nums flex items-center gap-1">
+                                    <RiHourglassLine className="h-3.5 w-3.5" />
+                                    {turnDurationText}
+                                </span>
+                            ) : null}
+                            {footerTimestamp ? (
+                                <span
+                                    className={footerTimestampClassName}
+                                    aria-label={`Message time: ${footerTimestamp}`}
+                                >
+                                    <RiTimeLine className="h-3.5 w-3.5" />
+                                    {footerTimestamp}
+                                </span>
+                            ) : null}
+                        </div>
                     </div>
                 )}
 
@@ -1305,6 +1526,8 @@ const MessageBody: React.FC<MessageBodyProps> = ({ isUser, ...props }) => {
                 agentMention={props.agentMention}
                 onRevert={props.onRevert}
                 onFork={props.onFork}
+                userActionsMode={props.userActionsMode}
+                stickyUserHeaderEnabled={props.stickyUserHeaderEnabled}
             />
         );
     }

@@ -182,7 +182,7 @@ export const AgentMentionAutocomplete = React.forwardRef<AgentMentionAutocomplet
   return (
     <div
       ref={containerRef}
-      className="absolute z-[100] min-w-0 w-full max-w-[360px] max-h-60 bg-background border-2 border-border/60 rounded-xl shadow-md bottom-full mb-2 left-0 flex flex-col"
+      className="absolute z-[100] min-w-0 w-full max-w-[360px] max-h-60 bg-background border-2 border-border/60 rounded-xl shadow-none bottom-full mb-2 left-0 flex flex-col"
     >
       {showTabs ? (
         <div className="px-2 pt-2 pb-1 border-b border-border/60">
@@ -198,7 +198,7 @@ export const AgentMentionAutocomplete = React.forwardRef<AgentMentionAutocomplet
                 className={cn(
                   'flex-1 px-2.5 py-1 rounded-md typography-meta font-semibold transition-none',
                   activeTab === tab.id
-                    ? 'bg-interactive-selection text-interactive-selection-foreground shadow-sm'
+                    ? 'bg-interactive-selection text-interactive-selection-foreground shadow-none'
                     : 'text-muted-foreground hover:bg-interactive-hover/50'
                 )}
                 onPointerDown={(event) => {

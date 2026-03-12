@@ -64,6 +64,23 @@ export interface DiscoveredSkill {
   scope: SkillScope;
   source: SkillSource;
   description?: string;
+  /** Domain folder parsed from file path, e.g. "automation-ai", "lark-ecosystem" */
+  group?: string;
+}
+
+/** Parse the domain group folder from a skill file path.
+ *  e.g. "~/.config/opencode/skills/automation-ai/ai-production/SKILL.md" → "automation-ai"
+ *  e.g. "~/.config/opencode/skills/theme-system/SKILL.md"                → undefined (flat)
+ */
+function parseSkillGroup(path: string): string | undefined {
+  const normalizedPath = path.replace(/\\/g, '/');
+  const idx = normalizedPath.lastIndexOf('/skills/');
+  if (idx === -1) return undefined;
+  const relative = normalizedPath.substring(idx + '/skills/'.length);
+  const parts = relative.split('/');
+  // Grouped layout: <group>/<name>/SKILL.md → parts.length >= 3
+  // Flat layout:    <name>/SKILL.md         → parts.length == 2
+  return parts.length >= 3 ? parts[0] : undefined;
 }
 
 // Raw skill response from API before transformation
@@ -185,6 +202,7 @@ export const useSkillsStore = create<SkillsStore>()(
                 scope: s.scope ?? 'user',
                 source: s.source ?? 'opencode',
                 description: s.sources?.md?.description || '',
+                group: parseSkillGroup(s.path),
               }));
               
               set({ skills, isLoading: false });

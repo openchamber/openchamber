@@ -36,6 +36,7 @@ interface TerminalStore {
 
   createTab: (directory: string) => string;
   setActiveTab: (directory: string, tabId: string) => void;
+  setTabLabel: (directory: string, tabId: string, label: string) => void;
   closeTab: (directory: string, tabId: string) => Promise<void>;
 
   setTabSessionId: (directory: string, tabId: string, sessionId: string | null) => void;
@@ -192,6 +193,43 @@ export const useTerminalStore = create<TerminalStore>()(
           });
         },
 
+        setTabLabel: (directory: string, tabId: string, label: string) => {
+          const key = normalizeDirectory(directory);
+          const normalizedLabel = label.trim();
+          if (!normalizedLabel) {
+            return;
+          }
+
+          set((state) => {
+            const newSessions = new Map(state.sessions);
+            const existing = newSessions.get(key);
+            if (!existing) {
+              return state;
+            }
+
+            const idx = findTabIndex(existing, tabId);
+            if (idx < 0) {
+              return state;
+            }
+
+            if (existing.tabs[idx]?.label === normalizedLabel) {
+              return state;
+            }
+
+            const nextTabs = [...existing.tabs];
+            nextTabs[idx] = {
+              ...nextTabs[idx],
+              label: normalizedLabel,
+            };
+
+            newSessions.set(key, {
+              ...existing,
+              tabs: nextTabs,
+            });
+            return { sessions: newSessions };
+          });
+        },
+
         closeTab: async (directory: string, tabId: string) => {
           const key = normalizeDirectory(directory);
           const entry = get().sessions.get(key);
@@ -258,7 +296,7 @@ export const useTerminalStore = create<TerminalStore>()(
             }
 
             const tab = existing.tabs[idx];
-            const shouldResetBuffer = tab.terminalSessionId !== sessionId;
+            const shouldResetBuffer = sessionId !== null && tab.terminalSessionId !== sessionId;
 
             const nextTab: TerminalTab = {
               ...tab,

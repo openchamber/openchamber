@@ -18,6 +18,8 @@ const MODELS_DEV_PROXY_URL = "/api/openchamber/models-metadata";
 
 const FALLBACK_PROVIDER_ID = "opencode";
 const FALLBACK_MODEL_ID = "big-pickle";
+const GIT_UTILITY_PROVIDER_ID = "zen";
+const GIT_UTILITY_PREFERRED_MODEL_ID = "big-pickle";
 
 interface OpenChamberDefaults {
     defaultModel?: string;
@@ -102,6 +104,64 @@ const isPrimaryMode = (mode?: string) => mode === "primary" || mode === "all" ||
 
 type ProviderModel = Provider["models"][string];
 type ProviderWithModelList = Omit<Provider, "models"> & { models: ProviderModel[] };
+
+type GitModelSelection = { providerId: string; modelId: string };
+
+const normalizeOptionalString = (value: unknown): string | undefined => {
+    if (typeof value !== "string") {
+        return undefined;
+    }
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+};
+
+const hasProviderModel = (
+    providers: ProviderWithModelList[],
+    providerId: string,
+    modelId: string
+): boolean => {
+    const provider = providers.find((item) => item.id === providerId);
+    if (!provider) {
+        return false;
+    }
+    return provider.models.some((model) => model.id === modelId);
+};
+
+const resolveGitGenerationModelSelection = ({
+    providers,
+    settingsZenModel,
+}: {
+    providers: ProviderWithModelList[];
+    settingsZenModel?: string;
+}): GitModelSelection | null => {
+    const zenModel = normalizeOptionalString(settingsZenModel);
+
+    if (!Array.isArray(providers) || providers.length === 0) {
+        if (zenModel) {
+            return { providerId: GIT_UTILITY_PROVIDER_ID, modelId: zenModel };
+        }
+        return null;
+    }
+
+    if (zenModel && hasProviderModel(providers, GIT_UTILITY_PROVIDER_ID, zenModel)) {
+        return { providerId: GIT_UTILITY_PROVIDER_ID, modelId: zenModel };
+    }
+
+    if (hasProviderModel(providers, GIT_UTILITY_PROVIDER_ID, GIT_UTILITY_PREFERRED_MODEL_ID)) {
+        return { providerId: GIT_UTILITY_PROVIDER_ID, modelId: GIT_UTILITY_PREFERRED_MODEL_ID };
+    }
+
+    const zenProvider = providers.find((provider) => provider.id === GIT_UTILITY_PROVIDER_ID);
+    if (zenProvider?.models.length) {
+        const randomIndex = Math.floor(Math.random() * zenProvider.models.length);
+        const randomModelId = normalizeOptionalString(zenProvider.models[randomIndex]?.id);
+        if (randomModelId) {
+            return { providerId: GIT_UTILITY_PROVIDER_ID, modelId: randomModelId };
+        }
+    }
+
+    return null;
+};
 
 interface ModelsDevModelEntry {
     id?: string;
@@ -421,6 +481,7 @@ interface ConfigStore {
     setSettingsAutoCreateWorktree: (enabled: boolean) => void;
     setSettingsGitmojiEnabled: (enabled: boolean) => void;
     setSettingsZenModel: (model: string | undefined) => void;
+    getResolvedGitGenerationModel: () => { providerId: string; modelId: string } | null;
     saveAgentModelSelection: (agentName: string, providerId: string, modelId: string) => void;
     getAgentModelSelection: (agentName: string) => { providerId: string; modelId: string } | null;
     checkConnection: () => Promise<boolean>;
@@ -1007,6 +1068,24 @@ export const useConfigStore = create<ConfigStore>()(
                                 ? get().providers
                                 : (get().directoryScoped[directoryKey]?.providers ?? []);
 
+                            const existingZenModel = normalizeOptionalString(get().settingsZenModel);
+
+                            const defaultZenModel = normalizeOptionalString(openChamberDefaults.zenModel);
+
+                            const resolvedExistingGitSelection = resolveGitGenerationModelSelection({
+                                providers,
+                                settingsZenModel: existingZenModel,
+                            });
+
+                            const resolvedDefaultGitSelection = resolveGitGenerationModelSelection({
+                                providers,
+                                settingsZenModel: defaultZenModel,
+                            });
+
+                            const resolvedGitSelection = resolvedExistingGitSelection || resolvedDefaultGitSelection;
+                            const resolvedGitModelId = resolvedGitSelection?.modelId;
+                            const resolvedZenModel = resolvedGitModelId || defaultZenModel || existingZenModel;
+
                             set((state) => {
                                 const baseSnapshot: DirectoryScopedConfig = state.directoryScoped[directoryKey] ?? {
                                     providers,
@@ -1031,7 +1110,7 @@ export const useConfigStore = create<ConfigStore>()(
                                     settingsDefaultAgent: openChamberDefaults.defaultAgent,
                                     settingsAutoCreateWorktree: openChamberDefaults.autoCreateWorktree ?? false,
                                     settingsGitmojiEnabled: openChamberDefaults.gitmojiEnabled ?? false,
-                                    settingsZenModel: openChamberDefaults.zenModel,
+                                    settingsZenModel: resolvedZenModel,
                                     directoryScoped: {
                                         ...state.directoryScoped,
                                         [directoryKey]: nextSnapshot,
@@ -1044,6 +1123,20 @@ export const useConfigStore = create<ConfigStore>()(
 
                                 return nextState;
                             });
+
+                            const shouldPersistResolvedZenModel =
+                                !!resolvedZenModel &&
+                                resolvedZenModel !== defaultZenModel;
+
+                            if (shouldPersistResolvedZenModel && resolvedZenModel) {
+                                updateDesktopSettings({
+                                    zenModel: resolvedZenModel,
+                                    gitProviderId: '',
+                                    gitModelId: '',
+                                }).catch(() => {
+                                    // Ignore errors - best effort cleanup
+                                });
+                            }
 
                             if (safeAgents.length === 0) {
                                 set((state) => {
@@ -1458,6 +1551,14 @@ export const useConfigStore = create<ConfigStore>()(
 
                 setSettingsZenModel: (model: string | undefined) => {
                     set({ settingsZenModel: model });
+                },
+
+                getResolvedGitGenerationModel: () => {
+                    const state = get();
+                    return resolveGitGenerationModelSelection({
+                        providers: state.providers,
+                        settingsZenModel: state.settingsZenModel,
+                    });
                 },
 
                 setVoiceProvider: (provider: 'browser' | 'openai' | 'say') => {

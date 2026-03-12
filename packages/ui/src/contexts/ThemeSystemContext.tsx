@@ -4,6 +4,7 @@ import React, {
   useCallback,
   useState,
 } from 'react';
+import { flushSync } from 'react-dom';
 import type { Theme, ThemeMode } from '@/types/theme';
 import type { DesktopSettings } from '@/lib/desktop';
 import { isDesktopLocalOriginActive, isVSCodeRuntime } from '@/lib/desktop';
@@ -25,6 +26,12 @@ type ThemePreferences = {
   darkThemeId: string;
 };
 
+type ThemeSyncPayload = {
+  themeMode?: unknown;
+  lightThemeId?: unknown;
+  darkThemeId?: unknown;
+};
+
 const DEFAULT_LIGHT_ID = DEFAULT_LIGHT_THEME_ID;
 const DEFAULT_DARK_ID = DEFAULT_DARK_THEME_ID;
 
@@ -39,6 +46,26 @@ const fallbackThemeForVariant = (variant: 'light' | 'dark'): Theme =>
   getDefaultTheme(variant === 'dark');
 
 const useIsomorphicLayoutEffect = typeof window !== 'undefined' ? React.useLayoutEffect : React.useEffect;
+
+const suppressTransitionsForThemeSwitch = () => {
+  if (typeof document === 'undefined') {
+    return;
+  }
+
+  const root = document.documentElement;
+  root.classList.add('oc-theme-switching');
+
+  const frame = window.requestAnimationFrame(() => {
+    window.requestAnimationFrame(() => {
+      root.classList.remove('oc-theme-switching');
+    });
+  });
+
+  return () => {
+    window.cancelAnimationFrame(frame);
+    root.classList.remove('oc-theme-switching');
+  };
+};
 
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === 'string' && value.trim().length > 0;
@@ -354,6 +381,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
     if (typeof window === 'undefined') {
       return;
     }
+    const restoreTransitions = suppressTransitionsForThemeSwitch();
     cssGenerator.apply(currentTheme);
     applyVSCodeRuntimeClass(isVSCode);
     updateBrowserChrome(currentTheme);
@@ -361,6 +389,8 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
     const root = document.documentElement;
     root.classList.remove('light', 'dark');
     root.classList.add(currentTheme.metadata.variant);
+
+    return restoreTransitions;
   }, [applyVSCodeRuntimeClass, cssGenerator, currentTheme, isVSCode, updateBrowserChrome]);
 
   useEffect(() => {
@@ -405,14 +435,143 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
   }, [preferences, currentTheme, ensureThemeById]);
 
   useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const handleStorage = (event: StorageEvent) => {
+      if (event.storageArea !== window.localStorage) {
+        return;
+      }
+
+      if (event.key !== 'themeMode' && event.key !== 'lightThemeId' && event.key !== 'darkThemeId') {
+        return;
+      }
+
+      setPreferences((prev) => {
+        const nextModeRaw = localStorage.getItem('themeMode');
+        const nextMode: ThemeMode =
+          nextModeRaw === 'light' || nextModeRaw === 'dark' || nextModeRaw === 'system'
+            ? nextModeRaw
+            : prev.themeMode;
+
+        const nextLightRaw = localStorage.getItem('lightThemeId');
+        const nextLight = typeof nextLightRaw === 'string' && nextLightRaw.trim().length > 0
+          ? nextLightRaw.trim()
+          : prev.lightThemeId;
+
+        const nextDarkRaw = localStorage.getItem('darkThemeId');
+        const nextDark = typeof nextDarkRaw === 'string' && nextDarkRaw.trim().length > 0
+          ? nextDarkRaw.trim()
+          : prev.darkThemeId;
+
+        if (nextMode === prev.themeMode && nextLight === prev.lightThemeId && nextDark === prev.darkThemeId) {
+          return prev;
+        }
+
+        return {
+          themeMode: nextMode,
+          lightThemeId: nextLight,
+          darkThemeId: nextDark,
+        };
+      });
+    };
+
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, []);
+
+  const applyIncomingThemeSync = useCallback((payload: ThemeSyncPayload) => {
+    const mode = payload.themeMode;
+    const light = payload.lightThemeId;
+    const dark = payload.darkThemeId;
+
+    if ((mode !== 'light' && mode !== 'dark' && mode !== 'system') || typeof light !== 'string' || typeof dark !== 'string') {
+      return;
+    }
+
+    const normalizedLight = light.trim();
+    const normalizedDark = dark.trim();
+    if (!normalizedLight || !normalizedDark) {
+      return;
+    }
+
+    suppressTransitionsForThemeSwitch();
+    flushSync(() => {
+      setPreferences((prev) => {
+        if (prev.themeMode === mode && prev.lightThemeId === normalizedLight && prev.darkThemeId === normalizedDark) {
+          return prev;
+        }
+
+        return {
+          themeMode: mode,
+          lightThemeId: normalizedLight,
+          darkThemeId: normalizedDark,
+        };
+      });
+    });
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const scopedWindow = window as unknown as {
+      __openchamberApplyThemeSync?: (payload: ThemeSyncPayload) => void;
+    };
+
+    scopedWindow.__openchamberApplyThemeSync = applyIncomingThemeSync;
+
+    return () => {
+      if (scopedWindow.__openchamberApplyThemeSync === applyIncomingThemeSync) {
+        delete scopedWindow.__openchamberApplyThemeSync;
+      }
+    };
+  }, [applyIncomingThemeSync]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const handleMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) {
+        return;
+      }
+
+      const data = event.data as {
+        type?: unknown;
+        payload?: ThemeSyncPayload;
+      };
+
+      if (data?.type !== 'openchamber:theme-sync' || !data.payload) {
+        return;
+      }
+
+      applyIncomingThemeSync(data.payload);
+    };
+
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [applyIncomingThemeSync]);
+
+  useEffect(() => {
+    const lightTheme = ensureThemeById(preferences.lightThemeId, 'light');
+    const darkTheme = ensureThemeById(preferences.darkThemeId, 'dark');
+
     void updateDesktopSettings({
       themeId: currentTheme.metadata.id,
       themeVariant: currentTheme.metadata.variant === 'light' ? 'light' : 'dark',
       useSystemTheme: preferences.themeMode === 'system',
       lightThemeId: preferences.lightThemeId,
       darkThemeId: preferences.darkThemeId,
+      splashBgLight: lightTheme.colors.surface.background,
+      splashFgLight: lightTheme.colors.surface.foreground,
+      splashBgDark: darkTheme.colors.surface.background,
+      splashFgDark: darkTheme.colors.surface.foreground,
     });
-  }, [currentTheme.metadata.id, currentTheme.metadata.variant, preferences.themeMode, preferences.lightThemeId, preferences.darkThemeId]);
+  }, [currentTheme.metadata.id, currentTheme.metadata.variant, ensureThemeById, preferences.themeMode, preferences.lightThemeId, preferences.darkThemeId]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {

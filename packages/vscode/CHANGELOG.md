@@ -1,3 +1,72 @@
+## [1.8.5] - 2026-03-04
+
+- Chat/Files: edit-style tool results now open in a VS Code diff editor with focus on the first changed line, making review and follow-up edits much faster.
+- Chat: improved focus-mode input layout so the footer action row stays pinned and available while composing long prompts.
+- Settings: removed duplicate chat display options from Appearance and hid extension-irrelevant sections, making settings easier to scan.
+- UI/Theming: aligned startup/loading branding with the active theme for a more consistent look during connection and auth states.
+- Reliability: improved startup recovery for provider/model/agent loading so options are less likely to appear empty right after opening the extension.
+
+## [1.8.4] - 2026-03-04
+
+- Chat: added Save as image support for assistant messages, so you can export response snapshots directly from the extension.
+- Chat: added a new `Changes` tool-output mode that opens edit/write/patch results by default while keeping activity easier to scan.
+- Chat Activity: active tools now appear immediately and continue updating in collapsed view, so in-flight work stays visible with stable durations (thanks to @nelsonPires5).
+- Chat: file references in assistant responses are now clickable (including line targets), making jump-to-file workflows faster during review.
+- Chat/Files: improved `@` file mentions with active-project scoping and more consistent search behavior, reducing irrelevant results.
+- Chat/GitHub: added Attach menu support for linking pull requests into your draft with picker-based selection and attached PR context.
+- Chat: simplified attachment actions with a direct Attach files flow, reducing friction when adding context from the workspace.
+- Chat: improved sticky user-message behavior with bounded height and internal scrolling, so long prompts stay readable without overwhelming the thread.
+- Shortcuts/Models: added favorite-model cycling shortcuts, so you can switch between starred models without leaving the keyboard (thanks to @iamhenry).
+- UI: interactive controls now consistently use pointer cursors, improving click affordance throughout the extension (thanks to @KJdotIO).
+
+
+## [1.8.3] - 2026-03-02
+
+- Chat: added user-message display options for plain-text rendering and sticky headers, with preferences persisted in settings.
+- Chat: improved code block readability with cleaner header actions, restored horizontal scrolling, and more polished themed highlighting in markdown and tool output (thanks to @nelsonPires5).
+- Chat: model picker provider groups are now collapsible, with expanded/collapsed state remembered.
+
+## [1.8.2] - 2026-03-01
+
+- Chat: improved message readability with cleaner tool/reasoning rendering and more polished markdown presentation in long responses.
+- Chat Activity: timing display is now less noisy, with detailed end timestamps shown on hover when you need them (thanks to @nelsonPires5).
+- Reliability: improved panel visibility/reconnect handling so session activity stays more consistent after hiding and reopening the extension.
+- Reliability: fixed live-streaming edge cases for event endpoints with query/trailing-slash variants, improving real-time updates across chat, session editor, and agent-manager views.
+
+## [1.8.1] - 2026-02-28
+
+- No notable changes.
+
+## [1.8.0] - 2026-02-28
+
+- Chat: improved long-session performance with virtualized message rendering, smoother scrolling, and more stable behavior in large histories (thanks to @shekohex).
+- Chat: added drag-and-drop file attachments, so dropping files from Explorer into chat is now a first-class flow (thanks to @Asuta).
+- Chat: enabled markdown rendering in user messages for clearer formatted prompts and notes (thanks to @haofeng0705).
+- Chat: pasted absolute paths are now treated as normal messages, reducing accidental command-like sends.
+- Chat: fixed queued send behavior for inactive sessions to reduce accidental sends to the wrong conversation.
+- Chat: enabled bueatiful diffs for edit tools in chat (thanks to @shekohex).
+- UI: improved long filename handling in file-mention autocomplete so results stay readable while typing (thanks to @haofeng0705).
+- Usage: added MiniMax coding-plan quota provider support for broader usage tracking coverage (thanks to @nzlov).
+- Usage: added Ollama Cloud quota provider support for broader usage tracking coverage (thanks to @iamhenry).
+
+## [1.7.5] - 2026-02-25
+
+- Sessions: improved switching performance so moving between chats feels more immediate.
+- Chat: fixed cases where messages could duplicate or disappear during active conversations.
+
+## [1.7.4] - 2026-02-24
+
+- Settings: redesigned the settings workspace with flatter, more consistent layouts so key options are easier to find.
+- Settings: grouped agents/skills navigation by subfolder to make larger setups easier to manage (thanks to @nguyenngothuong).
+- Chat: improved streaming smoothness and runtime stability with buffered updates and reliability fixes, reducing lag, stuck spinners, memory growth, and timeout-related interruptions in long runs (thanks to @nguyenngothuong).
+- Chat: draft text now persists per session, and the input supports an expanded focus mode for longer prompts (thanks to @nguyenngothuong).
+- Chat: added fullscreen Mermaid preview, improved default thinking-variant persistence, and hardened file-preview safety checks for a more predictable message experience (thanks to @yulia-ivashko).
+- Sessions: expanded folder management with subfolders, cleaner organization controls, and clearer delete confirmations (thanks to @nguyenngothuong).
+- Settings: added an MCP config manager UI to simplify editing and validating MCP server configuration (thanks to @nguyenngothuong).
+- Chat Activity: improved Structured Output tool rendering with dedicated title/icon, clearer result descriptions, and more reliable detailed expansion defaults.
+- Chat: added C, C++, and Go language support for syntax-aware rendering in code-heavy workflows (thanks to @fomenks).
+- Reliability: aligned file read/raw endpoint safety checks with other runtimes for more consistent extension behavior (thanks to @yulia-ivashko).
+
 ## [1.7.3] - 2026-02-21
 
 - Sessions: added custom folders to group chat sessions, with move/rename/delete flows and persisted collapse state per project (thanks to @nguyenngothuong).

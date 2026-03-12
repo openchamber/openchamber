@@ -109,6 +109,14 @@ function codeBlockLanguageResolver(info: string): Language | LanguageDescription
 
 const normalizeFileName = (filePath: string) => filePath.split('/').pop()?.toLowerCase() ?? '';
 
+const matchLanguageDescriptionForFile = (filePath: string): LanguageDescription | null => {
+  const filename = normalizeFileName(filePath);
+  if (!filename) {
+    return null;
+  }
+  return LanguageDescription.matchFilename(languages, filename);
+};
+
 const markdownHighlight = () => syntaxHighlighting(HighlightStyle.define([
   { tag: [t.heading1, t.heading2, t.heading3, t.heading4, t.heading5, t.heading6], fontWeight: '600' },
   { tag: t.strong, fontWeight: '600' },
@@ -248,5 +256,22 @@ export function languageByExtension(filePath: string): Extension | null {
 
     default:
       return null;
+  }
+}
+
+export async function loadLanguageByExtension(filePath: string): Promise<Extension | null> {
+  const description = matchLanguageDescriptionForFile(filePath);
+  if (!description) {
+    return null;
+  }
+
+  if (description.support) {
+    return description.support;
+  }
+
+  try {
+    return await description.load();
+  } catch {
+    return null;
   }
 }

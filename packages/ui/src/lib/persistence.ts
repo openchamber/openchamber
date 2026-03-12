@@ -74,6 +74,14 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
   if (typeof settings.openInAppId === 'string' && settings.openInAppId.length > 0) {
     localStorage.setItem('openInAppId', settings.openInAppId);
   }
+  if (typeof settings.pwaAppName === 'string') {
+    const normalized = settings.pwaAppName.trim().replace(/\s+/g, ' ').slice(0, 64);
+    if (normalized.length > 0) {
+      localStorage.setItem('openchamber.pwaName', normalized);
+    } else {
+      localStorage.removeItem('openchamber.pwaName');
+    }
+  }
 };
 
 type PersistApi = {
@@ -115,6 +123,19 @@ const sanitizeSkillCatalogs = (value: unknown): DesktopSettings['skillCatalogs']
   return result;
 };
 
+const HEX_COLOR_PATTERN = /^#(?:[\da-fA-F]{3}|[\da-fA-F]{6})$/;
+
+const normalizeIconBackground = (value: unknown): string | null => {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  return HEX_COLOR_PATTERN.test(trimmed) ? trimmed.toLowerCase() : null;
+};
+
 const sanitizeProjects = (value: unknown): DesktopSettings['projects'] | undefined => {
   if (!Array.isArray(value)) {
     return undefined;
@@ -150,8 +171,31 @@ const sanitizeProjects = (value: unknown): DesktopSettings['projects'] | undefin
     if (typeof candidate.icon === 'string' && candidate.icon.trim().length > 0) {
       project.icon = candidate.icon.trim();
     }
+    if (candidate.iconImage === null) {
+      (project as unknown as Record<string, unknown>).iconImage = null;
+    } else if (candidate.iconImage && typeof candidate.iconImage === 'object') {
+      const iconImage = candidate.iconImage as Record<string, unknown>;
+      const mime = typeof iconImage.mime === 'string' ? iconImage.mime.trim() : '';
+      const updatedAt = typeof iconImage.updatedAt === 'number' && Number.isFinite(iconImage.updatedAt)
+        ? Math.max(0, Math.round(iconImage.updatedAt))
+        : 0;
+      const source = iconImage.source === 'custom' || iconImage.source === 'auto'
+        ? iconImage.source
+        : null;
+      if (mime && updatedAt > 0 && source) {
+        (project as unknown as Record<string, unknown>).iconImage = { mime, updatedAt, source };
+      }
+    }
     if (typeof candidate.color === 'string' && candidate.color.trim().length > 0) {
       project.color = candidate.color.trim();
+    }
+    if (candidate.iconBackground === null) {
+      (project as unknown as Record<string, unknown>).iconBackground = null;
+    } else {
+      const iconBackground = normalizeIconBackground(candidate.iconBackground);
+      if (iconBackground) {
+        (project as unknown as Record<string, unknown>).iconBackground = iconBackground;
+      }
     }
     if (typeof candidate.addedAt === 'number' && Number.isFinite(candidate.addedAt) && candidate.addedAt >= 0) {
       project.addedAt = candidate.addedAt;
@@ -170,6 +214,51 @@ const sanitizeProjects = (value: unknown): DesktopSettings['projects'] | undefin
   }
 
   return result.length > 0 ? result : undefined;
+};
+
+const sanitizeNamedTunnelPresets = (value: unknown): DesktopSettings['namedTunnelPresets'] | undefined => {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const result: NonNullable<DesktopSettings['namedTunnelPresets']> = [];
+  const seenIds = new Set<string>();
+  const seenHostnames = new Set<string>();
+
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object') continue;
+    const candidate = entry as Record<string, unknown>;
+
+    const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
+    const name = typeof candidate.name === 'string' ? candidate.name.trim() : '';
+    const hostname = typeof candidate.hostname === 'string' ? candidate.hostname.trim().toLowerCase() : '';
+
+    if (!id || !name || !hostname) continue;
+    if (seenIds.has(id) || seenHostnames.has(hostname)) continue;
+    seenIds.add(id);
+    seenHostnames.add(hostname);
+
+    result.push({ id, name, hostname });
+  }
+
+  return result;
+};
+
+const sanitizeNamedTunnelPresetTokens = (value: unknown): DesktopSettings['namedTunnelPresetTokens'] | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  const result: Record<string, string> = {};
+  for (const [key, tokenValue] of Object.entries(candidate)) {
+    const id = key.trim();
+    const token = typeof tokenValue === 'string' ? tokenValue.trim() : '';
+    if (!id || !token) continue;
+    result[id] = token;
+  }
+
+  return Object.keys(result).length > 0 ? result : undefined;
 };
 
 const sanitizeModelRefs = (value: unknown, limit: number): Array<{ providerID: string; modelID: string }> | undefined => {
@@ -238,6 +327,9 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   if (typeof settings.showTextJustificationActivity === 'boolean' && settings.showTextJustificationActivity !== store.showTextJustificationActivity) {
     store.setShowTextJustificationActivity(settings.showTextJustificationActivity);
   }
+  if (typeof settings.showDeletionDialog === 'boolean' && settings.showDeletionDialog !== store.showDeletionDialog) {
+    store.setShowDeletionDialog(settings.showDeletionDialog);
+  }
   if (typeof settings.nativeNotificationsEnabled === 'boolean' && settings.nativeNotificationsEnabled !== store.nativeNotificationsEnabled) {
     store.setNativeNotificationsEnabled(settings.nativeNotificationsEnabled);
   }
@@ -274,10 +366,25 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
     store.setMaxLastMessageLength(settings.maxLastMessageLength);
   }
   if (typeof settings.toolCallExpansion === 'string'
-    && (settings.toolCallExpansion === 'collapsed' || settings.toolCallExpansion === 'activity' || settings.toolCallExpansion === 'detailed')) {
+    && (settings.toolCallExpansion === 'collapsed'
+      || settings.toolCallExpansion === 'activity'
+      || settings.toolCallExpansion === 'detailed'
+      || settings.toolCallExpansion === 'changes')) {
     if (settings.toolCallExpansion !== store.toolCallExpansion) {
       store.setToolCallExpansion(settings.toolCallExpansion);
     }
+  }
+  if (typeof settings.inputSpellcheckEnabled === 'boolean' && settings.inputSpellcheckEnabled !== store.inputSpellcheckEnabled) {
+    store.setInputSpellcheckEnabled(settings.inputSpellcheckEnabled);
+  }
+  if (typeof settings.userMessageRenderingMode === 'string'
+    && (settings.userMessageRenderingMode === 'markdown' || settings.userMessageRenderingMode === 'plain')) {
+    if (settings.userMessageRenderingMode !== store.userMessageRenderingMode) {
+      store.setUserMessageRenderingMode(settings.userMessageRenderingMode);
+    }
+  }
+  if (typeof settings.stickyUserHeader === 'boolean' && settings.stickyUserHeader !== store.stickyUserHeader) {
+    store.setStickyUserHeader(settings.stickyUserHeader);
   }
   if (typeof settings.fontSize === 'number' && Number.isFinite(settings.fontSize) && settings.fontSize !== store.fontSize) {
     store.setFontSize(settings.fontSize);
@@ -405,6 +512,40 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.autoDeleteAfterDays === 'number' && Number.isFinite(candidate.autoDeleteAfterDays)) {
     result.autoDeleteAfterDays = candidate.autoDeleteAfterDays;
   }
+  if (typeof candidate.tunnelMode === 'string') {
+    const mode = candidate.tunnelMode.trim().toLowerCase();
+    if (mode === 'quick' || mode === 'named') {
+      result.tunnelMode = mode;
+    }
+  }
+  if (candidate.tunnelBootstrapTtlMs === null) {
+    result.tunnelBootstrapTtlMs = null;
+  } else if (typeof candidate.tunnelBootstrapTtlMs === 'number' && Number.isFinite(candidate.tunnelBootstrapTtlMs)) {
+    result.tunnelBootstrapTtlMs = candidate.tunnelBootstrapTtlMs;
+  }
+  if (typeof candidate.tunnelSessionTtlMs === 'number' && Number.isFinite(candidate.tunnelSessionTtlMs)) {
+    result.tunnelSessionTtlMs = candidate.tunnelSessionTtlMs;
+  }
+  if (typeof candidate.namedTunnelHostname === 'string') {
+    result.namedTunnelHostname = candidate.namedTunnelHostname.trim();
+  }
+  if (candidate.namedTunnelToken === null) {
+    result.namedTunnelToken = null;
+  } else if (typeof candidate.namedTunnelToken === 'string') {
+    result.namedTunnelToken = candidate.namedTunnelToken.trim();
+  }
+  const namedTunnelPresets = sanitizeNamedTunnelPresets(candidate.namedTunnelPresets);
+  if (namedTunnelPresets) {
+    result.namedTunnelPresets = namedTunnelPresets;
+  }
+  if (typeof candidate.namedTunnelSelectedPresetId === 'string') {
+    const trimmed = candidate.namedTunnelSelectedPresetId.trim();
+    result.namedTunnelSelectedPresetId = trimmed.length > 0 ? trimmed : undefined;
+  }
+  const namedTunnelPresetTokens = sanitizeNamedTunnelPresetTokens(candidate.namedTunnelPresetTokens);
+  if (namedTunnelPresetTokens) {
+    result.namedTunnelPresetTokens = namedTunnelPresetTokens;
+  }
   if (typeof candidate.defaultModel === 'string' && candidate.defaultModel.length > 0) {
     result.defaultModel = candidate.defaultModel;
   }
@@ -425,6 +566,9 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (typeof candidate.showTextJustificationActivity === 'boolean') {
     result.showTextJustificationActivity = candidate.showTextJustificationActivity;
+  }
+  if (typeof candidate.showDeletionDialog === 'boolean') {
+    result.showDeletionDialog = candidate.showDeletionDialog;
   }
   if (typeof candidate.nativeNotificationsEnabled === 'boolean') {
     result.nativeNotificationsEnabled = candidate.nativeNotificationsEnabled;
@@ -595,9 +739,20 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
     typeof candidate.toolCallExpansion === 'string'
     && (candidate.toolCallExpansion === 'collapsed'
       || candidate.toolCallExpansion === 'activity'
-      || candidate.toolCallExpansion === 'detailed')
+      || candidate.toolCallExpansion === 'detailed'
+      || candidate.toolCallExpansion === 'changes')
   ) {
     result.toolCallExpansion = candidate.toolCallExpansion;
+  }
+  if (typeof candidate.inputSpellcheckEnabled === 'boolean') {
+    result.inputSpellcheckEnabled = candidate.inputSpellcheckEnabled;
+  }
+  if (typeof candidate.userMessageRenderingMode === 'string'
+    && (candidate.userMessageRenderingMode === 'markdown' || candidate.userMessageRenderingMode === 'plain')) {
+    result.userMessageRenderingMode = candidate.userMessageRenderingMode;
+  }
+  if (typeof candidate.stickyUserHeader === 'boolean') {
+    result.stickyUserHeader = candidate.stickyUserHeader;
   }
   if (typeof candidate.fontSize === 'number' && Number.isFinite(candidate.fontSize)) {
     result.fontSize = candidate.fontSize;
@@ -646,6 +801,10 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (typeof candidate.openInAppId === 'string' && candidate.openInAppId.length > 0) {
     result.openInAppId = candidate.openInAppId;
+  }
+  if (typeof candidate.pwaAppName === 'string') {
+    const normalized = candidate.pwaAppName.trim().replace(/\s+/g, ' ').slice(0, 64);
+    result.pwaAppName = normalized.length > 0 ? normalized : '';
   }
 
   if (typeof candidate.messageLimit === 'number' && Number.isFinite(candidate.messageLimit)) {

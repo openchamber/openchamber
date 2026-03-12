@@ -16,6 +16,9 @@ import * as nanogpt from './nanogpt.js';
 import * as openai from './openai.js';
 import * as openrouter from './openrouter.js';
 import * as zai from './zai.js';
+import * as minimaxCodingPlan from './minimax-coding-plan.js';
+import * as minimaxCnCodingPlan from './minimax-cn-coding-plan.js';
+import * as ollamaCloud from './ollama-cloud.js';
 
 const registry = {
   claude: {
@@ -71,6 +74,24 @@ const registry = {
     providerName: copilot.providerNameAddon,
     isConfigured: copilot.isConfigured,
     fetchQuota: copilot.fetchQuotaAddon
+  },
+  'minimax-coding-plan': {
+    providerId: minimaxCodingPlan.providerId,
+    providerName: minimaxCodingPlan.providerName,
+    isConfigured: minimaxCodingPlan.isConfigured,
+    fetchQuota: minimaxCodingPlan.fetchQuota
+  },
+  'minimax-cn-coding-plan': {
+    providerId: minimaxCnCodingPlan.providerId,
+    providerName: minimaxCnCodingPlan.providerName,
+    isConfigured: minimaxCnCodingPlan.isConfigured,
+    fetchQuota: minimaxCnCodingPlan.fetchQuota
+  },
+  'ollama-cloud': {
+    providerId: ollamaCloud.providerId,
+    providerName: ollamaCloud.providerName,
+    isConfigured: ollamaCloud.isConfigured,
+    fetchQuota: ollamaCloud.fetchQuota
   }
 };
 
@@ -126,3 +147,6 @@ export const fetchKimiQuota = kimi.fetchQuota;
 export const fetchOpenRouterQuota = openrouter.fetchQuota;
 export const fetchZaiQuota = zai.fetchQuota;
 export const fetchNanoGptQuota = nanogpt.fetchQuota;
+export const fetchMinimaxCodingPlanQuota = minimaxCodingPlan.fetchQuota;
+export const fetchMinimaxCnCodingPlanQuota = minimaxCnCodingPlan.fetchQuota;
+export const fetchOllamaCloudQuota = ollamaCloud.fetchQuota;

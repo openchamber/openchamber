@@ -9,8 +9,13 @@ type SessionStatusPayload = {
   next?: number;
 };
 
-export const useSessionStatusBootstrap = () => {
+export const useSessionStatusBootstrap = (options?: { enabled?: boolean }) => {
+  const enabled = options?.enabled ?? true;
   React.useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+
     let cancelled = false;
 
     const bootstrap = async () => {
@@ -38,5 +43,5 @@ export const useSessionStatusBootstrap = () => {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [enabled]);
 };

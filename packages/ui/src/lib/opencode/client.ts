@@ -484,6 +484,7 @@ class OpencodeService {
       'application/x-sh',
       'application/x-shellscript',
       'application/octet-stream',
+      'image/svg+xml',
     ];
     
     return textBasedTypes.includes(lowerMime);
@@ -619,6 +620,11 @@ class OpencodeService {
     }>;
     messageId?: string;
     agentMentions?: Array<{ name: string; source?: { value: string; start: number; end: number } }>;
+    format?: {
+      type: 'json_schema';
+      schema: Record<string, unknown>;
+      retryCount?: number;
+    };
   }): Promise<string> {
     // Generate a temporary client-side ID for optimistic UI
     // This ID won't be sent to the server - server will generate its own
@@ -692,27 +698,67 @@ class OpencodeService {
     // for model work (SSE will deliver output/status).
     // This avoids 504s from proxy timeouts on long-running turns.
     const base = this.baseUrl.replace(/\/+$/, '');
-    const url = new URL(`${base}/session/${encodeURIComponent(params.id)}/prompt_async`);
-    if (this.currentDirectory) {
-      url.searchParams.set('directory', this.currentDirectory);
+    let url: URL;
+    try {
+      url = new URL(`${base}/session/${encodeURIComponent(params.id)}/prompt_async`);
+      if (this.currentDirectory) {
+        url.searchParams.set('directory', this.currentDirectory);
+      }
+    } catch (error) {
+      console.error('[git-generation][browser] failed to build prompt_async URL', {
+        baseUrl: this.baseUrl,
+        normalizedBase: base,
+        sessionId: params.id,
+        directory: this.currentDirectory,
+        message: error instanceof Error ? error.message : String(error),
+        error,
+      });
+      throw error;
     }
 
-    const response = await fetch(url.toString(), {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        accept: 'application/json',
-      },
-      body: JSON.stringify({
-        model: {
-          providerID: params.providerID,
-          modelID: params.modelID,
-        },
+    if (params.format) {
+      console.info('[git-generation][browser] send structured message', {
+        sessionId: params.id,
+        providerID: params.providerID,
+        modelID: params.modelID,
         agent: params.agent,
         variant: params.variant,
-        parts,
-      }),
-    });
+        directory: this.currentDirectory,
+        baseUrl: this.baseUrl,
+        formatType: params.format.type,
+      });
+    }
+
+    let response: Response;
+    try {
+      response = await fetch(url.toString(), {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          accept: 'application/json',
+        },
+        body: JSON.stringify({
+          model: {
+            providerID: params.providerID,
+            modelID: params.modelID,
+          },
+          agent: params.agent,
+          variant: params.variant,
+          ...(params.format ? { format: params.format } : {}),
+          parts,
+        }),
+      });
+    } catch (error) {
+      console.error('[git-generation][browser] prompt_async request failed before response', {
+        sessionId: params.id,
+        url: url.toString(),
+        directory: this.currentDirectory,
+        hasFormat: Boolean(params.format),
+        message: error instanceof Error ? error.message : String(error),
+        error,
+      });
+      throw error;
+    }
 
     if (!response.ok) {
       let detail = '';
@@ -946,14 +992,50 @@ class OpencodeService {
     return result.data || false;
   }
 
-  async listPendingPermissions(): Promise<PermissionRequest[]> {
-    try {
-      // Permission requests are global across sessions; do not scope by directory.
-      const result = await this.client.permission.list();
-      return (result.data || []) as unknown as PermissionRequest[];
-    } catch {
-      return [];
+  async listPendingPermissions(options?: { directories?: Array<string | null | undefined> }): Promise<PermissionRequest[]> {
+    const fetches: Array<Promise<PermissionRequest[]>> = [];
+
+    const fetchForDirectory = async (directory?: string | null): Promise<PermissionRequest[]> => {
+      try {
+        const trimmed = typeof directory === 'string' ? directory.trim() : '';
+        const result = await this.client.permission.list(trimmed ? { directory: trimmed } : undefined);
+        return (result.data || []) as unknown as PermissionRequest[];
+      } catch {
+        return [];
+      }
+    };
+
+    // Try unscoped first (server may return global pending items).
+    fetches.push(fetchForDirectory(null));
+
+    const uniqueDirectories = new Set<string>();
+    for (const entry of options?.directories ?? []) {
+      const normalized = this.normalizeCandidatePath(entry ?? null);
+      if (normalized) {
+        uniqueDirectories.add(normalized);
+      }
     }
+
+    for (const directory of uniqueDirectories) {
+      fetches.push(fetchForDirectory(directory));
+    }
+
+    const results = await Promise.all(fetches);
+    const merged: PermissionRequest[] = [];
+    const seenIds = new Set<string>();
+
+    for (const list of results) {
+      for (const item of list) {
+        if (!item || typeof item !== 'object') continue;
+        const id = (item as { id?: unknown }).id;
+        if (typeof id !== 'string' || id.length === 0) continue;
+        if (seenIds.has(id)) continue;
+        seenIds.add(id);
+        merged.push(item);
+      }
+    }
+
+    return merged;
   }
 
   // Questions ("ask" tool)
@@ -1805,7 +1887,7 @@ class OpencodeService {
     }
   }
 
-  async listCommandsWithDetails(): Promise<Array<{ name: string; description?: string; agent?: string; model?: string; template?: string; subtask?: boolean }>> {
+  async listCommandsWithDetails(): Promise<Array<{ name: string; description?: string; agent?: string; model?: string; template?: string }>> {
     try {
       const response = await this.client.command.list(
         this.currentDirectory ? { directory: this.currentDirectory } : undefined
@@ -1817,7 +1899,6 @@ class OpencodeService {
         agent: cmd.agent as string | undefined,
         model: cmd.model as string | undefined,
         template: cmd.template as string | undefined,
-        subtask: cmd.subtask as boolean | undefined
       }));
     } catch {
       return [];
@@ -1973,91 +2054,43 @@ class OpencodeService {
       limit?: number;
       includeHidden?: boolean;
       respectGitignore?: boolean;
+      dirs?: boolean;
+      type?: 'file' | 'directory';
     }
   ): Promise<ProjectFileSearchHit[]> {
-    const desktopFiles = getDesktopFilesApi();
     const directory = typeof options?.directory === 'string' && options.directory.trim().length > 0
       ? options.directory.trim()
       : this.currentDirectory;
     const normalizedDirectory = directory ? normalizeFsPath(directory) : null;
+    const scopedClient = directory ? this.getScopedApiClient(directory) : this.client;
 
-    if (desktopFiles) {
-      try {
-        const results = await desktopFiles.search({
-          directory: directory || '',
-          query,
-          maxResults: options?.limit,
-          includeHidden: options?.includeHidden,
-          respectGitignore: options?.respectGitignore,
-        });
+    try {
+      const response = await scopedClient.find.files({
+        query,
+        limit: typeof options?.limit === 'number' && Number.isFinite(options.limit) ? options.limit : undefined,
+        dirs: options?.dirs === false || options?.type === 'file' ? 'false' : 'true',
+        type: options?.type,
+      });
 
-        if (!Array.isArray(results)) {
-          return [];
-        }
+      const items = Array.isArray(response?.data) ? response.data : [];
+      return items.map<ProjectFileSearchHit>((item) => {
+        const normalizedRelativePath = normalizeFsPath(item);
+        const name = normalizedRelativePath.split('/').filter(Boolean).pop() || normalizedRelativePath;
+        const normalizedPath = normalizedDirectory
+          ? normalizeFsPath(`${normalizedDirectory}/${normalizedRelativePath}`)
+          : normalizeFsPath(normalizedRelativePath);
 
-        return results.map<ProjectFileSearchHit>((file) => {
-          const normalizedPath = normalizeFsPath(file.path);
-          const name = normalizedPath.split('/').filter(Boolean).pop() || normalizedPath;
-          const relativePath = (() => {
-            if (file.preview && file.preview.length > 0 && typeof file.preview[0] === 'string') {
-              return normalizeFsPath(file.preview[0]);
-            }
-            if (normalizedDirectory && normalizedPath.startsWith(normalizedDirectory)) {
-              const suffix = normalizedPath.slice(normalizedDirectory.length).replace(/^\/+/, '');
-              return suffix || name;
-            }
-            return name;
-          })();
-
-          return {
-            name,
-            path: normalizedPath,
-            relativePath,
-            extension: name.includes('.') ? name.split('.').pop()?.toLowerCase() : undefined,
-          };
-        });
-      } catch (error) {
-        console.error('Failed to search files:', error);
-        throw error;
-      }
+        return {
+          name,
+          path: normalizedPath,
+          relativePath: normalizedRelativePath,
+          extension: name.includes('.') ? name.split('.').pop()?.toLowerCase() : undefined,
+        };
+      });
+    } catch (error) {
+      console.error('Failed to search files:', error);
+      throw error;
     }
-
-    const params = new URLSearchParams();
-    if (directory && directory.length > 0) {
-      params.set('directory', directory);
-    }
-    if (typeof query === 'string') {
-      params.set('q', query);
-    }
-    if (typeof options?.limit === 'number' && Number.isFinite(options.limit)) {
-      params.set('limit', String(options.limit));
-    }
-    if (options?.includeHidden) {
-      params.set('includeHidden', 'true');
-    }
-    if (options?.respectGitignore === false) {
-      params.set('respectGitignore', 'false');
-    }
-
-    const searchUrl = `${this.baseUrl}/fs/search${params.toString() ? `?${params.toString()}` : ''}`;
-    const response = await fetch(searchUrl, {
-      method: 'GET',
-      headers: {
-        Accept: 'application/json'
-      }
-    });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      const message = typeof error.error === 'string' ? error.error : 'Failed to search files';
-      throw new Error(message);
-    }
-
-    const result = await response.json();
-    if (!result || !Array.isArray(result.files)) {
-      return [];
-    }
-    return result.files as ProjectFileSearchHit[];
   }
 
   async getFilesystemHome(): Promise<string | null> {

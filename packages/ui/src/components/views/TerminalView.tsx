@@ -10,7 +10,6 @@ import { useFontPreferences } from '@/hooks/useFontPreferences';
 import { CODE_FONT_OPTION_MAP, DEFAULT_MONO_FONT } from '@/lib/fontOptions';
 import { convertThemeToXterm } from '@/lib/terminalTheme';
 import { TerminalViewport, type TerminalController } from '@/components/terminal/TerminalViewport';
-import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 import { Button } from '@/components/ui/button';
@@ -86,9 +85,11 @@ export const TerminalView: React.FC = () => {
     const { currentTheme } = useThemeSystem();
     const { monoFont } = useFontPreferences();
     const terminalFontSize = useUIStore(state => state.terminalFontSize);
+    const bottomTerminalHeight = useUIStore((state) => state.bottomTerminalHeight);
+    const isBottomTerminalExpanded = useUIStore((state) => state.isBottomTerminalExpanded);
     const { isMobile, hasTouchInput } = useDeviceInfo();
-    // Tabs are supported for web + desktop runtimes (not VSCode).
-    const enableTabs = !isMobile && runtime.platform !== 'vscode';
+    // Tabs are supported for web + desktop runtimes, including mobile (not VSCode).
+    const enableTabs = runtime.platform !== 'vscode';
     const showTerminalQuickKeysOnDesktop = useUIStore((state) => state.showTerminalQuickKeysOnDesktop);
     const showQuickKeys = isMobile || showTerminalQuickKeysOnDesktop;
 
@@ -137,6 +138,7 @@ export const TerminalView: React.FC = () => {
     const [isFatalError, setIsFatalError] = React.useState(false);
     const [activeModifier, setActiveModifier] = React.useState<Modifier | null>(null);
     const [isRestarting, setIsRestarting] = React.useState(false);
+    const [viewportLayoutVersion, setViewportLayoutVersion] = React.useState(0);
     const keyboardAvoidTargetId = React.useId();
 
     const streamCleanupRef = React.useRef<(() => void) | null>(null);
@@ -150,6 +152,13 @@ export const TerminalView: React.FC = () => {
     const nudgeOnConnectTerminalIdRef = React.useRef<string | null>(null);
     const rehydratedTerminalIdsRef = React.useRef<Set<string>>(new Set());
     const rehydratedSnapshotTakenRef = React.useRef(false);
+
+    const focusTerminalWhenWindowActive = React.useCallback(() => {
+        if (typeof document !== 'undefined' && !document.hasFocus()) {
+            return;
+        }
+        terminalControllerRef.current?.focus();
+    }, []);
 
     React.useEffect(() => {
         if (!terminalHydrated) {
@@ -263,7 +272,7 @@ export const TerminalView: React.FC = () => {
                                 setConnecting(directory, tabId, false);
                                 setConnectionError(null);
                                 setIsFatalError(false);
-                                terminalControllerRef.current?.focus();
+                                focusTerminalWhenWindowActive();
 
                                 // After a reload, buffer is empty and a reused PTY can look "stuck"
                                 // until the first output arrives. Nudge with a newline once.
@@ -292,6 +301,10 @@ export const TerminalView: React.FC = () => {
                                 const exitCode =
                                     typeof event.exitCode === 'number' ? event.exitCode : null;
                                 const signal = typeof event.signal === 'number' ? event.signal : null;
+                                const currentTab = useTerminalStore.getState()
+                                    .getDirectoryState(directory)
+                                    ?.tabs.find((t) => t.id === tabId);
+                                const isActionTab = Boolean(currentTab?.label?.startsWith('Action:'));
                                 appendToBuffer(
                                     directory,
                                     tabId,
@@ -301,7 +314,7 @@ export const TerminalView: React.FC = () => {
                                 );
                                 setTabSessionId(directory, tabId, null);
                                 setConnecting(directory, tabId, false);
-                                setConnectionError('Terminal session ended');
+                                setConnectionError(isActionTab ? null : 'Terminal session ended');
                                 setIsFatalError(false);
                                 disconnectStream();
                                 break;
@@ -335,7 +348,7 @@ export const TerminalView: React.FC = () => {
                 activeTerminalIdRef.current = null;
             };
         },
-        [appendToBuffer, disconnectStream, setConnecting, setTabSessionId, terminal]
+        [appendToBuffer, disconnectStream, focusTerminalWhenWindowActive, setConnecting, setTabSessionId, terminal]
     );
 
     React.useEffect(() => {
@@ -375,6 +388,8 @@ export const TerminalView: React.FC = () => {
 
             const tab = state.tabs.find((t) => t.id === tabId) ?? state.tabs[0];
             let terminalId = tab?.terminalSessionId ?? null;
+            const isActionTab = Boolean(tab?.label?.startsWith('Action:'));
+            const hasBufferedOutput = (tab?.bufferLength ?? 0) > 0 || (tab?.bufferChunks?.length ?? 0) > 0;
 
             const shouldNudgeExisting =
                 Boolean(terminalId) &&
@@ -386,6 +401,11 @@ export const TerminalView: React.FC = () => {
                 Boolean(terminalId) && rehydratedTerminalIdsRef.current.has(terminalId as string);
 
             if (!terminalId) {
+                if (isActionTab && hasBufferedOutput) {
+                    setConnecting(directory, tabId, false);
+                    return;
+                }
+
                 setConnectionError(null);
                 setIsFatalError(false);
                 setConnecting(directory, tabId, true);
@@ -473,27 +493,27 @@ export const TerminalView: React.FC = () => {
         }
 
         if (typeof window === 'undefined') {
-            terminalControllerRef.current?.focus();
+            focusTerminalWhenWindowActive();
             return;
         }
 
         const rafId = window.requestAnimationFrame(() => {
-            terminalControllerRef.current?.focus();
+            focusTerminalWhenWindowActive();
         });
 
         return () => {
             window.cancelAnimationFrame(rafId);
         };
-    }, [activeTabId, isTerminalVisible]);
+    }, [activeTabId, focusTerminalWhenWindowActive, isTerminalVisible]);
 
     const handleRestart = React.useCallback(async () => {
         if (!effectiveDirectory) return;
         if (isRestarting) return;
 
         const state = useTerminalStore.getState().getDirectoryState(effectiveDirectory);
-        const tabId = isMobile
-            ? (state?.tabs[0]?.id ?? null)
-            : (activeTabId ?? state?.activeTabId ?? state?.tabs[0]?.id ?? null);
+        const tabId = enableTabs
+            ? (activeTabId ?? state?.activeTabId ?? state?.tabs[0]?.id ?? null)
+            : (state?.tabs[0]?.id ?? null);
         if (!tabId) return;
 
         setIsRestarting(true);
@@ -510,7 +530,7 @@ export const TerminalView: React.FC = () => {
         } finally {
             setIsRestarting(false);
         }
-    }, [activeTabId, closeTab, disconnectStream, effectiveDirectory, isMobile, isRestarting]);
+    }, [activeTabId, closeTab, disconnectStream, effectiveDirectory, enableTabs, isRestarting]);
 
     const handleHardRestart = React.useCallback(async () => {
         // Keep semantics: “close tab -> new clean tab”.
@@ -735,7 +755,29 @@ export const TerminalView: React.FC = () => {
         return `${directoryPart}::${tabPart}::${terminalPart}`;
     }, [effectiveDirectory, activeTabId, terminalSessionId]);
 
-    const viewportSessionKey = terminalSessionId ?? terminalSessionKey;
+    const viewportSessionKey = React.useMemo(() => {
+        const base = terminalSessionId ?? terminalSessionKey;
+        return `${base}::layout-${viewportLayoutVersion}`;
+    }, [terminalSessionId, terminalSessionKey, viewportLayoutVersion]);
+
+    React.useEffect(() => {
+        if (isMobile || !isBottomTerminalOpen || !isTerminalVisible) {
+            return;
+        }
+
+        if (typeof window === 'undefined') {
+            setViewportLayoutVersion((value) => value + 1);
+            return;
+        }
+
+        const timeoutId = window.setTimeout(() => {
+            setViewportLayoutVersion((value) => value + 1);
+        }, 140);
+
+        return () => {
+            window.clearTimeout(timeoutId);
+        };
+    }, [bottomTerminalHeight, isBottomTerminalExpanded, isBottomTerminalOpen, isMobile, isTerminalVisible]);
 
     React.useEffect(() => {
         if (!isTerminalVisible) {
@@ -751,7 +793,7 @@ export const TerminalView: React.FC = () => {
         if (typeof window !== 'undefined') {
             const rafId = window.requestAnimationFrame(() => {
                 fitOnce();
-                controller.focus();
+                focusTerminalWhenWindowActive();
             });
             const timeoutIds = [220, 400].map((delay) => window.setTimeout(fitOnce, delay));
             return () => {
@@ -760,7 +802,35 @@ export const TerminalView: React.FC = () => {
             };
         }
         fitOnce();
-    }, [isTerminalVisible, terminalSessionKey, terminalSessionId]);
+    }, [focusTerminalWhenWindowActive, isTerminalVisible, terminalSessionKey, terminalSessionId]);
+
+    React.useEffect(() => {
+        if (isMobile || !isTerminalVisible || !isBottomTerminalOpen) {
+            return;
+        }
+
+        const controller = terminalControllerRef.current;
+        if (!controller) {
+            return;
+        }
+
+        const fitOnce = () => {
+            controller.fit();
+        };
+
+        if (typeof window !== 'undefined') {
+            const rafId = window.requestAnimationFrame(() => {
+                fitOnce();
+            });
+            const timeoutIds = [0, 80, 180, 320].map((delay) => window.setTimeout(fitOnce, delay));
+            return () => {
+                window.cancelAnimationFrame(rafId);
+                timeoutIds.forEach((id) => window.clearTimeout(id));
+            };
+        }
+
+        fitOnce();
+    }, [bottomTerminalHeight, isBottomTerminalExpanded, isBottomTerminalOpen, isMobile, isTerminalVisible]);
 
     if (!hasActiveContext) {
         return (
@@ -812,8 +882,13 @@ export const TerminalView: React.FC = () => {
             <Button
                 type="button"
                 size="sm"
-                variant={activeModifier === 'ctrl' ? 'default' : 'outline'}
-                className="h-6 w-9 p-0"
+                variant="outline"
+                className={cn(
+                    "h-6 w-9 p-0",
+                    activeModifier === 'ctrl'
+                        ? 'border-[var(--primary-base)] text-[var(--primary-base)] bg-[var(--primary-base)]/10 hover:text-[var(--primary-base)]'
+                        : undefined
+                )}
                 onClick={() => handleModifierToggle('ctrl')}
                 disabled={quickKeysDisabled}
             >
@@ -823,8 +898,13 @@ export const TerminalView: React.FC = () => {
             <Button
                 type="button"
                 size="sm"
-                variant={activeModifier === 'cmd' ? 'default' : 'outline'}
-                className="h-6 w-9 p-0"
+                variant="outline"
+                className={cn(
+                    "h-6 w-9 p-0",
+                    activeModifier === 'cmd'
+                        ? 'border-[var(--primary-base)] text-[var(--primary-base)] bg-[var(--primary-base)]/10 hover:text-[var(--primary-base)]'
+                        : undefined
+                )}
                 onClick={() => handleModifierToggle('cmd')}
                 disabled={quickKeysDisabled}
             >
@@ -891,18 +971,19 @@ export const TerminalView: React.FC = () => {
 
     return (
         <div className="flex h-full flex-col overflow-hidden bg-[var(--surface-background)]">
-            <div className="sticky top-0 z-20 shrink-0 bg-[var(--surface-background)] px-5 py-2 text-xs">
+            <div className={cn('sticky top-0 z-20 shrink-0 bg-[var(--surface-background)] text-xs', isMobile ? 'px-4 py-1.5' : 'px-5 py-2')}>
                 {enableTabs && directoryTerminalState ? (
-                    <div className="mt-2 pl-1 pr-1 flex items-center gap-2">
-                        <div className="min-w-0 flex-1 overflow-x-auto pb-1">
-                            <div className="flex w-max items-center gap-1 pr-1">
+                    <div className={cn('pl-1 pr-1 flex items-center gap-2', isMobile ? 'mt-1' : 'mt-2')}>
+                        <div className={cn('min-w-0 flex-1 overflow-x-auto', isMobile ? 'pb-0.5' : 'pb-1')}>
+                            <div className={cn('flex w-max items-center pr-1', isMobile ? 'gap-1' : 'gap-1')}>
                                 {directoryTerminalState.tabs.map((tab) => {
                                     const isActive = tab.id === activeTabId;
                                     return (
                                         <div
                                             key={tab.id}
                                             className={cn(
-                                                'group flex items-center gap-1 rounded-md border px-2 py-1 text-xs whitespace-nowrap',
+                                                'group flex items-center rounded-md border whitespace-nowrap',
+                                                isMobile ? 'h-8 gap-0.5 pl-2 pr-1.5 text-sm leading-none' : 'gap-1 pl-2 pr-1 py-1 text-xs',
                                                 isActive
                                                     ? 'bg-[var(--interactive-selection)] border-[var(--primary-muted)] text-[var(--interactive-selection-foreground)]'
                                                     : 'bg-transparent border-[var(--interactive-border)] text-[var(--surface-muted-foreground)] hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)]'
@@ -911,7 +992,10 @@ export const TerminalView: React.FC = () => {
                                             <button
                                                 type="button"
                                                 onClick={() => handleSelectTab(tab.id)}
-                                                className="max-w-[10rem] truncate text-left"
+                                                className={cn(
+                                                    'truncate text-left',
+                                                    isMobile ? '!min-h-0 !min-w-0 max-w-[9.5rem]' : 'max-w-[10rem]'
+                                                )}
                                                 title={tab.label}
                                             >
                                                 {tab.label}
@@ -919,8 +1003,9 @@ export const TerminalView: React.FC = () => {
                                             <button
                                                 type="button"
                                                 className={cn(
-                                                    'rounded-sm p-0.5 text-[var(--surface-muted-foreground)] hover:text-[var(--surface-foreground)]',
-                                                    !isActive && 'opacity-0 group-hover:opacity-100'
+                                                    'flex items-center justify-center rounded-sm text-[var(--surface-muted-foreground)] hover:text-[var(--surface-foreground)]',
+                                                    isMobile ? '!min-h-0 !min-w-0 h-3.5 w-3.5 p-0 leading-none' : 'h-4 w-4 p-0 leading-none',
+                                                    !isMobile && !isActive && 'opacity-0 group-hover:opacity-100'
                                                 )}
                                                 onClick={(e) => {
                                                     e.stopPropagation();
@@ -928,7 +1013,7 @@ export const TerminalView: React.FC = () => {
                                                 }}
                                                 title="Close tab"
                                             >
-                                                <RiCloseLine size={14} />
+                                                {isMobile ? <span aria-hidden>×</span> : <RiCloseLine size={12} />}
                                             </button>
                                         </div>
                                     );
@@ -937,10 +1022,13 @@ export const TerminalView: React.FC = () => {
                                 <button
                                     type="button"
                                     onClick={handleCreateTab}
-                                    className="ml-1 flex h-7 w-7 items-center justify-center rounded-md border border-[var(--interactive-border)] bg-transparent text-[var(--surface-muted-foreground)] hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)]"
+                                    className={cn(
+                                        'ml-1 flex items-center justify-center rounded-md border border-[var(--interactive-border)] bg-transparent text-[var(--surface-muted-foreground)] hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)]',
+                                        isMobile ? '!min-h-0 !min-w-0 h-8 w-8' : 'h-6.5 w-6.5'
+                                    )}
                                     title="New tab"
                                 >
-                                    <RiAddLine size={16} />
+                                    <RiAddLine size={isMobile ? 18 : 16} />
                                 </button>
                             </div>
                         </div>
@@ -968,43 +1056,22 @@ export const TerminalView: React.FC = () => {
             >
                 <div className="h-full w-full box-border pl-7 pr-5 pt-3 pb-4">
                     {shouldRenderViewport ? (
-                        isMobile ? (
-                            <TerminalViewport
-                                key={viewportSessionKey}
-                                ref={(controller) => {
-                                    terminalControllerRef.current = controller;
-                                }}
-                                sessionKey={viewportSessionKey}
-                                chunks={bufferChunks}
-                                onInput={handleViewportInput}
-                                onResize={handleViewportResize}
-                                theme={xtermTheme}
-                                fontFamily={resolvedFontStack}
-                                fontSize={terminalFontSize}
-                                enableTouchScroll={hasTouchInput}
-                                autoFocus={isTerminalVisible}
-                                keyboardAvoidTargetId={keyboardAvoidTargetId}
-                            />
-                        ) : (
-                            <ScrollableOverlay outerClassName="h-full" className="h-full w-full" disableHorizontal>
-                                <TerminalViewport
-                                    key={viewportSessionKey}
-                                    ref={(controller) => {
-                                        terminalControllerRef.current = controller;
-                                    }}
-                                    sessionKey={viewportSessionKey}
-                                    chunks={bufferChunks}
-                                    onInput={handleViewportInput}
-                                    onResize={handleViewportResize}
-                                    theme={xtermTheme}
-                                    fontFamily={resolvedFontStack}
-                                    fontSize={terminalFontSize}
-                                    enableTouchScroll={hasTouchInput}
-                                    autoFocus={isTerminalVisible}
-                                    keyboardAvoidTargetId={keyboardAvoidTargetId}
-                                />
-                            </ScrollableOverlay>
-                        )
+                        <TerminalViewport
+                            key={viewportSessionKey}
+                            ref={(controller) => {
+                                terminalControllerRef.current = controller;
+                            }}
+                            sessionKey={viewportSessionKey}
+                            chunks={bufferChunks}
+                            onInput={handleViewportInput}
+                            onResize={handleViewportResize}
+                            theme={xtermTheme}
+                            fontFamily={resolvedFontStack}
+                            fontSize={terminalFontSize}
+                            enableTouchScroll={hasTouchInput}
+                            autoFocus={isTerminalVisible}
+                            keyboardAvoidTargetId={keyboardAvoidTargetId}
+                        />
                     ) : null}
                 </div>
                 {connectionError && (

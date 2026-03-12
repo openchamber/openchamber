@@ -55,6 +55,16 @@ type TerminalController = {
   fit: () => void;
 };
 
+type TerminalWithViewport = {
+  scrollToBottom?: () => void;
+  getViewportY?: () => number;
+  hasSelection?: () => boolean;
+};
+
+type FitAddonWithObserveResize = FitAddon & {
+  observeResize?: () => void;
+};
+
 interface TerminalViewportProps {
   sessionKey: string;
   chunks: TerminalChunk[];
@@ -97,6 +107,7 @@ const TerminalViewport = React.forwardRef<TerminalController, TerminalViewportPr
     const writeScheduledRef = React.useRef<number | null>(null);
     const isWritingRef = React.useRef(false);
     const lastProcessedChunkIdRef = React.useRef<number | null>(null);
+    const followOutputRef = React.useRef(true);
     const touchScrollCleanupRef = React.useRef<(() => void) | null>(null);
     const viewportDiscoveryTimeoutRef = React.useRef<number | null>(null);
     const viewportDiscoveryAttemptsRef = React.useRef(0);
@@ -313,7 +324,7 @@ const TerminalViewport = React.forwardRef<TerminalController, TerminalViewportPr
 
     React.useEffect(() => {
       const container = containerRef.current;
-      if (!useHiddenInputOverlay || !container) {
+      if (!useHiddenInputOverlay || !container || enableTouchScroll) {
         return;
       }
 
@@ -338,7 +349,7 @@ const TerminalViewport = React.forwardRef<TerminalController, TerminalViewportPr
       return () => {
         container.removeEventListener('focusin', handleContainerFocusIn, true);
       };
-    }, [useHiddenInputOverlay, focusHiddenInput]);
+    }, [enableTouchScroll, useHiddenInputOverlay, focusHiddenInput]);
 
     const getTerminalSelectionText = React.useCallback((): string => {
       const terminal = terminalRef.current as unknown as {
@@ -834,9 +845,8 @@ const TerminalViewport = React.forwardRef<TerminalController, TerminalViewportPr
         scrollByPixels(deltaPixels);
       };
 
-        const handleTouchEnd = (event: TouchEvent) => {
+      const handleTouchEnd = (event: TouchEvent) => {
         const wasTap = !state.didMove;
-
 
         state.lastY = null;
         state.lastTime = null;
@@ -918,6 +928,7 @@ const TerminalViewport = React.forwardRef<TerminalController, TerminalViewportPr
       let localResizeObserver: ResizeObserver | null = null;
       let localTextareaObserver: MutationObserver | null = null;
       let localDisposables: Array<{ dispose: () => void }> = [];
+      let restorePatchedScrollToBottom: (() => void) | null = null;
 
       const container = containerRef.current;
       if (!container) {
@@ -956,9 +967,23 @@ const TerminalViewport = React.forwardRef<TerminalController, TerminalViewportPr
             return;
           }
 
-          const options = getGhosttyTerminalOptions(fontFamily, fontSize, theme, ghostty, useHiddenInputOverlay);
+          const options = getGhosttyTerminalOptions(fontFamily, fontSize, theme, ghostty, false);
 
           const terminal = new GhosttyTerminal(options);
+          followOutputRef.current = true;
+
+          const terminalWithViewport = terminal as unknown as TerminalWithViewport;
+          if (typeof terminalWithViewport.scrollToBottom === 'function') {
+            const originalScrollToBottom = terminalWithViewport.scrollToBottom.bind(terminalWithViewport);
+            terminalWithViewport.scrollToBottom = () => {
+              if (followOutputRef.current) {
+                originalScrollToBottom();
+              }
+            };
+            restorePatchedScrollToBottom = () => {
+              terminalWithViewport.scrollToBottom = originalScrollToBottom;
+            };
+          }
 
           const fitAddon = new FitAddon();
 
@@ -999,10 +1024,30 @@ const TerminalViewport = React.forwardRef<TerminalController, TerminalViewportPr
           }
 
           fitTerminal();
+          const fitAddonWithResize = fitAddon as FitAddonWithObserveResize;
+          if (typeof fitAddonWithResize.observeResize === 'function') {
+            fitAddonWithResize.observeResize();
+          }
           setupTouchScroll();
           localDisposables = [
             terminal.onData((data: string) => {
               inputHandlerRef.current(data);
+            }),
+            terminal.onScroll((viewportY: number) => {
+              if (typeof viewportY === 'number' && Number.isFinite(viewportY)) {
+                const hasSelection = typeof terminal.hasSelection === 'function' && terminal.hasSelection();
+                followOutputRef.current = !hasSelection && viewportY <= 0.5;
+              }
+            }),
+            terminal.onSelectionChange(() => {
+              const hasSelection = typeof terminal.hasSelection === 'function' && terminal.hasSelection();
+              if (hasSelection) {
+                followOutputRef.current = false;
+                return;
+              }
+
+              const viewportY = typeof terminal.getViewportY === 'function' ? terminal.getViewportY() : 0;
+              followOutputRef.current = viewportY <= 0.5;
             }),
           ];
 
@@ -1035,6 +1080,8 @@ const TerminalViewport = React.forwardRef<TerminalController, TerminalViewportPr
         window.removeEventListener('blur', handleWindowBlur);
 
         localDisposables.forEach((disposable) => disposable.dispose());
+        restorePatchedScrollToBottom?.();
+        restorePatchedScrollToBottom = null;
         if (localTerminalTextarea) {
           localTerminalTextarea.removeEventListener('focus', handleTerminalTextareaFocus);
           localTerminalTextarea.removeEventListener('blur', handleTerminalTextareaBlur);
@@ -1421,25 +1468,34 @@ const TerminalViewport = React.forwardRef<TerminalController, TerminalViewportPr
         className={cn('relative h-full w-full terminal-viewport-container', className)}
         style={{ backgroundColor: theme.background }}
         onTouchStart={(event) => {
-          if (useHiddenInputOverlay) {
+          if (!useHiddenInputOverlay || enableTouchScroll) {
+            return;
+          }
+          if (!hasCopyableSelectionInViewport()) {
             const touch = event.touches?.[0];
             focusHiddenInput(touch?.clientX, touch?.clientY);
           }
         }}
         onClick={(event) => {
           if (useHiddenInputOverlay) {
+            if (enableTouchScroll) {
+              return;
+            }
+            if (hasCopyableSelectionInViewport()) {
+              return;
+            }
             focusHiddenInput(event.clientX, event.clientY);
           } else {
             terminalRef.current?.focus();
           }
         }}
         onMouseUp={() => {
-          if (!enableTouchScroll) {
+          if (!enableTouchScroll && hasCopyableSelectionInViewport()) {
             void copySelectionToClipboard();
           }
         }}
         onTouchEnd={() => {
-          if (!enableTouchScroll) {
+          if (!enableTouchScroll && hasCopyableSelectionInViewport()) {
             void copySelectionToClipboard();
           }
         }}

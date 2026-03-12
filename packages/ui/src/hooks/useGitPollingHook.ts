@@ -33,7 +33,7 @@ export function useGitPolling() {
 
         setActiveDirectory(effectiveDirectory);
 
-        fetchAll(effectiveDirectory, git);
+        void fetchAll(effectiveDirectory, git, { silentIfCached: true });
 
         startPolling(git);
 

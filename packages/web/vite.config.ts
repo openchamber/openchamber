@@ -8,11 +8,36 @@ import { themeStoragePlugin } from '../../vite-theme-plugin';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageJson = JSON.parse(readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8'));
+const pwaDevEnabled = process.env.OPENCHAMBER_DISABLE_PWA_DEV !== '1';
+const reactScanToggle = (process.env.VITE_ENABLE_REACT_SCAN ?? '').toLowerCase();
+const enableReactScan = reactScanToggle === '1' || reactScanToggle === 'true' || reactScanToggle === 'on' || reactScanToggle === 'yes';
 
 export default defineConfig({
   root: path.resolve(__dirname, '.'),
   plugins: [
-    react(),
+    react({
+      babel: {
+        plugins: ['babel-plugin-react-compiler'],
+      },
+    }),
+    {
+      name: 'inject-react-scan-script',
+      transformIndexHtml() {
+        if (!enableReactScan) {
+          return;
+        }
+        return [
+          {
+            tag: 'script',
+            attrs: {
+              crossorigin: 'anonymous',
+              src: '//unpkg.com/react-scan/dist/auto.global.js',
+            },
+            injectTo: 'head-prepend',
+          },
+        ];
+      },
+    },
     themeStoragePlugin(),
     VitePWA({
       strategies: 'injectManifest',
@@ -29,7 +54,7 @@ export default defineConfig({
         injectionPoint: undefined,
       },
       devOptions: {
-        enabled: true,
+        enabled: pwaDevEnabled,
         type: 'module',
       },
     }),

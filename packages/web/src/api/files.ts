@@ -21,18 +21,6 @@ type WebDirectoryListResponse = {
   entries?: WebDirectoryEntry[];
 };
 
-type WebFileSearchResponse = {
-  root?: string;
-  directory?: string;
-  count?: number;
-  files?: Array<{
-    name?: string;
-    path?: string;
-    relativePath?: string;
-    extension?: string;
-  }>;
-};
-
 const toDirectoryListResult = (fallbackDirectory: string, payload: WebDirectoryListResponse): DirectoryListResult => {
   const directory = normalizePath(payload?.directory || payload?.path || fallbackDirectory);
   const entries = Array.isArray(payload?.entries) ? payload.entries : [];
@@ -78,35 +66,28 @@ export const createWebFilesAPI = (): FilesAPI => ({
       params.set('directory', directory);
     }
 
-    params.set('q', payload.query);
+    params.set('query', payload.query);
+    params.set('dirs', 'false');
+    params.set('type', 'file');
 
     if (typeof payload.maxResults === 'number' && Number.isFinite(payload.maxResults)) {
       params.set('limit', String(payload.maxResults));
     }
-    if (payload.includeHidden) {
-      params.set('includeHidden', 'true');
-    }
 
-    const response = await fetch(`/api/fs/search?${params.toString()}`);
+    const response = await fetch(`/api/find/file?${params.toString()}`);
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: response.statusText }));
       throw new Error((error as { error?: string }).error || 'Failed to search files');
     }
 
-    const result = (await response.json()) as WebFileSearchResponse;
-    const files = Array.isArray(result?.files) ? result.files : [];
+    const result = (await response.json()) as string[];
+    const files = Array.isArray(result) ? result : [];
 
-    return files
-      .filter((file): file is { path: string; relativePath?: string } =>
-        Boolean(file && typeof file.path === 'string')
-      )
-      .map((file) => ({
-        path: normalizePath(file.path),
-        preview: typeof file.relativePath === 'string' && file.relativePath.length > 0
-          ? [normalizePath(file.relativePath)]
-          : undefined,
-      }));
+    return files.map((relativePath) => ({
+      path: normalizePath(`${directory}/${relativePath}`),
+      preview: [normalizePath(relativePath)],
+    }));
   },
 
   async createDirectory(path: string): Promise<{ success: boolean; path: string }> {

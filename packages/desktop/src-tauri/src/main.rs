@@ -1,29 +1,45 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod remote_ssh;
+
 use anyhow::{anyhow, Result};
 use base64::{engine::general_purpose, Engine as _};
+use remote_ssh::DesktopSshManagerState;
 use serde::{Deserialize, Serialize};
+use std::env;
+use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    collections::{HashMap, HashSet},
+    fs,
+    path::{Path, PathBuf},
+};
 use std::{
     net::TcpListener,
     process::Command,
-    sync::{atomic::{AtomicU64, Ordering}, Mutex},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Mutex,
+    },
     time::Duration,
 };
-use std::{collections::{HashMap, HashSet}, fs, path::{Path, PathBuf}};
-use std::env;
-use std::time::{SystemTime, UNIX_EPOCH};
-use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri::utils::config::BackgroundThrottlingPolicy;
+use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 /// Global counter for generating unique window labels.
 static WINDOW_COUNTER: AtomicU64 = AtomicU64::new(1);
 
-fn next_window_label() -> String {
-    let n = WINDOW_COUNTER.fetch_add(1, Ordering::Relaxed);
-    if n == 1 {
-        "main".to_string()
-    } else {
-        format!("main-{n}")
+fn next_window_label<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> String {
+    loop {
+        let n = WINDOW_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let candidate = if n == 1 {
+            "main".to_string()
+        } else {
+            format!("main-{n}")
+        };
+
+        if !app.webview_windows().contains_key(&candidate) {
+            return candidate;
+        }
     }
 }
 
@@ -141,13 +157,8 @@ fn build_macos_menu<R: tauri::Runtime>(
 
     let pkg_info = app.package_info();
 
-    let auto_worktree = app
-        .try_state::<MenuRuntimeState>()
-        .map(|state| *state.auto_worktree.lock().expect("menu state mutex"))
-        .unwrap_or(false);
-
-    let new_session_shortcut = if auto_worktree { "Cmd+Shift+N" } else { "Cmd+N" };
-    let new_worktree_shortcut = if auto_worktree { "Cmd+N" } else { "Cmd+Shift+N" };
+    let new_session_shortcut = "Cmd+N";
+    let new_worktree_shortcut = "Cmd+Shift+N";
 
     let about = MenuItem::with_id(
         app,
@@ -211,8 +222,13 @@ fn build_macos_menu<R: tauri::Runtime>(
         MenuItem::with_id(app, MENU_ITEM_OPEN_GIT_TAB_ID, "Git", true, Some("Cmd+G"))?;
     let open_diff_tab =
         MenuItem::with_id(app, MENU_ITEM_OPEN_DIFF_TAB_ID, "Diff", true, Some("Cmd+E"))?;
-    let open_files_tab =
-        MenuItem::with_id(app, MENU_ITEM_OPEN_FILES_TAB_ID, "Files", true, None::<&str>)?;
+    let open_files_tab = MenuItem::with_id(
+        app,
+        MENU_ITEM_OPEN_FILES_TAB_ID,
+        "Files",
+        true,
+        None::<&str>,
+    )?;
     let open_terminal_tab = MenuItem::with_id(
         app,
         MENU_ITEM_OPEN_TERMINAL_TAB_ID,
@@ -222,12 +238,27 @@ fn build_macos_menu<R: tauri::Runtime>(
     )?;
     let copy = MenuItem::with_id(app, MENU_ITEM_COPY_ID, "Copy", true, Some("Cmd+C"))?;
 
-    let theme_light =
-        MenuItem::with_id(app, MENU_ITEM_THEME_LIGHT_ID, "Light Theme", true, None::<&str>)?;
-    let theme_dark =
-        MenuItem::with_id(app, MENU_ITEM_THEME_DARK_ID, "Dark Theme", true, None::<&str>)?;
-    let theme_system =
-        MenuItem::with_id(app, MENU_ITEM_THEME_SYSTEM_ID, "System Theme", true, None::<&str>)?;
+    let theme_light = MenuItem::with_id(
+        app,
+        MENU_ITEM_THEME_LIGHT_ID,
+        "Light Theme",
+        true,
+        None::<&str>,
+    )?;
+    let theme_dark = MenuItem::with_id(
+        app,
+        MENU_ITEM_THEME_DARK_ID,
+        "Dark Theme",
+        true,
+        None::<&str>,
+    )?;
+    let theme_system = MenuItem::with_id(
+        app,
+        MENU_ITEM_THEME_SYSTEM_ID,
+        "System Theme",
+        true,
+        None::<&str>,
+    )?;
 
     let toggle_sidebar = MenuItem::with_id(
         app,
@@ -261,8 +292,13 @@ fn build_macos_menu<R: tauri::Runtime>(
         Some("Cmd+Shift+L"),
     )?;
 
-    let report_bug =
-        MenuItem::with_id(app, MENU_ITEM_REPORT_BUG_ID, "Report a Bug", true, None::<&str>)?;
+    let report_bug = MenuItem::with_id(
+        app,
+        MENU_ITEM_REPORT_BUG_ID,
+        "Report a Bug",
+        true,
+        None::<&str>,
+    )?;
     let request_feature = MenuItem::with_id(
         app,
         MENU_ITEM_REQUEST_FEATURE_ID,
@@ -270,14 +306,28 @@ fn build_macos_menu<R: tauri::Runtime>(
         true,
         None::<&str>,
     )?;
-    let join_discord =
-        MenuItem::with_id(app, MENU_ITEM_JOIN_DISCORD_ID, "Join Discord", true, None::<&str>)?;
+    let join_discord = MenuItem::with_id(
+        app,
+        MENU_ITEM_JOIN_DISCORD_ID,
+        "Join Discord",
+        true,
+        None::<&str>,
+    )?;
 
-    let clear_cache =
-        MenuItem::with_id(app, MENU_ITEM_CLEAR_CACHE_ID, "Clear Cache", true, None::<&str>)?;
+    let clear_cache = MenuItem::with_id(
+        app,
+        MENU_ITEM_CLEAR_CACHE_ID,
+        "Clear Cache",
+        true,
+        None::<&str>,
+    )?;
 
-    let theme_submenu =
-        Submenu::with_items(app, "Theme", true, &[&theme_light, &theme_dark, &theme_system])?;
+    let theme_submenu = Submenu::with_items(
+        app,
+        "Theme",
+        true,
+        &[&theme_light, &theme_dark, &theme_system],
+    )?;
 
     let window_menu = Submenu::with_id_and_items(
         app,
@@ -386,43 +436,6 @@ fn build_macos_menu<R: tauri::Runtime>(
 }
 
 #[tauri::command]
-fn desktop_set_auto_worktree_menu(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
-    let Some(state) = app.try_state::<MenuRuntimeState>() else {
-        return Ok(());
-    };
-
-    {
-        let mut guard = state.auto_worktree.lock().expect("menu state mutex");
-        *guard = enabled;
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        use tauri::menu::MenuItemKind;
-
-        let new_session_shortcut = if enabled { "Cmd+Shift+N" } else { "Cmd+N" };
-        let new_worktree_shortcut = if enabled { "Cmd+N" } else { "Cmd+Shift+N" };
-
-        if let Some(menu) = app.menu() {
-            if let Some(MenuItemKind::MenuItem(item)) = menu.get(MENU_ITEM_NEW_SESSION_ID) {
-                item.set_accelerator(Some(new_session_shortcut))
-                    .map_err(|err| err.to_string())?;
-            }
-            if let Some(MenuItemKind::MenuItem(item)) = menu.get(MENU_ITEM_WORKTREE_CREATOR_ID) {
-                item.set_accelerator(Some(new_worktree_shortcut))
-                    .map_err(|err| err.to_string())?;
-            }
-        } else {
-            // Should not happen on macOS, but keep as fallback.
-            let menu = build_macos_menu(&app).map_err(|err| err.to_string())?;
-            app.set_menu(menu).map_err(|err| err.to_string())?;
-        }
-    }
-
-    Ok(())
-}
-
-#[tauri::command]
 fn desktop_clear_cache(app: tauri::AppHandle) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
@@ -435,7 +448,10 @@ fn desktop_clear_cache(app: tauri::AppHandle) -> Result<(), String> {
         }
 
         if !failures.is_empty() {
-            return Err(format!("Failed to clear browsing data for some windows: {}", failures.join("; ")));
+            return Err(format!(
+                "Failed to clear browsing data for some windows: {}",
+                failures.join("; ")
+            ));
         }
 
         // Reload all windows after clearing persisted browsing data so in-memory state is reset too.
@@ -461,7 +477,11 @@ fn desktop_open_path(path: String, app: Option<String>) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         let mut command = Command::new("open");
-        if let Some(app_name) = app.as_ref().map(|value| value.trim()).filter(|value| !value.is_empty()) {
+        if let Some(app_name) = app
+            .as_ref()
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+        {
             command.arg("-a").arg(app_name);
         }
         command.arg(trimmed);
@@ -472,6 +492,181 @@ fn desktop_open_path(path: String, app: Option<String>) -> Result<(), String> {
     #[cfg(not(target_os = "macos"))]
     {
         Err("desktop_open_path is only supported on macOS".to_string())
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Clone)]
+struct OpenCommandSpec {
+    program: &'static str,
+    args: Vec<String>,
+}
+
+#[cfg(target_os = "macos")]
+fn run_open_command_chain(specs: &[OpenCommandSpec]) -> Result<(), String> {
+    let mut failures: Vec<String> = Vec::new();
+
+    for spec in specs {
+        match Command::new(spec.program).args(&spec.args).status() {
+            Ok(status) if status.success() => return Ok(()),
+            Ok(status) => failures.push(format!(
+                "{} {} exited with status {}",
+                spec.program,
+                spec.args.join(" "),
+                status
+            )),
+            Err(error) => failures.push(format!(
+                "{} {} failed: {}",
+                spec.program,
+                spec.args.join(" "),
+                error
+            )),
+        }
+    }
+
+    if failures.is_empty() {
+        return Err("No launch strategies available".to_string());
+    }
+
+    Err(failures.join("; "))
+}
+
+#[cfg(target_os = "macos")]
+fn is_jetbrains_app_id(app_id: &str) -> bool {
+    matches!(
+        app_id,
+        "pycharm"
+            | "intellij"
+            | "webstorm"
+            | "phpstorm"
+            | "rider"
+            | "rustrover"
+            | "android-studio"
+    )
+}
+
+#[cfg(target_os = "macos")]
+fn cli_for_app_id(app_id: &str) -> Option<&'static str> {
+    match app_id {
+        "vscode" => Some("code"),
+        "cursor" => Some("cursor"),
+        "vscodium" => Some("codium"),
+        "windsurf" => Some("windsurf"),
+        "zed" => Some("zed"),
+        _ => None,
+    }
+}
+
+#[tauri::command]
+fn desktop_open_in_app(
+    project_path: String,
+    app_id: String,
+    app_name: String,
+    file_path: Option<String>,
+) -> Result<(), String> {
+    let trimmed_project_path = project_path.trim();
+    if trimmed_project_path.is_empty() {
+        return Err("Project path is required".to_string());
+    }
+
+    let trimmed_app_id = app_id.trim().to_lowercase();
+    if trimmed_app_id.is_empty() {
+        return Err("App id is required".to_string());
+    }
+
+    let trimmed_app_name = app_name.trim();
+    if trimmed_app_name.is_empty() {
+        return Err("App name is required".to_string());
+    }
+
+    let normalized_file_path = file_path
+        .as_ref()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty());
+
+    #[cfg(target_os = "macos")]
+    {
+        let project = trimmed_project_path.to_string();
+        let app_name_owned = trimmed_app_name.to_string();
+        let file = normalized_file_path.map(|value| value.to_string());
+        let mut specs: Vec<OpenCommandSpec> = Vec::new();
+
+        if trimmed_app_id == "finder" {
+            specs.push(OpenCommandSpec {
+                program: "open",
+                args: vec![project.clone()],
+            });
+            return run_open_command_chain(&specs);
+        }
+
+        if matches!(trimmed_app_id.as_str(), "terminal" | "iterm2" | "ghostty") {
+            specs.push(OpenCommandSpec {
+                program: "open",
+                args: vec!["-a".to_string(), app_name_owned.clone(), project.clone()],
+            });
+            return run_open_command_chain(&specs);
+        }
+
+        if let Some(cli) = cli_for_app_id(trimmed_app_id.as_str()) {
+            let mut cli_args = vec!["-n".to_string(), project.clone()];
+            if let Some(file_path) = file.as_ref() {
+                cli_args.push("-g".to_string());
+                cli_args.push(file_path.clone());
+            }
+            specs.push(OpenCommandSpec {
+                program: cli,
+                args: cli_args,
+            });
+        }
+
+        if is_jetbrains_app_id(trimmed_app_id.as_str()) {
+            let mut args = vec![
+                "-na".to_string(),
+                app_name_owned.clone(),
+                "--args".to_string(),
+                project.clone(),
+            ];
+            if let Some(file_path) = file.as_ref() {
+                args.push(file_path.clone());
+            }
+            specs.push(OpenCommandSpec {
+                program: "open",
+                args,
+            });
+        }
+
+        if let Some(file_path) = file.as_ref() {
+            specs.push(OpenCommandSpec {
+                program: "open",
+                args: vec![
+                    "-na".to_string(),
+                    app_name_owned.clone(),
+                    "--args".to_string(),
+                    project.clone(),
+                    file_path.clone(),
+                ],
+            });
+        }
+
+        specs.push(OpenCommandSpec {
+            program: "open",
+            args: vec!["-a".to_string(), app_name_owned.clone(), project.clone()],
+        });
+
+        if let Some(file_path) = file {
+            specs.push(OpenCommandSpec {
+                program: "open",
+                args: vec!["-a".to_string(), app_name_owned, file_path],
+            });
+        }
+
+        return run_open_command_chain(&specs);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = normalized_file_path;
+        Err("desktop_open_in_app is only supported on macOS".to_string())
     }
 }
 
@@ -578,9 +773,11 @@ fn desktop_get_installed_apps(
             let cached_icon_map: HashMap<String, String> = HashMap::new();
             tauri::async_runtime::spawn_blocking(move || {
                 log::info!("[open-in] scan start: {} candidates", app_names.len());
-                let refreshed = build_installed_apps(&app_names, &cached_icon_map, force_icon_refresh);
+                let refreshed =
+                    build_installed_apps(&app_names, &cached_icon_map, force_icon_refresh);
                 if log::log_enabled!(log::Level::Info) {
-                    let names: Vec<String> = refreshed.iter().map(|entry| entry.name.clone()).collect();
+                    let names: Vec<String> =
+                        refreshed.iter().map(|entry| entry.name.clone()).collect();
                     log::info!("[open-in] scan apps: {:?}", names);
                 }
                 log::info!("[open-in] scan done: {} installed", refreshed.len());
@@ -603,9 +800,11 @@ fn desktop_get_installed_apps(
             let cached_icon_map: HashMap<String, String> = HashMap::new();
             tauri::async_runtime::spawn_blocking(move || {
                 log::info!("[open-in] scan start: {} candidates", app_names.len());
-                let refreshed = build_installed_apps(&app_names, &cached_icon_map, force_icon_refresh);
+                let refreshed =
+                    build_installed_apps(&app_names, &cached_icon_map, force_icon_refresh);
                 if log::log_enabled!(log::Level::Info) {
-                    let names: Vec<String> = refreshed.iter().map(|entry| entry.name.clone()).collect();
+                    let names: Vec<String> =
+                        refreshed.iter().map(|entry| entry.name.clone()).collect();
                     log::info!("[open-in] scan apps: {:?}", names);
                 }
                 log::info!("[open-in] scan done: {} installed", refreshed.len());
@@ -714,7 +913,10 @@ fn resolve_app_bundle_path(app_name: &str) -> Option<PathBuf> {
         }
     }
 
-    if let Ok(output) = Command::new("mdfind").args(["-name", &bundle_name]).output() {
+    if let Ok(output) = Command::new("mdfind")
+        .args(["-name", &bundle_name])
+        .output()
+    {
         if output.status.success() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             for line in stdout.lines() {
@@ -735,9 +937,10 @@ fn resolve_app_bundle_path(app_name: &str) -> Option<PathBuf> {
 
 #[cfg(target_os = "macos")]
 fn installed_apps_cache_path() -> PathBuf {
-    let home = env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/"));
-    home
-        .join(".config")
+    let home = env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/"));
+    home.join(".config")
         .join("openchamber")
         .join(INSTALLED_APPS_CACHE_FILE)
 }
@@ -776,10 +979,10 @@ fn build_installed_apps(
             let icon_data_url = if force_icon_refresh {
                 resolve_app_icon_path(&app_path).and_then(|icon| icon_to_data_url(&icon, trimmed))
             } else {
-                cached_icon_map
-                    .get(trimmed)
-                    .cloned()
-                    .or_else(|| resolve_app_icon_path(&app_path).and_then(|icon| icon_to_data_url(&icon, trimmed)))
+                cached_icon_map.get(trimmed).cloned().or_else(|| {
+                    resolve_app_icon_path(&app_path)
+                        .and_then(|icon| icon_to_data_url(&icon, trimmed))
+                })
             };
             results.push(InstalledAppInfo {
                 name: trimmed.to_string(),
@@ -807,17 +1010,19 @@ fn resolve_app_icon_path(app_path: &Path) -> Option<PathBuf> {
     }
 
     if let Some(icon_file) = read_bundle_icon_file(app_path) {
-        let icon_path = app_path
-            .join("Contents")
-            .join("Resources")
-            .join(&icon_file);
+        let icon_path = app_path.join("Contents").join("Resources").join(&icon_file);
         if icon_path.exists() {
             return Some(icon_path);
         }
     }
 
     if let Ok(output) = Command::new("mdls")
-        .args(["-name", "kMDItemIconFile", "-raw", &app_path.to_string_lossy()])
+        .args([
+            "-name",
+            "kMDItemIconFile",
+            "-raw",
+            &app_path.to_string_lossy(),
+        ])
         .output()
     {
         if output.status.success() {
@@ -829,10 +1034,7 @@ fn resolve_app_icon_path(app_path: &Path) -> Option<PathBuf> {
                 } else {
                     format!("{icon_name}.icns")
                 };
-                let icon_path = app_path
-                    .join("Contents")
-                    .join("Resources")
-                    .join(icon_file);
+                let icon_path = app_path.join("Contents").join("Resources").join(icon_file);
                 if icon_path.exists() {
                     return Some(icon_path);
                 }
@@ -949,7 +1151,10 @@ fn is_app_bundle_installed(bundle_name: &str) -> bool {
     let system_app_path = format!("/System/Applications/{bundle_name}");
     let utilities_path = format!("/System/Applications/Utilities/{bundle_name}");
 
-    if Path::new(&app_path).exists() || Path::new(&system_app_path).exists() || Path::new(&utilities_path).exists() {
+    if Path::new(&app_path).exists()
+        || Path::new(&system_app_path).exists()
+        || Path::new(&utilities_path).exists()
+    {
         return true;
     }
 
@@ -967,6 +1172,10 @@ const SIDECAR_NAME: &str = "openchamber-server";
 const SIDECAR_NOTIFY_PREFIX: &str = "[OpenChamberDesktopNotify] ";
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(20);
 const HEALTH_POLL_INTERVAL: Duration = Duration::from_millis(250);
+const LOCAL_SIDECAR_HEALTH_TIMEOUT: Duration = Duration::from_secs(8);
+const LOCAL_SIDECAR_HEALTH_POLL_INTERVAL: Duration = Duration::from_millis(100);
+const STARTUP_REMOTE_PROBE_SOFT_TIMEOUT: Duration = Duration::from_secs(2);
+const STARTUP_REMOTE_PROBE_HARD_TIMEOUT: Duration = Duration::from_secs(10);
 
 const DEFAULT_DESKTOP_PORT: u16 = 57123;
 const WINDOW_STATE_DEBOUNCE_MS: u64 = 300;
@@ -1026,11 +1235,6 @@ impl WindowFocusState {
         let mut guard = self.focused_windows.lock().expect("focus mutex");
         guard.remove(label);
     }
-}
-
-#[derive(Default)]
-struct MenuRuntimeState {
-    auto_worktree: Mutex<bool>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -1136,7 +1340,13 @@ fn read_desktop_local_port_from_disk() -> Option<u16> {
         .as_ref()
         .and_then(|v| v.get("desktopLocalPort"))
         .and_then(|v| v.as_u64())
-        .and_then(|v| if v > 0 && v <= u16::MAX as u64 { Some(v as u16) } else { None })
+        .and_then(|v| {
+            if v > 0 && v <= u16::MAX as u64 {
+                Some(v as u16)
+            } else {
+                None
+            }
+        })
 }
 
 fn write_desktop_local_port_to_disk(port: u16) -> Result<()> {
@@ -1159,7 +1369,6 @@ fn write_desktop_local_port_to_disk(port: u16) -> Result<()> {
     fs::write(&path, serde_json::to_string_pretty(&root)?)?;
     Ok(())
 }
-
 
 fn read_desktop_hosts_config_from_disk() -> DesktopHostsConfig {
     read_desktop_hosts_config_from_path(&settings_file_path())
@@ -1305,7 +1514,6 @@ fn desktop_hosts_set(config: DesktopHostsConfig) -> Result<(), String> {
     write_desktop_hosts_config_to_disk(&config).map_err(|err| err.to_string())
 }
 
-
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct HostProbeResult {
@@ -1313,12 +1521,11 @@ struct HostProbeResult {
     latency_ms: u64,
 }
 
-#[tauri::command]
-async fn desktop_host_probe(url: String) -> Result<HostProbeResult, String> {
-    let health = build_health_url(&url).ok_or_else(|| "Invalid URL".to_string())?;
+async fn probe_host_with_timeout(url: &str, timeout: Duration) -> Result<HostProbeResult, String> {
+    let health = build_health_url(url).ok_or_else(|| "Invalid URL".to_string())?;
     let client = reqwest::Client::builder()
         .no_proxy()
-        .timeout(Duration::from_secs(2))
+        .timeout(timeout)
         .build()
         .map_err(|err| err.to_string())?;
     let started = std::time::Instant::now();
@@ -1349,6 +1556,11 @@ async fn desktop_host_probe(url: String) -> Result<HostProbeResult, String> {
             latency_ms: started.elapsed().as_millis() as u64,
         }),
     }
+}
+
+#[tauri::command]
+async fn desktop_host_probe(url: String) -> Result<HostProbeResult, String> {
+    probe_host_with_timeout(&url, STARTUP_REMOTE_PROBE_SOFT_TIMEOUT).await
 }
 
 #[derive(Clone, Serialize)]
@@ -1389,7 +1601,8 @@ fn is_nonempty_string(value: &str) -> bool {
     !value.trim().is_empty()
 }
 
-const CHANGELOG_URL: &str = "https://raw.githubusercontent.com/btriapitsyn/openchamber/main/CHANGELOG.md";
+const CHANGELOG_URL: &str =
+    "https://raw.githubusercontent.com/btriapitsyn/openchamber/main/CHANGELOG.md";
 
 fn parse_semver_num(value: &str) -> Option<u32> {
     let trimmed = value.trim().trim_start_matches('v');
@@ -1456,7 +1669,10 @@ async fn fetch_changelog_notes(from_version: &str, to_version: &str) -> Option<S
     let mut relevant: Vec<String> = Vec::new();
     for idx in 0..markers.len() {
         let (start, ver_num) = markers[idx];
-        let end = markers.get(idx + 1).map(|m| m.0).unwrap_or_else(|| changelog.len());
+        let end = markers
+            .get(idx + 1)
+            .map(|m| m.0)
+            .unwrap_or_else(|| changelog.len());
         let Some(ver_num) = ver_num else {
             continue;
         };
@@ -1522,13 +1738,13 @@ fn maybe_show_sidecar_notification(app: &tauri::AppHandle, payload: SidecarNotif
     let _ = builder.show();
 }
 
-async fn wait_for_health(url: &str) -> bool {
+async fn wait_for_health_with(url: &str, timeout: Duration, poll_interval: Duration) -> bool {
     let client = match reqwest::Client::builder().no_proxy().build() {
         Ok(c) => c,
         Err(_) => return false,
     };
 
-    let deadline = std::time::Instant::now() + HEALTH_TIMEOUT;
+    let deadline = std::time::Instant::now() + timeout;
     let health_url = format!("{}/health", url.trim_end_matches('/'));
 
     while std::time::Instant::now() < deadline {
@@ -1537,10 +1753,14 @@ async fn wait_for_health(url: &str) -> bool {
                 return true;
             }
         }
-        tokio::time::sleep(HEALTH_POLL_INTERVAL).await;
+        tokio::time::sleep(poll_interval).await;
     }
 
     false
+}
+
+async fn wait_for_health(url: &str) -> bool {
+    wait_for_health_with(url, HEALTH_TIMEOUT, HEALTH_POLL_INTERVAL).await
 }
 
 fn kill_sidecar(app: tauri::AppHandle) {
@@ -1627,8 +1847,15 @@ async fn spawn_local_server(app: &tauri::AppHandle) -> Result<String> {
         }
 
         let mut candidate = value.to_string();
-        if fs::metadata(&candidate).map(|m| m.is_dir()).unwrap_or(false) {
-            let bin_name = if cfg!(windows) { "opencode.exe" } else { "opencode" };
+        if fs::metadata(&candidate)
+            .map(|m| m.is_dir())
+            .unwrap_or(false)
+        {
+            let bin_name = if cfg!(windows) {
+                "opencode.exe"
+            } else {
+                "opencode"
+            };
             candidate = PathBuf::from(candidate)
                 .join(bin_name)
                 .to_string_lossy()
@@ -1685,13 +1912,13 @@ async fn spawn_local_server(app: &tauri::AppHandle) -> Result<String> {
     push_unique("/usr/sbin".to_string());
     push_unique("/sbin".to_string());
 
-        if let Some(home) = resolved_home_dir.as_deref() {
-            // OpenCode installer default.
-            push_unique(format!("{home}/.opencode/bin"));
-            push_unique(format!("{home}/.local/bin"));
-            push_unique(format!("{home}/.bun/bin"));
-            push_unique(format!("{home}/.cargo/bin"));
-            push_unique(format!("{home}/bin"));
+    if let Some(home) = resolved_home_dir.as_deref() {
+        // OpenCode installer default.
+        push_unique(format!("{home}/.opencode/bin"));
+        push_unique(format!("{home}/.local/bin"));
+        push_unique(format!("{home}/.bun/bin"));
+        push_unique(format!("{home}/.cargo/bin"));
+        push_unique(format!("{home}/bin"));
     }
 
     if let Ok(existing) = env::var("PATH") {
@@ -1784,7 +2011,13 @@ async fn spawn_local_server(app: &tauri::AppHandle) -> Result<String> {
             *state.url.lock().expect("sidecar url mutex") = Some(url.clone());
         }
 
-        if !wait_for_health(&url).await {
+        if !wait_for_health_with(
+            &url,
+            LOCAL_SIDECAR_HEALTH_TIMEOUT,
+            LOCAL_SIDECAR_HEALTH_POLL_INTERVAL,
+        )
+        .await
+        {
             kill_sidecar(app.clone());
             continue;
         }
@@ -1978,7 +2211,13 @@ fn desktop_new_window_at_url(app: tauri::AppHandle, url: String) -> Result<(), S
 
     let local_origin = app
         .try_state::<DesktopUiInjectionState>()
-        .and_then(|state| state.local_origin.lock().expect("desktop local origin mutex").clone())
+        .and_then(|state| {
+            state
+                .local_origin
+                .lock()
+                .expect("desktop local origin mutex")
+                .clone()
+        })
         .ok_or_else(|| "Local origin not yet known (sidecar may still be starting)".to_string())?;
 
     create_window(&app, &url, &local_origin, false).map_err(|e| e.to_string())
@@ -1993,7 +2232,8 @@ fn desktop_read_file(path: String) -> Result<FileContent, String> {
     let path = Path::new(&path);
 
     // Check file size (max 50MB)
-    let metadata = std::fs::metadata(path).map_err(|e| format!("Failed to read file metadata: {e}"))?;
+    let metadata =
+        std::fs::metadata(path).map_err(|e| format!("Failed to read file metadata: {e}"))?;
     let size = metadata.len();
     if size > 50 * 1024 * 1024 {
         return Err("File is too large. Maximum size is 50MB.".to_string());
@@ -2003,7 +2243,11 @@ fn desktop_read_file(path: String) -> Result<FileContent, String> {
     let bytes = std::fs::read(path).map_err(|e| format!("Failed to read file: {e}"))?;
 
     // Detect mime type from extension
-    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
     let mime = match ext.as_str() {
         "png" => "image/png",
         "jpg" | "jpeg" => "image/jpeg",
@@ -2055,11 +2299,16 @@ fn macos_major_version() -> Option<u32> {
 
     // Use marketing version (sw_vers), but map legacy 10.x to minor (10.15 -> 15).
     // This matches WebKit UA fallback logic in the UI.
-    if let Some(raw) = cmd_stdout("/usr/bin/sw_vers", &["-productVersion"]).or_else(|| cmd_stdout("sw_vers", &["-productVersion"])) {
+    if let Some(raw) = cmd_stdout("/usr/bin/sw_vers", &["-productVersion"])
+        .or_else(|| cmd_stdout("sw_vers", &["-productVersion"]))
+    {
         let raw = raw.trim();
         let mut parts = raw.split('.');
         let major = parts.next().and_then(|v| v.parse::<u32>().ok())?;
-        let minor = parts.next().and_then(|v| v.parse::<u32>().ok()).unwrap_or(0);
+        let minor = parts
+            .next()
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or(0);
         return Some(if major == 10 { minor } else { major });
     }
 
@@ -2087,7 +2336,8 @@ fn macos_major_version() -> Option<u32> {
 /// Build the initialization script injected into every webview window.
 /// This is computed once and reused for all windows.
 fn build_init_script(local_origin: &str) -> String {
-    let home = std::env::var(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).unwrap_or_default();
+    let home =
+        std::env::var(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).unwrap_or_default();
     let macos_major = macos_major_version().unwrap_or(0);
 
     let home_json = serde_json::to_string(&home).unwrap_or_else(|_| "\"\"".into());
@@ -2161,8 +2411,12 @@ fn capture_window_state(window: &tauri::Window) -> Option<DesktopWindowState> {
     Some(DesktopWindowState {
         x: (position.x as f64 / scale).round() as i32,
         y: (position.y as f64 / scale).round() as i32,
-        width: (size.width as f64 / scale).round().max(MIN_WINDOW_WIDTH as f64) as u32,
-        height: (size.height as f64 / scale).round().max(MIN_WINDOW_HEIGHT as f64) as u32,
+        width: (size.width as f64 / scale)
+            .round()
+            .max(MIN_WINDOW_WIDTH as f64) as u32,
+        height: (size.height as f64 / scale)
+            .round()
+            .max(MIN_WINDOW_HEIGHT as f64) as u32,
         maximized: window.is_maximized().unwrap_or(false),
         fullscreen: window.is_fullscreen().unwrap_or(false),
     })
@@ -2179,7 +2433,10 @@ fn schedule_window_state_persist(window: tauri::Window, immediate: bool) {
         let Some(state) = app.try_state::<WindowGeometryDebounceState>() else {
             return;
         };
-        let mut guard = state.revisions.lock().expect("window geometry debounce mutex");
+        let mut guard = state
+            .revisions
+            .lock()
+            .expect("window geometry debounce mutex");
         let next = guard.get(&label).copied().unwrap_or(0).saturating_add(1);
         guard.insert(label.clone(), next);
         next
@@ -2215,16 +2472,24 @@ fn schedule_window_state_persist(window: tauri::Window, immediate: bool) {
 }
 
 /// Create a new window with a unique label, pointing at the given URL.
-fn create_window(app: &tauri::AppHandle, url: &str, local_origin: &str, restore_geometry: bool) -> Result<()> {
+fn create_window(
+    app: &tauri::AppHandle,
+    url: &str,
+    local_origin: &str,
+    restore_geometry: bool,
+) -> Result<()> {
     let parsed = url::Url::parse(url).map_err(|err| anyhow!("Invalid URL: {err}"))?;
-    let label = next_window_label();
+    let label = next_window_label(app);
 
     let init_script = build_init_script(local_origin);
 
     // Store the init script and local origin so new windows and page reloads can reuse it.
     if let Some(state) = app.try_state::<DesktopUiInjectionState>() {
         *state.script.lock().expect("desktop ui injection mutex") = Some(init_script.clone());
-        *state.local_origin.lock().expect("desktop local origin mutex") = Some(local_origin.to_string());
+        *state
+            .local_origin
+            .lock()
+            .expect("desktop local origin mutex") = Some(local_origin.to_string());
     }
 
     let restored_state = if restore_geometry {
@@ -2240,8 +2505,7 @@ fn create_window(app: &tauri::AppHandle, url: &str, local_origin: &str, restore_
         .decorations(true)
         .visible(false)
         .initialization_script(&init_script)
-        .background_throttling(BackgroundThrottlingPolicy::Disabled)
-        ;
+        .background_throttling(BackgroundThrottlingPolicy::Disabled);
 
     let apply_restored_state = restored_state
         .as_ref()
@@ -2261,7 +2525,10 @@ fn create_window(app: &tauri::AppHandle, url: &str, local_origin: &str, restore_
         builder = builder
             .hidden_title(true)
             .title_bar_style(tauri::TitleBarStyle::Overlay)
-            .traffic_light_position(tauri::Position::Logical(tauri::LogicalPosition { x: 17.0, y: 26.0 }));
+            .traffic_light_position(tauri::Position::Logical(tauri::LogicalPosition {
+                x: 17.0,
+                y: 26.0,
+            }));
     }
 
     let window = builder.build()?;
@@ -2276,6 +2543,170 @@ fn create_window(app: &tauri::AppHandle, url: &str, local_origin: &str, restore_
     let _ = window.set_focus();
 
     Ok(())
+}
+
+fn create_startup_window(app: &tauri::AppHandle, restore_geometry: bool) -> Result<()> {
+    if app.get_webview_window("main").is_some() {
+        return Ok(());
+    }
+
+    let restored_state = if restore_geometry {
+        read_desktop_window_state_from_disk()
+    } else {
+        None
+    };
+
+    let splash_script = build_startup_splash_script();
+
+    let mut builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+        .title("OpenChamber")
+        .inner_size(1280.0, 800.0)
+        .min_inner_size(MIN_WINDOW_WIDTH as f64, MIN_WINDOW_HEIGHT as f64)
+        .decorations(true)
+        .visible(true)
+        .initialization_script(&splash_script)
+        .background_throttling(BackgroundThrottlingPolicy::Disabled);
+
+    let apply_restored_state = restored_state
+        .as_ref()
+        .map(|state| is_window_state_visible(app, state))
+        .unwrap_or(false);
+
+    if let Some(state) = restored_state.as_ref().filter(|_| apply_restored_state) {
+        let restored_width = state.width.max(MIN_RESTORE_WINDOW_WIDTH);
+        let restored_height = state.height.max(MIN_RESTORE_WINDOW_HEIGHT);
+        builder = builder
+            .inner_size(restored_width as f64, restored_height as f64)
+            .position(state.x as f64, state.y as f64);
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder
+            .hidden_title(true)
+            .title_bar_style(tauri::TitleBarStyle::Overlay)
+            .traffic_light_position(tauri::Position::Logical(tauri::LogicalPosition {
+                x: 17.0,
+                y: 26.0,
+            }));
+    }
+
+    let window = builder.build()?;
+
+    if let Some(state) = restored_state.as_ref().filter(|_| apply_restored_state) {
+        if state.maximized || state.fullscreen {
+            let _ = window.maximize();
+        }
+    }
+
+    let _ = window.show();
+    let _ = window.set_focus();
+
+    Ok(())
+}
+
+fn build_startup_splash_script() -> String {
+    let settings = fs::read_to_string(settings_file_path())
+        .ok()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok());
+
+    let theme_mode = settings
+        .as_ref()
+        .and_then(|value| value.get("themeMode"))
+        .and_then(|value| value.as_str())
+        .and_then(|value| match value.trim() {
+            "light" => Some("light"),
+            "dark" => Some("dark"),
+            "system" => Some("system"),
+            _ => None,
+        });
+
+    let use_system_theme = settings
+        .as_ref()
+        .and_then(|value| value.get("useSystemTheme"))
+        .and_then(|value| value.as_bool())
+        .unwrap_or(true);
+
+    let theme_variant = settings
+        .as_ref()
+        .and_then(|value| value.get("themeVariant"))
+        .and_then(|value| value.as_str())
+        .and_then(|value| match value.trim() {
+            "light" => Some("light"),
+            "dark" => Some("dark"),
+            _ => None,
+        });
+
+    let effective_mode = theme_mode
+        .or_else(|| {
+            if use_system_theme {
+                Some("system")
+            } else {
+                None
+            }
+        })
+        .or(theme_variant)
+        .unwrap_or("system");
+
+    let splash_bg_light = settings
+        .as_ref()
+        .and_then(|value| value.get("splashBgLight"))
+        .and_then(|value| value.as_str())
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("");
+    let splash_fg_light = settings
+        .as_ref()
+        .and_then(|value| value.get("splashFgLight"))
+        .and_then(|value| value.as_str())
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("");
+    let splash_bg_dark = settings
+        .as_ref()
+        .and_then(|value| value.get("splashBgDark"))
+        .and_then(|value| value.as_str())
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("");
+    let splash_fg_dark = settings
+        .as_ref()
+        .and_then(|value| value.get("splashFgDark"))
+        .and_then(|value| value.as_str())
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("");
+
+    let mode_json = serde_json::to_string(effective_mode).unwrap_or_else(|_| "\"system\"".into());
+    let bg_light_json = serde_json::to_string(splash_bg_light).unwrap_or_else(|_| "\"\"".into());
+    let fg_light_json = serde_json::to_string(splash_fg_light).unwrap_or_else(|_| "\"\"".into());
+    let bg_dark_json = serde_json::to_string(splash_bg_dark).unwrap_or_else(|_| "\"\"".into());
+    let fg_dark_json = serde_json::to_string(splash_fg_dark).unwrap_or_else(|_| "\"\"".into());
+
+    format!(
+        "(function(){{try{{var mode={mode_json};var bgLight={bg_light_json};var fgLight={fg_light_json};var bgDark={bg_dark_json};var fgDark={fg_dark_json};var root=document.documentElement;if(bgLight)root.style.setProperty('--splash-background-light',bgLight);if(fgLight)root.style.setProperty('--splash-stroke-light',fgLight);if(bgDark)root.style.setProperty('--splash-background-dark',bgDark);if(fgDark)root.style.setProperty('--splash-stroke-dark',fgDark);var prefersDark=false;try{{prefersDark=!!(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches);}}catch(_e){{}}var dark=mode==='dark'?true:(mode==='light'?false:prefersDark);root.setAttribute('data-splash-variant',dark?'dark':'light');root.style.setProperty('color-scheme',dark?'dark':'light');}}catch(_e){{}}}})();"
+    )
+}
+
+fn activate_main_window(app: &tauri::AppHandle, url: &str, local_origin: &str) -> Result<()> {
+    let parsed = url::Url::parse(url).map_err(|err| anyhow!("Invalid URL: {err}"))?;
+    let init_script = build_init_script(local_origin);
+
+    if let Some(state) = app.try_state::<DesktopUiInjectionState>() {
+        *state.script.lock().expect("desktop ui injection mutex") = Some(init_script);
+        *state
+            .local_origin
+            .lock()
+            .expect("desktop local origin mutex") = Some(local_origin.to_string());
+    }
+
+    if let Some(window) = app.get_webview_window("main") {
+        window.navigate(parsed).map_err(|err| anyhow!(err.to_string()))?;
+        let _ = window.set_focus();
+        return Ok(());
+    }
+
+    create_window(app, url, local_origin, true)
 }
 
 /// Open a new window pointed at the default host (local or configured default).
@@ -2301,7 +2732,13 @@ fn create_window(app: &tauri::AppHandle, url: &str, local_origin: &str, restore_
 fn open_new_window(app: &tauri::AppHandle) {
     let local_origin = app
         .try_state::<DesktopUiInjectionState>()
-        .and_then(|state| state.local_origin.lock().expect("desktop local origin mutex").clone());
+        .and_then(|state| {
+            state
+                .local_origin
+                .lock()
+                .expect("desktop local origin mutex")
+                .clone()
+        });
 
     let Some(local_origin) = local_origin else {
         log::warn!("[desktop] cannot open new window: local origin not yet known (sidecar may still be starting)");
@@ -2336,11 +2773,20 @@ fn open_new_window(app: &tauri::AppHandle) {
     if target_url != local_ui_url {
         let is_cached_unreachable = app
             .try_state::<DesktopUiInjectionState>()
-            .map(|state| state.unreachable_hosts.lock().expect("unreachable hosts mutex").contains(&target_url))
+            .map(|state| {
+                state
+                    .unreachable_hosts
+                    .lock()
+                    .expect("unreachable hosts mutex")
+                    .contains(&target_url)
+            })
             .unwrap_or(false);
 
         if is_cached_unreachable {
-            log::info!("[desktop] new window: default host ({}) cached as unreachable, using local", target_url);
+            log::info!(
+                "[desktop] new window: default host ({}) cached as unreachable, using local",
+                target_url
+            );
             target_url = local_ui_url;
         }
     }
@@ -2364,7 +2810,7 @@ fn main() {
         .manage(DesktopUiInjectionState::default())
         .manage(WindowFocusState::default())
         .manage(WindowGeometryDebounceState::default())
-        .manage(MenuRuntimeState::default())
+        .manage(DesktopSshManagerState::default())
         .manage(PendingUpdate(Mutex::new(None)))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
@@ -2547,6 +2993,9 @@ fn main() {
                 // If this was the last window, kill the sidecar and exit.
                 let remaining = app.webview_windows().len();
                 if remaining == 0 {
+                    if let Some(state) = app.try_state::<DesktopSshManagerState>() {
+                        state.shutdown_all(&app);
+                    }
                     kill_sidecar(app.clone());
                     app.exit(0);
                 }
@@ -2556,7 +3005,7 @@ fn main() {
                 schedule_window_state_persist(window.clone(), false);
             }
 
-            if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
+            if let tauri::WindowEvent::CloseRequested { .. } = event {
                 schedule_window_state_persist(window.clone(), true);
             }
         })
@@ -2567,23 +3016,36 @@ fn main() {
             desktop_restart,
             desktop_new_window,
             desktop_new_window_at_url,
-            desktop_set_auto_worktree_menu,
             desktop_clear_cache,
             desktop_open_path,
+            desktop_open_in_app,
             desktop_filter_installed_apps,
             desktop_get_installed_apps,
             desktop_fetch_app_icons,
             desktop_hosts_get,
             desktop_hosts_set,
             desktop_host_probe,
+            remote_ssh::desktop_ssh_instances_get,
+            remote_ssh::desktop_ssh_instances_set,
+            remote_ssh::desktop_ssh_import_hosts,
+            remote_ssh::desktop_ssh_connect,
+            remote_ssh::desktop_ssh_disconnect,
+            remote_ssh::desktop_ssh_status,
+            remote_ssh::desktop_ssh_logs,
+            remote_ssh::desktop_ssh_logs_clear,
             desktop_read_file,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
+
+            if let Err(err) = create_startup_window(&handle, true) {
+                log::error!("[desktop] failed to create startup window: {err}");
+            }
+
             tauri::async_runtime::spawn(async move {
                 let local_url = if cfg!(debug_assertions) {
-                    let dev_url = "http://127.0.0.1:3001";
-                    if wait_for_health(dev_url).await {
+                    let dev_url = "http://127.0.0.1:3901".to_string();
+                    if wait_for_health(&dev_url).await {
                         dev_url.to_string()
                     } else {
                         match spawn_local_server(&handle).await {
@@ -2647,37 +3109,48 @@ fn main() {
 
                 if initial_url != local_ui_url {
                     let failed_url = initial_url.clone();
-                    match desktop_host_probe(initial_url.clone()).await {
-                        Ok(probe) if probe.status != "unreachable" => {}
-                        Ok(_) => {
+                    let soft_probe =
+                        probe_host_with_timeout(&initial_url, STARTUP_REMOTE_PROBE_SOFT_TIMEOUT).await;
+
+                    let remote_reachable = match soft_probe {
+                        Ok(probe) if probe.status != "unreachable" => true,
+                        Ok(_) | Err(_) => {
                             log::warn!(
-                                "[desktop] startup host unreachable ({}), falling back to local ({})",
-                                initial_url,
-                                local_ui_url
+                                "[desktop] startup host slow/unreachable ({}), retrying with extended timeout",
+                                initial_url
                             );
-                            initial_url = local_ui_url.clone();
-                            // Cache the failure so open_new_window skips this host.
-                            if let Some(state) = handle.try_state::<DesktopUiInjectionState>() {
-                                state.unreachable_hosts.lock().expect("unreachable hosts mutex").insert(failed_url);
+
+                            match probe_host_with_timeout(
+                                &initial_url,
+                                STARTUP_REMOTE_PROBE_HARD_TIMEOUT,
+                            )
+                            .await
+                            {
+                                Ok(probe) if probe.status != "unreachable" => true,
+                                Ok(_) | Err(_) => false,
                             }
                         }
-                        Err(err) => {
-                            log::warn!(
-                                "[desktop] startup host probe failed ({}): {}, falling back to local ({})",
-                                initial_url,
-                                err,
-                                local_ui_url
-                            );
-                            initial_url = local_ui_url.clone();
-                            if let Some(state) = handle.try_state::<DesktopUiInjectionState>() {
-                                state.unreachable_hosts.lock().expect("unreachable hosts mutex").insert(failed_url);
-                            }
+                    };
+
+                    if !remote_reachable {
+                        log::warn!(
+                            "[desktop] startup host unreachable after retries ({}), falling back to local ({})",
+                            initial_url,
+                            local_ui_url
+                        );
+                        initial_url = local_ui_url.clone();
+                        if let Some(state) = handle.try_state::<DesktopUiInjectionState>() {
+                            state
+                                .unreachable_hosts
+                                .lock()
+                                .expect("unreachable hosts mutex")
+                                .insert(failed_url);
                         }
                     }
                 }
 
-                if let Err(err) = create_window(&handle, &initial_url, &local_origin, true) {
-                    log::error!("[desktop] failed to create window: {err}");
+                if let Err(err) = activate_main_window(&handle, &initial_url, &local_origin) {
+                    log::error!("[desktop] failed to activate main window: {err}");
                 }
             });
 
@@ -2693,13 +3166,22 @@ fn main() {
         match event {
             tauri::RunEvent::ExitRequested { .. } => {
                 // Best-effort cleanup; never block shutdown.
+                if let Some(state) = app_handle.try_state::<DesktopSshManagerState>() {
+                    state.shutdown_all(app_handle);
+                }
                 kill_sidecar(app_handle.clone());
             }
             tauri::RunEvent::Exit => {
+                if let Some(state) = app_handle.try_state::<DesktopSshManagerState>() {
+                    state.shutdown_all(app_handle);
+                }
                 kill_sidecar(app_handle.clone());
             }
             #[cfg(target_os = "macos")]
-            tauri::RunEvent::Reopen { has_visible_windows, .. } => {
+            tauri::RunEvent::Reopen {
+                has_visible_windows,
+                ..
+            } => {
                 // macOS: clicking dock icon when no windows are open opens a new one.
                 if !has_visible_windows {
                     open_new_window(app_handle);
@@ -2734,7 +3216,10 @@ mod tests {
     fn sanitize_host_url_for_storage_strips_fragment_and_keeps_query() {
         let input = "https://example.com/workspace?coder_session_token=xxxxxx#ignored";
         let sanitized = sanitize_host_url_for_storage(input).expect("sanitized url");
-        assert_eq!(sanitized, "https://example.com/workspace?coder_session_token=xxxxxx");
+        assert_eq!(
+            sanitized,
+            "https://example.com/workspace?coder_session_token=xxxxxx"
+        );
     }
 
     #[test]

@@ -928,6 +928,26 @@ const parseRemoteBranchRef = (value: string) => {
   };
 };
 
+const resolveRemoteBranchRef = async (primaryWorktree: string, value: string) => {
+  const raw = String(value || '').trim();
+  const parsed = parseRemoteBranchRef(raw);
+  if (!parsed) {
+    return null;
+  }
+
+  if (raw.startsWith('refs/remotes/') || raw.startsWith('remotes/')) {
+    return parsed;
+  }
+
+  const localRef = `refs/heads/${raw}`;
+  const localExists = await runGitCommand(primaryWorktree, ['show-ref', '--verify', '--quiet', localRef]);
+  if (localExists.success) {
+    return null;
+  }
+
+  return parsed;
+};
+
 const normalizeUpstreamTarget = (remote: string | undefined, branch: string | undefined) => {
   const remoteName = String(remote || '').trim();
   const branchName = String(branch || '').trim();
@@ -1442,7 +1462,7 @@ export async function validateWorktreeCreate(directory: string, input: CreateGit
     if (mode === 'existing') {
       try {
         const requestedExistingBranch = String(input?.existingBranch || '').trim();
-        const parsedExistingRemote = parseRemoteBranchRef(requestedExistingBranch);
+        const parsedExistingRemote = await resolveRemoteBranchRef(context.primaryWorktree, requestedExistingBranch);
         if (parsedExistingRemote && ensureRemoteName && ensureRemoteUrl && ensureRemoteName === parsedExistingRemote.remote) {
           const lsRemote = await runGitCommand(
             context.primaryWorktree,
@@ -1484,7 +1504,7 @@ export async function validateWorktreeCreate(directory: string, input: CreateGit
         localBranch = preferredBranchName;
       }
 
-      const parsedRemoteRef = parseRemoteBranchRef(startRef);
+      const parsedRemoteRef = await resolveRemoteBranchRef(context.primaryWorktree, startRef);
       if (startRef && startRef !== 'HEAD') {
         if (parsedRemoteRef && ensureRemoteName && ensureRemoteUrl && ensureRemoteName === parsedRemoteRef.remote) {
           const remoteCheck = await checkRemoteBranchExists(
@@ -1587,7 +1607,7 @@ export async function createWorktree(directory: string, input: CreateGitWorktree
 
   if (mode === 'existing') {
     const requestedExistingBranch = String(input?.existingBranch || '').trim();
-    const parsedExistingRemote = parseRemoteBranchRef(requestedExistingBranch);
+    const parsedExistingRemote = await resolveRemoteBranchRef(context.primaryWorktree, requestedExistingBranch);
     if (parsedExistingRemote && ensureRemoteName && ensureRemoteUrl && parsedExistingRemote.remote === ensureRemoteName) {
       await ensureRemoteWithUrl(context.primaryWorktree, ensureRemoteName, ensureRemoteUrl);
       await fetchRemoteBranchRef(context.primaryWorktree, parsedExistingRemote.remote, parsedExistingRemote.branch);
@@ -1633,7 +1653,7 @@ export async function createWorktree(directory: string, input: CreateGitWorktree
       worktreeAddArgs.push(startRef);
     }
 
-    const parsedRemoteStartRef = parseRemoteBranchRef(startRef);
+    const parsedRemoteStartRef = await resolveRemoteBranchRef(context.primaryWorktree, startRef);
     if (parsedRemoteStartRef) {
       inferredUpstream = {
         remote: parsedRemoteStartRef.remote,
@@ -1647,7 +1667,7 @@ export async function createWorktree(directory: string, input: CreateGitWorktree
   }
 
   if (mode === 'new') {
-    const parsedRemoteStartRef = parseRemoteBranchRef(startRef);
+    const parsedRemoteStartRef = await resolveRemoteBranchRef(context.primaryWorktree, startRef);
     if (parsedRemoteStartRef) {
       await fetchRemoteBranchRef(context.primaryWorktree, parsedRemoteStartRef.remote, parsedRemoteStartRef.branch);
     }

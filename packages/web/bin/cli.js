@@ -4,7 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import net from 'net';
 import { spawn, spawnSync } from 'child_process';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -23,6 +23,10 @@ function getBunBinary() {
 }
 
 const BUN_BIN = getBunBinary();
+
+function importFromFilePath(filePath) {
+  return import(pathToFileURL(filePath).href);
+}
 
 function isBunRuntime() {
   return typeof globalThis.Bun !== 'undefined';
@@ -177,6 +181,7 @@ OPTIONS:
 
 ENVIRONMENT:
   OPENCHAMBER_UI_PASSWORD      Alternative to --ui-password flag
+  OPENCODE_HOST               External OpenCode server base URL, e.g. http://hostname:4096 (overrides OPENCODE_PORT)
   OPENCODE_PORT               Port of external OpenCode server to connect to
   OPENCODE_SKIP_START          Skip starting OpenCode, use external server
 
@@ -624,17 +629,19 @@ const commands = {
       return;
     }
 
-    const { startWebUiServer } = await import(serverPath);
+    const { startWebUiServer } = await importFromFilePath(serverPath);
     await startWebUiServer({
       port: options.port,
       attachSignals: true,
       exitOnShutdown: true,
       uiPassword: typeof effectiveUiPassword === 'string' ? effectiveUiPassword : null,
       tryCfTunnel: options.tryCfTunnel,
-      onTunnelReady: async (url) => {
-        const displayUrl = buildTunnelUrl(url, effectiveUiPassword, options.tunnelPasswordUrl);
+      onTunnelReady: async (url, connectUrl) => {
+        const displayUrl = connectUrl || buildTunnelUrl(url, effectiveUiPassword, options.tunnelPasswordUrl);
         console.log(`\n🌐 Tunnel URL: \x1b[36m${displayUrl}\x1b[0m\n`);
-        if (options.tunnelPasswordUrl && effectiveUiPassword) {
+        if (connectUrl) {
+          console.log('🔑 One-time connect link (expires after first use)\n');
+        } else if (options.tunnelPasswordUrl && effectiveUiPassword) {
           console.log('🔑 Password is embedded in URL for auto-login\n');
         }
         if (options.tunnelQr) {
@@ -925,7 +932,7 @@ const commands = {
       executeUpdate,
       detectPackageManager,
       getCurrentVersion,
-    } = await import(packageManagerPath);
+    } = await importFromFilePath(packageManagerPath);
 
     // Check for running instances before update
     let runningInstances = [];

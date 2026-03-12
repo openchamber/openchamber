@@ -1,4 +1,4 @@
-import type { RuntimeAPIs, TerminalAPI, NotificationsAPI } from '@openchamber/ui/lib/api/types';
+import type { RuntimeAPIs, TerminalAPI } from '@openchamber/ui/lib/api/types';
 import { createVSCodeFilesAPI } from './files';
 import { createVSCodeSettingsAPI } from './settings';
 import { createVSCodePermissionsAPI } from './permissions';
@@ -7,6 +7,7 @@ import { createVSCodeEditorAPI } from './editor';
 import { createVSCodeGitAPI } from './git';
 import { createVSCodeActionsAPI } from './vscode';
 import { createVSCodeGitHubAPI } from './github';
+import { createVSCodeNotificationsAPI } from './notifications';
 
 // Stub APIs return sensible defaults instead of throwing
 const createStubTerminalAPI = (): TerminalAPI => ({
@@ -17,11 +18,6 @@ const createStubTerminalAPI = (): TerminalAPI => ({
   close: async () => {},
 });
 
-const createStubNotificationsAPI = (): NotificationsAPI => ({
-  notifyAgentCompletion: async () => true,
-  canNotify: () => true,
-});
-
 export const createVSCodeAPIs = (): RuntimeAPIs => ({
   runtime: { platform: 'vscode', isDesktop: false, isVSCode: true, label: 'VS Code Extension' },
   terminal: createStubTerminalAPI(),
@@ -29,7 +25,7 @@ export const createVSCodeAPIs = (): RuntimeAPIs => ({
   files: createVSCodeFilesAPI(),
   settings: createVSCodeSettingsAPI(),
   permissions: createVSCodePermissionsAPI(),
-  notifications: createStubNotificationsAPI(),
+  notifications: createVSCodeNotificationsAPI(),
   github: createVSCodeGitHubAPI(),
   tools: createVSCodeToolsAPI(),
   editor: createVSCodeEditorAPI(),

@@ -4,7 +4,6 @@ import {
   RiCheckLine,
   RiLoader4Line,
   RiGitBranchLine,
-  RiGitRepositoryLine,
   RiBriefcaseLine,
   RiHomeLine,
   RiGraduationCapLine,
@@ -47,9 +46,7 @@ interface GitHeaderProps {
   onSelectIdentity: (profile: GitIdentityProfile) => void;
   isApplyingIdentity: boolean;
   isWorktreeMode: boolean;
-  isSidebarMode?: boolean;
   onOpenHistory?: () => void;
-  onOpenBranchPicker?: () => void;
 }
 
 const IDENTITY_ICON_MAP: Record<
@@ -207,9 +204,7 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
   onSelectIdentity,
   isApplyingIdentity,
   isWorktreeMode,
-  isSidebarMode = false,
   onOpenHistory,
-  onOpenBranchPicker,
 }) => {
   const isMobile = useUIStore((state) => state.isMobile);
 
@@ -217,38 +212,20 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
     return null;
   }
 
-  const useTwoRowHeader = isSidebarMode || isMobile;
+  const useTwoRowHeader = isMobile;
 
   const managementButtons = (
     <div className="flex items-center gap-1 shrink-0">
-      {onOpenBranchPicker ? (
-        <Tooltip delayDuration={useTwoRowHeader ? 300 : 1000}>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="sm"
-              className={isSidebarMode ? 'h-8 w-8 px-0' : 'gap-1.5 px-2 py-1 h-8 typography-ui-label'}
-              onClick={onOpenBranchPicker}
-            >
-              <RiGitRepositoryLine className="size-4" />
-              {!isSidebarMode && <span className="git-header-label">Manage branches</span>}
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent sideOffset={8}>Manage branches</TooltipContent>
-        </Tooltip>
-      ) : null}
-
       {onOpenHistory ? (
         <Tooltip delayDuration={useTwoRowHeader ? 300 : 1000}>
           <TooltipTrigger asChild>
             <Button
               variant="ghost"
               size="sm"
-              className={isSidebarMode ? 'h-8 w-8 px-0' : 'gap-1.5 px-2 py-1 h-8 typography-ui-label'}
+              className="h-8 w-8 px-0"
               onClick={onOpenHistory}
             >
               <RiHistoryLine className="size-4" />
-              {!isSidebarMode && <span className="git-header-label">History</span>}
             </Button>
           </TooltipTrigger>
           <TooltipContent sideOffset={8}>History</TooltipContent>
@@ -265,7 +242,7 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
       onPull={onPull}
       onPush={onPush}
       disabled={!status}
-      iconOnly={isSidebarMode}
+      iconOnly={true}
       tooltipDelayMs={useTwoRowHeader ? 300 : 1000}
       aheadCount={status.ahead}
       behindCount={status.behind}
@@ -283,68 +260,36 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
     />
   );
 
-  if (useTwoRowHeader) {
-    return (
-      <header className="@container/git-header border-b border-border/40 px-3 py-2 bg-background">
-        <div className="flex items-center justify-between gap-2 min-w-0">
-          <div className="min-w-0 flex-1">
-            {isWorktreeMode ? (
-              <WorktreeBranchDisplay
-                currentBranch={status.current}
-                onRename={onRenameBranch}
-              />
-            ) : (
-              <BranchSelector
-                currentBranch={status.current}
-                localBranches={localBranches}
-                remoteBranches={remoteBranches}
-                branchInfo={branchInfo}
-                onCheckout={onCheckoutBranch}
-                onCreate={onCreateBranch}
-                remotes={remotes}
-                tooltipDelayMs={useTwoRowHeader ? 300 : 1000}
-              />
-            )}
-          </div>
-        </div>
-
-        <div className="mt-1.5 flex items-center justify-between gap-2 min-w-0">
-          <div className="flex min-w-0 flex-wrap items-center gap-1">
-            {syncButtons}
-            {managementButtons}
-          </div>
-          <div className="min-w-0 max-w-[45%]">{identityControl}</div>
-        </div>
-      </header>
-    );
-  }
-
   return (
-    <header className="@container/git-header flex items-center gap-2 border-b border-border/40 px-3 py-2 bg-background">
-      <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
-        {isWorktreeMode ? (
-          <WorktreeBranchDisplay
-            currentBranch={status.current}
-            onRename={onRenameBranch}
-          />
-        ) : (
-          <BranchSelector
-            currentBranch={status.current}
-            localBranches={localBranches}
-            remoteBranches={remoteBranches}
-            branchInfo={branchInfo}
-            onCheckout={onCheckoutBranch}
-            onCreate={onCreateBranch}
-            remotes={remotes}
-          />
-        )}
-
-        <div className="shrink-0">{syncButtons}</div>
+    <header className="@container/git-header px-3 py-2 bg-transparent">
+      <div className="flex items-center justify-between gap-2 min-w-0">
+        <div className="min-w-0 flex-1">
+          {isWorktreeMode ? (
+            <WorktreeBranchDisplay
+              currentBranch={status.current}
+              onRename={onRenameBranch}
+            />
+          ) : (
+            <BranchSelector
+              currentBranch={status.current}
+              localBranches={localBranches}
+              remoteBranches={remoteBranches}
+              branchInfo={branchInfo}
+              onCheckout={onCheckoutBranch}
+              onCreate={onCreateBranch}
+              remotes={remotes}
+              tooltipDelayMs={useTwoRowHeader ? 300 : 1000}
+            />
+          )}
+        </div>
       </div>
 
-      <div className="flex items-center gap-1 shrink-0">
-        {managementButtons}
-        {identityControl}
+      <div className="mt-1.5 flex items-center justify-between gap-2 min-w-0">
+        <div className="flex min-w-0 flex-wrap items-center gap-1">
+          {syncButtons}
+          {managementButtons}
+        </div>
+        <div className="min-w-0 max-w-[45%]">{identityControl}</div>
       </div>
     </header>
   );

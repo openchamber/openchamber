@@ -69,6 +69,7 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
     isMobile,
     expandedTools,
     onToggleTool,
+    onShowPopup,
     onContentChange,
     diffStats,
 }) => {
@@ -106,9 +107,36 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
 
     const toolConnections = getToolConnections(displayParts);
 
-    // For collapsed state: show last N items
+    // For collapsed state: show last N items, but ensure at least one in-flight item is visible if exists
     const visibleCollapsedParts = React.useMemo(() => {
-        return displayParts.slice(-MAX_VISIBLE_COLLAPSED);
+        const defaultVisible = displayParts.slice(-MAX_VISIBLE_COLLAPSED);
+        
+        const hasVisibleActive = defaultVisible.some((p) => p.endedAt === undefined);
+        if (hasVisibleActive) {
+            return defaultVisible;
+        }
+
+        const activeParts = displayParts.filter((p) => p.endedAt === undefined);
+        if (activeParts.length === 0) {
+            return defaultVisible;
+        }
+
+        const newestActive = activeParts[activeParts.length - 1];
+        const visibleIds = new Set(defaultVisible.map((p) => p.id));
+        
+        if (visibleIds.has(newestActive.id)) {
+            return defaultVisible;
+        }
+
+        const replacementIndex = 0;
+        const result = [...defaultVisible];
+        result[replacementIndex] = newestActive;
+        
+        return result.sort((a, b) => {
+            const aIndex = displayParts.findIndex((p) => p.id === a.id);
+            const bIndex = displayParts.findIndex((p) => p.id === b.id);
+            return aIndex - bIndex;
+        });
     }, [displayParts]);
 
     // Set of part IDs that were visible in collapsed state
@@ -252,6 +280,7 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
                                             syntaxTheme={syntaxTheme}
                                             isMobile={isMobile}
                                             onContentChange={onContentChange}
+                                            onShowPopup={onShowPopup}
                                             hasPrevTool={connection?.hasPrev ?? false}
                                             hasNextTool={connection?.hasNext ?? false}
                                         />

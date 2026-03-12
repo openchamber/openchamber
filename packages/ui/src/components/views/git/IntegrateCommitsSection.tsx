@@ -377,7 +377,7 @@ Important:
 
             <DropdownMenu open={branchDropdownOpen} onOpenChange={setBranchDropdownOpen}>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="gap-1.5">
+                <Button variant="outline" size="sm" className="h-7 px-2 py-0 gap-1.5">
                   Target
                   <span className="max-w-[160px] truncate font-mono text-xs text-muted-foreground">{targetBranch}</span>
                   <RiArrowDownSLine className="size-4 opacity-60" />
@@ -416,15 +416,15 @@ Important:
             </DropdownMenu>
 
             {ui.kind === 'ready' ? (
-              <Button size="sm" onClick={() => void handleMove()} disabled={!isEligible || ui.plan.commits.length === 0}>
+              <Button size="sm" className="h-7 px-2 py-0" onClick={() => void handleMove()} disabled={!isEligible || ui.plan.commits.length === 0}>
                 Move
               </Button>
             ) : ui.kind === 'loading' ? (
-              <Button size="sm" variant="outline" disabled>
+              <Button size="sm" variant="outline" className="h-7 px-2 py-0" disabled>
                 Checking…
               </Button>
             ) : ui.kind === 'running' ? (
-              <Button size="sm" variant="outline" disabled>
+              <Button size="sm" variant="outline" className="h-7 px-2 py-0" disabled>
                 Moving…
               </Button>
             ) : null}

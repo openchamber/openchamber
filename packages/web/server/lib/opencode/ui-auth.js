@@ -1,8 +1,11 @@
 import crypto from 'crypto';
+import { SignJWT, jwtVerify } from 'jose';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
 
 const SESSION_COOKIE_NAME = 'oc_ui_session';
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
-const CLEANUP_INTERVAL_MS = 10 * 60 * 1000;
 
 const RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000;
 const RATE_LIMIT_MAX_ATTEMPTS = Number(process.env.OPENCHAMBER_RATE_LIMIT_MAX_ATTEMPTS) || 10;
@@ -271,6 +274,37 @@ const normalizePassword = (candidate) => {
   return candidate.normalize().trim();
 };
 
+const OPENCHAMBER_DATA_DIR = process.env.OPENCHAMBER_DATA_DIR
+  ? path.resolve(process.env.OPENCHAMBER_DATA_DIR)
+  : path.join(os.homedir(), '.config', 'openchamber');
+const JWT_SECRET_FILE = path.join(OPENCHAMBER_DATA_DIR, 'jwt-secret');
+
+function getOrCreateJwtSecret() {
+  const envSecret = process.env.OPENCODE_JWT_SECRET;
+  if (envSecret) {
+    return new TextEncoder().encode(envSecret);
+  }
+
+  try {
+    if (fs.existsSync(JWT_SECRET_FILE)) {
+      return new TextEncoder().encode(fs.readFileSync(JWT_SECRET_FILE, 'utf8').trim());
+    }
+  } catch (e) {
+    console.warn('[JWT] Failed to read secret file:', e.message);
+  }
+
+  const secret = crypto.randomBytes(32).toString('hex');
+  try {
+    fs.mkdirSync(OPENCHAMBER_DATA_DIR, { recursive: true });
+    fs.writeFileSync(JWT_SECRET_FILE, secret, { mode: 0o600 });
+    console.log('[JWT] Generated and persisted new secret to', JWT_SECRET_FILE);
+  } catch (e) {
+    console.warn('[JWT] Failed to persist secret:', e.message);
+  }
+
+  return new TextEncoder().encode(secret);
+}
+
 export const createUiAuth = ({
   password,
   cookieName = SESSION_COOKIE_NAME,
@@ -291,7 +325,7 @@ export const createUiAuth = ({
       res.setHeader('Set-Cookie', header);
     };
 
-    const ensureSessionToken = (req, res) => {
+    const ensureSessionToken = async (req, res) => {
       const cookies = parseCookies(req.headers.cookie);
       if (cookies[cookieName]) {
         return cookies[cookieName];
@@ -319,9 +353,7 @@ export const createUiAuth = ({
 
   const salt = crypto.randomBytes(16);
   const expectedHash = crypto.scryptSync(normalizedPassword, salt, 64);
-  const sessions = new Map();
-
-  let cleanupTimer = null;
+  const JWT_SECRET = getOrCreateJwtSecret();
 
   const getTokenFromRequest = (req) => {
     const cookies = parseCookies(req.headers.cookie);
@@ -329,12 +361,6 @@ export const createUiAuth = ({
       return cookies[cookieName];
     }
     return null;
-  };
-
-  const dropSession = (token) => {
-    if (token) {
-      sessions.delete(token);
-    }
   };
 
   const setSessionCookie = (req, res, token) => {
@@ -376,49 +402,28 @@ export const createUiAuth = ({
     }
   };
 
-  const isSessionValid = (token) => {
+  const isSessionValid = async (token) => {
     if (!token) {
       return false;
     }
-    const record = sessions.get(token);
-    if (!record) {
+    try {
+      await jwtVerify(token, JWT_SECRET);
+      return true;
+    } catch {
       return false;
     }
-    if (Date.now() - record.lastSeen > sessionTtlMs) {
-      sessions.delete(token);
-      return false;
-    }
-    record.lastSeen = Date.now();
-    return true;
   };
 
-  const issueSession = (req, res) => {
-    const token = crypto.randomBytes(32).toString('base64url');
-    const now = Date.now();
-    sessions.set(token, { createdAt: now, lastSeen: now });
+  const issueSession = async (req, res) => {
+    const token = await new SignJWT({ type: 'ui-session' })
+      .setProtectedHeader({ alg: 'HS256' })
+      .setIssuedAt()
+      .setExpirationTime(sessionTtlMs / 1000 + 's')
+      .sign(JWT_SECRET);
     setSessionCookie(req, res, token);
     return token;
   };
 
-  const cleanupStaleSessions = () => {
-    const now = Date.now();
-    for (const [token, record] of sessions.entries()) {
-      if (now - record.lastSeen > sessionTtlMs) {
-        sessions.delete(token);
-      }
-    }
-  };
-
-  const startCleanup = () => {
-    if (!cleanupTimer) {
-      cleanupTimer = setInterval(cleanupStaleSessions, CLEANUP_INTERVAL_MS);
-      if (cleanupTimer && typeof cleanupTimer.unref === 'function') {
-        cleanupTimer.unref();
-      }
-    }
-  };
-
-  startCleanup();
   startRateLimitCleanup();
 
   const respondUnauthorized = (req, res) => {
@@ -431,21 +436,21 @@ export const createUiAuth = ({
     }
   };
 
-  const requireAuth = (req, res, next) => {
+  const requireAuth = async (req, res, next) => {
     if (req.method === 'OPTIONS') {
       return next();
     }
     const token = getTokenFromRequest(req);
-    if (isSessionValid(token)) {
+    if (await isSessionValid(token)) {
       return next();
     }
     clearSessionCookie(req, res);
     return respondUnauthorized(req, res);
   };
 
-  const handleSessionStatus = (req, res) => {
+  const handleSessionStatus = async (req, res) => {
     const token = getTokenFromRequest(req);
-    if (isSessionValid(token)) {
+    if (await isSessionValid(token)) {
       res.json({ authenticated: true });
       return;
     }
@@ -479,22 +484,12 @@ export const createUiAuth = ({
 
     await clearRateLimit(req);
 
-    const previousToken = getTokenFromRequest(req);
-    if (previousToken) {
-      dropSession(previousToken);
-    }
-
-    issueSession(req, res);
+    await issueSession(req, res);
     res.json({ authenticated: true });
   };
 
   const dispose = () => {
-    sessions.clear();
     loginRateLimiter.clear();
-    if (cleanupTimer) {
-      clearInterval(cleanupTimer);
-      cleanupTimer = null;
-    }
     if (rateLimitCleanupTimer) {
       clearInterval(rateLimitCleanupTimer);
       rateLimitCleanupTimer = null;
@@ -506,9 +501,9 @@ export const createUiAuth = ({
     requireAuth,
     handleSessionStatus,
     handleSessionCreate,
-    ensureSessionToken: (req, _res) => {
+    ensureSessionToken: async (req, _res) => {
       const token = getTokenFromRequest(req);
-      return isSessionValid(token) ? token : null;
+      return (await isSessionValid(token)) ? token : null;
     },
     dispose,
   };

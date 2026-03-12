@@ -1,6 +1,7 @@
 import React from 'react';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
+import { useUIStore } from '@/stores/useUIStore';
 
 interface CommitInputProps {
   value: string;
@@ -8,6 +9,7 @@ interface CommitInputProps {
   placeholder?: string;
   disabled?: boolean;
   hasTouchInput?: boolean;
+  isMobile?: boolean;
 }
 
 const MIN_HEIGHT = 38; // Single line height
@@ -19,18 +21,22 @@ export const CommitInput: React.FC<CommitInputProps> = ({
   placeholder = 'Commit message',
   disabled = false,
   hasTouchInput = false,
+  isMobile = false,
 }) => {
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+  const inputSpellcheckEnabled = useUIStore((state) => state.inputSpellcheckEnabled);
 
-  // Auto-resize based on content
-  React.useEffect(() => {
+  // Auto-resize based on content (layout phase to avoid mount flicker)
+  React.useLayoutEffect(() => {
     const textarea = textareaRef.current;
     if (!textarea) return;
 
     // Reset height to measure scrollHeight accurately
     textarea.style.height = `${MIN_HEIGHT}px`;
-    const newHeight = Math.min(Math.max(textarea.scrollHeight, MIN_HEIGHT), MAX_HEIGHT);
+    const contentHeight = textarea.scrollHeight;
+    const newHeight = Math.min(Math.max(contentHeight, MIN_HEIGHT), MAX_HEIGHT);
     textarea.style.height = `${newHeight}px`;
+    textarea.style.overflowY = contentHeight > MAX_HEIGHT ? 'auto' : 'hidden';
   }, [value]);
 
   return (
@@ -43,9 +49,10 @@ export const CommitInput: React.FC<CommitInputProps> = ({
       disabled={disabled}
       autoCorrect={hasTouchInput ? 'on' : 'off'}
       autoCapitalize={hasTouchInput ? 'sentences' : 'off'}
-      spellCheck={hasTouchInput ? true : false}
+      spellCheck={isMobile || inputSpellcheckEnabled}
+      scrollbarClassName="hidden"
       className={cn(
-        'rounded-lg bg-background/80 resize-none overflow-y-auto',
+        'rounded-lg bg-transparent resize-none overflow-y-hidden',
         disabled && 'opacity-50'
       )}
       style={{ minHeight: MIN_HEIGHT, maxHeight: MAX_HEIGHT }}

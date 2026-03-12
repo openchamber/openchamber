@@ -1,7 +1,10 @@
 import React from 'react';
-import { Button } from '@/components/ui/button';
+import { ButtonSmall } from '@/components/ui/button-small';
 import { Input } from '@/components/ui/input';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { RiInformationLine } from '@remixicon/react';
 import { useUIStore } from '@/stores/useUIStore';
+import { cn } from '@/lib/utils';
 import {
   formatShortcutForDisplay,
   getCustomizableShortcutActions,
@@ -125,137 +128,136 @@ export const KeyboardShortcutsSettings: React.FC = () => {
   }, [clearShortcutOverride]);
 
   return (
-    <div className="space-y-4">
-      <div className="space-y-1">
-        <h3 className="typography-ui-header font-semibold text-foreground">Keyboard Shortcuts</h3>
-        <p className="typography-meta text-muted-foreground">
-          Capture a new key combo, save it, and the runtime/help/palette bindings update together.
-        </p>
+    <div className="mb-8">
+      <div className="mb-1 px-1">
+        <div className="flex items-center gap-2">
+          <h3 className="typography-ui-header font-medium text-foreground">Keyboard Shortcuts</h3>
+          <ButtonSmall
+            type="button"
+            variant="outline"
+            size="xs"
+            className="!font-normal"
+            onClick={() => {
+              resetAllShortcutOverrides();
+              setDraftByAction({});
+              setPendingOverwrite(null);
+              setErrorText('');
+              setWarningText('');
+            }}
+          >
+            Reset All
+          </ButtonSmall>
+          <Tooltip delayDuration={1000}>
+            <TooltipTrigger asChild>
+              <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+            </TooltipTrigger>
+            <TooltipContent sideOffset={8} className="max-w-xs">
+              Capture a new key combo, save it, and bindings will update immediately.
+            </TooltipContent>
+          </Tooltip>
+        </div>
       </div>
 
-      <div className="space-y-2">
-        {actions.map((action) => {
+      {(errorText || warningText || pendingOverwrite) && (
+        <div className="mb-2 space-y-2 px-1">
+          {pendingOverwrite && (
+            <div className="rounded-lg border border-[var(--status-warning-border)] bg-[var(--status-warning-background)] p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <span className="typography-meta text-foreground">
+                This combo is already used by another shortcut. Overwrite and clear that other mapping?
+              </span>
+              <div className="flex gap-2 shrink-0">
+                <ButtonSmall type="button" size="xs" className="!font-normal" onClick={confirmOverwrite}>Overwrite</ButtonSmall>
+                <ButtonSmall type="button" size="xs" className="!font-normal" variant="ghost" onClick={() => setPendingOverwrite(null)}>Cancel</ButtonSmall>
+              </div>
+            </div>
+          )}
+          {errorText && (
+            <div className="rounded-lg border border-[var(--status-error-border)] bg-[var(--status-error-background)] p-3 typography-meta text-foreground">
+              {errorText}
+            </div>
+          )}
+          {warningText && (
+            <div className="rounded-lg border border-[var(--status-warning-border)] bg-[var(--status-warning-background)] p-3 typography-meta text-foreground">
+              {warningText}
+            </div>
+          )}
+        </div>
+      )}
+
+      <section className="px-2 pb-2 pt-0 space-y-0.5">
+        {actions.map((action, index) => {
           const effective = getEffectiveShortcutCombo(action.id, shortcutOverrides);
           const draft = draftByAction[action.id];
           const displayCombo = draft ?? effective;
           const hasDraft = typeof draft === 'string' && normalizeCombo(draft) !== normalizeCombo(effective);
 
           return (
-            <div key={action.id} className="rounded-md border border-border/60 p-3">
-              <div className="flex items-start justify-between gap-3">
-                <div className="space-y-0.5">
-                  <p className="typography-ui-label text-foreground">{action.label}</p>
-                  {action.description && (
-                    <p className="typography-meta text-muted-foreground">{action.description}</p>
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  <Input
-                    readOnly
-                    value={capturingActionId === action.id ? 'Press keys...' : formatShortcutForDisplay(displayCombo)}
-                    onFocus={() => {
-                      setCapturingActionId(action.id);
-                      setErrorText('');
-                    }}
-                    onBlur={() => {
-                      if (capturingActionId === action.id) {
-                        setCapturingActionId(null);
-                      }
-                    }}
-                    onKeyDown={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-
-                      if (event.key === 'Escape') {
-                        setCapturingActionId(null);
-                        return;
-                      }
-
-                      const combo = keyboardEventToCombo(event);
-                      if (!combo) {
-                        return;
-                      }
-
-                      setDraftByAction((current) => ({
-                        ...current,
-                        [action.id]: combo,
-                      }));
+            <div key={action.id} className={cn("flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8", index > 0 && "border-t border-[var(--surface-subtle)]")}>
+              <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
+                <span className="typography-ui-label text-foreground">{action.label}</span>
+              </div>
+              <div className="flex min-w-0 flex-1 items-center gap-2 sm:w-fit sm:flex-initial">
+                <Input
+                  readOnly
+                  value={capturingActionId === action.id ? 'Press keys...' : formatShortcutForDisplay(displayCombo)}
+                  onFocus={() => {
+                    setCapturingActionId(action.id);
+                    setErrorText('');
+                  }}
+                  onBlur={() => {
+                    if (capturingActionId === action.id) {
                       setCapturingActionId(null);
-                      setPendingOverwrite(null);
-                      setErrorText('');
-                    }}
-                    className="w-52"
-                  />
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={() => {
-                      const next = draftByAction[action.id];
-                      if (!next) {
-                        setErrorText('Capture a shortcut first.');
-                        return;
-                      }
-                      saveCombo(action.id, next);
-                    }}
-                    disabled={!hasDraft}
-                  >
-                    Save
-                  </Button>
-                  <Button type="button" variant="ghost" onClick={() => resetOne(action.id)}>
-                    Reset
-                  </Button>
-                </div>
+                    }
+                  }}
+                  onKeyDown={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+
+                    if (event.key === 'Escape') {
+                      setCapturingActionId(null);
+                      return;
+                    }
+
+                    const combo = keyboardEventToCombo(event);
+                    if (!combo) {
+                      return;
+                    }
+
+                    setDraftByAction((current) => ({
+                      ...current,
+                      [action.id]: combo,
+                    }));
+                    setCapturingActionId(null);
+                    setPendingOverwrite(null);
+                    setErrorText('');
+                  }}
+                  className="h-7 w-40 min-w-0 typography-ui-label text-center"
+                />
+                <ButtonSmall
+                  type="button"
+                  variant="secondary"
+                  size="xs"
+                  className="!font-normal"
+                  onClick={() => {
+                    const next = draftByAction[action.id];
+                    if (!next) {
+                      setErrorText('Capture a shortcut first.');
+                      return;
+                    }
+                    saveCombo(action.id, next);
+                  }}
+                  disabled={!hasDraft}
+                >
+                  Save
+                </ButtonSmall>
+                <ButtonSmall type="button" size="xs" className="!font-normal" variant="ghost" onClick={() => resetOne(action.id)}>
+                  Reset
+                </ButtonSmall>
               </div>
             </div>
           );
         })}
-      </div>
-
-      {pendingOverwrite && (
-        <div className="rounded-md border border-[var(--status-warning-border)] bg-[var(--status-warning-background)] p-3">
-          <p className="typography-meta" style={{ color: 'var(--surface-foreground)' }}>
-            This combo is already used by another shortcut. Overwrite and clear that other mapping?
-          </p>
-          <div className="mt-2 flex gap-2">
-            <Button type="button" size="sm" onClick={confirmOverwrite}>Overwrite</Button>
-            <Button type="button" size="sm" variant="ghost" onClick={() => setPendingOverwrite(null)}>Cancel</Button>
-          </div>
-        </div>
-      )}
-
-      {errorText && (
-        <div
-          className="rounded-md border border-[var(--status-error-border)] bg-[var(--status-error-background)] p-2 typography-meta"
-          style={{ color: 'var(--surface-foreground)' }}
-        >
-          {errorText}
-        </div>
-      )}
-
-      {warningText && (
-        <div
-          className="rounded-md border border-[var(--status-warning-border)] bg-[var(--status-warning-background)] p-2 typography-meta"
-          style={{ color: 'var(--surface-foreground)' }}
-        >
-          {warningText}
-        </div>
-      )}
-
-      <div className="flex justify-end">
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => {
-            resetAllShortcutOverrides();
-            setDraftByAction({});
-            setPendingOverwrite(null);
-            setErrorText('');
-            setWarningText('');
-          }}
-        >
-          Reset all shortcuts
-        </Button>
-      </div>
+      </section>
     </div>
   );
 };

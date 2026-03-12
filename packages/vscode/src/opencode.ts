@@ -108,6 +108,16 @@ function isExecutable(filePath: string): boolean {
   }
 }
 
+function shouldUseWindowsShell(binary: string): boolean {
+  if (process.platform !== 'win32') return false;
+  const trimmed = (binary || '').trim();
+  if (!trimmed) return true;
+  const ext = path.extname(trimmed).toLowerCase();
+  if (ext === '.cmd' || ext === '.bat') return true;
+  // Bare command names often resolve to .cmd shims via PATHEXT.
+  return !ext && !trimmed.includes('\\') && !trimmed.includes('/');
+}
+
 function appendToPath(dir: string) {
   const trimmed = (dir || '').trim();
   if (!trimmed) return;
@@ -349,6 +359,7 @@ async function spawnManagedOpenCodeServer(
     cwd: workingDirectory,
     env: { ...process.env },
     stdio: ['ignore', 'pipe', 'pipe'],
+    shell: shouldUseWindowsShell(binary),
   });
 
   const url = await new Promise<string>((resolve, reject) => {

@@ -1,20 +1,14 @@
 # <picture><source media="(prefers-color-scheme: dark)" srcset="docs/references/badges/openchamber-logo-dark.svg"><img src="docs/references/badges/openchamber-logo-light.svg" width="32" height="32" align="absmiddle" /></picture> OpenChamber
 
 [![GitHub stars](https://img.shields.io/github/stars/btriapitsyn/openchamber?style=flat&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMiIgaGVpZ2h0PSIzMiIgZmlsbD0iI2YxZWNlYyIgdmlld0JveD0iMCAwIDI1NiAyNTYiPjxwYXRoIGQ9Ik0yMjkuMDYsMTA4Ljc5bC00OC43LDQyLDE0Ljg4LDYyLjc5YTguNCw4LjQsMCwwLDEtMTIuNTIsOS4xN0wxMjgsMTg5LjA5LDczLjI4LDIyMi43NGE4LjQsOC40LDAsMCwxLTEyLjUyLTkuMTdsMTQuODgtNjIuNzktNDguNy00MkE4LjQ2LDguNDYsMCwwLDEsMzEuNzMsOTRMOTUuNjQsODguOGwyNC42Mi01OS42YTguMzYsOC4zNiwwLDAsMSwxNS40OCwwbDI0LjYyLDU5LjZMMjI0LjI3LDk0QTguNDYsOC40NiwwLDAsMSwyMjkuMDYsMTA4Ljc5WiIgb3BhY2l0eT0iMC4yIj48L3BhdGg%2BPHBhdGggZD0iTTIzOS4xOCw5Ny4yNkExNi4zOCwxNi4zOCwwLDAsMCwyMjQuOTIsODZsLTU5LTQuNzZMMTQzLjE0LDI2LjE1YTE2LjM2LDE2LjM2LDAsMCwwLTMwLjI3LDBMOTAuMTEsODEuMjMsMzEuMDgsODZhMTYuNDYsMTYuNDYsMCwwLDAtOS4zNywyOC44Nmw0NSwzOC44M0w1MywyMTEuNzVhMTYuMzgsMTYuMzgsMCwwLDAsMjQuNSwxNy44MkwxMjgsMTk4LjQ5bDUwLjUzLDMxLjA4QTE2LjQsMTYuNCwwLDAsMCwyMDMsMjExLjc1bC0xMy43Ni01OC4wNyw0NS0zOC44M0ExNi40MywxNi40MywwLDAsMCwyMzkuMTgsOTcuMjZabS0xNS4zNCw1LjQ3LTQ4LjcsNDJhOCw4LDAsMCwwLTIuNTYsNy45MWwxNC44OCw2Mi44YS4zNy4zNywwLDAsMS0uMTcuNDhjLS4xOC4xNC0uMjMuMTEtLjM4LDBsLTU0LjcyLTMzLjY1YTgsOCwwLDAsMC04LjM4LDBMNjkuMDksMjE1Ljk0Yy0uMTUuMDktLjE5LjEyLS4zOCwwYS4zNy4zNywwLDAsMS0uMTctLjQ4bDE0Ljg4LTYyLjhhOCw4LDAsMCwwLTIuNTYtNy45MWwtNDguNy00MmMtLjEyLS4xLS4yMy0uMTktLjEzLS41cy4xOC0uMjcuMzMtLjI5bDYzLjkyLTUuMTZBOCw4LDAsMCwwLDEwMyw5MS44NmwyNC42Mi01OS42MWMuMDgtLjE3LjExLS4yNS4zNS0uMjVzLjI3LjA4LjM1LjI1TDE1Myw5MS44NmE4LDgsMCwwLDAsNi43NSw0LjkybDYzLjkyLDUuMTZjLjE1LDAsLjI0LDAsLjMzLjI5UzIyNCwxMDIuNjMsMjIzLjg0LDEwMi43M1oiPjwvcGF0aD48L3N2Zz4%3D&logoColor=FFFCF0&labelColor=100F0F&color=66800B)](https://github.com/btriapitsyn/openchamber/stargazers)
-[![GitHub forks](https://img.shields.io/github/forks/btriapitsyn/openchamber?style=flat&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMiIgaGVpZ2h0PSIzMiIgZmlsbD0iI2YxZWNlYyIgdmlld0JveD0iMCAwIDI1NiAyNTYiPjxwYXRoIGQ9Ik04OCw2NEEyNCwyNCwwLDEsMSw2NCw0MCwyNCwyNCwwLDAsMSw4OCw2NFpNMTkyLDQwYTI0LDI0LDAsMSwwLDI0LDI0QTI0LDI0LDAsMCwwLDE5Miw0MFoiIG9wYWNpdHk9IjAuMiI%2BPC9wYXRoPjxwYXRoIGQ9Ik0yMjQsNjRhMzIsMzIsMCwxLDAtNDAsMzF2MTdhOCw4LDAsMCwxLTgsOEg4MGE4LDgsMCwwLDEtOC04Vjk1YTMyLDMyLDAsMSwwLTE2LDB2MTdhMjQsMjQsMCwwLDAsMjQsMjRoNDB2MjVhMzIsMzIsMCwxLDAsMTYsMFYxMzZoNDBhMjQsMjQsMCwwLDAsMjQtMjRWOTVBMzIuMDYsMzIuMDYsMCwwLDAsMjI0LDY0Wk00OCw2NEExNiwxNiwwLDEsMSw2NCw4MCwxNiwxNiwwLDAsMSw0OCw2NFptOTYsMTI4YTE2LDE2LDAsMSwxLTE2LTE2QTE2LDE2LDAsMCwxLDE0NCwxOTJaTTE5Miw4MGExNiwxNiwwLDEsMSwxNi0xNkExNiwxNiwwLDAsMSwxOTIsODBaIj48L3BhdGg%2BPC9zdmc%2B&logoColor=FFFCF0&labelColor=100F0F&color=BC5215)](https://github.com/btriapitsyn/openchamber/network/members)
 [![GitHub release](https://img.shields.io/github/v/release/btriapitsyn/openchamber?style=flat&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMiIgaGVpZ2h0PSIzMiIgZmlsbD0iI2YxZWNlYyIgdmlld0JveD0iMCAwIDI1NiAyNTYiPjxwYXRoIGQ9Ik0xMjgsMTI5LjA5VjIzMmE4LDgsMCwwLDEtMy44NC0xbC04OC00OC4xOGE4LDgsMCwwLDEtNC4xNi03VjgwLjE4YTgsOCwwLDAsMSwuNy0zLjI1WiIgb3BhY2l0eT0iMC4yIj48L3BhdGg%2BPHBhdGggZD0iTTIyMy42OCw2Ni4xNSwxMzUuNjgsMThhMTUuODgsMTUuODgsMCwwLDAtMTUuMzYsMGwtODgsNDguMTdhMTYsMTYsMCwwLDAtOC4zMiwxNHY5NS42NGExNiwxNiwwLDAsMCw4LjMyLDE0bDg4LDQ4LjE3YTE1Ljg4LDE1Ljg4LDAsMCwwLDE1LjM2LDBsODgtNDguMTdhMTYsMTYsMCwwLDAsOC4zMi0xNFY4MC4xOEExNiwxNiwwLDAsMCwyMjMuNjgsNjYuMTVaTTEyOCwzMmw4MC4zNCw0NC0yOS43NywxNi4zLTgwLjM1LTQ0Wk0xMjgsMTIwLDQ3LjY2LDc2bDMzLjktMTguNTYsODAuMzQsNDRaTTQwLDkwbDgwLDQzLjc4djg1Ljc5TDQwLDE3NS44MlptMTc2LDg1Ljc4aDBsLTgwLDQzLjc5VjEzMy44MmwzMi0xNy41MVYxNTJhOCw4LDAsMCwwLDE2LDBWMTA3LjU1TDIxNiw5MHY4NS43N1oiPjwvcGF0aD48L3N2Zz4%3D&logoColor=FFFCF0&labelColor=100F0F&color=205EA6)](https://github.com/btriapitsyn/openchamber/releases/latest)
 [![Created with OpenCode](docs/references/badges/created-with-opencode.svg)](https://opencode.ai)
-[![Ask Zread](https://img.shields.io/badge/Ask_Zread-_.svg?style=flat&labelColor=100F0F&color=3AA99F&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTQuOTYxNTYgMS42MDAxSDIuMjQxNTZDMS44ODgxIDEuNjAwMSAxLjYwMTU2IDEuODg2NjQgMS42MDE1NiAyLjI0MDFWNC45NjAxQzEuNjAxNTYgNS4zMTM1NiAxLjg4ODEgNS42MDAxIDIuMjQxNTYgNS42MDAxSDQuOTYxNTZDNS4zMTUwMiA1LjYwMDEgNS42MDE1NiA1LjMxMzU2IDUuNjAxNTYgNC45NjAxVjIuMjQwMUM1LjYwMTU2IDEuODg2NjQgNS4zMTUwMiAxLjYwMDEgNC45NjE1NiAxLjYwMDFaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik00Ljk2MTU2IDEwLjM5OTlIMi4yNDE1NkMxLjg4ODEgMTAuMzk5OSAxLjYwMTU2IDEwLjY4NjQgMS42MDE1NiAxMS4wMzk5VjEzLjc1OTlDMS42MDE1NiAxNC4xMTM0IDEuODg4MSAxNC4zOTk5IDIuMjQxNTYgMTQuMzk5OUg0Ljk2MTU2QzUuMzE1MDIgMTQuMzk5OSA1LjYwMTU2IDE0LjExMzQgNS42MDE1NiAxMy43NTk5VjExLjAzOTlDNS42MDE1NiAxMC42ODY0IDUuMzE1MDIgMTAuMzk5OSA0Ljk2MTU2IDEwLjM5OTlaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik0xMy43NTg0IDEuNjAwMUgxMS4wMzg0QzEwLjY4NSAxLjYwMDEgMTAuMzk4NCAxLjg4NjY0IDEwLjM5ODQgMi4yNDAxVjQuOTYwMUMxMC4zOTg0IDUuMzEzNTYgMTAuNjg1IDUuNjAwMSAxMS4wMzg0IDUuNjAwMUgxMy43NTg0QzE0LjExMTkgNS42MDAxIDE0LjM5ODQgNS4zMTM1NiAxNC4zOTg0IDQuOTYwMVYyLjI0MDFDMTQuMzk4NCAxLjg4NjY0IDE0LjExMTkgMS42MDAxIDEzLjc1ODQgMS42MDAxWiIgZmlsbD0iI2ZmZiIvPgo8cGF0aCBkPSJNNCAxMkwxMiA0TDQgMTJaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik00IDEyTDEyIDQiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIxLjUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgo8L3N2Zz4K&logoColor=FFFCF0)](https://zread.ai/btriapitsyn/openchamber)
 [![Discord](https://img.shields.io/badge/Discord-join.svg?style=flat&labelColor=100F0F&color=8B7EC8&logo=discord&logoColor=FFFCF0)](https://discord.gg/ZYRSdnwwKA)
 [![Support the project](https://img.shields.io/badge/Support-Project-black?style=flat&labelColor=100F0F&color=EC8B49&logo=ko-fi&logoColor=FFFCF0)](https://ko-fi.com/G2G41SAWNS)
 
-Web and desktop interface for the [OpenCode](https://opencode.ai) AI coding agent. Works alongside the OpenCode TUI.
+## **OpenCode, everywhere.** Desktop. Browser. Phone.
 
-The OpenCode team is actively working on their own desktop app. I still decided to release this project as a fan-made alternative.
-
-It was entirely built with OpenCode tool - first with the TUI version, then with the first usable version of OpenChamber, which I then used to build the rest.
-
-The whole project was built entirely with AI coding agents under my supervision. It started as a hobby project and proof of concept that AI agents can create genuinely usable software.
+### A rich interface for [OpenCode](https://opencode.ai). Review diffs, manage agents, run dev servers, and keep the big picture while your AI codes.
 
 ![OpenChamber Chat](docs/references/chat_example.png)
 
@@ -29,124 +23,224 @@ The whole project was built entirely with AI coding agents under my supervision.
 
 <p>
 <img src="docs/references/pwa_chat_example.png" width="45%" alt="PWA Chat">
-<img src="docs/references/pwa_terminal_example.png" width="45%" alt="PWA Terminal">
+<img src="docs/references/pwa_diff_example.png" width="45%" alt="PWA Diff">
 </p>
 
 </details>
 
-## Why use OpenChamber?
+## Highlights
 
-- **Cross-device continuity**: Start in TUI, continue on tablet/phone, return to terminal - same session
-- **Remote access**: Use OpenCode from anywhere via browser
-- **Familiarity**: A visual alternative for developers who prefer GUI workflows
+- **Use it from anywhere** - Cloudflare tunnel with QR code onboarding. Scan, connect, code from your couch.
+- **Branchable chat timeline** - Undo, redo, fork from any turn. Explore different approaches without losing your place.
+- **GitHub-native workflows** - Start sessions from issues and PRs with context already attached. Review checks, merge - all in-app.
+- **Project Actions** - Run dev servers, configure SSH port forwarding, open remote URLs locally. Your project commands, one click away.
+- **Connect to remote machines** - Desktop app connects to remote OpenChamber instances over SSH, with dedicated lifecycle and UX flows.
 
-## Features
+## Quick Start
 
-### Core (all app versions)
+> **Prerequisite:** [OpenCode CLI](https://opencode.ai) installed.
 
-- Branchable chat timeline with `/undo`, `/redo`, and one-click forks from earlier turns
-- Smart tool UIs for diffs, file operations, permissions, and long-running task progress
-- Voice mode with speech input and read-aloud responses for hands-free workflows
-- Multi-agent runs from one prompt with isolated worktrees for safe side-by-side comparisons
-- Git workflows in-app: identities, commits, PR creation, checks, and merge actions
-- GitHub-native workflows: start sessions from issues and pull requests with context already attached
-- Plan/Build mode with a dedicated plan view for drafting and iterating implementation steps
-- Inline comment drafts on diffs, files, and plans that can be sent back to the agent
-- Context visibility tools (token/cost breakdowns, raw message inspection, and activity summaries)
-- Integrated terminal with per-directory sessions and stable performance on heavy output
-- Built-in skills catalog and local skill management for reusable automation workflows
+### **Desktop (macOS)**
+Download from [Releases](https://github.com/btriapitsyn/openchamber/releases).
 
-### Web / PWA
+### **VS Code**
+Install from [Marketplace](https://marketplace.visualstudio.com/items?itemName=fedaykindev.openchamber) or search "OpenChamber" in Extensions.
 
-- Cloudflare Quick Tunnel for instant remote access (`--try-cf-tunnel`)
-- One-scan onboarding with tunnel QR + password URL helpers
-- Mobile-first experience: optimized chat controls, keyboard-safe layouts, and attachment-friendly UI
-- Background notifications plus reliable cross-tab session activity tracking
-- Built-in self-update + restart flow that keeps your server settings intact
-
-### Desktop (macOS)
-
-- Native macOS menu integration with polished app actions and deep-link handling
-- Multi-window support for parallel project/session workflows
-- "Open In" shortcuts for Finder, Terminal, and your preferred editor
-- Fast switching between local and remote instances
-- Workspace-first startup flow with directory picker and steadier window restore behavior
-
-### VS Code Extension
-
-- Editor-native workflow: open files directly from tool output and keep sessions beside your code
-- Agent Manager for parallel multi-model runs from a single prompt
-- Right-click actions to add context, explain selections, and improve code in-place
-- In-extension settings, responsive layout, and theme mapping that matches your editor
-- Hardened runtime lifecycle and health checks for faster startup and fewer stuck reconnect states
-
-### Custom Themes
-
-Create your own color schemes by dropping JSON files into `~/.config/openchamber/themes/`. Hot reload supported — no restart needed.
-
-[**Read the Guide: Custom Themes**](docs/CUSTOM_THEMES.md)
-
-## Installation
-
-### VS Code Extension
-
-Install from [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=fedaykindev.openchamber) / [Open VSX Registry](https://open-vsx.org/extension/FedaykinDev/openchamber) or search "OpenChamber" in Extensions.
-
-### CLI (Web Server)
+### **CLI (Web + PWA)**
+_requires Node.js 20+_
 
 ```bash
-# Quick install (auto-detects your package manager)
 curl -fsSL https://raw.githubusercontent.com/btriapitsyn/openchamber/main/scripts/install.sh | bash
-
-# Or install manually
-bun add -g @openchamber/web    # or npm, pnpm, yarn
+openchamber --ui-password be-creative-here --daemon
 ```
 
+<details>
+<summary>Advanced CLI options</summary>
+
 ```bash
-openchamber                          # Start on port 3000
 openchamber --port 8080              # Custom port
 openchamber --daemon                 # Background mode
 openchamber --ui-password secret     # Password-protect UI
-openchamber --try-cf-tunnel          # Create a Cloudflare Quick Tunnel for remote access
-openchamber --try-cf-tunnel --tunnel-qr              # Show QR code for easy mobile access
-openchamber --try-cf-tunnel --tunnel-password-url   # Include password in URL for auto-login
-OPENCODE_PORT=4096 OPENCODE_SKIP_START=true openchamber  # Connect to external OpenCode server
+openchamber --try-cf-tunnel          # Cloudflare Quick Tunnel
+openchamber --try-cf-tunnel --tunnel-qr              # + QR code
+openchamber --try-cf-tunnel --tunnel-password-url     # + password in URL
 openchamber stop                     # Stop server
-openchamber update                   # Update to latest version
+openchamber update                   # Update to latest
 ```
 
-### Desktop App (macOS)
+Connect to an existing OpenCode server:
+```bash
+OPENCODE_PORT=4096 OPENCODE_SKIP_START=true openchamber
+OPENCODE_HOST=https://myhost:4096 OPENCODE_SKIP_START=true openchamber
+```
 
-Download from [Releases](https://github.com/btriapitsyn/openchamber/releases).
+</details>
 
-## Prerequisites
+<details>
+<summary>Docker</summary>
 
-- [OpenCode CLI](https://opencode.ai) installed
-- Node.js 20+ (for web version)
-- [cloudflared](https://github.com/cloudflare/cloudflared/releases) (required for `--try-cf-tunnel`)
+```bash
+docker compose up -d
+```
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for guidelines.
+Available at `http://localhost:3000`.
 
-## Tech Stack
+**UI Password:**
+```yaml
+environment:
+  UI_PASSWORD: your_secure_password
+```
 
-### Frontend
-![React](https://img.shields.io/badge/React-19-61DAFB?style=flat&logo=react&logoColor=white)
-![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-3178C6?style=flat&logo=typescript&logoColor=white)
-![Vite](https://img.shields.io/badge/Vite-7-646CFF?style=flat&logo=vite&logoColor=white)
-![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-v4-06B6D4?style=flat&logo=tailwindcss&logoColor=white)
+**Cloudflare Tunnel:**
+```yaml
+environment:
+  CF_TUNNEL: "true" # Options: true, qr, password
+```
 
-### State & UI
-![Zustand](https://img.shields.io/badge/Zustand-State_Management-FF6B6B?style=flat)
-![Radix UI](https://img.shields.io/badge/Radix_UI-Components-8B5CF6?style=flat&logo=radixui&logoColor=white)
+| Value      | Description                     |
+| ---------- | ------------------------------- |
+| `true`     | Enable tunnel only              |
+| `qr`       | Enable tunnel + QR code         |
+| `password` | Enable tunnel + password in URL |
 
-### Backend & Desktop
-![Express](https://img.shields.io/badge/Express.js-Server-000000?style=flat&logo=express&logoColor=white)
-![Tauri](https://img.shields.io/badge/Tauri-Desktop-FFC131?style=flat&logo=tauri&logoColor=white)
-![OpenCode SDK](https://img.shields.io/badge/OpenCode-SDK-4F46E5?style=flat)
+**Data directory permissions:** The `data/` directory is mounted for persistent storage. Before running:
+
+```bash
+mkdir -p data/openchamber data/opencode/share data/opencode/config data/ssh
+chown -R 1000:1000 data/
+```
+
+**SSH/Git:** If git push/pull fails, run `ssh -T git@github.com` in terminal.
+
+</details>
+
+<details>
+<summary>Named Cloudflare Tunnel (persistent hostname)</summary>
+
+For reliable long-lived access with a custom hostname from your Cloudflare account:
+
+- Configure in-app at **Settings > OpenChamber > Tunnel**, switch to **Named** mode.
+- Requires a domain in your Cloudflare account.
+- [Cloudflare setup guide](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/get-started/create-remote-tunnel/)
+- CLI `--tunnel <config.yml>` support is coming very soon.
+
+</details>
+
+## Features
+
+<details>
+<summary><strong>Chat & Interaction</strong></summary>
+
+- Branchable chat timeline with `/undo`, `/redo`, and one-click forks from any turn
+- Multi-agent runs from one prompt with isolated worktrees for safe side-by-side comparisons
+- Voice mode with speech input and read-aloud responses for hands-free workflows
+- Plan/Build mode with a dedicated plan view for drafting and iterating steps
+- Inline comment drafts on diffs, files, and plans - send feedback back to the agent
+- Shell mode via leading `!` with inline output
+- Share messages as images
+- Mermaid diagrams render inline with copy/download actions
+- Smart tool UIs for diffs, file operations, permissions, and task progress
+
+</details>
+
+<details>
+<summary><strong>Git & GitHub</strong></summary>
+
+- Full Git sidebar with staging, commits, push/pull, branch management, and rebase/merge flows
+- PR creation with AI-generated descriptions, status checks, and merge actions
+- Start sessions from GitHub issues and pull requests with context baked in
+- Multi-remote push and fork-aware PR creation
+- Worktree integration: isolated sessions per branch, merge back with conflict handling
+- Git identities, gitmoji support, and multi-account GitHub auth
+
+</details>
+
+<details>
+<summary><strong>Files, Diff & Terminal</strong></summary>
+
+- Workspace file browser with inline editing, syntax highlighting, and markdown preview
+- Beautiful diff viewer with stacked/inline modes, lazy loading for large changesets
+- Integrated terminal with per-directory sessions, tabbed interface, and stable heavy-output performance
+- Clickable file paths in messages - jump to exact line locations
+- File-type icons across all views for faster visual scanning
+
+</details>
+
+<details>
+<summary><strong>Web / PWA</strong></summary>
+
+- Cloudflare tunnel with Quick and Named modes, secure one-time connect links, and QR onboarding
+- Mobile-first: optimized chat controls, keyboard-safe layouts, drag-to-reorder projects
+- Background notifications and cross-tab session tracking
+- Self-update + restart flow that keeps your server settings intact
+- Installable as PWA with project-aware naming
+
+</details>
+
+<details>
+<summary><strong>Desktop (macOS)</strong></summary>
+
+- Connect to remote OpenChamber instances over SSH with dedicated lifecycle flows
+- Project Actions: run dev servers, SSH port forwarding, open remote URLs locally
+- Multi-window support for parallel project workflows
+- "Open In" shortcuts for Finder, Terminal, and your preferred editor
+- Fast switching between local and remote instances
+- Native macOS menu, deep-link handling, and polished startup
+
+</details>
+
+<details>
+<summary><strong>VS Code Extension</strong></summary>
+
+- Editor-native: open files from tool output, keep sessions beside your code
+- Agent Manager for parallel multi-model runs from a single prompt
+- Right-click actions: add context, explain selections, improve code in-place
+- Session editor panel, responsive layout, and theme mapping to your editor
+- Edit-style tool results open directly in focused diff views
+
+</details>
+
+<details>
+<summary><strong>Customization</strong></summary>
+
+- 18+ built-in themes with light/dark variants
+- Custom themes via JSON files in `~/.config/openchamber/themes/` - hot reload, no restart
+- Configurable keyboard shortcuts for chat, panels, and services
+- Font size, spacing, corner radius, and layout controls
+- Customizable project icons with upload and automatic favicon discovery
+- Skills catalog and local skill management for reusable automation
+
+[Read the Guide: Custom Themes](docs/CUSTOM_THEMES.md)
+
+</details>
+
+<details>
+<summary><strong>Context & Productivity</strong></summary>
+
+- Token usage, cost breakdowns, and raw message inspection panel
+- Usage quota tracking across multiple providers with pace/prediction indicators
+- Favorite model cycling via keyboard shortcuts
+- Session folders and subfolders with drag-to-reorder
+- Persistent project notes and todos per project
+- Draft persistence per session with expanded focus mode for longer prompts
+
+</details>
+
+## Roadmap
+
+Active development. Here's what's being worked on or planned:
+
+- Windows and Linux desktop apps
+- Mobile app with remote instance and laptop connectivity
+- More built-in tunneling options
+- Kanban board for multi-agent management - keeping the human in the loop and in control
+- Custom OpenCode plugins/tools built-in catalog
+- Linear integration
+- Built-in browser for running dev apps with agent integration
 
 ## Acknowledgments
 
-Independent project, not affiliated with OpenCode team.
+Independent project, not affiliated with the OpenCode team.
 
 **Special thanks to:**
 
@@ -154,9 +248,14 @@ Independent project, not affiliated with OpenCode team.
 - [Flexoki](https://github.com/kepano/flexoki) - Beautiful color scheme by [Steph Ango](https://stephango.com/flexoki).
 - [Pierre](https://pierrejs-docs.vercel.app/) - Fast, beautiful diff viewer with syntax highlighting.
 - [Tauri](https://github.com/tauri-apps/tauri) - Desktop application framework.
-- [Ghossty-web](https://github.com/coder/ghostty-web) - for a great implementeation of a Ghostty web renderer.
-- [David Hill](https://x.com/iamdavidhill) - who inspired me to release this without [overthinking](https://x.com/iamdavidhill/status/1993648326450020746?s=20).
-- My wife, who created a beautiful firework animation for the app while testing it for the first time.
+- [Ghostty-web](https://github.com/coder/ghostty-web) - Great implementation of a Ghostty web renderer.
+- [David Hill](https://x.com/iamdavidhill) - Who inspired me to release this without [overthinking](https://x.com/iamdavidhill/status/1993648326450020746).
+- [My wife](https://github.com/yulia-ivashko), who - with zero AI background - sat down with the app for the first time and built the firework celebration that plays on every successful push.
+- Every contributor who shaped this project with their PRs, ideas, and attention to detail.
+
+## Contributing
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for development setup and guidelines.
 
 ## License
 

@@ -2,6 +2,8 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+const DESKTOP_DEV_PORT = 3901;
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -48,11 +50,12 @@ const run = (cmd, args, cwd) => {
 console.log('[desktop] ensuring sidecar + web-dist...');
 run('node', ['./scripts/build-sidecar.mjs'], desktopDir);
 
-console.log('[desktop] starting API server on http://127.0.0.1:3001 ...');
+console.log(`[desktop] starting API server on http://127.0.0.1:${DESKTOP_DEV_PORT} ...`);
 
-const apiChild = spawn(sidecarPath, ['--port', '3001'], {
+const apiChild = spawn(sidecarPath, ['--port', String(DESKTOP_DEV_PORT)], {
   cwd: repoRoot,
   stdio: 'inherit',
+  detached: process.platform !== 'win32',
   env: {
     ...process.env,
     OPENCHAMBER_HOST: '127.0.0.1',
@@ -67,9 +70,10 @@ console.log('[desktop] starting Vite HMR server on http://127.0.0.1:5173 ...');
 const webChild = spawn('bun', ['x', 'vite', '--host', '127.0.0.1', '--port', '5173', '--strictPort'], {
   cwd: webDir,
   stdio: 'inherit',
+  detached: process.platform !== 'win32',
   env: {
     ...process.env,
-    OPENCHAMBER_PORT: process.env.OPENCHAMBER_PORT || '3001',
+    OPENCHAMBER_PORT: String(DESKTOP_DEV_PORT),
     NO_PROXY: process.env.NO_PROXY || 'localhost,127.0.0.1',
     no_proxy: process.env.no_proxy || 'localhost,127.0.0.1',
   },
@@ -77,17 +81,80 @@ const webChild = spawn('bun', ['x', 'vite', '--host', '127.0.0.1', '--port', '51
 
 let shuttingDown = false;
 
-const shutdown = () => {
+function waitForExit(child, timeoutMs) {
+  return new Promise((resolve) => {
+    if (!child || child.exitCode !== null || child.signalCode !== null) {
+      resolve();
+      return;
+    }
+
+    const onExit = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+
+    const timer = setTimeout(() => {
+      child.off('exit', onExit);
+      resolve();
+    }, timeoutMs);
+
+    child.once('exit', onExit);
+  });
+}
+
+function signalChild(child, signal) {
+  if (!child || child.exitCode !== null || child.signalCode !== null) {
+    return;
+  }
+
+  try {
+    if (process.platform !== 'win32') {
+      process.kill(-child.pid, signal);
+      return;
+    }
+  } catch {
+  }
+
+  try {
+    child.kill(signal);
+  } catch {
+  }
+}
+
+async function requestApiShutdown() {
+  const url = `http://127.0.0.1:${DESKTOP_DEV_PORT}/api/system/shutdown`;
+  try {
+    await fetch(url, { method: 'POST' });
+  } catch {
+  }
+}
+
+async function stopChildTree(child) {
+  if (!child || child.exitCode !== null || child.signalCode !== null) {
+    return;
+  }
+
+  signalChild(child, 'SIGINT');
+  await waitForExit(child, 2500);
+
+  if (child.exitCode === null && child.signalCode === null) {
+    signalChild(child, 'SIGTERM');
+    await waitForExit(child, 2500);
+  }
+
+  if (child.exitCode === null && child.signalCode === null) {
+    signalChild(child, 'SIGKILL');
+    await waitForExit(child, 1000);
+  }
+}
+
+const shutdown = async (exitCode = 0) => {
   if (shuttingDown) return;
   shuttingDown = true;
 
-  try {
-    apiChild.kill('SIGTERM');
-  } catch {}
-
-  try {
-    webChild.kill('SIGTERM');
-  } catch {}
+  await requestApiShutdown();
+  await Promise.all([stopChildTree(webChild), stopChildTree(apiChild)]);
+  process.exit(exitCode);
 };
 
 const handleExit = (label) => (code, signal) => {
@@ -99,8 +166,10 @@ const handleExit = (label) => (code, signal) => {
     console.error(`[desktop] ${label} exited unexpectedly (code=${code ?? 'null'} signal=${signal ?? 'none'})`);
   }
 
-  shutdown();
-  process.exit(typeof code === 'number' ? code : 1);
+  shutdown(typeof code === 'number' ? code : 1).catch((error) => {
+    console.error('[desktop] shutdown failed:', error);
+    process.exit(1);
+  });
 };
 
 apiChild.on('exit', handleExit('API server'));
@@ -111,13 +180,18 @@ const handleError = (label) => (error) => {
     return;
   }
   console.error(`[desktop] failed to start ${label}:`, error);
-  shutdown();
-  process.exit(1);
+  shutdown(1).catch(() => process.exit(1));
 };
 
 apiChild.on('error', handleError('API server'));
 webChild.on('error', handleError('Vite server'));
 
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
-process.on('exit', shutdown);
+process.on('SIGINT', () => {
+  shutdown(130).catch(() => process.exit(130));
+});
+process.on('SIGTERM', () => {
+  shutdown(143).catch(() => process.exit(143));
+});
+process.on('SIGHUP', () => {
+  shutdown(129).catch(() => process.exit(129));
+});

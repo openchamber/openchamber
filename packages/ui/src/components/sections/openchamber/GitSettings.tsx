@@ -1,6 +1,4 @@
 import React from 'react';
-import { RiInformationLine } from '@remixicon/react';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Checkbox } from '@/components/ui/checkbox';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -13,7 +11,6 @@ export const GitSettings: React.FC = () => {
   const showGitignored = useFilesViewShowGitignored();
 
   const [isLoading, setIsLoading] = React.useState(true);
-
 
   // Load current settings
   React.useEffect(() => {
@@ -67,8 +64,7 @@ export const GitSettings: React.FC = () => {
     loadSettings();
   }, [setSettingsGitmojiEnabled]);
 
-  const handleGitmojiChange = React.useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const enabled = event.target.checked;
+  const handleGitmojiChange = React.useCallback(async (enabled: boolean) => {
     setSettingsGitmojiEnabled(enabled);
     try {
       await updateDesktopSettings({
@@ -84,56 +80,58 @@ export const GitSettings: React.FC = () => {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="space-y-1">
-        <div className="flex items-center gap-2">
-          <h3 className="typography-ui-header font-semibold text-foreground">Commit Messages</h3>
-          <Tooltip delayDuration={1000}>
-            <TooltipTrigger asChild>
-              <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
-            </TooltipTrigger>
-            <TooltipContent sideOffset={8} className="max-w-xs">
-              Configure how commit messages are generated.
-            </TooltipContent>
-          </Tooltip>
-        </div>
+    <div className="mb-8">
+      <div className="mb-1 px-1">
+        <h3 className="typography-ui-header font-medium text-foreground">Git Preferences</h3>
       </div>
 
-      <div className="space-y-3">
-        <div className="flex flex-col gap-2">
-          <label className="flex items-center gap-2 cursor-pointer">
-            <Checkbox
-              checked={settingsGitmojiEnabled}
-              onChange={(checked) => handleGitmojiChange({ target: { checked } } as React.ChangeEvent<HTMLInputElement>)}
-            />
-            <span className="typography-ui-label text-foreground">Enable gitmoji picker</span>
-          </label>
-          <p className="typography-meta text-muted-foreground pl-5.5">
-            Adds a gitmoji selector to the Git commit message input.
-          </p>
+      <section className="px-2 pb-2 pt-0 space-y-0.5">
+        <div
+          className="group flex cursor-pointer items-center gap-2 py-1.5"
+          role="button"
+          tabIndex={0}
+          aria-pressed={settingsGitmojiEnabled}
+          onClick={() => {
+            void handleGitmojiChange(!settingsGitmojiEnabled);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === ' ' || event.key === 'Enter') {
+              event.preventDefault();
+              void handleGitmojiChange(!settingsGitmojiEnabled);
+            }
+          }}
+        >
+          <Checkbox
+            checked={settingsGitmojiEnabled}
+            onChange={(checked) => {
+              void handleGitmojiChange(checked);
+            }}
+            ariaLabel="Enable Gitmoji picker"
+          />
+          <span className="typography-ui-label text-foreground">Enable Gitmoji Picker</span>
         </div>
-      </div>
 
-      <div className="space-y-1">
-        <h3 className="typography-ui-header font-semibold text-foreground">Files Overview</h3>
-        <p className="typography-meta text-muted-foreground">
-          Show gitignored files in the Files browser pane only.
-        </p>
-      </div>
-      <div className="space-y-3">
-        <div className="flex flex-col gap-2">
-          <label className="flex items-center gap-2 cursor-pointer">
-            <Checkbox
-              checked={showGitignored}
-              onChange={setFilesViewShowGitignored}
-            />
-            <span className="typography-ui-label text-foreground">Display gitignored files</span>
-          </label>
-          <p className="typography-meta text-muted-foreground pl-5.5">
-            Toggles gitignored files in the Files tree and search results.
-          </p>
+        <div
+          className="group flex cursor-pointer items-center gap-2 py-1.5"
+          role="button"
+          tabIndex={0}
+          aria-pressed={showGitignored}
+          onClick={() => setFilesViewShowGitignored(!showGitignored)}
+          onKeyDown={(event) => {
+            if (event.key === ' ' || event.key === 'Enter') {
+              event.preventDefault();
+              setFilesViewShowGitignored(!showGitignored);
+            }
+          }}
+        >
+          <Checkbox
+            checked={showGitignored}
+            onChange={setFilesViewShowGitignored}
+            ariaLabel="Display gitignored files"
+          />
+          <span className="typography-ui-label text-foreground">Display Gitignored Files</span>
         </div>
-      </div>
+      </section>
     </div>
   );
 };

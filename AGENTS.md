@@ -57,6 +57,14 @@ Notification message preparation utilities for system notifications, including t
 WebSocket protocol utilities for terminal input handling including message normalization, control frame parsing, and rate limiting.
 - Module docs: `packages/web/server/lib/terminal/DOCUMENTATION.md`
 
+##### tts
+Server-side text-to-speech services and summarization helpers for `/api/tts/*` endpoints.
+- Module docs: `packages/web/server/lib/tts/DOCUMENTATION.md`
+
+##### skills-catalog
+Skills catalog management including discovery, installation, and configuration of agent skill packages.
+- Module docs: `packages/web/server/lib/skills-catalog/DOCUMENTATION.md`
+
 ## Build / dev commands (verified)
 All scripts are in `package.json`.
 - Validate: `bun run type-check`, `bun run lint`
@@ -79,7 +87,7 @@ All scripts are in `package.json`.
 - SSE hookup: `packages/ui/src/hooks/useEventStream.ts`
 - Web server embeds/starts OpenCode server: `packages/web/server/index.js` (`createOpencodeServer`)
 - Web runtime filesystem endpoints: search `packages/web/server/index.js` for `/api/fs/`
-- External server support: Set `OPENCODE_PORT` and `OPENCODE_SKIP_START=true` to connect to existing OpenCode instance
+- External server support: Set `OPENCODE_HOST` (full base URL, e.g. `http://hostname:4096`) or `OPENCODE_PORT`, plus `OPENCODE_SKIP_START=true`, to connect to existing OpenCode instance
 
 ## Key UI patterns (reference files)
 - Settings shell: `packages/ui/src/components/views/SettingsView.tsx`

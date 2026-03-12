@@ -379,7 +379,7 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
             let currentFlatIndex = 0;
 
             return (
-              <div style={{ backgroundColor: 'var(--surface-elevated)' }} className="absolute bottom-full left-0 mb-1 z-50 border border-border/30 rounded-xl overflow-hidden shadow-lg w-[min(380px,calc(100vw-2rem))] flex flex-col">
+              <div style={{ backgroundColor: 'var(--surface-elevated)' }} className="absolute bottom-full left-0 mb-1 z-50 border border-border/30 rounded-xl overflow-hidden shadow-none w-[min(380px,calc(100vw-2rem))] flex flex-col">
                 {/* Search input */}
                 <div className="p-2 border-b border-border/40">
                   <div className="relative">

@@ -390,10 +390,10 @@ export interface GitAPI {
   getGitBranches(directory: string): Promise<GitBranch>;
   deleteGitBranch(directory: string, payload: GitDeleteBranchPayload): Promise<{ success: boolean }>;
   deleteRemoteBranch(directory: string, payload: GitDeleteRemoteBranchPayload): Promise<{ success: boolean }>;
-  generateCommitMessage(directory: string, files: string[], options?: { zenModel?: string }): Promise<{ message: GeneratedCommitMessage }>;
+  generateCommitMessage(directory: string, files: string[], options?: { zenModel?: string; providerId?: string; modelId?: string }): Promise<{ message: GeneratedCommitMessage }>;
   generatePullRequestDescription(
     directory: string,
-    payload: { base: string; head: string; context?: string; zenModel?: string }
+    payload: { base: string; head: string; context?: string; zenModel?: string; providerId?: string; modelId?: string }
   ): Promise<GeneratedPullRequestDescription>;
   listGitWorktrees(directory: string): Promise<GitWorktreeInfo[]>;
   validateGitWorktree?(directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeValidationResult>;
@@ -489,6 +489,12 @@ export interface ProjectEntry {
   path: string;
   label?: string;
   icon?: string | null;
+  iconImage?: {
+    mime: string;
+    updatedAt: number;
+    source: 'custom' | 'auto';
+  } | null;
+  iconBackground?: string | null;
   color?: string | null;
   addedAt?: number;
   lastOpenedAt?: number;
@@ -511,13 +517,15 @@ export interface SettingsPayload {
   pinnedDirectories?: string[];
   showReasoningTraces?: boolean;
   showTextJustificationActivity?: boolean;
+  showDeletionDialog?: boolean;
   nativeNotificationsEnabled?: boolean;
   notificationMode?: 'always' | 'hidden-only';
   autoDeleteEnabled?: boolean;
   autoDeleteAfterDays?: number;
   queueModeEnabled?: boolean;
   gitmojiEnabled?: boolean;
-  toolCallExpansion?: 'collapsed' | 'activity' | 'detailed';
+  toolCallExpansion?: 'collapsed' | 'activity' | 'detailed' | 'changes';
+  inputSpellcheckEnabled?: boolean;
   fontSize?: number;
   terminalFontSize?: number;
   padding?: number;
@@ -528,6 +536,9 @@ export interface SettingsPayload {
   directoryShowHidden?: boolean;
   filesViewShowGitignored?: boolean;
   openInAppId?: string;
+  gitProviderId?: string;
+  gitModelId?: string;
+  pwaAppName?: string;
 
   [key: string]: unknown;
 }
@@ -588,7 +599,12 @@ export interface ToolsAPI {
 
 export interface EditorAPI {
   openFile(path: string, line?: number, column?: number): Promise<void>;
-  openDiff(original: string, modified: string, label?: string): Promise<void>;
+  openDiff(
+    original: string,
+    modified: string,
+    label?: string,
+    options?: { line?: number; patch?: string },
+  ): Promise<void>;
 }
 
 export interface VSCodeAPI {
@@ -758,6 +774,8 @@ export type GitHubPullRequestStatus = {
   pr?: GitHubPullRequest | null;
   checks?: GitHubChecksSummary | null;
   canMerge?: boolean;
+  defaultBranch?: string | null;
+  resolvedRemoteName?: string | null;
 };
 
 export type GitHubPullRequestCreateInput = {
