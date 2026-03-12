@@ -19,7 +19,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
-import { isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
+import { isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
 import { useDeviceInfo } from '@/lib/device';
 import { usePwaDetection } from '@/hooks/usePwaDetection';
 import { updateDesktopSettings } from '@/lib/persistence';
@@ -143,7 +143,7 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-export type VisibleSetting = 'theme' | 'pwaInstallName' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'cornerRadius' | 'inputBarOffset' | 'navRail' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'activityRenderMode' | 'stickyUserHeader' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'reasoning' | 'showToolFileIcons' | 'queueMode' | 'terminalQuickKeys' | 'persistDraft' | 'inputSpellcheck';
+export type VisibleSetting = 'theme' | 'pwaInstallName' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'cornerRadius' | 'inputBarOffset' | 'navRail' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'activityRenderMode' | 'stickyUserHeader' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'reasoning' | 'showToolFileIcons' | 'expandedTools' | 'queueMode' | 'terminalQuickKeys' | 'persistDraft' | 'inputSpellcheck';
 
 interface OpenChamberVisualSettingsProps {
     /** Which settings to show. If undefined, shows all. */
@@ -191,6 +191,10 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setInputSpellcheckEnabled = useUIStore(state => state.setInputSpellcheckEnabled);
     const showToolFileIcons = useUIStore(state => state.showToolFileIcons);
     const setShowToolFileIcons = useUIStore(state => state.setShowToolFileIcons);
+    const showExpandedBashTools = useUIStore(state => state.showExpandedBashTools);
+    const setShowExpandedBashTools = useUIStore(state => state.setShowExpandedBashTools);
+    const showExpandedEditTools = useUIStore(state => state.showExpandedEditTools);
+    const setShowExpandedEditTools = useUIStore(state => state.setShowExpandedEditTools);
     const isNavRailExpanded = useUIStore(state => state.isNavRailExpanded);
     const setNavRailExpanded = useUIStore(state => state.setNavRailExpanded);
     const showMobileSessionStatusBar = useUIStore(state => state.showMobileSessionStatusBar);
@@ -255,6 +259,16 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         void updateDesktopSettings({ showToolFileIcons: enabled });
     }, [setShowToolFileIcons]);
 
+    const handleShowExpandedBashToolsChange = React.useCallback((enabled: boolean) => {
+        setShowExpandedBashTools(enabled);
+        void updateDesktopSettings({ showExpandedBashTools: enabled });
+    }, [setShowExpandedBashTools]);
+
+    const handleShowExpandedEditToolsChange = React.useCallback((enabled: boolean) => {
+        setShowExpandedEditTools(enabled);
+        void updateDesktopSettings({ showExpandedEditTools: enabled });
+    }, [setShowExpandedEditTools]);
+
     const lightThemes = React.useMemo(
         () => availableThemes
             .filter((theme) => theme.metadata.variant === 'light')
@@ -305,9 +319,10 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         || shouldShow('queueMode')
         || shouldShow('persistDraft')
         || shouldShow('showToolFileIcons')
+        || shouldShow('expandedTools')
         || (!isMobile && shouldShow('inputSpellcheck'));
 
-    const showPwaInstallNameSetting = shouldShow('pwaInstallName') && isWebRuntime() && browserTab;
+    const showPwaInstallNameSetting = shouldShow('pwaInstallName') && isWebRuntime() && browserTab && !isDesktopShell() && !isVSCode;
     const [pwaInstallName, setPwaInstallName] = React.useState('');
 
     const applyPwaInstallName = React.useCallback(async (value: string) => {
@@ -477,12 +492,12 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                             </div>
 
                             {showPwaInstallNameSetting && (
-                                <div className={cn('py-1.5', isMobile ? 'space-y-2' : 'flex items-center gap-8')}>
-                                    <div className={cn('flex min-w-0 flex-col', isMobile ? 'w-full' : 'w-56 shrink-0')}>
+                                <div className="py-1.5 space-y-1.5">
+                                    <div className="flex min-w-0 flex-col">
                                         <span className="typography-ui-label text-foreground">Install App Name</span>
                                         <span className="typography-meta text-muted-foreground">Used by PWA installation process.</span>
                                     </div>
-                                    <div className={cn('flex items-center gap-2', isMobile ? 'w-full' : 'w-fit min-w-[22rem]')}>
+                                    <div className="flex w-full max-w-[28rem] items-center gap-2">
                                         <Input
                                             value={pwaInstallName}
                                             onChange={(event) => {
@@ -857,7 +872,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     {shouldShow('activityRenderMode') && chatRenderMode === 'sorted' && (
                                         <section className="p-2 md:col-span-2">
                                             <h4 className="typography-ui-header font-medium text-foreground">Activity Default</h4>
-                                            <div role="radiogroup" aria-label="Activity default mode" className="mt-1 space-y-0">
+                                            <div role="radiogroup" aria-label="Activity default mode" className="mt-0.5 space-y-0">
                                                 {ACTIVITY_RENDER_MODE_OPTIONS.map((option) => {
                                                     const selected = activityRenderMode === option.id;
                                                     return (
@@ -873,7 +888,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                                     handleActivityRenderModeChange(option.id);
                                                                 }
                                                             }}
-                                                            className="flex w-full items-center gap-2 py-0.5 text-left"
+                                                            className="flex w-full items-center gap-2 py-0 text-left"
                                                         >
                                                             <Radio
                                                                 checked={selected}
@@ -890,10 +905,58 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         </section>
                                     )}
 
+                                    {shouldShow('expandedTools') && (
+                                        <section className="p-2 md:col-span-2 space-y-0.5">
+                                            <div className="typography-ui-header font-medium text-foreground py-1.5">Show tools opened by default:</div>
+
+                                            <div
+                                                className="group flex cursor-pointer items-center gap-2 py-0.5"
+                                                role="button"
+                                                tabIndex={0}
+                                                aria-pressed={showExpandedBashTools}
+                                                onClick={() => handleShowExpandedBashToolsChange(!showExpandedBashTools)}
+                                                onKeyDown={(event) => {
+                                                    if (event.key === ' ' || event.key === 'Enter') {
+                                                        event.preventDefault();
+                                                        handleShowExpandedBashToolsChange(!showExpandedBashTools);
+                                                    }
+                                                }}
+                                            >
+                                                <Checkbox
+                                                    checked={showExpandedBashTools}
+                                                    onChange={handleShowExpandedBashToolsChange}
+                                                    ariaLabel="Show expanded bash tools"
+                                                />
+                                                <span className="typography-ui-label text-foreground">Bash</span>
+                                            </div>
+
+                                            <div
+                                                className="group flex cursor-pointer items-center gap-2 py-0.5"
+                                                role="button"
+                                                tabIndex={0}
+                                                aria-pressed={showExpandedEditTools}
+                                                onClick={() => handleShowExpandedEditToolsChange(!showExpandedEditTools)}
+                                                onKeyDown={(event) => {
+                                                    if (event.key === ' ' || event.key === 'Enter') {
+                                                        event.preventDefault();
+                                                        handleShowExpandedEditToolsChange(!showExpandedEditTools);
+                                                    }
+                                                }}
+                                            >
+                                                <Checkbox
+                                                    checked={showExpandedEditTools}
+                                                    onChange={handleShowExpandedEditToolsChange}
+                                                    ariaLabel="Show expanded edit tools"
+                                                />
+                                                <span className="typography-ui-label text-foreground">Edit tools</span>
+                                            </div>
+                                        </section>
+                                    )}
+
                                     {shouldShow('userMessageRendering') && (
                                         <section className="p-2">
                                             <h4 className="typography-ui-header font-medium text-foreground">User Message Rendering</h4>
-                                            <div role="radiogroup" aria-label="User message rendering mode" className="mt-1 space-y-0">
+                                            <div role="radiogroup" aria-label="User message rendering mode" className="mt-0.5 space-y-0">
                                                 {USER_MESSAGE_RENDERING_OPTIONS.map((option) => {
                                                     const selected = normalizeUserMessageRenderingMode(userMessageRenderingMode) === option.id;
                                                     return (
@@ -909,7 +972,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                                     handleUserMessageRenderingModeChange(option.id);
                                                                 }
                                                             }}
-                                                            className="flex w-full items-center gap-2 py-0.5 text-left"
+                                                            className="flex w-full items-center gap-2 py-0 text-left"
                                                         >
                                                             <Radio
                                                                 checked={selected}
@@ -929,7 +992,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     {shouldShow('mermaidRendering') && (
                                         <section className="p-2">
                                             <h4 className="typography-ui-header font-medium text-foreground">Mermaid Rendering</h4>
-                                            <div role="radiogroup" aria-label="Mermaid rendering mode" className="mt-1 space-y-0">
+                                            <div role="radiogroup" aria-label="Mermaid rendering mode" className="mt-0.5 space-y-0">
                                                 {MERMAID_RENDERING_OPTIONS.map((option) => {
                                                     const selected = mermaidRenderingMode === option.id;
                                                     return (
@@ -945,7 +1008,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                                     handleMermaidRenderingModeChange(option.id);
                                                                 }
                                                             }}
-                                                            className="flex w-full items-center gap-2 py-0.5 text-left"
+                                                            className="flex w-full items-center gap-2 py-0 text-left"
                                                         >
                                                             <Radio
                                                                 checked={selected}
@@ -965,7 +1028,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     {shouldShow('diffLayout') && !isVSCode && (
                                         <section className="p-2">
                                             <h4 className="typography-ui-header font-medium text-foreground">Diff Layout</h4>
-                                            <div role="radiogroup" aria-label="Diff layout" className="mt-1 space-y-0">
+                                            <div role="radiogroup" aria-label="Diff layout" className="mt-0.5 space-y-0">
                                                 {DIFF_LAYOUT_OPTIONS.map((option) => {
                                                     const selected = diffLayoutPreference === option.id;
                                                     return (
@@ -981,7 +1044,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                                     setDiffLayoutPreference(option.id);
                                                                 }
                                                             }}
-                                                            className="flex w-full items-center gap-2 py-0.5 text-left"
+                                                            className="flex w-full items-center gap-2 py-0 text-left"
                                                         >
                                                             <Radio
                                                                 checked={selected}
@@ -1001,7 +1064,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     {shouldShow('diffLayout') && !isVSCode && (
                                         <section className="p-2">
                                             <h4 className="typography-ui-header font-medium text-foreground">Diff View Mode</h4>
-                                            <div role="radiogroup" aria-label="Diff view mode" className="mt-1 space-y-0">
+                                            <div role="radiogroup" aria-label="Diff view mode" className="mt-0.5 space-y-0">
                                                 {DIFF_VIEW_MODE_OPTIONS.map((option) => {
                                                     const selected = diffViewMode === option.id;
                                                     return (
@@ -1017,7 +1080,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                                     setDiffViewMode(option.id);
                                                                 }
                                                             }}
-                                                            className="flex w-full items-center gap-2 py-0.5 text-left"
+                                                            className="flex w-full items-center gap-2 py-0 text-left"
                                                         >
                                                             <Radio
                                                                 checked={selected}
@@ -1040,7 +1103,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 <section className="p-2 space-y-0.5">
                                     {shouldShow('reasoning') && (
                                         <div
-                                            className="group flex cursor-pointer items-center gap-2 py-1.5"
+                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
                                             role="button"
                                             tabIndex={0}
                                             aria-pressed={showReasoningTraces}
@@ -1063,7 +1126,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
 
                                     {shouldShow('stickyUserHeader') && (
                                         <div
-                                            className="group flex cursor-pointer items-center gap-2 py-1.5"
+                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
                                             role="button"
                                             tabIndex={0}
                                             aria-pressed={stickyUserHeader}
@@ -1086,7 +1149,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
 
                                     {shouldShow('showToolFileIcons') && (
                                         <div
-                                            className="group flex cursor-pointer items-center gap-2 py-1.5"
+                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
                                             role="button"
                                             tabIndex={0}
                                             aria-pressed={showToolFileIcons}
@@ -1109,7 +1172,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
 
                                     {shouldShow('mobileStatusBar') && isMobile && (
                                         <div
-                                            className="group flex cursor-pointer items-center gap-2 py-1.5"
+                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
                                             role="button"
                                             tabIndex={0}
                                             aria-pressed={showMobileSessionStatusBar}
@@ -1132,7 +1195,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
 
                                     {shouldShow('dotfiles') && !isVSCodeRuntime() && (
                                         <div
-                                            className="group flex cursor-pointer items-center gap-2 py-1.5"
+                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
                                             role="button"
                                             tabIndex={0}
                                             aria-pressed={directoryShowHidden}
@@ -1155,7 +1218,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
 
                                     {shouldShow('queueMode') && (
                                         <div
-                                            className="group flex cursor-pointer items-center gap-2 py-1.5"
+                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
                                             role="button"
                                             tabIndex={0}
                                             aria-pressed={queueModeEnabled}
@@ -1188,7 +1251,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
 
                                     {shouldShow('persistDraft') && (
                                         <div
-                                            className="group flex cursor-pointer items-center gap-2 py-1.5"
+                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
                                             role="button"
                                             tabIndex={0}
                                             aria-pressed={persistChatDraft}

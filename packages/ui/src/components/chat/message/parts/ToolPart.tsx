@@ -1362,7 +1362,10 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                     input={input}
                     syntaxTheme={syntaxTheme}
                 />,
-                { className: 'p-1' }
+                {
+                    className: 'p-1',
+                    maxHeightClass: part.tool === 'bash' ? 'max-h-[46vh]' : undefined,
+                }
             );
         }
 

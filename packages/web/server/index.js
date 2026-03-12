@@ -2100,6 +2100,12 @@ const sanitizeSettingsUpdate = (payload) => {
   if (typeof candidate.showToolFileIcons === 'boolean') {
     result.showToolFileIcons = candidate.showToolFileIcons;
   }
+  if (typeof candidate.showExpandedBashTools === 'boolean') {
+    result.showExpandedBashTools = candidate.showExpandedBashTools;
+  }
+  if (typeof candidate.showExpandedEditTools === 'boolean') {
+    result.showExpandedEditTools = candidate.showExpandedEditTools;
+  }
   if (typeof candidate.chatRenderMode === 'string') {
     const mode = candidate.chatRenderMode.trim();
     if (mode === 'sorted' || mode === 'live') {

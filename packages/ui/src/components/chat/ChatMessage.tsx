@@ -31,6 +31,31 @@ const ToolOutputDialog = React.lazy(() => import('./message/ToolOutputDialog'));
 
 const EXPANDED_TOOLS_CACHE_MAX = 4000;
 const expandedToolsStateCache = new Map<string, Set<string>>();
+const collapsedToolsStateCache = new Map<string, Set<string>>();
+
+const BASH_TOOL_NAMES = new Set(['bash', 'shell', 'cmd', 'terminal']);
+const EDIT_TOOL_NAMES = new Set([
+    'apply_patch',
+    'edit',
+    'write',
+    'multiedit',
+    'str_replace',
+    'str_replace_based_edit_tool',
+    'create',
+    'file_write',
+]);
+
+const normalizeToolName = (toolName: unknown): string => {
+    if (typeof toolName !== 'string') return '';
+    const trimmed = toolName.trim().toLowerCase();
+    if (!trimmed) return '';
+    const withoutIndex = trimmed.replace(/:\d+$/, '');
+    if (!withoutIndex.includes('.')) {
+        return withoutIndex;
+    }
+    const parts = withoutIndex.split('.').filter(Boolean);
+    return parts[parts.length - 1] ?? withoutIndex;
+};
 
 const readExpandedToolsCache = (messageId: string): Set<string> => {
     const cached = expandedToolsStateCache.get(messageId);
@@ -45,6 +70,21 @@ const writeExpandedToolsCache = (messageId: string, value: Set<string>): void =>
         }
     }
     expandedToolsStateCache.set(messageId, new Set(value));
+};
+
+const readCollapsedToolsCache = (messageId: string): Set<string> => {
+    const cached = collapsedToolsStateCache.get(messageId);
+    return cached ? new Set(cached) : new Set();
+};
+
+const writeCollapsedToolsCache = (messageId: string, value: Set<string>): void => {
+    if (collapsedToolsStateCache.size >= EXPANDED_TOOLS_CACHE_MAX && !collapsedToolsStateCache.has(messageId)) {
+        const oldest = collapsedToolsStateCache.keys().next().value;
+        if (typeof oldest === 'string') {
+            collapsedToolsStateCache.delete(oldest);
+        }
+    }
+    collapsedToolsStateCache.set(messageId, new Set(value));
 };
 
 function useStickyDisplayValue<T>(value: T | null | undefined): T | null | undefined {
@@ -131,11 +171,13 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     } = sessionState;
 
     const providers = useConfigStore((state) => state.providers);
-    const { showReasoningTraces, stickyUserHeader, chatRenderMode } = useUIStore(
+    const { showReasoningTraces, stickyUserHeader, chatRenderMode, showExpandedBashTools, showExpandedEditTools } = useUIStore(
         useShallow((state) => ({
             showReasoningTraces: state.showReasoningTraces,
             stickyUserHeader: state.stickyUserHeader,
             chatRenderMode: state.chatRenderMode,
+            showExpandedBashTools: state.showExpandedBashTools,
+            showExpandedEditTools: state.showExpandedEditTools,
         }))
     );
 
@@ -148,6 +190,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     const [copiedCode, setCopiedCode] = React.useState<string | null>(null);
     const [copiedMessage, setCopiedMessage] = React.useState(false);
     const [expandedTools, setExpandedTools] = React.useState<Set<string>>(() => readExpandedToolsCache(message.info.id));
+    const [collapsedTools, setCollapsedTools] = React.useState<Set<string>>(() => readCollapsedToolsCache(message.info.id));
     const [popupContent, setPopupContent] = React.useState<ToolPopupContent>({
         open: false,
         title: '',
@@ -156,6 +199,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
 
     React.useEffect(() => {
         setExpandedTools(readExpandedToolsCache(message.info.id));
+        setCollapsedTools(readCollapsedToolsCache(message.info.id));
     }, [message.info.id]);
 
 
@@ -412,8 +456,57 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         return filtered;
     }, [isUser, visibleParts]);
 
-    // Tools default collapsed; expandedTools contains IDs of tools the user toggled open.
-    const effectiveExpandedTools = expandedTools;
+    const turnActivityToolParts = React.useMemo(() => {
+        if (isUser) {
+            return [] as Part[];
+        }
+        const records = turnGroupingContext?.activityParts ?? [];
+        return records
+            .filter((record) => record.kind === 'tool')
+            .map((record) => record.part)
+            .filter((part): part is Part => part.type === 'tool');
+    }, [isUser, turnGroupingContext?.activityParts]);
+
+    const defaultOpenToolIds = React.useMemo(() => {
+        if (!showExpandedBashTools && !showExpandedEditTools) {
+            return new Set<string>();
+        }
+
+        const next = new Set<string>();
+        for (const part of [...toolParts, ...turnActivityToolParts]) {
+            const toolId = typeof part?.id === 'string' ? part.id : '';
+            if (!toolId) continue;
+            const toolName = normalizeToolName((part as { tool?: string }).tool);
+            if (!toolName) continue;
+
+            if (showExpandedBashTools && BASH_TOOL_NAMES.has(toolName)) {
+                next.add(toolId);
+                continue;
+            }
+            if (showExpandedEditTools && EDIT_TOOL_NAMES.has(toolName)) {
+                next.add(toolId);
+            }
+        }
+
+        return next;
+    }, [showExpandedBashTools, showExpandedEditTools, toolParts, turnActivityToolParts]);
+
+    const effectiveExpandedTools = React.useMemo(() => {
+        if (defaultOpenToolIds.size === 0 && collapsedTools.size === 0) {
+            return expandedTools;
+        }
+
+        const next = new Set(expandedTools);
+        defaultOpenToolIds.forEach((toolId) => {
+            if (!collapsedTools.has(toolId)) {
+                next.add(toolId);
+            }
+        });
+        collapsedTools.forEach((toolId) => {
+            next.delete(toolId);
+        });
+        return next;
+    }, [collapsedTools, defaultOpenToolIds, expandedTools]);
 
     const agentMention = React.useMemo(() => {
         if (!isUser) {
@@ -663,6 +756,32 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     }, [sessionId, message.info.id, forkFromMessage]);
 
     const handleToggleTool = React.useCallback((toolId: string) => {
+        const isDefaultOpen = defaultOpenToolIds.has(toolId);
+        const isCurrentlyExpanded = effectiveExpandedTools.has(toolId);
+
+        if (isDefaultOpen) {
+            setCollapsedTools((prev) => {
+                const next = new Set(prev);
+                if (isCurrentlyExpanded) {
+                    next.add(toolId);
+                } else {
+                    next.delete(toolId);
+                }
+                writeCollapsedToolsCache(message.info.id, next);
+                return next;
+            });
+
+            if (!isCurrentlyExpanded) {
+                setExpandedTools((prev) => {
+                    const next = new Set(prev);
+                    next.delete(toolId);
+                    writeExpandedToolsCache(message.info.id, next);
+                    return next;
+                });
+            }
+            return;
+        }
+
         setExpandedTools((prev) => {
             const next = new Set(prev);
             if (next.has(toolId)) {
@@ -673,7 +792,17 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
             writeExpandedToolsCache(message.info.id, next);
             return next;
         });
-    }, [message.info.id]);
+
+        setCollapsedTools((prev) => {
+            if (!prev.has(toolId)) {
+                return prev;
+            }
+            const next = new Set(prev);
+            next.delete(toolId);
+            writeCollapsedToolsCache(message.info.id, next);
+            return next;
+        });
+    }, [defaultOpenToolIds, effectiveExpandedTools, message.info.id]);
 
     const resolvedAnimationHandlers = animationHandlers ?? null;
     const hasAnnouncedAuxiliaryScrollRef = React.useRef(false);

@@ -552,6 +552,8 @@ interface UIStore {
   persistChatDraft: boolean;
   inputSpellcheckEnabled: boolean;
   showToolFileIcons: boolean;
+  showExpandedBashTools: boolean;
+  showExpandedEditTools: boolean;
   mermaidRenderingMode: MermaidRenderingMode;
   userMessageRenderingMode: UserMessageRenderingMode;
   stickyUserHeader: boolean;
@@ -663,6 +665,8 @@ interface UIStore {
   setPersistChatDraft: (value: boolean) => void;
   setInputSpellcheckEnabled: (value: boolean) => void;
   setShowToolFileIcons: (value: boolean) => void;
+  setShowExpandedBashTools: (value: boolean) => void;
+  setShowExpandedEditTools: (value: boolean) => void;
   setMermaidRenderingMode: (value: MermaidRenderingMode) => void;
   setUserMessageRenderingMode: (value: UserMessageRenderingMode) => void;
   setStickyUserHeader: (value: boolean) => void;
@@ -774,6 +778,8 @@ export const useUIStore = create<UIStore>()(
         persistChatDraft: true,
         inputSpellcheckEnabled: false,
         showToolFileIcons: true,
+        showExpandedBashTools: false,
+        showExpandedEditTools: false,
         mermaidRenderingMode: 'svg',
         userMessageRenderingMode: 'markdown',
         stickyUserHeader: true,
@@ -1674,6 +1680,12 @@ export const useUIStore = create<UIStore>()(
         setShowToolFileIcons: (value) => {
           set({ showToolFileIcons: value });
         },
+        setShowExpandedBashTools: (value) => {
+          set({ showExpandedBashTools: value });
+        },
+        setShowExpandedEditTools: (value) => {
+          set({ showExpandedEditTools: value });
+        },
         setMermaidRenderingMode: (value) => {
           set({ mermaidRenderingMode: value });
         },
@@ -1861,6 +1873,8 @@ export const useUIStore = create<UIStore>()(
           persistChatDraft: state.persistChatDraft,
           inputSpellcheckEnabled: state.inputSpellcheckEnabled,
           showToolFileIcons: state.showToolFileIcons,
+          showExpandedBashTools: state.showExpandedBashTools,
+          showExpandedEditTools: state.showExpandedEditTools,
           mermaidRenderingMode: state.mermaidRenderingMode,
           userMessageRenderingMode: state.userMessageRenderingMode,
           stickyUserHeader: state.stickyUserHeader,

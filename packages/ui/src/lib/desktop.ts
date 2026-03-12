@@ -116,6 +116,8 @@ export type DesktopSettings = {
   pwaAppName?: string;
   inputSpellcheckEnabled?: boolean;
   showToolFileIcons?: boolean;
+  showExpandedBashTools?: boolean;
+  showExpandedEditTools?: boolean;
   chatRenderMode?: 'sorted' | 'live';
   activityRenderMode?: 'collapsed' | 'summary';
   mermaidRenderingMode?: 'svg' | 'ascii';
