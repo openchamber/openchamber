@@ -20,7 +20,7 @@
       "background": "#FFFFFF",
       "foreground": "#1A1A1A",
       "muted": "#F5F5F5",
-      "mutedForeground": "#666666",
+      "mutedForeground": "#757575",
       "elevated": "#FAFAFA",
       "elevatedForeground": "#1A1A1A",
       "overlay": "#00000020",
@@ -131,7 +131,7 @@
       "link": "#333333",
       "linkHover": "#000000",
       "inlineCode": "#4D4D4D",
-      "inlineCodeBackground": "#E5E5E5",
+      "inlineCodeBackground": "#f1f1f1",
       "blockquote": "#808080",
       "blockquoteBorder": "#D9D9D9",
       "listMarker": "#66666699"
