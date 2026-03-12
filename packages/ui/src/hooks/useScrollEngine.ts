@@ -17,6 +17,7 @@ type ScrollEngineResult = {
     forceManualMode: () => void;
     cancelFollow: () => void;
     isAtTop: boolean;
+    isFollowingBottom: boolean;
     isManualOverrideActive: () => boolean;
     getScrollTop: () => number;
     getScrollHeight: () => number;
@@ -42,6 +43,7 @@ export const useScrollEngine = ({
     containerRef,
 }: ScrollEngineOptions): ScrollEngineResult => {
     const [isAtTop, setIsAtTop] = React.useState(true);
+    const [isFollowingBottom, setIsFollowingBottom] = React.useState(false);
 
     const atTopRef = React.useRef(true);
     const manualOverrideRef = React.useRef(false);
@@ -66,6 +68,7 @@ export const useScrollEngine = ({
             followRafRef.current = null;
         }
         followActiveRef.current = false;
+        setIsFollowingBottom(false);
     }, []);
 
     const cancelAll = React.useCallback(() => {
@@ -77,12 +80,14 @@ export const useScrollEngine = ({
     const startFollowLoop = React.useCallback(() => {
         if (followActiveRef.current) return; // already running
         followActiveRef.current = true;
+        setIsFollowingBottom(true);
 
         const tick = () => {
             const container = containerRef.current;
             if (!container || !followActiveRef.current) {
                 followActiveRef.current = false;
                 followRafRef.current = null;
+                setIsFollowingBottom(false);
                 return;
             }
 
@@ -228,6 +233,7 @@ export const useScrollEngine = ({
             forceManualMode,
             cancelFollow,
             isAtTop,
+            isFollowingBottom,
             isManualOverrideActive,
             getScrollTop,
             getScrollHeight,
@@ -239,6 +245,7 @@ export const useScrollEngine = ({
             forceManualMode,
             cancelFollow,
             isAtTop,
+            isFollowingBottom,
             isManualOverrideActive,
             getScrollTop,
             getScrollHeight,

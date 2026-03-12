@@ -189,6 +189,7 @@ export const ChatContainer: React.FC = () => {
         releasePinnedScroll,
         isPinned,
         isOverflowing,
+        isProgrammaticFollowActive,
     } = useChatScrollManager({
         currentSessionId,
         sessionMessages,
@@ -433,7 +434,7 @@ export const ChatContainer: React.FC = () => {
                             />
                         </div>
                     </ScrollShadow>
-                    <OverlayScrollbar containerRef={scrollRef} />
+                    <OverlayScrollbar containerRef={scrollRef} suppressVisibility={isProgrammaticFollowActive} userIntentOnly />
                 </div>
             </div>
 

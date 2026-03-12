@@ -65,6 +65,7 @@ interface UseChatScrollManagerResult {
     releasePinnedScroll: () => void;
     isPinned: boolean;
     isOverflowing: boolean;
+    isProgrammaticFollowActive: boolean;
 }
 
 const PROGRAMMATIC_SCROLL_SUPPRESS_MS = 200;
@@ -560,5 +561,6 @@ export const useChatScrollManager = ({
         releasePinnedScroll,
         isPinned,
         isOverflowing,
+        isProgrammaticFollowActive: scrollEngine.isFollowingBottom,
     };
 };
