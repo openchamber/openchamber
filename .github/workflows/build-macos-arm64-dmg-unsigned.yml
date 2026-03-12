@@ -1,0 +1,80 @@
+name: Build macOS DMG (arm64, unsigned)
+
+on:
+  workflow_dispatch:
+    inputs:
+      macos_version:
+        description: macOS runner version
+        required: true
+        type: choice
+        options:
+          - "macos-15"
+          - "macos-26"
+        default: "macos-15"
+      ref:
+        description: Git ref to build (branch, tag, or sha)
+        required: false
+        default: ""
+
+env:
+  CARGO_INCREMENTAL: 0
+  RUST_BACKTRACE: short
+
+jobs:
+  build-macos-dmg-arm64:
+    name: Build DMG (arm64, ${{ inputs.macos_version }})
+    runs-on: ${{ inputs.macos_version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: packages/desktop/src-tauri
+          key: aarch64-apple-darwin
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build UI package
+        run: bun run --cwd packages/ui build
+
+      - name: Build Desktop app (arm64, unsigned)
+        run: bun run --cwd packages/desktop build && bun run --cwd packages/desktop tauri build --target aarch64-apple-darwin
+
+      - name: Prepare DMG artifact
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          DMG_PATH="packages/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg"
+          if ls $DMG_PATH 1> /dev/null 2>&1; then
+            DMG_FILE=$(ls $DMG_PATH | head -n 1)
+            DMG_NAME="OpenChamber_${{ inputs.macos_version }}_arm64_unsigned.dmg"
+            cp "$DMG_FILE" "artifacts/$DMG_NAME"
+          else
+            echo "Error: DMG file not found at $DMG_PATH"
+            exit 1
+          fi
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dmg-${{ inputs.macos_version }}-arm64-unsigned
+          path: artifacts/*.dmg
+          retention-days: 7
