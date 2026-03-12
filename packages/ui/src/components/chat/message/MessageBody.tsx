@@ -606,7 +606,9 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
     const createSessionFromAssistantMessage = useSessionStore((state) => state.createSessionFromAssistantMessage);
     const openMultiRunLauncherWithPrompt = useUIStore((state) => state.openMultiRunLauncherWithPrompt);
     const chatRenderMode = useUIStore((state) => state.chatRenderMode);
+    const activityRenderMode = useUIStore((state) => state.activityRenderMode);
     const isSortedRenderMode = chatRenderMode === 'sorted';
+    const collapsedPreviewCount = activityRenderMode === 'collapsed' ? 7 : 0;
     const isLastAssistantInTurn = turnGroupingContext?.isLastAssistantInTurn ?? false;
     const hasStopFinish = messageFinish === 'stop';
 
@@ -1020,6 +1022,7 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
                         key={`progressive-group-${segment.id}`}
                         parts={visibleSegmentParts}
                         isExpanded={turnGroupingContext.isGroupExpanded === true}
+                        collapsedPreviewCount={collapsedPreviewCount}
                         onToggle={toggleActivityGroup}
                         syntaxTheme={syntaxTheme}
                         isMobile={isMobile}
@@ -1190,6 +1193,7 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
         activityGroupSegmentsForMessage,
         animateActivityRows,
         chatRenderMode,
+        collapsedPreviewCount,
         expandedTools,
         hasStopFinish,
         isMobile,

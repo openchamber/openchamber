@@ -30,6 +30,7 @@ interface DiffStats {
 interface ProgressiveGroupProps {
     parts: TurnActivityPart[];
     isExpanded: boolean;
+    collapsedPreviewCount?: number;
     onToggle: () => void;
     syntaxTheme: Record<string, React.CSSProperties>;
     isMobile: boolean;
@@ -700,6 +701,7 @@ const InlineJustificationBlock: React.FC<{
 const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
     parts,
     isExpanded,
+    collapsedPreviewCount = 0,
     onToggle,
     syntaxTheme,
     isMobile,
@@ -713,7 +715,10 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
     animateNewTools = false,
 }) => {
     void _streamPhase;
-    const shouldRenderRows = !showHeader || isExpanded;
+    const previewCount = showHeader && !isExpanded
+        ? Math.max(0, Math.floor(collapsedPreviewCount))
+        : 0;
+    const shouldRenderRows = !showHeader || isExpanded || previewCount > 0;
 
     const sortedParts = React.useMemo(() => {
         if (!shouldRenderRows) {
@@ -728,6 +733,20 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
         }
         return aggregateRows(sortedParts);
     }, [shouldRenderRows, sortedParts]);
+
+    const previewHiddenCount = React.useMemo(() => {
+        if (isExpanded || previewCount === 0) {
+            return 0;
+        }
+        return Math.max(0, rows.length - previewCount);
+    }, [isExpanded, previewCount, rows.length]);
+
+    const visibleRows = React.useMemo(() => {
+        if (isExpanded || previewCount === 0) {
+            return rows;
+        }
+        return rows.slice(-previewCount);
+    }, [isExpanded, previewCount, rows]);
 
     const toolCount = React.useMemo(
         () => parts.filter((activity) => activity.kind === 'tool').length,
@@ -762,7 +781,7 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
     };
 
     const renderedRows = shouldRenderRows
-        ? rows.map((row, index) => {
+        ? visibleRows.map((row, index) => {
         switch (row.type) {
             case 'reasoning':
                 return wrapRow(
@@ -838,6 +857,8 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
     })
         : null;
 
+    const shouldShowRowsContainer = isExpanded || visibleRows.length > 0;
+
     if (!showHeader) {
         return (
             <FadeInOnReveal>
@@ -882,13 +903,22 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
                         </span>
                     ))}
                 </button>
-                {isExpanded ? (
+                {shouldShowRowsContainer ? (
                     <div className="relative ml-2 pl-3">
                         <span
                             aria-hidden="true"
                             className="pointer-events-none absolute left-0 top-px bottom-0 w-px"
                             style={{ backgroundColor: 'var(--tools-border)' }}
                         />
+                        {previewHiddenCount > 0 ? (
+                            <button
+                                type="button"
+                                onClick={onToggle}
+                                className="typography-meta leading-5 px-2 py-1 text-muted-foreground/45 hover:text-muted-foreground/65 text-left"
+                            >
+                                +{previewHiddenCount} more...
+                            </button>
+                        ) : null}
                         <div>{renderedRows}</div>
                     </div>
                 ) : null}

@@ -15,6 +15,7 @@ interface DiffStats {
 interface TurnActivityProps {
     parts: TurnActivityRecord[];
     isExpanded: boolean;
+    collapsedPreviewCount?: number;
     onToggle: () => void;
     syntaxTheme: Record<string, React.CSSProperties>;
     isMobile: boolean;
