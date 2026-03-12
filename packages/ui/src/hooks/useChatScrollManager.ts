@@ -223,12 +223,13 @@ export const useChatScrollManager = ({
         const currentScrollTop = container.scrollTop;
         const distanceFromBottom = getDistanceFromBottom();
 
+        const scrollingUp = currentScrollTop < lastScrollTopRef.current;
+
         // Unpin whenever we move away from bottom.
         // Also handle programmatic jumps to older content (timeline navigation)
         // so we don't snap back to bottom on the next content update.
         if (isPinnedRef.current) {
             const nearBottom = isNearBottom(distanceFromBottom, getPinThreshold());
-            const scrollingUp = currentScrollTop < lastScrollTopRef.current;
             const scrollingUpByUserIntent = Boolean(!isProgrammatic && event?.isTrusted && hasDirectIntent && scrollingUp);
             const programmaticJumpAwayFromBottom = Boolean(!event?.isTrusted && scrollingUp && !nearBottom);
 
@@ -237,9 +238,9 @@ export const useChatScrollManager = ({
             }
         }
 
-        // Re-pin at bottom should always work (even momentum scroll)
+        // Re-pin only when returning to bottom, not while still scrolling up.
         if (!isPinnedRef.current && now >= repinBlockedUntilRef.current) {
-            if (event?.isTrusted && isStrictlyAtBottom(distanceFromBottom)) {
+            if (event?.isTrusted && !scrollingUp && isStrictlyAtBottom(distanceFromBottom)) {
                 updatePinnedState(true);
             }
         }

@@ -31,6 +31,44 @@ const EMPTY_PERMISSIONS: PermissionRequest[] = [];
 const EMPTY_QUESTIONS: QuestionRequest[] = [];
 const IDLE_SESSION_STATUS = { type: 'idle' as const };
 
+type HydratingToolSkeletonRow = {
+    id: string;
+    titleWidth: string;
+    detailWidth: string;
+};
+
+const HYDRATING_SKELETON_ITEMS: Array<{
+    id: number;
+    toolRows: HydratingToolSkeletonRow[];
+    textWidths: [string, string, string];
+}> = [
+    {
+        id: 1,
+        toolRows: [
+            { id: 'search', titleWidth: 'w-24', detailWidth: 'w-52' },
+            { id: 'read', titleWidth: 'w-20', detailWidth: 'w-36' },
+            { id: 'edit', titleWidth: 'w-24', detailWidth: 'w-64' },
+        ],
+        textWidths: ['w-24', 'w-[92%]', 'w-[78%]'],
+    },
+    {
+        id: 2,
+        toolRows: [
+            { id: 'read', titleWidth: 'w-20', detailWidth: 'w-40' },
+            { id: 'search', titleWidth: 'w-24', detailWidth: 'w-48' },
+        ],
+        textWidths: ['w-20', 'w-[88%]', 'w-[70%]'],
+    },
+    {
+        id: 3,
+        toolRows: [
+            { id: 'shell', titleWidth: 'w-28', detailWidth: 'w-44' },
+            { id: 'edit', titleWidth: 'w-24', detailWidth: 'w-56' },
+        ],
+        textWidths: ['w-24', 'w-[84%]', 'w-[64%]'],
+    },
+];
+
 export const ChatContainer: React.FC = () => {
     const {
         currentSessionId,
@@ -345,14 +383,29 @@ export const ChatContainer: React.FC = () => {
                 style={isMobile ? { paddingBottom: 'var(--oc-keyboard-inset, 0px)' } : undefined}
             >
                 {returnToParentButton}
-                <div className="flex-1 overflow-y-auto p-4 bg-background">
-                    <div className="chat-message-column space-y-4">
-                        {[1, 2, 3].map((i) => (
-                            <div key={i} className="flex gap-3 p-4">
-                                <Skeleton className="h-8 w-8 rounded-full" />
-                                <div className="flex-1 space-y-2">
-                                    <Skeleton className="h-4 w-24" />
-                                    <Skeleton className="h-20 w-full" />
+                <div className="flex-1 overflow-y-auto bg-background pt-6">
+                    <div className="space-y-4">
+                        {HYDRATING_SKELETON_ITEMS.map((item) => (
+                            <div key={item.id} className="group w-full">
+                                <div className="chat-message-column">
+                                    <div className="space-y-2.5 px-4 py-3">
+                                        <div className="space-y-1.5">
+                                            {item.toolRows.map((row) => {
+                                                return (
+                                                    <div key={`${item.id}-${row.id}`} className="flex items-center gap-2">
+                                                        <Skeleton className="h-3.5 w-3.5 rounded-full flex-shrink-0" />
+                                                        <Skeleton className={cn('h-4 rounded-md', row.titleWidth)} />
+                                                        <Skeleton className={cn('h-4 rounded-md', row.detailWidth)} />
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                        <div className="space-y-1.5 pt-1">
+                                            <Skeleton className={cn('h-4 rounded-md', item.textWidths[0])} />
+                                            <Skeleton className={cn('h-4 rounded-md', item.textWidths[1])} />
+                                            <Skeleton className={cn('h-4 rounded-md', item.textWidths[2])} />
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         ))}
