@@ -357,6 +357,27 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   if (typeof settings.inputSpellcheckEnabled === 'boolean' && settings.inputSpellcheckEnabled !== store.inputSpellcheckEnabled) {
     store.setInputSpellcheckEnabled(settings.inputSpellcheckEnabled);
   }
+  if (typeof settings.showToolFileIcons === 'boolean' && settings.showToolFileIcons !== store.showToolFileIcons) {
+    store.setShowToolFileIcons(settings.showToolFileIcons);
+  }
+  if (typeof settings.chatRenderMode === 'string'
+    && (settings.chatRenderMode === 'sorted' || settings.chatRenderMode === 'live')) {
+    if (settings.chatRenderMode !== store.chatRenderMode) {
+      store.setChatRenderMode(settings.chatRenderMode);
+    }
+  }
+  if (typeof settings.activityRenderMode === 'string'
+    && (settings.activityRenderMode === 'collapsed' || settings.activityRenderMode === 'summary')) {
+    if (settings.activityRenderMode !== store.activityRenderMode) {
+      store.setActivityRenderMode(settings.activityRenderMode);
+    }
+  }
+  if (typeof settings.mermaidRenderingMode === 'string'
+    && (settings.mermaidRenderingMode === 'svg' || settings.mermaidRenderingMode === 'ascii')) {
+    if (settings.mermaidRenderingMode !== store.mermaidRenderingMode) {
+      store.setMermaidRenderingMode(settings.mermaidRenderingMode);
+    }
+  }
   if (typeof settings.userMessageRenderingMode === 'string'
     && (settings.userMessageRenderingMode === 'markdown' || settings.userMessageRenderingMode === 'plain')) {
     if (settings.userMessageRenderingMode !== store.userMessageRenderingMode) {
@@ -714,6 +735,21 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
 
   if (typeof candidate.inputSpellcheckEnabled === 'boolean') {
     result.inputSpellcheckEnabled = candidate.inputSpellcheckEnabled;
+  }
+  if (typeof candidate.showToolFileIcons === 'boolean') {
+    result.showToolFileIcons = candidate.showToolFileIcons;
+  }
+  if (typeof candidate.chatRenderMode === 'string'
+    && (candidate.chatRenderMode === 'sorted' || candidate.chatRenderMode === 'live')) {
+    result.chatRenderMode = candidate.chatRenderMode;
+  }
+  if (typeof candidate.activityRenderMode === 'string'
+    && (candidate.activityRenderMode === 'collapsed' || candidate.activityRenderMode === 'summary')) {
+    result.activityRenderMode = candidate.activityRenderMode;
+  }
+  if (typeof candidate.mermaidRenderingMode === 'string'
+    && (candidate.mermaidRenderingMode === 'svg' || candidate.mermaidRenderingMode === 'ascii')) {
+    result.mermaidRenderingMode = candidate.mermaidRenderingMode;
   }
   if (typeof candidate.userMessageRenderingMode === 'string'
     && (candidate.userMessageRenderingMode === 'markdown' || candidate.userMessageRenderingMode === 'plain')) {

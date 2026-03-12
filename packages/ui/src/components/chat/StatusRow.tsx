@@ -14,6 +14,7 @@ import { useSessionStore } from "@/stores/useSessionStore";
 import { useUIStore } from "@/stores/useUIStore";
 import { WorkingPlaceholder } from "./message/parts/WorkingPlaceholder";
 import { isVSCodeRuntime } from "@/lib/desktop";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 const statusConfig: Record<TodoStatus, { textClassName: string }> = {
   in_progress: {
@@ -42,6 +43,19 @@ const priorityIcon: Record<TodoPriority, React.ReactNode> = {
   low: <RiArrowDownSLine className="h-3.5 w-3.5" aria-hidden="true" />,
 };
 
+const statusLabel: Record<TodoStatus, string> = {
+  in_progress: "In progress",
+  pending: "Pending",
+  completed: "Completed",
+  cancelled: "Cancelled",
+};
+
+const priorityLabel: Record<TodoPriority, string> = {
+  high: "High priority",
+  medium: "Medium priority",
+  low: "Low priority",
+};
+
 interface TodoItemRowProps {
   todo: TodoItem;
 }
@@ -59,8 +73,15 @@ const TodoItemRow: React.FC<TodoItemRowProps> = ({ todo }) => {
     );
 
   return (
-    <div className="flex items-start min-w-0 py-0.5 gap-2">
-      <span className="mt-0.5 flex-shrink-0">{statusIcon}</span>
+    <div className="flex items-center min-w-0 py-0.5 gap-2">
+      <Tooltip delayDuration={200}>
+        <TooltipTrigger asChild>
+          <span className="flex-shrink-0">{statusIcon}</span>
+        </TooltipTrigger>
+        <TooltipContent side="left" sideOffset={6}>
+          {statusLabel[todo.status] ?? statusLabel.pending}
+        </TooltipContent>
+      </Tooltip>
       <span
         className={cn(
           "flex-1 typography-ui-label",
@@ -69,15 +90,21 @@ const TodoItemRow: React.FC<TodoItemRowProps> = ({ todo }) => {
       >
         {todo.content}
       </span>
-      <span
-        className={cn(
-          "typography-meta flex-shrink-0",
-          priorityClassName[todo.priority] ?? priorityClassName.medium
-        )}
-        title={`${todo.priority} priority`}
-      >
-        {priorityIcon[todo.priority] ?? priorityIcon.medium}
-      </span>
+      <Tooltip delayDuration={200}>
+        <TooltipTrigger asChild>
+          <span
+            className={cn(
+              "typography-meta flex items-center justify-center flex-shrink-0 leading-none",
+              priorityClassName[todo.priority] ?? priorityClassName.medium
+            )}
+          >
+            {priorityIcon[todo.priority] ?? priorityIcon.medium}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="right" sideOffset={6}>
+          {priorityLabel[todo.priority] ?? priorityLabel.medium}
+        </TooltipContent>
+      </Tooltip>
     </div>
   );
 };
@@ -236,7 +263,7 @@ export const StatusRow: React.FC<StatusRowProps> = ({
 
   return (
     <div className="chat-column mb-1" style={{ containerType: "inline-size" }}>
-      <div className="flex items-center justify-between pr-[2ch] py-0.5 gap-2 h-[1.2rem]">
+      <div className="flex items-center justify-between py-0.5 gap-2 h-[1.2rem]">
         {/* Left: Abort status or Working placeholder */}
         <div className="flex-1 flex items-center overflow-hidden min-w-0">
           {showAssistantStatus && showAbortStatus ? (
@@ -260,7 +287,7 @@ export const StatusRow: React.FC<StatusRowProps> = ({
         </div>
 
         {/* Right: Abort (mobile only) + Todo */}
-        <div className="relative flex items-center gap-2 flex-shrink-0" ref={popoverRef}>
+        <div className="relative -mr-3 flex items-center gap-2 flex-shrink-0" ref={popoverRef}>
           {abortButton}
           {todoTrigger}
 

@@ -199,7 +199,7 @@ export function WorkingPlaceholder({
         aria-live="polite"
         aria-label={retryText}
       >
-        <span className="flex items-center gap-1.5">
+        <span className="flex items-center gap-1">
           <GenericStatusSpinner className="size-[15px] shrink-0" />
           <Text variant="shine" className="typography-ui-header">
             {retryText}
@@ -226,7 +226,7 @@ export function WorkingPlaceholder({
       aria-label={label}
       data-waiting={displayedPermission ? 'true' : undefined}
     >
-      <span className="flex items-center gap-1.5">
+      <span className="flex items-center gap-1">
         <GenericStatusSpinner className="size-[15px] shrink-0" />
         <Text variant="shine" className="typography-ui-header">
           {displayText}

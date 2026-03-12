@@ -26,7 +26,7 @@ interface TurnActivityProps {
     streamPhase: StreamPhase;
     showHeader: boolean;
     animateRows?: boolean;
-    animateNewTools?: boolean;
+    animatedToolIds?: Set<string>;
     diffStats?: DiffStats;
 }
 

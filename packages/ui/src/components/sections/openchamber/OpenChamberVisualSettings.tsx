@@ -143,7 +143,7 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-export type VisibleSetting = 'theme' | 'pwaInstallName' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'cornerRadius' | 'inputBarOffset' | 'navRail' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'activityRenderMode' | 'stickyUserHeader' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'reasoning' | 'queueMode' | 'terminalQuickKeys' | 'persistDraft' | 'inputSpellcheck';
+export type VisibleSetting = 'theme' | 'pwaInstallName' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'cornerRadius' | 'inputBarOffset' | 'navRail' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'activityRenderMode' | 'stickyUserHeader' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'reasoning' | 'showToolFileIcons' | 'queueMode' | 'terminalQuickKeys' | 'persistDraft' | 'inputSpellcheck';
 
 interface OpenChamberVisualSettingsProps {
     /** Which settings to show. If undefined, shows all. */
@@ -189,6 +189,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setPersistChatDraft = useUIStore(state => state.setPersistChatDraft);
     const inputSpellcheckEnabled = useUIStore(state => state.inputSpellcheckEnabled);
     const setInputSpellcheckEnabled = useUIStore(state => state.setInputSpellcheckEnabled);
+    const showToolFileIcons = useUIStore(state => state.showToolFileIcons);
+    const setShowToolFileIcons = useUIStore(state => state.setShowToolFileIcons);
     const isNavRailExpanded = useUIStore(state => state.isNavRailExpanded);
     const setNavRailExpanded = useUIStore(state => state.setNavRailExpanded);
     const showMobileSessionStatusBar = useUIStore(state => state.showMobileSessionStatusBar);
@@ -206,6 +208,18 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     } = useThemeSystem();
 
     const [themesReloading, setThemesReloading] = React.useState(false);
+    const [chatRenderPreviewTick, setChatRenderPreviewTick] = React.useState(0);
+
+    React.useEffect(() => {
+        const intervalId = setInterval(() => {
+            setChatRenderPreviewTick((prev) => (prev + 1) % 24);
+        }, 420);
+
+        return () => {
+            clearInterval(intervalId);
+        };
+    }, []);
+
     const handleUserMessageRenderingModeChange = React.useCallback((mode: 'markdown' | 'plain') => {
         setUserMessageRenderingMode(mode);
         void updateDesktopSettings({ userMessageRenderingMode: mode });
@@ -220,6 +234,26 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         setInputSpellcheckEnabled(enabled);
         void updateDesktopSettings({ inputSpellcheckEnabled: enabled });
     }, [setInputSpellcheckEnabled]);
+
+    const handleChatRenderModeChange = React.useCallback((mode: 'sorted' | 'live') => {
+        setChatRenderMode(mode);
+        void updateDesktopSettings({ chatRenderMode: mode });
+    }, [setChatRenderMode]);
+
+    const handleActivityRenderModeChange = React.useCallback((mode: 'collapsed' | 'summary') => {
+        setActivityRenderMode(mode);
+        void updateDesktopSettings({ activityRenderMode: mode });
+    }, [setActivityRenderMode]);
+
+    const handleMermaidRenderingModeChange = React.useCallback((mode: 'svg' | 'ascii') => {
+        setMermaidRenderingMode(mode);
+        void updateDesktopSettings({ mermaidRenderingMode: mode });
+    }, [setMermaidRenderingMode]);
+
+    const handleShowToolFileIconsChange = React.useCallback((enabled: boolean) => {
+        setShowToolFileIcons(enabled);
+        void updateDesktopSettings({ showToolFileIcons: enabled });
+    }, [setShowToolFileIcons]);
 
     const lightThemes = React.useMemo(
         () => availableThemes
@@ -270,6 +304,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         || shouldShow('reasoning')
         || shouldShow('queueMode')
         || shouldShow('persistDraft')
+        || shouldShow('showToolFileIcons')
         || (!isMobile && shouldShow('inputSpellcheck'));
 
     const showPwaInstallNameSetting = shouldShow('pwaInstallName') && isWebRuntime() && browserTab;
@@ -735,6 +770,126 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
 
                             {(shouldShow('userMessageRendering') || shouldShow('mermaidRendering') || shouldShow('chatRenderMode') || (shouldShow('activityRenderMode') && chatRenderMode === 'sorted') || (shouldShow('diffLayout') && !isVSCode)) && (
                                 <div className="grid grid-cols-1 gap-y-2 md:grid-cols-[minmax(0,16rem)_minmax(0,16rem)] md:justify-start md:gap-x-2">
+                                    {shouldShow('chatRenderMode') && (
+                                        <section className="p-2 md:col-span-2">
+                                            <h4 className="typography-ui-header font-medium text-foreground">Chat Render Mode</h4>
+                                            <div role="radiogroup" aria-label="Chat render mode" className="mt-1 grid w-full max-w-[26rem] grid-cols-1 gap-3 sm:grid-cols-2">
+                                                {CHAT_RENDER_MODE_OPTIONS.map((option) => {
+                                                    const selected = chatRenderMode === option.id;
+                                                    const previewPhase = chatRenderPreviewTick % 12;
+                                                    return (
+                                                        <button
+                                                            key={option.id}
+                                                            type="button"
+                                                            onClick={() => handleChatRenderModeChange(option.id)}
+                                                            aria-pressed={selected}
+                                                            className={cn(
+                                                                'flex flex-col items-start gap-1 rounded-lg border p-3 text-left transition-colors',
+                                                                selected
+                                                                    ? 'border-primary bg-primary/5'
+                                                                    : 'border-border hover:border-border/80 hover:bg-muted/50'
+                                                            )}
+                                                        >
+                                                            <span className={cn('typography-ui-label', selected ? 'text-foreground' : 'text-muted-foreground')}>
+                                                                {option.label}
+                                                            </span>
+                                                            <div className="mt-2 w-full rounded-md border border-border/60 bg-muted/30 p-2">
+                                                                {option.id === 'live' ? (
+                                                                    <div className="space-y-1.5">
+                                                                        {[0, 1, 2].map((index) => {
+                                                                            const rowStart = index * 3 + 1;
+                                                                            const rowProgressPhase = previewPhase - rowStart + 1;
+                                                                            const rowProgress = rowProgressPhase <= 0
+                                                                                ? 0
+                                                                                : rowProgressPhase === 1
+                                                                                    ? 42
+                                                                                    : rowProgressPhase === 2
+                                                                                        ? 68
+                                                                                        : 92;
+                                                                            const visible = rowProgress > 0;
+                                                                            return (
+                                                                                <div
+                                                                                    key={index}
+                                                                                    className={cn(
+                                                                                        'flex items-center gap-1.5 transition-all duration-300 motion-reduce:transition-none',
+                                                                                        visible ? 'translate-y-0 opacity-100' : 'translate-y-1 opacity-0'
+                                                                                    )}
+                                                                                >
+                                                                                    <span className="h-2 w-2 shrink-0 rounded-full bg-muted-foreground/55" />
+                                                                                    <span
+                                                                                        className="h-1.5 rounded bg-muted-foreground/30 transition-all duration-300 motion-reduce:transition-none"
+                                                                                        style={{ width: `${rowProgress}%` }}
+                                                                                    />
+                                                                                </div>
+                                                                            );
+                                                                        })}
+                                                                    </div>
+                                                                ) : (
+                                                                    <div className="space-y-1.5">
+                                                                        {[0, 1, 2].map((index) => {
+                                                                            const visible = previewPhase >= (index + 1) * 3;
+                                                                            return (
+                                                                                <div
+                                                                                    key={index}
+                                                                                    className={cn(
+                                                                                        'flex items-center gap-1.5 transition-all duration-300 motion-reduce:transition-none',
+                                                                                        visible ? 'translate-y-0 opacity-100' : 'translate-y-1 opacity-0'
+                                                                                    )}
+                                                                                >
+                                                                                    <span className="h-2 w-2 shrink-0 rounded-full bg-muted-foreground/55" />
+                                                                                    <span
+                                                                                        className="h-1.5 rounded bg-muted-foreground/30"
+                                                                                        style={{ width: '92%' }}
+                                                                                    />
+                                                                                </div>
+                                                                            );
+                                                                        })}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                        </section>
+                                    )}
+
+                                    {shouldShow('activityRenderMode') && chatRenderMode === 'sorted' && (
+                                        <section className="p-2 md:col-span-2">
+                                            <h4 className="typography-ui-header font-medium text-foreground">Activity Default</h4>
+                                            <div role="radiogroup" aria-label="Activity default mode" className="mt-1 space-y-0">
+                                                {ACTIVITY_RENDER_MODE_OPTIONS.map((option) => {
+                                                    const selected = activityRenderMode === option.id;
+                                                    return (
+                                                        <div
+                                                            key={option.id}
+                                                            role="button"
+                                                            tabIndex={0}
+                                                            aria-pressed={selected}
+                                                            onClick={() => handleActivityRenderModeChange(option.id)}
+                                                            onKeyDown={(event) => {
+                                                                if (event.key === ' ' || event.key === 'Enter') {
+                                                                    event.preventDefault();
+                                                                    handleActivityRenderModeChange(option.id);
+                                                                }
+                                                            }}
+                                                            className="flex w-full items-center gap-2 py-0.5 text-left"
+                                                        >
+                                                            <Radio
+                                                                checked={selected}
+                                                                onChange={() => handleActivityRenderModeChange(option.id)}
+                                                                ariaLabel={`Activity default mode: ${option.label}`}
+                                                            />
+                                                            <span className={cn('typography-ui-label font-normal', selected ? 'text-foreground' : 'text-foreground/50')}>
+                                                                {option.label}
+                                                            </span>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </section>
+                                    )}
+
                                     {shouldShow('userMessageRendering') && (
                                         <section className="p-2">
                                             <h4 className="typography-ui-header font-medium text-foreground">User Message Rendering</h4>
@@ -783,91 +938,19 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                             role="button"
                                                             tabIndex={0}
                                                             aria-pressed={selected}
-                                                            onClick={() => setMermaidRenderingMode(option.id)}
+                                                            onClick={() => handleMermaidRenderingModeChange(option.id)}
                                                             onKeyDown={(event) => {
                                                                 if (event.key === ' ' || event.key === 'Enter') {
                                                                     event.preventDefault();
-                                                                    setMermaidRenderingMode(option.id);
+                                                                    handleMermaidRenderingModeChange(option.id);
                                                                 }
                                                             }}
                                                             className="flex w-full items-center gap-2 py-0.5 text-left"
                                                         >
                                                             <Radio
                                                                 checked={selected}
-                                                                onChange={() => setMermaidRenderingMode(option.id)}
+                                                                onChange={() => handleMermaidRenderingModeChange(option.id)}
                                                                 ariaLabel={`Mermaid rendering: ${option.label}`}
-                                                            />
-                                                            <span className={cn('typography-ui-label font-normal', selected ? 'text-foreground' : 'text-foreground/50')}>
-                                                                {option.label}
-                                                            </span>
-                                                        </div>
-                                                    );
-                                                })}
-                                            </div>
-                                        </section>
-                                    )}
-
-                                    {shouldShow('chatRenderMode') && (
-                                        <section className="p-2">
-                                            <h4 className="typography-ui-header font-medium text-foreground">Chat Render Mode</h4>
-                                            <div role="radiogroup" aria-label="Chat render mode" className="mt-1 space-y-0">
-                                                {CHAT_RENDER_MODE_OPTIONS.map((option) => {
-                                                    const selected = chatRenderMode === option.id;
-                                                    return (
-                                                        <div
-                                                            key={option.id}
-                                                            role="button"
-                                                            tabIndex={0}
-                                                            aria-pressed={selected}
-                                                            onClick={() => setChatRenderMode(option.id)}
-                                                            onKeyDown={(event) => {
-                                                                if (event.key === ' ' || event.key === 'Enter') {
-                                                                    event.preventDefault();
-                                                                    setChatRenderMode(option.id);
-                                                                }
-                                                            }}
-                                                            className="flex w-full items-center gap-2 py-0.5 text-left"
-                                                        >
-                                                            <Radio
-                                                                checked={selected}
-                                                                onChange={() => setChatRenderMode(option.id)}
-                                                                ariaLabel={`Chat render mode: ${option.label}`}
-                                                            />
-                                                            <span className={cn('typography-ui-label font-normal', selected ? 'text-foreground' : 'text-foreground/50')}>
-                                                                {option.label}
-                                                            </span>
-                                                        </div>
-                                                    );
-                                                })}
-                                            </div>
-                                        </section>
-                                    )}
-
-                                    {shouldShow('activityRenderMode') && chatRenderMode === 'sorted' && (
-                                        <section className="p-2">
-                                            <h4 className="typography-ui-header font-medium text-foreground">Activity Default</h4>
-                                            <div role="radiogroup" aria-label="Activity default mode" className="mt-1 space-y-0">
-                                                {ACTIVITY_RENDER_MODE_OPTIONS.map((option) => {
-                                                    const selected = activityRenderMode === option.id;
-                                                    return (
-                                                        <div
-                                                            key={option.id}
-                                                            role="button"
-                                                            tabIndex={0}
-                                                            aria-pressed={selected}
-                                                            onClick={() => setActivityRenderMode(option.id)}
-                                                            onKeyDown={(event) => {
-                                                                if (event.key === ' ' || event.key === 'Enter') {
-                                                                    event.preventDefault();
-                                                                    setActivityRenderMode(option.id);
-                                                                }
-                                                            }}
-                                                            className="flex w-full items-center gap-2 py-0.5 text-left"
-                                                        >
-                                                            <Radio
-                                                                checked={selected}
-                                                                onChange={() => setActivityRenderMode(option.id)}
-                                                                ariaLabel={`Activity default mode: ${option.label}`}
                                                             />
                                                             <span className={cn('typography-ui-label font-normal', selected ? 'text-foreground' : 'text-foreground/50')}>
                                                                 {option.label}
@@ -953,8 +1036,31 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 </div>
                             )}
 
-                            {(shouldShow('stickyUserHeader') || (shouldShow('mobileStatusBar') && isMobile) || shouldShow('dotfiles') || shouldShow('queueMode') || shouldShow('persistDraft') || (!isMobile && shouldShow('inputSpellcheck')) || shouldShow('reasoning')) && (
+                            {(shouldShow('stickyUserHeader') || (shouldShow('mobileStatusBar') && isMobile) || shouldShow('dotfiles') || shouldShow('queueMode') || shouldShow('persistDraft') || shouldShow('showToolFileIcons') || (!isMobile && shouldShow('inputSpellcheck')) || shouldShow('reasoning')) && (
                                 <section className="p-2 space-y-0.5">
+                                    {shouldShow('reasoning') && (
+                                        <div
+                                            className="group flex cursor-pointer items-center gap-2 py-1.5"
+                                            role="button"
+                                            tabIndex={0}
+                                            aria-pressed={showReasoningTraces}
+                                            onClick={() => setShowReasoningTraces(!showReasoningTraces)}
+                                            onKeyDown={(event) => {
+                                                if (event.key === ' ' || event.key === 'Enter') {
+                                                    event.preventDefault();
+                                                    setShowReasoningTraces(!showReasoningTraces);
+                                                }
+                                            }}
+                                        >
+                                            <Checkbox
+                                                checked={showReasoningTraces}
+                                                onChange={setShowReasoningTraces}
+                                                ariaLabel="Show reasoning traces"
+                                            />
+                                            <span className="typography-ui-label text-foreground">Show Reasoning Traces</span>
+                                        </div>
+                                    )}
+
                                     {shouldShow('stickyUserHeader') && (
                                         <div
                                             className="group flex cursor-pointer items-center gap-2 py-1.5"
@@ -975,6 +1081,29 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 ariaLabel="Sticky user header"
                                             />
                                             <span className="typography-ui-label text-foreground">Sticky User Header</span>
+                                        </div>
+                                    )}
+
+                                    {shouldShow('showToolFileIcons') && (
+                                        <div
+                                            className="group flex cursor-pointer items-center gap-2 py-1.5"
+                                            role="button"
+                                            tabIndex={0}
+                                            aria-pressed={showToolFileIcons}
+                                            onClick={() => handleShowToolFileIconsChange(!showToolFileIcons)}
+                                            onKeyDown={(event) => {
+                                                if (event.key === ' ' || event.key === 'Enter') {
+                                                    event.preventDefault();
+                                                    handleShowToolFileIconsChange(!showToolFileIcons);
+                                                }
+                                            }}
+                                        >
+                                            <Checkbox
+                                                checked={showToolFileIcons}
+                                                onChange={handleShowToolFileIconsChange}
+                                                ariaLabel="Show tool file icons"
+                                            />
+                                            <span className="typography-ui-label text-foreground">Show Tool File Icons</span>
                                         </div>
                                     )}
 
@@ -1102,31 +1231,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             <span className="typography-ui-label text-foreground">Enable Spellcheck in Text Inputs</span>
                                         </div>
                                     )}
-
-                                    {shouldShow('reasoning') && (
-                                        <div
-                                            className="group flex cursor-pointer items-center gap-2 py-1.5"
-                                            role="button"
-                                            tabIndex={0}
-                                            aria-pressed={showReasoningTraces}
-                                            onClick={() => setShowReasoningTraces(!showReasoningTraces)}
-                                            onKeyDown={(event) => {
-                                                if (event.key === ' ' || event.key === 'Enter') {
-                                                    event.preventDefault();
-                                                    setShowReasoningTraces(!showReasoningTraces);
-                                                }
-                                            }}
-                                        >
-                                            <Checkbox
-                                                checked={showReasoningTraces}
-                                                onChange={setShowReasoningTraces}
-                                                ariaLabel="Show reasoning traces"
-                                            />
-                                            <span className="typography-ui-label text-foreground">Show Reasoning Traces</span>
-                                        </div>
-                                    )}
-
-
 
                                 </section>
                             )}

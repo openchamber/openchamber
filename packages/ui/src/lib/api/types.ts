@@ -524,6 +524,10 @@ export interface SettingsPayload {
   queueModeEnabled?: boolean;
   gitmojiEnabled?: boolean;
   inputSpellcheckEnabled?: boolean;
+  showToolFileIcons?: boolean;
+  chatRenderMode?: 'sorted' | 'live';
+  activityRenderMode?: 'collapsed' | 'summary';
+  mermaidRenderingMode?: 'svg' | 'ascii';
   fontSize?: number;
   terminalFontSize?: number;
   padding?: number;

@@ -2097,6 +2097,27 @@ const sanitizeSettingsUpdate = (payload) => {
   if (typeof candidate.inputSpellcheckEnabled === 'boolean') {
     result.inputSpellcheckEnabled = candidate.inputSpellcheckEnabled;
   }
+  if (typeof candidate.showToolFileIcons === 'boolean') {
+    result.showToolFileIcons = candidate.showToolFileIcons;
+  }
+  if (typeof candidate.chatRenderMode === 'string') {
+    const mode = candidate.chatRenderMode.trim();
+    if (mode === 'sorted' || mode === 'live') {
+      result.chatRenderMode = mode;
+    }
+  }
+  if (typeof candidate.activityRenderMode === 'string') {
+    const mode = candidate.activityRenderMode.trim();
+    if (mode === 'collapsed' || mode === 'summary') {
+      result.activityRenderMode = mode;
+    }
+  }
+  if (typeof candidate.mermaidRenderingMode === 'string') {
+    const mode = candidate.mermaidRenderingMode.trim();
+    if (mode === 'svg' || mode === 'ascii') {
+      result.mermaidRenderingMode = mode;
+    }
+  }
   if (typeof candidate.userMessageRenderingMode === 'string') {
     const mode = candidate.userMessageRenderingMode.trim();
     if (mode === 'markdown' || mode === 'plain') {

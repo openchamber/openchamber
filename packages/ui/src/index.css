@@ -397,6 +397,12 @@ svg.animate-spin {
   }
 }
 
+/* Starfield twinkle — dots fade through varying brightness like stars */
+@keyframes star-twinkle {
+  0%, 100% { opacity: 0.15; }
+  50% { opacity: 0.7; }
+}
+
 @keyframes pulse-opacity {
   0%,
   100% {

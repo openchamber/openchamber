@@ -12,6 +12,7 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSessionStore } from '@/stores/useSessionStore';
+import { useUIStore } from '@/stores/useUIStore';
 import { opencodeClient } from '@/lib/opencode/client';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Text } from '@/components/ui/text';
@@ -48,6 +49,7 @@ interface ToolPartProps {
 const getMultiFileDescription = (
     metadata: Record<string, unknown> | undefined,
     animate = true,
+    showFileIcons = true,
 ): React.ReactNode => {
     const files = Array.isArray(metadata?.files) ? metadata?.files : [];
     if (files.length <= 1) return null;
@@ -99,7 +101,7 @@ const getMultiFileDescription = (
                 const hasPerFileDiff = entry.added !== null || entry.removed !== null;
                 return (
                     <span key={entry.path} className="inline-flex min-w-0 max-w-full items-center gap-1 typography-meta leading-5" style={{ color: 'var(--tools-description)' }}>
-                        <FileTypeIcon filePath={entry.path} className="h-3.5 w-3.5" />
+                        {showFileIcons ? <FileTypeIcon filePath={entry.path} className="h-3.5 w-3.5" /> : null}
                         <Text
                             variant={animate ? 'generate-effect' : undefined}
                             className="min-w-0 max-w-full truncate typography-meta leading-5"
@@ -703,6 +705,7 @@ const TaskToolSummary: React.FC<{
     isActive?: boolean;
 }> = ({ entries, isExpanded, isMobile, output, sessionId, onShowPopup, input, animateTailText = true, isActive = false }) => {
     const setCurrentSession = useSessionStore((state) => state.setCurrentSession);
+    const showToolFileIcons = useUIStore((state) => state.showToolFileIcons);
     const displayEntries = entries;
 
     const trimmedOutput = typeof output === 'string'
@@ -772,7 +775,7 @@ const TaskToolSummary: React.FC<{
                                         </span>
                                         {hasLabel ? (
                                             status !== 'error' && shouldRenderGitPathLabel(toolName, label) ? (
-                                                renderAnimatedPathWithIcon(label, animateTailText, true)
+                                                renderAnimatedPathWithIcon(label, animateTailText, true, showToolFileIcons)
                                             ) : (
                                                 status === 'error' ? (
                                                     <span className={cn(
@@ -908,13 +911,13 @@ const renderPathLikeGitChanges = (path: string, grow = true) => {
     );
 };
 
-const renderAnimatedPathWithIcon = (path: string, animate = true, grow = true) => {
+const renderAnimatedPathWithIcon = (path: string, animate = true, grow = true, showFileIcons = true) => {
     const lastSlash = path.lastIndexOf('/');
 
     if (lastSlash === -1) {
         return (
             <span className={cn('min-w-0 inline-flex items-center gap-1', grow && 'flex-1')} title={path}>
-                <FileTypeIcon filePath={path} className="h-3.5 w-3.5 flex-shrink-0" />
+                {showFileIcons ? <FileTypeIcon filePath={path} className="h-3.5 w-3.5 flex-shrink-0" /> : null}
                 <Text
                     key={animate ? `path-full-${path}` : undefined}
                     variant={animate ? 'generate-effect' : undefined}
@@ -932,7 +935,7 @@ const renderAnimatedPathWithIcon = (path: string, animate = true, grow = true) =
 
     return (
         <span className={cn('min-w-0 inline-flex items-center gap-1 overflow-hidden', grow && 'flex-1')} title={path}>
-            <FileTypeIcon filePath={path} className="h-3.5 w-3.5 flex-shrink-0" />
+            {showFileIcons ? <FileTypeIcon filePath={path} className="h-3.5 w-3.5 flex-shrink-0" /> : null}
             <span className={cn('min-w-0 inline-flex items-baseline overflow-hidden typography-meta', grow && 'flex-1')}>
                 <Text
                     key={animate ? `path-dir-${dir}` : undefined}
@@ -1406,6 +1409,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
     animateTailText = true,
 }) => {
     const state = part.state;
+    const showToolFileIcons = useUIStore((s) => s.showToolFileIcons);
     const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
 
     const normalizedPartTool = normalizeToolName(part.tool);
@@ -1834,7 +1838,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
                                     />
                                 </span>
                             ) : null}
-                            {getMultiFileDescription(metadata, animateTailText)}
+                            {getMultiFileDescription(metadata, animateTailText, showToolFileIcons)}
                         </>
                     ) : (
                         <>
@@ -1876,7 +1880,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
                             )}
                             {!justificationText && description && (
                                 descriptionPath && description === descriptionPath ? (
-                                    renderAnimatedPathWithIcon(descriptionPath, animateTailText, false)
+                                    renderAnimatedPathWithIcon(descriptionPath, animateTailText, false, showToolFileIcons)
                                 ) : (
                                     <Text
                                         variant={animateTailText ? 'generate-effect' : undefined}

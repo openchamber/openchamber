@@ -115,6 +115,10 @@ export type DesktopSettings = {
   gitModelId?: string;
   pwaAppName?: string;
   inputSpellcheckEnabled?: boolean;
+  showToolFileIcons?: boolean;
+  chatRenderMode?: 'sorted' | 'live';
+  activityRenderMode?: 'collapsed' | 'summary';
+  mermaidRenderingMode?: 'svg' | 'ascii';
   userMessageRenderingMode?: 'markdown' | 'plain';
   stickyUserHeader?: boolean;
   fontSize?: number;

@@ -41,7 +41,7 @@ interface ProgressiveGroupProps {
     streamPhase: StreamPhase;
     showHeader: boolean;
     animateRows?: boolean;
-    animateNewTools?: boolean;
+    animatedToolIds?: Set<string>;
     diffStats?: DiffStats;
 }
 
@@ -521,6 +521,7 @@ export const StaticToolRow: React.FC<{
     activities: TurnActivityPart[];
     animateTailText: boolean;
 }> = ({ toolName, activities, animateTailText }) => {
+    const showToolFileIcons = useUIStore((state) => state.showToolFileIcons);
     const displayName = getToolMetadata(toolName).displayName;
     const icon = getToolIcon(toolName);
     const isReadGroup = toolName.toLowerCase() === 'read';
@@ -609,7 +610,7 @@ export const StaticToolRow: React.FC<{
                         style={{ color: 'var(--tools-title)' }}
                         title={entry.offset ? `${entry.path}:${entry.offset}` : entry.path}
                     >
-                        <FileTypeIcon filePath={entry.path} className="h-3.5 w-3.5" />
+                        {showToolFileIcons ? <FileTypeIcon filePath={entry.path} className="h-3.5 w-3.5" /> : null}
                         <Text
                             variant={animateTailText ? 'generate-effect' : undefined}
                             className="min-w-0 max-w-full truncate typography-meta leading-5"
@@ -712,7 +713,7 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
     streamPhase: _streamPhase,
     showHeader,
     animateRows = true,
-    animateNewTools = false,
+    animatedToolIds,
 }) => {
     void _streamPhase;
     const previewCount = showHeader && !isExpanded
@@ -756,6 +757,7 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
     const aggregatedFileDiffs = React.useMemo(() => aggregateFileDiffs(parts), [parts]);
 
     const hasToolMetric = toolCount > 0;
+    const showToolFileIcons = useUIStore((state) => state.showToolFileIcons);
 
     if (shouldRenderRows && rows.length === 0) {
         return null;
@@ -768,8 +770,8 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
         return <FadeInOnReveal key={key}>{content}</FadeInOnReveal>;
     };
 
-    const renderToolRow = (key: string, content: React.ReactNode) => {
-        if (!animateNewTools) {
+    const renderToolRow = (key: string, content: React.ReactNode, animate: boolean) => {
+        if (!animate) {
             return wrapRow(key, content);
         }
         return wrapRow(
@@ -817,9 +819,10 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
                             isMobile={isMobile}
                             onContentChange={onContentChange}
                             onShowPopup={onShowPopup}
-                            animateTailText={animateRows}
+                            animateTailText={Boolean(animatedToolIds?.has(row.activity.id))}
                         />
-                    </>
+                    </>,
+                    Boolean(animatedToolIds?.has(row.activity.id))
                 );
 
             case 'tool-static-group':
@@ -829,9 +832,10 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
                         <StaticToolRow
                             toolName={row.toolName}
                             activities={row.activities}
-                            animateTailText={animateRows}
+                            animateTailText={row.activities.some((activity) => animatedToolIds?.has(activity.id))}
                         />
-                    </>
+                    </>,
+                    row.activities.some((activity) => animatedToolIds?.has(activity.id))
                 );
 
             case 'tool-fallback':
@@ -846,9 +850,10 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
                             isMobile={isMobile}
                             onContentChange={onContentChange}
                             onShowPopup={onShowPopup}
-                            animateTailText={animateRows}
+                            animateTailText={Boolean(animatedToolIds?.has(row.activity.id))}
                         />
-                    </>
+                    </>,
+                    Boolean(animatedToolIds?.has(row.activity.id))
                 );
 
             default:
@@ -891,7 +896,7 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
                             key={`${entry.filePath}-${index}`}
                             className="inline-flex min-w-0 max-w-full items-center gap-1 typography-meta leading-5 text-muted-foreground/80"
                         >
-                            <FileTypeIcon filePath={entry.filePath} className="h-3.5 w-3.5" />
+                            {showToolFileIcons ? <FileTypeIcon filePath={entry.filePath} className="h-3.5 w-3.5" /> : null}
                             <span className={cn('truncate', isMobile ? 'max-w-[9rem]' : 'max-w-[12rem]')} style={{ color: 'var(--tools-description)' }} title={entry.filePath}>
                                 {toDisplayFileName(entry.filePath)}
                             </span>
