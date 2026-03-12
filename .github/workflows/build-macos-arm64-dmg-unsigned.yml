@@ -58,13 +58,13 @@ jobs:
       - name: Generate temporary updater signing key
         run: |
           echo "Generating temporary minisign key for CI build (not secure, for testing only)"
-          echo "TAURI_PRIVATE_KEY=RWFP6V2NXUQKEVYRVU7HGNDRBARCDZQYHVU7HGNDRBARCDZQYHVU7HGNDRBARCDZQYHVU7HGNDRB" >> $GITHUB_ENV
-          echo "TAURI_KEY_PASSWORD=" >> $GITHUB_ENV
+          echo "TAURI_SIGNING_PRIVATE_KEY=RWFP6V2NXUQKEVYRVU7HGNDRBARCDZQYHVU7HGNDRBARCDZQYHVU7HGNDRBARCDZQYHVU7HGNDRB" >> $GITHUB_ENV
+          echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=" >> $GITHUB_ENV
 
       - name: Build Desktop app (arm64, unsigned)
         env:
-          TAURI_PRIVATE_KEY: ${{ env.TAURI_PRIVATE_KEY }}
-          TAURI_KEY_PASSWORD: ${{ env.TAURI_KEY_PASSWORD }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ env.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: bun run --cwd packages/desktop build && bun run --cwd packages/desktop tauri build --target aarch64-apple-darwin
 
       - name: Remove invalid updater signature

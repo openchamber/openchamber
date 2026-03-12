@@ -78,11 +78,25 @@ jobs:
       - name: Build UI package
         run: bun run --cwd packages/ui build
 
+      - name: Generate temporary updater signing key
+        run: |
+          echo "Generating temporary minisign key for CI build (not secure, for testing only)"
+          echo "TAURI_SIGNING_PRIVATE_KEY=RWFP6V2NXUQKEVYRVU7HGNDRBARCDZQYHVU7HGNDRBARCDZQYHVU7HGNDRBARCDZQYHVU7HGNDRB" >> $GITHUB_ENV
+          echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=" >> $GITHUB_ENV
+
       - name: Build Desktop app (unsigned)
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ env.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           export TAURI_ENV_TARGET_TRIPLE=${{ matrix.target }}
           bun run --cwd packages/desktop build
           bun run --cwd packages/desktop tauri build --target ${{ matrix.target }}
+
+      - name: Remove invalid updater signature
+        run: |
+          echo "Removing invalid updater signature artifacts"
+          rm -f packages/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.tar.gz.sig
 
       - name: Verify sidecar architecture
         run: |
