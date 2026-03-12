@@ -198,25 +198,38 @@ jobs:
           
           echo "🔍 Verifying binary architectures in $APP_PATH"
           
-          MAIN_ARCH=$(file "$APP_PATH/Contents/MacOS/openchamber-desktop" | grep -oE 'x86_64|aarch64' | head -1)
-          SIDEARCH_ARCH=$(file "$APP_PATH/Contents/MacOS/openchamber-server" | grep -oE 'x86_64|aarch64' | head -1)
-          EXPECTED_ARCH=$(echo "${{ matrix.target }}" | grep -oE 'x86_64|aarch64' | head -1)
+          # Extract raw architecture names (macOS file command reports ARM as "arm64")
+          MAIN_ARCH_RAW=$(file "$APP_PATH/Contents/MacOS/openchamber-desktop" | grep -oE 'arm64|x86_64|aarch64' | head -1)
+          SIDEARCH_ARCH_RAW=$(file "$APP_PATH/Contents/MacOS/openchamber-server" | grep -oE 'arm64|x86_64|aarch64' | head -1)
           
-          echo "   Main binary: $MAIN_ARCH"
-          echo "   Sidecar binary: $SIDEARCH_ARCH"
+          # Normalize architecture names (arm64 -> aarch64 for consistency with Rust/Tauri)
+          normalize_arch() {
+            case "$1" in
+              arm64) echo "aarch64" ;;
+              aarch64|x86_64) echo "$1" ;;
+              *) echo "unknown" ;;
+            esac
+          }
+          
+          MAIN_ARCH=$(normalize_arch "$MAIN_ARCH_RAW")
+          SIDEARCH_ARCH=$(normalize_arch "$SIDEARCH_ARCH_RAW")
+          EXPECTED_ARCH=$(echo "${{ matrix.target }}" | grep -oE 'aarch64|x86_64' | head -1)
+          
+          echo "   Main: $MAIN_ARCH_RAW → $MAIN_ARCH"
+          echo "   Sidecar: $SIDEARCH_ARCH_RAW → $SIDEARCH_ARCH"
           echo "   Expected: $EXPECTED_ARCH"
           
           if [ "$MAIN_ARCH" != "$EXPECTED_ARCH" ]; then
             echo "❌ ERROR: Main binary architecture mismatch!"
             echo "   Expected: $EXPECTED_ARCH"
-            echo "   Got: $MAIN_ARCH"
+            echo "   Got: $MAIN_ARCH (raw: $MAIN_ARCH_RAW)"
             exit 1
           fi
           
           if [ "$SIDEARCH_ARCH" != "$EXPECTED_ARCH" ]; then
             echo "❌ ERROR: Sidecar binary architecture mismatch!"
             echo "   Expected: $EXPECTED_ARCH"
-            echo "   Got: $SIDEARCH_ARCH"
+            echo "   Got: $SIDEARCH_ARCH (raw: $SIDEARCH_ARCH_RAW)"
             exit 1
           fi
           
