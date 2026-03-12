@@ -530,6 +530,10 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
   const pendingMessageStallTimersRef = React.useRef<Map<string, NodeJS.Timeout>>(new Map());
   const lastMessageStallRecoveryBySessionRef = React.useRef<Map<string, number>>(new Map());
   const partTypeHintsByKeyRef = React.useRef<Map<string, string>>(new Map());
+  const sessionCooldownTimersRef = React.useRef<Map<string, NodeJS.Timeout>>(new Map());
+  const sessionActivityPhaseRef = React.useRef<Map<string, 'idle' | 'busy' | 'cooldown'>>(new Map());
+  const sessionActivityLastRefreshAtRef = React.useRef<number>(0);
+  const sessionActivityRefreshInFlightRef = React.useRef<Promise<void> | null>(null);
   const scheduleSoftResyncRef = React.useRef<
     (sessionId: string, reason: string, limit?: number) => Promise<void>
   >(() => Promise.resolve());
@@ -772,6 +776,123 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
     useSessionStore.setState({ sessionStatus: next });
   }, []);
 
+  const updateSessionActivityPhase = React.useCallback((
+    sessionId: string,
+    phase: 'idle' | 'busy' | 'cooldown',
+    source: string = 'unknown',
+    options?: { syncStatus?: boolean }
+  ) => {
+    if (!sessionId) return;
+    const syncStatus = options?.syncStatus !== false;
+
+    const current = sessionActivityPhaseRef.current.get(sessionId);
+    if (current === phase) {
+      return;
+    }
+
+    const existingTimer = sessionCooldownTimersRef.current.get(sessionId);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+      sessionCooldownTimersRef.current.delete(sessionId);
+    }
+
+    const next = new Map(sessionActivityPhaseRef.current);
+    next.set(sessionId, phase);
+    sessionActivityPhaseRef.current = next;
+
+    if (!syncStatus) {
+      return;
+    }
+
+    if (phase === 'idle') {
+      updateSessionStatus(sessionId, { type: 'idle' }, `${source}:idle`);
+      return;
+    }
+
+    updateSessionStatus(sessionId, { type: 'busy' }, `${source}:${phase}`);
+
+    if (phase === 'cooldown') {
+      const timer = setTimeout(() => {
+        sessionCooldownTimersRef.current.delete(sessionId);
+        if (sessionActivityPhaseRef.current.get(sessionId) !== 'cooldown') {
+          return;
+        }
+        const latest = new Map(sessionActivityPhaseRef.current);
+        latest.set(sessionId, 'idle');
+        sessionActivityPhaseRef.current = latest;
+        updateSessionStatus(sessionId, { type: 'idle' }, `${source}:cooldown_timeout`);
+      }, 2000);
+      sessionCooldownTimersRef.current.set(sessionId, timer);
+    }
+  }, [updateSessionStatus]);
+
+  const refreshSessionActivityStatus = React.useCallback(async () => {
+    const now = Date.now();
+    if (sessionActivityRefreshInFlightRef.current) {
+      return sessionActivityRefreshInFlightRef.current;
+    }
+    if (now - sessionActivityLastRefreshAtRef.current < 1500) {
+      return;
+    }
+    sessionActivityLastRefreshAtRef.current = now;
+
+    const applyStatusMap = (statusMap: Record<string, { type?: string }>) => {
+      const observed = new Set<string>();
+      const currentSessions = useSessionStore.getState().sessions;
+      const knownSessionIds = new Set(currentSessions.map((session) => session.id));
+
+      for (const [sessionId, raw] of Object.entries(statusMap)) {
+        if (!sessionId || !raw) continue;
+        observed.add(sessionId);
+        const phase: 'idle' | 'busy' | 'cooldown' =
+          raw.type === 'cooldown'
+            ? 'cooldown'
+            : raw.type === 'busy' || raw.type === 'retry'
+              ? 'busy'
+              : 'idle';
+        updateSessionActivityPhase(sessionId, phase, 'snapshot');
+      }
+
+      for (const [sessionId, phase] of sessionActivityPhaseRef.current.entries()) {
+        if (!knownSessionIds.has(sessionId)) continue;
+        if ((phase === 'busy' || phase === 'cooldown') && !observed.has(sessionId)) {
+          updateSessionActivityPhase(sessionId, 'idle', 'snapshot_missing');
+        }
+      }
+    };
+
+    const task = (async (): Promise<void> => {
+      try {
+        const webServerActivity = await opencodeClient.getWebServerSessionActivity();
+        if (webServerActivity && Object.keys(webServerActivity).length > 0) {
+          applyStatusMap(webServerActivity);
+          return;
+        }
+
+        const globalStatusMap = await opencodeClient.getGlobalSessionStatus();
+        if (globalStatusMap && Object.keys(globalStatusMap).length > 0) {
+          applyStatusMap(globalStatusMap);
+        }
+      } catch {
+        // ignored
+      }
+    })().finally(() => {
+      sessionActivityRefreshInFlightRef.current = null;
+    });
+
+    sessionActivityRefreshInFlightRef.current = task;
+    return task;
+  }, [updateSessionActivityPhase]);
+
+  const clearSessionActivityTimers = React.useCallback(() => {
+    const cooldownTimers = sessionCooldownTimersRef.current;
+    for (const timer of cooldownTimers.values()) {
+      clearTimeout(timer);
+    }
+    cooldownTimers.clear();
+    sessionActivityPhaseRef.current.clear();
+  }, []);
+
   React.useEffect(() => {
     const nextSessionId = currentSessionId ?? null;
     const prevSessionId = previousSessionIdRef.current;
@@ -783,13 +904,13 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
       messageCache.clear();
 
       if (prevDirectory && nextDirectory && prevDirectory !== nextDirectory) {
-        // Removed: void refreshSessionStatus();
+        void refreshSessionActivityStatus();
       }
     }
 
     previousSessionIdRef.current = nextSessionId;
     previousSessionDirectoryRef.current = nextDirectory;
-  }, [currentSessionId,  resolveSessionDirectoryForStatus]);
+  }, [currentSessionId, refreshSessionActivityStatus, resolveSessionDirectoryForStatus]);
 
   const handleEvent = React.useCallback((event: EventData) => {
     lastEventTimestampRef.current = Date.now();
@@ -872,7 +993,8 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
 
           if (sessionId && statusType) {
             if (statusType === 'busy') {
-             updateSessionStatus(sessionId, { type: 'busy' }, 'sse:session.status');
+              updateSessionStatus(sessionId, { type: 'busy' }, 'sse:session.status');
+              updateSessionActivityPhase(sessionId, 'busy', 'sse:session.status', { syncStatus: false });
             } else if (statusType === 'retry') {
               updateSessionStatus(sessionId, {
                 type: 'retry',
@@ -901,9 +1023,22 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
                         ? metadataObj.next
                       : undefined,
               }, 'sse:session.status');
+              updateSessionActivityPhase(sessionId, 'busy', 'sse:session.status', { syncStatus: false });
             } else {
               updateSessionStatus(sessionId, { type: 'idle' }, 'sse:session.status');
+              updateSessionActivityPhase(sessionId, 'idle', 'sse:session.status', { syncStatus: false });
             }
+            requestSessionMetadataRefresh(sessionId, typeof props.directory === 'string' ? props.directory : null);
+          }
+        }
+        break;
+
+      case 'openchamber:session-activity':
+        {
+          const sessionId = readStringProp(props, ['sessionId', 'sessionID']);
+          const phase = typeof props.phase === 'string' ? props.phase : null;
+          if (sessionId && (phase === 'idle' || phase === 'busy' || phase === 'cooldown')) {
+            updateSessionActivityPhase(sessionId, phase, 'sse:openchamber:session-activity');
             requestSessionMetadataRefresh(sessionId, typeof props.directory === 'string' ? props.directory : null);
           }
         }
@@ -920,6 +1055,7 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
             // Update session status
             if (status === 'busy') {
               updateSessionStatus(sessionId, { type: 'busy' }, 'sse:openchamber:session-status');
+              updateSessionActivityPhase(sessionId, 'busy', 'sse:openchamber:session-status', { syncStatus: false });
             } else if (status === 'retry') {
               const metadata = (typeof props.metadata === 'object' && props.metadata !== null) ? props.metadata as Record<string, unknown> : {};
               updateSessionStatus(sessionId, {
@@ -928,8 +1064,10 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
                 message: typeof metadata.message === 'string' ? metadata.message : undefined,
                 next: typeof metadata.next === 'number' ? metadata.next : undefined,
               }, 'sse:openchamber:session-status');
+              updateSessionActivityPhase(sessionId, 'busy', 'sse:openchamber:session-status', { syncStatus: false });
             } else {
               updateSessionStatus(sessionId, { type: 'idle' }, 'sse:openchamber:session-status');
+              updateSessionActivityPhase(sessionId, 'idle', 'sse:openchamber:session-status', { syncStatus: false });
             }
 
             // Update attention state in the same update to ensure atomicity
@@ -1906,6 +2044,7 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
     bootstrapState,
     effectiveDirectory,
     updateSessionStatus,
+    updateSessionActivityPhase,
     dispatchRuntimeNotification,
     writePartTypeHint,
   ]);
@@ -2019,6 +2158,7 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
       lastEventTimestampRef.current = Date.now();
       publishStatus('connected', null);
       checkConnection();
+      void refreshSessionActivityStatus();
       triggerSessionStatusPoll();
 
       requestPendingPermissionsRefreshRef.current(shouldRefresh);
@@ -2103,6 +2243,7 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
     requestSessionMetadataRefresh,
     stableHandleEvent,
     stableBootstrapState,
+    refreshSessionActivityStatus,
     effectiveDirectory,
     debugConnectionState,
   ]);
@@ -2180,6 +2321,7 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
 
       clearPauseTimeout();
       maybeBootstrapIfStale('visibility_restore');
+      void refreshSessionActivityStatus();
       triggerSessionStatusPoll();
 
       const isStalled = Date.now() - lastEventTimestampRef.current > 45000;
@@ -2196,6 +2338,7 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
           requestSessionMetadataRefresh(sessionId);
         }
         requestPendingPermissionsRefreshRef.current(false);
+        void refreshSessionActivityStatus();
 
         // Removed: void refreshSessionStatus();
         triggerSessionStatusPoll();
@@ -2210,6 +2353,7 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
     if (visibilityStateRef.current === 'visible') {
       clearPauseTimeout();
       maybeBootstrapIfStale('window_focus');
+      void refreshSessionActivityStatus();
       triggerSessionStatusPoll();
 
       const isStalled = Date.now() - lastEventTimestampRef.current > 45000;
@@ -2225,6 +2369,7 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
              scheduleSoftResync(sessionId, 'window_focus', getMessageLimit());
            }
            requestPendingPermissionsRefreshRef.current(false);
+           void refreshSessionActivityStatus();
            // Removed: void refreshSessionStatus();
            triggerSessionStatusPoll();
 
@@ -2237,6 +2382,7 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
       const handleOnline = () => {
         onlineStatusRef.current = true;
         maybeBootstrapIfStale('network_restored');
+        void refreshSessionActivityStatus();
         requestPendingPermissionsRefreshRef.current(false);
         if (pendingResumeRef.current || !unsubscribeRef.current) {
           triggerSessionStatusPoll();
@@ -2304,6 +2450,7 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
           );
 
           if (hasBusySessions) {
+            void refreshSessionActivityStatus();
             triggerSessionStatusPoll();
           }
           if (now - lastEventTimestampRef.current > 45000) {
@@ -2369,6 +2516,8 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
         staleCheckIntervalRef.current = null;
       }
 
+      clearSessionActivityTimers();
+
       messageCache.clear();
       // eslint-disable-next-line react-hooks/exhaustive-deps -- Intentionally accessing current ref value at cleanup time
       notifiedMessagesRef.current.clear();
@@ -2400,6 +2549,8 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
     scheduleReconnect,
     loadMessages,
     requestSessionMetadataRefresh,
+    refreshSessionActivityStatus,
+    clearSessionActivityTimers,
     
     
     shouldHoldConnection,

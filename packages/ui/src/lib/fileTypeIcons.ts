@@ -1,8 +1,45 @@
 import { getLanguageFromExtension } from '@/lib/toolHelpers';
 import { FILE_TYPE_ICON_IDS } from '@/lib/fileTypeIconIds';
-import spriteUrl from '../assets/icons/file-types/sprite.svg';
+import spriteContent from '../assets/icons/file-types/sprite.svg?raw';
 
 type ThemeVariant = 'light' | 'dark';
+
+const FILE_TYPE_SPRITE_ROOT_ID = 'oc-file-type-icon-sprite-root';
+
+const mountFileTypeSprite = (): void => {
+  if (typeof document === 'undefined') {
+    return;
+  }
+
+  if (document.getElementById(FILE_TYPE_SPRITE_ROOT_ID)) {
+    return;
+  }
+
+  const attach = () => {
+    if (document.getElementById(FILE_TYPE_SPRITE_ROOT_ID)) {
+      return;
+    }
+
+    const root = document.createElement('div');
+    root.id = FILE_TYPE_SPRITE_ROOT_ID;
+    root.setAttribute('aria-hidden', 'true');
+    root.style.position = 'absolute';
+    root.style.width = '0';
+    root.style.height = '0';
+    root.style.overflow = 'hidden';
+    root.innerHTML = spriteContent;
+    document.body.appendChild(root);
+  };
+
+  if (document.body) {
+    attach();
+    return;
+  }
+
+  document.addEventListener('DOMContentLoaded', attach, { once: true });
+};
+
+mountFileTypeSprite();
 
 const fileNameIconMap: Record<string, string> = {
   dockerfile: 'docker',
@@ -206,7 +243,7 @@ export const getFileTypeIconHref = (
   const resolvedBaseIconName = resolveIconName(filePath, options?.extension);
   const baseIconName = FILE_TYPE_ICON_IDS.has(resolvedBaseIconName) ? resolvedBaseIconName : fallbackIconName;
   const iconName = selectVariantIconName(baseIconName, options?.themeVariant || 'dark');
-  return `${spriteUrl}#${iconName}`;
+  return `#${iconName}`;
 };
 
 export const getFileTypeIconUrl = getFileTypeIconHref;

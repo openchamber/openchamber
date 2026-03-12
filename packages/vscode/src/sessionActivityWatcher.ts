@@ -1,3 +1,4 @@
+import { createOpencodeClient } from '@opencode-ai/sdk/v2';
 import type { OpenCodeManager } from './opencode';
 
 // Session activity tracking (mirrors web server and desktop Tauri behavior)
@@ -102,36 +103,6 @@ const deriveSessionActivity = (payload: Record<string, unknown>): SessionActivit
   return null;
 };
 
-const parseSseDataPayload = (block: string): Record<string, unknown> | null => {
-  if (!block) {
-    return null;
-  }
-
-  const lines = block.split('\n');
-  const dataLines: string[] = [];
-
-  for (const line of lines) {
-    if (line.startsWith('data:')) {
-      dataLines.push(line.slice(5).replace(/^\s/, ''));
-    }
-  }
-
-  if (dataLines.length === 0) {
-    return null;
-  }
-
-  const payloadText = dataLines.join('\n').trim();
-  if (!payloadText) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(payloadText) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-};
-
 const waitForOpenCodePort = async (manager: OpenCodeManager, timeoutMs = 30000): Promise<number | null> => {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
@@ -149,11 +120,6 @@ const waitForOpenCodePort = async (manager: OpenCodeManager, timeoutMs = 30000):
     await new Promise(r => setTimeout(r, 500));
   }
   return null;
-};
-
-const buildOpenCodeUrl = (pathname: string, baseUrl: string): string => {
-  const normalized = baseUrl.replace(/\/+$/, '');
-  return `${normalized}${pathname}`;
 };
 
 export const startGlobalEventWatcher = async (
@@ -181,8 +147,6 @@ export const startGlobalEventWatcher = async (
   const run = async (): Promise<void> => {
     while (!signal.aborted) {
       attempt += 1;
-      let upstream: Response | null = null;
-      let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
 
       try {
         const baseUrl = manager.getApiUrl();
@@ -190,47 +154,31 @@ export const startGlobalEventWatcher = async (
           throw new Error('OpenCode API URL not available');
         }
 
-        const url = buildOpenCodeUrl('/global/event', baseUrl);
-        const authHeaders = manager.getOpenCodeAuthHeaders();
-        upstream = await fetch(url, {
-          headers: {
-            Accept: 'text/event-stream',
-            'Cache-Control': 'no-cache',
-            Connection: 'keep-alive',
-            ...authHeaders,
-          },
-          signal,
+        const client = createOpencodeClient({
+          baseUrl,
+          headers: manager.getOpenCodeAuthHeaders(),
         });
-
-        if (!upstream.ok || !upstream.body) {
-          throw new Error(`bad status ${upstream.status}`);
-        }
+        const result = await client.global.event({
+          signal,
+          sseMaxRetryAttempts: 0,
+          onSseEvent: (event) => {
+            const payload = event.data;
+            if (!payload || typeof payload !== 'object') {
+              return;
+            }
+            const activity = deriveSessionActivity(payload as Record<string, unknown>);
+            if (activity) {
+              setSessionActivityPhase(activity.sessionId, activity.phase);
+            }
+          },
+        });
 
         console.log('[VSCode:Activity] connected');
 
-        const decoder = new TextDecoder();
-        reader = upstream.body.getReader();
-        let buffer = '';
-
-        while (!signal.aborted) {
-          const { value, done } = await reader.read();
-          if (done) {
+        for await (const _ of result.stream) {
+          void _;
+          if (signal.aborted) {
             break;
-          }
-
-          buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n');
-
-          let separatorIndex: number;
-          while ((separatorIndex = buffer.indexOf('\n\n')) !== -1) {
-            const block = buffer.slice(0, separatorIndex);
-            buffer = buffer.slice(separatorIndex + 2);
-            const payload = parseSseDataPayload(block);
-            if (payload) {
-              const activity = deriveSessionActivity(payload);
-              if (activity) {
-                setSessionActivityPhase(activity.sessionId, activity.phase);
-              }
-            }
           }
         }
       } catch (error) {
@@ -238,16 +186,6 @@ export const startGlobalEventWatcher = async (
           return;
         }
         console.warn('[VSCode:Activity] disconnected', error instanceof Error ? error.message : error);
-      } finally {
-        try {
-          if (reader) {
-            await reader.cancel();
-          } else if (upstream?.body && !(upstream.body as ReadableStream<Uint8Array>).locked) {
-            await upstream.body.cancel();
-          }
-        } catch {
-          // ignore
-        }
       }
 
       const backoffMs = Math.min(1000 * Math.pow(2, Math.min(attempt, 5)), 30000);
