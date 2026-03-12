@@ -98,6 +98,15 @@ jobs:
       - name: Build UI package
         run: bun run --cwd packages/ui build
 
+      - name: Create temporary Tauri config (disable updater artifacts)
+        run: |
+          # 临时禁用 updater artifacts 以避免签名要求
+          jq '.bundle.createUpdaterArtifacts = false' \
+            packages/desktop/src-tauri/tauri.conf.json \
+            > packages/desktop/src-tauri/tauri.conf.tmp.json
+          mv packages/desktop/src-tauri/tauri.conf.tmp.json \
+            packages/desktop/src-tauri/tauri.conf.json
+
       - name: Build Desktop app (unsigned, no notarization)
         run: bun run --cwd packages/desktop build && bun run --cwd packages/desktop tauri build --target ${{ matrix.target }}
 
