@@ -85,16 +85,29 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
             if (!activeSection) {
               return props.hasSessionSearchQuery ? props.searchEmptyState : props.emptyState;
             }
-            const group =
+            const primaryGroup =
               activeSection.groups.find((candidate) => candidate.isMain && candidate.sessions.length > 0)
               ?? activeSection.groups.find((candidate) => candidate.sessions.length > 0)
               ?? activeSection.groups.find((candidate) => candidate.isMain)
               ?? activeSection.groups[0];
-            if (!group) {
+            if (!primaryGroup) {
               return <div className="py-1 text-left typography-micro text-muted-foreground">No sessions yet.</div>;
             }
-            const groupKey = `${activeSection.project.id}:${group.id}`;
-            return props.renderGroupSessions(group, groupKey, activeSection.project.id, props.showOnlyMainWorkspace);
+            const archivedGroup = activeSection.groups.find((candidate) => candidate.isArchivedBucket);
+            const groupsToRender = [
+              primaryGroup,
+              ...(archivedGroup && archivedGroup.id !== primaryGroup.id ? [archivedGroup] : []),
+            ];
+
+            return groupsToRender.map((group) => {
+              const groupKey = `${activeSection.project.id}:${group.id}`;
+              const hideGroupLabel = group.id === primaryGroup.id;
+              return (
+                <React.Fragment key={groupKey}>
+                  {props.renderGroupSessions(group, groupKey, activeSection.project.id, hideGroupLabel)}
+                </React.Fragment>
+              );
+            });
           })()}
         </div>
       ) : (
