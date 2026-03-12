@@ -54,6 +54,18 @@ OPENCODE_HOST=https://myhost:4096 OPENCODE_SKIP_START=true openchamber
 | `OPENCODE_HOST` | Full base URL of external server (overrides `OPENCODE_PORT`) |
 | `OPENCODE_PORT` | Port of external server |
 | `OPENCODE_SKIP_START` | Skip starting embedded OpenCode server |
+| `OPENCHAMBER_OPENCODE_HOSTNAME` | Bind hostname for managed OpenCode server (default: `127.0.0.1`, use `0.0.0.0` for LAN/remote access — trusted networks only) |
+
+</details>
+
+<details>
+<summary>Bind managed OpenCode to LAN / Tailscale</summary>
+
+```bash
+OPENCHAMBER_OPENCODE_HOSTNAME=0.0.0.0 openchamber --port 3000
+```
+
+**Security note:** binding to `0.0.0.0` exposes the server on all network interfaces — use only on trusted networks and protect with firewall rules or `--ui-password`.
 
 </details>
 
