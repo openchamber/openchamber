@@ -3315,6 +3315,7 @@ const commands = {
           || (typeof options.token === 'string' && options.token.trim().length > 0)
           || (typeof options.tokenFile === 'string' && options.tokenFile.trim().length > 0);
         let doctorTokenValue = resolveToken(options);
+        let hasSavedManagedRemoteProfile = false;
         const normalizedMode = typeof options.mode === 'string' ? options.mode.trim().toLowerCase() : '';
 
         if (typeof options.profile === 'string' && options.profile.trim().length > 0) {
@@ -3330,6 +3331,11 @@ const commands = {
             if (entry.mode !== 'managed-remote') return false;
             if (!providerOption) return true;
             return entry.provider === providerOption;
+          });
+          hasSavedManagedRemoteProfile = remoteProfiles.some((entry) => {
+            const savedHostname = normalizeProfileHostname(entry.hostname);
+            const savedToken = normalizeProfileToken(entry.token);
+            return Boolean(savedHostname && savedToken);
           });
           if (remoteProfiles.length === 1) {
             doctorProfile = remoteProfiles[0];
@@ -3361,6 +3367,9 @@ const commands = {
           }
           if (typeof doctorTokenValue === 'string' && doctorTokenValue.trim().length > 0) {
             query.set('managedRemoteTunnelToken', doctorTokenValue);
+          }
+          if (hasSavedManagedRemoteProfile) {
+            query.set('hasSavedManagedRemoteProfile', '1');
           }
 
           const failedPorts = [];
@@ -3617,11 +3626,11 @@ const commands = {
 
         if (dedupedHints.length > 0) {
           console.log('');
-          clackIntro(boldText('Troubleshooting'));
+          clackIntro(boldText('Suggestion notes'));
           for (const hint of dedupedHints) {
             const lines = Array.isArray(hint.lines) ? hint.lines : [];
             const detail = lines.length > 0 ? lines.map((line) => `  ${line}`).join('\n') : undefined;
-            logStatus('warning', hint.code || '[WARNING]', detail);
+            logStatus('info', hint.code || '[NOTE]', detail);
           }
           clackOutro(`${dedupedHints.length} ${dedupedHints.length === 1 ? 'suggestion' : 'suggestions'}`);
         }

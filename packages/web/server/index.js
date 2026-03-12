@@ -8029,6 +8029,14 @@ async function main(options = {}) {
       const storedManagedRemoteToken = typeof settings?.managedRemoteTunnelToken === 'string'
         ? settings.managedRemoteTunnelToken.trim()
         : '';
+      const managedRemoteTunnelConfig = await readManagedRemoteTunnelConfigFromDisk();
+      const serverHasSavedManagedRemoteProfile = managedRemoteTunnelConfig.tunnels.some((entry) => {
+        const savedHostname = normalizeManagedRemoteTunnelHostname(entry?.hostname);
+        const savedToken = typeof entry?.token === 'string' ? entry.token.trim() : '';
+        return Boolean(savedHostname && savedToken);
+      });
+      const cliHasSavedManagedRemoteProfile = req?.query?.hasSavedManagedRemoteProfile === '1';
+      const hasSavedManagedRemoteProfile = serverHasSavedManagedRemoteProfile || cliHasSavedManagedRemoteProfile;
       const configManagedRemoteToken = providerId === TUNNEL_PROVIDER_CLOUDFLARE
         ? await resolveManagedRemoteTunnelToken({ presetId: selectedPresetId, hostname })
         : '';
@@ -8044,6 +8052,7 @@ async function main(options = {}) {
         hostname,
         token,
         configPath: requestConfigPath,
+        hasSavedManagedRemoteProfile,
       };
 
       const result = await runTunnelDoctor({

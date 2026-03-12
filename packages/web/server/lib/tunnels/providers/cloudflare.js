@@ -171,7 +171,11 @@ export function createCloudflareTunnelProvider() {
       ];
 
       const normalizedHost = normalizeCloudflareTunnelHostname(request.hostname);
+      const hostnameMissing = !normalizedHost;
       const remoteTokenValidation = validateTokenShape(request.token);
+      const tokenMissing = typeof request.token !== 'string' || request.token.trim().length === 0;
+      const hasSavedManagedRemoteProfile = request.hasSavedManagedRemoteProfile === true;
+      const savedProfileReadyDetail = 'Ready (at least one saved profile present).';
       const managedRemoteChecks = [
         {
           id: 'startup_readiness',
@@ -182,16 +186,20 @@ export function createCloudflareTunnelProvider() {
         {
           id: 'managed_remote_hostname',
           label: 'Managed remote hostname',
-          status: normalizedHost ? 'pass' : 'fail',
+          status: normalizedHost || (hostnameMissing && hasSavedManagedRemoteProfile) ? 'pass' : 'fail',
           detail: normalizedHost
             ? normalizedHost
-            : 'Managed remote hostname is required (use --hostname).',
+            : (hostnameMissing && hasSavedManagedRemoteProfile)
+              ? savedProfileReadyDetail
+              : 'Managed remote hostname is required (use --hostname).',
         },
         {
           id: 'managed_remote_token',
           label: 'Managed remote token',
-          status: remoteTokenValidation.ok ? 'pass' : 'fail',
-          detail: remoteTokenValidation.detail,
+          status: remoteTokenValidation.ok || (tokenMissing && hasSavedManagedRemoteProfile) ? 'pass' : 'fail',
+          detail: (tokenMissing && hasSavedManagedRemoteProfile)
+            ? savedProfileReadyDetail
+            : remoteTokenValidation.detail,
         },
       ];
 
