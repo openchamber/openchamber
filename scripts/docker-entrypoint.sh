@@ -82,4 +82,5 @@ if [ "$#" -gt 0 ]; then
   exec "$@"
 fi
 
-exec bun packages/web/bin/cli.js ${OPENCHAMBER_ARGS}
+bun packages/web/bin/cli.js ${OPENCHAMBER_ARGS}
+bun packages/web/bin/cli.js logs

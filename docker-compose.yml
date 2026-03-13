@@ -3,7 +3,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: openchamber:local
     container_name: openchamber
     ports:
       - "3000:3000"
