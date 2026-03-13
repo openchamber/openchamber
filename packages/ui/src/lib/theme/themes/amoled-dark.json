@@ -1,0 +1,187 @@
+{
+  "metadata": {
+    "id": "amoled-dark",
+    "name": "AMOLED",
+    "description": "Port of OpenCode AMOLED theme (dark variant)",
+    "version": "1.0.0",
+    "variant": "dark",
+    "tags": [
+      "dark",
+      "opencode",
+      "amoled"
+    ]
+  },
+  "colors": {
+    "primary": {
+      "base": "#954af5",
+      "hover": "#9f66f4",
+      "active": "#9f66f4",
+      "foreground": "#ffffff",
+      "muted": "#954af580",
+      "emphasis": "#9f66f4"
+    },
+    "surface": {
+      "background": "#000000",
+      "foreground": "#ffffff",
+      "muted": "#111111",
+      "mutedForeground": "#dbdbdb",
+      "elevated": "#0a0a0a",
+      "elevatedForeground": "#ffffff",
+      "overlay": "#00000080",
+      "subtle": "#191919"
+    },
+    "interactive": {
+      "border": "#434343",
+      "borderHover": "#4e4e4e",
+      "borderFocus": "#531195",
+      "selection": "#3c0770",
+      "selectionForeground": "#ffffff",
+      "focus": "#531195",
+      "focusRing": "#53119559",
+      "cursor": "#ffffff",
+      "hover": "#191919",
+      "active": "#191919"
+    },
+    "status": {
+      "error": "#c71133",
+      "errorForeground": "#ffffff",
+      "errorBackground": "#5d0212",
+      "errorBorder": "#7d081d",
+      "warning": "#c49925",
+      "warningForeground": "#ffffff",
+      "warningBackground": "#353003",
+      "warningBorder": "#494308",
+      "success": "#2bbd69",
+      "successForeground": "#ffffff",
+      "successBackground": "#08391c",
+      "successBorder": "#025027",
+      "info": "#24b6b6",
+      "infoForeground": "#ffffff",
+      "infoBackground": "#063636",
+      "infoBorder": "#0f4b4b"
+    },
+    "pr": {
+      "open": "#2bbd69",
+      "draft": "#dbdbdb",
+      "blocked": "#c49925",
+      "merged": "#ff00ff",
+      "closed": "#c71133"
+    },
+    "syntax": {
+      "base": {
+        "background": "#111111",
+        "foreground": "#ffffff",
+        "comment": "#555555",
+        "keyword": "#ff00ff",
+        "string": "#00ff88",
+        "number": "#18ffff",
+        "function": "#ffea00",
+        "variable": "#ffffff",
+        "type": "#fef5a2",
+        "operator": "#dbdbdb"
+      },
+      "tokens": {
+        "commentDoc": "#555555",
+        "stringEscape": "#b388ff",
+        "keywordImport": "#ff00ff",
+        "storageModifier": "#ff00ff",
+        "functionCall": "#ffea00",
+        "method": "#ffea00",
+        "variableProperty": "#ffea00",
+        "variableOther": "#ffffff",
+        "variableGlobal": "#b388ff",
+        "variableLocal": "#dbdbdb",
+        "parameter": "#ffffff",
+        "constant": "#b388ff",
+        "class": "#fef5a2",
+        "className": "#fef5a2",
+        "interface": "#fef5a2",
+        "struct": "#fef5a2",
+        "enum": "#fef5a2",
+        "typeParameter": "#fef5a2",
+        "namespace": "#ff00ff",
+        "module": "#ff00ff",
+        "tag": "#ff00ff",
+        "jsxTag": "#ff00ff",
+        "tagAttribute": "#ffea00",
+        "tagAttributeValue": "#00ff88",
+        "boolean": "#18ffff",
+        "decorator": "#ff00ff",
+        "label": "#ff00ff",
+        "punctuation": "#dbdbdb",
+        "macro": "#ff00ff",
+        "preprocessor": "#ff00ff",
+        "regex": "#ffffff",
+        "url": "#e3d7fe",
+        "key": "#ffea00",
+        "exception": "#c71133"
+      },
+      "highlights": {
+        "diffAdded": "#92fdb3",
+        "diffAddedBackground": "#011406",
+        "diffRemoved": "#f20e3f",
+        "diffRemovedBackground": "#230204",
+        "diffModified": "#fef5a2",
+        "diffModifiedBackground": "#1f1b27",
+        "lineNumber": "#bebebe",
+        "lineNumberActive": "#ffffff"
+      }
+    },
+    "markdown": {
+      "heading1": "#e3d7fe",
+      "heading2": "#e3d7fe",
+      "heading3": "#ffffff",
+      "heading4": "#ffffff",
+      "link": "#e3d7fe",
+      "linkHover": "#a9fdfc",
+      "inlineCode": "#8cfeb0",
+      "inlineCodeBackground": "#111111",
+      "blockquote": "#fef5a2",
+      "blockquoteBorder": "#434343",
+      "listMarker": "#e3d7fe99"
+    },
+    "chat": {
+      "userMessage": "#ffffff",
+      "userMessageBackground": "#3c0770",
+      "assistantMessage": "#ffffff",
+      "assistantMessageBackground": "#000000",
+      "timestamp": "#dbdbdb",
+      "divider": "#434343"
+    },
+    "tools": {
+      "background": "#11111180",
+      "border": "#434343b3",
+      "headerHover": "#19191980",
+      "icon": "#dbdbdb",
+      "title": "#ffffff",
+      "description": "#dbdbdb",
+      "edit": {
+        "added": "#92fdb3",
+        "addedBackground": "#011406",
+        "removed": "#f20e3f",
+        "removedBackground": "#230204",
+        "lineNumber": "#bebebe"
+      }
+    }
+  },
+  "config": {
+    "fonts": {
+      "sans": "\"IBM Plex Mono\", monospace",
+      "mono": "\"IBM Plex Mono\", monospace",
+      "heading": "\"IBM Plex Mono\", monospace"
+    },
+    "radius": {
+      "none": "0",
+      "sm": "0.125rem",
+      "md": "0.375rem",
+      "lg": "0.5rem",
+      "xl": "0.75rem",
+      "full": "9999px"
+    },
+    "transitions": {
+      "fast": "150ms ease",
+      "normal": "250ms ease",
+      "slow": "350ms ease"
+    }
+  }
+}
