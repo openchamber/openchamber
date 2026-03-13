@@ -7,6 +7,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { spawn, spawnSync } from 'child_process';
 import { fileURLToPath, pathToFileURL } from 'url';
+import { isModuleCliExecution } from './cli-entry.js';
 import { cloudflareTunnelProviderCapabilities } from '../server/lib/tunnels/providers/cloudflare.js';
 import {
   intro as clackIntro, outro as clackOutro, log as clackLog,
@@ -4614,17 +4615,7 @@ async function main() {
   await commands[command](options);
 }
 
-const isCliExecution = (() => {
-  const entry = process.argv[1];
-  if (typeof entry !== 'string' || entry.length === 0) {
-    return false;
-  }
-  try {
-    return pathToFileURL(path.resolve(entry)).href === import.meta.url;
-  } catch {
-    return false;
-  }
-})();
+const isCliExecution = isModuleCliExecution();
 
 if (isCliExecution) {
   let isHandlingSigint = false;
