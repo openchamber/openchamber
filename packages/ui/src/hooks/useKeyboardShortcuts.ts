@@ -342,6 +342,35 @@ export const useKeyboardShortcuts = () => {
         return;
       }
 
+      if (eventMatchesShortcut(e, combo('close_tab'))) {
+        const activeElement = document.activeElement;
+        const isContextPanelFocused = activeElement?.closest('[data-context-panel="true"]');
+
+        if (!isContextPanelFocused) {
+          return;
+        }
+
+        const { contextPanelByDirectory, closeContextPanelTab } = useUIStore.getState();
+
+        for (const [directoryKey, panelState] of Object.entries(contextPanelByDirectory)) {
+          if (!panelState?.isOpen || !panelState.activeTabId) {
+            continue;
+          }
+
+          const tabs = panelState.tabs ?? [];
+          if (tabs.length <= 1) {
+            continue;
+          }
+
+          e.preventDefault();
+          e.stopPropagation();
+          closeContextPanelTab(directoryKey, panelState.activeTabId);
+          return;
+        }
+
+        return;
+      }
+
       if (e.key === 'Escape') {
         const target = e.target as Element | null;
         const isInsideDialog = Boolean(target?.closest('[role="dialog"]'));

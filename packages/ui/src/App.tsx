@@ -492,10 +492,10 @@ function App({ apis }: AppProps) {
   // VS Code runtime - simplified layout without git/terminal views
   if (isVSCodeRuntime) {
     // Check if this is the Agent Manager panel
-    const panelType = typeof window !== 'undefined' 
-      ? (window as { __OPENCHAMBER_PANEL_TYPE__?: 'chat' | 'agentManager' }).__OPENCHAMBER_PANEL_TYPE__ 
+    const panelType = typeof window !== 'undefined'
+      ? (window as { __OPENCHAMBER_PANEL_TYPE__?: 'chat' | 'agentManager' }).__OPENCHAMBER_PANEL_TYPE__
       : 'chat';
-    
+
     if (panelType === 'agentManager') {
     return (
       <ErrorBoundary>
@@ -510,7 +510,7 @@ function App({ apis }: AppProps) {
       </ErrorBoundary>
     );
     }
-    
+
     return (
       <ErrorBoundary>
         <RuntimeAPIProvider apis={apis}>
