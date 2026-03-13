@@ -777,7 +777,7 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
                             letterSpacing: '0.005em',
                         }}
                     >
-                        Activity
+                        {t('progressiveGroup.activity')}
                     </span>
                 </button>
                 {shouldShowRowsContainer ? (
