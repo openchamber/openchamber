@@ -3911,6 +3911,7 @@ function getLoginShellEnvSnapshot() {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
         maxBuffer: 10 * 1024 * 1024,
+        windowsHide: true,
       });
 
       if (result.status !== 0) {
@@ -3949,6 +3950,7 @@ function getWindowsShellEnvSnapshot() {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
         maxBuffer: 10 * 1024 * 1024,
+        windowsHide: true,
       });
       if (result.status !== 0) {
         continue;
@@ -3968,6 +3970,7 @@ function getWindowsShellEnvSnapshot() {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
       maxBuffer: 10 * 1024 * 1024,
+      windowsHide: true,
     });
     if (result.status === 0 && typeof result.stdout === 'string' && result.stdout.length > 0) {
       return parseNullSeparatedEnvSnapshot(result.stdout.replace(/\r?\n/g, '\0'));
@@ -4112,6 +4115,7 @@ function resolveWslExecutablePath() {
     const result = spawnSync('where', ['wsl'], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
     });
     if (result.status === 0) {
       const lines = (result.stdout || '')
@@ -4163,6 +4167,7 @@ function probeWslForOpencode() {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
         timeout: 6000,
+        windowsHide: true,
       },
     );
 
@@ -4279,6 +4284,7 @@ function resolveOpencodeCliPath() {
       const result = spawnSync('where', ['opencode'], {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
       });
       if (result.status === 0) {
         const lines = (result.stdout || '')
@@ -4314,6 +4320,7 @@ function resolveOpencodeCliPath() {
       const result = spawnSync(shell, ['-lic', 'command -v opencode'], {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
       });
       if (result.status === 0) {
         const found = (result.stdout || '').trim().split(/\s+/).pop() || '';
@@ -4364,6 +4371,7 @@ function resolveNodeCliPath() {
       const result = spawnSync('where', ['node'], {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
       });
       if (result.status === 0) {
         const lines = (result.stdout || '')
@@ -4386,6 +4394,7 @@ function resolveNodeCliPath() {
       const result = spawnSync(shell, ['-lic', 'command -v node'], {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
       });
       if (result.status === 0) {
         const found = (result.stdout || '').trim().split(/\s+/).pop() || '';
@@ -4445,6 +4454,7 @@ function resolveBunCliPath() {
       const result = spawnSync('where', ['bun'], {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
       });
       if (result.status === 0) {
         const lines = (result.stdout || '')
@@ -4467,6 +4477,7 @@ function resolveBunCliPath() {
       const result = spawnSync(shell, ['-lic', 'command -v bun'], {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
       });
       if (result.status === 0) {
         const found = (result.stdout || '').trim().split(/\s+/).pop() || '';
