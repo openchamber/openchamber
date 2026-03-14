@@ -103,7 +103,7 @@ const getMultiFileDescription = (
                     <span key={entry.path} className="inline-flex min-w-0 max-w-full items-center gap-1 typography-meta leading-5" style={{ color: 'var(--tools-description)' }}>
                         {showFileIcons ? <FileTypeIcon filePath={entry.path} className="h-3.5 w-3.5" /> : null}
                         <Text
-                            variant={animate ? 'generate-effect' : undefined}
+                            variant={animate ? 'generate-effect' : 'static'}
                             className="min-w-0 max-w-full truncate typography-meta leading-5"
                             style={{ color: 'var(--tools-description)' }}
                             title={entry.path}
@@ -853,7 +853,7 @@ const TaskToolSummary: React.FC<{
                                                     </span>
                                                 ) : (
                                                     <Text
-                                                        variant={animateTailText ? 'generate-effect' : undefined}
+                                                        variant={animateTailText ? 'generate-effect' : 'static'}
                                                         className={cn(
                                                             'typography-meta flex-1 min-w-0 text-muted-foreground/70',
                                                             isMobile ? 'whitespace-normal break-words' : 'truncate'
@@ -1933,7 +1933,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
                                     renderAnimatedPathWithIcon(descriptionPath, animateTailText, false, showToolFileIcons)
                                 ) : (
                                     <Text
-                                        variant={animateTailText ? 'generate-effect' : undefined}
+                                        variant={animateTailText ? 'generate-effect' : 'static'}
                                         className="min-w-0 truncate typography-meta"
                                         style={{ color: 'var(--tools-description)' }}
                                         title={description}

@@ -3,11 +3,7 @@ import type { Part } from '@opencode-ai/sdk/v2';
 
 import { MessageFreshnessDetector } from '@/lib/messageFreshness';
 import { createScrollSpy } from '@/components/chat/lib/scroll/scrollSpy';
-import {
-    isNearBottom,
-    normalizeWheelDelta,
-    shouldPauseAutoScrollOnWheel,
-} from '@/components/chat/lib/scroll/scrollIntent';
+import { isNearBottom, shouldPauseAutoScrollOnWheel } from '@/components/chat/lib/scroll/scrollIntent';
 
 import { useScrollEngine } from './useScrollEngine';
 
@@ -220,11 +216,10 @@ export const useChatScrollManager = ({
         const nearBottom = isNearBottom(distanceFromBottom, getPinThreshold());
 
         const scrollingUp = currentScrollTop < lastScrollTopRef.current;
-        const scrollingUpByUserIntent = Boolean(!isProgrammatic && event?.isTrusted && hasDirectIntent && scrollingUp);
+        const scrollingUpByUserIntent = Boolean(event?.isTrusted && !isProgrammatic && hasDirectIntent && scrollingUp);
 
-        // Unpin whenever we move away from bottom.
-        // Also handle programmatic jumps to older content (timeline navigation)
-        // so we don't snap back to bottom on the next content update.
+        // Unpin on explicit upward user intent.
+        // Also unpin for programmatic jumps away from bottom.
         if (isPinnedRef.current) {
             const programmaticJumpAwayFromBottom = Boolean(!event?.isTrusted && scrollingUp && !nearBottom);
 
@@ -233,10 +228,11 @@ export const useChatScrollManager = ({
             }
         }
 
-        // Re-pin once user returns to bottom zone.
-        // Never re-pin on a direct upward user gesture.
-        if (!isPinnedRef.current && now >= repinBlockedUntilRef.current) {
-            if (event?.isTrusted && nearBottom && !scrollingUpByUserIntent) {
+        // Re-pin once we return to bottom zone.
+        // User-driven scroll can always re-pin immediately.
+        if (!isPinnedRef.current && nearBottom) {
+            if (!scrollingUpByUserIntent && (event?.isTrusted || now >= repinBlockedUntilRef.current)) {
+                repinBlockedUntilRef.current = 0;
                 updatePinnedState(true);
             }
         }
@@ -257,31 +253,6 @@ export const useChatScrollManager = ({
         updateScrollButtonVisibility,
         updateViewportAnchor,
     ]);
-
-    const handleWheelIntent = React.useCallback((event: WheelEvent) => {
-        const container = scrollRef.current;
-        if (!container) {
-            return;
-        }
-
-        const delta = normalizeWheelDelta({
-            deltaY: event.deltaY,
-            deltaMode: event.deltaMode,
-            rootHeight: container.clientHeight,
-        });
-
-        // Scrolling up while pinned → unpin and kill follow loop immediately
-        if (isPinnedRef.current && shouldPauseAutoScrollOnWheel({
-            root: container,
-            target: event.target,
-            delta,
-        })) {
-            scrollEngine.cancelFollow();
-            updatePinnedState(false);
-            return;
-        }
-
-    }, [scrollEngine, updatePinnedState]);
 
     React.useEffect(() => {
         const container = scrollRef.current;
@@ -341,7 +312,6 @@ export const useChatScrollManager = ({
         container.addEventListener('touchmove', handleTouchMoveIntent as EventListener, { passive: true });
         container.addEventListener('touchend', handleTouchEndIntent as EventListener, { passive: true });
         container.addEventListener('touchcancel', handleTouchEndIntent as EventListener, { passive: true });
-        container.addEventListener('wheel', handleWheelIntent as EventListener, { passive: true });
         container.addEventListener('wheel', markDirectIntent as EventListener, { passive: true });
 
         return () => {
@@ -350,10 +320,9 @@ export const useChatScrollManager = ({
             container.removeEventListener('touchmove', handleTouchMoveIntent as EventListener);
             container.removeEventListener('touchend', handleTouchEndIntent as EventListener);
             container.removeEventListener('touchcancel', handleTouchEndIntent as EventListener);
-            container.removeEventListener('wheel', handleWheelIntent as EventListener);
             container.removeEventListener('wheel', markDirectIntent as EventListener);
         };
-    }, [handleScrollEvent, handleWheelIntent, scrollEngine, updatePinnedState]);
+    }, [handleScrollEvent, scrollEngine, updatePinnedState]);
 
     // Session switch - always start pinned at bottom
     useIsomorphicLayoutEffect(() => {

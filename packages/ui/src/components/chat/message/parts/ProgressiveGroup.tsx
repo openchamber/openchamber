@@ -520,7 +520,7 @@ export const StaticToolRow: React.FC<{
                 ? descriptions.map((desc, index) => (
                     <span key={`${desc}-${index}`} className="inline-flex min-w-0 flex-1">
                         <Text
-                            variant={animateTailText ? 'generate-effect' : undefined}
+                            variant={animateTailText ? 'generate-effect' : 'static'}
                             className="min-w-0 flex-1 truncate whitespace-nowrap typography-meta leading-5"
                             style={{ color: 'var(--tools-description)' }}
                             title={desc}
@@ -550,7 +550,7 @@ export const StaticToolRow: React.FC<{
                 : null}
             {!isReadGroup && !isSearchGroup && !isFetchGroup && descriptions.length > 0 ? (
                 <Text
-                    variant={animateTailText ? 'generate-effect' : undefined}
+                    variant={animateTailText ? 'generate-effect' : 'static'}
                     className="min-w-0 flex-1 truncate whitespace-nowrap typography-meta leading-5"
                     style={{ color: 'var(--tools-description)' }}
                 >
