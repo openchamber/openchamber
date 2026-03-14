@@ -779,18 +779,26 @@ export const Header: React.FC<HeaderProps> = ({
       return () => { };
     }
 
-    const observer = new ResizeObserver(() => {
-      updateHeaderHeight();
-    });
+    let rafId = 0;
+    const scheduleUpdate = () => {
+      if (rafId) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = 0;
+        updateHeaderHeight();
+      });
+    };
+
+    const observer = new ResizeObserver(scheduleUpdate);
 
     observer.observe(node);
-    window.addEventListener('resize', updateHeaderHeight);
-    window.addEventListener('orientationchange', updateHeaderHeight);
+    window.addEventListener('resize', scheduleUpdate);
+    window.addEventListener('orientationchange', scheduleUpdate);
 
     return () => {
+      if (rafId) cancelAnimationFrame(rafId);
       observer.disconnect();
-      window.removeEventListener('resize', updateHeaderHeight);
-      window.removeEventListener('orientationchange', updateHeaderHeight);
+      window.removeEventListener('resize', scheduleUpdate);
+      window.removeEventListener('orientationchange', scheduleUpdate);
     };
   }, [updateHeaderHeight]);
 
