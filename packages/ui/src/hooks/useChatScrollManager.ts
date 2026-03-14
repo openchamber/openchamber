@@ -73,7 +73,6 @@ const DIRECT_SCROLL_INTENT_WINDOW_MS = 250;
 // Threshold for re-pinning: 10% of container height (matches bottom spacer)
 const PIN_THRESHOLD_RATIO = 0.10;
 const REPIN_BLOCK_AFTER_RELEASE_MS = 4000;
-const STRICT_REPIN_DISTANCE_PX = 160;
 const SORTED_PIN_THRESHOLD_PX = 24;
 
 export const useChatScrollManager = ({
@@ -125,10 +124,6 @@ export const useChatScrollManager = ({
         const container = scrollRef.current;
         if (!container) return 0;
         return container.scrollHeight - container.scrollTop - container.clientHeight;
-    }, []);
-
-    const isStrictlyAtBottom = React.useCallback((distanceFromBottom: number) => {
-        return distanceFromBottom <= STRICT_REPIN_DISTANCE_PX;
     }, []);
 
     const updatePinnedState = React.useCallback((newPinned: boolean) => {
@@ -222,15 +217,15 @@ export const useChatScrollManager = ({
         // Handle pin/unpin logic
         const currentScrollTop = container.scrollTop;
         const distanceFromBottom = getDistanceFromBottom();
+        const nearBottom = isNearBottom(distanceFromBottom, getPinThreshold());
 
         const scrollingUp = currentScrollTop < lastScrollTopRef.current;
+        const scrollingUpByUserIntent = Boolean(!isProgrammatic && event?.isTrusted && hasDirectIntent && scrollingUp);
 
         // Unpin whenever we move away from bottom.
         // Also handle programmatic jumps to older content (timeline navigation)
         // so we don't snap back to bottom on the next content update.
         if (isPinnedRef.current) {
-            const nearBottom = isNearBottom(distanceFromBottom, getPinThreshold());
-            const scrollingUpByUserIntent = Boolean(!isProgrammatic && event?.isTrusted && hasDirectIntent && scrollingUp);
             const programmaticJumpAwayFromBottom = Boolean(!event?.isTrusted && scrollingUp && !nearBottom);
 
             if (scrollingUpByUserIntent || programmaticJumpAwayFromBottom) {
@@ -238,9 +233,10 @@ export const useChatScrollManager = ({
             }
         }
 
-        // Re-pin only when returning to bottom, not while still scrolling up.
+        // Re-pin once user returns to bottom zone.
+        // Never re-pin on a direct upward user gesture.
         if (!isPinnedRef.current && now >= repinBlockedUntilRef.current) {
-            if (event?.isTrusted && !scrollingUp && isStrictlyAtBottom(distanceFromBottom)) {
+            if (event?.isTrusted && nearBottom && !scrollingUpByUserIntent) {
                 updatePinnedState(true);
             }
         }
@@ -255,7 +251,6 @@ export const useChatScrollManager = ({
         currentSessionId,
         getDistanceFromBottom,
         getPinThreshold,
-        isStrictlyAtBottom,
         scrollEngine,
         sessionMessages.length,
         updatePinnedState,
