@@ -187,6 +187,13 @@ const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
     customizable: true,
   },
   {
+    id: 'open_right_sidebar_board',
+    defaultCombo: 'mod+shift+b',
+    label: 'Open right sidebar Board tab',
+    description: 'Open right sidebar and select Board',
+    customizable: true,
+  },
+  {
     id: 'cycle_right_sidebar_tab',
     defaultCombo: 'mod+shift+]',
     label: 'Cycle right sidebar tab',

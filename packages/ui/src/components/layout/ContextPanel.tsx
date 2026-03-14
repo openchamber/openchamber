@@ -1,10 +1,10 @@
 import React from 'react';
-import { RiArrowLeftRightLine, RiChat4Line, RiCloseLine, RiDonutChartFill, RiFileTextLine, RiFullscreenExitLine, RiFullscreenLine } from '@remixicon/react';
+import { RiArrowLeftRightLine, RiChat4Line, RiCloseLine, RiDonutChartFill, RiFileTextLine, RiFullscreenExitLine, RiFullscreenLine, RiLayoutGridLine } from '@remixicon/react';
 
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { Button } from '@/components/ui/button';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
-import { DiffView, FilesView, PlanView } from '@/components/views';
+import { DiffView, FilesView, KanbanView, PlanView } from '@/components/views';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { cn } from '@/lib/utils';
@@ -56,11 +56,12 @@ const getRelativePathLabel = (filePath: string | null, directory: string): strin
   return normalizedFile;
 };
 
-const getModeLabel = (mode: 'diff' | 'file' | 'context' | 'plan' | 'chat'): string => {
+const getModeLabel = (mode: 'diff' | 'file' | 'context' | 'plan' | 'chat' | 'board'): string => {
   if (mode === 'chat') return 'Chat';
   if (mode === 'file') return 'Files';
   if (mode === 'diff') return 'Diff';
   if (mode === 'plan') return 'Plan';
+  if (mode === 'board') return 'Board';
   return 'Context';
 };
 
@@ -82,7 +83,7 @@ const getFileNameFromPath = (path: string | null): string | null => {
   return segments[segments.length - 1] || null;
 };
 
-const getTabLabel = (tab: { mode: 'diff' | 'file' | 'context' | 'plan' | 'chat'; label: string | null; targetPath: string | null }): string => {
+const getTabLabel = (tab: { mode: 'diff' | 'file' | 'context' | 'plan' | 'chat' | 'board'; label: string | null; targetPath: string | null }): string => {
   if (tab.label) {
     return tab.label;
   }
@@ -94,7 +95,7 @@ const getTabLabel = (tab: { mode: 'diff' | 'file' | 'context' | 'plan' | 'chat';
   return getModeLabel(tab.mode);
 };
 
-const getTabIcon = (tab: { mode: 'diff' | 'file' | 'context' | 'plan' | 'chat'; targetPath: string | null }): React.ReactNode | undefined => {
+const getTabIcon = (tab: { mode: 'diff' | 'file' | 'context' | 'plan' | 'chat' | 'board'; targetPath: string | null }): React.ReactNode | undefined => {
   if (tab.mode === 'file') {
     return tab.targetPath
       ? <FileTypeIcon filePath={tab.targetPath} className="h-3.5 w-3.5" />
@@ -115,6 +116,10 @@ const getTabIcon = (tab: { mode: 'diff' | 'file' | 'context' | 'plan' | 'chat'; 
 
   if (tab.mode === 'chat') {
     return <RiChat4Line className="h-3.5 w-3.5" />;
+  }
+
+  if (tab.mode === 'board') {
+    return <RiLayoutGridLine className="h-3.5 w-3.5" />;
   }
 
   return undefined;
@@ -413,7 +418,9 @@ export const ContextPanel: React.FC = () => {
         ? <ContextPanelContent />
         : activeTab?.mode === 'plan'
           ? <PlanView />
-          : null;
+          : activeTab?.mode === 'board'
+            ? <KanbanView />
+            : null;
 
   const chatTabs = React.useMemo(
     () => tabs.filter((tab) => tab.mode === 'chat'),

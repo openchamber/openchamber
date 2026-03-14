@@ -1,12 +1,13 @@
 import React from 'react';
-import { RiFolder3Line, RiGitBranchLine } from '@remixicon/react';
+import { RiFolder3Line, RiGitBranchLine, RiLayoutGridLine } from '@remixicon/react';
 
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { GitView } from '@/components/views';
 import { useUIStore } from '@/stores/useUIStore';
 import { SidebarFilesTree } from './SidebarFilesTree';
+import { BoardSidebarView } from './BoardSidebarView';
 
-type RightTab = 'git' | 'files';
+type RightTab = 'git' | 'files' | 'board';
 
 export const RightSidebarTabs: React.FC = () => {
   const rightSidebarTab = useUIStore((state) => state.rightSidebarTab);
@@ -22,6 +23,11 @@ export const RightSidebarTabs: React.FC = () => {
       id: 'files',
       label: 'Files',
       icon: <RiFolder3Line className="h-3.5 w-3.5" />,
+    },
+    {
+      id: 'board',
+      label: 'Board',
+      icon: <RiLayoutGridLine className="h-3.5 w-3.5" />,
     },
   ], []);
 
@@ -39,7 +45,7 @@ export const RightSidebarTabs: React.FC = () => {
       </div>
 
       <div className="min-h-0 flex-1 overflow-hidden">
-        {rightSidebarTab === 'git' ? <GitView /> : <SidebarFilesTree />}
+        {rightSidebarTab === 'git' ? <GitView /> : rightSidebarTab === 'files' ? <SidebarFilesTree /> : <BoardSidebarView />}
       </div>
     </div>
   );

@@ -14,7 +14,7 @@ import { useSessionStore } from '@/stores/useSessionStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useDeviceInfo } from '@/lib/device';
-import { RiAddLine, RiChatAi3Line, RiCheckLine, RiCodeLine, RiComputerLine, RiGitBranchLine, RiLayoutLeftLine, RiLayoutRightLine, RiMoonLine, RiQuestionLine, RiSettings3Line, RiSunLine, RiTerminalBoxLine, RiTimeLine } from '@remixicon/react';
+import { RiAddLine, RiChatAi3Line, RiCheckLine, RiCodeLine, RiComputerLine, RiGitBranchLine, RiLayoutGridLine, RiLayoutLeftLine, RiLayoutRightLine, RiMoonLine, RiQuestionLine, RiSettings3Line, RiSunLine, RiTerminalBoxLine, RiTimeLine } from '@remixicon/react';
 import { createWorktreeSession } from '@/lib/worktreeSessionCreator';
 import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
@@ -157,6 +157,15 @@ export const CommandPalette: React.FC = () => {
     handleClose();
   };
 
+  const handleOpenRightSidebarBoard = () => {
+    if (isMobile) {
+      return;
+    }
+    setRightSidebarOpen(true);
+    setRightSidebarTab('board');
+    handleClose();
+  };
+
   const handleToggleTerminalDock = () => {
     toggleBottomTerminal();
     handleClose();
@@ -222,6 +231,13 @@ export const CommandPalette: React.FC = () => {
             <span>Open Right Sidebar Files</span>
             <CommandShortcut>{shortcut('open_right_sidebar_files')}</CommandShortcut>
           </CommandItem>
+          {!isMobile && (
+            <CommandItem onSelect={handleOpenRightSidebarBoard}>
+              <RiLayoutGridLine className="mr-2 h-4 w-4" />
+              <span>Open Right Sidebar Board</span>
+              <CommandShortcut>{shortcut('open_right_sidebar_board')}</CommandShortcut>
+            </CommandItem>
+          )}
           <CommandItem onSelect={handleToggleTerminalDock}>
             <RiTerminalBoxLine className="mr-2 h-4 w-4" />
             <span>Toggle Terminal Dock</span>

@@ -1,4 +1,5 @@
 import type { WorktreeMetadata } from '@/types/worktree';
+import type { ProjectBoard } from '@/types/kanban';
 
 export type RuntimePlatform = 'web' | 'desktop' | 'vscode';
 
@@ -1062,4 +1063,45 @@ export interface SkillsInstallResponse {
   requiresReload?: boolean;
   message?: string;
   reloadDelayMs?: number;
+}
+
+// ============== Kanban API Types ==============
+
+export interface KanbanBoardResponse {
+  board: ProjectBoard;
+  projectDirectory: string;
+}
+
+export interface KanbanMutationResponse {
+  board: ProjectBoard;
+}
+
+export interface KanbanCreateColumnPayload {
+  name: string;
+  afterColumnId?: string;
+}
+
+export interface KanbanRenameColumnPayload {
+  name: string;
+}
+
+export interface KanbanCreateCardPayload {
+  columnId: string;
+  title: string;
+  description: string;
+  worktreeId: string;
+}
+
+export interface KanbanMoveCardPayload {
+  toColumnId: string;
+  toOrder?: number;
+}
+
+export interface KanbanUpdateColumnAutomationPayload {
+  onEnterText?: string;
+  agent?: string;
+  providerID?: string;
+  modelID?: string;
+  variant?: string;
+  onFinishMoveTo?: string;
 }

@@ -6,8 +6,8 @@ import { SEMANTIC_TYPOGRAPHY, getTypographyVariable, type SemanticTypographyKey 
 import type { ShortcutCombo } from '@/lib/shortcuts';
 
 export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files';
-export type RightSidebarTab = 'git' | 'files';
-export type ContextPanelMode = 'diff' | 'file' | 'context' | 'plan' | 'chat';
+export type RightSidebarTab = 'git' | 'files' | 'board';
+export type ContextPanelMode = 'diff' | 'file' | 'context' | 'plan' | 'chat' | 'board';
 export type MermaidRenderingMode = 'svg' | 'ascii';
 export type UserMessageRenderingMode = 'markdown' | 'plain';
 export type ChatRenderMode = 'sorted' | 'live';
@@ -233,7 +233,7 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       touchedAt?: unknown;
     };
 
-    if (candidate.mode !== 'diff' && candidate.mode !== 'file' && candidate.mode !== 'context' && candidate.mode !== 'plan' && candidate.mode !== 'chat') {
+    if (candidate.mode !== 'diff' && candidate.mode !== 'file' && candidate.mode !== 'context' && candidate.mode !== 'plan' && candidate.mode !== 'chat' && candidate.mode !== 'board') {
       continue;
     }
 
@@ -409,7 +409,7 @@ const sanitizeContextPanelByDirectory = (
     let tabs = sanitizeContextPanelTabs(candidate.tabs);
     let activeTabId = typeof candidate.activeTabId === 'string' ? candidate.activeTabId : null;
 
-    if (tabs.length === 0 && (candidate.mode === 'diff' || candidate.mode === 'file' || candidate.mode === 'context' || candidate.mode === 'plan' || candidate.mode === 'chat')) {
+    if (tabs.length === 0 && (candidate.mode === 'diff' || candidate.mode === 'file' || candidate.mode === 'context' || candidate.mode === 'plan' || candidate.mode === 'chat' || candidate.mode === 'board')) {
       tabs = [createContextPanelTab({
         mode: candidate.mode,
         targetPath: typeof candidate.targetPath === 'string' ? candidate.targetPath : null,
@@ -579,6 +579,7 @@ interface UIStore {
   openContextFileAtLine: (directory: string, filePath: string, line: number, column?: number) => void;
   openContextOverview: (directory: string) => void;
   openContextPlan: (directory: string) => void;
+  openContextBoard: (directory: string) => void;
   setActiveContextPanelTab: (directory: string, tabID: string) => void;
   reorderContextPanelTabs: (directory: string, activeTabID: string, overTabID: string) => void;
   closeContextPanelTab: (directory: string, tabID: string) => void;
@@ -956,6 +957,15 @@ export const useUIStore = create<UIStore>()(
           }
 
           get().openContextPanelTab(normalizedDirectory, { mode: 'plan' });
+        },
+
+        openContextBoard: (directory) => {
+          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          if (!normalizedDirectory) {
+            return;
+          }
+
+          get().openContextPanelTab(normalizedDirectory, { mode: 'board', dedupeKey: 'board' });
         },
 
         setActiveContextPanelTab: (directory, tabID) => {
@@ -1785,7 +1795,7 @@ export const useUIStore = create<UIStore>()(
             delete state.memoryLimitActiveSession;
           }
 
-          if (typeof state.rightSidebarTab !== 'string' || (state.rightSidebarTab !== 'git' && state.rightSidebarTab !== 'files')) {
+          if (typeof state.rightSidebarTab !== 'string' || (state.rightSidebarTab !== 'git' && state.rightSidebarTab !== 'files' && state.rightSidebarTab !== 'board')) {
             state.rightSidebarTab = 'git';
           }
 

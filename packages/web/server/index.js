@@ -3056,6 +3056,7 @@ const sessionStates = new Map(); // sessionId -> {
 // }
 const SESSION_STATE_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
 const SESSION_STATE_CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+let getKanbanAutomationRuntime = async () => null;
 
 const updateSessionState = (sessionId, status, eventId, metadata = {}) => {
   if (!sessionId || typeof sessionId !== 'string') return;
@@ -3108,6 +3109,20 @@ const updateSessionState = (sessionId, status, eventId, metadata = {}) => {
   // Also update activity phases for backward compatibility
   const phase = status === 'busy' || status === 'retry' ? 'busy' : 'idle';
   setSessionActivityPhase(sessionId, phase);
+
+  // Hook kanban automation runtime into session idle status
+  if (status === 'idle' && (!existing || existing.status !== 'idle')) {
+    getKanbanAutomationRuntime().then(runtime => {
+      if (!runtime || typeof runtime.handleSessionIdle !== 'function') {
+        return;
+      }
+      runtime.handleSessionIdle(sessionId).catch(err => {
+        console.warn('[KanbanAutomation] Failed to handle session idle:', err);
+      });
+    }).catch(err => {
+      console.warn('[KanbanAutomation] Failed to get runtime:', err);
+    });
+  }
 };
 
 const getSessionStateSnapshot = () => {
@@ -7000,6 +7015,8 @@ async function main(options = {}) {
       req.path.startsWith('/api/projects') ||
       req.path.startsWith('/api/fs') ||
       req.path.startsWith('/api/git') ||
+      req.path.startsWith('/api/github') ||
+      req.path.startsWith('/api/kanban') ||
       req.path.startsWith('/api/prompts') ||
       req.path.startsWith('/api/terminal') ||
       req.path.startsWith('/api/opencode') ||
@@ -11579,6 +11596,106 @@ async function main(options = {}) {
     return gitLibraries;
   };
 
+  let kanbanLibrary = null;
+  const getKanbanLibrary = async () => {
+    if (!kanbanLibrary) {
+      kanbanLibrary = await import('./lib/kanban/index.js');
+    }
+    return kanbanLibrary;
+  };
+
+  let kanbanAutomationRuntime = null;
+  getKanbanAutomationRuntime = async () => {
+    if (!kanbanAutomationRuntime) {
+      const { createKanbanAutomationRuntime } = await import('./lib/kanban/automation.js');
+
+      const createSession = async ({ directory, title }) => {
+        const url = new URL(buildOpenCodeUrl('/session', ''));
+        if (directory) {
+          url.searchParams.set('directory', directory);
+        }
+
+        const response = await fetch(url.toString(), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+            ...getOpenCodeAuthHeaders(),
+          },
+          body: JSON.stringify({ title }),
+        });
+        if (!response.ok) {
+          throw new Error(`Failed to create automation session (${response.status})`);
+        }
+        return await response.json();
+      };
+
+      const sendPrompt = async ({ sessionId, directory, text, providerID, modelID, agent, variant }) => {
+        const url = new URL(buildOpenCodeUrl(`/session/${encodeURIComponent(sessionId)}/prompt_async`, ''));
+        if (directory) {
+          url.searchParams.set('directory', directory);
+        }
+
+        const response = await fetch(url.toString(), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+            ...getOpenCodeAuthHeaders(),
+          },
+          body: JSON.stringify({
+            model: {
+              providerID,
+              modelID,
+            },
+            ...(agent ? { agent } : {}),
+            ...(variant ? { variant } : {}),
+            parts: [{ type: 'text', text }],
+          }),
+        });
+        if (!response.ok) {
+          throw new Error(`Failed to dispatch automation prompt (${response.status})`);
+        }
+      };
+
+      const sendCommand = async ({ sessionId, directory, command, arguments: args, providerID, modelID, agent, variant }) => {
+        const url = new URL(buildOpenCodeUrl(`/session/${encodeURIComponent(sessionId)}/command`, ''));
+        if (directory) {
+          url.searchParams.set('directory', directory);
+        }
+
+        const response = await fetch(url.toString(), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+            ...getOpenCodeAuthHeaders(),
+          },
+          body: JSON.stringify({
+            command,
+            arguments: typeof args === 'string' ? args : '',
+            model: `${providerID}/${modelID}`,
+            ...(agent ? { agent } : {}),
+            ...(variant ? { variant } : {}),
+          }),
+        });
+        if (!response.ok) {
+          throw new Error(`Failed to dispatch automation command (${response.status})`);
+        }
+      };
+
+      kanbanAutomationRuntime = createKanbanAutomationRuntime({
+        createSession,
+        sendPrompt,
+        sendCommand,
+        onError: ({ projectDirectory, cardId, error }) => {
+          console.error(`[KanbanAutomation] Error for card ${cardId} in ${projectDirectory}:`, error);
+        },
+      });
+    }
+    return kanbanAutomationRuntime;
+  };
+
   app.get('/api/git/identities', async (req, res) => {
     const { getProfiles } = await getGitLibraries();
     try {
@@ -12356,6 +12473,402 @@ async function main(options = {}) {
     } catch (error) {
       console.error('Failed to get commit files:', error);
       res.status(500).json({ error: error.message || 'Failed to get commit files' });
+    }
+  });
+
+  app.get('/api/kanban/board', async (req, res) => {
+    const { getOrCreateBoard, KanbanConflictError } = await getKanbanLibrary();
+    try {
+      const resolved = await resolveProjectDirectory(req);
+      if (!resolved.directory) {
+        return res.status(400).json({ error: resolved.error || 'Active workspace is required' });
+      }
+
+      const result = await getOrCreateBoard(resolved.directory);
+      res.json(result);
+    } catch (error) {
+      console.error('Failed to get kanban board:', error);
+      if (error instanceof KanbanConflictError) {
+        return res.status(409).json({ error: error.message });
+      }
+      res.status(500).json({ error: error.message || 'Failed to get kanban board' });
+    }
+  });
+
+  app.post('/api/kanban/columns', async (req, res) => {
+    const { createColumn, KanbanValidationError, KanbanNotFoundError, KanbanConflictError } = await getKanbanLibrary();
+    try {
+      const resolved = await resolveProjectDirectory(req);
+      if (!resolved.directory) {
+        return res.status(400).json({ error: resolved.error || 'Active workspace is required' });
+      }
+
+      const { name, afterColumnId } = req.body || {};
+      const trimmedName = typeof name === 'string' ? name.trim() : '';
+      const trimmedAfterColumnId = typeof afterColumnId === 'string' ? afterColumnId.trim() : '';
+
+      if (!trimmedName) {
+        return res.status(400).json({ error: 'Column name is required' });
+      }
+
+      const result = await createColumn(resolved.directory, { name: trimmedName, afterColumnId: trimmedAfterColumnId });
+      res.json(result);
+    } catch (error) {
+      console.error('Failed to create column:', error);
+      if (error instanceof KanbanValidationError) {
+        return res.status(400).json({ error: error.message });
+      }
+      if (error instanceof KanbanNotFoundError) {
+        return res.status(404).json({ error: error.message });
+      }
+      if (error instanceof KanbanConflictError) {
+        return res.status(409).json({ error: error.message });
+      }
+      res.status(500).json({ error: error.message || 'Failed to create column' });
+    }
+  });
+
+  app.patch('/api/kanban/columns/:columnId', async (req, res) => {
+    const { renameColumn, KanbanValidationError, KanbanNotFoundError, KanbanConflictError } = await getKanbanLibrary();
+    try {
+      const { columnId } = req.params;
+      if (!columnId || typeof columnId !== 'string') {
+        return res.status(400).json({ error: 'Column ID is required' });
+      }
+
+      const resolved = await resolveProjectDirectory(req);
+      if (!resolved.directory) {
+        return res.status(400).json({ error: resolved.error || 'Active workspace is required' });
+      }
+
+      const { name } = req.body || {};
+      const trimmedName = typeof name === 'string' ? name.trim() : '';
+
+      if (!trimmedName) {
+        return res.status(400).json({ error: 'Column name is required' });
+      }
+
+      const result = await renameColumn(resolved.directory, columnId, { name: trimmedName });
+      res.json(result);
+    } catch (error) {
+      console.error('Failed to rename column:', error);
+      if (error instanceof KanbanValidationError) {
+        return res.status(400).json({ error: error.message });
+      }
+      if (error instanceof KanbanNotFoundError) {
+        return res.status(404).json({ error: error.message });
+      }
+      if (error instanceof KanbanConflictError) {
+        return res.status(409).json({ error: error.message });
+      }
+      res.status(500).json({ error: error.message || 'Failed to rename column' });
+    }
+  });
+
+  app.patch('/api/kanban/columns/:columnId/automation', async (req, res) => {
+    const { updateColumnAutomation, KanbanValidationError, KanbanNotFoundError, KanbanConflictError } = await getKanbanLibrary();
+    try {
+      const { columnId } = req.params;
+      if (!columnId || typeof columnId !== 'string') {
+        return res.status(400).json({ error: 'Column ID is required' });
+      }
+
+      const resolved = await resolveProjectDirectory(req);
+      if (!resolved.directory) {
+        return res.status(400).json({ error: resolved.error || 'Active workspace is required' });
+      }
+
+      const payload = req.body || {};
+      const result = await updateColumnAutomation(resolved.directory, columnId, payload);
+      res.json(result);
+    } catch (error) {
+      console.error('Failed to update column automation:', error);
+      if (error instanceof KanbanValidationError) {
+        return res.status(400).json({ error: error.message });
+      }
+      if (error instanceof KanbanNotFoundError) {
+        return res.status(404).json({ error: error.message });
+      }
+      if (error instanceof KanbanConflictError) {
+        return res.status(409).json({ error: error.message });
+      }
+      res.status(500).json({ error: error.message || 'Failed to update column automation' });
+    }
+  });
+
+  app.delete('/api/kanban/columns/:columnId', async (req, res) => {
+    const { deleteColumn, KanbanValidationError, KanbanNotFoundError, KanbanConflictError } = await getKanbanLibrary();
+    try {
+      const { columnId } = req.params;
+      if (!columnId || typeof columnId !== 'string') {
+        return res.status(400).json({ error: 'Column ID is required' });
+      }
+
+      const resolved = await resolveProjectDirectory(req);
+      if (!resolved.directory) {
+        return res.status(400).json({ error: resolved.error || 'Active workspace is required' });
+      }
+
+      const result = await deleteColumn(resolved.directory, columnId);
+      res.json(result);
+    } catch (error) {
+      console.error('Failed to delete column:', error);
+      if (error instanceof KanbanValidationError) {
+        return res.status(400).json({ error: error.message });
+      }
+      if (error instanceof KanbanNotFoundError) {
+        return res.status(404).json({ error: error.message });
+      }
+      if (error instanceof KanbanConflictError) {
+        return res.status(409).json({ error: error.message });
+      }
+      res.status(500).json({ error: error.message || 'Failed to delete column' });
+    }
+  });
+
+  app.post('/api/kanban/cards', async (req, res) => {
+    const { createCard, getOrCreateBoard, KanbanValidationError, KanbanNotFoundError, KanbanConflictError } = await getKanbanLibrary();
+    try {
+      const resolved = await resolveProjectDirectory(req);
+      if (!resolved.directory) {
+        return res.status(400).json({ error: resolved.error || 'Active workspace is required' });
+      }
+
+      const { columnId, title, description, worktreeId } = req.body || {};
+      const trimmedColumnId = typeof columnId === 'string' ? columnId.trim() : '';
+      const trimmedTitle = typeof title === 'string' ? title.trim() : '';
+      const trimmedDescription = typeof description === 'string' ? description.trim() : '';
+      const trimmedWorktreeId = typeof worktreeId === 'string' ? worktreeId.trim() : '';
+
+      if (!trimmedColumnId) {
+        return res.status(400).json({ error: 'Column ID is required' });
+      }
+      if (!trimmedTitle) {
+        return res.status(400).json({ error: 'Card title is required' });
+      }
+      if (!trimmedDescription) {
+        return res.status(400).json({ error: 'Card description is required' });
+      }
+      if (!trimmedWorktreeId) {
+        return res.status(400).json({ error: 'Worktree ID is required' });
+      }
+
+      const validatedWorktree = await resolveWorkspacePathFromContext(req, trimmedWorktreeId);
+      if (!validatedWorktree.ok) {
+        return res.status(400).json({ error: `Invalid worktree path: ${validatedWorktree.error}` });
+      }
+
+      const result = await createCard(resolved.directory, {
+        columnId: trimmedColumnId,
+        title: trimmedTitle,
+        description: trimmedDescription,
+        worktreeId: validatedWorktree.resolved
+      });
+
+      const { board } = result;
+      const createdCard = board.cards
+        .filter(c => c.columnId === trimmedColumnId)
+        .sort((a, b) => b.order - a.order)[0];
+      const targetColumn = board.columns.find(c => c.id === trimmedColumnId);
+
+      if (
+        createdCard
+        && targetColumn
+        && targetColumn.automation
+        && targetColumn.automation.onEnterText
+      ) {
+        const runtime = await getKanbanAutomationRuntime();
+        if (runtime && typeof runtime.startAutomationForCardEntry === 'function') {
+          const startResult = await runtime.startAutomationForCardEntry(resolved.directory, createdCard.id, trimmedColumnId);
+          if (!startResult?.started) {
+            console.warn('[KanbanAutomation] Start was skipped after create:', {
+              directory: resolved.directory,
+              cardId: createdCard.id,
+              reason: startResult?.reason,
+            });
+          }
+        }
+        const { board: latestBoard } = await getOrCreateBoard(resolved.directory);
+        return res.json({ board: latestBoard });
+      }
+
+      res.json(result);
+    } catch (error) {
+      console.error('Failed to create card:', error);
+      if (error instanceof KanbanValidationError) {
+        return res.status(400).json({ error: error.message });
+      }
+      if (error instanceof KanbanNotFoundError) {
+        return res.status(404).json({ error: error.message });
+      }
+      if (error instanceof KanbanConflictError) {
+        return res.status(409).json({ error: error.message });
+      }
+      res.status(500).json({ error: error.message || 'Failed to create card' });
+    }
+  });
+
+  app.patch('/api/kanban/cards/:cardId', async (req, res) => {
+    const { updateCard, KanbanValidationError, KanbanNotFoundError, KanbanConflictError } = await getKanbanLibrary();
+    try {
+      const { cardId } = req.params;
+      if (!cardId || typeof cardId !== 'string') {
+        return res.status(400).json({ error: 'Card ID is required' });
+      }
+
+      const resolved = await resolveProjectDirectory(req);
+      if (!resolved.directory) {
+        return res.status(400).json({ error: resolved.error || 'Active workspace is required' });
+      }
+
+      const { title, description, worktreeId } = req.body || {};
+      const trimmedTitle = typeof title === 'string' ? title.trim() : undefined;
+      const trimmedDescription = typeof description === 'string' ? description.trim() : undefined;
+      const trimmedWorktreeId = typeof worktreeId === 'string' ? worktreeId.trim() : undefined;
+
+      if (trimmedTitle !== undefined && !trimmedTitle) {
+        return res.status(400).json({ error: 'Card title cannot be empty' });
+      }
+      if (trimmedDescription !== undefined && !trimmedDescription) {
+        return res.status(400).json({ error: 'Card description cannot be empty' });
+      }
+
+      let validatedWorktreePath = undefined;
+      if (trimmedWorktreeId !== undefined) {
+        if (!trimmedWorktreeId) {
+          return res.status(400).json({ error: 'Worktree ID cannot be empty' });
+        }
+        const validatedWorktree = await resolveWorkspacePathFromContext(req, trimmedWorktreeId);
+        if (!validatedWorktree.ok) {
+          return res.status(400).json({ error: `Invalid worktree path: ${validatedWorktree.error}` });
+        }
+        validatedWorktreePath = validatedWorktree.resolved;
+      }
+
+      const result = await updateCard(resolved.directory, cardId, {
+        title: trimmedTitle,
+        description: trimmedDescription,
+        worktreeId: validatedWorktreePath
+      });
+      res.json(result);
+    } catch (error) {
+      console.error('Failed to update card:', error);
+      if (error instanceof KanbanValidationError) {
+        return res.status(400).json({ error: error.message });
+      }
+      if (error instanceof KanbanNotFoundError) {
+        return res.status(404).json({ error: error.message });
+      }
+      if (error instanceof KanbanConflictError) {
+        return res.status(409).json({ error: error.message });
+      }
+      res.status(500).json({ error: error.message || 'Failed to update card' });
+    }
+  });
+
+  app.delete('/api/kanban/cards/:cardId', async (req, res) => {
+    const { deleteCard, KanbanValidationError, KanbanNotFoundError, KanbanConflictError } = await getKanbanLibrary();
+    try {
+      const { cardId } = req.params;
+      if (!cardId || typeof cardId !== 'string') {
+        return res.status(400).json({ error: 'Card ID is required' });
+      }
+
+      const resolved = await resolveProjectDirectory(req);
+      if (!resolved.directory) {
+        return res.status(400).json({ error: resolved.error || 'Active workspace is required' });
+      }
+
+      const result = await deleteCard(resolved.directory, cardId);
+      res.json(result);
+    } catch (error) {
+      console.error('Failed to delete card:', error);
+      if (error instanceof KanbanValidationError) {
+        return res.status(400).json({ error: error.message });
+      }
+      if (error instanceof KanbanNotFoundError) {
+        return res.status(404).json({ error: error.message });
+      }
+      if (error instanceof KanbanConflictError) {
+        return res.status(409).json({ error: error.message });
+      }
+      res.status(500).json({ error: error.message || 'Failed to delete card' });
+    }
+  });
+
+  app.post('/api/kanban/cards/:cardId/move', async (req, res) => {
+    const { moveCard, getOrCreateBoard, KanbanValidationError, KanbanNotFoundError, KanbanConflictError } = await getKanbanLibrary();
+    try {
+      const { cardId } = req.params;
+      if (!cardId || typeof cardId !== 'string') {
+        return res.status(400).json({ error: 'Card ID is required' });
+      }
+
+      const resolved = await resolveProjectDirectory(req);
+      if (!resolved.directory) {
+        return res.status(400).json({ error: resolved.error || 'Active workspace is required' });
+      }
+
+      const { toColumnId, toOrder } = req.body || {};
+      const trimmedToColumnId = typeof toColumnId === 'string' ? toColumnId.trim() : '';
+
+      if (!trimmedToColumnId) {
+        return res.status(400).json({ error: 'Target column ID is required' });
+      }
+      if (typeof toOrder !== 'number' || toOrder < 0) {
+        return res.status(400).json({ error: 'Target order must be a non-negative number' });
+      }
+
+      const preMoveBoardResult = await getOrCreateBoard(resolved.directory);
+      const preMoveCard = preMoveBoardResult.board.cards.find(c => c.id === cardId);
+      const previousColumnId = preMoveCard?.columnId;
+
+      const result = await moveCard(resolved.directory, cardId, {
+        toColumnId: trimmedToColumnId,
+        toOrder
+      });
+
+      const { board } = result;
+      const movedCard = board.cards.find(c => c.id === cardId);
+      const targetColumn = board.columns.find(c => c.id === trimmedToColumnId);
+      const columnChanged = Boolean(previousColumnId && previousColumnId !== trimmedToColumnId);
+
+      if (
+        columnChanged
+        && movedCard
+        && targetColumn
+        && targetColumn.automation
+        && movedCard.columnId === trimmedToColumnId
+        && targetColumn.automation.onEnterText
+      ) {
+        const runtime = await getKanbanAutomationRuntime();
+        if (runtime && typeof runtime.startAutomationForCardEntry === 'function') {
+          const startResult = await runtime.startAutomationForCardEntry(resolved.directory, cardId, trimmedToColumnId);
+          if (!startResult?.started) {
+            console.warn('[KanbanAutomation] Start was skipped after move:', {
+              directory: resolved.directory,
+              cardId,
+              reason: startResult?.reason,
+            });
+          }
+        }
+        const { board: latestBoard } = await getOrCreateBoard(resolved.directory);
+        return res.json({ board: latestBoard });
+      }
+
+      res.json(result);
+    } catch (error) {
+      console.error('Failed to move card:', error);
+      if (error instanceof KanbanValidationError) {
+        return res.status(400).json({ error: error.message });
+      }
+      if (error instanceof KanbanNotFoundError) {
+        return res.status(404).json({ error: error.message });
+      }
+      if (error instanceof KanbanConflictError) {
+        return res.status(409).json({ error: error.message });
+      }
+      res.status(500).json({ error: error.message || 'Failed to move card' });
     }
   });
 

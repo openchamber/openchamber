@@ -1,8 +1,8 @@
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
+import type { WorktreeMetadata } from '@/types/worktree';
+import { getProjectDirectories } from '@/lib/worktrees/projectDirectories';
 import { dedupeSessionsById, isSessionRelatedToProject, normalizePath } from '../utils';
-
-type WorktreeMeta = { path: string };
 
 type Args = {
   isVSCode: boolean;
@@ -10,7 +10,7 @@ type Args = {
   archivedSessions: Session[];
   sessionsByDirectory: Map<string, Session[]>;
   getSessionsByDirectory: (directory: string) => Session[];
-  availableWorktreesByProject: Map<string, WorktreeMeta[]>;
+  availableWorktreesByProject: Map<string, WorktreeMetadata[]>;
 };
 
 export const useProjectSessionLists = (args: Args) => {
@@ -25,13 +25,9 @@ export const useProjectSessionLists = (args: Args) => {
 
   const getSessionsForProject = React.useCallback(
     (project: { normalizedPath: string }) => {
-      const worktreesForProject = isVSCode ? [] : (availableWorktreesByProject.get(project.normalizedPath) ?? []);
-      const directories = [
-        project.normalizedPath,
-        ...worktreesForProject
-          .map((meta) => normalizePath(meta.path) ?? meta.path)
-          .filter((value): value is string => Boolean(value)),
-      ];
+      const directories = isVSCode
+        ? [project.normalizedPath]
+        : getProjectDirectories(project.normalizedPath, availableWorktreesByProject);
 
       const seen = new Set<string>();
       const collected: Session[] = [];
@@ -81,13 +77,8 @@ export const useProjectSessionLists = (args: Args) => {
         return dedupeSessionsById([...archived, ...unassignedLive]);
       }
 
-      const worktreesForProject = isVSCode ? [] : (availableWorktreesByProject.get(project.normalizedPath) ?? []);
-      const validDirectories = new Set<string>([
-        project.normalizedPath,
-        ...worktreesForProject
-          .map((meta) => normalizePath(meta.path) ?? meta.path)
-          .filter((value): value is string => Boolean(value)),
-      ]);
+      const directories = getProjectDirectories(project.normalizedPath, availableWorktreesByProject);
+      const validDirectories = new Set<string>(directories);
 
       const collect = (input: Session[]): Session[] => input.filter((session) =>
         isSessionRelatedToProject(session, project.normalizedPath, validDirectories),
