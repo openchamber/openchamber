@@ -77,14 +77,50 @@ const normalizeHost = (candidate) => {
   if (!trimmed) {
     return null;
   }
-  return trimmed.replace(/:\d+$/, '');
+
+  const bracketedIpv6Match = trimmed.match(/^\[([^\]]+)\](?::(\d+))?$/);
+  if (bracketedIpv6Match) {
+    return bracketedIpv6Match[1];
+  }
+
+  const colonCount = trimmed.split(':').length - 1;
+  if (colonCount === 1 && /:\d+$/.test(trimmed)) {
+    return trimmed.replace(/:\d+$/, '');
+  }
+
+  return trimmed;
+};
+
+let cachedCustomLocalHostRaw = null;
+let cachedCustomLocalHostSet = new Set();
+
+const getCustomLocalHostSet = () => {
+  const raw = typeof process.env.CUSTOM_LOCALHOST === 'string' ? process.env.CUSTOM_LOCALHOST : '';
+  if (raw === cachedCustomLocalHostRaw) {
+    return cachedCustomLocalHostSet;
+  }
+
+  const next = new Set();
+  for (const token of raw.split(/[\s,;]+/)) {
+    const normalized = normalizeHost(token);
+    if (normalized) {
+      next.add(normalized);
+    }
+  }
+
+  cachedCustomLocalHostRaw = raw;
+  cachedCustomLocalHostSet = next;
+  return cachedCustomLocalHostSet;
 };
 
 const isLocalHost = (host) => {
   if (!host) {
     return false;
   }
-  return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
+  if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]') {
+    return true;
+  }
+  return getCustomLocalHostSet().has(host);
 };
 
 const getClientIp = (req) => {
