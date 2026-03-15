@@ -281,17 +281,28 @@ export const ChatContainer: React.FC = () => {
 
         updateChatScrollHeight();
 
+        let rafId = 0;
+        const scheduleUpdate = () => {
+            if (rafId) return;
+            rafId = requestAnimationFrame(() => {
+                rafId = 0;
+                updateChatScrollHeight();
+            });
+        };
+
         if (typeof ResizeObserver === 'undefined') {
-            window.addEventListener('resize', updateChatScrollHeight);
+            window.addEventListener('resize', scheduleUpdate);
             return () => {
-                window.removeEventListener('resize', updateChatScrollHeight);
+                if (rafId) cancelAnimationFrame(rafId);
+                window.removeEventListener('resize', scheduleUpdate);
             };
         }
 
-        const resizeObserver = new ResizeObserver(updateChatScrollHeight);
+        const resizeObserver = new ResizeObserver(scheduleUpdate);
         resizeObserver.observe(container);
 
         return () => {
+            if (rafId) cancelAnimationFrame(rafId);
             resizeObserver.disconnect();
         };
     }, [currentSessionId, isDesktopExpandedInput, scrollRef]);

@@ -362,6 +362,10 @@ export const MainLayout: React.FC = () => {
             setKeyboardOpen(false);
         };
 
+        // Batch visualViewport updates to once per animation frame to avoid
+        // layout thrashing during keyboard open/close animations.
+        let rafId = 0;
+
         const updateVisualViewport = () => {
             const viewport = window.visualViewport;
 
@@ -464,13 +468,21 @@ export const MainLayout: React.FC = () => {
             }
         };
 
+        const scheduleVisualViewportUpdate = () => {
+            if (rafId) return;
+            rafId = requestAnimationFrame(() => {
+                rafId = 0;
+                updateVisualViewport();
+            });
+        };
+
         updateVisualViewport();
 
         const viewport = window.visualViewport;
-        viewport?.addEventListener('resize', updateVisualViewport);
-        viewport?.addEventListener('scroll', updateVisualViewport);
-        window.addEventListener('resize', updateVisualViewport);
-        window.addEventListener('orientationchange', updateVisualViewport);
+        viewport?.addEventListener('resize', scheduleVisualViewportUpdate);
+        viewport?.addEventListener('scroll', scheduleVisualViewportUpdate);
+        window.addEventListener('resize', scheduleVisualViewportUpdate);
+        window.addEventListener('orientationchange', scheduleVisualViewportUpdate);
         const isTextInputTarget = (element: HTMLElement | null) => {
             if (!element) {
                 return false;
@@ -488,7 +500,7 @@ export const MainLayout: React.FC = () => {
             if (isTextInputTarget(target)) {
                 ignoreOpenUntilZero = false;
             }
-            updateVisualViewport();
+            scheduleVisualViewportUpdate();
         };
         document.addEventListener('focusin', handleFocusIn, true);
 
@@ -533,10 +545,11 @@ export const MainLayout: React.FC = () => {
         document.addEventListener('focusout', handleFocusOut, true);
 
         return () => {
-            viewport?.removeEventListener('resize', updateVisualViewport);
-            viewport?.removeEventListener('scroll', updateVisualViewport);
-            window.removeEventListener('resize', updateVisualViewport);
-            window.removeEventListener('orientationchange', updateVisualViewport);
+            if (rafId) cancelAnimationFrame(rafId);
+            viewport?.removeEventListener('resize', scheduleVisualViewportUpdate);
+            viewport?.removeEventListener('scroll', scheduleVisualViewportUpdate);
+            window.removeEventListener('resize', scheduleVisualViewportUpdate);
+            window.removeEventListener('orientationchange', scheduleVisualViewportUpdate);
             document.removeEventListener('focusin', handleFocusIn, true);
             document.removeEventListener('focusout', handleFocusOut, true);
             clearKeyboardAvoidTarget();

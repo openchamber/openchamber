@@ -161,12 +161,19 @@ export function useDeviceInfo(): DeviceInfo {
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
 
+    let debounceTimer: ReturnType<typeof setTimeout>;
     const handleResize = () => {
-      setDeviceInfo(getDeviceInfo());
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        setDeviceInfo(getDeviceInfo());
+      }, 150);
     };
 
     window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    return () => {
+      clearTimeout(debounceTimer);
+      window.removeEventListener('resize', handleResize);
+    };
   }, []);
 
   React.useEffect(() => {
