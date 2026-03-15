@@ -1,6 +1,7 @@
 import React from 'react';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
+import { useLanguage } from '@/hooks/useLanguage';
 import { useUIStore } from '@/stores/useUIStore';
 
 interface CommitInputProps {
@@ -18,12 +19,14 @@ const MAX_HEIGHT = 200;
 export const CommitInput: React.FC<CommitInputProps> = ({
   value,
   onChange,
-  placeholder = 'Commit message',
+  placeholder,
   disabled = false,
   hasTouchInput = false,
   isMobile = false,
 }) => {
+  const { t } = useLanguage();
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+  const effectivePlaceholder = placeholder || t('commitSection.commitMessagePlaceholder');
   const inputSpellcheckEnabled = useUIStore((state) => state.inputSpellcheckEnabled);
 
   // Auto-resize based on content (layout phase to avoid mount flicker)
@@ -44,7 +47,7 @@ export const CommitInput: React.FC<CommitInputProps> = ({
       ref={textareaRef}
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      placeholder={placeholder}
+      placeholder={effectivePlaceholder}
       rows={1}
       disabled={disabled}
       autoCorrect={hasTouchInput ? 'on' : 'off'}

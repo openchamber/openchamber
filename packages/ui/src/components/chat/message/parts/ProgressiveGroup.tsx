@@ -20,6 +20,7 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useUIStore } from '@/stores/useUIStore';
 import ReasoningPart from './ReasoningPart';
 import JustificationBlock from './JustificationBlock';
+import { useLanguage } from '@/hooks/useLanguage';
 
 interface ProgressiveGroupProps {
     parts: TurnActivityPart[];
@@ -609,6 +610,7 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
     animateRows = true,
     animatedToolIds,
 }) => {
+    const { t } = useLanguage();
     void _streamPhase;
     const previewCount = showHeader && !isExpanded
         ? Math.max(0, Math.floor(collapsedPreviewCount))
@@ -775,7 +777,7 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
                             letterSpacing: '0.005em',
                         }}
                     >
-                        Activity
+                        {t('progressiveGroup.activity')}
                     </span>
                 </button>
                 {shouldShowRowsContainer ? (

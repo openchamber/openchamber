@@ -1,4 +1,5 @@
 import React from 'react';
+import { useLanguage } from '@/hooks/useLanguage';
 import { Button } from '@/components/ui/button';
 import { ButtonSmall } from '@/components/ui/button-small';
 import { toast } from '@/components/ui';
@@ -33,6 +34,7 @@ type DeviceFlowCompleteResponse =
   | { connected: false; status?: string; error?: string };
 
 export const GitHubSettings: React.FC = () => {
+  const { t } = useLanguage();
   const { isMobile } = useDeviceInfo();
   const runtimeGitHub = getRegisteredRuntimeAPIs()?.github;
   const status = useGitHubAuthStore((state) => state.status);
@@ -120,11 +122,11 @@ export const GitHubSettings: React.FC = () => {
       void openExternal(url);
     } catch (error) {
       console.error('Failed to start GitHub connect:', error);
-      toast.error('Failed to start GitHub connect');
+      toast.error(t('githubSettings.failedStartConnect'));
     } finally {
       setIsBusy(false);
     }
-  }, [openExternal, runtimeGitHub]);
+  }, [openExternal, runtimeGitHub, t]);
 
   const pollOnce = React.useCallback(async (deviceCode: string) => {
     if (runtimeGitHub) {
@@ -160,7 +162,7 @@ export const GitHubSettings: React.FC = () => {
         try {
           const result = await pollOnce(flow.deviceCode);
             if (result.connected) {
-              toast.success('GitHub connected');
+              toast.success(t('githubSettings.connected'));
               setFlow(null);
               stopPolling();
               await refreshStatus(runtimeGitHub, { force: true });
@@ -172,7 +174,7 @@ export const GitHubSettings: React.FC = () => {
           }
 
           if (result.status === 'expired_token' || result.status === 'access_denied') {
-            toast.error(result.error || 'GitHub authorization failed');
+            toast.error(result.error || t('githubSettings.authorizationFailed'));
             setFlow(null);
             stopPolling();
           }
@@ -188,7 +190,7 @@ export const GitHubSettings: React.FC = () => {
         pollTimerRef.current = null;
       }
     };
-  }, [flow, pollIntervalMs, pollOnce, refreshStatus, runtimeGitHub, stopPolling]);
+  }, [flow, pollIntervalMs, pollOnce, refreshStatus, runtimeGitHub, stopPolling, t]);
 
   const disconnect = React.useCallback(async () => {
     setIsBusy(true);
@@ -206,15 +208,15 @@ export const GitHubSettings: React.FC = () => {
           throw new Error(response.statusText);
         }
       }
-      toast.success('GitHub disconnected');
+      toast.success(t('githubSettings.disconnected'));
       await refreshStatus(runtimeGitHub, { force: true });
     } catch (error) {
       console.error('Failed to disconnect GitHub:', error);
-      toast.error('Failed to disconnect GitHub');
+      toast.error(t('githubSettings.failedDisconnect'));
     } finally {
       setIsBusy(false);
     }
-  }, [refreshStatus, runtimeGitHub, stopPolling]);
+  }, [refreshStatus, runtimeGitHub, stopPolling, t]);
 
   const activateAccount = React.useCallback(async (accountId: string) => {
     if (!accountId) return;
@@ -239,14 +241,14 @@ export const GitHubSettings: React.FC = () => {
           })();
 
       setStatus(payload);
-      toast.success('GitHub account switched');
+      toast.success(t('githubSettings.accountSwitched'));
     } catch (error) {
       console.error('Failed to switch GitHub account:', error);
-      toast.error('Failed to switch GitHub account');
+      toast.error(t('githubSettings.failedSwitchAccount'));
     } finally {
       setIsBusy(false);
     }
-  }, [runtimeGitHub, setStatus]);
+  }, [runtimeGitHub, setStatus, t]);
 
   if (isLoading) {
     return null;
@@ -260,13 +262,13 @@ export const GitHubSettings: React.FC = () => {
     <div className="mb-8">
       <div className="mb-3 px-1 flex items-start justify-between gap-4">
         <div className="flex items-center gap-2">
-          <h3 className="typography-ui-header font-semibold text-foreground">GitHub</h3>
+          <h3 className="typography-ui-header font-semibold text-foreground">{t('githubSettings.title')}</h3>
           <Tooltip delayDuration={1000}>
             <TooltipTrigger asChild>
               <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
             </TooltipTrigger>
             <TooltipContent sideOffset={8} className="max-w-xs">
-              Connect a GitHub account for in-app PR and issue workflows.
+              {t('githubSettings.description')}
             </TooltipContent>
           </Tooltip>
         </div>
@@ -279,7 +281,7 @@ export const GitHubSettings: React.FC = () => {
               {user?.avatarUrl ? (
                 <img
                   src={user.avatarUrl}
-                  alt={user.login ? `${user.login} avatar` : 'GitHub avatar'}
+                  alt={user.login ? t('githubSettings.avatarAltWithLogin', { login: user.login }) : t('githubSettings.avatarAltFallback')}
                   className="h-10 w-10 shrink-0 rounded-full border border-[var(--interactive-border)] bg-[var(--surface-muted)] object-cover"
                   loading="lazy"
                   referrerPolicy="no-referrer"
@@ -290,38 +292,38 @@ export const GitHubSettings: React.FC = () => {
 
               <div className="min-w-0 flex-1">
                 <div className="typography-ui-label text-foreground">
-                  {user?.name?.trim() || user?.login || 'GitHub'}
+                  {user?.name?.trim() || user?.login || t('githubSettings.title')}
                 </div>
                 <div className={cn("flex items-center gap-2 typography-meta text-muted-foreground mt-0.5", isMobile ? "flex-wrap" : "truncate")}>
                   <RiGithubFill className="h-3.5 w-3.5 shrink-0" />
-                  <span className="font-mono">{user?.login || 'unknown'}</span>
+                  <span className="font-mono">{user?.login || t('githubSettings.unknown')}</span>
                   {user?.email && <span className="opacity-50">•</span>}
                   {user?.email && <span>{user.email}</span>}
                 </div>
                 {status?.scope && (
-                  <div className="typography-micro text-muted-foreground/70 mt-0.5">Scopes: {status.scope}</div>
+                  <div className="typography-micro text-muted-foreground/70 mt-0.5">{t('githubSettings.scopes')}: {status.scope}</div>
                 )}
               </div>
             </div>
 
             <ButtonSmall variant="outline" onClick={disconnect} disabled={isBusy} className={cn("text-[var(--status-error)] hover:text-[var(--status-error)]", isMobile ? "w-full" : undefined)}>
-              Disconnect
+              {t('githubSettings.disconnect')}
             </ButtonSmall>
           </div>
         ) : (
           <div className="flex items-center justify-between gap-4 px-4 py-4">
             <div className="flex min-w-0 flex-col">
-              <span className="typography-ui-label text-foreground">Not Connected</span>
+              <span className="typography-ui-label text-foreground">{t('githubSettings.notConnected')}</span>
             </div>
             <ButtonSmall variant="default" onClick={startConnect} disabled={isBusy}>
-              Connect GitHub
+              {t('githubSettings.connect')}
             </ButtonSmall>
           </div>
         )}
 
         {accounts.length > 1 && (
           <div className="mt-2 border-t border-[var(--surface-subtle)] pt-2 px-2 pb-1">
-            <div className="typography-micro text-muted-foreground mb-2 px-1">Other Accounts</div>
+            <div className="typography-micro text-muted-foreground mb-2 px-1">{t('githubSettings.otherAccounts')}</div>
             <div className="space-y-1">
               {accounts.map((account) => {
                 const accountUser = account.user;
@@ -335,7 +337,7 @@ export const GitHubSettings: React.FC = () => {
                       {accountUser?.avatarUrl ? (
                         <img
                           src={accountUser.avatarUrl}
-                          alt={accountUser.login ? `${accountUser.login} avatar` : 'GitHub avatar'}
+                          alt={accountUser.login ? t('githubSettings.avatarAltWithLogin', { login: accountUser.login }) : t('githubSettings.avatarAltFallback')}
                           className="h-6 w-6 shrink-0 rounded-full border border-[var(--interactive-border)] bg-[var(--surface-muted)] object-cover"
                           loading="lazy"
                           referrerPolicy="no-referrer"
@@ -347,7 +349,7 @@ export const GitHubSettings: React.FC = () => {
                       )}
                       <div className="min-w-0 flex flex-col">
                         <span className="typography-ui-label text-foreground truncate">
-                          {accountUser?.name?.trim() || accountUser?.login || 'GitHub'}
+                          {accountUser?.name?.trim() || accountUser?.login || t('githubSettings.title')}
                         </span>
                         {accountUser?.login && (
                           <span className="typography-micro text-muted-foreground truncate font-mono">
@@ -357,14 +359,14 @@ export const GitHubSettings: React.FC = () => {
                       </div>
                     </div>
                     {isCurrent ? (
-                      <span className="typography-micro text-[var(--primary-base)] bg-[var(--primary-base)]/10 px-1.5 py-0.5 rounded">Active</span>
+                      <span className="typography-micro text-[var(--primary-base)] bg-[var(--primary-base)]/10 px-1.5 py-0.5 rounded">{t('githubSettings.active')}</span>
                     ) : (
                       <ButtonSmall
                         variant="ghost"
                         onClick={() => activateAccount(account.id)}
                         disabled={isBusy}
                       >
-                        Switch to
+                        {t('githubSettings.switchTo')}
                       </ButtonSmall>
                     )}
                   </div>
@@ -384,7 +386,7 @@ export const GitHubSettings: React.FC = () => {
             disabled={isBusy}
             className={cn(isMobile ? 'w-full' : undefined)}
           >
-            Add Account
+            {t('githubSettings.addAccount')}
           </ButtonSmall>
         </div>
       )}
@@ -392,9 +394,9 @@ export const GitHubSettings: React.FC = () => {
       {flow && (
         <div className="mt-4 rounded-lg bg-[var(--surface-elevated)]/70 p-4 border border-[var(--interactive-border)]">
           <div className="space-y-1">
-            <h4 className="typography-ui-label text-foreground">Authorize OpenChamber</h4>
+            <h4 className="typography-ui-label text-foreground">{t('githubSettings.authorizeOpenChamber')}</h4>
             <p className="typography-meta text-muted-foreground">
-              In GitHub, enter the following code to authorize this device:
+              {t('githubSettings.enterCodeDescription')}
             </p>
           </div>
           <div className="flex items-center justify-between gap-3 mt-4">
@@ -405,19 +407,19 @@ export const GitHubSettings: React.FC = () => {
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                Open GitHub
+                {t('githubSettings.openGitHub')}
               </a>
             </Button>
           </div>
           <div className="mt-4 flex items-center justify-between">
             <span className="typography-micro text-muted-foreground animate-pulse">
-              Waiting for approval… (auto-refresh)
+              {t('githubSettings.waitingForApproval')}
             </span>
             <ButtonSmall variant="ghost" disabled={isBusy} onClick={() => {
               stopPolling();
               setFlow(null);
             }}>
-              Cancel
+              {t('common.cancel')}
             </ButtonSmall>
           </div>
         </div>

@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/select';
 import { checkIsGitRepository, getGitBranches } from '@/lib/gitApi';
 import { resolveRootTrackingRemote } from '@/lib/worktrees/worktreeCreate';
+import { useLanguage } from '@/hooks/useLanguage';
 
 export type WorktreeBaseOption = {
   value: string;
@@ -56,8 +57,9 @@ const parseTrackingRemote = (tracking: string | null | undefined): string | null
  */
 // eslint-disable-next-line react-refresh/only-export-components -- Hook is tightly coupled with BranchSelector
 export function useBranchOptions(directory: string | null): BranchSelectorState {
+  const { t } = useLanguage();
   const [branches, setBranches] = React.useState<WorktreeBaseOption[]>([
-    { value: 'HEAD', label: 'Current (HEAD)', group: 'special' },
+    { value: 'HEAD', label: t('multirun.currentHead'), group: 'special' },
   ]);
   const [isLoading, setIsLoading] = React.useState(false);
   const [isGitRepository, setIsGitRepository] = React.useState<boolean | null>(null);
@@ -68,7 +70,7 @@ export function useBranchOptions(directory: string | null): BranchSelectorState 
     if (!directory) {
       setIsGitRepository(null);
       setIsLoading(false);
-      setBranches([{ value: 'HEAD', label: 'Current (HEAD)', group: 'special' }]);
+      setBranches([{ value: 'HEAD', label: t('multirun.currentHead'), group: 'special' }]);
       return;
     }
 
@@ -83,7 +85,7 @@ export function useBranchOptions(directory: string | null): BranchSelectorState 
         setIsGitRepository(isGit);
 
         if (!isGit) {
-          setBranches([{ value: 'HEAD', label: 'Current (HEAD)', group: 'special' }]);
+          setBranches([{ value: 'HEAD', label: t('multirun.currentHead'), group: 'special' }]);
           return;
         }
 
@@ -94,7 +96,7 @@ export function useBranchOptions(directory: string | null): BranchSelectorState 
         if (cancelled) return;
 
         const worktreeBaseOptions: WorktreeBaseOption[] = [];
-        const headLabel = branchData?.current ? `Current (HEAD: ${branchData.current})` : 'Current (HEAD)';
+        const headLabel = branchData?.current ? t('multirun.currentHeadWithBranch', { branch: branchData.current }) : t('multirun.currentHead');
         worktreeBaseOptions.push({ value: 'HEAD', label: headLabel, group: 'special' });
 
         if (branchData) {
@@ -146,7 +148,7 @@ export function useBranchOptions(directory: string | null): BranchSelectorState 
     return () => {
       cancelled = true;
     };
-  }, [directory]);
+  }, [directory, t]);
 
   return { branches, isLoading, isGitRepository };
 }
@@ -162,6 +164,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
   disabled,
   id,
 }) => {
+  const { t } = useLanguage();
   const { branches, isLoading, isGitRepository } = useBranchOptions(directory);
   const selectedLabel = React.useMemo(() => {
     return branches.find((option) => option.value === value)?.label ?? null;
@@ -192,12 +195,12 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
           {selectedLabel ? (
             <SelectValue>{selectedLabel}</SelectValue>
           ) : (
-            <SelectValue placeholder={isLoading ? 'Loading branches…' : 'Select a branch'} />
+            <SelectValue placeholder={isLoading ? t('multirun.loadingBranches') : t('multirun.selectBranch')} />
           )}
         </SelectTrigger>
         <SelectContent fitContent>
           <SelectGroup>
-            <SelectLabel>Default</SelectLabel>
+            <SelectLabel>{t('multirun.default')}</SelectLabel>
             {branches
               .filter((option) => option.group === 'special')
               .map((option) => (
@@ -211,7 +214,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
             <>
               <SelectSeparator />
               <SelectGroup>
-                <SelectLabel>Local branches</SelectLabel>
+                <SelectLabel>{t('branchSelector.localBranches')}</SelectLabel>
                 {branches
                   .filter((option) => option.group === 'local')
                   .map((option) => (
@@ -227,7 +230,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
             <>
               <SelectSeparator />
               <SelectGroup>
-                <SelectLabel>Remote branches</SelectLabel>
+                <SelectLabel>{t('branchSelector.remoteBranches')}</SelectLabel>
                 {branches
                   .filter((option) => option.group === 'remote')
                   .map((option) => (
@@ -242,7 +245,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
       </Select>
       
       {isGitRepository === false && (
-        <p className="typography-micro text-muted-foreground/70">Not in a git repository.</p>
+        <p className="typography-micro text-muted-foreground/70">{t('multirun.notInGitRepository')}</p>
       )}
     </div>
   );

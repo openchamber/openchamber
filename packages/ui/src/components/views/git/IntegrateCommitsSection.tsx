@@ -18,6 +18,7 @@ import { toast } from '@/components/ui';
 import { useSessionStore } from '@/stores/useSessionStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { execCommand } from '@/lib/execCommands';
+import { useLanguage } from '@/hooks/useLanguage';
 import {
   abortIntegrate,
   computeIntegratePlan,
@@ -57,6 +58,7 @@ export const IntegrateCommitsSection: React.FC<{
   onRefresh,
   variant = 'framed',
 }) => {
+  const { t } = useLanguage();
   const currentSessionId = useSessionStore((s) => s.currentSessionId);
   const setActiveMainTab = useUIStore((s) => s.setActiveMainTab);
   const [branchDropdownOpen, setBranchDropdownOpen] = React.useState(false);
@@ -245,7 +247,7 @@ Important:
 
     // Use current session - set pending input text and synthetic parts
     if (!currentSessionId) {
-      toast.error('No active session', { description: 'Open a chat session first or start a new session.' });
+      toast.error(t('pullRequest.noActiveSession'), { description: t('integrateCommits.openChatSessionOrCreateNew') });
       return;
     }
 
@@ -255,20 +257,20 @@ Important:
       { text: context.payloadText, synthetic: true },
     ]);
     setActiveMainTab('chat');
-  }, [currentSessionId, setActiveMainTab, buildConflictContext, openNewSessionDraft, setPendingInputText, setPendingSyntheticParts]);
+  }, [currentSessionId, setActiveMainTab, buildConflictContext, openNewSessionDraft, setPendingInputText, setPendingSyntheticParts, t]);
 
   const handleMove = React.useCallback(async () => {
     if (ui.kind !== 'ready') return;
     if (ui.plan.commits.length === 0) {
-      toast.message('No commits to move');
+      toast.message(t('integrateCommits.noCommitsToMove'));
       return;
     }
     setUi({ kind: 'running', plan: ui.plan });
     try {
       const result = await integrateWorktreeCommits(ui.plan);
       if (result.kind === 'success') {
-        toast.success('Commits moved', {
-          description: `${result.moved} commit${result.moved === 1 ? '' : 's'} into ${ui.plan.targetBranch}`,
+        toast.success(t('integrateCommits.commitsMoved'), {
+          description: t('integrateCommits.commitsMovedDescription', { count: result.moved, branch: ui.plan.targetBranch }),
         });
         const next = await computeIntegratePlan(ui.plan);
         setUi({ kind: 'ready', plan: next });
@@ -276,7 +278,7 @@ Important:
         return;
       }
       if (result.kind === 'conflict') {
-        toast.error('Cherry-pick conflict', { description: 'Resolve conflicts, then continue.' });
+        toast.error(t('integrateCommits.cherryPickConflict'), { description: t('integrateCommits.resolveConflictsThenContinue') });
         setUi({ kind: 'conflict', state: result.state, details: result.details });
         if (conflictStorageKey && typeof window !== 'undefined') {
           window.localStorage.setItem(conflictStorageKey, JSON.stringify(result.state));
@@ -284,18 +286,18 @@ Important:
       }
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      toast.error('Failed to move commits', { description: message });
+      toast.error(t('integrateCommits.failedToMoveCommits'), { description: message });
       const next = await computeIntegratePlan({ repoRoot, sourceBranch, targetBranch }).catch(() => null);
       if (next) setUi({ kind: 'ready', plan: next });
       else setUi({ kind: 'idle' });
     }
-  }, [ui, onRefresh, repoRoot, sourceBranch, targetBranch, conflictStorageKey]);
+  }, [ui, onRefresh, repoRoot, sourceBranch, targetBranch, conflictStorageKey, t]);
 
   const handleAbort = React.useCallback(async () => {
     if (ui.kind !== 'conflict') return;
     try {
       await abortIntegrate(ui.state);
-      toast.message('Cherry-pick aborted');
+      toast.message(t('integrateCommits.cherryPickAborted'));
       if (conflictStorageKey && typeof window !== 'undefined') {
         window.localStorage.removeItem(conflictStorageKey);
       }
@@ -304,14 +306,14 @@ Important:
       if (next) setUi({ kind: 'ready', plan: next });
       else setUi({ kind: 'idle' });
     }
-  }, [ui, repoRoot, sourceBranch, targetBranch, conflictStorageKey]);
+  }, [ui, repoRoot, sourceBranch, targetBranch, conflictStorageKey, t]);
 
   const handleContinue = React.useCallback(async () => {
     if (ui.kind !== 'conflict') return;
     try {
       const result = await continueIntegrate(ui.state);
       if (result.kind === 'success') {
-        toast.success('Cherry-pick finished');
+        toast.success(t('integrateCommits.cherryPickFinished'));
         const next = await computeIntegratePlan({ repoRoot, sourceBranch, targetBranch }).catch(() => null);
         if (next) setUi({ kind: 'ready', plan: next });
         else setUi({ kind: 'idle' });
@@ -329,9 +331,9 @@ Important:
       }
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      toast.error('Cherry-pick continue failed', { description: message });
+      toast.error(t('integrateCommits.cherryPickContinueFailed'), { description: message });
     }
-  }, [ui, repoRoot, sourceBranch, targetBranch, onRefresh, conflictStorageKey]);
+  }, [ui, repoRoot, sourceBranch, targetBranch, onRefresh, conflictStorageKey, t]);
 
   if (!repoRoot || !sourceBranch) {
     return null;
@@ -352,9 +354,9 @@ Important:
       <div className={headerClassName}>
         <div className="flex items-center gap-2 min-w-0">
           <RiSplitCellsHorizontal className="size-4 text-muted-foreground" />
-          <h3 className="typography-ui-header font-semibold text-foreground truncate">Re-integrate commits</h3>
+          <h3 className="typography-ui-header font-semibold text-foreground truncate">{t('integrateCommits.reintegrateCommits')}</h3>
           {ui.kind === 'ready' && ui.plan.commits.length > 0 ? (
-            <span className="typography-meta text-muted-foreground truncate">{ui.plan.commits.length} to move</span>
+            <span className="typography-meta text-muted-foreground truncate">{t('integrateCommits.toMoveCount', { count: ui.plan.commits.length })}</span>
           ) : null}
         </div>
         <div className="flex items-center gap-2">
@@ -367,7 +369,7 @@ Important:
       <div className={bodyClassName}>
         <div className="flex flex-wrap items-center gap-2">
           <div className="min-w-0">
-            <div className="typography-ui-label text-foreground">Move commits</div>
+            <div className="typography-ui-label text-foreground">{t('integrateCommits.moveCommits')}</div>
               <div className="typography-micro text-muted-foreground truncate">
                 {sourceBranch} → {targetBranch}
               </div>
@@ -378,7 +380,7 @@ Important:
             <DropdownMenu open={branchDropdownOpen} onOpenChange={setBranchDropdownOpen}>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="sm" className="h-7 px-2 py-0 gap-1.5">
-                  Target
+                  {t('integrateCommits.target')}
                   <span className="max-w-[160px] truncate font-mono text-xs text-muted-foreground">{targetBranch}</span>
                   <RiArrowDownSLine className="size-4 opacity-60" />
                 </Button>
@@ -388,14 +390,14 @@ Important:
                 className="w-72 p-0 max-h-(--radix-dropdown-menu-content-available-height) flex flex-col overflow-hidden"
               >
                 <Command className="h-full min-h-0">
-                  <CommandInput ref={searchInputRef} placeholder="Search branches..." />
+                  <CommandInput ref={searchInputRef} placeholder={t('branchSelector.searchBranches')} />
                   <CommandList
                     className="h-full min-h-0"
                     scrollbarClassName="overlay-scrollbar--flush overlay-scrollbar--dense overlay-scrollbar--zero"
                     disableHorizontal
                   >
-                    <CommandEmpty>No branches found.</CommandEmpty>
-                    <CommandGroup heading="Local branches">
+                    <CommandEmpty>{t('branchSelector.noBranchesFound')}</CommandEmpty>
+                    <CommandGroup heading={t('branchSelector.localBranches')}>
                       {localBranches.map((branch) => (
                         <CommandItem
                           key={branch}
@@ -417,28 +419,28 @@ Important:
 
             {ui.kind === 'ready' ? (
               <Button size="sm" className="h-7 px-2 py-0" onClick={() => void handleMove()} disabled={!isEligible || ui.plan.commits.length === 0}>
-                Move
+                {t('integrateCommits.move')}
               </Button>
             ) : ui.kind === 'loading' ? (
               <Button size="sm" variant="outline" className="h-7 px-2 py-0" disabled>
-                Checking…
+                {t('integrateCommits.checking')}
               </Button>
             ) : ui.kind === 'running' ? (
               <Button size="sm" variant="outline" className="h-7 px-2 py-0" disabled>
-                Moving…
+                {t('integrateCommits.moving')}
               </Button>
             ) : null}
           </div>
 
           {ui.kind === 'ready' && ui.plan.commits.length === 0 && (
-            <div className="typography-meta text-muted-foreground">No commits to move.</div>
+            <div className="typography-meta text-muted-foreground">{t('integrateCommits.noCommitsToMove')}</div>
           )}
 
           {ui.kind === 'ready' && ui.plan.commits.length > 0 && (
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-2">
                 <div className="typography-meta text-foreground">
-                  Commits to move
+                  {t('integrateCommits.commitsToMove')}
                   <span className="text-muted-foreground"> ({ui.plan.commits.length})</span>
                 </div>
                 {commitSummaries.length > 0 && ui.plan.commits.length > 5 && (
@@ -447,7 +449,7 @@ Important:
                     onClick={() => setShowAllCommits((v) => !v)}
                     className="typography-micro text-muted-foreground hover:text-foreground"
                   >
-                    {showAllCommits ? 'Show less' : 'Show all'}
+                    {showAllCommits ? t('integrateCommits.showLess') : t('integrateCommits.showAll')}
                   </button>
                 )}
               </div>
@@ -460,11 +462,11 @@ Important:
                   </div>
                 ))}
                 {commitSummaries.length === 0 && (
-                  <div className="typography-meta text-muted-foreground">Preview unavailable.</div>
+                  <div className="typography-meta text-muted-foreground">{t('integrateCommits.previewUnavailable')}</div>
                 )}
                 {ui.plan.commits.length > commitSummaries.length && (
                   <div className="typography-micro text-muted-foreground/70">
-                    Showing first {commitSummaries.length} commits.
+                    {t('integrateCommits.showingFirstCommits', { count: commitSummaries.length })}
                   </div>
                 )}
               </div>
@@ -474,10 +476,10 @@ Important:
           {ui.kind === 'conflict' && (
             <div className="rounded-md border border-border/60 bg-background/60 p-3 space-y-2">
               <div className="typography-meta text-foreground">
-                Conflicts in {ui.details.unmergedFiles.length} files
+                {t('integrateCommits.conflictsInFiles', { count: ui.details.unmergedFiles.length })}
               </div>
               <div className="typography-micro text-muted-foreground/80">
-                Current commit: <span className="font-mono">{ui.state.currentCommit.slice(0, 7)}</span>
+                {t('integrateCommits.currentCommit')}: <span className="font-mono">{ui.state.currentCommit.slice(0, 7)}</span>
               </div>
               <div className="flex flex-wrap gap-1.5">
                 {ui.details.unmergedFiles.slice(0, 6).map((file) => (
@@ -486,12 +488,12 @@ Important:
                   </span>
                 ))}
                 {ui.details.unmergedFiles.length > 6 && (
-                  <span className="text-xs text-muted-foreground">+{ui.details.unmergedFiles.length - 6} more</span>
+                  <span className="text-xs text-muted-foreground">+{ui.details.unmergedFiles.length - 6} {t('integrateCommits.more')}</span>
                 )}
               </div>
               <div className="flex items-center gap-2 pt-1">
                 <Button size="sm" variant="ghost" className="h-7 px-2 py-0 typography-meta" onClick={() => void handleAbort()}>
-                  Abort
+                  {t('integrateCommits.abort')}
                 </Button>
                 <Button
                   size="sm"
@@ -501,7 +503,7 @@ Important:
                   onClick={() => void handleResolveWithAi({ state: ui.state, details: ui.details }, false)}
                 >
                   <RiSparklingLine className="size-3.5" />
-                  Current Session
+                  {t('integrateCommits.currentSession')}
                 </Button>
                 <Button
                   size="sm"
@@ -510,10 +512,10 @@ Important:
                   onClick={() => void handleResolveWithAi({ state: ui.state, details: ui.details }, true)}
                 >
                   <RiSparklingLine className="size-3.5" />
-                  New Session
+                  {t('integrateCommits.newSession')}
                 </Button>
                 <Button size="sm" className="h-7 px-2 py-0 typography-meta" onClick={() => void handleContinue()}>
-                  Continue
+                  {t('integrateCommits.continue')}
                 </Button>
               </div>
             </div>

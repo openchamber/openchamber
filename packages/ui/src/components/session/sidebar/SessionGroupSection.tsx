@@ -13,6 +13,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { cn } from '@/lib/utils';
 import { sessionEvents } from '@/lib/sessionEvents';
 import type { MainTab } from '@/stores/useUIStore';
+import { useLanguage } from '@/hooks/useLanguage';
 import { SessionFolderItem } from '../SessionFolderItem';
 import { DroppableFolderWrapper, SessionFolderDndScope } from './sessionFolderDnd';
 import type { GroupSearchData, SessionGroup, SessionNode } from './types';
@@ -90,6 +91,7 @@ type Props = {
 };
 
 export function SessionGroupSection(props: Props): React.ReactNode {
+  const { t } = useLanguage();
   const {
     group,
     groupKey,
@@ -346,7 +348,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
       {visibleSessions.map((node) => renderSessionNode(node, 0, group.directory, projectId, group.isArchivedBucket === true))}
       {totalSessions === 0 && allFoldersForGroup.length === 0 ? (
         <div className="py-1 text-left typography-micro text-muted-foreground">
-          {group.isArchivedBucket ? 'No archived sessions yet.' : 'No sessions in this workspace yet.'}
+          {group.isArchivedBucket ? t('sessionSidebar.noArchivedSessionsYet') : t('sessionSidebar.noSessionsInWorkspaceYet')}
         </div>
       ) : null}
       {remainingCount > 0 && !isExpanded ? (
@@ -355,7 +357,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
           onClick={() => toggleGroupSessionLimit(groupKey)}
           className="mt-0.5 flex items-center justify-start rounded-md px-1.5 py-0.5 text-left text-xs text-muted-foreground/70 leading-tight hover:text-foreground hover:underline"
         >
-          Show {remainingCount} more {remainingCount === 1 ? 'session' : 'sessions'}
+          {t('sessionSidebar.showMoreSessions', { count: remainingCount })}
         </button>
       ) : null}
       {isExpanded && totalSessions > maxVisible ? (
@@ -364,7 +366,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
           onClick={() => toggleGroupSessionLimit(groupKey)}
           className="mt-0.5 flex items-center justify-start rounded-md px-1.5 py-0.5 text-left text-xs text-muted-foreground/70 leading-tight hover:text-foreground hover:underline"
         >
-          Show fewer sessions
+          {t('sessionSidebar.showFewerSessions')}
         </button>
       ) : null}
     </SessionFolderDndScope>
@@ -387,7 +389,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
             onToggleCollapsedGroup(groupKey);
           }
         }}
-        aria-label={isCollapsed ? `Expand ${group.label}` : `Collapse ${group.label}`}
+        aria-label={isCollapsed ? t('sessionSidebar.expandGroup', { label: group.label }) : t('sessionSidebar.collapseGroup', { label: group.label })}
       >
         <div className={cn(
           'min-w-0 flex items-center gap-1.5 pl-1.5 transition-[padding]',
@@ -541,12 +543,12 @@ export function SessionGroupSection(props: Props): React.ReactNode {
                     });
                   }}
                   className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-                  aria-label={`Delete ${group.label}`}
+                  aria-label={t('sessionSidebar.deleteGroup', { label: group.label })}
                 >
                   <RiDeleteBinLine className="h-4 w-4" />
                 </button>
               </TooltipTrigger>
-              <TooltipContent side="bottom" sideOffset={4}><p>Delete worktree</p></TooltipContent>
+              <TooltipContent side="bottom" sideOffset={4}><p>{t('sessionSidebar.deleteWorktree')}</p></TooltipContent>
             </Tooltip>
           </div>
         ) : null}
@@ -564,12 +566,12 @@ export function SessionGroupSection(props: Props): React.ReactNode {
                     openNewSessionDraft({ directoryOverride: group.directory });
                   }}
                   className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-                  aria-label={`New session in ${group.label}`}
+                  aria-label={t('sessionSidebar.newSessionInGroup', { label: group.label })}
                 >
                   <RiAddLine className="h-4 w-4" />
                 </button>
               </TooltipTrigger>
-              <TooltipContent side="bottom" sideOffset={4}><p>New session</p></TooltipContent>
+              <TooltipContent side="bottom" sideOffset={4}><p>{t('sessionSidebar.newSession')}</p></TooltipContent>
             </Tooltip>
           </div>
         ) : null}

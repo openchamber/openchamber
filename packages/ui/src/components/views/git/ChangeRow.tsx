@@ -8,6 +8,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import type { GitStatus } from '@/lib/api/types';
+import { useLanguage } from '@/hooks/useLanguage';
 
 type ChangeDescriptor = {
   code: string;
@@ -15,16 +16,14 @@ type ChangeDescriptor = {
   description: string;
 };
 
-const CHANGE_DESCRIPTORS: Record<string, ChangeDescriptor> = {
-  '?': { code: '?', color: 'var(--status-info)', description: 'Untracked file' },
-  A: { code: 'A', color: 'var(--status-success)', description: 'New file' },
-  D: { code: 'D', color: 'var(--status-error)', description: 'Deleted file' },
-  R: { code: 'R', color: 'var(--status-info)', description: 'Renamed file' },
-  C: { code: 'C', color: 'var(--status-info)', description: 'Copied file' },
-  M: { code: 'M', color: 'var(--status-warning)', description: 'Modified file' },
-};
-
-const DEFAULT_DESCRIPTOR = CHANGE_DESCRIPTORS.M;
+const getChangeDescriptors = (t: (key: string, params?: Record<string, unknown>) => string): Record<string, ChangeDescriptor> => ({
+  '?': { code: '?', color: 'var(--status-info)', description: t('changeRow.untrackedFile') },
+  A: { code: 'A', color: 'var(--status-success)', description: t('changeRow.newFile') },
+  D: { code: 'D', color: 'var(--status-error)', description: t('changeRow.deletedFile') },
+  R: { code: 'R', color: 'var(--status-info)', description: t('changeRow.renamedFile') },
+  C: { code: 'C', color: 'var(--status-info)', description: t('changeRow.copiedFile') },
+  M: { code: 'M', color: 'var(--status-warning)', description: t('changeRow.modifiedFile') },
+});
 
 function getChangeSymbol(file: GitStatus['files'][number]): string {
   const indexCode = file.index?.trim();
@@ -36,9 +35,12 @@ function getChangeSymbol(file: GitStatus['files'][number]): string {
   return indexCode?.charAt(0) || workingCode?.charAt(0) || 'M';
 }
 
-function describeChange(file: GitStatus['files'][number]): ChangeDescriptor {
+function describeChange(
+  file: GitStatus['files'][number],
+  changeDescriptors: Record<string, ChangeDescriptor>,
+): ChangeDescriptor {
   const symbol = getChangeSymbol(file);
-  return CHANGE_DESCRIPTORS[symbol] ?? DEFAULT_DESCRIPTOR;
+  return changeDescriptors[symbol] ?? changeDescriptors.M;
 }
 
 interface ChangeRowProps {
@@ -62,7 +64,9 @@ export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
   stats,
   rowPaddingClassName,
 }) {
-  const descriptor = useMemo(() => describeChange(file), [file]);
+  const { t } = useLanguage();
+  const changeDescriptors = useMemo(() => getChangeDescriptors(t), [t]);
+  const descriptor = useMemo(() => describeChange(file, changeDescriptors), [changeDescriptors, file]);
   const indicatorLabel = descriptor.description;
   const insertions = stats?.insertions ?? 0;
   const deletions = stats?.deletions ?? 0;
@@ -110,7 +114,7 @@ export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
           type="button"
           onClick={handleToggleClick}
           aria-pressed={checked}
-          aria-label={`Select ${file.path}`}
+          aria-label={t('changeRow.selectFile', { path: file.path })}
           className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         >
           {checked ? (
@@ -167,7 +171,7 @@ export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
               onClick={handleRevertClick}
               disabled={isReverting}
               className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-50"
-              aria-label={`Revert changes for ${file.path}`}
+              aria-label={t('changeRow.revertChangesForFile', { path: file.path })}
             >
               {isReverting ? (
                 <RiLoader4Line className="size-3.5 animate-spin" />
@@ -176,7 +180,7 @@ export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
               )}
             </button>
           </TooltipTrigger>
-          <TooltipContent sideOffset={8}>Revert changes</TooltipContent>
+          <TooltipContent sideOffset={8}>{t('changeRow.revertChanges')}</TooltipContent>
         </Tooltip>
     </div>
   );

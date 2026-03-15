@@ -6,6 +6,7 @@ import { useCommandsStore } from '@/stores/useCommandsStore';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useShallow } from 'zustand/react/shallow';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { useLanguage } from '@/hooks/useLanguage';
 
 interface CommandInfo {
   name: string;
@@ -42,6 +43,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
   onTabSelect,
   style,
 }, ref) => {
+  const { t } = useLanguage();
   const { hasMessagesInCurrentSession, currentSessionId } = useSessionStore(
     useShallow((state) => {
       const sessionId = state.currentSessionId;
@@ -107,18 +109,18 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
 
         const builtInCommands: CommandInfo[] = [
           ...(hasSession && !hasMessagesInCurrentSession
-            ? [{ name: 'init', description: 'Create/update AGENTS.md file', isBuiltIn: true }]
+            ? [{ name: 'init', description: t('chatAutocomplete.createUpdateAgentsMdFile'), isBuiltIn: true }]
             : []
           ),
           ...(hasSession  // Show when session exists, not when hasMessages
             ? [
-                { name: 'undo', description: 'Undo the last message', isBuiltIn: true },
-                { name: 'redo', description: 'Redo previously undone messages', isBuiltIn: true },
-                { name: 'timeline', description: 'Jump to a specific message', isBuiltIn: true },
+                { name: 'undo', description: t('chatAutocomplete.undoLastMessage'), isBuiltIn: true },
+                { name: 'redo', description: t('chatAutocomplete.redoPreviouslyUndoneMessages'), isBuiltIn: true },
+                { name: 'timeline', description: t('chatAutocomplete.jumpToSpecificMessage'), isBuiltIn: true },
               ]
             : []
           ),
-          { name: 'compact', description: 'Compress session history using AI to reduce context size', isBuiltIn: true },
+          { name: 'compact', description: t('chatAutocomplete.compressSessionHistory'), isBuiltIn: true },
         ];
 
         const commandMap = new Map<string, CommandInfo>();
@@ -151,18 +153,18 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
         const allowInitCommand = !hasMessagesInCurrentSession;
         const builtInCommands: CommandInfo[] = [
           ...(hasSession && !hasMessagesInCurrentSession
-            ? [{ name: 'init', description: 'Create/update AGENTS.md file', isBuiltIn: true }]
+            ? [{ name: 'init', description: t('chatAutocomplete.createUpdateAgentsMdFile'), isBuiltIn: true }]
             : []
           ),
           ...(hasSession  // Show when session exists, not when hasMessages
             ? [
-                { name: 'undo', description: 'Undo the last message', isBuiltIn: true },
-                { name: 'redo', description: 'Redo previously undone messages', isBuiltIn: true },
-                { name: 'timeline', description: 'Jump to a specific message', isBuiltIn: true },
+                { name: 'undo', description: t('chatAutocomplete.undoLastMessage'), isBuiltIn: true },
+                { name: 'redo', description: t('chatAutocomplete.redoPreviouslyUndoneMessages'), isBuiltIn: true },
+                { name: 'timeline', description: t('chatAutocomplete.jumpToSpecificMessage'), isBuiltIn: true },
               ]
             : []
           ),
-          { name: 'compact', description: 'Compress session history using AI to reduce context size', isBuiltIn: true },
+          { name: 'compact', description: t('chatAutocomplete.compressSessionHistory'), isBuiltIn: true },
         ];
 
         const filtered = (searchQuery
@@ -179,7 +181,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
     };
 
     loadCommands();
-  }, [searchQuery, hasMessagesInCurrentSession, hasSession, commandsWithMetadata, skills]);
+  }, [searchQuery, hasMessagesInCurrentSession, hasSession, commandsWithMetadata, skills, t]);
 
   React.useEffect(() => {
     setSelectedIndex(0);
@@ -259,9 +261,9 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
         <div className="px-2 pt-2 pb-1 border-b border-border/60">
           <div className="flex items-center gap-1 rounded-lg bg-[var(--surface-elevated)] p-1">
             {([
-              { id: 'commands' as const, label: 'Commands' },
-              { id: 'agents' as const, label: 'Agents' },
-              { id: 'files' as const, label: 'Files' },
+              { id: 'commands' as const, label: t('chatAutocomplete.commandsTab') },
+              { id: 'agents' as const, label: t('chatAutocomplete.agentsTab') },
+              { id: 'files' as const, label: t('chatAutocomplete.filesTab') },
             ]).map((tab) => (
               <button
                 key={tab.id}
@@ -367,12 +369,12 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
                       <span className="typography-ui-label font-medium">/{command.name}</span>
                       {command.isSkill ? (
                         <span className="text-[10px] leading-none uppercase font-bold tracking-tight bg-[var(--status-info-background)] text-[var(--status-info)] border-[var(--status-info-border)] px-1.5 py-1 rounded border flex-shrink-0">
-                          skill
+                          {t('chatAutocomplete.skillTag')}
                         </span>
                       ) : null}
                       {isSystem ? (
                         <span className="text-[10px] leading-none uppercase font-bold tracking-tight bg-[var(--status-warning-background)] text-[var(--status-warning)] border-[var(--status-warning-border)] px-1.5 py-1 rounded border flex-shrink-0">
-                          system
+                          {t('chatAutocomplete.systemTag')}
                         </span>
                       ) : command.scope ? (
                         <span className={cn(
@@ -401,14 +403,14 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
             })}
             {commands.length === 0 && (
               <div className="px-3 py-2 typography-ui-label text-muted-foreground">
-                No commands found
+                {t('chatAutocomplete.noCommandsFound')}
               </div>
             )}
           </div>
         )}
       </ScrollableOverlay>
       <div className="px-3 pt-1 pb-1.5 border-t typography-meta text-muted-foreground">
-        ↑↓ navigate • Enter select • Esc close
+        {t('chatAutocomplete.keyboardHints')}
       </div>
     </div>
   );

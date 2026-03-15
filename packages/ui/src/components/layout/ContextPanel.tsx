@@ -7,6 +7,7 @@ import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { DiffView, FilesView, PlanView } from '@/components/views';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
+import { useLanguage } from '@/hooks/useLanguage';
 import { cn } from '@/lib/utils';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -156,6 +157,7 @@ const truncateTabLabel = (value: string, maxChars: number): string => {
 };
 
 export const ContextPanel: React.FC = () => {
+  const { t } = useLanguage();
   const effectiveDirectory = useEffectiveDirectory() ?? '';
   const directoryKey = React.useMemo(() => normalizeDirectoryKey(effectiveDirectory), [effectiveDirectory]);
 
@@ -300,7 +302,6 @@ export const ContextPanel: React.FC = () => {
       setSelectedFilePath(directoryKey, activeTab.targetPath);
       return;
     }
-
     if (activeTab.mode === 'diff' && activeTab.targetPath) {
       setPendingDiffFile(activeTab.targetPath);
     }
@@ -458,8 +459,8 @@ export const ContextPanel: React.FC = () => {
           size="sm"
           onClick={handleToggleExpanded}
           className="h-7 w-7 p-0"
-          title={isExpanded ? 'Collapse panel' : 'Expand panel'}
-          aria-label={isExpanded ? 'Collapse panel' : 'Expand panel'}
+        title={isExpanded ? t('contextPanel.collapsePanel') : t('contextPanel.expandPanel')}
+        aria-label={isExpanded ? t('contextPanel.collapsePanel') : t('contextPanel.expandPanel')}
         >
           {isExpanded ? <RiFullscreenExitLine className="h-3.5 w-3.5" /> : <RiFullscreenLine className="h-3.5 w-3.5" />}
         </Button>
@@ -469,8 +470,8 @@ export const ContextPanel: React.FC = () => {
           size="sm"
           onClick={handleClose}
           className="h-7 w-7 p-0"
-          title="Close panel"
-          aria-label="Close panel"
+        title={t('contextPanel.closePanel')}
+        aria-label={t('contextPanel.closePanel')}
         >
           <RiCloseLine className="h-3.5 w-3.5" />
         </Button>
@@ -524,7 +525,7 @@ export const ContextPanel: React.FC = () => {
           onPointerCancel={handleResizeEnd}
           role="separator"
           aria-orientation="vertical"
-          aria-label="Resize context panel"
+          aria-label={t('contextPanel.resizeContextPanel')}
         />
       )}
       {header}

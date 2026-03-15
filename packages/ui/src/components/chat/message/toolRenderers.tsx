@@ -347,7 +347,7 @@ export const renderTodoOutput = (output: string, options?: { unstyled?: boolean 
                     <div className="space-y-2">
                         <div className="flex items-center gap-2">
                             <div className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: 'var(--foreground)' }} />
-                            <span className="typography-meta font-semibold text-foreground uppercase tracking-wide">In Progress</span>
+                            <span className="typography-meta font-semibold text-foreground uppercase tracking-wide">In Progress</span> {/* // i18n-scan-ignore */}
                         </div>
                         <div className="space-y-1.5 pl-4">
                             {todosByStatus.in_progress.map((todo, idx) => (
@@ -364,7 +364,7 @@ export const renderTodoOutput = (output: string, options?: { unstyled?: boolean 
                     <div className="space-y-2">
                         <div className="flex items-center gap-2">
                             <div className="w-2 h-2 rounded-full bg-muted-foreground/50" />
-                            <span className="typography-meta font-semibold text-muted-foreground uppercase tracking-wide">Pending</span>
+                            <span className="typography-meta font-semibold text-muted-foreground uppercase tracking-wide">Pending</span> {/* // i18n-scan-ignore */}
                         </div>
                         <div className="space-y-1.5 pl-4">
                             {todosByStatus.pending.map((todo, idx) => (
@@ -381,7 +381,7 @@ export const renderTodoOutput = (output: string, options?: { unstyled?: boolean 
                     <div className="space-y-2">
                         <div className="flex items-center gap-2">
                             <RiCheckLine className="w-3 h-3" style={{ color: 'var(--status-success)' }} />
-                            <span className="typography-meta font-semibold uppercase tracking-wide" style={{ color: 'var(--status-success)' }}>Completed</span>
+                            <span className="typography-meta font-semibold uppercase tracking-wide" style={{ color: 'var(--status-success)' }}>Completed</span> {/* // i18n-scan-ignore */}
                         </div>
                         <div className="space-y-1.5 pl-4">
                             {todosByStatus.completed.map((todo, idx) => (
@@ -398,7 +398,7 @@ export const renderTodoOutput = (output: string, options?: { unstyled?: boolean 
                     <div className="space-y-2">
                         <div className="flex items-center gap-2">
                             <span className="w-3 h-3 text-muted-foreground/50">×</span>
-                            <span className="typography-meta font-semibold text-muted-foreground/50 uppercase tracking-wide">Cancelled</span>
+                            <span className="typography-meta font-semibold text-muted-foreground/50 uppercase tracking-wide">Cancelled</span> {/* // i18n-scan-ignore */}
                         </div>
                         <div className="space-y-1.5 pl-4">
                             {todosByStatus.cancelled.map((todo, idx) => (

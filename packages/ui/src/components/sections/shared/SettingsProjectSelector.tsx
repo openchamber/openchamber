@@ -10,12 +10,14 @@ import { RiArrowDownSLine, RiFolderLine } from '@remixicon/react';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { cn } from '@/lib/utils';
+import { useLanguage } from '@/hooks/useLanguage';
 
 const formatProjectLabel = (label: string): string => {
   return label.replace(/[-_]/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
 };
 
 export const SettingsProjectSelector: React.FC<{ className?: string }> = ({ className }) => {
+  const { t } = useLanguage();
   const projects = useProjectsStore((state) => state.projects);
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
   const setActiveProject = useProjectsStore((state) => state.setActiveProject);
@@ -39,7 +41,7 @@ export const SettingsProjectSelector: React.FC<{ className?: string }> = ({ clas
 
   const rawLabel = activeProject?.label && activeProject.label.trim().length > 0
     ? activeProject.label
-    : (activeProject?.path.split('/').filter(Boolean).pop() || activeProject?.path || 'Project');
+    : (activeProject?.path.split('/').filter(Boolean).pop() || activeProject?.path || t('settingsProjectSelector.defaultProject'));
   const label = formatProjectLabel(rawLabel);
 
   return (
@@ -48,8 +50,8 @@ export const SettingsProjectSelector: React.FC<{ className?: string }> = ({ clas
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              aria-label="Switch project"
-              title="Switch project"
+              aria-label={t('settingsProjectSelector.switchProject')}
+              title={t('settingsProjectSelector.switchProject')}
               className={cn(
                 // Mirror Input sizing so headers align visually.
                 'text-foreground border border-border/80 appearance-none flex h-8 w-full min-w-0 rounded-lg bg-transparent px-3 py-1 outline-none',

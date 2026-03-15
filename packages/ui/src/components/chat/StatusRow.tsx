@@ -15,6 +15,7 @@ import { useUIStore } from "@/stores/useUIStore";
 import { WorkingPlaceholder } from "./message/parts/WorkingPlaceholder";
 import { isVSCodeRuntime } from "@/lib/desktop";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useLanguage } from "@/hooks/useLanguage";
 
 const statusConfig: Record<TodoStatus, { textClassName: string }> = {
   in_progress: {
@@ -145,6 +146,7 @@ export const StatusRow: React.FC<StatusRowProps> = ({
   showTodos = true,
   agentName,
 }) => {
+  const { t } = useLanguage();
   const [isExpanded, setIsExpanded] = React.useState(false);
   const currentSessionId = useSessionStore((state) => state.currentSessionId);
   const todos = useTodoStore((state) =>
@@ -224,7 +226,7 @@ export const StatusRow: React.FC<StatusRowProps> = ({
       type="button"
       onClick={onAbort}
       className="flex items-center justify-center h-[1.2rem] w-[1.2rem] text-[var(--status-error)] transition-opacity hover:opacity-80 focus-visible:outline-none flex-shrink-0"
-      aria-label="Stop generating"
+      aria-label={t('statusRow.stopGenerating')}
     >
       <RiCloseCircleLine size={18} aria-hidden="true" />
     </button>
@@ -243,7 +245,7 @@ export const StatusRow: React.FC<StatusRowProps> = ({
           {activeTodo.content}
         </span>
       ) : (
-        <span className="typography-ui-label">Tasks</span>
+        <span className="typography-ui-label">{t('statusRow.tasks')}</span>
       )}
       <span className="typography-meta">
         {statusSummary.active} active · {statusSummary.left} left
@@ -305,7 +307,7 @@ export const StatusRow: React.FC<StatusRowProps> = ({
             >
               {/* Header */}
               <div className="flex items-center justify-between px-3 py-2 border-b border-border">
-                <span className="typography-ui-label text-muted-foreground">Tasks</span>
+                <span className="typography-ui-label text-muted-foreground">{t('statusRow.tasks')}</span>
                 <span className="typography-meta text-muted-foreground">
                   {progress.completed}/{progress.total}
                 </span>

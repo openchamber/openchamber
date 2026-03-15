@@ -7,12 +7,14 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { RiCloseLine, RiDatabase2Line, RiPulseLine } from '@remixicon/react';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { useLanguage } from '@/hooks/useLanguage';
 
 interface MemoryDebugPanelProps {
   onClose?: () => void;
 }
 
 export const MemoryDebugPanel: React.FC<MemoryDebugPanelProps> = ({ onClose }) => {
+  const { t } = useLanguage();
   const {
     sessions,
     messages,
@@ -53,7 +55,7 @@ export const MemoryDebugPanel: React.FC<MemoryDebugPanelProps> = ({ onClose }) =
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <RiDatabase2Line className="h-4 w-4" />
-          <h3 className="font-semibold typography-ui-label">Memory Debug Panel</h3>
+          <h3 className="font-semibold typography-ui-label">{t('memoryDebugPanel.title')}</h3>
         </div>
         {onClose && (
           <Button
@@ -71,11 +73,11 @@ export const MemoryDebugPanel: React.FC<MemoryDebugPanelProps> = ({ onClose }) =
         {}
         <div className="grid grid-cols-2 gap-2 typography-meta">
           <div className="bg-muted/50 rounded p-2">
-            <div className="text-muted-foreground">Total Messages</div>
+            <div className="text-muted-foreground">{t('memoryDebugPanel.totalMessages')}</div>
             <div className="typography-markdown font-semibold">{totalMessages}</div>
           </div>
           <div className="bg-muted/50 rounded p-2">
-            <div className="text-muted-foreground">Cached Sessions</div>
+            <div className="text-muted-foreground">{t('memoryDebugPanel.cachedSessions')}</div>
             <div className="typography-markdown font-semibold">{cachedSessionCount} / {MEMORY_LIMITS.MAX_SESSIONS}</div>
           </div>
         </div>
@@ -85,22 +87,22 @@ export const MemoryDebugPanel: React.FC<MemoryDebugPanelProps> = ({ onClose }) =
         {}
         <div className="typography-meta space-y-1 border-t pt-2">
           <div className="flex justify-between">
-            <span className="text-muted-foreground">Viewport Window:</span>
+            <span className="text-muted-foreground">{t('memoryDebugPanel.viewportWindow')}:</span>
             <span>{getBackgroundTrimLimit()} messages</span>
           </div>
           <div className="flex justify-between">
-            <span className="text-muted-foreground">Zombie Timeout:</span>
-            <span>{MEMORY_LIMITS.ZOMBIE_TIMEOUT / 1000 / 60} minutes</span>
+            <span className="text-muted-foreground">{t('memoryDebugPanel.zombieTimeout')}</span>
+            <span>{t('memoryDebugPanel.zombieTimeoutValue', { minutes: MEMORY_LIMITS.ZOMBIE_TIMEOUT / 1000 / 60 })}</span>
           </div>
           <div className="flex justify-between">
-            <span className="text-muted-foreground">GitHub Total Requests:</span>
+            <span className="text-muted-foreground">{t('memoryDebugPanel.githubTotalRequests')}</span>
             <span>{totalGitHubRequests}</span>
           </div>
         </div>
 
         {}
         <div className="border-t pt-2">
-          <div className="typography-meta font-semibold mb-1">Sessions in Memory:</div>
+          <div className="typography-meta font-semibold mb-1">{t('memoryDebugPanel.sessionsInMemory')}:</div>
           <ScrollableOverlay outerClassName="max-h-48" className="space-y-1 pr-1">
             {sessionStats.map(stat => (
               <div
@@ -153,7 +155,7 @@ export const MemoryDebugPanel: React.FC<MemoryDebugPanelProps> = ({ onClose }) =
               </Button>
             </TooltipTrigger>
             <TooltipContent side="top">
-              Log current memory state to browser console
+              {t('memoryDebugPanel.logCurrentStateHint')}
             </TooltipContent>
           </Tooltip>
         </div>

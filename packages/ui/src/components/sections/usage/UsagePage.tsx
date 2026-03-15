@@ -1,4 +1,5 @@
 import React from 'react';
+import { useLanguage } from '@/hooks/useLanguage';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Checkbox } from '@/components/ui/checkbox';
 import { UsageCard } from './UsageCard';
@@ -34,6 +35,7 @@ interface ModelInfo {
 }
 
 export const UsagePage: React.FC = () => {
+  const { t } = useLanguage();
   const results = useQuotaStore((state) => state.results);
   const selectedProviderId = useQuotaStore((state) => state.selectedProviderId);
   const setSelectedProvider = useQuotaStore((state) => state.setSelectedProvider);
@@ -70,7 +72,7 @@ export const UsagePage: React.FC = () => {
   const selectedResult = results.find((entry) => entry.providerId === selectedProviderId) ?? null;
 
   const providerMeta = QUOTA_PROVIDERS.find((provider) => provider.id === selectedProviderId);
-  const providerName = providerMeta?.name ?? selectedProviderId ?? 'Usage';
+  const providerName = providerMeta?.name ?? selectedProviderId ?? t('usagePage.fallbackProviderName');
   const usage = selectedResult?.usage;
   const showInDropdown = selectedProviderId ? dropdownProviderIds.includes(selectedProviderId) : false;
   const handleDropdownToggle = React.useCallback((enabled: boolean) => {
@@ -142,7 +144,7 @@ export const UsagePage: React.FC = () => {
   if (!selectedProviderId) {
     return (
       <div className="flex h-full items-center justify-center text-muted-foreground">
-        <p className="typography-body">Select a provider to view usage details.</p>
+        <p className="typography-body">{t('usagePage.selectProvider')}</p>
       </div>
     );
   }
@@ -156,13 +158,13 @@ export const UsagePage: React.FC = () => {
           <ProviderLogo providerId={selectedProviderId} className="h-5 w-5 shrink-0" />
           <div className="min-w-0">
             <h2 className="typography-ui-header font-semibold text-foreground truncate">
-              {providerName} Usage
+              {t('usagePage.providerUsage', { provider: providerName })}
             </h2>
             <p className="typography-meta text-muted-foreground truncate">
               {isLoading ? (
-                <span className="animate-pulse">Refreshing usage...</span>
+                <span className="animate-pulse">{t('usagePage.refreshingUsage')}</span>
               ) : (
-                `Last updated: ${formatTime(lastUpdated)}`
+                `${t('usagePage.lastUpdated')} ${formatTime(lastUpdated)}`
               )}
             </p>
           </div>
@@ -186,16 +188,16 @@ export const UsagePage: React.FC = () => {
             <Checkbox
               checked={showInDropdown}
               onChange={handleDropdownToggle}
-              ariaLabel="Show in header menu"
+              ariaLabel={t('usagePage.showInHeaderMenuAria')}
             />
             <div className="flex min-w-0 items-center gap-1.5">
-              <span className="typography-ui-label text-foreground">Show in Header Menu</span>
+              <span className="typography-ui-label text-foreground">{t('usagePage.showInHeaderMenu')}</span>
               <Tooltip delayDuration={1000}>
                 <TooltipTrigger asChild>
                   <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
                 </TooltipTrigger>
                 <TooltipContent sideOffset={8} className="max-w-xs">
-                  When enabled, this provider's usage will be visible in the quick access dropdown menu in the app header.
+                  {t('usagePage.showInHeaderMenuTooltip')}
                 </TooltipContent>
               </Tooltip>
             </div>
@@ -205,22 +207,22 @@ export const UsagePage: React.FC = () => {
         {/* State Messages */}
         {!selectedResult && (
           <div className="mb-8 px-2">
-            <p className="typography-ui-label text-foreground">No usage data available yet.</p>
+            <p className="typography-ui-label text-foreground">{t('usagePage.noUsageData')}</p>
           </div>
         )}
 
         {error && (
           <div className="mb-8 rounded-lg border border-[var(--status-error-border)] bg-[var(--status-error-background)] px-4 py-3">
-            <p className="typography-ui-label font-medium text-[var(--status-error)]">Failed to refresh usage data</p>
+            <p className="typography-ui-label font-medium text-[var(--status-error)]">{t('usagePage.failedToRefreshUsage')}</p>
             <p className="typography-meta text-[var(--status-error)]/80 mt-1">{error}</p>
           </div>
         )}
 
         {selectedResult && !selectedResult.configured && (
           <div className="mb-8 rounded-lg border border-[var(--status-warning-border)] bg-[var(--status-warning-background)] px-4 py-3">
-            <p className="typography-ui-label font-medium text-[var(--status-warning)]">Provider not configured</p>
+            <p className="typography-ui-label font-medium text-[var(--status-warning)]">{t('usagePage.providerNotConfigured')}</p>
             <p className="typography-meta text-[var(--status-warning)]/80 mt-1">
-              Add credentials in the Providers tab to enable usage tracking.
+              {t('usagePage.providerNotConfiguredDesc')}
             </p>
           </div>
         )}
@@ -242,7 +244,7 @@ export const UsagePage: React.FC = () => {
         {providerModels.length > 0 && (
           <div className="mb-8">
             <div className="mb-1 px-1">
-              <h3 className="typography-ui-header font-medium text-foreground">Model Quotas</h3>
+              <h3 className="typography-ui-header font-medium text-foreground">{t('usagePage.modelQuotas')}</h3>
             </div>
 
             <div className="space-y-3">
@@ -314,7 +316,7 @@ export const UsagePage: React.FC = () => {
                     >
                       <CollapsibleTrigger className="flex w-full items-center justify-between py-0.5 group">
                         <div className="flex items-center gap-1.5 text-left">
-                          <span className="typography-ui-label font-normal text-foreground">Other Models</span>
+                          <span className="typography-ui-label font-normal text-foreground">{t('usagePage.otherModels')}</span>
                           <span className="typography-micro text-muted-foreground">
                             ({otherModels.length})
                           </span>
@@ -358,8 +360,8 @@ export const UsagePage: React.FC = () => {
         {selectedResult?.configured && usage && Object.keys(usage.windows ?? {}).length === 0 &&
           providerModels.length === 0 && (
           <div className="mb-8 px-2">
-            <p className="typography-ui-label text-foreground">No quota windows reported</p>
-            <p className="typography-meta text-muted-foreground mt-1">This provider does not currently report any rate limits or usage quotas.</p>
+            <p className="typography-ui-label text-foreground">{t('usagePage.noQuotaWindows')}</p>
+            <p className="typography-meta text-muted-foreground mt-1">{t('usagePage.noQuotaWindowsDesc')}</p>
           </div>
         )}
 

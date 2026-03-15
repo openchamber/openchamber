@@ -2,6 +2,7 @@ import React from 'react';
 import { cn, fuzzyMatch } from '@/lib/utils';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { useLanguage } from '@/hooks/useLanguage';
 
 interface SkillInfo {
   name: string;
@@ -26,6 +27,7 @@ export const SkillAutocomplete = React.forwardRef<SkillAutocompleteHandle, Skill
   onClose,
   style,
 }, ref) => {
+  const { t } = useLanguage();
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const [selectedIndex, setSelectedIndex] = React.useState(0);
   const [filteredSkills, setFilteredSkills] = React.useState<SkillInfo[]>([]);
@@ -158,12 +160,12 @@ export const SkillAutocomplete = React.forwardRef<SkillAutocompleteHandle, Skill
           </div>
         ) : (
           <div className="px-3 py-2 typography-ui-label text-muted-foreground">
-            No skills found
+            {t('skillAutocomplete.noSkillsFound')}
           </div>
         )}
       </ScrollableOverlay>
       <div className="px-3 pt-1 pb-1.5 border-t typography-meta text-muted-foreground">
-        ↑↓ navigate • Enter select • Esc close
+        {t('modelSelector.keyboardHints')}
       </div>
     </div>
   );

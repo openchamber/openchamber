@@ -3,6 +3,7 @@ import { RiErrorWarningLine, RiRestartLine } from '@remixicon/react';
 import { Button } from './button';
 import { Card, CardContent, CardHeader, CardTitle } from './card';
 import { copyTextToClipboard } from '@/lib/clipboard';
+import { useLanguage } from '@/hooks/useLanguage';
 
 interface ErrorBoundaryState {
   hasError: boolean;
@@ -16,8 +17,12 @@ interface ErrorBoundaryProps {
   fallback?: React.ReactNode;
 }
 
-export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  constructor(props: ErrorBoundaryProps) {
+interface InternalErrorBoundaryProps extends ErrorBoundaryProps {
+  t: (key: string) => string;
+}
+
+class InternalErrorBoundary extends React.Component<InternalErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: InternalErrorBoundaryProps) {
     super(props);
     this.state = { hasError: false };
   }
@@ -63,17 +68,17 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
             <CardHeader className="text-center">
               <CardTitle className="flex items-center justify-center gap-2 text-destructive">
                 <RiErrorWarningLine className="h-5 w-5" />
-                Something went wrong
+                {this.props.t('errorBoundary.somethingWentWrong')}
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <p className="text-sm text-muted-foreground text-center">
-                The application encountered an unexpected error. This has been logged for debugging.
+                {this.props.t('errorBoundary.unexpectedError')}
               </p>
 
               {this.state.error && (
                 <details className="text-xs font-mono bg-muted p-3 rounded">
-                  <summary className="cursor-pointer hover:bg-interactive-hover/80">Error details</summary>
+                  <summary className="cursor-pointer hover:bg-interactive-hover/80">{this.props.t('errorBoundary.errorDetails')}</summary>
                   <pre className="mt-2 overflow-x-auto">
                     {this.state.error.toString()}
                     {this.state.errorInfo?.componentStack ? `\n\nComponent stack:${this.state.errorInfo.componentStack}` : ''}
@@ -84,10 +89,10 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
               <div className="flex gap-2">
                 <Button onClick={this.handleReset} variant="outline" className="flex-1">
                   <RiRestartLine className="h-4 w-4 mr-2" />
-                  Try again
+                  {this.props.t('errorBoundary.tryAgain')}
                 </Button>
                 <Button onClick={this.handleCopy} variant="outline" className="flex-1">
-                  {this.state.copied ? 'Copied' : 'Copy'}
+                  {this.state.copied ? this.props.t('errorBoundary.copied') : this.props.t('common.copy')}
                 </Button>
               </div>
             </CardContent>
@@ -99,3 +104,8 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
     return this.props.children;
   }
 }
+
+export const ErrorBoundary: React.FC<ErrorBoundaryProps> = (props) => {
+  const { t } = useLanguage();
+  return <InternalErrorBoundary {...props} t={t} />;
+};

@@ -22,6 +22,7 @@ import { formatDirectoryName } from '@/lib/utils';
 import { formatProjectLabel } from './utils';
 import type { ProjectRef } from '@/lib/openchamberConfig';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
+import { useLanguage } from '@/hooks/useLanguage';
 
 type ProjectItem = {
   id: string;
@@ -73,6 +74,7 @@ type Props = {
 };
 
 export function SidebarHeader(props: Props): React.ReactNode {
+  const { t } = useLanguage();
   const {
     hideDirectoryControls,
     hideProjectSelector,
@@ -137,7 +139,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
                       || formatDirectoryName(activeProjectForHeader.normalizedPath, homeDirectory)
                       || activeProjectForHeader.normalizedPath,
                     )
-                    : 'Projects'}
+                    : t('navigation.projectNavigation')}
                 </span>
                 <RiArrowDownSLine className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
               </button>
@@ -169,7 +171,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
                   className="gap-2"
                 >
                   <RiPencilAiLine className="h-4 w-4" />
-                  Rename project
+                  {t('sessionSidebar.renameProject')}
                 </DropdownMenuItem>
               ) : (
                 <div className="px-2 py-1.5">
@@ -184,7 +186,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
                       value={projectRenameDraft}
                       onChange={(event) => setProjectRenameDraft(event.target.value)}
                       className="h-7 flex-1 rounded border border-border bg-transparent px-2 typography-ui-label text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-                      placeholder="Rename project"
+                      placeholder={t('sessionSidebar.renameProject')}
                       autoFocus
                       onKeyDown={(event) => {
                         if (event.key === 'Escape') {
@@ -218,7 +220,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
                 className="text-destructive focus:text-destructive gap-2"
               >
                 <RiCloseLine className="h-4 w-4" />
-                Close project
+                {t('navigation.closeProject')}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -229,27 +231,27 @@ export function SidebarHeader(props: Props): React.ReactNode {
                   <button
                     type="button"
                     className={addProjectButtonClass}
-                    aria-label="Session display mode"
+                    aria-label={t('sessionSidebar.displayMode')}
                   >
                     <RiEqualizer2Line className={headerActionIconClass} />
                   </button>
                 </DropdownMenuTrigger>
               </TooltipTrigger>
-              <TooltipContent side="bottom" sideOffset={4}><p>Display mode</p></TooltipContent>
+              <TooltipContent side="bottom" sideOffset={4}><p>{t('sessionSidebar.displayMode')}</p></TooltipContent>
             </Tooltip>
             <DropdownMenuContent align="end" className="min-w-[160px]">
               <DropdownMenuItem
                 onClick={() => setDisplayMode('default')}
                 className="flex items-center justify-between"
               >
-                <span>Default</span>
+                <span>{t('sessionSidebar.displayModeDefault')}</span>
                 {displayMode === 'default' ? <RiCheckLine className="h-4 w-4 text-primary" /> : null}
               </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={() => setDisplayMode('minimal')}
                 className="flex items-center justify-between"
               >
-                <span>Minimal</span>
+                <span>{t('sessionSidebar.displayModeMinimal')}</span>
                 {displayMode === 'minimal' ? <RiCheckLine className="h-4 w-4 text-primary" /> : null}
               </DropdownMenuItem>
             </DropdownMenuContent>
@@ -278,12 +280,12 @@ export function SidebarHeader(props: Props): React.ReactNode {
                             setNewWorktreeDialogOpen(true);
                           }}
                           className={headerActionButtonClass}
-                          aria-label="New worktree"
+                          aria-label={t('sessionSidebar.newWorktree')}
                         >
                           <RiNodeTree className={headerActionIconClass} />
                         </button>
                       </TooltipTrigger>
-                      <TooltipContent side="bottom" sideOffset={4}><p>New worktree</p></TooltipContent>
+                      <TooltipContent side="bottom" sideOffset={4}><p>{t('sessionSidebar.newWorktree')}</p></TooltipContent>
                     </Tooltip>
                     <Tooltip>
                       <TooltipTrigger asChild>
@@ -291,12 +293,12 @@ export function SidebarHeader(props: Props): React.ReactNode {
                           type="button"
                           onClick={openMultiRunLauncher}
                           className={headerActionButtonClass}
-                          aria-label="New multi-run"
+                          aria-label={t('sessionSidebar.newMultiRun')}
                         >
                           <ArrowsMerge className={headerActionIconClass} />
                         </button>
                       </TooltipTrigger>
-                      <TooltipContent side="bottom" sideOffset={4}><p>New multi-run</p></TooltipContent>
+                      <TooltipContent side="bottom" sideOffset={4}><p>{t('sessionSidebar.newMultiRun')}</p></TooltipContent>
                     </Tooltip>
                   </>
                 ) : null}
@@ -308,12 +310,12 @@ export function SidebarHeader(props: Props): React.ReactNode {
                         type="button"
                         onClick={() => setProjectNotesPanelOpen(true)}
                         className={headerActionButtonClass}
-                        aria-label="Project notes and todos"
+                        aria-label={t('sessionSidebar.projectNotesAndTodos')}
                       >
                         <RiStickyNoteLine className={headerActionIconClass} />
                       </button>
                     </TooltipTrigger>
-                    <TooltipContent side="bottom" sideOffset={4}><p>Project notes</p></TooltipContent>
+                    <TooltipContent side="bottom" sideOffset={4}><p>{t('sessionSidebar.projectNotes')}</p></TooltipContent>
                   </Tooltip>
                 ) : (
                   <DropdownMenu open={projectNotesPanelOpen} onOpenChange={setProjectNotesPanelOpen} modal={false}>
@@ -323,13 +325,13 @@ export function SidebarHeader(props: Props): React.ReactNode {
                           <button
                             type="button"
                             className={headerActionButtonClass}
-                            aria-label="Project notes and todos"
+                            aria-label={t('sessionSidebar.projectNotesAndTodos')}
                           >
                             <RiStickyNoteLine className={headerActionIconClass} />
                           </button>
                         </DropdownMenuTrigger>
                       </TooltipTrigger>
-                      <TooltipContent side="bottom" sideOffset={4}><p>Project notes</p></TooltipContent>
+                      <TooltipContent side="bottom" sideOffset={4}><p>{t('sessionSidebar.projectNotes')}</p></TooltipContent>
                     </Tooltip>
                     <DropdownMenuContent align="start" className="w-[340px] p-0">
                       <ProjectNotesTodoPanel
@@ -347,13 +349,13 @@ export function SidebarHeader(props: Props): React.ReactNode {
                       type="button"
                       onClick={() => setIsSessionSearchOpen((prev) => !prev)}
                       className={headerActionButtonClass}
-                      aria-label="Search sessions"
+                      aria-label={t('sessionSidebar.searchSessions')}
                       aria-expanded={isSessionSearchOpen}
                     >
                       <RiSearchLine className={headerActionIconClass} />
                     </button>
                   </TooltipTrigger>
-                  <TooltipContent side="bottom" sideOffset={4}><p>Search sessions</p></TooltipContent>
+                  <TooltipContent side="bottom" sideOffset={4}><p>{t('sessionSidebar.searchSessions')}</p></TooltipContent>
                 </Tooltip>
                 </div>
 
@@ -364,27 +366,27 @@ export function SidebarHeader(props: Props): React.ReactNode {
                         <button
                           type="button"
                           className={headerActionButtonClass}
-                          aria-label="Session display mode"
+                          aria-label={t('sessionSidebar.displayMode')}
                         >
                           <RiEqualizer2Line className={headerActionIconClass} />
                         </button>
                       </DropdownMenuTrigger>
                     </TooltipTrigger>
-                    <TooltipContent side="bottom" sideOffset={4}><p>Display mode</p></TooltipContent>
+                    <TooltipContent side="bottom" sideOffset={4}><p>{t('sessionSidebar.displayMode')}</p></TooltipContent>
                   </Tooltip>
                   <DropdownMenuContent align="end" className="min-w-[160px]">
                     <DropdownMenuItem
                       onClick={() => setDisplayMode('default')}
                       className="flex items-center justify-between"
                     >
-                      <span>Default</span>
+                      <span>{t('sessionSidebar.displayModeDefault')}</span>
                       {displayMode === 'default' ? <RiCheckLine className="h-4 w-4 text-primary" /> : null}
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       onClick={() => setDisplayMode('minimal')}
                       className="flex items-center justify-between"
                     >
-                      <span>Minimal</span>
+                      <span>{t('sessionSidebar.displayModeMinimal')}</span>
                       {displayMode === 'minimal' ? <RiCheckLine className="h-4 w-4 text-primary" /> : null}
                     </DropdownMenuItem>
                   </DropdownMenuContent>
@@ -395,9 +397,9 @@ export function SidebarHeader(props: Props): React.ReactNode {
                 <div className="px-1 pb-1">
                   <div className="mb-1 flex items-center justify-between px-0.5 typography-micro text-muted-foreground/80">
                     {hasSessionSearchQuery ? (
-                      <span>{searchMatchCount} {searchMatchCount === 1 ? 'match' : 'matches'}</span>
+                      <span>{t('sessionSidebar.matchesCount', { count: searchMatchCount })}</span>
                     ) : <span />}
-                    <span>Esc to clear</span>
+                    <span>{t('sessionSidebar.escToClear')}</span>
                   </div>
                   <div className="relative">
                     <RiSearchLine className="pointer-events-none absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -405,7 +407,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
                       ref={sessionSearchInputRef}
                       value={sessionSearchQuery}
                       onChange={(event) => setSessionSearchQuery(event.target.value)}
-                      placeholder="Search sessions..."
+                      placeholder={t('sessionSidebar.searchSessionsPlaceholder')}
                       className="h-8 w-full rounded-md border border-border bg-transparent pl-8 pr-8 typography-ui-label text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
                       onKeyDown={(event) => {
                         if (event.key === 'Escape') {
@@ -423,7 +425,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
                         type="button"
                         onClick={() => setSessionSearchQuery('')}
                         className="absolute right-1 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-                        aria-label="Clear search"
+                        aria-label={t('common.clear')}
                       >
                         <RiCloseLine className="h-3.5 w-3.5" />
                       </button>

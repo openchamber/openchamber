@@ -14,6 +14,7 @@ import { formatDirectoryName, formatPathForDisplay, cn } from '@/lib/utils';
 import type { SessionGroup } from './types';
 import { SortableGroupItem, SortableProjectItem } from './sortableItems';
 import { formatProjectLabel } from './utils';
+import { useLanguage } from '@/hooks/useLanguage';
 
 type ProjectSection = {
   project: {
@@ -63,6 +64,7 @@ type Props = {
 };
 
 export function SidebarProjectsList(props: Props): React.ReactNode {
+  const { t } = useLanguage();
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -91,7 +93,7 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
               ?? activeSection.groups.find((candidate) => candidate.isMain)
               ?? activeSection.groups[0];
             if (!primaryGroup) {
-              return <div className="py-1 text-left typography-micro text-muted-foreground">No sessions yet.</div>;
+              return <div className="py-1 text-left typography-micro text-muted-foreground">{t('sessionSidebar.noSessionsYetDot')}</div>;
             }
             const archivedGroup = activeSection.groups.find((candidate) => candidate.isArchivedBucket);
             const groupsToRender = [
@@ -207,7 +209,7 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
                         <DragOverlay dropAnimation={null} />
                       </DndContext>
                     ) : (
-                      <div className="py-1 text-left typography-micro text-muted-foreground">No sessions yet.</div>
+                      <div className="py-1 text-left typography-micro text-muted-foreground">{t('sessionSidebar.noSessionsYetDot')}</div>
                     )}
                   </div>
                 ) : null}

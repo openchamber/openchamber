@@ -2,6 +2,7 @@ import React from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { RiCheckboxBlankLine, RiCheckboxLine } from '@remixicon/react';
 import type { Session } from '@opencode-ai/sdk/v2';
+import { useLanguage } from '@/hooks/useLanguage';
 
 export type DeleteSessionConfirmState = {
   session: Session;
@@ -16,21 +17,22 @@ export function SessionDeleteConfirmDialog(props: {
   setShowDeletionDialog: (next: boolean) => void;
   onConfirm: () => Promise<void> | void;
 }): React.ReactNode {
+  const { t } = useLanguage();
   const { value, setValue, showDeletionDialog, setShowDeletionDialog, onConfirm } = props;
 
   return (
     <Dialog open={Boolean(value)} onOpenChange={(open) => { if (!open) setValue(null); }}>
       <DialogContent showCloseButton={false} className="max-w-sm gap-5">
         <DialogHeader>
-          <DialogTitle>{value?.archivedBucket ? 'Delete session?' : 'Archive session?'}</DialogTitle>
+          <DialogTitle>{value?.archivedBucket ? t('sessionSidebar.deleteSessionQuestion') : t('common.archive')}</DialogTitle>
           <DialogDescription>
             {value && value.descendantCount > 0
               ? value.archivedBucket
-                ? `"${value.session.title || 'Untitled Session'}" and its ${value.descendantCount} sub-task${value.descendantCount === 1 ? '' : 's'} will be permanently deleted.`
-                : `"${value.session.title || 'Untitled Session'}" and its ${value.descendantCount} sub-task${value.descendantCount === 1 ? '' : 's'} will be archived.`
+                ? `"${value.session.title || t('sessionDialogs.untitledSession')}" and its ${value.descendantCount} sub-task${value.descendantCount === 1 ? '' : 's'} will be permanently deleted.`
+                : `"${value.session.title || t('sessionDialogs.untitledSession')}" and its ${value.descendantCount} sub-task${value.descendantCount === 1 ? '' : 's'} will be archived.`
               : value?.archivedBucket
-                ? `"${value?.session.title || 'Untitled Session'}" will be permanently deleted.`
-                : `"${value?.session.title || 'Untitled Session'}" will be archived.`}
+                ? `"${value?.session.title || t('sessionDialogs.untitledSession')}" will be permanently deleted.`
+                : `"${value?.session.title || t('sessionDialogs.untitledSession')}" will be archived.`}
           </DialogDescription>
         </DialogHeader>
         <DialogFooter className="w-full sm:items-center sm:justify-between">
@@ -41,7 +43,7 @@ export function SessionDeleteConfirmDialog(props: {
             aria-pressed={!showDeletionDialog}
           >
             {!showDeletionDialog ? <RiCheckboxLine className="h-4 w-4 text-primary" /> : <RiCheckboxBlankLine className="h-4 w-4" />}
-            Never ask
+            {t('sessionDialogs.neverAsk')}
           </button>
           <div className="flex items-center gap-2">
             <button
@@ -49,14 +51,14 @@ export function SessionDeleteConfirmDialog(props: {
               onClick={() => setValue(null)}
               className="inline-flex h-8 items-center justify-center rounded-md border border-border px-3 typography-ui-label text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
             >
-              Cancel
+              {t('common.cancel')}
             </button>
             <button
               type="button"
               onClick={() => void onConfirm()}
               className="inline-flex h-8 items-center justify-center rounded-md bg-destructive px-3 typography-ui-label text-destructive-foreground hover:bg-destructive/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/50"
             >
-              {value?.archivedBucket ? 'Delete' : 'Archive'}
+              {value?.archivedBucket ? t('common.delete') : t('common.archive')}
             </button>
           </div>
         </DialogFooter>
@@ -78,13 +80,14 @@ export function FolderDeleteConfirmDialog(props: {
   setValue: (next: DeleteFolderConfirmState) => void;
   onConfirm: () => void;
 }): React.ReactNode {
+  const { t } = useLanguage();
   const { value, setValue, onConfirm } = props;
 
   return (
     <Dialog open={Boolean(value)} onOpenChange={(open) => { if (!open) setValue(null); }}>
       <DialogContent showCloseButton={false} className="max-w-sm gap-5">
         <DialogHeader>
-          <DialogTitle>Delete folder?</DialogTitle>
+          <DialogTitle>{t('sessionSidebar.deleteFolderQuestion')}</DialogTitle>
           <DialogDescription>
             {value && (value.subFolderCount > 0 || value.sessionCount > 0)
               ? `"${value.folderName}" will be deleted${value.subFolderCount > 0 ? ` along with ${value.subFolderCount} sub-folder${value.subFolderCount === 1 ? '' : 's'}` : ''}. Sessions inside will not be deleted.`
@@ -97,14 +100,14 @@ export function FolderDeleteConfirmDialog(props: {
             onClick={() => setValue(null)}
             className="inline-flex h-8 items-center justify-center rounded-md border border-border px-3 typography-ui-label text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
           >
-            Cancel
+            {t('common.cancel')}
           </button>
           <button
             type="button"
             onClick={onConfirm}
             className="inline-flex h-8 items-center justify-center rounded-md bg-destructive px-3 typography-ui-label text-destructive-foreground hover:bg-destructive/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/50"
           >
-            Delete
+            {t('common.delete')}
           </button>
         </DialogFooter>
       </DialogContent>

@@ -22,6 +22,7 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
+import { useLanguage } from '@/hooks/useLanguage';
 import type { GitHubPullRequestContextResult, GitHubPullRequestSummary, GitHubPullRequestsListResult } from '@/lib/api/types';
 
 const parsePrNumber = (value: string): number | null => {
@@ -110,6 +111,7 @@ export function GitHubPrPickerDialog({
     author?: { login: string; avatarUrl?: string };
   }) => void;
 }) {
+  const { t } = useLanguage();
   const { github } = useRuntimeAPIs();
   const githubAuthStatus = useGitHubAuthStore((state) => state.status);
   const githubAuthChecked = useGitHubAuthStore((state) => state.hasChecked);
@@ -185,11 +187,11 @@ export function GitHubPrPickerDialog({
       setHasMore(Boolean(next.hasMore));
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      toast.error('Failed to load more pull requests', { description: message });
+      toast.error(t('githubPullRequestPickerDialog.failedToLoadMorePrs'), { description: message });
     } finally {
       setIsLoadingMore(false);
     }
-  }, [github, hasMore, isLoading, isLoadingMore, page, projectDirectory]);
+  }, [github, hasMore, isLoading, isLoadingMore, page, projectDirectory, t]);
 
   React.useEffect(() => {
     if (!open) {
@@ -238,11 +240,11 @@ export function GitHubPrPickerDialog({
 
   const attachPr = React.useCallback(async (prNumber: number) => {
     if (!projectDirectory) {
-      toast.error('No active project');
+      toast.error(t('githubPullRequestPickerDialog.noActiveProject'));
       return;
     }
     if (!github?.prContext) {
-      toast.error('GitHub runtime API unavailable');
+      toast.error(t('githubPullRequestPickerDialog.runtimeApiUnavailable'));
       return;
     }
     if (loadingPrNumber) return;
@@ -255,18 +257,18 @@ export function GitHubPrPickerDialog({
       });
 
       if (context.connected === false) {
-        toast.error('GitHub not connected');
+        toast.error(t('githubPullRequestPickerDialog.notConnected'));
         return;
       }
 
       if (!context.pr) {
-        toast.error('Pull request not found');
+        toast.error(t('githubPullRequestPickerDialog.prNotFound'));
         return;
       }
 
       if (!context.repo) {
-        toast.error('Repo not resolvable', {
-          description: 'origin remote must be a GitHub URL',
+        toast.error(t('githubPullRequestPickerDialog.repoNotResolvable'), {
+          description: t('githubPullRequestPickerDialog.originRemoteMustBeGithubUrl'),
         });
         return;
       }
@@ -292,14 +294,14 @@ export function GitHubPrPickerDialog({
       onOpenChange(false);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      toast.error('Failed to load pull request details', { description: message });
+      toast.error(t('githubPullRequestPickerDialog.failedToLoadPrDetails'), { description: message });
     } finally {
       setLoadingPrNumber(null);
     }
-  }, [github, includeDiff, loadingPrNumber, onOpenChange, onSelect, projectDirectory]);
+  }, [github, includeDiff, loadingPrNumber, onOpenChange, onSelect, projectDirectory, t]);
 
-  const title = 'Link GitHub Pull Request';
-  const description = 'Select a pull request to attach review context to this message.';
+  const title = t('githubPullRequestPickerDialog.linkTitle');
+  const description = t('githubPullRequestPickerDialog.linkDescription');
 
   const content = (
     <>
@@ -307,7 +309,7 @@ export function GitHubPrPickerDialog({
         <div className="relative flex-1 min-w-0">
           <RiSearchLine className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Search by title or #123, or paste pull request URL"
+            placeholder={t('githubPullRequestPickerDialog.searchPlaceholder')}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             className="pl-9 w-full"
@@ -318,41 +320,41 @@ export function GitHubPrPickerDialog({
           onClick={() => setIncludeDiff((prev) => !prev)}
           className="h-9 shrink-0 flex items-center gap-1 text-left"
           aria-pressed={includeDiff}
-          aria-label="Include PR diff in attached context"
+          aria-label={t('githubPullRequestPickerDialog.includePrDiffInAttachedContext')}
         >
           <Checkbox
             checked={includeDiff}
             onChange={(checked) => setIncludeDiff(checked)}
-            ariaLabel="Include PR diff in attached context"
+            ariaLabel={t('githubPullRequestPickerDialog.includePrDiffInAttachedContext')}
             className="size-6"
             iconClassName="size-5"
           />
-          <span className="typography-small text-muted-foreground whitespace-nowrap">Include PR diff</span>
+          <span className="typography-small text-muted-foreground whitespace-nowrap">{t('githubIntegrationDialog.includePrDiff')}</span>
         </button>
       </div>
 
       <div className={cn(isMobile ? 'min-h-0' : 'flex-1 overflow-y-auto')}>
           {!projectDirectory ? (
-            <div className="text-center text-muted-foreground py-8">No active project selected.</div>
+            <div className="text-center text-muted-foreground py-8">{t('githubIssuePickerDialog.noActiveProjectSelected')}</div>
           ) : null}
 
           {!github ? (
-            <div className="text-center text-muted-foreground py-8">GitHub runtime API unavailable.</div>
+            <div className="text-center text-muted-foreground py-8">{t('githubIssuePickerDialog.runtimeApiUnavailable')}</div>
           ) : null}
 
           {isLoading ? (
             <div className="text-center text-muted-foreground py-8 flex items-center justify-center gap-2">
               <RiLoader4Line className="h-4 w-4 animate-spin" />
-              Loading pull requests...
+              {t('githubPullRequestPickerDialog.loadingPullRequests')}
             </div>
           ) : null}
 
           {connected === false ? (
             <div className="text-center text-muted-foreground py-8 space-y-3">
-              <div>GitHub not connected. Connect your GitHub account in settings.</div>
+              <div>{t('githubIssuePickerDialog.notConnected')}</div>
               <div className="flex justify-center">
                 <Button variant="outline" size="sm" onClick={openGitHubSettings}>
-                  Open settings
+                  {t('commandPalette.openSettings')}
                 </Button>
               </div>
             </div>
@@ -372,7 +374,7 @@ export function GitHubPrPickerDialog({
             >
               <span className="typography-meta text-muted-foreground w-5 text-right flex-shrink-0">#</span>
               <p className="flex-1 min-w-0 typography-small text-foreground truncate ml-0.5">
-                Use pull request #{directNumber}
+                {t('githubPullRequestPickerDialog.usePrNumber', { number: directNumber })}
               </p>
               <div className="flex-shrink-0 h-5 flex items-center mr-2">
                 {loadingPrNumber === directNumber ? (
@@ -383,7 +385,9 @@ export function GitHubPrPickerDialog({
           ) : null}
 
           {filtered.length === 0 && !isLoading && connected && github && projectDirectory ? (
-            <div className="text-center text-muted-foreground py-8">{query ? 'No pull requests found' : 'No open pull requests found'}</div>
+            <div className="text-center text-muted-foreground py-8">
+              {query ? t('githubPullRequestPickerDialog.noPrsFound') : t('githubPullRequestPickerDialog.noOpenPrsFound')}
+            </div>
           ) : null}
 
           {filtered.map((pr) => (
@@ -413,7 +417,7 @@ export function GitHubPrPickerDialog({
                     rel="noopener noreferrer"
                     className="hidden group-hover:flex h-5 w-5 items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
                     onClick={(e) => e.stopPropagation()}
-                    aria-label="Open in GitHub"
+                    aria-label={t('githubIssuePickerDialog.openInGithub')}
                   >
                     <RiExternalLinkLine className="h-4 w-4" />
                   </a>
@@ -436,10 +440,10 @@ export function GitHubPrPickerDialog({
                 {isLoadingMore ? (
                   <span className="inline-flex items-center gap-2">
                     <RiLoader4Line className="h-4 w-4 animate-spin" />
-                    Loading...
+                    {t('githubPullRequestPickerDialog.loading')}
                   </span>
                 ) : (
-                  'Load more'
+                  t('githubPullRequestPickerDialog.loadMore')
                 )}
               </button>
             </div>
