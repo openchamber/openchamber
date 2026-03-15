@@ -15,6 +15,10 @@ if ! chmod 700 "${SSH_DIR}" 2>/dev/null; then
   echo "[entrypoint] warning: cannot chmod ${SSH_DIR}, continuing with existing permissions"
 fi
 
+# Create required directories for OpenCode
+mkdir -p /home/openchamber/.local/share/opencode/bin /home/openchamber/.local/state/opencode /home/openchamber/.config/opencode
+chown -R openchamber:openchamber /home/openchamber/.local /home/openchamber/.config 2>/dev/null || true
+
 if [ ! -f "${SSH_PRIVATE_KEY_PATH}" ] || [ ! -f "${SSH_PUBLIC_KEY_PATH}" ]; then
   if [ ! -w "${SSH_DIR}" ]; then
     echo "[entrypoint] error: ssh key missing and ${SSH_DIR} is not writable" >&2
