@@ -630,8 +630,8 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
 
                                             {/* Favorites Section */}
                                             {filteredFavorites.length > 0 && (
-                                                <>
-                                                    <DropdownMenuLabel style={{ backgroundColor: 'var(--surface-elevated)' }} className="typography-micro font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2 -mx-1 px-3 py-1.5 sticky top-0 z-10 border-b border-border/30">
+                                                <div>
+                                                    <DropdownMenuLabel className="typography-micro font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2 -mx-1 px-3 py-1.5 border-b border-border/30">
                                                         <RiStarFill className="h-4 w-4 text-primary" />
                                                         Favorites
                                                     </DropdownMenuLabel>
@@ -639,14 +639,14 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                                                         const idx = currentFlatIndex++;
                                                         return renderModelRow(model, providerID, modelID, 'fav', idx, selectedIndex === idx);
                                                     })}
-                                                </>
+                                                </div>
                                             )}
 
                                             {/* Recents Section */}
                                             {filteredRecents.length > 0 && (
-                                                <>
+                                                <div>
                                                     {filteredFavorites.length > 0 && <DropdownMenuSeparator />}
-                                                    <DropdownMenuLabel style={{ backgroundColor: 'var(--surface-elevated)' }} className="typography-micro font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2 -mx-1 px-3 py-1.5 sticky top-0 z-10 border-b border-border/30">
+                                                    <DropdownMenuLabel className="typography-micro font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2 -mx-1 px-3 py-1.5 border-b border-border/30">
                                                         <RiTimeLine className="h-4 w-4" />
                                                         Recent
                                                     </DropdownMenuLabel>
@@ -654,7 +654,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                                                         const idx = currentFlatIndex++;
                                                         return renderModelRow(model, providerID, modelID, 'recent', idx, selectedIndex === idx);
                                                     })}
-                                                </>
+                                                </div>
                                             )}
 
                                             {/* Separator before providers */}
@@ -664,9 +664,9 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
 
                                             {/* All Providers - Flat List */}
                                             {filteredProviders.map((provider, index) => (
-                                                <React.Fragment key={provider.id}>
+                                                <div key={provider.id}>
                                                     {index > 0 && <DropdownMenuSeparator />}
-                                                    <DropdownMenuLabel style={{ backgroundColor: 'var(--surface-elevated)' }} className="typography-micro font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2 -mx-1 px-3 py-1.5 sticky top-0 z-10 border-b border-border/30">
+                                                    <DropdownMenuLabel className="typography-micro font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2 -mx-1 px-3 py-1.5 border-b border-border/30">
                                                         <ProviderLogo
                                                             providerId={provider.id}
                                                             className="h-4 w-4 flex-shrink-0"
@@ -677,7 +677,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                                                         const idx = currentFlatIndex++;
                                                         return renderModelRow(model, provider.id as string, model.id as string, 'provider', idx, selectedIndex === idx);
                                                     })}
-                                                </React.Fragment>
+                                                </div>
                                             ))}
                                         </div>
                                     </ScrollableOverlay>

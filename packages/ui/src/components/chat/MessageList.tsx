@@ -1336,12 +1336,6 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
 
     return (
         <div>
-                {/* Top spacer for overlay desktop header */}
-                <div
-                    className="flex-shrink-0"
-                    style={{ height: isMobile ? '0px' : 'var(--oc-header-height, 56px)' }}
-                    aria-hidden="true"
-                />
                 {(turnStart > 0 || hasMoreAbove) && (
                     <div className="flex justify-center py-3">
                         {isLoadingOlder ? (

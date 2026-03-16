@@ -778,7 +778,6 @@ export const MainLayout: React.FC = () => {
                             'flex flex-1 overflow-hidden relative',
                             (isSettingsDialogOpen || isMultiRunLauncherOpen) && 'hidden'
                         )}
-                        style={{ paddingTop: 'var(--oc-header-height, 56px)' }}
                     >
                         <main className="w-full h-full overflow-hidden bg-background relative">
                             <div className={cn('absolute inset-0', !isChatActive && 'invisible')}>
@@ -910,15 +909,7 @@ export const MainLayout: React.FC = () => {
                                 isSidebarOpen && 'border-l border-border/50 rounded-tl-xl rounded-bl-xl',
                                 isRightSidebarOpen && 'border-r border-border/50 rounded-tr-xl rounded-br-xl'
                             )}>
-                                {isChatActive ? (
-                                    <div className="pointer-events-none absolute inset-x-0 top-0 z-20">
-                                        <div className="pointer-events-auto">
-                                            <Header desktopRightSidebarActionsHost={desktopRightSidebarActionsHost} />
-                                        </div>
-                                    </div>
-                                ) : (
-                                    <Header desktopRightSidebarActionsHost={desktopRightSidebarActionsHost} />
-                                )}
+                                <Header desktopRightSidebarActionsHost={desktopRightSidebarActionsHost} />
                                 <div className={cn(
                                     'flex flex-1 min-h-0 overflow-hidden',
                                     isSidebarOpen || isChatActive ? '' : 'border-l border-border/50',

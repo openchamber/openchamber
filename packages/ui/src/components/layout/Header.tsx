@@ -2114,8 +2114,9 @@ export const Header: React.FC<HeaderProps> = ({
   );
 
   const headerClassName = cn(
-    'header-safe-area relative z-10 border-b border-border/40',
-    'bg-background/70 backdrop-blur-lg supports-[backdrop-filter]:bg-background/55'
+    'header-safe-area relative z-10',
+    isMobile && 'border-b border-border/50',
+    isDesktopApp ? 'bg-background' : 'bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80'
   );
 
   return (

@@ -2302,10 +2302,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
                                     {/* Favorites Section */}
                                     {filteredFavorites.length > 0 && (
-                                        <>
+                                        <div>
                                             <DropdownMenuLabel
-                                                style={{ backgroundColor: 'var(--surface-elevated)' }}
-                                                className="typography-micro font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2 -mx-1 px-3 py-1.5 sticky top-0 z-10 border-b border-border/30"
+                                                className="typography-micro font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2 -mx-1 px-3 py-1.5 border-b border-border/30"
                                             >
                                                 <RiStarFill className="h-4 w-4 text-primary" />
                                                 Favorites
@@ -2314,16 +2313,15 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                                 const idx = currentFlatIndex++;
                                                 return renderModelRow(model, providerID, modelID, 'fav', idx, modelSelectedIndex === idx);
                                             })}
-                                        </>
+                                        </div>
                                     )}
 
                                     {/* Recents Section */}
                                     {filteredRecents.length > 0 && (
-                                        <>
+                                        <div>
                                             {filteredFavorites.length > 0 && <DropdownMenuSeparator />}
                                             <DropdownMenuLabel
-                                                style={{ backgroundColor: 'var(--surface-elevated)' }}
-                                                className="typography-micro font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2 -mx-1 px-3 py-1.5 sticky top-0 z-10 border-b border-border/30"
+                                                className="typography-micro font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2 -mx-1 px-3 py-1.5 border-b border-border/30"
                                             >
                                                 <RiTimeLine className="h-4 w-4" />
                                                 Recent
@@ -2332,7 +2330,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                                 const idx = currentFlatIndex++;
                                                 return renderModelRow(model, providerID, modelID, 'recent', idx, modelSelectedIndex === idx);
                                             })}
-                                        </>
+                                        </div>
                                     )}
 
                                     {/* Separator before providers */}
@@ -2342,7 +2340,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
                                     {/* All Providers - Flat List */}
                                     {providerSections.map(({ provider, isExpanded, visibleModels }, index) => (
-                                        <React.Fragment key={provider.id}>
+                                        <div key={provider.id}>
                                             {index > 0 && <DropdownMenuSeparator />}
                                             <div
                                                 role="button"
@@ -2366,8 +2364,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                                     }
                                                 }}
                                                 className={cn(
-                                                    'typography-micro font-semibold text-muted-foreground uppercase tracking-wider flex w-full items-center gap-2 -mx-1 px-3 py-1.5 sticky top-0 z-10 border-b border-border/30',
-                                                    'bg-[var(--surface-elevated)] text-left transition-colors',
+                                                    'typography-micro font-semibold text-muted-foreground uppercase tracking-wider flex w-full items-center gap-2 -mx-1 px-3 py-1.5 border-b border-border/30',
+                                                    'text-left transition-colors',
                                                     forceExpandProviders ? 'cursor-default' : 'cursor-pointer'
                                                 )}
                                                 aria-expanded={isExpanded}
@@ -2392,7 +2390,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                                 const idx = currentFlatIndex++;
                                                 return renderModelRow(model, provider.id as string, model.id as string, 'provider', idx, modelSelectedIndex === idx);
                                             })}
-                                        </React.Fragment>
+                                        </div>
                                     ))}
                                 </div>
                             </ScrollableOverlay>

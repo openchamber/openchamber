@@ -1154,15 +1154,13 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         'relative flex h-full flex-col text-foreground overflow-x-hidden',
         mobileVariant ? '' : 'bg-transparent',
       )}
-      style={showDesktopSidebarChrome ? { paddingTop: 'var(--oc-header-height, 56px)' } : undefined}
     >
       {showDesktopSidebarChrome ? (
         <div
           className={cn(
-            'absolute inset-x-0 top-0 z-20 flex items-center pr-3',
+            'flex h-12 flex-shrink-0 items-center pr-3',
             desktopSidebarTopPaddingClass,
           )}
-          style={{ height: 'var(--oc-header-height, 56px)' }}
         >
           <Tooltip>
             <TooltipTrigger asChild>

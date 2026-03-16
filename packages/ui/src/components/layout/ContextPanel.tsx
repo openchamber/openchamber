@@ -167,7 +167,6 @@ export const ContextPanel: React.FC = () => {
   const setActiveContextPanelTab = useUIStore((state) => state.setActiveContextPanelTab);
   const reorderContextPanelTabs = useUIStore((state) => state.reorderContextPanelTabs);
   const setPendingDiffFile = useUIStore((state) => state.setPendingDiffFile);
-  const isChatMainTab = useUIStore((state) => state.activeMainTab === 'chat');
   const setSelectedFilePath = useFilesViewTabsStore((state) => state.setSelectedPath);
   const { themeMode, lightThemeId, darkThemeId, currentTheme } = useThemeSystem();
 
@@ -497,13 +496,6 @@ export const ContextPanel: React.FC = () => {
         ['--oc-context-panel-width' as string]: `${isResizing ? (resizingWidthRef.current ?? width) : width}px`,
       };
 
-  const panelStyleWithHeaderOffset: React.CSSProperties = isChatMainTab
-    ? {
-        ...panelStyle,
-        paddingTop: 'var(--oc-header-height, 56px)',
-      }
-    : panelStyle;
-
   return (
     <aside
       ref={panelRef}
@@ -518,7 +510,7 @@ export const ContextPanel: React.FC = () => {
         isResizing ? 'transition-none' : 'transition-[width] duration-200 ease-in-out'
       )}
       onKeyDownCapture={handlePanelKeyDownCapture}
-      style={panelStyleWithHeaderOffset}
+      style={panelStyle}
     >
       {!isExpanded && (
         <div
