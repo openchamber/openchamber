@@ -1091,7 +1091,8 @@
       "working": "working",
       "editingFile": "editing file",
       "thinking": "thinking",
-      "composing": "composing"
+      "composing": "composing",
+      "waitingForPermission": "waiting for permission"
     },
     "toolStatus": {
       "read": "reading file",
@@ -1130,6 +1131,11 @@
       "connectingDots": "connecting dots",
       "inspectingLogic": "inspecting logic",
       "weighingOptions": "weighing options"
+    },
+    "retry": {
+      "attempt": " (attempt {{attempt}})",
+      "in": " in {{duration}}",
+      "retrying": "Retrying{{countdown}}{{attempt}}..."
     }
   },
   "installSkillDialog": {

@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { Text } from '@/components/ui/text';
 // import { SessionActiveSpinner } from './SessionActiveSpinner';
 import { GenericStatusSpinner } from './GenericStatusSpinner';
@@ -61,6 +62,7 @@ export function WorkingPlaceholder({
   isWaitingForPermission,
   retryInfo,
 }: WorkingPlaceholderProps) {
+  const { t } = useTranslation();
   const [displayedText, setDisplayedText] = React.useState<string | null>(null);
   const [displayedPermission, setDisplayedPermission] = React.useState<boolean>(false);
 
@@ -135,7 +137,7 @@ export function WorkingPlaceholder({
       return;
     }
 
-    const incomingText = isWaitingForPermission ? 'waiting for permission' : statusText;
+    const incomingText = isWaitingForPermission ? t('assistantStatus.status.waitingForPermission') : statusText;
     const incomingPermission = Boolean(isWaitingForPermission);
     const incomingGeneric = Boolean(isGenericStatus) && !incomingPermission;
 
@@ -186,11 +188,16 @@ export function WorkingPlaceholder({
 
   // Retry state: show countdown and attempt info
   if (retryInfo) {
-    const attemptLabel = retryInfo.attempt && retryInfo.attempt > 1 ? ` (attempt ${retryInfo.attempt})` : '';
-    const countdownLabel = retryCountdown !== null && retryCountdown > 0
-      ? ` in ${formatRetryCountdown(retryCountdown)}`
+    const attemptLabel = retryInfo.attempt && retryInfo.attempt > 1
+      ? t('assistantStatus.retry.attempt', { attempt: retryInfo.attempt })
       : '';
-    const retryText = `Retrying${countdownLabel}${attemptLabel}...`;
+    const countdownLabel = retryCountdown !== null && retryCountdown > 0
+      ? t('assistantStatus.retry.in', { duration: formatRetryCountdown(retryCountdown) })
+      : '';
+    const retryText = t('assistantStatus.retry.retrying', {
+      countdown: countdownLabel,
+      attempt: attemptLabel,
+    });
 
     return (
       <div

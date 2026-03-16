@@ -402,7 +402,7 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
 
         return {
             ...baseWorking,
-            statusText: 'waiting for permission',
+            statusText: i18n.t('assistantStatus.status.waitingForPermission'),
             isWaitingForPermission: true,
             canAbort: false,
             retryInfo: null,

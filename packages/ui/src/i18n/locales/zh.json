@@ -1178,7 +1178,8 @@
       "working": "处理中",
       "editingFile": "正在编辑文件",
       "thinking": "正在思考",
-      "composing": "正在生成内容"
+      "composing": "正在生成内容",
+      "waitingForPermission": "正在等待权限"
     },
     "toolStatus": {
       "read": "正在读取文件",
@@ -1217,6 +1218,11 @@
       "connectingDots": "正在串联线索",
       "inspectingLogic": "正在检查逻辑",
       "weighingOptions": "正在权衡方案"
+    },
+    "retry": {
+      "attempt": "（第 {{attempt}} 次尝试）",
+      "in": "，{{duration}} 后",
+      "retrying": "正在重试{{countdown}}{{attempt}}..."
     }
   },
   "installSkillDialog": {
