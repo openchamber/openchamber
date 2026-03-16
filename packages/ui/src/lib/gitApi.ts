@@ -423,7 +423,7 @@ const runStructuredGenerationInActiveSession = async ({
       messageInfo: response.data.info,
       messageParts: response.data.parts,
     });
-    throw new Error('No structured output returned by session');
+    throw new Error(i18n.t('gitGeneration.noStructuredOutputReturned'));
   }
 
   return structuredOutput as Record<string, unknown>;
@@ -701,3 +701,4 @@ export async function getConflictDetails(directory: string): Promise<import('./a
   if (runtime?.getConflictDetails) return runtime.getConflictDetails(directory);
   return gitHttp.getConflictDetails(directory);
 }
+import i18n from '@/i18n';
