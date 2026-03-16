@@ -671,15 +671,15 @@ export const ProjectActionsButton = ({
       <button
         type="button"
         className={cn(
-          'app-region-no-drag inline-flex h-7 items-center gap-2 self-center rounded-md border border-[var(--interactive-border)]',
-          'bg-[var(--surface-elevated)] pl-1.5 pr-2.5 typography-ui-label font-medium text-foreground hover:bg-interactive-hover transition-colors',
+          'app-region-no-drag inline-flex h-7 shrink-0 items-center gap-2 self-center rounded-md border border-[var(--interactive-border)]',
+          'bg-[var(--surface-elevated)] px-3 typography-ui-label font-medium text-foreground hover:bg-interactive-hover transition-colors',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
           className
         )}
         onClick={openProjectActionsSettings}
       >
         <RiAddLine className="h-4 w-4 text-muted-foreground" />
-        <span className="header-open-label">Add action</span>
+        <span className="header-open-label whitespace-nowrap">Add action</span>
       </button>
     );
   }
@@ -759,7 +759,7 @@ export const ProjectActionsButton = ({
   return (
     <div
       className={cn(
-        'app-region-no-drag inline-flex items-center self-center rounded-md border border-[var(--interactive-border)]',
+        'app-region-no-drag inline-flex shrink-0 items-center self-center rounded-md border border-[var(--interactive-border)]',
         'bg-[var(--surface-elevated)] shadow-none overflow-hidden',
         compact ? 'h-9' : 'h-7',
         className
@@ -771,8 +771,8 @@ export const ProjectActionsButton = ({
         disabled={isLoading || isStoppingSelected}
         className={cn(
           'inline-flex h-full items-center typography-ui-label font-medium text-foreground hover:bg-interactive-hover',
-          compact ? 'w-9 justify-center px-0' : 'gap-2 pl-2 pr-3',
-          'transition-colors disabled:cursor-not-allowed'
+          compact ? 'w-9 justify-center px-0' : 'gap-2 px-3',
+          'transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed'
         )}
         aria-label={selectedRunning ? `Stop ${resolvedSelected.name}` : `Run ${resolvedSelected.name}`}
       >
@@ -783,7 +783,7 @@ export const ProjectActionsButton = ({
               ? <RiStopLine className="h-4 w-4 text-[var(--status-warning)]" />
               : <SelectedIcon className="h-4 w-4" />}
         </span>
-        {!compact ? <span className="header-open-label">{selectedButtonLabel}</span> : null}
+        {!compact ? <span className="header-open-label whitespace-nowrap">{selectedButtonLabel}</span> : null}
       </button>
 
       <DropdownMenu>
@@ -793,14 +793,14 @@ export const ProjectActionsButton = ({
             className={cn(
               compact ? 'inline-flex h-full w-8 items-center justify-center' : 'inline-flex h-full w-7 items-center justify-center',
               'border-l border-[var(--interactive-border)] text-muted-foreground',
-              'hover:bg-interactive-hover hover:text-foreground transition-colors'
+              'hover:bg-interactive-hover hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'
             )}
             aria-label="Choose project action"
           >
             <RiArrowDownSLine className="h-4 w-4" />
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="center" alignOffset={8} className="w-52 max-h-[70vh] overflow-y-auto">
+        <DropdownMenuContent align="center" className="w-52 max-h-[70vh] overflow-y-auto" style={{ translate: '-30px 0' }}>
           <DropdownMenuItem className="flex items-center gap-2" onClick={openProjectActionsSettings}>
             <RiAddLine className="h-4 w-4" />
             <span className="typography-ui-label text-foreground">Add new action</span>

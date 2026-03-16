@@ -170,7 +170,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const [hoveredProjectId, setHoveredProjectId] = React.useState<string | null>(null);
   const [newWorktreeDialogOpen, setNewWorktreeDialogOpen] = React.useState(false);
   const [projectNotesPanelOpen, setProjectNotesPanelOpen] = React.useState(false);
-  const [openMenuSessionId, setOpenMenuSessionId] = React.useState<string | null>(null);
+  const [openSidebarMenuKey, setOpenSidebarMenuKey] = React.useState<string | null>(null);
   const [renamingFolderId, setRenamingFolderId] = React.useState<string | null>(null);
   const [renameFolderDraft, setRenameFolderDraft] = React.useState('');
   const [deleteSessionConfirm, setDeleteSessionConfirm] = React.useState<DeleteSessionConfirmState>(null);
@@ -915,6 +915,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       projectId?: string | null,
       archivedBucket = false,
       secondaryMeta?: { projectLabel?: string | null; branchLabel?: string | null } | null,
+      renderContext: 'project' | 'recent' = 'project',
     ): React.ReactNode => (
       <SessionNodeItem
         node={node}
@@ -947,8 +948,8 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         copiedSessionId={copiedSessionId}
         handleCopyShareUrl={handleCopyShareUrl}
         handleUnshareSession={handleUnshareSession}
-        openMenuSessionId={openMenuSessionId}
-        setOpenMenuSessionId={setOpenMenuSessionId}
+        openSidebarMenuKey={openSidebarMenuKey}
+        setOpenSidebarMenuKey={setOpenSidebarMenuKey}
         renamingFolderId={renamingFolderId}
         getFoldersForScope={getFoldersForScope}
         getSessionFolderId={getSessionFolderId}
@@ -960,6 +961,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         mobileVariant={mobileVariant}
         renderSessionNode={renderSessionNode}
         secondaryMeta={secondaryMeta}
+        renderContext={renderContext}
       />
     ),
     [
@@ -988,8 +990,8 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       copiedSessionId,
       handleCopyShareUrl,
       handleUnshareSession,
-      openMenuSessionId,
-      setOpenMenuSessionId,
+      openSidebarMenuKey,
+      setOpenSidebarMenuKey,
       renamingFolderId,
       getFoldersForScope,
       getSessionFolderId,
@@ -1227,6 +1229,8 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         reorderProjects={reorderProjects}
         getOrderedGroups={getOrderedGroups}
         setGroupOrderByProject={setGroupOrderByProject}
+        openSidebarMenuKey={openSidebarMenuKey}
+        setOpenSidebarMenuKey={setOpenSidebarMenuKey}
       />
 
       <SidebarFooter

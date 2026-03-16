@@ -60,6 +60,8 @@ type Props = {
   reorderProjects: (fromIndex: number, toIndex: number) => void;
   getOrderedGroups: (projectId: string, groups: SessionGroup[]) => SessionGroup[];
   setGroupOrderByProject: React.Dispatch<React.SetStateAction<Map<string, string[]>>>;
+  openSidebarMenuKey: string | null;
+  setOpenSidebarMenuKey: (key: string | null) => void;
 };
 
 export function SidebarProjectsList(props: Props): React.ReactNode {
@@ -185,6 +187,8 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
                     onClose={() => props.removeProject(projectKey)}
                     sentinelRef={(el) => { props.projectHeaderSentinelRefs.current.set(projectKey, el); }}
                     showCreateButtons
+                    openSidebarMenuKey={props.openSidebarMenuKey}
+                    setOpenSidebarMenuKey={props.setOpenSidebarMenuKey}
                   >
                     {!isCollapsed ? (
                       <div className="space-y-0 pt-0 pb-0.5 pl-3">

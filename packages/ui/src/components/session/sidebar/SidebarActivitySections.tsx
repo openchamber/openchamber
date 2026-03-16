@@ -21,7 +21,7 @@ type ActivitySection = {
 
 type Props = {
   sections: ActivitySection[];
-  renderSessionNode: (node: SessionNode, depth?: number, groupDirectory?: string | null, projectId?: string | null, archivedBucket?: boolean, secondaryMeta?: { projectLabel?: string | null; branchLabel?: string | null } | null) => React.ReactNode;
+  renderSessionNode: (node: SessionNode, depth?: number, groupDirectory?: string | null, projectId?: string | null, archivedBucket?: boolean, secondaryMeta?: { projectLabel?: string | null; branchLabel?: string | null } | null, renderContext?: 'project' | 'recent') => React.ReactNode;
 };
 
 export function SidebarActivitySections({ sections, renderSessionNode }: Props): React.ReactNode {
@@ -63,7 +63,7 @@ export function SidebarActivitySections({ sections, renderSessionNode }: Props):
             </button>
             {!isCollapsed ? (
               <div className={cn('space-y-0.5 pl-7')}>
-                {section.items.map((item) => renderSessionNode(item.node, 0, item.groupDirectory, item.projectId, false, item.secondaryMeta))}
+                {section.items.map((item) => renderSessionNode(item.node, 0, item.groupDirectory, item.projectId, false, item.secondaryMeta, 'recent'))}
               </div>
             ) : null}
           </div>

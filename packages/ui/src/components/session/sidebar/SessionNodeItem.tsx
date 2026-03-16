@@ -83,8 +83,8 @@ type Props = {
   copiedSessionId: string | null;
   handleCopyShareUrl: (url: string, sessionId: string) => void;
   handleUnshareSession: (sessionId: string) => void;
-  openMenuSessionId: string | null;
-  setOpenMenuSessionId: (id: string | null) => void;
+  openSidebarMenuKey: string | null;
+  setOpenSidebarMenuKey: (key: string | null) => void;
   renamingFolderId: string | null;
   getFoldersForScope: (scopeKey: string) => Folder[];
   getSessionFolderId: (scopeKey: string, sessionId: string) => string | null;
@@ -94,8 +94,9 @@ type Props = {
   openContextPanelTab: (directory: string, options: { mode: 'chat'; dedupeKey: string; label: string }) => void;
   handleDeleteSession: (session: Session, source?: { archivedBucket?: boolean }) => void;
   mobileVariant: boolean;
-  renderSessionNode: (node: SessionNode, depth?: number, groupDirectory?: string | null, projectId?: string | null, archivedBucket?: boolean, secondaryMeta?: SecondaryMeta | null) => React.ReactNode;
+  renderSessionNode: (node: SessionNode, depth?: number, groupDirectory?: string | null, projectId?: string | null, archivedBucket?: boolean, secondaryMeta?: SecondaryMeta | null, renderContext?: 'project' | 'recent') => React.ReactNode;
   secondaryMeta?: SecondaryMeta | null;
+  renderContext?: 'project' | 'recent';
 };
 
 export function SessionNodeItem(props: Props): React.ReactNode {
@@ -130,8 +131,8 @@ export function SessionNodeItem(props: Props): React.ReactNode {
     copiedSessionId,
     handleCopyShareUrl,
     handleUnshareSession,
-    openMenuSessionId,
-    setOpenMenuSessionId,
+    openSidebarMenuKey,
+    setOpenSidebarMenuKey,
     renamingFolderId,
     getFoldersForScope,
     getSessionFolderId,
@@ -143,6 +144,7 @@ export function SessionNodeItem(props: Props): React.ReactNode {
     mobileVariant,
     renderSessionNode,
     secondaryMeta,
+    renderContext = 'project',
   } = props;
   const hasSecondaryProjectLabel = Boolean(secondaryMeta?.projectLabel);
   const hasSecondaryBranchLabel = Boolean(secondaryMeta?.branchLabel);
@@ -153,6 +155,7 @@ export function SessionNodeItem(props: Props): React.ReactNode {
   const suppressNextSelectRef = React.useRef(false);
 
   const session = node.session;
+  const menuInstanceKey = `${renderContext}:${archivedBucket ? 'archived' : 'active'}:${session.id}`;
   const sessionDirectory =
     normalizePath((session as Session & { directory?: string | null }).directory ?? null)
     ?? normalizePath(groupDirectory ?? null);
@@ -172,6 +175,7 @@ export function SessionNodeItem(props: Props): React.ReactNode {
   const sessionTimestamp = session.time?.updated || session.time?.created || Date.now();
   const sessionUpdatedLabel = formatSessionDateLabel(sessionTimestamp);
   const sessionCompactUpdatedLabel = formatSessionCompactDateLabel(sessionTimestamp);
+  const isMenuOpen = openSidebarMenuKey === menuInstanceKey;
   const subsessionChevron = hasChildren ? (
     <span
       role="button"
@@ -255,12 +259,13 @@ export function SessionNodeItem(props: Props): React.ReactNode {
     ? <RiErrorWarningLine className="h-4 w-4 text-status-warning" />
     : null;
 
-  const handleRowContextMenu = React.useCallback((event: React.MouseEvent<HTMLDivElement>) => {
-    event.preventDefault();
+  const handleMenuOpenChange = React.useCallback((open: boolean) => {
+    setOpenSidebarMenuKey(open ? menuInstanceKey : null);
+  }, [menuInstanceKey, setOpenSidebarMenuKey]);
+
+  const handleMenuTriggerClick = React.useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
-    suppressNextSelectRef.current = true;
-    setOpenMenuSessionId(session.id);
-  }, [session.id, setOpenMenuSessionId]);
+  }, []);
 
   const handleRowSelect = React.useCallback(() => {
     if (suppressNextSelectRef.current) {
@@ -276,12 +281,107 @@ export function SessionNodeItem(props: Props): React.ReactNode {
     }
   }, []);
 
+  const sessionMenuContent = (
+    <DropdownMenuContent align="end" className="min-w-[180px]" onCloseAutoFocus={(event) => { if (renamingFolderId) event.preventDefault(); }}>
+      <DropdownMenuItem
+        onClick={() => {
+          setEditingId(session.id);
+          setEditTitle(sessionTitle);
+        }}
+        className="[&>svg]:mr-1"
+      >
+        <RiPencilAiLine className="mr-1 h-4 w-4" />
+        Rename
+      </DropdownMenuItem>
+      <DropdownMenuItem onClick={() => togglePinnedSession(session.id)} className="[&>svg]:mr-1">
+        {isPinnedSession ? <RiUnpinLine className="mr-1 h-4 w-4" /> : <RiPushpinLine className="mr-1 h-4 w-4" />}
+        {isPinnedSession ? 'Unpin session' : 'Pin session'}
+      </DropdownMenuItem>
+      {!session.share ? (
+        <DropdownMenuItem onClick={() => handleShareSession(session)} className="[&>svg]:mr-1">
+          <RiShare2Line className="mr-1 h-4 w-4" />
+          Share
+        </DropdownMenuItem>
+      ) : (
+        <>
+          <DropdownMenuItem onClick={() => { if (session.share?.url) handleCopyShareUrl(session.share.url, session.id); }} className="[&>svg]:mr-1">
+            {copiedSessionId === session.id ? <><RiCheckLine className="mr-1 h-4 w-4" style={{ color: 'var(--status-success)' }} />Copied</> : <><RiFileCopyLine className="mr-1 h-4 w-4" />Copy link</>}
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => handleUnshareSession(session.id)} className="[&>svg]:mr-1">
+            <RiLinkUnlinkM className="mr-1 h-4 w-4" />
+            Unshare
+          </DropdownMenuItem>
+        </>
+      )}
+
+      {sessionDirectory && !archivedBucket ? (() => {
+        const scopeFolders = getFoldersForScope(sessionDirectory);
+        const currentFolderId = getSessionFolderId(sessionDirectory, session.id);
+        return (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger className="[&>svg]:mr-1"><RiFolderLine className="h-4 w-4" />Move to folder</DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="min-w-[180px]">
+                {scopeFolders.length === 0 ? (
+                  <DropdownMenuItem disabled className="text-muted-foreground">No folders yet</DropdownMenuItem>
+                ) : (
+                  scopeFolders.map((folder) => (
+                    <DropdownMenuItem key={folder.id} onClick={() => { if (currentFolderId === folder.id) removeSessionFromFolder(sessionDirectory, session.id); else addSessionToFolder(sessionDirectory, folder.id, session.id); }}>
+                      <span className="flex-1 truncate">{folder.name}</span>
+                      {currentFolderId === folder.id ? <RiCheckLine className="ml-2 h-3.5 w-3.5 text-primary flex-shrink-0" /> : null}
+                    </DropdownMenuItem>
+                  ))
+                )}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => { const newFolder = createFolderAndStartRename(sessionDirectory); if (!newFolder) return; addSessionToFolder(sessionDirectory, newFolder.id, session.id); }}>
+                  <RiAddLine className="mr-1 h-4 w-4" />
+                  New folder...
+                </DropdownMenuItem>
+                {currentFolderId ? (
+                  <DropdownMenuItem onClick={() => { removeSessionFromFolder(sessionDirectory, session.id); }} className="text-destructive focus:text-destructive">
+                    <RiCloseLine className="mr-1 h-4 w-4" />
+                    Remove from folder
+                  </DropdownMenuItem>
+                ) : null}
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+          </>
+        );
+      })() : null}
+
+      {!isVSCode ? (
+        <DropdownMenuItem
+          disabled={!sessionDirectory}
+          onClick={() => {
+            if (!sessionDirectory) return;
+            openContextPanelTab(sessionDirectory, {
+              mode: 'chat',
+              dedupeKey: `session:${session.id}`,
+              label: sessionTitle,
+            });
+          }}
+          className="[&>svg]:mr-1"
+        >
+          <RiChat4Line className="mr-1 h-4 w-4" />
+          <span className="truncate">Open in Side Panel</span>
+          <span className="shrink-0 typography-micro px-1 rounded leading-none pb-px text-[var(--status-warning)] bg-[var(--status-warning)]/10">beta</span>
+        </DropdownMenuItem>
+      ) : null}
+
+      <DropdownMenuSeparator />
+      <DropdownMenuItem className="text-destructive focus:text-destructive [&>svg]:mr-1" onClick={() => handleDeleteSession(session, { archivedBucket })}>
+        <RiDeleteBinLine className="mr-1 h-4 w-4" />
+        {archivedBucket ? 'Delete' : 'Archive'}
+      </DropdownMenuItem>
+    </DropdownMenuContent>
+  );
+
   return (
     <React.Fragment key={session.id}>
       <DraggableSessionRow sessionId={session.id} sessionDirectory={sessionDirectory ?? null} sessionTitle={sessionTitle}>
         <div
           className={cn('group relative flex items-center rounded-md px-1.5 py-1', isMissingDirectory ? 'opacity-75' : '', depth > 0 && 'pl-[20px]')}
-          onContextMenu={handleRowContextMenu}
         >
           {subsessionChevron}
           <div className="flex min-w-0 flex-1 items-center">
@@ -297,7 +397,10 @@ export function SessionNodeItem(props: Props): React.ReactNode {
                       e.stopPropagation();
                       handleSessionDoubleClick();
                     }}
-                    className={cn('flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none disabled:cursor-not-allowed transition-[padding]', mobileVariant ? 'pr-7' : (isMinimalMode ? 'pr-7' : 'group-hover:pr-5 group-focus-within:pr-5'))}
+                    className={cn(
+                      'flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none disabled:cursor-not-allowed transition-[padding]',
+                      mobileVariant ? 'pr-7' : '',
+                    )}
                   >
                     <div className={cn('flex w-full items-center min-w-0 flex-1 overflow-hidden', isMinimalMode ? 'gap-1' : 'gap-1')}>
                       {showStatusMarker ? (
@@ -321,105 +424,35 @@ export function SessionNodeItem(props: Props): React.ReactNode {
                       <div className={cn('block min-w-0 flex-1 truncate typography-ui-label font-normal', isActive ? 'text-primary' : 'text-foreground')}>{renderHighlightedText(sessionTitle, normalizedSessionSearchQuery)}</div>
                       {mobileVariant ? <span className="ml-2 flex-shrink-0 text-[0.72rem] text-muted-foreground/75">{sessionCompactUpdatedLabel}</span> : null}
                       {!mobileVariant ? (
-                        <DropdownMenu open={openMenuSessionId === session.id} onOpenChange={(open) => setOpenMenuSessionId(open ? session.id : null)}>
+                        <div className="relative ml-1 flex h-4 min-w-4 flex-shrink-0 items-center justify-end">
+                          <span className={cn(
+                            'whitespace-nowrap text-right text-[0.72rem] text-muted-foreground/75 transition-opacity duration-150',
+                            isMenuOpen
+                              ? 'opacity-0'
+                              : 'group-hover:opacity-0 group-focus-within:opacity-0',
+                          )}>
+                            {sessionCompactUpdatedLabel}
+                          </span>
+                          <DropdownMenu open={isMenuOpen} onOpenChange={handleMenuOpenChange}>
                             <DropdownMenuTrigger asChild>
                               <button
                                 type="button"
-                                className="sr-only"
-                                onClick={(event) => event.stopPropagation()}
-                                onKeyDown={(event) => event.stopPropagation()}
+                                className={cn(
+                                  'absolute inset-y-0 right-0 inline-flex h-4 w-4 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity',
+                                  isMenuOpen
+                                    ? 'opacity-100 pointer-events-auto'
+                                    : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto',
+                                )}
                                 aria-label="Session menu"
-                              />
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="min-w-[180px]" onCloseAutoFocus={(event) => { if (renamingFolderId) event.preventDefault(); }}>
-                              <DropdownMenuItem
-                                onClick={() => {
-                                  setEditingId(session.id);
-                                  setEditTitle(sessionTitle);
-                                }}
-                                className="[&>svg]:mr-1"
+                                onClick={handleMenuTriggerClick}
+                                onKeyDown={(event) => event.stopPropagation()}
                               >
-                                <RiPencilAiLine className="mr-1 h-4 w-4" />
-                                Rename
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => togglePinnedSession(session.id)} className="[&>svg]:mr-1">
-                                {isPinnedSession ? <RiUnpinLine className="mr-1 h-4 w-4" /> : <RiPushpinLine className="mr-1 h-4 w-4" />}
-                                {isPinnedSession ? 'Unpin session' : 'Pin session'}
-                              </DropdownMenuItem>
-                              {!session.share ? (
-                                <DropdownMenuItem onClick={() => handleShareSession(session)} className="[&>svg]:mr-1">
-                                  <RiShare2Line className="mr-1 h-4 w-4" />
-                                  Share
-                                </DropdownMenuItem>
-                              ) : (
-                                <>
-                                  <DropdownMenuItem onClick={() => { if (session.share?.url) handleCopyShareUrl(session.share.url, session.id); }} className="[&>svg]:mr-1">
-                                    <RiFileCopyLine className="mr-1 h-4 w-4" />
-                                    {copiedSessionId === session.id ? 'Copied' : 'Copy URL'}
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem onClick={() => handleUnshareSession(session.id)} className="[&>svg]:mr-1 text-destructive focus:text-destructive">
-                                    <RiLinkUnlinkM className="mr-1 h-4 w-4" />
-                                    Unshare
-                                  </DropdownMenuItem>
-                                </>
-                              )}
-                              {sessionDirectory ? (() => {
-                                const scopeKey = archivedBucket ? `archived:${sessionDirectory}` : sessionDirectory;
-                                const folders = getFoldersForScope(scopeKey);
-                                const currentFolderId = getSessionFolderId(scopeKey, session.id);
-                                return folders.length > 0 ? (
-                                  <>
-                                    <DropdownMenuSeparator />
-                                    <DropdownMenuSub>
-                                      <DropdownMenuSubTrigger className="[&>svg]:mr-1">
-                                        <RiFolderLine className="mr-1 h-4 w-4" />
-                                        Move to folder
-                                      </DropdownMenuSubTrigger>
-                                      <DropdownMenuSubContent className="min-w-[180px]">
-                                        {currentFolderId ? (
-                                          <DropdownMenuItem onClick={() => removeSessionFromFolder(scopeKey, session.id)}>
-                                            <RiFolderLine className="mr-1 h-4 w-4" />
-                                            Remove from folder
-                                          </DropdownMenuItem>
-                                        ) : null}
-                                        {folders.map((folder) => (
-                                          <DropdownMenuItem key={folder.id} onClick={() => addSessionToFolder(scopeKey, folder.id, session.id)} disabled={folder.id === currentFolderId}>
-                                            <RiFolderLine className="mr-1 h-4 w-4" />
-                                            {folder.name}
-                                          </DropdownMenuItem>
-                                        ))}
-                                        <DropdownMenuSeparator />
-                                        <DropdownMenuItem onClick={() => { const newFolder = createFolderAndStartRename(sessionDirectory); if (!newFolder) return; addSessionToFolder(sessionDirectory, newFolder.id, session.id); }}>
-                                          <RiAddLine className="mr-1 h-4 w-4" />
-                                          New folder
-                                        </DropdownMenuItem>
-                                      </DropdownMenuSubContent>
-                                    </DropdownMenuSub>
-                                  </>
-                                ) : null;
-                              })() : null}
-                              {sessionDirectory ? (
-                                <DropdownMenuItem
-                                  onClick={() => {
-                                    openContextPanelTab(sessionDirectory, {
-                                      mode: 'chat',
-                                      dedupeKey: `sidebar-${sessionDirectory}`,
-                                      label: sessionTitle,
-                                    });
-                                  }}
-                                  className="[&>svg]:mr-1"
-                                >
-                                  <RiChat4Line className="mr-1 h-4 w-4" />
-                                  Open in split view
-                                </DropdownMenuItem>
-                              ) : null}
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem onClick={() => handleDeleteSession(session, { archivedBucket })} className="[&>svg]:mr-1 text-destructive focus:text-destructive">
-                                <RiDeleteBinLine className="mr-1 h-4 w-4" />
-                                Delete
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
+                                <RiMore2Line className="h-2.5 w-2.5" />
+                              </button>
+                            </DropdownMenuTrigger>
+                            {sessionMenuContent}
                           </DropdownMenu>
+                        </div>
                       ) : null}
                       {pendingPermissionCount > 0 ? (
                         <span className="inline-flex items-center gap-1 rounded bg-destructive/10 px-1 py-0.5 text-[0.7rem] text-destructive flex-shrink-0" title="Permission required" aria-label="Permission required">
@@ -504,135 +537,50 @@ export function SessionNodeItem(props: Props): React.ReactNode {
           </div>
 
           {streamingIndicator && !mobileVariant ? (
-            <div className={cn('absolute top-1/2 -translate-y-1/2 z-10', isMinimalMode ? 'right-7' : 'right-[30px]')}>
+            <div className={cn('absolute top-1/2 -translate-y-1/2 z-10', isMinimalMode ? 'right-0' : 'right-[30px]')}>
               {streamingIndicator}
             </div>
           ) : null}
 
-          {isMinimalMode && !mobileVariant ? (
-            <div className="absolute right-0.5 top-1/2 -translate-y-1/2 z-10">
-              <span className="text-[0.72rem] text-muted-foreground/75 group-hover:hidden">{sessionCompactUpdatedLabel}</span>
-              <button
-                type="button"
-                className="hidden h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 group-hover:inline-flex"
-                aria-label="Session menu"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setOpenMenuSessionId(openMenuSessionId === session.id ? null : session.id);
-                }}
-                onKeyDown={(event) => event.stopPropagation()}
-              >
-                <RiMore2Line className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          ) : null}
-
-          <div className={cn('absolute right-0.5 top-1/2 -translate-y-1/2 z-10 transition-opacity', isMinimalMode && !mobileVariant ? 'hidden' : '', mobileVariant ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100')}>
-            <DropdownMenu open={openMenuSessionId === session.id} onOpenChange={(open) => setOpenMenuSessionId(open ? session.id : null)}>
-              <DropdownMenuTrigger asChild>
-                <button type="button" className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50" aria-label="Session menu" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
-                  <RiMore2Line className="h-3.5 w-3.5" />
-                </button>
-              </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="min-w-[180px]" onCloseAutoFocus={(event) => { if (renamingFolderId) event.preventDefault(); }}>
-                  <DropdownMenuItem
-                    onClick={() => {
-                      setEditingId(session.id);
-                      setEditTitle(sessionTitle);
-                    }}
-                    className="[&>svg]:mr-1"
-                  >
-                    <RiPencilAiLine className="mr-1 h-4 w-4" />
-                    Rename
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => togglePinnedSession(session.id)} className="[&>svg]:mr-1">
-                    {isPinnedSession ? <RiUnpinLine className="mr-1 h-4 w-4" /> : <RiPushpinLine className="mr-1 h-4 w-4" />}
-                    {isPinnedSession ? 'Unpin session' : 'Pin session'}
-                  </DropdownMenuItem>
-                  {!session.share ? (
-                    <DropdownMenuItem onClick={() => handleShareSession(session)} className="[&>svg]:mr-1">
-                      <RiShare2Line className="mr-1 h-4 w-4" />
-                      Share
-                    </DropdownMenuItem>
-                  ) : (
-                    <>
-                      <DropdownMenuItem onClick={() => { if (session.share?.url) handleCopyShareUrl(session.share.url, session.id); }} className="[&>svg]:mr-1">
-                        {copiedSessionId === session.id ? <><RiCheckLine className="mr-1 h-4 w-4" style={{ color: 'var(--status-success)' }} />Copied</> : <><RiFileCopyLine className="mr-1 h-4 w-4" />Copy link</>}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => handleUnshareSession(session.id)} className="[&>svg]:mr-1">
-                        <RiLinkUnlinkM className="mr-1 h-4 w-4" />
-                        Unshare
-                      </DropdownMenuItem>
-                    </>
-                  )}
-
-                  {sessionDirectory && !archivedBucket ? (() => {
-                    const scopeFolders = getFoldersForScope(sessionDirectory);
-                    const currentFolderId = getSessionFolderId(sessionDirectory, session.id);
-                    return (
-                      <>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuSub>
-                          <DropdownMenuSubTrigger className="[&>svg]:mr-1"><RiFolderLine className="h-4 w-4" />Move to folder</DropdownMenuSubTrigger>
-                          <DropdownMenuSubContent className="min-w-[180px]">
-                            {scopeFolders.length === 0 ? (
-                              <DropdownMenuItem disabled className="text-muted-foreground">No folders yet</DropdownMenuItem>
-                            ) : (
-                              scopeFolders.map((folder) => (
-                                <DropdownMenuItem key={folder.id} onClick={() => { if (currentFolderId === folder.id) removeSessionFromFolder(sessionDirectory, session.id); else addSessionToFolder(sessionDirectory, folder.id, session.id); }}>
-                                  <span className="flex-1 truncate">{folder.name}</span>
-                                  {currentFolderId === folder.id ? <RiCheckLine className="ml-2 h-3.5 w-3.5 text-primary flex-shrink-0" /> : null}
-                                </DropdownMenuItem>
-                              ))
-                            )}
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem onClick={() => { const newFolder = createFolderAndStartRename(sessionDirectory); if (!newFolder) return; addSessionToFolder(sessionDirectory, newFolder.id, session.id); }}>
-                              <RiAddLine className="mr-1 h-4 w-4" />
-                              New folder...
-                            </DropdownMenuItem>
-                            {currentFolderId ? (
-                              <DropdownMenuItem onClick={() => { removeSessionFromFolder(sessionDirectory, session.id); }} className="text-destructive focus:text-destructive">
-                                <RiCloseLine className="mr-1 h-4 w-4" />
-                                Remove from folder
-                              </DropdownMenuItem>
-                            ) : null}
-                          </DropdownMenuSubContent>
-                        </DropdownMenuSub>
-                      </>
-                    );
-                  })() : null}
-
-                  {!isVSCode ? (
-                    <DropdownMenuItem
-                      disabled={!sessionDirectory}
-                      onClick={() => {
-                        if (!sessionDirectory) return;
-                        openContextPanelTab(sessionDirectory, {
-                          mode: 'chat',
-                          dedupeKey: `session:${session.id}`,
-                          label: sessionTitle,
-                        });
-                      }}
-                      className="[&>svg]:mr-1"
+          {!isMinimalMode || mobileVariant ? (
+            <div className={cn(
+              'absolute right-0 top-1/2 z-10 -translate-y-1/2',
+              cn(
+                'transition-opacity',
+                isMenuOpen
+                  ? 'opacity-100 pointer-events-auto'
+                  : mobileVariant
+                    ? 'opacity-100 pointer-events-auto'
+                    : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto',
+              ),
+            )}>
+              <DropdownMenu open={isMenuOpen} onOpenChange={handleMenuOpenChange}>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className={cn(
+                      'inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity',
+                      isMinimalMode && !mobileVariant
+                        ? (isMenuOpen
+                            ? 'h-4 w-4 opacity-100 pointer-events-auto'
+                            : 'h-4 w-4 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto')
+                        : 'h-6 w-6 opacity-100',
+                    )}
+                    aria-label="Session menu"
+                    onClick={handleMenuTriggerClick}
+                    onKeyDown={(event) => event.stopPropagation()}
                     >
-                      <RiChat4Line className="mr-1 h-4 w-4" />
-                      <span className="truncate">Open in Side Panel</span>
-                      <span className="shrink-0 typography-micro px-1 rounded leading-none pb-px text-[var(--status-warning)] bg-[var(--status-warning)]/10">beta</span>
-                    </DropdownMenuItem>
-                  ) : null}
-
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem className="text-destructive focus:text-destructive [&>svg]:mr-1" onClick={() => handleDeleteSession(session, { archivedBucket })}>
-                    <RiDeleteBinLine className="mr-1 h-4 w-4" />
-                    {archivedBucket ? 'Delete' : 'Archive'}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
+                      <RiMore2Line className={cn(isMinimalMode && !mobileVariant ? 'h-2.5 w-2.5' : 'h-3.5 w-3.5')} />
+                  </button>
+                </DropdownMenuTrigger>
+                {sessionMenuContent}
+                </DropdownMenu>
+              </div>
+            ) : null}
         </div>
       </DraggableSessionRow>
       {hasChildren && isExpanded
-        ? node.children.map((child) => renderSessionNode(child, depth + 1, sessionDirectory ?? groupDirectory, projectId, archivedBucket))
+        ? node.children.map((child) => renderSessionNode(child, depth + 1, sessionDirectory ?? groupDirectory, projectId, archivedBucket, undefined, renderContext))
         : null}
     </React.Fragment>
   );

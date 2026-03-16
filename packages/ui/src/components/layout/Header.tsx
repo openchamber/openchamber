@@ -1655,7 +1655,8 @@ export const Header: React.FC<HeaderProps> = ({
               {currentSessionPrLabel ? <span className="truncate">{currentSessionPrLabel}</span> : null}
               <span className="inline-flex flex-shrink-0 items-center gap-0 text-[0.92em]">
                 <span className="text-status-success/80">+{currentSessionChanges.additions}</span>
-                <span className="text-status-error/65">/-{currentSessionChanges.deletions}</span>
+                <span className="text-muted-foreground/60">/</span>
+                <span className="text-status-error/65">-{currentSessionChanges.deletions}</span>
               </span>
             </div>
           ) : null}

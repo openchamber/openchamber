@@ -50,6 +50,8 @@ export interface SortableProjectItemProps {
   children?: React.ReactNode;
   showCreateButtons?: boolean;
   hideHeader?: boolean;
+  openSidebarMenuKey: string | null;
+  setOpenSidebarMenuKey: (key: string | null) => void;
 }
 
 export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
@@ -79,6 +81,8 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   children,
   showCreateButtons = true,
   hideHeader = false,
+  openSidebarMenuKey,
+  setOpenSidebarMenuKey,
 }) => {
   const { currentTheme } = useThemeSystem();
   const {
@@ -90,9 +94,10 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
     isDragging,
   } = useSortable({ id });
 
-  const [isMenuOpen, setIsMenuOpen] = React.useState(false);
   const [imageFailed, setImageFailed] = React.useState(false);
   const suppressNextToggleRef = React.useRef(false);
+  const menuInstanceKey = `project:${id}`;
+  const isMenuOpen = openSidebarMenuKey === menuInstanceKey;
 
   React.useEffect(() => {
     setImageFailed(false);
@@ -107,11 +112,12 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
     })
     : null;
 
-  const handleContextMenu = React.useCallback((event: React.MouseEvent<HTMLDivElement>) => {
-    event.preventDefault();
+  const handleMenuOpenChange = React.useCallback((open: boolean) => {
+    setOpenSidebarMenuKey(open ? menuInstanceKey : null);
+  }, [menuInstanceKey, setOpenSidebarMenuKey]);
+
+  const handleMenuTriggerClick = React.useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
-    suppressNextToggleRef.current = true;
-    setIsMenuOpen(true);
   }, []);
 
   const handleToggleMouseDown = React.useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
@@ -152,7 +158,6 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
             style={{ backgroundColor: isDesktopShell && isStuck ? 'transparent' : undefined }}
             onMouseEnter={() => onHoverChange(true)}
             onMouseLeave={() => onHoverChange(false)}
-            onContextMenu={handleContextMenu}
           >
             <div className="relative flex items-center gap-1 px-0.5 py-0.5" {...attributes}>
               <Tooltip delayDuration={1500}>
@@ -235,17 +240,17 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
 
                 <DropdownMenu
                   open={isMenuOpen}
-                  onOpenChange={setIsMenuOpen}
+                  onOpenChange={handleMenuOpenChange}
                 >
                     <DropdownMenuTrigger asChild>
                       <button
                         type="button"
                         className={cn(
                           'inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 hover:text-foreground',
-                          mobileVariant ? 'opacity-100' : isHovered ? 'opacity-100' : 'opacity-0 pointer-events-none',
+                          isMenuOpen ? 'opacity-100 pointer-events-auto' : mobileVariant ? 'opacity-100' : isHovered ? 'opacity-100' : 'opacity-0 pointer-events-none',
                         )}
                         aria-label="Project menu"
-                        onClick={(e) => e.stopPropagation()}
+                        onClick={handleMenuTriggerClick}
                       >
                         <RiMore2Line className="h-3.5 w-3.5" />
                       </button>
