@@ -148,8 +148,8 @@ const SessionFolderItemBase = <TSessionNode,>({
       <div
         ref={droppableRef}
         className={cn(
-          'group/folder flex items-center justify-between gap-1.5 py-1 min-w-0 rounded-sm',
-          'hover:bg-interactive-hover/50 cursor-pointer',
+          'group/folder relative flex items-center justify-between gap-1.5 py-1 min-w-0 rounded-md',
+          'cursor-pointer',
           isDropTarget && 'bg-primary/10 ring-1 ring-inset ring-primary/30',
         )}
         onClick={renaming ? undefined : onToggle}
@@ -167,7 +167,12 @@ const SessionFolderItemBase = <TSessionNode,>({
         }
         aria-label={isCollapsed ? `Expand folder ${folder.name}` : `Collapse folder ${folder.name}`}
       >
-        <div className="min-w-0 flex items-center gap-1.5 pl-1.5 flex-1">
+        <div className={cn(
+          'min-w-0 flex items-center gap-1.5 pl-1.5 flex-1 transition-[padding]',
+          archivedBucket
+            ? (mobileVariant ? 'pr-7' : 'group-hover/folder:pr-7 group-focus-within/folder:pr-7')
+            : '',
+        )}>
           <FolderIcon className={cn('h-3.5 w-3.5 flex-shrink-0', isDropTarget ? 'text-primary' : 'text-muted-foreground')} />
 
           {renaming ? (
@@ -235,15 +240,16 @@ const SessionFolderItemBase = <TSessionNode,>({
         </div>
 
         {/* Action buttons */}
-        {!renaming && !hideActions ? (
+        {!renaming && (!hideActions || archivedBucket) ? (
           <div className="flex items-center gap-0.5 px-0.5">
             <div
               className={cn(
                 'flex items-center gap-0.5 transition-opacity',
                 mobileVariant ? 'opacity-100' : 'opacity-0 group-hover/folder:opacity-100 group-focus-within/folder:opacity-100',
+                archivedBucket && 'absolute right-0.5 top-1/2 z-10 -translate-y-1/2 px-0',
               )}
             >
-              {onNewSession ? (
+              {!archivedBucket && onNewSession ? (
                 <button
                   type="button"
                   onClick={(event) => {
@@ -258,7 +264,7 @@ const SessionFolderItemBase = <TSessionNode,>({
                 </button>
               ) : null}
               {/* Only allow sub-folders at depth 0 (one level deep max) */}
-              {onNewSubFolder && depth === 0 ? (
+              {!archivedBucket && onNewSubFolder && depth === 0 ? (
                 <button
                   type="button"
                   onClick={(event) => {
@@ -272,17 +278,19 @@ const SessionFolderItemBase = <TSessionNode,>({
                   <RiFolderAddLine className="h-3.5 w-3.5" />
                 </button>
               ) : null}
-              <button
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  handleStartRename();
-                }}
-                className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-                aria-label={`Rename folder ${folder.name}`}
-              >
-                <RiPencilAiLine className="h-3.5 w-3.5" />
-              </button>
+              {!archivedBucket ? (
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    handleStartRename();
+                  }}
+                  className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                  aria-label={`Rename folder ${folder.name}`}
+                >
+                  <RiPencilAiLine className="h-3.5 w-3.5" />
+                </button>
+              ) : null}
               <button
                 type="button"
                 onClick={(event) => {
@@ -290,7 +298,7 @@ const SessionFolderItemBase = <TSessionNode,>({
                   onDelete();
                 }}
                 className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-                aria-label={`Delete folder ${folder.name}`}
+                aria-label={archivedBucket ? `Delete archived sessions in folder ${folder.name}` : `Delete folder ${folder.name}`}
               >
                 <RiDeleteBinLine className="h-3.5 w-3.5" />
               </button>

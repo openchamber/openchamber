@@ -143,7 +143,7 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-export type VisibleSetting = 'theme' | 'pwaInstallName' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'cornerRadius' | 'inputBarOffset' | 'navRail' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'activityRenderMode' | 'stickyUserHeader' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'reasoning' | 'showToolFileIcons' | 'expandedTools' | 'queueMode' | 'terminalQuickKeys' | 'persistDraft' | 'inputSpellcheck';
+export type VisibleSetting = 'theme' | 'pwaInstallName' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'cornerRadius' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'activityRenderMode' | 'stickyUserHeader' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'reasoning' | 'showToolFileIcons' | 'expandedTools' | 'queueMode' | 'terminalQuickKeys' | 'persistDraft' | 'inputSpellcheck';
 
 interface OpenChamberVisualSettingsProps {
     /** Which settings to show. If undefined, shows all. */
@@ -195,8 +195,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const setShowExpandedBashTools = useUIStore(state => state.setShowExpandedBashTools);
     const showExpandedEditTools = useUIStore(state => state.showExpandedEditTools);
     const setShowExpandedEditTools = useUIStore(state => state.setShowExpandedEditTools);
-    const isNavRailExpanded = useUIStore(state => state.isNavRailExpanded);
-    const setNavRailExpanded = useUIStore(state => state.setNavRailExpanded);
     const showMobileSessionStatusBar = useUIStore(state => state.showMobileSessionStatusBar);
     const setShowMobileSessionStatusBar = useUIStore(state => state.setShowMobileSessionStatusBar);
     const {
@@ -306,7 +304,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     const isVSCode = isVSCodeRuntime();
     const hasAppearanceSettings = (shouldShow('theme') || shouldShow('pwaInstallName')) && !isVSCode;
     const hasLayoutSettings = shouldShow('fontSize') || shouldShow('terminalFontSize') || shouldShow('spacing') || shouldShow('cornerRadius') || shouldShow('inputBarOffset');
-    const hasNavigationSettings = (!isMobile && shouldShow('navRail')) || (shouldShow('terminalQuickKeys') && !isMobile);
+    const hasNavigationSettings = shouldShow('terminalQuickKeys') && !isMobile;
     const hasBehaviorSettings = shouldShow('mermaidRendering')
         || shouldShow('userMessageRendering')
         || shouldShow('chatRenderMode')
@@ -710,38 +708,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                     <div className="space-y-3">
                         <section className="px-2 pb-2 pt-0">
                             <h4 className="typography-ui-header font-medium text-foreground">Navigation</h4>
-                            {shouldShow('navRail') && !isMobile && (
-                                <div
-                                    className="group mt-1.5 flex cursor-pointer items-center gap-2 py-1.5"
-                                    role="button"
-                                    tabIndex={0}
-                                    onClick={() => setNavRailExpanded(!isNavRailExpanded)}
-                                    onKeyDown={(e) => {
-                                        if (e.key === 'Enter' || e.key === ' ') {
-                                            e.preventDefault();
-                                            setNavRailExpanded(!isNavRailExpanded);
-                                        }
-                                    }}
-                                >
-                                    <Checkbox
-                                        checked={isNavRailExpanded}
-                                        onChange={setNavRailExpanded}
-                                        ariaLabel="Expand project rail by default"
-                                    />
-                                    <div className="flex min-w-0 items-center gap-1.5">
-                                        <span className="typography-ui-label text-foreground">Expand project rail</span>
-                                        <Tooltip delayDuration={1000}>
-                                            <TooltipTrigger asChild>
-                                                <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
-                                            </TooltipTrigger>
-                                            <TooltipContent sideOffset={8} className="max-w-xs">
-                                                Show project names in the left rail when multiple projects are open. Auto-collapses with a single project.
-                                            </TooltipContent>
-                                        </Tooltip>
-                                    </div>
-                                </div>
-                            )}
-
                             {shouldShow('terminalQuickKeys') && !isMobile && (
                                 <div
                                     className="group flex cursor-pointer items-center gap-2 py-1.5"

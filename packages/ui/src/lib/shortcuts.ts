@@ -159,13 +159,6 @@ const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
     customizable: true,
   },
   {
-    id: 'toggle_nav_rail',
-    defaultCombo: 'mod+shift+l',
-    label: 'Toggle project rail',
-    description: 'Expand or collapse the project navigation rail',
-    customizable: true,
-  },
-  {
     id: 'toggle_right_sidebar',
     defaultCombo: 'mod+b',
     label: 'Toggle right sidebar',

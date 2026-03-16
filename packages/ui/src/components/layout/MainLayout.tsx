@@ -3,7 +3,6 @@ import { motion, useMotionValue, animate } from 'motion/react';
 import { Header } from './Header';
 import { BottomTerminalDock } from './BottomTerminalDock';
 import { Sidebar } from './Sidebar';
-import { NavRail } from './NavRail';
 import { RightSidebar } from './RightSidebar';
 import { RightSidebarTabs } from './RightSidebarTabs';
 import { ContextPanel } from './ContextPanel';
@@ -702,9 +701,6 @@ export const MainLayout: React.FC = () => {
                         aria-hidden={!mobileLeftDrawerOpen}
                     >
                         <div className="h-full overflow-hidden flex bg-sidebar shadow-none drawer-safe-area">
-                            <div onPointerDownCapture={(e) => e.stopPropagation()}>
-                              <NavRail className="shrink-0" mobile />
-                            </div>
                             <div className="flex-1 min-w-0 overflow-hidden flex flex-col">
                                 <ErrorBoundary>
                                     <SessionSidebar mobileVariant />
@@ -807,10 +803,9 @@ export const MainLayout: React.FC = () => {
                         <div className={cn('absolute inset-0 flex flex-col', isMultiRunLauncherOpen && 'invisible')}>
                             <Header />
                             <div className="flex flex-1 overflow-hidden">
-                                <NavRail />
                                 <div className="flex flex-1 min-w-0 overflow-hidden border-t border-l border-border/50 rounded-tl-xl">
                                 <Sidebar isOpen={isSidebarOpen} isMobile={isMobile}>
-                                    <SessionSidebar hideProjectSelector />
+                                    <SessionSidebar />
                                 </Sidebar>
                                 <div className="flex flex-1 min-w-0 flex-col overflow-hidden">
                                     <div className="flex flex-1 min-h-0 overflow-hidden">

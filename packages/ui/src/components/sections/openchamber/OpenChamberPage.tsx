@@ -110,7 +110,7 @@ const VisualSectionContent: React.FC = () => {
         'spacing',
         'cornerRadius',
         'inputBarOffset',
-        ...(!isVSCode ? ['terminalQuickKeys' as const, 'navRail' as const] : []),
+        ...(!isVSCode ? ['terminalQuickKeys' as const] : []),
     ]} />;
 };
 

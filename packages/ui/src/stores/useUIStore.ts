@@ -471,7 +471,6 @@ interface UIStore {
   isBottomTerminalExpanded: boolean;
   bottomTerminalHeight: number;
   hasManuallyResizedBottomTerminal: boolean;
-  isNavRailExpanded: boolean;
   isSessionSwitcherOpen: boolean;
   activeMainTab: MainTab;
   mainTabGuard: MainTabGuard | null;
@@ -589,8 +588,6 @@ interface UIStore {
   setBottomTerminalOpen: (open: boolean) => void;
   setBottomTerminalExpanded: (expanded: boolean) => void;
   setBottomTerminalHeight: (height: number) => void;
-  setNavRailExpanded: (expanded: boolean) => void;
-  toggleNavRail: () => void;
   setSessionSwitcherOpen: (open: boolean) => void;
   setActiveMainTab: (tab: MainTab) => void;
   setMainTabGuard: (guard: MainTabGuard | null) => void;
@@ -703,7 +700,6 @@ export const useUIStore = create<UIStore>()(
         isBottomTerminalExpanded: false,
         bottomTerminalHeight: 300,
         hasManuallyResizedBottomTerminal: false,
-        isNavRailExpanded: false,
         isSessionSwitcherOpen: false,
         activeMainTab: 'chat',
         mainTabGuard: null,
@@ -1167,13 +1163,6 @@ export const useUIStore = create<UIStore>()(
 
         setBottomTerminalHeight: (height) => {
           set({ bottomTerminalHeight: height, hasManuallyResizedBottomTerminal: true });
-        },
-
-        setNavRailExpanded: (expanded) => {
-          set({ isNavRailExpanded: expanded });
-        },
-        toggleNavRail: () => {
-          set({ isNavRailExpanded: !get().isNavRailExpanded });
         },
 
         setSessionSwitcherOpen: (open) => {
@@ -1827,7 +1816,6 @@ export const useUIStore = create<UIStore>()(
           isBottomTerminalOpen: state.isBottomTerminalOpen,
           isBottomTerminalExpanded: state.isBottomTerminalExpanded,
           bottomTerminalHeight: state.bottomTerminalHeight,
-          isNavRailExpanded: state.isNavRailExpanded,
           isSessionSwitcherOpen: state.isSessionSwitcherOpen,
           activeMainTab: state.activeMainTab,
           sidebarSection: state.sidebarSection,

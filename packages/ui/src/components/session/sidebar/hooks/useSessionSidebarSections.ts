@@ -9,6 +9,10 @@ type ProjectItem = {
   path: string;
   label?: string;
   normalizedPath: string;
+  icon?: string;
+  color?: string;
+  iconImage?: { mime: string; updatedAt: number; source: 'custom' | 'auto' };
+  iconBackground?: string;
 };
 
 type ProjectSection = {
@@ -18,7 +22,6 @@ type ProjectSection = {
 
 type Args = {
   normalizedProjects: ProjectItem[];
-  activeProjectId: string | null;
   getSessionsForProject: (project: { normalizedPath: string }) => Session[];
   getArchivedSessionsForProject: (project: { normalizedPath: string }) => Session[];
   availableWorktreesByProject: Map<string, WorktreeMetadata[]>;
@@ -42,7 +45,6 @@ type Args = {
 export const useSessionSidebarSections = (args: Args) => {
   const {
     normalizedProjects,
-    activeProjectId,
     getSessionsForProject,
     getArchivedSessionsForProject,
     availableWorktreesByProject,
@@ -88,12 +90,8 @@ export const useSessionSidebarSections = (args: Args) => {
   ]);
 
   const visibleProjectSections = React.useMemo(() => {
-    if (projectSections.length === 0) {
-      return projectSections;
-    }
-    const active = projectSections.find((section) => section.project.id === activeProjectId);
-    return active ? [active] : [projectSections[0]];
-  }, [projectSections, activeProjectId]);
+    return projectSections;
+  }, [projectSections]);
 
   const groupSearchDataByGroup = React.useMemo(() => {
     const result = new WeakMap<SessionGroup, GroupSearchData>();

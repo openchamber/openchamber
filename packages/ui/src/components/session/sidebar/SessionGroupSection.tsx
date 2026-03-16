@@ -45,7 +45,7 @@ type Props = {
   deleteFolder: (scopeKey: string, folderId: string) => void;
   showDeletionDialog: boolean;
   setDeleteFolderConfirm: React.Dispatch<React.SetStateAction<DeleteFolderConfirm>>;
-  renderSessionNode: (node: SessionNode, depth?: number, groupDirectory?: string | null, projectId?: string | null, archivedBucket?: boolean) => React.ReactNode;
+  renderSessionNode: (node: SessionNode, depth?: number, groupDirectory?: string | null, projectId?: string | null, archivedBucket?: boolean, secondaryMeta?: { projectLabel?: string | null; branchLabel?: string | null } | null) => React.ReactNode;
   currentSessionDirectory: string | null;
   projectRepoStatus: Map<string, boolean | null>;
   lastRepoStatus: boolean;
@@ -109,7 +109,6 @@ export function SessionGroupSection(props: Props): React.ReactNode {
     showDeletionDialog,
     setDeleteFolderConfirm,
     renderSessionNode,
-    currentSessionDirectory,
     projectRepoStatus,
     lastRepoStatus,
     toggleGroupSessionLimit,
@@ -204,24 +203,17 @@ export function SessionGroupSection(props: Props): React.ReactNode {
   };
 
   const allGroupSessions = collectGroupSessions(sourceGroupNodes);
-  const normalizedGroupDirectory = normalizePath(group.directory ?? null);
   const isGitProject = projectId && projectRepoStatus.has(projectId)
     ? Boolean(projectRepoStatus.get(projectId))
     : lastRepoStatus;
-  const isActiveGroup = Boolean(
-    normalizedGroupDirectory
-      && currentSessionDirectory
-      && normalizedGroupDirectory === currentSessionDirectory,
-  );
   const groupDirectoryKey = normalizePath(group.directory ?? null);
   const groupBranchKey = group.branch?.trim() ?? null;
   const prIndicator = groupDirectoryKey && groupBranchKey
     ? (prVisualStateByDirectoryBranch.get(`${groupDirectoryKey}::${groupBranchKey}`) ?? null)
     : null;
   const showInlinePrTitle = Boolean(prIndicator && group.branch);
-  const showBranchSubtitle = !group.isMain && (isBranchDifferentFromLabel(group.branch, group.label) || Boolean(prIndicator));
+  const showBranchSubtitle = !prIndicator && !group.isMain && Boolean(group.branch);
   const prVisualState = prIndicator?.visualState ?? null;
-  const branchIconColor = prVisualState ? `var(--pr-${prVisualState})` : undefined;
   const checksSummary = prIndicator && prIndicator.state === 'open' && prIndicator.checks
     ? `${prIndicator.checks.success}/${prIndicator.checks.total} checks passed`
     : null;
@@ -241,6 +233,33 @@ export function SessionGroupSection(props: Props): React.ReactNode {
     : null;
   const baseBranchLabel = prIndicator?.base ?? null;
   const headBranchLabel = prIndicator?.head ?? null;
+  const statusLine = (() => {
+    if (!prIndicator) {
+      return group.branch && isBranchDifferentFromLabel(group.branch, group.label)
+        ? { label: group.branch, color: null as string | null }
+        : null;
+    }
+    switch (prIndicator.visualState) {
+      case 'merged':
+        return { label: 'Merged', color: 'var(--pr-merged)' };
+      case 'open':
+        return (prIndicator.canMerge === true || prIndicator.mergeableState === 'clean' || prIndicator.checks?.state === 'success')
+          ? { label: 'Ready to merge', color: 'var(--pr-open)' }
+          : { label: 'PR open', color: 'var(--pr-open)' };
+      case 'blocked':
+        return {
+          label: prIndicator.mergeableState === 'dirty' ? 'Merge conflicts' : 'Merge blocked',
+          color: 'var(--pr-blocked)',
+        };
+      case 'draft':
+        return { label: 'Draft PR', color: 'var(--pr-draft)' };
+      case 'closed':
+        return { label: 'Closed', color: 'var(--pr-closed)' };
+      default:
+        return null;
+    }
+  })();
+  const branchIconColor = statusLine?.color ?? (prVisualState ? `var(--pr-${prVisualState})` : undefined);
   const handlePrLinkClick = (event: React.MouseEvent<HTMLElement>) => {
     event.preventDefault();
     event.stopPropagation();
@@ -263,6 +282,15 @@ export function SessionGroupSection(props: Props): React.ReactNode {
     const subFolderItems = directSubFolders.length > 0
       ? <>{directSubFolders.map(({ folder: sf, nodes: sn }) => renderOneFolderItem(sf, sn, depth + 1))}</>
       : undefined;
+    const collectFolderSessions = (targetFolderId: string): Session[] => {
+      const directNodes = allFoldersForGroup.find(({ folder: candidate }) => candidate.id === targetFolderId)?.nodes ?? [];
+      const childFolders = allFoldersForGroup.filter(({ folder: candidate }) => candidate.parentId === targetFolderId);
+      return [
+        ...collectGroupSessions(directNodes),
+        ...childFolders.flatMap(({ folder: child }) => collectFolderSessions(child.id)),
+      ];
+    };
+    const folderSessionsForDelete = group.isArchivedBucket ? collectFolderSessions(folder.id) : [];
 
     return (
       <DroppableFolderWrapper key={folder.id} folderId={folder.id}>
@@ -277,6 +305,13 @@ export function SessionGroupSection(props: Props): React.ReactNode {
               if (folderScopeKey) renameFolder(folderScopeKey, folder.id, name);
             }}
             onDelete={() => {
+              if (group.isArchivedBucket) {
+                sessionEvents.requestDelete({
+                  sessions: folderSessionsForDelete,
+                  mode: 'session',
+                });
+                return;
+              }
               if (!folderScopeKey) return;
               if (!showDeletionDialog) {
                 deleteFolder(folderScopeKey, folder.id);
@@ -324,7 +359,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
               if (!folderScopeKey) return;
               createFolderAndStartRename(folderScopeKey, folder.id);
             } : undefined}
-            hideActions={group.isArchivedBucket === true}
+            hideActions={false}
             archivedBucket={group.isArchivedBucket === true}
           />
         )}
@@ -371,13 +406,13 @@ export function SessionGroupSection(props: Props): React.ReactNode {
   );
 
   if (hideGroupLabel) {
-    return <div className="oc-group"><div className="oc-group-body pb-3">{body}</div></div>;
+    return <div className="oc-group"><div className="oc-group-body pb-3 pl-4">{body}</div></div>;
   }
 
   return (
     <div className="oc-group">
       <div
-        className={cn('group/gh relative flex items-center justify-between gap-1 py-1 min-w-0 rounded-sm', 'hover:bg-interactive-hover/50 cursor-pointer')}
+        className={cn('group/gh relative flex items-start justify-between gap-1 py-1 min-w-0 rounded-md', 'cursor-pointer')}
         onClick={() => onToggleCollapsedGroup(groupKey)}
         role="button"
         tabIndex={0}
@@ -390,76 +425,38 @@ export function SessionGroupSection(props: Props): React.ReactNode {
         aria-label={isCollapsed ? `Expand ${group.label}` : `Collapse ${group.label}`}
       >
         <div className={cn(
-          'min-w-0 flex items-center gap-1.5 pl-1.5 transition-[padding]',
+          'min-w-0 flex items-start gap-1 pl-0.5 transition-[padding]',
           mobileVariant
             ? (!group.isMain && group.worktree ? 'pr-14' : 'pr-7')
             : (!group.isMain && group.worktree ? 'group-hover/gh:pr-14 group-focus-within/gh:pr-14' : 'group-hover/gh:pr-7 group-focus-within/gh:pr-7'),
         )}>
-          {group.isArchivedBucket ? (
-            <RiArchiveLine className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
-          ) : (!group.isMain || isGitProject) ? (
-            showInlinePrTitle && prIndicator ? (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="inline-flex">
-                    <RiGitBranchLine
-                      className="h-3.5 w-3.5 flex-shrink-0 translate-y-[0.5px] text-muted-foreground"
-                      style={branchIconColor ? { color: branchIconColor } : undefined}
-                    />
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent side="top" sideOffset={6} align="start" className="max-w-sm">
-                  <div className="space-y-1 text-xs">
-                    {(baseBranchLabel || headBranchLabel) ? (
-                      <div className="text-muted-foreground truncate">
-                        {baseBranchLabel && headBranchLabel ? (
-                          <>
-                            <span>{baseBranchLabel}</span>
-                            <RiArrowLeftLongLine className="mx-0.5 inline h-3 w-3 align-[-2px]" />
-                            <span>{headBranchLabel}</span>
-                          </>
-                        ) : (
-                          <span>{baseBranchLabel ?? headBranchLabel ?? ''}</span>
-                        )}
-                      </div>
-                    ) : null}
-                    {mergeStateLabel ? <div className="text-muted-foreground truncate">{mergeStateLabel}</div> : null}
-                    {(mergeabilityLabel || checksSummary) ? (
-                      <div className="text-muted-foreground truncate">
-                        {mergeabilityLabel ?? ''}
-                        {mergeabilityLabel && checksSummary ? ' • ' : ''}
-                        {checksSummary ?? ''}
-                        {checksTail ? ` (${checksTail})` : ''}
-                      </div>
-                    ) : null}
-                  </div>
-                </TooltipContent>
-              </Tooltip>
-            ) : (
-              <RiGitBranchLine
-                className="h-3.5 w-3.5 flex-shrink-0 translate-y-[0.5px] text-muted-foreground"
-                style={branchIconColor ? { color: branchIconColor } : undefined}
-              />
-            )
-          ) : null}
-          <div className="min-w-0 flex flex-col justify-center">
-            <p className={cn('text-[14px] font-semibold truncate', isActiveGroup ? 'text-primary' : 'text-muted-foreground')}>
+          <div className="min-w-0 flex flex-col justify-center gap-0.5">
+            <p className="text-[14px] font-normal truncate text-foreground/92">
               {showInlinePrTitle && prIndicator ? (
                 <>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <span className="inline-flex items-baseline gap-1">
+                      <span className="inline-flex items-center gap-1 leading-none align-middle">
+                        <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+                          <RiGitBranchLine
+                            className="h-3.5 w-3.5 shrink-0 group-hover/gh:hidden"
+                            style={branchIconColor ? { color: branchIconColor } : undefined}
+                          />
+                          <span className="hidden text-muted-foreground group-hover/gh:inline-flex h-3.5 w-3.5 items-center justify-center">
+                            {isCollapsed ? <RiArrowRightSLine className="h-3.5 w-3.5" /> : <RiArrowDownSLine className="h-3.5 w-3.5" />}
+                          </span>
+                        </span>
                         {prIndicator.url ? (
                           <button
                             type="button"
-                            className="inline-flex items-baseline leading-none underline hover:no-underline"
+                            className="inline-flex items-center leading-none"
                             onMouseDown={(event) => event.stopPropagation()}
                             onClick={handlePrLinkClick}
                           >
                             #{prIndicator.number}
                           </button>
                         ) : (
-                          <span className="leading-none">#{prIndicator.number}</span>
+                          <span className="inline-flex items-center leading-none">#{prIndicator.number}</span>
                         )}
                       </span>
                     </TooltipTrigger>
@@ -490,42 +487,117 @@ export function SessionGroupSection(props: Props): React.ReactNode {
                       </div>
                     </TooltipContent>
                   </Tooltip>
-                  <span>{` ${group.branch}`}</span>
+                  <span className="ml-1 inline-flex items-center leading-none align-middle">{group.branch}</span>
                 </>
+              ) : group.isArchivedBucket ? (
+                <span className="inline-flex min-w-0 items-center gap-1">
+                  <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+                    <RiArchiveLine className="h-3.5 w-3.5 shrink-0 text-muted-foreground group-hover/gh:hidden" />
+                    <span className="hidden text-muted-foreground group-hover/gh:inline-flex h-3.5 w-3.5 items-center justify-center">
+                      {isCollapsed ? <RiArrowRightSLine className="h-3.5 w-3.5" /> : <RiArrowDownSLine className="h-3.5 w-3.5" />}
+                    </span>
+                  </span>
+                  <span className="truncate">{renderHighlightedText(group.label, normalizedSessionSearchQuery)}</span>
+                </span>
+              ) : (!group.isMain || group.worktree) ? (
+                <span className="inline-flex min-w-0 items-center gap-1">
+                  <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+                    <RiGitBranchLine
+                      className="h-3.5 w-3.5 shrink-0 text-muted-foreground group-hover/gh:hidden"
+                      style={branchIconColor ? { color: branchIconColor } : undefined}
+                    />
+                    <span className="hidden text-muted-foreground group-hover/gh:inline-flex h-3.5 w-3.5 items-center justify-center">
+                      {isCollapsed ? <RiArrowRightSLine className="h-3.5 w-3.5" /> : <RiArrowDownSLine className="h-3.5 w-3.5" />}
+                    </span>
+                  </span>
+                  <span className="truncate">{renderHighlightedText(group.label, normalizedSessionSearchQuery)}</span>
+                </span>
               ) : (
                 renderHighlightedText(group.label, normalizedSessionSearchQuery)
               )}
             </p>
-            {!showInlinePrTitle && showBranchSubtitle ? (
-              <span className="text-[10px] sm:text-[11px] text-muted-foreground/80 truncate leading-tight">
-                {prIndicator ? (
-                  <>
-                    {prIndicator.url ? (
-                      <button
-                        type="button"
-                        className="underline hover:no-underline"
-                        onMouseDown={(event) => event.stopPropagation()}
-                        onClick={handlePrLinkClick}
-                      >
-                        #{prIndicator.number}
-                      </button>
-                    ) : (
-                      <span>#{prIndicator.number}</span>
-                    )}
-                    {group.branch ? <span>{` ${group.branch}`}</span> : null}
-                  </>
-                ) : (
-                  group.branch
-                )}
+            {showBranchSubtitle && statusLine ? (
+              <span className="inline-flex min-w-0 items-center gap-1.5 leading-tight">
+                {group.isArchivedBucket ? (
+                  <RiArchiveLine className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
+                ) : (!group.isMain || isGitProject) ? (
+                  showInlinePrTitle && prIndicator ? (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="inline-flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center">
+                          <RiGitBranchLine
+                            className="h-3.5 w-3.5 text-muted-foreground"
+                            style={branchIconColor ? { color: branchIconColor } : undefined}
+                          />
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" sideOffset={6} align="start" className="max-w-sm">
+                        <div className="space-y-1 text-xs">
+                          {(baseBranchLabel || headBranchLabel) ? (
+                            <div className="text-muted-foreground truncate">
+                              {baseBranchLabel && headBranchLabel ? (
+                                <>
+                                  <span>{baseBranchLabel}</span>
+                                  <RiArrowLeftLongLine className="mx-0.5 inline h-3 w-3 align-[-2px]" />
+                                  <span>{headBranchLabel}</span>
+                                </>
+                              ) : (
+                                <span>{baseBranchLabel ?? headBranchLabel ?? ''}</span>
+                              )}
+                            </div>
+                          ) : null}
+                          {mergeStateLabel ? <div className="text-muted-foreground truncate">{mergeStateLabel}</div> : null}
+                          {(mergeabilityLabel || checksSummary) ? (
+                            <div className="text-muted-foreground truncate">
+                              {mergeabilityLabel ?? ''}
+                              {mergeabilityLabel && checksSummary ? ' • ' : ''}
+                              {checksSummary ?? ''}
+                              {checksTail ? ` (${checksTail})` : ''}
+                            </div>
+                          ) : null}
+                        </div>
+                      </TooltipContent>
+                    </Tooltip>
+                  ) : (
+                    <RiGitBranchLine
+                      className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground"
+                      style={branchIconColor ? { color: branchIconColor } : undefined}
+                    />
+                  )
+                ) : null}
+                <span
+                  className={cn('min-w-0 truncate text-[11px] font-medium', !statusLine.color && 'text-muted-foreground/80')}
+                  style={statusLine.color ? { color: statusLine.color } : undefined}
+                >
+                  {statusLine.label}
+                </span>
               </span>
             ) : null}
           </div>
-          {isCollapsed ? (
-            <RiArrowRightSLine className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
-          ) : (
-            <RiArrowDownSLine className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
-          )}
         </div>
+        {group.isArchivedBucket && allGroupSessions.length > 0 ? (
+          <div className={cn('absolute right-0.5 top-1/2 -translate-y-1/2 z-10 transition-opacity', mobileVariant ? 'opacity-100' : 'opacity-0 group-hover/gh:opacity-100 group-focus-within/gh:opacity-100')}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    sessionEvents.requestDelete({
+                      sessions: allGroupSessions,
+                      mode: 'session',
+                    });
+                  }}
+                  className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                  aria-label={`Delete archived sessions in ${group.label}`}
+                >
+                  <RiDeleteBinLine className="h-4 w-4" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" sideOffset={4}><p>Delete archived sessions</p></TooltipContent>
+            </Tooltip>
+          </div>
+        ) : null}
         {group.directory && !group.isMain && group.worktree ? (
           <div className={cn('absolute right-7 top-1/2 -translate-y-1/2 z-10 transition-opacity', mobileVariant ? 'opacity-100' : 'opacity-0 group-hover/gh:opacity-100 group-focus-within/gh:opacity-100')}>
             <Tooltip>
@@ -564,17 +636,17 @@ export function SessionGroupSection(props: Props): React.ReactNode {
                     openNewSessionDraft({ directoryOverride: group.directory });
                   }}
                   className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-                  aria-label={`New session in ${group.label}`}
-                >
-                  <RiAddLine className="h-4 w-4" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom" sideOffset={4}><p>New session</p></TooltipContent>
-            </Tooltip>
-          </div>
-        ) : null}
+                   aria-label={`New draft session in ${group.label}`}
+                 >
+                   <RiAddLine className="h-4 w-4" />
+                 </button>
+               </TooltipTrigger>
+               <TooltipContent side="bottom" sideOffset={4}><p>New draft session</p></TooltipContent>
+             </Tooltip>
+           </div>
+         ) : null}
       </div>
-      {!isCollapsed ? <div className="oc-group-body pb-3">{body}</div> : null}
+      {!isCollapsed ? <div className="oc-group-body pb-3 pl-4">{body}</div> : null}
     </div>
   );
 }

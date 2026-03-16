@@ -1,6 +1,7 @@
 import React from "react";
 import { cn } from "@/lib/utils";
 import { OverlayScrollbar } from "./OverlayScrollbar";
+import { ScrollShadow } from "./ScrollShadow";
 
 type ScrollableOverlayProps = React.HTMLAttributes<HTMLElement> & {
   minThumbSize?: number;
@@ -14,6 +15,8 @@ type ScrollableOverlayProps = React.HTMLAttributes<HTMLElement> & {
   keyboardAvoid?: boolean;
   /** Prevent scroll from propagating to parent when at boundaries */
   preventOverscroll?: boolean;
+  useScrollShadow?: boolean;
+  scrollShadowSize?: number;
 };
 
 export const ScrollableOverlay = React.forwardRef<HTMLElement, ScrollableOverlayProps>(
@@ -31,6 +34,8 @@ export const ScrollableOverlay = React.forwardRef<HTMLElement, ScrollableOverlay
     fillContainer = true,
     keyboardAvoid = false,
     preventOverscroll = false,
+    useScrollShadow = false,
+    scrollShadowSize,
     ...rest
   }, ref) => {
     const containerRef = React.useRef<HTMLElement | null>(null);
@@ -46,20 +51,39 @@ export const ScrollableOverlay = React.forwardRef<HTMLElement, ScrollableOverlay
         )}
         data-keyboard-avoid={keyboardAvoid ? "true" : undefined}
       >
-        <Component
-          ref={containerRef as React.Ref<HTMLElement>}
-          className={cn(
-            "overlay-scrollbar-target overlay-scrollbar-container",
-            preventOverscroll && "overscroll-none",
-            fillContainer ? "flex-1 min-h-0 w-full" : "flex-none w-full h-auto",
-            disableHorizontal ? "overflow-y-auto overflow-x-hidden" : "overflow-auto",
-            className
-          )}
-          style={style}
-          {...rest}
-        >
-          {children}
-        </Component>
+        {useScrollShadow ? (
+          <ScrollShadow
+            ref={containerRef as React.Ref<HTMLDivElement>}
+            size={scrollShadowSize}
+            className={cn(
+              "overlay-scrollbar-target overlay-scrollbar-container",
+              preventOverscroll && "overscroll-none",
+              fillContainer ? "flex-1 min-h-0 w-full" : "flex-none w-full h-auto",
+              disableHorizontal ? "overflow-y-auto overflow-x-hidden" : "overflow-auto",
+              className
+            )}
+            style={style as React.CSSProperties}
+            observeMutations={observeMutations}
+            {...rest}
+          >
+            {children}
+          </ScrollShadow>
+        ) : (
+          <Component
+            ref={containerRef as React.Ref<HTMLElement>}
+            className={cn(
+              "overlay-scrollbar-target overlay-scrollbar-container",
+              preventOverscroll && "overscroll-none",
+              fillContainer ? "flex-1 min-h-0 w-full" : "flex-none w-full h-auto",
+              disableHorizontal ? "overflow-y-auto overflow-x-hidden" : "overflow-auto",
+              className
+            )}
+            style={style}
+            {...rest}
+          >
+            {children}
+          </Component>
+        )}
         <OverlayScrollbar
           containerRef={containerRef}
           minThumbSize={minThumbSize}

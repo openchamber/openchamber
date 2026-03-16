@@ -45,6 +45,34 @@ export const formatSessionDateLabel = (updatedMs: number): string => {
   return formatDateLabel(updatedMs);
 };
 
+export const formatSessionCompactDateLabel = (updatedMs: number): string => {
+  const diff = Math.max(0, Date.now() - updatedMs);
+
+  const minute = 60_000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+  const week = 7 * day;
+  const month = 30 * day;
+  const year = 365 * day;
+
+  if (diff < hour) {
+    return `${Math.max(1, Math.floor(diff / minute))}m`;
+  }
+  if (diff < day) {
+    return `${Math.floor(diff / hour)}h`;
+  }
+  if (diff < week) {
+    return `${Math.floor(diff / day)}d`;
+  }
+  if (diff < 5 * week) {
+    return `${Math.floor(diff / week)}w`;
+  }
+  if (diff < year) {
+    return `${Math.floor(diff / month)}mo`;
+  }
+  return `${Math.floor(diff / year)}y`;
+};
+
 export const normalizePath = (value?: string | null) => {
   if (!value) {
     return null;
