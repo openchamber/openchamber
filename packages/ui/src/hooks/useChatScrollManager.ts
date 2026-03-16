@@ -72,7 +72,6 @@ const PROGRAMMATIC_SCROLL_SUPPRESS_MS = 200;
 const DIRECT_SCROLL_INTENT_WINDOW_MS = 250;
 // Threshold for re-pinning: 10% of container height (matches bottom spacer)
 const PIN_THRESHOLD_RATIO = 0.10;
-const REPIN_BLOCK_AFTER_RELEASE_MS = 4000;
 const SORTED_PIN_THRESHOLD_PX = 24;
 
 export const useChatScrollManager = ({
@@ -112,7 +111,6 @@ export const useChatScrollManager = ({
     const suppressUserScrollUntilRef = React.useRef<number>(0);
     const lastDirectScrollIntentAtRef = React.useRef<number>(0);
     const isPinnedRef = React.useRef(true);
-    const repinBlockedUntilRef = React.useRef<number>(0);
     const lastScrollTopRef = React.useRef<number>(0);
     const touchLastYRef = React.useRef<number | null>(null);
 
@@ -143,9 +141,6 @@ export const useChatScrollManager = ({
     }, [markProgrammaticScroll, scrollEngine]);
 
     const scrollPinnedToBottom = React.useCallback(() => {
-        if (Date.now() < repinBlockedUntilRef.current) {
-            return;
-        }
         if (streamingMessageId) {
             scrollToBottomInternal({ followBottom: true });
             return;
@@ -187,7 +182,6 @@ export const useChatScrollManager = ({
         if (!container) return;
 
         // Re-pin when explicitly scrolling to bottom
-        repinBlockedUntilRef.current = 0;
         updatePinnedState(true);
 
         scrollToBottomInternal(options);
@@ -196,7 +190,6 @@ export const useChatScrollManager = ({
 
     const releasePinnedScroll = React.useCallback(() => {
         scrollEngine.cancelFollow();
-        repinBlockedUntilRef.current = Date.now() + REPIN_BLOCK_AFTER_RELEASE_MS;
         updatePinnedState(false);
         updateScrollButtonVisibility();
     }, [scrollEngine, updatePinnedState, updateScrollButtonVisibility]);
@@ -216,27 +209,19 @@ export const useChatScrollManager = ({
 
         // Handle pin/unpin logic
         const currentScrollTop = container.scrollTop;
-        const distanceFromBottom = getDistanceFromBottom();
-        const nearBottom = isNearBottom(distanceFromBottom, getPinThreshold());
-
         const scrollingUp = currentScrollTop < lastScrollTopRef.current;
-        const scrollingUpByUserIntent = Boolean(event?.isTrusted && !isProgrammatic && hasDirectIntent && scrollingUp);
 
-        // Unpin on explicit upward user intent.
-        // Also unpin for programmatic jumps away from bottom.
-        if (isPinnedRef.current) {
-            const programmaticJumpAwayFromBottom = Boolean(!event?.isTrusted && scrollingUp && !nearBottom);
-
-            if (scrollingUpByUserIntent || programmaticJumpAwayFromBottom) {
+        // Unpin requires strict user intent check
+        if (event?.isTrusted && !isProgrammatic && hasDirectIntent) {
+            if (scrollingUp && isPinnedRef.current) {
                 updatePinnedState(false);
             }
         }
 
-        // Re-pin once we return to bottom zone.
-        // User-driven scroll can always re-pin immediately.
-        if (!isPinnedRef.current && nearBottom) {
-            if (!scrollingUpByUserIntent && (event?.isTrusted || now >= repinBlockedUntilRef.current)) {
-                repinBlockedUntilRef.current = 0;
+        // Re-pin at bottom should always work (even momentum scroll)
+        if (!isPinnedRef.current) {
+            const distanceFromBottom = getDistanceFromBottom();
+            if (!scrollingUp && distanceFromBottom <= getPinThreshold()) {
                 updatePinnedState(true);
             }
         }
@@ -270,7 +255,6 @@ export const useChatScrollManager = ({
             rootHeight: container.clientHeight,
         });
 
-        // Scrolling up while pinned should release follow immediately.
         if (isPinnedRef.current && shouldPauseAutoScrollOnWheel({
             root: container,
             target: event.target,
@@ -376,7 +360,6 @@ export const useChatScrollManager = ({
     // Maintain pin-to-bottom when content changes
     React.useEffect(() => {
         if (!isPinnedRef.current) return;
-        if (Date.now() < repinBlockedUntilRef.current) return;
         if (isSyncing) return;
 
         const container = scrollRef.current;
@@ -398,7 +381,7 @@ export const useChatScrollManager = ({
             updateScrollButtonVisibility();
 
             // Maintain pin when content grows - fast smooth follow
-            if (isPinnedRef.current && Date.now() >= repinBlockedUntilRef.current) {
+            if (isPinnedRef.current) {
                 const distanceFromBottom = getDistanceFromBottom();
                 if (distanceFromBottom > getAutoFollowThreshold()) {
                     scrollPinnedToBottom();
@@ -410,7 +393,7 @@ export const useChatScrollManager = ({
 
         // Also observe children for content changes
         const childObserver = new MutationObserver(() => {
-            if (isPinnedRef.current && Date.now() >= repinBlockedUntilRef.current) {
+            if (isPinnedRef.current) {
                 const distanceFromBottom = getDistanceFromBottom();
                 if (distanceFromBottom > getAutoFollowThreshold()) {
                     scrollPinnedToBottom();
@@ -447,7 +430,7 @@ export const useChatScrollManager = ({
         updateScrollButtonVisibility();
 
         // Maintain pin when content changes - fast smooth follow
-        if (isPinnedRef.current && Date.now() >= repinBlockedUntilRef.current) {
+        if (isPinnedRef.current) {
             const distanceFromBottom = getDistanceFromBottom();
             if (distanceFromBottom > getAutoFollowThreshold()) {
                 scrollPinnedToBottom();
@@ -464,7 +447,7 @@ export const useChatScrollManager = ({
         const handlers: AnimationHandlers = {
             onChunk: () => {
                 updateScrollButtonVisibility();
-                if (isPinnedRef.current && Date.now() >= repinBlockedUntilRef.current) {
+                if (isPinnedRef.current) {
                     const distanceFromBottom = getDistanceFromBottom();
                     if (distanceFromBottom > getAutoFollowThreshold()) {
                         scrollPinnedToBottom();
@@ -478,7 +461,7 @@ export const useChatScrollManager = ({
             onAnimationStart: () => {},
             onAnimatedHeightChange: () => {
                 updateScrollButtonVisibility();
-                if (isPinnedRef.current && Date.now() >= repinBlockedUntilRef.current) {
+                if (isPinnedRef.current) {
                     const distanceFromBottom = getDistanceFromBottom();
                     if (distanceFromBottom > getAutoFollowThreshold()) {
                         scrollPinnedToBottom();
