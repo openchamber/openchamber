@@ -56,7 +56,11 @@ export async function checkCloudflaredAvailable() {
   const cfPath = await searchPathFor('cloudflared');
   if (cfPath) {
     try {
-      const result = spawnSync(cfPath, ['--version'], { windowsHide: true,  encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+      const result = spawnSync(cfPath, ['--version'], {
+        windowsHide: true,
+        encoding: 'utf8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
       if (result.status === 0) {
         return { available: true, path: cfPath, version: result.stdout.trim() };
       }
