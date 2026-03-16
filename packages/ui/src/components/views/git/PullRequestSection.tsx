@@ -720,7 +720,7 @@ export const PullRequestSection: React.FC<{
             <Button variant="outline" size="sm" asChild className="flex-shrink-0">
               <a href={run.detailsUrl} target="_blank" rel="noopener noreferrer">
                 <RiExternalLinkLine className="size-4" />
-                Open
+                {t('common.open')}
               </a>
             </Button>
           ) : null}
@@ -743,7 +743,9 @@ export const PullRequestSection: React.FC<{
         {Array.isArray(run.annotations) && run.annotations.length > 0 ? (
           <div className="space-y-1">
             <div className="typography-micro text-muted-foreground">
-              Failed annotations{run.annotations.length > 20 ? ` (showing 20/${run.annotations.length})` : ''}
+              {run.annotations.length > 20
+                ? t('pullRequestSection.failedAnnotationsWithCount', { count: run.annotations.length })
+                : t('pullRequestSection.failedAnnotations')}
             </div>
             <div className="space-y-1">
               {run.annotations.slice(0, 20).map((annotation, idx) => (
@@ -1933,7 +1935,7 @@ export const PullRequestSection: React.FC<{
               <RiGitPullRequestLine className="h-5 w-5" />
               {t('pullRequest.prComments')}
               {pr ? (
-                <span className="typography-meta text-muted-foreground">PR #{pr.number}</span>
+                <span className="typography-meta text-muted-foreground">{t('chatInput.pullRequestNumber', { number: pr.number })}</span>
               ) : null}
             </DialogTitle>
           </DialogHeader>

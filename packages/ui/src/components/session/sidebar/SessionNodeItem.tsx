@@ -206,8 +206,8 @@ export function SessionNodeItem(props: Props): React.ReactNode {
               {session.share ? <RiShare2Line className="h-3 w-3 text-[color:var(--status-info)] flex-shrink-0" /> : null}
               {(sessionSummary?.files ?? 0) > 0 || hasChildren ? (
                 <span className="flex items-center gap-2 flex-shrink-0">
-                  {(sessionSummary?.files ?? 0) > 0 ? <Tooltip><TooltipTrigger asChild><span className="inline-flex items-center gap-0.5"><RiFileEditLine className="h-3 w-3 text-muted-foreground/70" /><span>{sessionSummary!.files}</span></span></TooltipTrigger><TooltipContent side="bottom" sideOffset={4}><p>{sessionSummary!.files} changed {sessionSummary!.files === 1 ? 'file' : 'files'}</p></TooltipContent></Tooltip> : null}
-                  {hasChildren ? <Tooltip><TooltipTrigger asChild><span className="inline-flex items-center gap-0.5"><RiRobot2Line className="h-3 w-3 text-muted-foreground/70" /><span>{node.children.length}</span></span></TooltipTrigger><TooltipContent side="bottom" sideOffset={4}><p>{node.children.length} {node.children.length === 1 ? 'sub-session' : 'sub-sessions'}</p></TooltipContent></Tooltip> : null}
+                  {(sessionSummary?.files ?? 0) > 0 ? <Tooltip><TooltipTrigger asChild><span className="inline-flex items-center gap-0.5"><RiFileEditLine className="h-3 w-3 text-muted-foreground/70" /><span>{sessionSummary!.files}</span></span></TooltipTrigger><TooltipContent side="bottom" sideOffset={4}><p>{t('sessionSidebar.changedFilesCount', { count: sessionSummary?.files ?? 0 })}</p></TooltipContent></Tooltip> : null}
+                  {hasChildren ? <Tooltip><TooltipTrigger asChild><span className="inline-flex items-center gap-0.5"><RiRobot2Line className="h-3 w-3 text-muted-foreground/70" /><span>{node.children.length}</span></span></TooltipTrigger><TooltipContent side="bottom" sideOffset={4}><p>{t('sessionSidebar.subSessionsCount', { count: node.children.length })}</p></TooltipContent></Tooltip> : null}
                 </span>
               ) : null}
             </div>
@@ -306,13 +306,13 @@ export function SessionNodeItem(props: Props): React.ReactNode {
                     {(sessionSummary?.files ?? 0) > 0 ? (
                       <div className="flex items-center gap-1">
                         <RiFileEditLine className="h-3 w-3 text-muted-foreground" />
-                        <span className="text-muted-foreground">{sessionSummary!.files} changed {sessionSummary!.files === 1 ? 'file' : 'files'}</span>
+                        <span className="text-muted-foreground">{t('sessionSidebar.changedFilesCount', { count: sessionSummary?.files ?? 0 })}</span>
                       </div>
                     ) : null}
                     {hasChildren ? (
                       <div className="flex items-center gap-1">
                         <RiRobot2Line className="h-3 w-3 text-muted-foreground" />
-                        <span className="text-muted-foreground">{node.children.length} {node.children.length === 1 ? 'sub-session' : 'sub-sessions'}</span>
+                        <span className="text-muted-foreground">{t('sessionSidebar.subSessionsCount', { count: node.children.length })}</span>
                       </div>
                     ) : null}
                     {isMissingDirectory ? (
@@ -375,8 +375,8 @@ export function SessionNodeItem(props: Props): React.ReactNode {
                   {session.share ? <RiShare2Line className="h-3 w-3 text-[color:var(--status-info)] flex-shrink-0" /> : null}
                   {(sessionSummary?.files ?? 0) > 0 || hasChildren ? (
                     <span className="flex items-center gap-2 flex-shrink-0">
-                      {(sessionSummary?.files ?? 0) > 0 ? <Tooltip><TooltipTrigger asChild><span className="inline-flex items-center gap-0.5"><RiFileEditLine className="h-3 w-3 text-muted-foreground/70" /><span>{sessionSummary!.files}</span></span></TooltipTrigger><TooltipContent side="bottom" sideOffset={4}><p>{sessionSummary!.files} changed {sessionSummary!.files === 1 ? 'file' : 'files'}</p></TooltipContent></Tooltip> : null}
-                      {hasChildren ? <Tooltip><TooltipTrigger asChild><span className="inline-flex items-center gap-0.5"><RiRobot2Line className="h-3 w-3 text-muted-foreground/70" /><span>{node.children.length}</span></span></TooltipTrigger><TooltipContent side="bottom" sideOffset={4}><p>{node.children.length} {node.children.length === 1 ? 'sub-session' : 'sub-sessions'}</p></TooltipContent></Tooltip> : null}
+                      {(sessionSummary?.files ?? 0) > 0 ? <Tooltip><TooltipTrigger asChild><span className="inline-flex items-center gap-0.5"><RiFileEditLine className="h-3 w-3 text-muted-foreground/70" /><span>{sessionSummary!.files}</span></span></TooltipTrigger><TooltipContent side="bottom" sideOffset={4}><p>{t('sessionSidebar.changedFilesCount', { count: sessionSummary?.files ?? 0 })}</p></TooltipContent></Tooltip> : null}
+                      {hasChildren ? <Tooltip><TooltipTrigger asChild><span className="inline-flex items-center gap-0.5"><RiRobot2Line className="h-3 w-3 text-muted-foreground/70" /><span>{node.children.length}</span></span></TooltipTrigger><TooltipContent side="bottom" sideOffset={4}><p>{t('sessionSidebar.subSessionsCount', { count: node.children.length })}</p></TooltipContent></Tooltip> : null}
                     </span>
                   ) : null}
                   {isMissingDirectory ? <span className="inline-flex items-center gap-0.5 text-status-warning flex-shrink-0"><RiErrorWarningLine className="h-3 w-3" />{t('sessionSidebar.missing')}</span> : null}
@@ -453,12 +453,12 @@ export function SessionNodeItem(props: Props): React.ReactNode {
                             <DropdownMenuSeparator />
                             <DropdownMenuItem onClick={() => { const newFolder = createFolderAndStartRename(sessionDirectory); if (!newFolder) return; addSessionToFolder(sessionDirectory, newFolder.id, session.id); }}>
                               <RiAddLine className="mr-1 h-4 w-4" />
-                              New folder...
+                              {t('sessionSidebar.newFolder')}
                             </DropdownMenuItem>
                             {currentFolderId ? (
                               <DropdownMenuItem onClick={() => { removeSessionFromFolder(sessionDirectory, session.id); }} className="text-destructive focus:text-destructive">
                                 <RiCloseLine className="mr-1 h-4 w-4" />
-                                Remove from folder
+                                {t('sessionSidebar.removeFromFolder')}
                               </DropdownMenuItem>
                             ) : null}
                           </DropdownMenuSubContent>

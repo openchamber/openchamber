@@ -248,7 +248,7 @@ export const StatusRow: React.FC<StatusRowProps> = ({
         <span className="typography-ui-label">{t('statusRow.tasks')}</span>
       )}
       <span className="typography-meta">
-        {statusSummary.active} active · {statusSummary.left} left
+        {t('statusRow.activeLeftSummary', { active: statusSummary.active, left: statusSummary.left })}
       </span>
       {isExpanded ? (
         <RiArrowUpSLine className="h-3.5 w-3.5" />
@@ -272,7 +272,7 @@ export const StatusRow: React.FC<StatusRowProps> = ({
             <div className="flex h-full items-center text-[var(--status-error)] pl-0.5">
               <span className="flex items-center gap-1.5 typography-ui-label">
                 <RiCloseCircleLine size={16} aria-hidden="true" />
-                Aborted
+                {t('statusRow.aborted')}
               </span>
             </div>
           ) : showAssistantStatus && shouldRenderPlaceholder ? (

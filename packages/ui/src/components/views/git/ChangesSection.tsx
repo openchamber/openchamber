@@ -235,15 +235,15 @@ export const ChangesSection: React.FC<ChangesSectionProps> = ({
           <DialogHeader>
             <DialogTitle>{t('changesSection.revertAllChanges')}</DialogTitle>
             <DialogDescription>
-              This will discard local changes for {totalCount} file{totalCount === 1 ? '' : 's'} in the list.
+              {t('changesSection.discardLocalChangesForFiles', { count: totalCount })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setConfirmRevertAllOpen(false)} disabled={isRevertingAll}>
-              Cancel
+              {t('common.cancel')}
             </Button>
             <Button variant="destructive" onClick={() => void handleConfirmRevertAll()} disabled={isRevertingAll}>
-              {isRevertingAll ? 'Reverting...' : 'Revert all'}
+              {isRevertingAll ? t('changesSection.reverting') : t('changesSection.revertAll')}
             </Button>
           </DialogFooter>
         </DialogContent>

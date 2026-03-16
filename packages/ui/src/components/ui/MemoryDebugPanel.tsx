@@ -88,7 +88,7 @@ export const MemoryDebugPanel: React.FC<MemoryDebugPanelProps> = ({ onClose }) =
         <div className="typography-meta space-y-1 border-t pt-2">
           <div className="flex justify-between">
             <span className="text-muted-foreground">{t('memoryDebugPanel.viewportWindow')}:</span>
-            <span>{getBackgroundTrimLimit()} messages</span>
+            <span>{t('memoryDebugPanel.messagesCount', { count: getBackgroundTrimLimit() })}</span>
           </div>
           <div className="flex justify-between">
             <span className="text-muted-foreground">{t('memoryDebugPanel.zombieTimeout')}</span>
@@ -124,7 +124,7 @@ export const MemoryDebugPanel: React.FC<MemoryDebugPanelProps> = ({ onClose }) =
                   <span className={`font-mono ${
                     stat.messageCount > getMessageLimit() ? 'text-status-warning' : ''
                   }`}>
-                    {stat.messageCount} msgs
+                    {t('memoryDebugPanel.msgsCount', { count: stat.messageCount })}
                   </span>
                   {stat.backgroundCount > 0 && (
                     <span className="text-primary">+{stat.backgroundCount}</span>
@@ -151,7 +151,7 @@ export const MemoryDebugPanel: React.FC<MemoryDebugPanelProps> = ({ onClose }) =
                   });
                 }}
               >
-                Log State
+                {t('memoryDebugPanel.logState')}
               </Button>
             </TooltipTrigger>
             <TooltipContent side="top">

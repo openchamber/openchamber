@@ -2428,7 +2428,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                             <span className="text-muted-foreground flex-shrink-0">
                                 #{linkedIssue.number}
                                 {linkedIssue.author && (
-                                    <span className="ml-1">by {linkedIssue.author.login}</span>
+                                    <span className="ml-1">{t('chatInput.byAuthor', { author: linkedIssue.author.login })}</span>
                                 )}
                             </span>
                             <span className="text-foreground truncate">
@@ -2474,9 +2474,9 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                                 />
                             )}
                             <span className="text-muted-foreground flex-shrink-0">
-                                PR #{linkedPr.number}
+                                {t('chatInput.pullRequestNumber', { number: linkedPr.number })}
                                 {linkedPr.author && (
-                                    <span className="ml-1">by {linkedPr.author.login}</span>
+                                    <span className="ml-1">{t('chatInput.byAuthor', { author: linkedPr.author.login })}</span>
                                 )}
                             </span>
                             <span className="text-foreground truncate">

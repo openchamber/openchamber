@@ -397,7 +397,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
               )}
             >
               {requiredSatisfied ? <RiCheckLine className="h-3 w-3" /> : <RiArrowRightSLine className="h-3 w-3" />}
-              {requiredSatisfied ? 'Submit' : 'Next'}
+              {requiredSatisfied ? t('questionCard.submit') : t('questionCard.next')}
             </button>
 
             <button
@@ -411,7 +411,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
               )}
             >
               <RiCloseLine className="h-3 w-3" />
-              Dismiss
+              {t('questionCard.dismiss')}
             </button>
 
             {isResponding ? (

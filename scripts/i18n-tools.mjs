@@ -85,6 +85,23 @@ const NON_TRANSLATABLE_TERMS = new Set([
   'verse',
   'marin',
   'cedar',
+  'bun',
+  'npm',
+  'opencode',
+  'opencode cli',
+  'openchamber',
+  'openchamber logo',
+  'csv',
+  'tsv',
+  'markdown',
+  'ctx',
+  'out',
+  'ms',
+  'localhost',
+  'parent',
+  '$root_project_path',
+  'plain',
+  'esc',
 ]);
 
 const T_CALL_PATTERN = /\bt\s*\(\s*(['"])([^'"`]+?)\1/g;
@@ -158,8 +175,19 @@ function expressionContainsTranslation(node) {
 }
 
 function hasI18nIgnoreComment(sourceFile, node) {
+  const trailing = ts.getTrailingCommentRanges(sourceFile.text, node.end) ?? [];
+  if (trailing.some((range) => sourceFile.text.slice(range.pos, range.end).includes('i18n-scan-ignore'))) {
+    return true;
+  }
   const ranges = ts.getLeadingCommentRanges(sourceFile.text, node.pos) ?? [];
-  return ranges.some((range) => sourceFile.text.slice(range.pos, range.end).includes('i18n-scan-ignore'));
+  if (ranges.some((range) => sourceFile.text.slice(range.pos, range.end).includes('i18n-scan-ignore'))) {
+    return true;
+  }
+  const lineStart = sourceFile.text.lastIndexOf('\n', Math.max(0, node.end - 1)) + 1;
+  const lineEndIndex = sourceFile.text.indexOf('\n', node.end);
+  const lineEnd = lineEndIndex === -1 ? sourceFile.text.length : lineEndIndex;
+  const sameLineText = sourceFile.text.slice(lineStart, lineEnd);
+  return sameLineText.includes('i18n-scan-ignore');
 }
 
 function isInsideIgnoredJsx(sourceFile, node) {
@@ -480,6 +508,7 @@ function looksLikeHumanText(text) {
   if (candidate.length < 2) return false;
   if (URL_PATTERN.test(candidate)) return false;
   if (FILE_LIKE_PATTERN.test(candidate)) return false;
+  if (candidate.includes('/') && !candidate.includes(' ')) return false;
   if (DURATION_LIKE_PATTERN.test(candidate)) return false;
   if (I18N_KEY_LIKE_PATTERN.test(candidate)) return false;
   if (NON_TRANSLATABLE_TERMS.has(candidate.toLowerCase())) return false;
@@ -498,6 +527,7 @@ function shouldIgnoreLiteral(line, propName, literal) {
   if (line.includes('className=') && propName === 'className') return true;
   if (propName && !USER_VISIBLE_PROPS.has(propName)) return true;
   if (!propName && CODE_FRAGMENT_PATTERN.test(literal)) return true;
+  if (!propName && /^[A-Z][A-Za-z0-9]*(?:\s+[A-Z][A-Za-z0-9]*)*$/.test(literal) && NON_TRANSLATABLE_TERMS.has(literal.toLowerCase())) return true;
   if (!looksLikeHumanText(literal)) return true;
   return false;
 }

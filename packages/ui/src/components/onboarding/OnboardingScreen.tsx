@@ -227,7 +227,7 @@ export function OnboardingScreen({ onCliAvailable }: OnboardingScreenProps) {
               OpenCode CLI
               <RiExternalLinkLine className="h-4 w-4" />
             </a>
-            {' '}is required to continue.
+            {' '}{t('onboarding.isRequiredToContinue')}
           </p>
         </div>
 
@@ -247,7 +247,7 @@ export function OnboardingScreen({ onCliAvailable }: OnboardingScreenProps) {
             {copied ? (
               <div className="flex items-center justify-center gap-2" style={{ color: 'var(--status-success)' }}>
                 <RiCheckLine className="h-4 w-4" />
-                Copied to clipboard
+                {t('onboarding.copyToClipboardSuccess')}
               </div>
             ) : (
               <BashCommand onCopy={handleCopy} copyTitle={t('onboarding.copyToClipboard')} />

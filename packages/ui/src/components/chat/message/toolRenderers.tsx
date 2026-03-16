@@ -1,5 +1,6 @@
 import { RiCheckLine } from '@remixicon/react';
 
+import i18n from '@/i18n';
 import { cn } from '@/lib/utils';
 import { typography } from '@/lib/typography';
 import { formatToolInput, detectToolOutputLanguage } from '@/lib/toolHelpers';
@@ -193,7 +194,7 @@ export const renderGrepOutput = (output: string, isMobile: boolean, options?: { 
                 style={typography.tool.popup}
             >
                 <div className="typography-meta text-muted-foreground mb-2">
-                    Found {lines.length} match{lines.length !== 1 ? 'es' : ''}
+                    {i18n.t('toolRenderers.foundMatches', { count: lines.length })}
                 </div>
                 {Object.entries(fileGroups).map(([filepath, matches]) => (
                     <div key={filepath} className="space-y-1">
@@ -211,7 +212,7 @@ export const renderGrepOutput = (output: string, isMobile: boolean, options?: { 
                                         <div className="flex gap-2 min-w-0 flex-1">
                                             {match.lineNum && (
                                                 <span className="text-muted-foreground font-mono whitespace-nowrap">
-                                                    Line {match.lineNum}:
+                                                    {i18n.t('toolRenderers.lineNumber', { line: match.lineNum })}
                                                 </span>
                                             )}
                                             <span className="text-foreground font-mono break-words flex-1">
@@ -260,7 +261,7 @@ export const renderGlobOutput = (output: string, isMobile: boolean, options?: { 
                 style={typography.tool.popup}
             >
                 <div className="typography-meta text-muted-foreground mb-2">
-                    Found {paths.length} file{paths.length !== 1 ? 's' : ''}
+                    {i18n.t('toolRenderers.foundFiles', { count: paths.length })}
                 </div>
                 {sortedDirs.map((dir) => (
                     <div key={dir} className="space-y-1">
@@ -328,18 +329,18 @@ export const renderTodoOutput = (output: string, options?: { unstyled?: boolean 
                 style={typography.tool.popup}
             >
                 <div className="flex gap-4 typography-meta pb-2 border-b border-border/20">
-                    <span className="font-medium" style={{ color: 'var(--muted-foreground)' }}>Total: {todos.length}</span>
+                    <span className="font-medium" style={{ color: 'var(--muted-foreground)' }}>{i18n.t('toolRenderers.totalCount', { count: todos.length })}</span>
                     {todosByStatus.in_progress.length > 0 && (
-                        <span className="font-medium" style={{ color: 'var(--foreground)' }}>In Progress: {todosByStatus.in_progress.length}</span>
+                        <span className="font-medium" style={{ color: 'var(--foreground)' }}>{i18n.t('toolRenderers.inProgressCount', { count: todosByStatus.in_progress.length })}</span>
                     )}
                     {todosByStatus.pending.length > 0 && (
-                        <span style={{ color: 'var(--muted-foreground)' }}>Pending: {todosByStatus.pending.length}</span>
+                        <span style={{ color: 'var(--muted-foreground)' }}>{i18n.t('toolRenderers.pendingCount', { count: todosByStatus.pending.length })}</span>
                     )}
                     {todosByStatus.completed.length > 0 && (
-                        <span style={{ color: 'var(--status-success)' }}>Completed: {todosByStatus.completed.length}</span>
+                        <span style={{ color: 'var(--status-success)' }}>{i18n.t('toolRenderers.completedCount', { count: todosByStatus.completed.length })}</span>
                     )}
                     {todosByStatus.cancelled.length > 0 && (
-                        <span style={{ color: 'var(--muted-foreground)', opacity: 0.5 }}>Cancelled: {todosByStatus.cancelled.length}</span>
+                        <span style={{ color: 'var(--muted-foreground)', opacity: 0.5 }}>{i18n.t('toolRenderers.cancelledCount', { count: todosByStatus.cancelled.length })}</span>
                     )}
                 </div>
 

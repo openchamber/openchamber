@@ -275,7 +275,7 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
             <div className="typography-meta text-muted-foreground">
               {timeout && <span>{t('permissionCard.timeout')}: {timeout}ms</span>}
               {timeout && format && <span> • </span>}
-              {format && <span>Response format: {format}</span>}
+              {format && <span>{t('permissionCard.responseFormat')}: {format}</span>}
             </div>
           )}
         </>
@@ -375,7 +375,7 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
               }}
             >
               <RiCheckLine className="h-3.5 w-3.5 sm:h-3 sm:w-3 flex-shrink-0" />
-              Allow Once
+              {t('permissionCard.allowOnce')}
             </button>
 
             {permission.always.length > 0 ? (
@@ -400,13 +400,15 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
                 <RiTimeLine className="h-3.5 w-3.5 sm:h-3 sm:w-3 flex-shrink-0" />
                 {(() => {
                   const always = (permission.always as string[]) || (permission.metadata.always as string[]) || [];
-                  if (always.length === 0) return "Always Allow";
+                  if (always.length === 0) return t('permissionCard.alwaysAllow');
                   const displayPatterns = always.slice(0, 2);
                   const text = displayPatterns.join(", ");
                   const hasMore = always.length > 2;
                   return (
                     <span className="truncate max-w-[180px]">
-                      {hasMore ? `Always: ${text}...` : `Always: ${text}`}
+                      {hasMore
+                        ? t('permissionCard.alwaysPatternsMore', { patterns: text })
+                        : t('permissionCard.alwaysPatterns', { patterns: text })}
                     </span>
                   );
                 })()}
@@ -431,7 +433,7 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
                 }}
               >
                 <RiTimeLine className="h-3.5 w-3.5 sm:h-3 sm:w-3 flex-shrink-0" />
-                Always Allow
+                {t('permissionCard.alwaysAllow')}
               </button>
             )}
 
@@ -454,7 +456,7 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
               }}
             >
               <RiCloseLine className="h-3.5 w-3.5 sm:h-3 sm:w-3 flex-shrink-0" />
-              Deny
+              {t('permissionCard.deny')}
             </button>
 
             {isResponding && (

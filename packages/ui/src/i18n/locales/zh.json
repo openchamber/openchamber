@@ -78,7 +78,10 @@
     "projectNavigation": "项目导航",
     "projectOptions": "项目选项",
     "editProject": "编辑项目",
-    "closeProject": "关闭项目"
+    "closeProject": "关闭项目",
+    "failedToAddProject": "添加项目失败",
+    "selectValidDirectory": "请选择有效目录。",
+    "failedToSelectDirectory": "选择目录失败"
   },
   "header": {
     "chat": "对话",
@@ -127,6 +130,8 @@
     "reloadThemes": "重新加载主题",
     "reloadingThemes": "正在重新加载主题...",
     "selectLanguage": "选择语言",
+    "installAppName": "安装应用名称",
+    "installAppNameDescription": "用于 PWA 安装流程。",
     "pwaInstallAppNameAria": "PWA 安装应用名称",
     "resetInstallAppNameAria": "重置安装应用名称",
     "spacingLayout": "间距与布局",
@@ -164,7 +169,6 @@
     "terminalQuickKeysDesc": "在终端视图中显示 Esc、Ctrl、方向键",
     "queueMessagesByDefaultDesc": "启用后，回车键排队消息。使用 {{modifier}}+回车键发送。",
     "toolOutputCollapsed": "折叠",
-    "toolOutputSummary": "摘要",
     "activityDefaultExpanded": "展开",
     "diffLayoutDynamic": "动态",
     "diffLayoutDynamicDesc": "新的内联，修改的并排。",
@@ -202,7 +206,10 @@
     "showExpandedBashTools": "展开 Bash 工具",
     "showExpandedEditTools": "展开编辑工具",
     "bash": "Bash",
-    "editTools": "编辑工具"
+    "editTools": "编辑工具",
+    "showReasoningTraces": "显示推理轨迹",
+    "showToolFileIcons": "显示工具文件图标",
+    "enableSpellcheckInTextInputs": "在文本输入中启用拼写检查"
   },
   "chatInput": {
     "sendMessage": "发送消息",
@@ -228,7 +235,9 @@
     "failedToAttachDroppedFile": "附加拖拽文件失败",
     "failedToAttachDroppedFiles": "附加拖拽文件失败",
     "failedToAttachFile": "附加文件失败",
-    "failedToPickFilesInVSCode": "在 VS Code 中选择文件失败"
+    "failedToPickFilesInVSCode": "在 VS Code 中选择文件失败",
+    "byAuthor": "作者 {{author}}",
+    "pullRequestNumber": "PR #{{number}}"
   },
   "chatEmptyState": {
     "phrases": {
@@ -270,7 +279,10 @@
     "failedToDiscoverIcon": "发现项目图标失败",
     "customIconAlreadySet": "此项目已设置自定义图标",
     "projectIconDiscovered": "项目图标已发现",
-    "projectIconBackgroundColor": "Project icon background color"
+    "projectIconBackgroundColor": "项目图标背景颜色",
+    "removing": "移除中...",
+    "removeProjectIcon": "移除项目图标",
+    "undoRemove": "撤销移除"
   },
   "filesView": {
     "createFile": "创建文件",
@@ -308,7 +320,12 @@
     "newFile": "新文件",
     "newFolder": "新文件夹",
     "searching": "搜索中...",
-    "openInDesktopApp": "在桌面应用中打开"
+    "openInDesktopApp": "在桌面应用中打开",
+    "closeFile": "关闭 {{name}}",
+    "saveNowShortcut": "立即保存（{{shortcut}}）- 1.5 秒后自动保存",
+    "saveShortcut": "保存（{{shortcut}}）",
+    "largeFilePreviewLimited": "该文件较大（{{sizeKb}}KB），预览可能受限。",
+    "openingFileAtChange": "正在定位到变更位置打开文件..."
   },
   "sidebarFilesTree": {
     "pathCopied": "路径已复制到剪贴板",
@@ -365,6 +382,12 @@
     "deleteSessionQuestion": "删除会话？",
     "deleteFolderQuestion": "删除文件夹？",
     "directoryMissing": "目录缺失",
+    "changedFilesCount": "{{count}} 个已更改文件",
+    "changedFilesCount_other": "{{count}} 个已更改文件",
+    "subSessionsCount": "{{count}} 个子会话",
+    "subSessionsCount_other": "{{count}} 个子会话",
+    "newFolder": "新建文件夹...",
+    "removeFromFolder": "从文件夹中移除",
     "missing": "缺失",
     "displayMode": "显示模式",
     "displayModeDefault": "默认",
@@ -459,7 +482,8 @@
     "newBranchName": "新分支名称",
     "current": "当前",
     "noLocalBranches": "没有本地分支",
-    "noRemoteBranches": "没有远程分支"
+    "noRemoteBranches": "没有远程分支",
+    "aheadBehind": "领先 {{ahead}} · 落后 {{behind}}"
   },
   "branchPickerDialog": {
     "manageBranches": "管理分支",
@@ -652,6 +676,10 @@
     "additionalContextPlaceholder": "说明为什么需要这次改动...\n补充如何测试（命令 / 步骤）...\n说明风险 / 发布计划...",
     "additionalContextHelp": "该文本仅用于指导 PR 生成。"
   },
+  "pullRequestSection": {
+    "failedAnnotations": "失败标注",
+    "failedAnnotationsWithCount": "失败标注（显示 20/{{count}}）"
+  },
   "integrateCommits": {
     "reintegrateCommits": "重新整合提交",
     "toMoveCount": "{{count}} 个提交要移动",
@@ -695,7 +723,11 @@
     "changes": "更改",
     "all": "全选",
     "changedFiles": "Changed files",
-    "revertAllChanges": "Revert all changes?"
+    "revertAllChanges": "还原所有更改？",
+    "discardLocalChangesForFiles": "这将丢弃列表中 {{count}} 个文件的本地更改。",
+    "discardLocalChangesForFiles_other": "这将丢弃列表中 {{count}} 个文件的本地更改。",
+    "revertAll": "全部还原",
+    "reverting": "还原中..."
   },
   "gitStash": {
     "operationMerge": "合并",
@@ -1350,7 +1382,8 @@
     "uploadIcon": "上传图标",
     "discovering": "发现中...",
     "discoverFavicon": "发现网站图标",
-    "worktree": "工作树"
+    "worktree": "工作树",
+    "undoRemove": "撤销移除"
   },
   "projectsSidebar": {
     "projects": "项目",
@@ -2364,7 +2397,10 @@
     "removeImage": "移除图片"
   },
   "queuedMessageChips": {
-    "removeFromQueue": "从队列中移除"
+    "removeFromQueue": "从队列中移除",
+    "queued": "已排队",
+    "attachmentsCount": "+{{count}} 个文件",
+    "attachmentsCount_other": "+{{count}} 个文件"
   },
   "openInAppButton": {
     "chooseAppToOpen": "选择要打开的应用",
@@ -2498,7 +2534,9 @@
   },
   "statusRow": {
     "stopGenerating": "停止生成",
-    "tasks": "任务"
+    "tasks": "任务",
+    "activeLeftSummary": "{{active}} 个进行中 · 剩余 {{left}} 个",
+    "aborted": "已中止"
   },
   "timelineDialog": {
     "conversationTimeline": "会话时间线",
@@ -2536,7 +2574,8 @@
     "copyMessage": "复制消息",
     "copyAnswer": "复制回答",
     "startNewSessionFromAnswer": "基于此回答开启新会话",
-    "startNewMultiRunFromAnswer": "基于此回答开启新的多运行"
+    "startNewMultiRunFromAnswer": "基于此回答开启新的多运行",
+    "openSubtaskSession": "打开子任务会话"
   },
   "textSelectionMenu": {
     "addToChat": "添加到聊天",
@@ -2555,21 +2594,44 @@
     "unableToLoadMermaidDiagram": "无法加载 Mermaid 图表。"
   },
   "progressiveGroup": {
-    "activity": "活动"
+    "activity": "活动",
+    "moreCount": "+{{count}} 条更多内容..."
   },
   "toolPart": {
     "output": "输出",
     "diff": "差异",
     "error": "错误",
     "awaitingResponse": "等待响应中...",
-    "noOutputProduced": "未产生输出"
+    "noOutputProduced": "未产生输出",
+    "moreCount": "+{{count}} 条更多内容...",
+    "openSubtask": "打开 {{agentType}} 子任务"
+  },
+  "toolRenderers": {
+    "foundMatches": "找到 {{count}} 处匹配",
+    "foundMatches_other": "找到 {{count}} 处匹配",
+    "lineNumber": "第 {{line}} 行：",
+    "foundFiles": "找到 {{count}} 个文件",
+    "foundFiles_other": "找到 {{count}} 个文件",
+    "totalCount": "总计：{{count}}",
+    "inProgressCount": "进行中：{{count}}",
+    "pendingCount": "待处理：{{count}}",
+    "completedCount": "已完成：{{count}}",
+    "cancelledCount": "已取消：{{count}}"
+  },
+  "inlineComments": {
+    "linesRange": "第 {{start}}-{{end}} 行",
+    "showLess": "收起",
+    "showMore": "展开更多",
+    "editComment": "编辑评论",
+    "deleteComment": "删除评论"
   },
   "reasoningPart": {
     "thinking": "思考",
     "justification": "理由"
   },
   "inlineCommentInput": {
-    "addCommentPlaceholder": "添加评论...（Cmd+Enter 保存）"
+    "addCommentPlaceholder": "添加评论...（Cmd+Enter 保存）",
+    "comment": "评论"
   },
   "githubIssuePicker": {
     "noActiveProject": "未选择活动项目。"
@@ -2610,7 +2672,10 @@
     "filesChangedCount_other": "{{count}} 个文件已更改",
     "selectSessionDirectoryToViewDiffs": "选择会话目录以查看 diff",
     "notAGitRepositoryUseGitTab": "当前不是 git 仓库。请使用 Git 标签页初始化或切换目录。",
-    "workingTreeCleanNoChanges": "工作树干净 - 没有可显示的更改"
+    "workingTreeCleanNoChanges": "工作树干净 - 没有可显示的更改",
+    "openFileInEditorAtChange": "在编辑器中于变更处打开此文件",
+    "loadingRepositoryStatus": "正在加载仓库状态...",
+    "openFileAtFirstChangedLine": "在首个变更行打开此文件"
   },
   "chatErrorBoundary": {
     "chatError": "聊天错误",
@@ -2697,7 +2762,15 @@
     "switchBetweenLocalAndRemoteServers": "在 Local 与远程 OpenChamber 服务器之间切换",
     "instanceSwitcherLimitedUseLocalToRecover": "该页面的实例切换器功能受限。请使用 Local 恢复。",
     "ssh": "SSH",
-    "switchToLocal": "切换到 Local"
+    "switchToLocal": "切换到 Local",
+    "remoteSsh": "远程 SSH",
+    "connect": "连接",
+    "defaultInstance": "默认实例",
+    "setAsDefault": "设为默认",
+    "instanceUnreachable": "实例不可达",
+    "connectingTo": "正在连接到 {{host}}",
+    "sshInstance": "SSH 实例",
+    "failedToConnectDefaultSsh": "连接默认 SSH 实例失败。"
   },
   "onboarding": {
     "copyToClipboard": "复制到剪贴板",
@@ -2715,6 +2788,8 @@
     "setBinaryPathIfNotDetected": "如果 OpenChamber 没有自动检测到 OpenCode，请在下方设置二进制路径。",
     "alreadyInstalledSetCliPath": "已经安装？请设置 OpenCode CLI 路径：",
     "savesAndReloadsConfig": "会保存到 OpenChamber 设置并重新加载 OpenCode 配置。",
+    "isRequiredToContinue": "才可继续。",
+    "copyToClipboardSuccess": "已复制到剪贴板",
     "windowsHintPathPrefix": "如果检测失败，请设置原生路径",
     "windowsHintOr": "或",
     "ensureOpencodeInPathPrefix": "已经安装？请确保",
@@ -2761,7 +2836,16 @@
     "removingOtherWorktrees": "正在移除其他工作树...",
     "removedOtherWorktrees": "已移除其他工作树",
     "failedToRemoveOtherWorktrees": "移除其他工作树失败",
-    "noSessionsInThisGroup": "此分组中没有会话"
+    "noSessionsInThisGroup": "此分组中没有会话",
+    "modelsCount": "{{count}} 个模型",
+    "modelsCount_other": "{{count}} 个模型",
+    "noBranch": "无分支",
+    "removeThisWorktree": "移除此工作树",
+    "leaveThisOneRemoveOthers": "保留当前项并移除其他项",
+    "copyWorktreePath": "复制工作树路径",
+    "working": "处理中...",
+    "loadingSessionFor": "正在为 {{label}} 加载会话",
+    "sessionId": "会话 ID：{{id}}"
   },
   "agentManagerSidebar": {
     "agentGroups": "Agent 分组",
@@ -2773,10 +2857,33 @@
     "noGroupsFound": "未找到分组",
     "newAgentGroup": "新 Agent 分组",
     "searchAgentGroups": "搜索 Agent 分组...",
-    "showLess": "收起"
+    "showLess": "收起",
+    "deletingGroup": "正在删除“{{name}}”...",
+    "deletedGroup": "已删除“{{name}}”",
+    "failedToDeleteGroup": "删除“{{name}}”失败",
+    "modelsCount": "{{count}} 个模型",
+    "modelsCount_other": "{{count}} 个模型",
+    "deleteAgentGroupDescription": "删除 {{name}}？这会移除此分组中的所有工作树和会话。",
+    "deleting": "删除中..."
   },
   "agentManagerEmptyState": {
-    "models": "模型"
+    "models": "模型",
+    "failedToCreateAgentGroup": "创建 Agent 分组失败",
+    "groupNameExample": "例如：feature-auth、bugfix-login",
+    "baseBranch": "基础分支",
+    "createsNewBranchesFrom": "新分支将基于",
+    "setupCommands": "初始化命令",
+    "configuredCount": "（已配置 {{count}} 个）",
+    "setupCommandsHelpPrefix": "这些命令会在每个新工作树中执行。使用",
+    "setupCommandsHelpSuffix": "表示项目根目录。",
+    "commandExample": "例如：bun install",
+    "removeCommand": "移除命令",
+    "addCommand": "添加命令",
+    "addModel": "添加模型",
+    "askAnything": "请输入任意内容...",
+    "modelsSelected": "已选择 {{count}} 个模型",
+    "modelsSelected_other": "已选择 {{count}} 个模型",
+    "startAgentGroup": "启动 Agent 分组"
   },
   "contextUsageDisplay": {
     "contextLimit": "上下文上限",
@@ -2802,7 +2909,10 @@
     "title": "Memory Debug Panel",
     "logCurrentStateHint": "将当前内存状态输出到浏览器控制台",
     "githubTotalRequests": "GitHub 请求总数：",
-    "zombieTimeoutValue": "{{minutes}} 分钟"
+    "zombieTimeoutValue": "{{minutes}} 分钟",
+    "messagesCount": "{{count}} 条消息",
+    "msgsCount": "{{count}} 条 msgs",
+    "logState": "输出状态"
   },
   "numberInput": {
     "decreaseValue": "减少数值",
@@ -2819,7 +2929,26 @@
     "request": "请求：",
     "timeout": "超时：",
     "workingDirectory": "工作目录：",
-    "permissionRequired": "Permission Required"
+    "permissionRequired": "需要权限",
+    "responseFormat": "响应格式",
+    "allowOnce": "允许一次",
+    "alwaysAllow": "始终允许",
+    "alwaysPatterns": "始终：{{patterns}}",
+    "alwaysPatternsMore": "始终：{{patterns}}...",
+    "deny": "拒绝"
+  },
+  "permissionToastActions": {
+    "forSession": "（{{sessionTitle}}）",
+    "sessionFallback": "会话",
+    "permissionUnavailable": "权限详情不可用",
+    "sessionLabel": "会话：",
+    "permissionLabel": "权限：",
+    "approveOnceAria": "允许一次{{context}}",
+    "approveAlwaysAria": "始终允许{{context}}",
+    "denyPermissionAria": "拒绝权限{{context}}",
+    "once": "一次",
+    "always": "始终",
+    "deny": "拒绝"
   },
   "questionCard": {
     "fromSubagent": "来自子 Agent",
@@ -2828,7 +2957,10 @@
     "recommended": "推荐",
     "selectMultiple": "可多选",
     "yourAnswer": "你的答案",
-    "summary": "Summary"
+    "summary": "摘要",
+    "submit": "提交",
+    "next": "下一步",
+    "dismiss": "忽略"
   },
   "serverFilePicker": {
     "loadingFiles": "正在加载文件...",

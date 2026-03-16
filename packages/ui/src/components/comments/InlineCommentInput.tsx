@@ -133,7 +133,7 @@ export function InlineCommentInput({
           <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground mb-2">
             {fileLabel && <span className="truncate max-w-[200px]">{fileLabel}</span>}
             {fileLabel && lineRange && <span>•</span>}
-            {displayRange && <span>Lines {displayRange.start}-{displayRange.end}</span>}
+            {displayRange && <span>{t('inlineComments.linesRange', { start: displayRange.start, end: displayRange.end })}</span>}
           </div>
         )}
         
@@ -158,7 +158,7 @@ export function InlineCommentInput({
             onTouchStart={(e) => e.stopPropagation()}
             className="h-8 text-muted-foreground hover:text-foreground"
           >
-            Cancel
+            {t('common.cancel')}
           </Button>
           <Button
             size="sm"
@@ -172,7 +172,7 @@ export function InlineCommentInput({
               color: currentTheme?.colors?.status?.successForeground,
             }}
           >
-            {isEditing ? 'Save' : 'Comment'}
+            {isEditing ? t('common.save') : t('inlineCommentInput.comment')}
           </Button>
         </div>
       </div>

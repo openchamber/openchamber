@@ -520,8 +520,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                             {showPwaInstallNameSetting && (
                                 <div className="py-1.5 space-y-1.5">
                                     <div className="flex min-w-0 flex-col">
-                                        <span className="typography-ui-label text-foreground">Install App Name</span>
-                                        <span className="typography-meta text-muted-foreground">Used by PWA installation process.</span>
+                                        <span className="typography-ui-label text-foreground">{t('appearance.installAppName')}</span>
+                                        <span className="typography-meta text-muted-foreground">{t('appearance.installAppNameDescription')}</span>
                                     </div>
                                     <div className="flex w-full max-w-[28rem] items-center gap-2">
                                         <Input
@@ -1053,8 +1053,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
 
                                     {shouldShow('diffLayout') && !isVSCode && (
                                         <section className="p-2">
-                                            <h4 className="typography-ui-header font-medium text-foreground">Diff Layout</h4>
-                                            <div role="radiogroup" aria-label="Diff layout" className="mt-0.5 space-y-0">
+                                            <h4 className="typography-ui-header font-medium text-foreground">{t('appearance.diffLayout')}</h4>
+                                            <div role="radiogroup" aria-label={t('appearance.diffLayout')} className="mt-0.5 space-y-0">
                                                 {DIFF_LAYOUT_OPTIONS.map((option) => {
                                                     const selected = diffLayoutPreference === option.id;
                                                     return (
@@ -1089,8 +1089,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
 
                                     {shouldShow('diffLayout') && !isVSCode && (
                                         <section className="p-2">
-                                            <h4 className="typography-ui-header font-medium text-foreground">Diff View Mode</h4>
-                                            <div role="radiogroup" aria-label="Diff view mode" className="mt-0.5 space-y-0">
+                                            <h4 className="typography-ui-header font-medium text-foreground">{t('appearance.diffViewMode')}</h4>
+                                            <div role="radiogroup" aria-label={t('appearance.diffViewMode')} className="mt-0.5 space-y-0">
                                                 {DIFF_VIEW_MODE_OPTIONS.map((option) => {
                                                     const selected = diffViewMode === option.id;
                                                     return (
@@ -1144,9 +1144,9 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             <Checkbox
                                                 checked={showReasoningTraces}
                                                 onChange={setShowReasoningTraces}
-                                                ariaLabel="Show reasoning traces"
+                                                ariaLabel={t('appearance.showReasoningTraces')}
                                             />
-                                            <span className="typography-ui-label text-foreground">Show Reasoning Traces</span>
+                                            <span className="typography-ui-label text-foreground">{t('appearance.showReasoningTraces')}</span>
                                         </div>
                                     )}
 
@@ -1190,9 +1190,9 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             <Checkbox
                                                 checked={showToolFileIcons}
                                                 onChange={handleShowToolFileIconsChange}
-                                                ariaLabel="Show tool file icons"
+                                                ariaLabel={t('appearance.showToolFileIcons')}
                                             />
-                                            <span className="typography-ui-label text-foreground">Show Tool File Icons</span>
+                                            <span className="typography-ui-label text-foreground">{t('appearance.showToolFileIcons')}</span>
                                         </div>
                                     )}
 
@@ -1315,9 +1315,9 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             <Checkbox
                                                 checked={inputSpellcheckEnabled}
                                                 onChange={handleInputSpellcheckChange}
-                                                ariaLabel="Enable spellcheck in text inputs"
+                                                ariaLabel={t('appearance.enableSpellcheckInTextInputs')}
                                             />
-                                            <span className="typography-ui-label text-foreground">Enable Spellcheck in Text Inputs</span>
+                                            <span className="typography-ui-label text-foreground">{t('appearance.enableSpellcheckInTextInputs')}</span>
                                         </div>
                                     )}
 

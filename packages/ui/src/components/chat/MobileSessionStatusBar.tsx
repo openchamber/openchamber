@@ -1181,6 +1181,7 @@ function CollapsedView({
   contextUsage: SessionContextUsage | null;
   childIndicators?: Array<{ session: Session; isRunning: boolean }>;
 }) {
+  const { t } = useLanguage();
   const { handleTouchStart, handleTouchMove, handleTouchEnd } = useDrawerSwipe();
 
   return (
@@ -1224,7 +1225,7 @@ function CollapsedView({
           }}
           className="flex items-center gap-0.5 px-2 py-1 text-[12px] leading-tight !min-h-0 rounded border border-[var(--primary-base)]/60 bg-[var(--primary-base)]/5 text-[var(--primary-base)]/80 hover:text-[var(--primary-base)] hover:bg-[var(--primary-base)]/10 self-center"
         >
-          New
+          {t('sessionSidebar.newSession')}
         </button>
       </div>
     </div>
@@ -1384,7 +1385,7 @@ function ExpandedView({
             }}
             className="flex items-center gap-0.5 px-2 py-1 text-[12px] leading-tight !min-h-0 rounded border border-[var(--primary-base)]/60 bg-[var(--primary-base)]/5 text-[var(--primary-base)]/80 hover:text-[var(--primary-base)] hover:bg-[var(--primary-base)]/10 self-start"
           >
-            New
+            {t('sessionSidebar.newSession')}
           </button>
         </div>
       </div>

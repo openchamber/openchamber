@@ -11,6 +11,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { useLanguage } from '@/hooks/useLanguage';
 
 interface InlineCommentCardProps {
   draft: InlineCommentDraft;
@@ -28,6 +29,7 @@ export function InlineCommentCard({
   maxWidth,
 }: InlineCommentCardProps) {
   const themeContext = useOptionalThemeSystem();
+  const { t } = useLanguage();
   const currentTheme = themeContext?.currentTheme;
   const [isOpen, setIsOpen] = useState(false);
   const draftText = typeof draft.text === 'string' ? draft.text : '';
@@ -56,7 +58,7 @@ export function InlineCommentCard({
               {draft.fileLabel}
             </span>
             <span>•</span>
-            <span>Lines {draft.startLine}-{draft.endLine}</span>
+            <span>{t('inlineComments.linesRange', { start: draft.startLine, end: draft.endLine })}</span>
             {draft.side && <span>({draft.side})</span>}
           </div>
           
@@ -75,12 +77,12 @@ export function InlineCommentCard({
                   {isOpen ? (
                     <>
                       <RiArrowUpSLine className="size-3 mr-1" />
-                      Show less
+                      {t('inlineComments.showLess')}
                     </>
                   ) : (
                     <>
                       <RiArrowDownSLine className="size-3 mr-1" />
-                      Show more
+                      {t('inlineComments.showMore')}
                     </>
                   )}
                 </Button>
@@ -106,11 +108,11 @@ export function InlineCommentCard({
           <DropdownMenuContent align="end">
             <DropdownMenuItem onClick={onEdit}>
               <RiEditLine className="size-4 mr-2" />
-              Edit comment
+              {t('inlineComments.editComment')}
             </DropdownMenuItem>
             <DropdownMenuItem onClick={onDelete} className="text-destructive">
               <RiDeleteBinLine className="size-4 mr-2" />
-              Delete comment
+              {t('inlineComments.deleteComment')}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

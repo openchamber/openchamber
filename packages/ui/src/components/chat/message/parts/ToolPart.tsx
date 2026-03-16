@@ -819,7 +819,7 @@ const TaskToolSummary: React.FC<{
                 <ToolScrollableSection maxHeightClass={isExpanded ? 'max-h-[40vh]' : 'max-h-56'} disableHorizontal>
                     <div className="w-full min-w-0 space-y-1">
                         {hiddenCount > 0 ? (
-                            <div className="typography-micro text-muted-foreground/70">+{hiddenCount} more…</div>
+                            <div className="typography-micro text-muted-foreground/70">{t('toolPart.moreCount', { count: hiddenCount })}</div>
                         ) : null}
 
                         {visibleEntries.map((entry, idx) => {
@@ -884,7 +884,7 @@ const TaskToolSummary: React.FC<{
                     onClick={handleOpenSession}
                 >
                     <RiExternalLinkLine className="h-3.5 w-3.5 flex-shrink-0" />
-                    <span className="typography-meta text-primary font-medium">Open {agentType.charAt(0).toUpperCase() + agentType.slice(1)} subtask</span>
+                    <span className="typography-meta text-primary font-medium">{t('toolPart.openSubtask', { agentType: agentType.charAt(0).toUpperCase() + agentType.slice(1) })}</span>
                 </button>
             )}
 

@@ -952,7 +952,7 @@ const MermaidPreviewDialog: React.FC<{
                                             color: 'var(--surface-foreground)',
                                         }}
                                     >
-                                        Retry
+                                        {t('common.retry')}
                                     </button>
                                 </div>
                             )}

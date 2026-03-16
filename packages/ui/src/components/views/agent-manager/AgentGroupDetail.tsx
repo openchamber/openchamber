@@ -149,11 +149,11 @@ export const AgentGroupDetail: React.FC<AgentGroupDetailProps> = ({
           <div className="min-w-0 flex-1">
             <h1 className="typography-heading-lg text-foreground truncate">{group.name}</h1>
             <div className="flex items-center gap-2 mt-1 typography-meta text-muted-foreground">
-              <span>{group.sessionCount} model{group.sessionCount !== 1 ? 's' : ''}</span>
+              <span>{t('agentGroupDetail.modelsCount', { count: group.sessionCount })}</span>
               <span>·</span>
               <span className="flex items-center gap-1">
                 <RiGitBranchLine className="h-3.5 w-3.5" />
-                {selectedSession?.worktreeMetadata?.label || selectedSession?.branch || 'No branch'}
+                {selectedSession?.worktreeMetadata?.label || selectedSession?.branch || t('agentGroupDetail.noBranch')}
               </span>
             </div>
           </div>
@@ -242,7 +242,7 @@ export const AgentGroupDetail: React.FC<AgentGroupDetailProps> = ({
                   }}
                   variant="destructive"
                 >
-                  Remove this worktree
+                  {t('agentGroupDetail.removeThisWorktree')}
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onSelect={(e) => {
@@ -250,7 +250,7 @@ export const AgentGroupDetail: React.FC<AgentGroupDetailProps> = ({
                     void handleKeepOnlySelectedWorktree();
                   }}
                 >
-                  Leave this one, remove others
+                  {t('agentGroupDetail.leaveThisOneRemoveOthers')}
                 </DropdownMenuItem>
                 <DropdownMenuItem
                 onClick={(e) => {
@@ -260,7 +260,7 @@ export const AgentGroupDetail: React.FC<AgentGroupDetailProps> = ({
                 disabled={!selectedSession?.path}
               >
                 <RiFileCopyLine className="h-4 w-4 mr-px" />
-                Copy Worktree Path
+                {t('agentGroupDetail.copyWorktreePath')}
               </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -282,14 +282,14 @@ export const AgentGroupDetail: React.FC<AgentGroupDetailProps> = ({
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setWorktreeDialog(null)} disabled={isProcessing}>
-              Cancel
+              {t('common.cancel')}
             </Button>
             <Button
               variant={worktreeDialog?.kind === 'remove' ? 'destructive' : 'default'}
               onClick={() => void handleConfirmWorktreeAction()}
               disabled={isProcessing}
             >
-              {isProcessing ? 'Working…' : worktreeDialog?.kind === 'remove' ? 'Remove' : 'Remove others'}
+              {isProcessing ? t('agentGroupDetail.working') : worktreeDialog?.kind === 'remove' ? t('agentGroupDetail.remove') : t('agentGroupDetail.removeOtherWorktrees')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -322,10 +322,10 @@ export const AgentGroupDetail: React.FC<AgentGroupDetailProps> = ({
               <div className="flex-1 flex items-center justify-center">
                 <div className="text-center p-8">
                   <p className="typography-body text-muted-foreground mb-2">
-                    Loading session for <span className="font-medium text-foreground">{selectedSession.displayLabel}</span>
+                    {t('agentGroupDetail.loadingSessionFor', { label: selectedSession.displayLabel })}
                   </p>
                   <p className="typography-micro text-muted-foreground/60">
-                    Session ID: {selectedSession.id}
+                    {t('agentGroupDetail.sessionId', { id: selectedSession.id })}
                   </p>
                 </div>
               </div>

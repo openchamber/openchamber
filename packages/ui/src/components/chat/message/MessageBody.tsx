@@ -141,7 +141,7 @@ const UserSubtaskPart: React.FC<{ part: SubtaskPartLike }> = ({ part }) => {
                             void setCurrentSession(taskSessionID);
                         }}
                     >
-                        Open subtask session
+                        {t('messageBody.openSubtaskSession')}
                     </button>
                 </div>
             ) : null}

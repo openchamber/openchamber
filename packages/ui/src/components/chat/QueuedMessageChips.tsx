@@ -38,9 +38,9 @@ const QueuedMessageChip = memo(({ message, sessionId, onEdit }: QueuedMessageChi
                 className="h-4 w-4 flex-shrink-0 text-muted-foreground" 
             />
             <span className="text-muted-foreground flex-shrink-0">
-                Queued
+                {t('queuedMessageChips.queued')}
                 {attachmentCount > 0 && (
-                    <span className="ml-1">+{attachmentCount} file{attachmentCount > 1 ? 's' : ''}</span>
+                    <span className="ml-1">{t('queuedMessageChips.attachmentsCount', { count: attachmentCount })}</span>
                 )}
             </span>
             <span className="text-foreground truncate">

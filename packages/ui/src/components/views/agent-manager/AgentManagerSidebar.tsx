@@ -59,13 +59,13 @@ const AgentGroupItem: React.FC<AgentGroupItemProps> = ({ group, isSelected, onSe
   const handleDeleteGroup = React.useCallback(async () => {
     if (isDeleting) return;
     setIsDeleting(true);
-    toast.info(`Deleting "${group.name}"...`);
+    toast.info(t('agentManagerSidebar.deletingGroup', { name: group.name }));
     const ok = await deleteGroup(group.name);
     if (ok) {
-      toast.success(`Deleted "${group.name}"`);
+      toast.success(t('agentManagerSidebar.deletedGroup', { name: group.name }));
     } else {
       const error = useAgentGroupsStore.getState().error;
-      toast.error(error || `Failed to delete "${group.name}"`);
+      toast.error(error || t('agentManagerSidebar.failedToDeleteGroup', { name: group.name }));
     }
     setIsDeleting(false);
     setConfirmOpen(false);
@@ -91,7 +91,7 @@ const AgentGroupItem: React.FC<AgentGroupItemProps> = ({ group, isSelected, onSe
             <div className="flex items-center gap-2">
               <span className="typography-micro text-muted-foreground/60 flex items-center gap-1">
                 <RiGitBranchLine className="h-3 w-3" />
-                {group.sessionCount} model{group.sessionCount !== 1 ? 's' : ''}
+                {t('agentManagerSidebar.modelsCount', { count: group.sessionCount })}
               </span>
               <span className="typography-micro text-muted-foreground/60">
                 {formatRelativeTime(group.lastActive)}
@@ -124,7 +124,7 @@ const AgentGroupItem: React.FC<AgentGroupItemProps> = ({ group, isSelected, onSe
                     setConfirmOpen(true);
                   }}
                 >
-                  Delete
+                  {t('common.delete')}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -137,15 +137,15 @@ const AgentGroupItem: React.FC<AgentGroupItemProps> = ({ group, isSelected, onSe
           <DialogHeader>
             <DialogTitle>{t('agentManagerSidebar.deleteAgentGroup')}</DialogTitle>
             <DialogDescription>
-              Delete <span className="text-foreground font-medium">{group.name}</span>? This removes all worktrees and sessions in this group.
+              {t('agentManagerSidebar.deleteAgentGroupDescription', { name: group.name })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setConfirmOpen(false)} disabled={isDeleting}>
-              Cancel
+              {t('common.cancel')}
             </Button>
             <Button variant="destructive" onClick={() => void handleDeleteGroup()} disabled={isDeleting}>
-              {isDeleting ? 'Deleting…' : 'Delete'}
+              {isDeleting ? t('agentManagerSidebar.deleting') : t('common.delete')}
             </Button>
           </DialogFooter>
         </DialogContent>

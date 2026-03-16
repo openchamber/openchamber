@@ -383,12 +383,12 @@ export const ProjectEditDialog: React.FC<ProjectEditDialogProps> = ({
               )}
               {hasRemovableImageIcon && (
                 <Button size="sm" variant="outline" onClick={() => void handleRemoveImageIcon()} disabled={isRemovingCustomIcon}>
-                  {isRemovingCustomIcon ? 'Removing...' : 'Remove Project Icon'}
+                  {isRemovingCustomIcon ? t('projectEdit.removing') : t('projectEdit.removeProjectIcon')}
                 </Button>
               )}
               {pendingRemoveImageIcon && (
                 <Button size="sm" variant="outline" onClick={() => setPendingRemoveImageIcon(false)} disabled={isRemovingCustomIcon}>
-                  Undo Remove
+                  {t('projectEdit.undoRemove')}
                 </Button>
               )}
             </div>

@@ -78,7 +78,10 @@
     "projectNavigation": "Project navigation",
     "projectOptions": "Project options",
     "editProject": "Edit project",
-    "closeProject": "Close project"
+    "closeProject": "Close project",
+    "failedToAddProject": "Failed to add project",
+    "selectValidDirectory": "Please select a valid directory.",
+    "failedToSelectDirectory": "Failed to select directory"
   },
   "header": {
     "chat": "Chat",
@@ -127,6 +130,8 @@
     "reloadThemes": "Reload themes",
     "reloadingThemes": "Reloading themes...",
     "selectLanguage": "Select language",
+    "installAppName": "Install App Name",
+    "installAppNameDescription": "Used by the PWA installation process.",
     "pwaInstallAppNameAria": "PWA install app name",
     "resetInstallAppNameAria": "Reset install app name",
     "spacingLayout": "Spacing & Layout",
@@ -164,7 +169,6 @@
     "terminalQuickKeysDesc": "Show Esc, Ctrl, Arrows in terminal view",
     "queueMessagesByDefaultDesc": "When enabled, Enter queues messages. Use {{modifier}}+Enter to send.",
     "toolOutputCollapsed": "Collapsed",
-    "toolOutputSummary": "Summary",
     "activityDefaultExpanded": "Expanded",
     "diffLayoutDynamic": "Dynamic",
     "diffLayoutDynamicDesc": "New inline, modified side-by-side.",
@@ -202,7 +206,10 @@
     "showExpandedBashTools": "Show expanded bash tools",
     "showExpandedEditTools": "Show expanded edit tools",
     "bash": "Bash",
-    "editTools": "Edit tools"
+    "editTools": "Edit tools",
+    "showReasoningTraces": "Show Reasoning Traces",
+    "showToolFileIcons": "Show Tool File Icons",
+    "enableSpellcheckInTextInputs": "Enable Spellcheck in Text Inputs"
   },
   "chatInput": {
     "sendMessage": "Send message",
@@ -228,7 +235,9 @@
     "failedToAttachDroppedFile": "Failed to attach dropped file",
     "failedToAttachDroppedFiles": "Failed to attach dropped files",
     "failedToAttachFile": "Failed to attach file",
-    "failedToPickFilesInVSCode": "Failed to pick files in VS Code"
+    "failedToPickFilesInVSCode": "Failed to pick files in VS Code",
+    "byAuthor": "by {{author}}",
+    "pullRequestNumber": "PR #{{number}}"
   },
   "chatEmptyState": {
     "phrases": {
@@ -270,7 +279,10 @@
     "failedToDiscoverIcon": "Failed to discover project icon",
     "customIconAlreadySet": "Custom icon already set for this project",
     "projectIconDiscovered": "Project icon discovered",
-    "projectIconBackgroundColor": "Project icon background color"
+    "projectIconBackgroundColor": "Project icon background color",
+    "removing": "Removing...",
+    "removeProjectIcon": "Remove Project Icon",
+    "undoRemove": "Undo Remove"
   },
   "filesView": {
     "createFile": "Create file",
@@ -308,7 +320,12 @@
     "newFile": "New file",
     "newFolder": "New folder",
     "searching": "Searching...",
-    "openInDesktopApp": "Open in desktop app"
+    "openInDesktopApp": "Open in desktop app",
+    "closeFile": "Close {{name}}",
+    "saveNowShortcut": "Save now ({{shortcut}}) - auto-saves after 1.5s",
+    "saveShortcut": "Save ({{shortcut}})",
+    "largeFilePreviewLimited": "This file is large ({{sizeKb}}KB). Preview may be limited.",
+    "openingFileAtChange": "Opening file at change..."
   },
   "sidebarFilesTree": {
     "pathCopied": "Path copied to clipboard",
@@ -365,6 +382,12 @@
     "deleteSessionQuestion": "Delete session?",
     "deleteFolderQuestion": "Delete folder?",
     "directoryMissing": "Directory missing",
+    "changedFilesCount": "{{count}} changed file",
+    "changedFilesCount_other": "{{count}} changed files",
+    "subSessionsCount": "{{count}} sub-session",
+    "subSessionsCount_other": "{{count}} sub-sessions",
+    "newFolder": "New folder...",
+    "removeFromFolder": "Remove from folder",
     "missing": "Missing",
     "displayMode": "Display mode",
     "displayModeDefault": "Default",
@@ -459,7 +482,8 @@
     "newBranchName": "New branch name",
     "current": "Current",
     "noLocalBranches": "No local branches",
-    "noRemoteBranches": "No remote branches"
+    "noRemoteBranches": "No remote branches",
+    "aheadBehind": "{{ahead}} ahead · {{behind}} behind"
   },
   "branchPickerDialog": {
     "manageBranches": "Manage branches",
@@ -652,6 +676,10 @@
     "additionalContextPlaceholder": "Explain why this change is needed...\nMention how to test (commands / steps)...\nCall out risks / rollout plan...",
     "additionalContextHelp": "This text is only used to guide PR generation."
   },
+  "pullRequestSection": {
+    "failedAnnotations": "Failed annotations",
+    "failedAnnotationsWithCount": "Failed annotations (showing 20/{{count}})"
+  },
   "integrateCommits": {
     "reintegrateCommits": "Reintegrate commits",
     "toMoveCount": "{{count}} commits to move",
@@ -695,7 +723,11 @@
     "changes": "Changes",
     "all": "All",
     "changedFiles": "Changed files",
-    "revertAllChanges": "Revert all changes?"
+    "revertAllChanges": "Revert all changes?",
+    "discardLocalChangesForFiles": "This will discard local changes for {{count}} file in the list.",
+    "discardLocalChangesForFiles_other": "This will discard local changes for {{count}} files in the list.",
+    "revertAll": "Revert all",
+    "reverting": "Reverting..."
   },
   "gitStash": {
     "operationMerge": "Merge",
@@ -1263,7 +1295,8 @@
     "uploadIcon": "Upload Icon",
     "discovering": "Discovering...",
     "discoverFavicon": "Discover Favicon",
-    "worktree": "Worktree"
+    "worktree": "Worktree",
+    "undoRemove": "Undo Remove"
   },
   "projectsSidebar": {
     "projects": "Projects",
@@ -2364,7 +2397,10 @@
     "removeImage": "Remove image"
   },
   "queuedMessageChips": {
-    "removeFromQueue": "Remove from queue"
+    "removeFromQueue": "Remove from queue",
+    "queued": "Queued",
+    "attachmentsCount": "+{{count}} file",
+    "attachmentsCount_other": "+{{count}} files"
   },
   "openInAppButton": {
     "chooseAppToOpen": "Choose app to open",
@@ -2498,7 +2534,9 @@
   },
   "statusRow": {
     "stopGenerating": "Stop generating",
-    "tasks": "Tasks"
+    "tasks": "Tasks",
+    "activeLeftSummary": "{{active}} active · {{left}} left",
+    "aborted": "Aborted"
   },
   "timelineDialog": {
     "conversationTimeline": "Conversation Timeline",
@@ -2536,7 +2574,8 @@
     "copyMessage": "Copy message",
     "copyAnswer": "Copy answer",
     "startNewSessionFromAnswer": "Start new session from this answer",
-    "startNewMultiRunFromAnswer": "Start new multi-run from this answer"
+    "startNewMultiRunFromAnswer": "Start new multi-run from this answer",
+    "openSubtaskSession": "Open subtask session"
   },
   "textSelectionMenu": {
     "addToChat": "Add to chat",
@@ -2555,21 +2594,44 @@
     "unableToLoadMermaidDiagram": "Unable to load Mermaid diagram."
   },
   "progressiveGroup": {
-    "activity": "Activity"
+    "activity": "Activity",
+    "moreCount": "+{{count}} more..."
   },
   "toolPart": {
     "output": "Output",
     "diff": "Diff",
     "error": "Error",
     "awaitingResponse": "Awaiting response...",
-    "noOutputProduced": "No output produced"
+    "noOutputProduced": "No output produced",
+    "moreCount": "+{{count}} more...",
+    "openSubtask": "Open {{agentType}} subtask"
+  },
+  "toolRenderers": {
+    "foundMatches": "Found {{count}} match",
+    "foundMatches_other": "Found {{count}} matches",
+    "lineNumber": "Line {{line}}:",
+    "foundFiles": "Found {{count}} file",
+    "foundFiles_other": "Found {{count}} files",
+    "totalCount": "Total: {{count}}",
+    "inProgressCount": "In Progress: {{count}}",
+    "pendingCount": "Pending: {{count}}",
+    "completedCount": "Completed: {{count}}",
+    "cancelledCount": "Cancelled: {{count}}"
+  },
+  "inlineComments": {
+    "linesRange": "Lines {{start}}-{{end}}",
+    "showLess": "Show less",
+    "showMore": "Show more",
+    "editComment": "Edit comment",
+    "deleteComment": "Delete comment"
   },
   "reasoningPart": {
     "thinking": "Thinking",
     "justification": "Justification"
   },
   "inlineCommentInput": {
-    "addCommentPlaceholder": "Add a comment... (Cmd+Enter to save)"
+    "addCommentPlaceholder": "Add a comment... (Cmd+Enter to save)",
+    "comment": "Comment"
   },
   "githubIssuePicker": {
     "noActiveProject": "No active project selected."
@@ -2610,7 +2672,10 @@
     "filesChangedCount_other": "{{count}} files changed",
     "selectSessionDirectoryToViewDiffs": "Select a session directory to view diffs",
     "notAGitRepositoryUseGitTab": "Not a git repository. Use the Git tab to initialize or change directories.",
-    "workingTreeCleanNoChanges": "Working tree clean - no changes to display"
+    "workingTreeCleanNoChanges": "Working tree clean - no changes to display",
+    "openFileInEditorAtChange": "Open this file in editor at change",
+    "loadingRepositoryStatus": "Loading repository status...",
+    "openFileAtFirstChangedLine": "Open this file at first changed line"
   },
   "chatErrorBoundary": {
     "chatError": "Chat Error",
@@ -2697,7 +2762,15 @@
     "switchBetweenLocalAndRemoteServers": "Switch between Local and remote OpenChamber servers",
     "instanceSwitcherLimitedUseLocalToRecover": "Instance switcher is limited on this page. Use Local to recover.",
     "ssh": "SSH",
-    "switchToLocal": "Switch to Local"
+    "switchToLocal": "Switch to Local",
+    "remoteSsh": "Remote SSH",
+    "connect": "Connect",
+    "defaultInstance": "Default instance",
+    "setAsDefault": "Set as default",
+    "instanceUnreachable": "Instance unreachable",
+    "connectingTo": "Connecting to {{host}}",
+    "sshInstance": "SSH instance",
+    "failedToConnectDefaultSsh": "Failed to connect the default SSH instance."
   },
   "onboarding": {
     "copyToClipboard": "Copy to clipboard",
@@ -2715,6 +2788,8 @@
     "setBinaryPathIfNotDetected": "If OpenChamber does not detect OpenCode automatically, set the binary path below.",
     "alreadyInstalledSetCliPath": "Already installed? Set the OpenCode CLI path:",
     "savesAndReloadsConfig": "Saves to OpenChamber settings and reloads OpenCode configuration.",
+    "isRequiredToContinue": "is required to continue.",
+    "copyToClipboardSuccess": "Copied to clipboard",
     "windowsHintPathPrefix": "If detection fails, set a native path",
     "windowsHintOr": "or",
     "ensureOpencodeInPathPrefix": "Already installed? Make sure",
@@ -2761,7 +2836,16 @@
     "removingOtherWorktrees": "Removing other worktrees...",
     "removedOtherWorktrees": "Removed other worktrees",
     "failedToRemoveOtherWorktrees": "Failed to remove other worktrees",
-    "noSessionsInThisGroup": "No sessions in this group"
+    "noSessionsInThisGroup": "No sessions in this group",
+    "modelsCount": "{{count}} model",
+    "modelsCount_other": "{{count}} models",
+    "noBranch": "No branch",
+    "removeThisWorktree": "Remove this worktree",
+    "leaveThisOneRemoveOthers": "Leave this one, remove others",
+    "copyWorktreePath": "Copy Worktree Path",
+    "working": "Working...",
+    "loadingSessionFor": "Loading session for {{label}}",
+    "sessionId": "Session ID: {{id}}"
   },
   "agentManagerSidebar": {
     "agentGroups": "Agent Groups",
@@ -2773,10 +2857,33 @@
     "noGroupsFound": "No groups found",
     "newAgentGroup": "New Agent Group",
     "searchAgentGroups": "Search Agent Groups...",
-    "showLess": "Show less"
+    "showLess": "Show less",
+    "deletingGroup": "Deleting \"{{name}}\"...",
+    "deletedGroup": "Deleted \"{{name}}\"",
+    "failedToDeleteGroup": "Failed to delete \"{{name}}\"",
+    "modelsCount": "{{count}} model",
+    "modelsCount_other": "{{count}} models",
+    "deleteAgentGroupDescription": "Delete {{name}}? This removes all worktrees and sessions in this group.",
+    "deleting": "Deleting..."
   },
   "agentManagerEmptyState": {
-    "models": "Models"
+    "models": "Models",
+    "failedToCreateAgentGroup": "Failed to create agent group",
+    "groupNameExample": "e.g. feature-auth, bugfix-login",
+    "baseBranch": "Base Branch",
+    "createsNewBranchesFrom": "Creates new branches from",
+    "setupCommands": "Setup commands",
+    "configuredCount": "({{count}} configured)",
+    "setupCommandsHelpPrefix": "Commands run in each new worktree. Use",
+    "setupCommandsHelpSuffix": "for project root.",
+    "commandExample": "e.g., bun install",
+    "removeCommand": "Remove command",
+    "addCommand": "Add command",
+    "addModel": "Add model",
+    "askAnything": "Ask anything...",
+    "modelsSelected": "{{count}} model selected",
+    "modelsSelected_other": "{{count}} models selected",
+    "startAgentGroup": "Start Agent Group"
   },
   "contextUsageDisplay": {
     "contextLimit": "Context limit",
@@ -2802,7 +2909,10 @@
     "title": "Memory Debug Panel",
     "logCurrentStateHint": "Log current memory state to browser console",
     "githubTotalRequests": "GitHub Total Requests:",
-    "zombieTimeoutValue": "{{minutes}} minutes"
+    "zombieTimeoutValue": "{{minutes}} minutes",
+    "messagesCount": "{{count}} messages",
+    "msgsCount": "{{count}} msgs",
+    "logState": "Log State"
   },
   "numberInput": {
     "decreaseValue": "Decrease value",
@@ -2819,7 +2929,26 @@
     "request": "Request:",
     "timeout": "Timeout:",
     "workingDirectory": "Working Directory:",
-    "permissionRequired": "Permission Required"
+    "permissionRequired": "Permission Required",
+    "responseFormat": "Response format",
+    "allowOnce": "Allow Once",
+    "alwaysAllow": "Always Allow",
+    "alwaysPatterns": "Always: {{patterns}}",
+    "alwaysPatternsMore": "Always: {{patterns}}...",
+    "deny": "Deny"
+  },
+  "permissionToastActions": {
+    "forSession": " for {{sessionTitle}}",
+    "sessionFallback": "Session",
+    "permissionUnavailable": "Permission details unavailable",
+    "sessionLabel": "Session:",
+    "permissionLabel": "Permission:",
+    "approveOnceAria": "Approve once{{context}}",
+    "approveAlwaysAria": "Approve always{{context}}",
+    "denyPermissionAria": "Deny permission{{context}}",
+    "once": "Once",
+    "always": "Always",
+    "deny": "Deny"
   },
   "questionCard": {
     "fromSubagent": "From subagent",
@@ -2828,7 +2957,10 @@
     "recommended": "recommended",
     "selectMultiple": "Select multiple",
     "yourAnswer": "Your answer",
-    "summary": "Summary"
+    "summary": "Summary",
+    "submit": "Submit",
+    "next": "Next",
+    "dismiss": "Dismiss"
   },
   "serverFilePicker": {
     "loadingFiles": "Loading files...",

@@ -386,7 +386,7 @@ const FileRow: React.FC<FileRowProps> = ({
             <DropdownMenuContent align="end" side={isMobile ? "bottom" : "bottom"} onCloseAutoFocus={() => setContextMenuPath(null)}>
               {canRename && (
                 <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onOpenDialog('rename', node); }}>
-                  <RiEditLine className="mr-2 h-4 w-4" /> Rename
+                  <RiEditLine className="mr-2 h-4 w-4" /> {t('filesView.rename')}
                 </DropdownMenuItem>
               )}
               <DropdownMenuItem onClick={(e) => {
@@ -399,11 +399,11 @@ const FileRow: React.FC<FileRowProps> = ({
                   toast.error(t('filesView.copyFailed'));
                 });
               }}>
-                <RiFileCopyLine className="mr-2 h-4 w-4" /> Copy Path
+                <RiFileCopyLine className="mr-2 h-4 w-4" /> {t('sidebarFilesTree.copyPath')}
               </DropdownMenuItem>
               {canReveal && (
                 <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onRevealPath(node.path); }}>
-                  <RiFolderReceivedLine className="mr-2 h-4 w-4" /> Reveal in Finder
+                  <RiFolderReceivedLine className="mr-2 h-4 w-4" /> {t('sidebarFilesTree.revealInFinder')}
                 </DropdownMenuItem>
               )}
               {isDir && (canCreateFile || canCreateFolder) && (
@@ -411,12 +411,12 @@ const FileRow: React.FC<FileRowProps> = ({
                   <DropdownMenuSeparator />
                   {canCreateFile && (
                     <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onOpenDialog('createFile', node); }}>
-                      <RiFileAddLine className="mr-2 h-4 w-4" /> New File
+                      <RiFileAddLine className="mr-2 h-4 w-4" /> {t('filesView.newFile')}
                     </DropdownMenuItem>
                   )}
                   {canCreateFolder && (
                     <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onOpenDialog('createFolder', node); }}>
-                      <RiFolderAddLine className="mr-2 h-4 w-4" /> New Folder
+                      <RiFolderAddLine className="mr-2 h-4 w-4" /> {t('filesView.newFolder')}
                     </DropdownMenuItem>
                   )}
                 </>
@@ -428,7 +428,7 @@ const FileRow: React.FC<FileRowProps> = ({
                     onClick={(e) => { e.stopPropagation(); onOpenDialog('delete', node); }}
                     className="text-destructive focus:text-destructive"
                   >
-                    <RiDeleteBinLine className="mr-2 h-4 w-4" /> Delete
+                    <RiDeleteBinLine className="mr-2 h-4 w-4" /> {t('filesView.delete')}
                   </DropdownMenuItem>
                 </>
               )}
@@ -2056,7 +2056,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
         <DialogFooter>
           <Button variant="outline" onClick={() => setActiveDialog(null)} disabled={isDialogSubmitting}>
-            Cancel
+            {t('common.cancel')}
           </Button>
           <Button
             variant={activeDialog === 'delete' ? 'destructive' : 'default'}
@@ -2064,7 +2064,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
             disabled={isDialogSubmitting || (activeDialog !== 'delete' && !dialogInputValue.trim())}
           >
             {isDialogSubmitting ? <RiLoader4Line className="animate-spin" /> : (
-                activeDialog === 'delete' ? 'Delete' : 'Confirm'
+                activeDialog === 'delete' ? t('common.delete') : t('common.confirm')
             )}
           </Button>
         </DialogFooter>
@@ -2141,7 +2141,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
               disabled={isSaving}
               className="border-[var(--status-success-border)] bg-[var(--status-success-background)] text-[var(--status-success)] hover:bg-[rgb(var(--status-success)/0.2)]"
             >
-              Save changes
+              {t('filesView.saveChanges')}
             </Button>
             <Button variant="destructive" onClick={discardAndContinue}>{t('filesView.discard')}</Button>
           </DialogFooter>
@@ -2214,7 +2214,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                             handleCloseFile(file.path);
                           }}
                           className="inline-flex h-6 w-6 items-center justify-center rounded-md text-[var(--surface-muted-foreground)] hover:text-[var(--surface-foreground)]"
-                          aria-label={`Close ${file.name}`}
+                          aria-label={t('filesView.closeFile', { name: file.name })}
                         >
                           <RiCloseLine className="h-3.5 w-3.5" />
                         </button>
@@ -2275,7 +2275,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                             'rounded-sm p-0.5 text-[var(--surface-muted-foreground)] hover:text-[var(--surface-foreground)]',
                             !isActive && 'opacity-0 group-hover:opacity-100'
                           )}
-                          aria-label={`Close ${file.name}`}
+                          aria-label={t('filesView.closeFile', { name: file.name })}
                         >
                           <RiCloseLine size={14} />
                         </button>
@@ -2298,12 +2298,12 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
               isSaving ? (
                 <span className="flex items-center gap-1 text-muted-foreground typography-meta">
                   <RiLoader4Line className="h-3.5 w-3.5 animate-spin" />
-                  Saving…
+                  {t('common.saving')}
                 </span>
               ) : autoSaveStatus === 'saved' && !isDirty ? (
                 <span className="flex items-center gap-1 text-[color:var(--status-success)] typography-meta">
                   <RiCheckLine className="h-3.5 w-3.5" />
-                  Saved
+                  {t('common.done')}
                 </span>
               ) : isDirty ? (
                 <Button
@@ -2311,8 +2311,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                   size="sm"
                   onClick={() => void saveDraft()}
                   className="h-5 px-1 gap-1 text-muted-foreground opacity-70 hover:opacity-100"
-                  title={`Save now (${getModifierLabel()}+S) — auto-saves after 1.5s`}
-                  aria-label={`Save (${getModifierLabel()}+S)`}
+                  title={t('filesView.saveNowShortcut', { shortcut: `${getModifierLabel()}+S` })}
+                  aria-label={t('filesView.saveShortcut', { shortcut: `${getModifierLabel()}+S` })}
                 >
                   <RiSave3Line className="h-3.5 w-3.5" />
                 </Button>
@@ -2493,7 +2493,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
               : (
                 <div className="p-3 flex items-center gap-2 typography-ui text-muted-foreground">
                   <RiLoader4Line className="h-4 w-4 animate-spin" />
-                  Loading…
+                  {t('common.loading')}
                 </div>
               )
           ) : fileError ? (
@@ -2510,7 +2510,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
             <div className="h-full overflow-auto p-3">
               {fileContent.length > 500 * 1024 && (
                 <div className="mb-3 rounded-md border border-status-warning/20 bg-status-warning/10 px-3 py-2 text-sm text-status-warning">
-                  This file is large ({Math.round(fileContent.length / 1024)}KB). Preview may be limited.
+                  {t('filesView.largeFilePreviewLimited', { sizeKb: Math.round(fileContent.length / 1024) })}
                 </div>
               )}
               <ErrorBoundary
@@ -2638,7 +2638,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                 <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-background">
                   <div className="flex items-center gap-2 typography-ui text-muted-foreground">
                     <RiLoader4Line className="h-4 w-4 animate-spin" />
-                    Opening file at change...
+                     {t('filesView.openingFileAtChange')}
                   </div>
                 </div>
               )}
@@ -2710,7 +2710,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           {searching ? (
             <li className="flex items-center gap-1.5 px-2 py-1 typography-meta text-muted-foreground">
               <RiLoader4Line className="h-4 w-4 animate-spin" />
-              Searching…
+                    {t('filesView.searching').replace('...', '...')}
             </li>
           ) : searchResults.length > 0 ? (
             searchResults.map((node) => {
@@ -2766,12 +2766,12 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
             isSaving ? (
               <span className="flex items-center gap-1 text-muted-foreground typography-meta">
                 <RiLoader4Line className="h-3.5 w-3.5 animate-spin" />
-                Saving…
+                    {t('common.saving').replace('...', '...')}
               </span>
             ) : autoSaveStatus === 'saved' && !isDirty ? (
               <span className="flex items-center gap-1 text-[color:var(--status-success)] typography-meta">
                 <RiCheckLine className="h-3.5 w-3.5" />
-                Saved
+                    {t('common.done')}
               </span>
             ) : isDirty ? (
               <Button
@@ -2952,7 +2952,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
             <div className="h-full overflow-auto p-4">
               {fileContent.length > 500 * 1024 && (
                 <div className="mb-3 rounded-md border border-status-warning/20 bg-status-warning/10 px-3 py-2 text-sm text-status-warning">
-                  This file is large ({Math.round(fileContent.length / 1024)}KB). Preview may be limited.
+                   {t('filesView.largeFilePreviewLimited', { sizeKb: Math.round(fileContent.length / 1024) })}
                 </div>
               )}
               <ErrorBoundary
@@ -2999,7 +2999,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                 <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-background">
                   <div className="flex items-center gap-2 typography-ui text-muted-foreground">
                     <RiLoader4Line className="h-4 w-4 animate-spin" />
-                    Opening file at change...
+                    {t('filesView.openingFileAtChange')}
                   </div>
                 </div>
               )}

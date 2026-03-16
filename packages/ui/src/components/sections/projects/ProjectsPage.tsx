@@ -457,7 +457,7 @@ export const ProjectsPage: React.FC = () => {
                     onClick={() => setPendingRemoveImageIcon(false)}
                     disabled={isRemovingCustomIcon}
                   >
-                    Undo Remove
+                    {t('projectsPage.undoRemove')}
                   </ButtonSmall>
                 )}
               </div>

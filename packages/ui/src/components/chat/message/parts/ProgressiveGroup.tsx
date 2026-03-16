@@ -793,7 +793,7 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
                                 onClick={onToggle}
                                 className="typography-meta leading-5 px-2 py-1 text-muted-foreground/45 hover:text-muted-foreground/65 text-left"
                             >
-                                +{previewHiddenCount} more...
+                                {t('progressiveGroup.moreCount', { count: previewHiddenCount })}
                             </button>
                         ) : null}
                         <div className="space-y-1.5">{renderedRows}</div>
