@@ -589,11 +589,9 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
             if (pending?.text) {
                 if (pending.mode === 'append') {
                     setMessage((prev) => {
-                        const next = pending.text.trim();
-                        if (!next) return prev;
-                        const base = prev.trimEnd();
-                        if (!base.trim()) return next;
-                        return `${base} ${next}`;
+                        if (!pending.text) return prev;
+                        if (!prev.trim()) return pending.text;
+                        return `${prev}\n\n${pending.text}`;
                     });
                 } else {
                     setMessage(pending.text);

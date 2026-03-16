@@ -249,7 +249,8 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
   const handleAddToChat = React.useCallback(() => {
     if (!selectedText) return;
 
-    setPendingInputText(selectedText, 'append');
+    const fenced = `\`\`\`md\n${selectedText}\n\`\`\``;
+    setPendingInputText(fenced, 'append');
     
     hideMenu();
     
