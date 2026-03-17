@@ -42,6 +42,7 @@ import { SidebarActivitySections } from './sidebar/SidebarActivitySections';
 import { SidebarFooter } from './sidebar/SidebarFooter';
 import { SidebarProjectsList } from './sidebar/SidebarProjectsList';
 import { SessionNodeItem } from './sidebar/SessionNodeItem';
+import type { SortableDragHandleProps } from './sidebar/sortableItems';
 import {
   FolderDeleteConfirmDialog,
   SessionDeleteConfirmDialog,
@@ -444,12 +445,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     previousStreamingIdsRef.current = nextStreamingIds;
   }, [sessionStatus, safeStorage]);
 
-  useSessionPrefetch({
-    currentSessionId,
-    sortedSessions,
-    loadMessages,
-  });
-
   const childrenMap = React.useMemo(() => {
     const map = new Map<string, Session[]>();
     sortedSessions.forEach((session) => {
@@ -779,7 +774,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     setActiveSessionByProject,
     currentSessionId,
     handleSessionSelect,
-    isVSCode,
     newSessionDraftOpen,
     mobileVariant,
     openNewSessionDraft,
@@ -854,6 +848,13 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     () => deriveActiveNowSessions(activeNowEntries, new Map(sessions.map((session) => [session.id, session]))),
     [activeNowEntries, sessions],
   );
+
+  useSessionPrefetch({
+    currentSessionId,
+    sortedSessions,
+    recentSessionIds: activeNowSessions.map((session) => session.id),
+    loadMessages,
+  });
 
   const activitySections = React.useMemo(() => {
     const toItem = (session: Session) => {
@@ -1090,7 +1091,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   }, [prStatusEntries]);
 
   const renderGroupSessions = React.useCallback(
-    (group: SessionGroup, groupKey: string, projectId?: string | null, hideGroupLabel?: boolean) => (
+    (group: SessionGroup, groupKey: string, projectId?: string | null, hideGroupLabel?: boolean, dragHandleProps?: SortableDragHandleProps | null) => (
       <SessionGroupSection
         group={group}
         groupKey={groupKey}
@@ -1129,6 +1130,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         pinnedSessionIds={pinnedSessionIds}
         prVisualStateByDirectoryBranch={prVisualStateByDirectoryBranch}
         onToggleCollapsedGroup={toggleCollapsedGroup}
+        dragHandleProps={dragHandleProps}
       />
     ),
     [

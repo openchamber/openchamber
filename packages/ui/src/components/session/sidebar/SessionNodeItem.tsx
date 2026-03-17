@@ -176,27 +176,6 @@ export function SessionNodeItem(props: Props): React.ReactNode {
   const sessionUpdatedLabel = formatSessionDateLabel(sessionTimestamp);
   const sessionCompactUpdatedLabel = formatSessionCompactDateLabel(sessionTimestamp);
   const isMenuOpen = openSidebarMenuKey === menuInstanceKey;
-  const subsessionChevron = hasChildren ? (
-    <span
-      role="button"
-      tabIndex={0}
-      onClick={(event) => {
-        event.stopPropagation();
-        toggleParent(session.id);
-      }}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          event.stopPropagation();
-          toggleParent(session.id);
-        }
-      }}
-      className="absolute left-[-10px] top-1/2 inline-flex h-3.5 w-3.5 -translate-y-1/2 items-center justify-center text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 rounded-md"
-      aria-label={isExpanded ? 'Collapse subsessions' : 'Expand subsessions'}
-    >
-      {isExpanded ? <RiArrowDownSLine className="h-3 w-3" /> : <RiArrowRightSLine className="h-3 w-3" />}
-    </span>
-  ) : null;
 
   if (editingId === session.id) {
     return (
@@ -254,6 +233,60 @@ export function SessionNodeItem(props: Props): React.ReactNode {
   const pendingPermissionCount = permissions.get(session.id)?.length ?? 0;
   const showUnreadStatus = !isStreaming && needsAttention && !isActive;
   const showStatusMarker = isStreaming || showUnreadStatus;
+  const statusMarkerContent = isStreaming
+    ? <GridLoader size="xs" className="text-primary" />
+    : (
+        <span className="grid grid-cols-3 gap-[1px] text-[var(--status-info)]" aria-label="Unread updates" title="Unread updates">
+          {Array.from({ length: 9 }, (_, i) => (
+            ATTENTION_DIAMOND_INDICES.has(i) ? (
+              <span key={i} className="h-[3px] w-[3px] rounded-full bg-current animate-attention-diamond-pulse" style={{ animationDelay: getAttentionDiamondDelay(i) }} />
+            ) : (
+              <span key={i} className="h-[3px] w-[3px]" />
+            )
+          ))}
+        </span>
+      );
+  const inlineStatusMarker = !isMinimalMode && showStatusMarker ? (
+    <span className="inline-flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center">
+      {statusMarkerContent}
+    </span>
+  ) : null;
+  const minimalLeadingStatusMarker = isMinimalMode && showStatusMarker ? (
+    <span
+      className={cn(
+        'pointer-events-none absolute left-[-10px] top-1/2 inline-flex h-3.5 w-3.5 -translate-y-1/2 items-center justify-center transition-opacity',
+        hasChildren ? 'opacity-100 group-hover:opacity-0 group-focus-within:opacity-0' : '',
+      )}
+    >
+      {statusMarkerContent}
+    </span>
+  ) : null;
+  const subsessionChevron = hasChildren ? (
+    <span
+      role="button"
+      tabIndex={0}
+      onClick={(event) => {
+        event.stopPropagation();
+        toggleParent(session.id);
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          event.stopPropagation();
+          toggleParent(session.id);
+        }
+      }}
+      className={cn(
+        'absolute left-[-10px] top-1/2 inline-flex h-3.5 w-3.5 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity',
+        isMinimalMode && showStatusMarker
+          ? 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto'
+          : '',
+      )}
+      aria-label={isExpanded ? 'Collapse subsessions' : 'Expand subsessions'}
+    >
+      {isExpanded ? <RiArrowDownSLine className="h-3 w-3" /> : <RiArrowRightSLine className="h-3 w-3" />}
+    </span>
+  ) : null;
 
   const streamingIndicator = memoryState?.isZombie
     ? <RiErrorWarningLine className="h-4 w-4 text-status-warning" />
@@ -383,6 +416,7 @@ export function SessionNodeItem(props: Props): React.ReactNode {
         <div
           className={cn('group relative flex items-center rounded-sm px-1.5 py-1', isMissingDirectory ? 'opacity-75' : '', depth > 0 && 'pl-[20px]')}
         >
+          {minimalLeadingStatusMarker}
           {subsessionChevron}
           <div className="flex min-w-0 flex-1 items-center">
             {isMinimalMode ? (
@@ -403,23 +437,6 @@ export function SessionNodeItem(props: Props): React.ReactNode {
                     )}
                   >
                     <div className={cn('flex w-full items-center min-w-0 flex-1 overflow-hidden', isMinimalMode ? 'gap-1' : 'gap-1')}>
-                      {showStatusMarker ? (
-                        <span className="inline-flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center">
-                          {isStreaming ? (
-                            <GridLoader size="xs" className="text-primary" />
-                          ) : (
-                            <span className="grid grid-cols-3 gap-[1px] text-[var(--status-info)]" aria-label="Unread updates" title="Unread updates">
-                              {Array.from({ length: 9 }, (_, i) => (
-                                ATTENTION_DIAMOND_INDICES.has(i) ? (
-                                  <span key={i} className="h-[3px] w-[3px] rounded-full bg-current animate-attention-diamond-pulse" style={{ animationDelay: getAttentionDiamondDelay(i) }} />
-                                ) : (
-                                  <span key={i} className="h-[3px] w-[3px]" />
-                                )
-                              ))}
-                            </span>
-                          )}
-                        </span>
-                      ) : null}
                       {isPinnedSession ? <RiPushpinLine className="h-3 w-3 flex-shrink-0 text-primary" aria-label="Pinned session" /> : null}
                       <div className={cn('block min-w-0 flex-1 truncate typography-ui-label font-normal', isActive ? 'text-primary' : 'text-foreground')}>{renderHighlightedText(sessionTitle, normalizedSessionSearchQuery)}</div>
                       {mobileVariant ? <span className="ml-2 flex-shrink-0 text-[0.72rem] text-muted-foreground/75">{sessionCompactUpdatedLabel}</span> : null}
@@ -495,23 +512,7 @@ export function SessionNodeItem(props: Props): React.ReactNode {
                 className={cn('flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none disabled:cursor-not-allowed transition-[padding]', mobileVariant ? 'pr-7' : 'group-hover:pr-5 group-focus-within:pr-5')}
               >
                 <div className={cn('flex w-full items-center min-w-0 flex-1 overflow-hidden', isMinimalMode ? 'gap-1' : 'gap-1')}>
-                      {showStatusMarker ? (
-                        <span className="inline-flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center">
-                          {isStreaming ? (
-                        <GridLoader size="xs" className="text-primary" />
-                      ) : (
-                        <span className="grid grid-cols-3 gap-[1px] text-[var(--status-info)]" aria-label="Unread updates" title="Unread updates">
-                          {Array.from({ length: 9 }, (_, i) => (
-                            ATTENTION_DIAMOND_INDICES.has(i) ? (
-                              <span key={i} className="h-[3px] w-[3px] rounded-full bg-current animate-attention-diamond-pulse" style={{ animationDelay: getAttentionDiamondDelay(i) }} />
-                            ) : (
-                              <span key={i} className="h-[3px] w-[3px]" />
-                            )
-                          ))}
-                        </span>
-                      )}
-                    </span>
-                  ) : null}
+                    {inlineStatusMarker}
                     {isPinnedSession ? <RiPushpinLine className="h-3 w-3 flex-shrink-0 text-primary" aria-label="Pinned session" /> : null}
                     <div className={cn('block min-w-0 flex-1 truncate typography-ui-label font-normal', isActive ? 'text-primary' : 'text-foreground')}>{renderHighlightedText(sessionTitle, normalizedSessionSearchQuery)}</div>
                     {pendingPermissionCount > 0 ? (

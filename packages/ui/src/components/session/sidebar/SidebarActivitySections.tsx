@@ -24,11 +24,26 @@ type Props = {
   renderSessionNode: (node: SessionNode, depth?: number, groupDirectory?: string | null, projectId?: string | null, archivedBucket?: boolean, secondaryMeta?: { projectLabel?: string | null; branchLabel?: string | null } | null, renderContext?: 'project' | 'recent') => React.ReactNode;
 };
 
+const MAX_VISIBLE_RECENT_SESSIONS = 7;
+
 export function SidebarActivitySections({ sections, renderSessionNode }: Props): React.ReactNode {
   const [collapsed, setCollapsed] = React.useState<Set<string>>(new Set());
+  const [expandedSections, setExpandedSections] = React.useState<Set<string>>(new Set());
 
   const toggleSection = React.useCallback((key: string) => {
     setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  }, []);
+
+  const toggleSectionLimit = React.useCallback((key: string) => {
+    setExpandedSections((prev) => {
       const next = new Set(prev);
       if (next.has(key)) {
         next.delete(key);
@@ -48,6 +63,9 @@ export function SidebarActivitySections({ sections, renderSessionNode }: Props):
     <div className="space-y-2 pb-2 pt-1">
       {visibleSections.map((section) => {
         const isCollapsed = collapsed.has(section.key);
+        const isExpanded = expandedSections.has(section.key);
+        const visibleItems = isExpanded ? section.items : section.items.slice(0, MAX_VISIBLE_RECENT_SESSIONS);
+        const remainingCount = section.items.length - visibleItems.length;
         return (
           <div key={section.key} className="space-y-1">
             <button
@@ -63,7 +81,25 @@ export function SidebarActivitySections({ sections, renderSessionNode }: Props):
             </button>
             {!isCollapsed ? (
               <div className={cn('space-y-0.5 pl-7')}>
-                {section.items.map((item) => renderSessionNode(item.node, 0, item.groupDirectory, item.projectId, false, item.secondaryMeta, 'recent'))}
+                {visibleItems.map((item) => renderSessionNode(item.node, 0, item.groupDirectory, item.projectId, false, item.secondaryMeta, 'recent'))}
+                {remainingCount > 0 && !isExpanded ? (
+                  <button
+                    type="button"
+                    onClick={() => toggleSectionLimit(section.key)}
+                    className="mt-0.5 flex items-center justify-start rounded-md px-1.5 py-0.5 text-left text-xs text-muted-foreground/70 leading-tight hover:text-foreground hover:underline"
+                  >
+                    Show {remainingCount} more {remainingCount === 1 ? 'session' : 'sessions'}
+                  </button>
+                ) : null}
+                {isExpanded && section.items.length > MAX_VISIBLE_RECENT_SESSIONS ? (
+                  <button
+                    type="button"
+                    onClick={() => toggleSectionLimit(section.key)}
+                    className="mt-0.5 flex items-center justify-start rounded-md px-1.5 py-0.5 text-left text-xs text-muted-foreground/70 leading-tight hover:text-foreground hover:underline"
+                  >
+                    Show fewer sessions
+                  </button>
+                ) : null}
               </div>
             ) : null}
           </div>

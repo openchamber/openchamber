@@ -54,6 +54,11 @@ export interface SortableProjectItemProps {
   setOpenSidebarMenuKey: (key: string | null) => void;
 }
 
+export type SortableDragHandleProps = {
+  listeners: ReturnType<typeof useSortable>['listeners'];
+  setActivatorNodeRef: ReturnType<typeof useSortable>['setActivatorNodeRef'];
+};
+
 export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   id,
   projectLabel,
@@ -321,16 +326,21 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
 const SortableGroupItemBase: React.FC<{
   id: string;
   disabled?: boolean;
-  children: React.ReactNode;
+  children: React.ReactNode | ((dragHandleProps: SortableDragHandleProps) => React.ReactNode);
 }> = ({ id, disabled = false, children }) => {
   const {
-    attributes,
     listeners,
     setNodeRef,
+    setActivatorNodeRef,
     transform,
     transition,
     isDragging,
   } = useSortable({ id, disabled });
+
+  const dragHandleProps = React.useMemo<SortableDragHandleProps>(() => ({
+    listeners,
+    setActivatorNodeRef,
+  }), [listeners, setActivatorNodeRef]);
 
   return (
     <div
@@ -343,10 +353,8 @@ const SortableGroupItemBase: React.FC<{
         'space-y-0.5 rounded-md',
         isDragging && 'opacity-50',
       )}
-      {...attributes}
-      {...listeners}
     >
-      {children}
+      {typeof children === 'function' ? children(dragHandleProps) : children}
     </div>
   );
 };

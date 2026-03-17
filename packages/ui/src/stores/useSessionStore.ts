@@ -17,10 +17,12 @@ import { useDirectoryStore } from "./useDirectoryStore";
 import { useConfigStore } from "./useConfigStore";
 import { useProjectsStore } from "./useProjectsStore";
 import { useSessionFoldersStore } from "./useSessionFoldersStore";
+import { getSafeStorage } from "./utils/safeStorage";
 import { EXECUTION_FORK_META_TEXT } from "@/lib/messages/executionMeta";
 import { markPendingUserSendAnimation } from "@/lib/userSendAnimation";
 import { flattenAssistantTextParts } from "@/lib/messages/messageText";
 import { normalizeMessageRecordsForProjection } from "./utils/messageProjectors";
+import type { ProjectEntry } from "@/lib/api/types";
 
 export type { AttachedFile, EditPermissionMode };
 export { MEMORY_LIMITS, ACTIVE_SESSION_WINDOW } from "./types/sessionTypes";
@@ -47,6 +49,62 @@ const normalizePath = (value?: string | null): string | null => {
 };
 
 const sessionChoiceAnalysisSignature = new Map<string, string>();
+const DRAFT_TARGET_STORAGE_KEY = "oc.chatInput.lastDraftTarget";
+
+type PersistedDraftTarget = {
+    projectId: string | null;
+    directory: string | null;
+};
+
+const safeStorage = getSafeStorage();
+
+const readPersistedDraftTarget = (): PersistedDraftTarget | null => {
+    try {
+        const raw = safeStorage.getItem(DRAFT_TARGET_STORAGE_KEY);
+        if (!raw) {
+            return null;
+        }
+        const parsed = JSON.parse(raw) as { projectId?: unknown; directory?: unknown };
+        return {
+            projectId: typeof parsed?.projectId === "string" ? parsed.projectId : null,
+            directory: normalizePath(typeof parsed?.directory === "string" ? parsed.directory : null),
+        };
+    } catch {
+        return null;
+    }
+};
+
+const persistDraftTarget = (target: PersistedDraftTarget): void => {
+    try {
+        safeStorage.setItem(DRAFT_TARGET_STORAGE_KEY, JSON.stringify(target));
+    } catch {
+        // ignored
+    }
+};
+
+const resolveProjectForDirectory = (projects: ProjectEntry[], directory: string | null): ProjectEntry | null => {
+    const normalizedDirectory = normalizePath(directory);
+    if (!normalizedDirectory) {
+        return null;
+    }
+
+    let bestMatch: ProjectEntry | null = null;
+    for (const project of projects) {
+        const projectPath = normalizePath(project.path);
+        if (!projectPath) {
+            continue;
+        }
+        const isExact = normalizedDirectory === projectPath;
+        const isNested = normalizedDirectory.startsWith(`${projectPath}/`);
+        if (!isExact && !isNested) {
+            continue;
+        }
+        if (!bestMatch || projectPath.length > (normalizePath(bestMatch.path)?.length ?? 0)) {
+            bestMatch = project;
+        }
+    }
+    return bestMatch;
+};
 
 const buildSessionChoiceAnalysisSignature = (messages: Array<{ info: Message; parts: Part[] }>): string => {
     const lastMessage = messages[messages.length - 1];
@@ -120,7 +178,7 @@ export const useSessionStore = create<SessionStore>()(
             pendingInputText: null,
             pendingInputMode: 'replace',
             pendingSyntheticParts: null,
-            newSessionDraft: { open: true, directoryOverride: null, parentID: null },
+            newSessionDraft: { open: true, selectedProjectId: null, directoryOverride: null, parentID: null },
 
             // Voice state (initialized to disconnected/idle)
             voiceStatus: 'disconnected',
@@ -149,18 +207,71 @@ export const useSessionStore = create<SessionStore>()(
                 loadSessions: () => useSessionManagementStore.getState().loadSessions(),
 
                 openNewSessionDraft: (options) => {
-                    // Use explicit directoryOverride if provided, otherwise use active project path
-                    let directory: string | null = null;
-                    if (options?.directoryOverride !== undefined) {
-                        directory = options.directoryOverride;
-                    } else {
-                        const activeProject = useProjectsStore.getState().getActiveProject();
-                        directory = activeProject?.path ?? null;
-                    }
+                    const projectsState = useProjectsStore.getState();
+                    const projects = projectsState.projects;
+                    const activeProject = projectsState.getActiveProject();
+                    const currentDirectory = normalizePath(useDirectoryStore.getState().currentDirectory ?? null);
+                    const persistedTarget = readPersistedDraftTarget();
+
+                    const explicitDirectory = options?.directoryOverride !== undefined
+                        ? normalizePath(options.directoryOverride)
+                        : null;
+                    const explicitProject = options?.projectId
+                        ? projects.find((project) => project.id === options.projectId) ?? null
+                        : null;
+
+                    const inferredProjectFromDirectory = resolveProjectForDirectory(projects, explicitDirectory);
+                    const fallbackProject = (() => {
+                        if (activeProject) {
+                            return activeProject;
+                        }
+                        if (projectsState.activeProjectId) {
+                            return projects.find((project) => project.id === projectsState.activeProjectId) ?? null;
+                        }
+                        return projects[0] ?? null;
+                    })();
+
+                    const persistedProjectById = persistedTarget?.projectId
+                        ? projects.find((project) => project.id === persistedTarget.projectId) ?? null
+                        : null;
+                    const persistedProjectByDirectory = resolveProjectForDirectory(projects, persistedTarget?.directory ?? null);
+                    const currentDirectoryProject = resolveProjectForDirectory(projects, currentDirectory);
+
+                    const selectedProject = (() => {
+                        if (explicitProject || explicitDirectory !== null) {
+                            return explicitProject ?? inferredProjectFromDirectory ?? fallbackProject;
+                        }
+                        if (currentDirectory) {
+                            return currentDirectoryProject ?? fallbackProject;
+                        }
+                        return persistedProjectByDirectory ?? persistedProjectById ?? fallbackProject;
+                    })();
+
+                    const directory = (() => {
+                        if (explicitDirectory !== null) {
+                            return explicitDirectory;
+                        }
+                        if (explicitProject) {
+                            return normalizePath(explicitProject.path ?? null);
+                        }
+                        if (currentDirectory) {
+                            return currentDirectory;
+                        }
+                        if (persistedTarget?.directory) {
+                            return persistedTarget.directory;
+                        }
+                        return normalizePath(selectedProject?.path ?? null);
+                    })();
+
+                    persistDraftTarget({
+                        projectId: selectedProject?.id ?? null,
+                        directory,
+                    });
 
                     set({
                         newSessionDraft: {
                             open: true,
+                            selectedProjectId: selectedProject?.id ?? null,
                             directoryOverride: directory,
                             parentID: options?.parentID ?? null,
                             title: options?.title,
@@ -200,10 +311,39 @@ export const useSessionStore = create<SessionStore>()(
                     }
                 },
 
+                setNewSessionDraftTarget: ({ projectId, directoryOverride }) => {
+                    const projects = useProjectsStore.getState().projects;
+                    const project = projectId
+                        ? projects.find((entry) => entry.id === projectId) ?? null
+                        : null;
+                    const normalizedDirectory = normalizePath(directoryOverride);
+                    const normalizedProjectPath = normalizePath(project?.path ?? null);
+                    const nextDirectory = normalizedDirectory ?? normalizedProjectPath ?? null;
+
+                    set((state) => {
+                        if (!state.newSessionDraft?.open) {
+                            return state;
+                        }
+                        return {
+                            newSessionDraft: {
+                                ...state.newSessionDraft,
+                                selectedProjectId: project?.id ?? null,
+                                directoryOverride: nextDirectory,
+                                parentID: null,
+                            },
+                        };
+                    });
+
+                    persistDraftTarget({
+                        projectId: project?.id ?? null,
+                        directory: nextDirectory,
+                    });
+                },
+
                 closeNewSessionDraft: () => {
                     const realCurrentSessionId = useSessionManagementStore.getState().currentSessionId;
                     set({
-                        newSessionDraft: { open: false, directoryOverride: null, parentID: null, title: undefined, initialPrompt: undefined, syntheticParts: undefined, targetFolderId: undefined },
+                        newSessionDraft: { open: false, selectedProjectId: null, directoryOverride: null, parentID: null, title: undefined, initialPrompt: undefined, syntheticParts: undefined, targetFolderId: undefined },
                         currentSessionId: realCurrentSessionId,
                     });
                 },
@@ -375,6 +515,7 @@ export const useSessionStore = create<SessionStore>()(
                     if (draft?.open) {
                         const draftTargetFolderId = draft.targetFolderId;
                         const draftDirectoryOverride = draft.directoryOverride ?? null;
+                        const draftProjectId = draft.selectedProjectId ?? null;
 
                         const created = await useSessionManagementStore
                             .getState()
@@ -383,6 +524,11 @@ export const useSessionStore = create<SessionStore>()(
                         if (!created?.id) {
                             throw new Error('Failed to create session');
                         }
+
+                        persistDraftTarget({
+                            projectId: draftProjectId,
+                            directory: normalizePath(draftDirectoryOverride ?? created.directory ?? null),
+                        });
 
                         const configState = useConfigStore.getState();
                         const draftAgentName = configState.currentAgentName;
@@ -1067,13 +1213,22 @@ useDirectoryStore.subscribe((state, prevState) => {
         return;
     }
 
+    const projects = useProjectsStore.getState().projects;
+    const resolvedProject = resolveProjectForDirectory(projects, nextDirectory);
+
     useSessionStore.setState((store) => ({
         newSessionDraft: {
             ...store.newSessionDraft,
+            selectedProjectId: resolvedProject?.id ?? store.newSessionDraft.selectedProjectId ?? null,
             directoryOverride: nextDirectory,
             parentID: null,
         },
     }));
+
+    persistDraftTarget({
+        projectId: resolvedProject?.id ?? draft.selectedProjectId ?? null,
+        directory: nextDirectory,
+    });
 });
 
 const bootDraftOpen = useSessionStore.getState().newSessionDraft?.open;

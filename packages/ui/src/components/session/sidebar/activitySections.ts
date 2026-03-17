@@ -11,6 +11,10 @@ const isSubtaskSession = (session: Session): boolean => {
   return Boolean((session as Session & { parentID?: string | null }).parentID);
 };
 
+const isArchivedSession = (session: Session): boolean => {
+  return Boolean(session.time?.archived);
+};
+
 const getSessionUpdatedAt = (session: Session): number => {
   const updated = session.time?.updated;
   const created = session.time?.created;
@@ -70,6 +74,9 @@ export const pruneActiveNowEntries = (
     if (!session) {
       return true;
     }
+    if (isArchivedSession(session)) {
+      return false;
+    }
     return getSessionUpdatedAt(session) >= minUpdatedAt;
   });
 };
@@ -92,6 +99,7 @@ export const deriveActiveNowSessions = (
   const sessions = entries
     .map((entry) => sessionsById.get(entry.sessionId) ?? null)
     .filter((session): session is Session => Boolean(session))
+    .filter((session) => !isArchivedSession(session))
     .filter((session) => !isSubtaskSession(session));
   return sortSessionsByUpdated(sessions);
 };

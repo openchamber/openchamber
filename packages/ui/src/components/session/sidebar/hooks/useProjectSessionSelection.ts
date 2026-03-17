@@ -15,7 +15,6 @@ type Args = {
   setActiveSessionByProject: React.Dispatch<React.SetStateAction<Map<string, string>>>;
   currentSessionId: string | null;
   handleSessionSelect: (sessionId: string, sessionDirectory: string | null, isMissingDirectory: boolean, projectId?: string | null) => void;
-  isVSCode: boolean;
   newSessionDraftOpen: boolean;
   mobileVariant: boolean;
   openNewSessionDraft: (options?: { directoryOverride?: string | null }) => void;
@@ -33,7 +32,6 @@ export const useProjectSessionSelection = (args: Args): { currentSessionDirector
     setActiveSessionByProject,
     currentSessionId,
     handleSessionSelect,
-    isVSCode,
     newSessionDraftOpen,
     mobileVariant,
     openNewSessionDraft,
@@ -84,18 +82,13 @@ export const useProjectSessionSelection = (args: Args): { currentSessionDirector
   }, [projectSections]);
 
   const previousActiveProjectRef = React.useRef<string | null>(null);
-  const lastSeenActiveProjectRef = React.useRef<string | null>(null);
 
   React.useLayoutEffect(() => {
     if (!activeProjectId) {
       return;
     }
 
-    const previousSeenProjectId = lastSeenActiveProjectRef.current;
-    const isProjectSwitch = Boolean(previousSeenProjectId && previousSeenProjectId !== activeProjectId);
-    lastSeenActiveProjectRef.current = activeProjectId;
-
-    if (newSessionDraftOpen && (isVSCode || !isProjectSwitch)) {
+    if (newSessionDraftOpen) {
       return;
     }
 
@@ -146,7 +139,6 @@ export const useProjectSessionSelection = (args: Args): { currentSessionDirector
     activeSessionByProject,
     currentSessionId,
     handleSessionSelect,
-    isVSCode,
     newSessionDraftOpen,
     mobileVariant,
     openNewSessionDraft,

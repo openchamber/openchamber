@@ -9,10 +9,11 @@ const SESSION_PREFETCH_PENDING_LIMIT = 6;
 type Args = {
   currentSessionId: string | null;
   sortedSessions: Session[];
+  recentSessionIds?: string[];
   loadMessages: (sessionId: string, limit?: number) => Promise<void>;
 };
 
-export const useSessionPrefetch = ({ currentSessionId, sortedSessions, loadMessages }: Args): void => {
+export const useSessionPrefetch = ({ currentSessionId, sortedSessions, recentSessionIds = [], loadMessages }: Args): void => {
   const sessionPrefetchTimersRef = React.useRef<Map<string, number>>(new Map());
   const sessionPrefetchQueueRef = React.useRef<string[]>([]);
   const sessionPrefetchInFlightRef = React.useRef<Set<string>>(new Set());
@@ -99,6 +100,20 @@ export const useSessionPrefetch = ({ currentSessionId, sortedSessions, loadMessa
     scheduleSessionPrefetch(sortedSessions[currentIndex - 1]?.id);
     scheduleSessionPrefetch(sortedSessions[currentIndex + 1]?.id);
   }, [currentSessionId, scheduleSessionPrefetch, sortedSessions]);
+
+  React.useEffect(() => {
+    if (!currentSessionId || recentSessionIds.length === 0) {
+      return;
+    }
+
+    const currentIndex = recentSessionIds.indexOf(currentSessionId);
+    if (currentIndex < 0) {
+      return;
+    }
+
+    scheduleSessionPrefetch(recentSessionIds[currentIndex - 1]);
+    scheduleSessionPrefetch(recentSessionIds[currentIndex + 1]);
+  }, [currentSessionId, recentSessionIds, scheduleSessionPrefetch]);
 
   React.useEffect(() => {
     const prefetchTimers = sessionPrefetchTimersRef.current;

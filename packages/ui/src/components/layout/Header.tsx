@@ -677,6 +677,7 @@ export const Header: React.FC<HeaderProps> = ({
     }
     return { additions: 0, deletions: 0 };
   }, [currentSessionDiffStats]);
+  const hasNonZeroSessionChanges = currentSessionChanges.additions > 0 || currentSessionChanges.deletions > 0;
 
   const selectedFilePath = useFilesViewTabsStore((state) => {
     const directory = normalize(openDirectory || '');
@@ -1643,7 +1644,7 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="truncate pl-1 typography-ui-label text-[14px] font-normal leading-tight text-foreground">
             {currentSessionTitle}
           </div>
-          {(activeProjectLabel || currentBranchLabel || currentSessionPrLabel || currentSessionChanges) ? (
+          {(activeProjectLabel || currentBranchLabel || currentSessionPrLabel || hasNonZeroSessionChanges) ? (
             <div className="flex min-w-0 items-center gap-1.5 truncate pl-1 typography-micro text-[10.5px] font-normal leading-tight text-muted-foreground/75">
               {activeProjectLabel ? <span className="truncate">{activeProjectLabel}</span> : null}
               {currentBranchLabel ? (
@@ -1653,11 +1654,13 @@ export const Header: React.FC<HeaderProps> = ({
                 </span>
               ) : null}
               {currentSessionPrLabel ? <span className="truncate">{currentSessionPrLabel}</span> : null}
-              <span className="inline-flex flex-shrink-0 items-center gap-0 text-[0.92em]">
-                <span className="text-status-success/80">+{currentSessionChanges.additions}</span>
-                <span className="text-muted-foreground/60">/</span>
-                <span className="text-status-error/65">-{currentSessionChanges.deletions}</span>
-              </span>
+              {hasNonZeroSessionChanges ? (
+                <span className="inline-flex flex-shrink-0 items-center gap-0 text-[0.92em]">
+                  <span className="text-status-success/80">+{currentSessionChanges.additions}</span>
+                  <span className="text-muted-foreground/60">/</span>
+                  <span className="text-status-error/65">-{currentSessionChanges.deletions}</span>
+                </span>
+              ) : null}
             </div>
           ) : null}
         </div>

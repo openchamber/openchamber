@@ -116,6 +116,7 @@ export interface SyntheticContextPart {
 
 export type NewSessionDraftState = {
     open: boolean;
+    selectedProjectId?: string | null;
     directoryOverride: string | null;
     parentID: string | null;
     title?: string;
@@ -215,7 +216,8 @@ export interface SessionStore {
     setSessionAgentEditMode: (sessionId: string, agentName: string | undefined, mode: EditPermissionMode, defaultMode?: EditPermissionMode) => void;
     loadSessions: () => Promise<void>;
 
-    openNewSessionDraft: (options?: { directoryOverride?: string | null; parentID?: string | null; title?: string; initialPrompt?: string; syntheticParts?: SyntheticContextPart[]; targetFolderId?: string }) => void;
+    openNewSessionDraft: (options?: { projectId?: string | null; directoryOverride?: string | null; parentID?: string | null; title?: string; initialPrompt?: string; syntheticParts?: SyntheticContextPart[]; targetFolderId?: string }) => void;
+    setNewSessionDraftTarget: (target: { projectId?: string | null; directoryOverride?: string | null }) => void;
     closeNewSessionDraft: () => void;
 
     createSession: (title?: string, directoryOverride?: string | null, parentID?: string | null) => Promise<Session | null>;

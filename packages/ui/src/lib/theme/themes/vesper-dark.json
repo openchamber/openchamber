@@ -19,9 +19,9 @@
     "surface": {
       "background": "#101010",
       "foreground": "#FFFFFF",
-      "muted": "#141414",
+      "muted": "#14141490",
       "mutedForeground": "#7f7f7f",
-      "elevated": "#110f0f",
+      "elevated": "#110f0f90",
       "elevatedForeground": "#FFFFFF",
       "overlay": "#FFFFFF20",
       "subtle": "#232323"
@@ -168,10 +168,10 @@
     },
     "radius": {
       "none": "0",
-      "sm": "0.125rem",
-      "md": "0.375rem",
-      "lg": "0.5rem",
-      "xl": "0.75rem",
+      "sm": "0.325rem",
+      "md": "0.75rem",
+      "lg": "1.125rem",
+      "xl": "1.5rem",
       "full": "9999px"
     },
     "transitions": {

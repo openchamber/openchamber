@@ -7,6 +7,7 @@ import {
     RiCloseLine,
     RiCommandLine,
     RiExternalLinkLine,
+    RiFolderLine,
     RiFullscreenLine,
     RiGitPullRequestLine,
     RiGithubLine,
@@ -25,7 +26,7 @@ import { QueuedMessageChips } from './QueuedMessageChips';
 import { FileMentionAutocomplete, type FileMentionHandle } from './FileMentionAutocomplete';
 import { CommandAutocomplete, type CommandAutocompleteHandle } from './CommandAutocomplete';
 import { SkillAutocomplete, type SkillAutocompleteHandle } from './SkillAutocomplete';
-import { cn, isMacOS } from '@/lib/utils';
+import { cn, formatDirectoryName, isMacOS } from '@/lib/utils';
 import { ModelControls } from './ModelControls';
 import { UnifiedControlsDrawer } from './UnifiedControlsDrawer';
 import { parseAgentMentions } from '@/lib/messages/agentMentions';
@@ -49,15 +50,50 @@ import {
     DropdownMenuItem,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { GitHubIssuePickerDialog } from '@/components/session/GitHubIssuePickerDialog';
 import { GitHubPrPickerDialog } from '@/components/session/GitHubPrPickerDialog';
 import { useChatSearchDirectory } from '@/hooks/useChatSearchDirectory';
 import { opencodeClient } from '@/lib/opencode/client';
+import { useProjectsStore } from '@/stores/useProjectsStore';
+import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, getProjectIconImageUrl } from '@/lib/projectMeta';
+import { useGitBranches, useGitStore } from '@/stores/useGitStore';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 
 const MAX_VISIBLE_TEXTAREA_LINES = 8;
 const EMPTY_QUEUE: QueuedMessage[] = [];
 const FILE_MENTION_TOKEN = /^@[^\s]+$/;
+
+const normalizePath = (value?: string | null): string | null => {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const trimmed = value.trim();
+    if (!trimmed) {
+        return null;
+    }
+    const normalized = trimmed.replace(/\\/g, '/');
+    if (normalized === '/') {
+        return '/';
+    }
+    return normalized.length > 1 ? normalized.replace(/\/+$/, '') : normalized;
+};
+
+const getProjectDisplayLabel = (project: { label?: string; path: string }): string => {
+    const label = project.label?.trim();
+    if (label) {
+        return label;
+    }
+    return formatDirectoryName(project.path);
+};
+
+const getProjectIconColor = (projectColor?: string | null): string | undefined => {
+    if (!projectColor) {
+        return undefined;
+    }
+    return PROJECT_COLOR_MAP[projectColor] ?? undefined;
+};
 
 const appendWithLineBreaks = (base: string, next: string): string => {
     const separator = !base
@@ -157,7 +193,10 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
 
     const sendMessage = useSessionStore((state) => state.sendMessage);
     const currentSessionId = useSessionStore((state) => state.currentSessionId);
-    const newSessionDraftOpen = useSessionStore((state) => state.newSessionDraft?.open);
+    const newSessionDraft = useSessionStore((state) => state.newSessionDraft);
+    const newSessionDraftOpen = Boolean(newSessionDraft?.open);
+    const setNewSessionDraftTarget = useSessionStore((state) => state.setNewSessionDraftTarget);
+    const availableWorktreesByProject = useSessionStore((state) => state.availableWorktreesByProject);
     const abortCurrentOperation = useSessionStore((state) => state.abortCurrentOperation);
     const acknowledgeSessionAbort = useSessionStore((state) => state.acknowledgeSessionAbort);
     const abortPromptSessionId = useSessionStore((state) => state.abortPromptSessionId);
@@ -169,12 +208,16 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
     const consumePendingInputText = useSessionStore((state) => state.consumePendingInputText);
     const pendingInputText = useSessionStore((state) => state.pendingInputText);
     const consumePendingSyntheticParts = useSessionStore((state) => state.consumePendingSyntheticParts);
+    const projects = useProjectsStore((state) => state.projects);
+    const activeProjectId = useProjectsStore((state) => state.activeProjectId);
+    const setActiveProjectIdOnly = useProjectsStore((state) => state.setActiveProjectIdOnly);
 
     const { currentProviderId, currentModelId, currentVariant, currentAgentName, setAgent, getVisibleAgents } = useConfigStore();
     const agents = getVisibleAgents();
     const primaryAgents = React.useMemo(() => agents.filter((agent) => agent.mode === 'primary'), [agents]);
     const { isMobile, inputBarOffset, isKeyboardOpen, setTimelineDialogOpen, cornerRadius, persistChatDraft, inputSpellcheckEnabled, isExpandedInput, setExpandedInput } = useUIStore();
     const { working } = useAssistantStatus();
+    const { git: runtimeGit } = useRuntimeAPIs();
     const { currentTheme } = useThemeSystem();
     const chatSearchDirectory = useChatSearchDirectory();
     const [showAbortStatus, setShowAbortStatus] = React.useState(false);
@@ -2164,6 +2207,210 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
 
     const footerGapClass = 'gap-x-1.5 gap-y-0';
     const isVSCode = isVSCodeRuntime();
+    const showDraftTargetSelectors = newSessionDraftOpen && !isVSCode;
+
+    const selectedDraftProject = React.useMemo(() => {
+        const explicit = newSessionDraft?.selectedProjectId
+            ? projects.find((project) => project.id === newSessionDraft.selectedProjectId) ?? null
+            : null;
+        if (explicit) {
+            return explicit;
+        }
+
+        const active = activeProjectId
+            ? projects.find((project) => project.id === activeProjectId) ?? null
+            : null;
+        if (active) {
+            return active;
+        }
+
+        return projects[0] ?? null;
+    }, [activeProjectId, newSessionDraft?.selectedProjectId, projects]);
+
+    const selectedDraftProjectPath = React.useMemo(
+        () => normalizePath(selectedDraftProject?.path ?? null),
+        [selectedDraftProject?.path],
+    );
+
+    const selectedDraftProjectBranches = useGitBranches(selectedDraftProjectPath);
+    const fetchBranches = useGitStore((state) => state.fetchBranches);
+
+    React.useEffect(() => {
+        if (!showDraftTargetSelectors || !selectedDraftProjectPath || !selectedDraftProject || !runtimeGit || selectedDraftProjectBranches?.all) {
+            return;
+        }
+        void fetchBranches(selectedDraftProjectPath, runtimeGit);
+    }, [fetchBranches, runtimeGit, selectedDraftProject, selectedDraftProjectBranches?.all, selectedDraftProjectPath, showDraftTargetSelectors]);
+
+    const projectRootBranchOption = React.useMemo(() => {
+        if (!selectedDraftProject) {
+            return null;
+        }
+        const value = normalizePath(selectedDraftProject.path);
+        if (!value) {
+            return null;
+        }
+        const projectRootBranch = selectedDraftProjectBranches?.current?.trim() ?? '';
+        return {
+            value,
+            label: projectRootBranch || 'HEAD',
+        };
+    }, [selectedDraftProject, selectedDraftProjectBranches]);
+
+    const worktreeBranchOptions = React.useMemo(() => {
+        if (!selectedDraftProject) {
+            return [] as Array<{ value: string; label: string }>;
+        }
+
+        const seen = new Set<string>();
+        const options: Array<{ value: string; label: string }> = [];
+        const rootValue = projectRootBranchOption?.value ?? null;
+
+        const worktrees = (() => {
+            if (!selectedDraftProjectPath) {
+                return [];
+            }
+            return availableWorktreesByProject.get(selectedDraftProjectPath)
+                ?? availableWorktreesByProject.get(selectedDraftProject.path)
+                ?? [];
+        })();
+
+        worktrees
+            .slice()
+            .sort((a, b) => a.branch.localeCompare(b.branch))
+            .forEach((worktree) => {
+                const normalizedValue = normalizePath(worktree.path);
+                if (!normalizedValue || normalizedValue === rootValue || seen.has(normalizedValue)) {
+                    return;
+                }
+                seen.add(normalizedValue);
+                options.push({
+                    value: normalizedValue,
+                    label: worktree.branch?.trim() || formatDirectoryName(worktree.path),
+                });
+            });
+
+        return options;
+    }, [availableWorktreesByProject, projectRootBranchOption?.value, selectedDraftProject, selectedDraftProjectPath]);
+
+    const selectedDraftDirectory = React.useMemo(
+        () => normalizePath(newSessionDraft?.directoryOverride ?? null) ?? selectedDraftProjectPath,
+        [newSessionDraft?.directoryOverride, selectedDraftProjectPath],
+    );
+
+    const draftBranchItems = React.useMemo(() => {
+        const baseItems: Array<{ value: string; label: string }> = [];
+        if (projectRootBranchOption) {
+            baseItems.push(projectRootBranchOption);
+        }
+        baseItems.push(...worktreeBranchOptions);
+
+        if (!selectedDraftDirectory) {
+            return baseItems;
+        }
+        if (baseItems.some((option) => option.value === selectedDraftDirectory)) {
+            return baseItems;
+        }
+        return [
+            ...baseItems,
+            { value: selectedDraftDirectory, label: formatDirectoryName(selectedDraftDirectory) },
+        ];
+    }, [projectRootBranchOption, selectedDraftDirectory, worktreeBranchOptions]);
+
+    const selectedDraftBranchLabel = React.useMemo(() => {
+        const selectedValue = selectedDraftDirectory ?? draftBranchItems[0]?.value ?? null;
+        if (!selectedValue) {
+            return null;
+        }
+        return draftBranchItems.find((item) => item.value === selectedValue)?.label ?? formatDirectoryName(selectedValue);
+    }, [draftBranchItems, selectedDraftDirectory]);
+
+    const selectedDraftBranchIsKnown = React.useMemo(() => {
+        if (!selectedDraftDirectory) {
+            return true;
+        }
+        if (projectRootBranchOption?.value === selectedDraftDirectory) {
+            return true;
+        }
+        return worktreeBranchOptions.some((option) => option.value === selectedDraftDirectory);
+    }, [projectRootBranchOption?.value, selectedDraftDirectory, worktreeBranchOptions]);
+
+    const handleDraftProjectChange = React.useCallback((projectId: string) => {
+        const project = projects.find((entry) => entry.id === projectId);
+        if (!project) {
+            return;
+        }
+        if (activeProjectId !== projectId) {
+            setActiveProjectIdOnly(projectId);
+        }
+        setNewSessionDraftTarget({
+            projectId,
+            directoryOverride: project.path,
+        });
+    }, [activeProjectId, projects, setActiveProjectIdOnly, setNewSessionDraftTarget]);
+
+    const handleDraftDirectoryChange = React.useCallback((directory: string) => {
+        if (!selectedDraftProject) {
+            return;
+        }
+        setNewSessionDraftTarget({
+            projectId: selectedDraftProject.id,
+            directoryOverride: directory,
+        });
+    }, [selectedDraftProject, setNewSessionDraftTarget]);
+
+    const renderProjectLabelWithIcon = React.useCallback((project: {
+        id: string;
+        path: string;
+        label?: string;
+        icon?: string | null;
+        color?: string | null;
+        iconImage?: { mime: string; updatedAt: number; source: 'custom' | 'auto' } | null;
+        iconBackground?: string | null;
+    }) => {
+        const imageUrl = getProjectIconImageUrl(
+            { id: project.id, iconImage: project.iconImage ?? null },
+            {
+                themeVariant: currentTheme.metadata.variant,
+                iconColor: currentTheme.colors.surface.foreground,
+            },
+        );
+        const ProjectIcon = project.icon ? PROJECT_ICON_MAP[project.icon] : null;
+        const iconColor = getProjectIconColor(project.color);
+
+        return (
+            <span className="inline-flex min-w-0 items-center gap-1.5">
+                {imageUrl ? (
+                    <span
+                        className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center overflow-hidden rounded-[3px]"
+                        style={project.iconBackground ? { backgroundColor: project.iconBackground } : undefined}
+                    >
+                        <img src={imageUrl} alt="" className="h-full w-full object-contain" draggable={false} />
+                    </span>
+                ) : ProjectIcon ? (
+                    <ProjectIcon className="h-3.5 w-3.5 shrink-0" style={iconColor ? { color: iconColor } : undefined} />
+                ) : (
+                    <RiFolderLine className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80" style={iconColor ? { color: iconColor } : undefined} />
+                )}
+                <span className="truncate">{getProjectDisplayLabel(project)}</span>
+            </span>
+        );
+    }, [currentTheme.colors.surface.foreground, currentTheme.metadata.variant]);
+
+    React.useEffect(() => {
+        if (!showDraftTargetSelectors || !selectedDraftProject || !selectedDraftDirectory) {
+            return;
+        }
+        const valid = draftBranchItems.some((option) => option.value === selectedDraftDirectory);
+        if (valid) {
+            return;
+        }
+        setNewSessionDraftTarget({
+            projectId: selectedDraftProject.id,
+            directoryOverride: selectedDraftProject.path,
+        });
+    }, [draftBranchItems, selectedDraftDirectory, selectedDraftProject, setNewSessionDraftTarget, showDraftTargetSelectors]);
+
     const footerPaddingClass = isMobile ? 'px-1.5 py-1.5' : (isVSCode ? 'px-1.5 py-1' : 'px-2.5 py-1.5');
     const buttonSizeClass = isMobile ? 'h-8 w-8' : (isVSCode ? 'h-5 w-5' : 'h-6 w-6');
     const sendIconSizeClass = isMobile ? 'h-4 w-4' : (isVSCode ? 'h-3.5 w-3.5' : 'h-4 w-4');
@@ -2536,6 +2783,72 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                     showAssistantStatus={false}
                     showTodos
                 />
+                {showDraftTargetSelectors && selectedDraftProject ? (
+                    <div className="mb-1.5 flex min-w-0 items-center gap-1.5 px-0.5">
+                        <Select
+                            value={selectedDraftProject.id}
+                            onValueChange={handleDraftProjectChange}
+                        >
+                            <SelectTrigger
+                                size="sm"
+                                className="h-7 min-w-0 w-fit max-w-[42vw] sm:max-w-[18rem] border-transparent bg-transparent px-1.5 hover:bg-transparent data-[state=open]:bg-transparent"
+                            >
+                                <SelectValue>
+                                    {renderProjectLabelWithIcon(selectedDraftProject)}
+                                </SelectValue>
+                            </SelectTrigger>
+                            <SelectContent fitContent>
+                                {projects.map((project) => (
+                                    <SelectItem key={project.id} value={project.id} className="max-w-[24rem] truncate">
+                                        {renderProjectLabelWithIcon(project)}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+
+                        <Select
+                            value={selectedDraftDirectory ?? draftBranchItems[0]?.value ?? normalizePath(selectedDraftProject.path) ?? ''}
+                            onValueChange={handleDraftDirectoryChange}
+                        >
+                            <SelectTrigger
+                                size="sm"
+                                className="h-7 min-w-0 w-fit max-w-[48vw] sm:max-w-[20rem] border-transparent bg-transparent px-1.5 hover:bg-transparent data-[state=open]:bg-transparent"
+                            >
+                                <SelectValue>
+                                    {selectedDraftBranchLabel ?? 'Branch'}
+                                </SelectValue>
+                            </SelectTrigger>
+                            <SelectContent fitContent>
+                                {projectRootBranchOption ? (
+                                    <SelectGroup>
+                                        <SelectLabel>Project root</SelectLabel>
+                                        <SelectItem key={projectRootBranchOption.value} value={projectRootBranchOption.value} className="max-w-[24rem] truncate">
+                                            {projectRootBranchOption.label}
+                                        </SelectItem>
+                                    </SelectGroup>
+                                ) : null}
+                                {worktreeBranchOptions.length > 0 ? (
+                                    <>
+                                        {projectRootBranchOption ? <SelectSeparator /> : null}
+                                        <SelectGroup>
+                                            <SelectLabel>Worktrees</SelectLabel>
+                                            {worktreeBranchOptions.map((option) => (
+                                                <SelectItem key={option.value} value={option.value} className="max-w-[24rem] truncate">
+                                                    {option.label}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectGroup>
+                                    </>
+                                ) : null}
+                                {selectedDraftDirectory && !selectedDraftBranchIsKnown ? (
+                                    <SelectItem value={selectedDraftDirectory} className="max-w-[24rem] truncate">
+                                        {selectedDraftBranchLabel}
+                                    </SelectItem>
+                                ) : null}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                ) : null}
                 <div
                     className={cn(
                         "flex flex-col relative overflow-visible",

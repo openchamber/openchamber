@@ -24,6 +24,12 @@ interface SelectionPayload {
 
 const DESKTOP_MENU_SIDE_MARGIN_PX = 8;
 const DESKTOP_MENU_FALLBACK_WIDTH_PX = 280;
+const BLOCK_TAGS = new Set([
+  'address', 'article', 'aside', 'blockquote', 'dd', 'div', 'dl', 'dt',
+  'fieldset', 'figcaption', 'figure', 'footer', 'form', 'h1', 'h2', 'h3',
+  'h4', 'h5', 'h6', 'header', 'hr', 'li', 'main', 'nav', 'ol', 'p', 'pre',
+  'section', 'table', 'ul',
+]);
 
 const normalizeLineBreaks = (value: string): string => value.replace(/\r\n?/g, '\n');
 
@@ -103,6 +109,11 @@ const renderBlockMarkdownNode = (node: Node): string => {
     return `\`\`\`${language}\n${code}\n\`\`\``;
   }
 
+  if (tag === 'code') {
+    const code = normalizeLineBreaks(element.textContent || '').trim();
+    return code ? `\`${code.replace(/`/g, '\\`')}\`` : '';
+  }
+
   if (tag === 'ul') return renderListMarkdown(element, false);
   if (tag === 'ol') return renderListMarkdown(element, true);
 
@@ -137,8 +148,34 @@ const renderBlockMarkdownNode = (node: Node): string => {
   return trimSelectionValue(Array.from(element.childNodes).map((child) => renderInlineMarkdownNode(child)).join(''));
 };
 
+const isInlineSelectionFragment = (fragment: DocumentFragment): boolean => {
+  return Array.from(fragment.childNodes).every((node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      return true;
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) {
+      return true;
+    }
+
+    const element = node as HTMLElement;
+    return !BLOCK_TAGS.has(element.tagName.toLowerCase());
+  });
+};
+
 const rangeToMarkdown = (range: Range, plainText: string): string => {
   const fragment = range.cloneContents();
+
+  if (isInlineSelectionFragment(fragment)) {
+    const inlineMarkdown = trimSelectionValue(
+      Array.from(fragment.childNodes)
+        .map((node) => renderInlineMarkdownNode(node))
+        .join('')
+    );
+    if (inlineMarkdown) {
+      return inlineMarkdown;
+    }
+  }
+
   const markdown = Array.from(fragment.childNodes)
     .map((node) => renderBlockMarkdownNode(node))
     .filter((value) => value.length > 0)

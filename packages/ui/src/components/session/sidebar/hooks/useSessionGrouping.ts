@@ -19,6 +19,8 @@ type Args = {
   isVSCode: boolean;
 };
 
+const isArchivedSession = (session: Session): boolean => Boolean(session.time?.archived);
+
 export const useSessionGrouping = (args: Args) => {
   const buildGroupSearchText = React.useCallback((group: SessionGroup): string => {
     return [group.label, group.branch ?? '', group.description ?? '', group.directory ?? ''].join(' ').toLowerCase();
@@ -70,6 +72,10 @@ export const useSessionGrouping = (args: Args) => {
       sortedProjectSessions.forEach((session) => {
         const parentID = (session as Session & { parentID?: string | null }).parentID;
         if (!parentID) return;
+        const parentSession = sessionMap.get(parentID);
+        if (!parentSession || isArchivedSession(parentSession) !== isArchivedSession(session)) {
+          return;
+        }
         const collection = childrenMap.get(parentID) ?? [];
         collection.push(session);
         childrenMap.set(parentID, collection);
@@ -105,7 +111,9 @@ export const useSessionGrouping = (args: Args) => {
       const roots = sortedProjectSessions.filter((session) => {
         const parentID = (session as Session & { parentID?: string | null }).parentID;
         if (!parentID) return true;
-        return !sessionMap.has(parentID);
+        const parentSession = sessionMap.get(parentID);
+        if (!parentSession) return true;
+        return isArchivedSession(parentSession) !== isArchivedSession(session);
       });
 
       const groupedNodes = new Map<string, SessionNode[]>();

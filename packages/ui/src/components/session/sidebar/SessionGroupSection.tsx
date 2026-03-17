@@ -15,9 +15,11 @@ import { sessionEvents } from '@/lib/sessionEvents';
 import type { MainTab } from '@/stores/useUIStore';
 import { SessionFolderItem } from '../SessionFolderItem';
 import { DroppableFolderWrapper, SessionFolderDndScope } from './sessionFolderDnd';
+import type { SortableDragHandleProps } from './sortableItems';
 import type { GroupSearchData, SessionGroup, SessionNode } from './types';
 import { compareSessionsByPinnedAndTime, isBranchDifferentFromLabel, normalizePath, renderHighlightedText } from './utils';
 import type { SessionFolder } from '@/stores/useSessionFoldersStore';
+import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 
 type DeleteFolderConfirm = {
   scopeKey: string;
@@ -87,6 +89,7 @@ type Props = {
     } | null;
   }>;
   onToggleCollapsedGroup: (groupKey: string) => void;
+  dragHandleProps?: SortableDragHandleProps | null;
 };
 
 export function SessionGroupSection(props: Props): React.ReactNode {
@@ -127,9 +130,12 @@ export function SessionGroupSection(props: Props): React.ReactNode {
     pinnedSessionIds,
     prVisualStateByDirectoryBranch,
     onToggleCollapsedGroup,
+    dragHandleProps,
   } = props;
 
   const searchData = hasSessionSearchQuery ? groupSearchDataByGroup.get(group) : null;
+  const displayMode = useSessionDisplayStore((state) => state.displayMode);
+  const isMinimalMode = displayMode === 'minimal';
   const isExpanded = expandedSessionGroups.has(groupKey);
   const isCollapsed = hasSessionSearchQuery ? false : collapsedGroups.has(groupKey);
   const maxVisible = hideDirectoryControls ? 10 : 5;
@@ -368,6 +374,16 @@ export function SessionGroupSection(props: Props): React.ReactNode {
   };
 
   const renderFolderItems = () => rootFolders.map(({ folder, nodes }) => renderOneFolderItem(folder, nodes, 0));
+  const hasWorktreeDeleteAction = Boolean(!group.isMain && group.worktree);
+  const groupHeaderRightPadding = mobileVariant
+    ? (hasWorktreeDeleteAction ? 'pr-14' : 'pr-7')
+    : isMinimalMode
+      ? (hasWorktreeDeleteAction
+          ? 'pr-10 group-hover/gh:pr-14 group-focus-within/gh:pr-14'
+          : 'pr-10')
+      : (hasWorktreeDeleteAction
+          ? 'pr-5 group-hover/gh:pr-14 group-focus-within/gh:pr-14'
+          : 'pr-5');
 
   const body = (
     <SessionFolderDndScope
@@ -423,20 +439,23 @@ export function SessionGroupSection(props: Props): React.ReactNode {
           }
         }}
         aria-label={isCollapsed ? `Expand ${group.label}` : `Collapse ${group.label}`}
+        aria-expanded={!isCollapsed}
       >
-        <div className={cn(
-          'min-w-0 flex items-start gap-1 pl-0.5 transition-[padding]',
-          mobileVariant
-            ? (!group.isMain && group.worktree ? 'pr-14' : 'pr-7')
-            : (!group.isMain && group.worktree ? 'group-hover/gh:pr-14 group-focus-within/gh:pr-14' : 'group-hover/gh:pr-7 group-focus-within/gh:pr-7'),
-        )}>
+        <div
+          ref={dragHandleProps?.setActivatorNodeRef}
+          className={cn(
+            'min-w-0 flex items-start gap-1 pl-0.5 transition-[padding] cursor-grab active:cursor-grabbing',
+            groupHeaderRightPadding,
+          )}
+          {...(dragHandleProps?.listeners ?? {})}
+        >
           <div className="min-w-0 flex flex-col justify-center gap-0.5">
             <p className="text-[14px] font-normal truncate text-foreground/92">
               {showInlinePrTitle && prIndicator ? (
-                <>
+                <span className="inline-flex min-w-0 max-w-full items-center">
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <span className="inline-flex items-center gap-1 leading-none align-middle">
+                      <span className="inline-flex shrink-0 items-center gap-1 leading-none align-middle">
                         <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center">
                           <RiGitBranchLine
                             className="h-3.5 w-3.5 shrink-0 group-hover/gh:hidden"
@@ -449,14 +468,14 @@ export function SessionGroupSection(props: Props): React.ReactNode {
                         {prIndicator.url ? (
                           <button
                             type="button"
-                            className="inline-flex items-center leading-none"
+                            className="inline-flex shrink-0 items-center leading-none"
                             onMouseDown={(event) => event.stopPropagation()}
                             onClick={handlePrLinkClick}
                           >
                             #{prIndicator.number}
                           </button>
                         ) : (
-                          <span className="inline-flex items-center leading-none">#{prIndicator.number}</span>
+                          <span className="inline-flex shrink-0 items-center leading-none">#{prIndicator.number}</span>
                         )}
                       </span>
                     </TooltipTrigger>
@@ -487,8 +506,8 @@ export function SessionGroupSection(props: Props): React.ReactNode {
                       </div>
                     </TooltipContent>
                   </Tooltip>
-                  <span className="ml-1 inline-flex items-center leading-none align-middle">{group.branch}</span>
-                </>
+                  <span className="ml-1 min-w-0 flex-1 truncate leading-none align-middle">{group.branch}</span>
+                </span>
               ) : group.isArchivedBucket ? (
                 <span className="inline-flex min-w-0 items-center gap-1">
                   <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center">

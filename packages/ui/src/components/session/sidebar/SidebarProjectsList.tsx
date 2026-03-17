@@ -12,6 +12,7 @@ import { SortableContext, arrayMove, sortableKeyboardCoordinates, verticalListSo
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { formatDirectoryName, formatPathForDisplay, cn } from '@/lib/utils';
 import type { SessionGroup } from './types';
+import type { SortableDragHandleProps } from './sortableItems';
 import { SortableGroupItem, SortableProjectItem } from './sortableItems';
 import { formatProjectLabel } from './utils';
 
@@ -37,7 +38,7 @@ type Props = {
   hasSessionSearchQuery: boolean;
   emptyState: React.ReactNode;
   searchEmptyState: React.ReactNode;
-  renderGroupSessions: (group: SessionGroup, groupKey: string, projectId?: string | null, hideGroupLabel?: boolean) => React.ReactNode;
+  renderGroupSessions: (group: SessionGroup, groupKey: string, projectId?: string | null, hideGroupLabel?: boolean, dragHandleProps?: SortableDragHandleProps | null) => React.ReactNode;
   homeDirectory: string | null;
   collapsedProjects: Set<string>;
   hideDirectoryControls: boolean;
@@ -66,9 +67,12 @@ type Props = {
 };
 
 export function SidebarProjectsList(props: Props): React.ReactNode {
-  const sensors = useSensors(
+  const projectSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+  const groupSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
   );
 
   if (props.projectSections.length === 0) {
@@ -117,7 +121,7 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
       ) : (
         <>
           <DndContext
-            sensors={sensors}
+            sensors={projectSensors}
             collisionDetection={closestCenter}
             onDragEnd={(event) => {
               if (props.isInlineEditing) return;
@@ -196,7 +200,7 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
                       <div className="space-y-0 pt-0 pb-0.5 pl-3">
                         {section.groups.length > 0 ? (
                           <DndContext
-                            sensors={sensors}
+                            sensors={groupSensors}
                             collisionDetection={closestCenter}
                             onDragEnd={(event) => {
                               if (props.isInlineEditing) return;
@@ -220,7 +224,7 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
                                 const groupKey = `${projectKey}:${group.id}`;
                                 return (
                                   <SortableGroupItem key={group.id} id={group.id} disabled={props.isInlineEditing}>
-                                    {props.renderGroupSessions(group, groupKey, projectKey)}
+                                    {(dragHandleProps) => props.renderGroupSessions(group, groupKey, projectKey, false, dragHandleProps)}
                                   </SortableGroupItem>
                                 );
                               })}
