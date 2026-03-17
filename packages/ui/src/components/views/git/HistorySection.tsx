@@ -13,6 +13,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { SegmentDivider } from '@/components/ui/segment-divider';
 import { HistoryCommitRow } from './HistoryCommitRow';
 import type { GitLogEntry, CommitFileEntry } from '@/lib/api/types';
 
@@ -63,6 +64,35 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
     branchDivider !== null &&
     branchDivider.insertBeforeIndex > 0 &&
     branchDivider.insertBeforeIndex < log.all.length;
+  const hasDividerBelowLoaded = branchDivider !== null && branchDivider.insertBeforeIndex === log.all.length;
+  const hasSplitHistory = hasDivider || hasDividerBelowLoaded;
+
+  const topEntries = hasDivider
+    ? log.all.slice(0, branchDivider.insertBeforeIndex)
+    : hasDividerBelowLoaded
+      ? log.all
+      : [];
+  const bottomEntries = hasDivider ? log.all.slice(branchDivider.insertBeforeIndex) : [];
+
+  const dividerIcon = branchDivider?.direction === 'down'
+    ? <RiArrowDownSLine className="size-3.5" />
+    : <RiArrowUpLine className="size-3.5" />;
+
+  const renderCommitList = (entries: GitLogEntry[]) => (
+    <ul className="divide-y divide-border/60">
+      {entries.map((entry) => (
+        <HistoryCommitRow
+          key={entry.hash}
+          entry={entry}
+          isExpanded={expandedCommitHashes.has(entry.hash)}
+          onToggle={() => onToggleCommit(entry.hash)}
+          files={commitFilesMap.get(entry.hash) ?? []}
+          isLoadingFiles={loadingCommitHashes.has(entry.hash)}
+          onCopyHash={onCopyHash}
+        />
+      ))}
+    </ul>
+  );
 
   const content = (
     <ScrollableOverlay outerClassName="min-h-0 max-h-[50vh]" className="w-full">
@@ -72,50 +102,35 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
             No commits found
           </p>
         </div>
-      ) : (
-        <ul className="divide-y divide-border/60">
-          {log.all.map((entry, index) => {
-            const isBoundary = hasDivider && index === branchDivider.insertBeforeIndex;
-            const roundTop = isBoundary;
-            const roundBottom = hasDivider && index === branchDivider.insertBeforeIndex - 1;
+      ) : hasSplitHistory && branchDivider ? (
+        <div className="flex flex-col gap-0">
+          {topEntries.length > 0 ? (
+            <div className="rounded-xl border border-border/60 bg-background/70 overflow-hidden">
+              {renderCommitList(topEntries)}
+            </div>
+          ) : null}
 
-            return (
-              <React.Fragment key={entry.hash}>
-                {isBoundary ? (
-                  <li className="px-3 py-2" aria-hidden>
-                    <div className="flex items-center gap-2">
-                      <span className="h-px flex-1 bg-border/60" />
-                      <span className="inline-flex max-w-[80%] items-center gap-1 typography-micro text-muted-foreground">
-                        <span className="truncate" title={branchDivider.branchName}>{branchDivider.branchName}</span>
-                        {branchDivider.direction === 'down' ? (
-                          <RiArrowDownSLine className="size-3.5" />
-                        ) : (
-                          <RiArrowUpLine className="size-3.5" />
-                        )}
-                      </span>
-                      <span className="h-px flex-1 bg-border/60" />
-                    </div>
-                  </li>
-                ) : null}
-                <HistoryCommitRow
-                  entry={entry}
-                  isExpanded={expandedCommitHashes.has(entry.hash)}
-                  onToggle={() => onToggleCommit(entry.hash)}
-                  files={commitFilesMap.get(entry.hash) ?? []}
-                  isLoadingFiles={loadingCommitHashes.has(entry.hash)}
-                  onCopyHash={onCopyHash}
-                  roundTop={roundTop}
-                  roundBottom={roundBottom}
-                />
-              </React.Fragment>
-            );
-          })}
-        </ul>
+          <SegmentDivider
+            label={branchDivider.branchName}
+            icon={dividerIcon}
+          />
+
+          {bottomEntries.length > 0 ? (
+            <div className="rounded-xl border border-border/60 bg-background/70 overflow-hidden">
+              {renderCommitList(bottomEntries)}
+            </div>
+          ) : null}
+        </div>
+      ) : (
+        renderCommitList(log.all)
       )}
     </ScrollableOverlay>
   );
 
   if (!showHeader) {
+    if (hasSplitHistory) {
+      return <section>{content}</section>;
+    }
     return (
       <section className="rounded-xl border border-border/60 bg-background/70 overflow-hidden">
         {content}

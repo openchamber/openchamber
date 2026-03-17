@@ -1254,8 +1254,17 @@ export const GitView: React.FC = () => {
         }
 
         const insertBeforeIndex = log.all.findIndex((entry) => !branchHashes.has(entry.hash));
-        if (insertBeforeIndex <= 0) {
+        if (insertBeforeIndex === 0) {
           setHistoryBranchDivider(null);
+          return;
+        }
+
+        if (insertBeforeIndex === -1) {
+          setHistoryBranchDivider({
+            insertBeforeIndex: log.all.length,
+            branchName: currentBranch,
+            direction: 'up',
+          });
           return;
         }
 

@@ -115,6 +115,7 @@ All scripts are in `package.json`.
 - React: prefer function components + hooks; class only when needed (e.g. error boundaries).
 - Control flow: avoid nested ternaries; prefer early returns + `if/else`/`switch`.
 - Styling: Tailwind v4; typography via `packages/ui/src/lib/typography.ts`; theme vars via `packages/ui/src/lib/theme/`.
+- Shared UI patterns: for "series of items + divider + series of items" layouts, use shared UI primitives (for example `packages/ui/src/components/ui/segment-divider.tsx`) instead of duplicating ad-hoc markup in feature components.
 - Toasts: use custom toast wrapper from `@/components/ui` (backed by `packages/ui/src/components/ui/toast.ts`); do not import `sonner` directly in feature code.
 - No new deps unless asked.
 - Never add secrets (`.env`, keys) or log sensitive data.
