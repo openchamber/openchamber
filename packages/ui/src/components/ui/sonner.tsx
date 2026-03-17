@@ -14,15 +14,15 @@ const Toaster = ({ ...props }: ToasterProps) => {
       closeButton={false}
       toastOptions={{
         style: {
-          borderRadius: "var(--radius-md)",
+          borderRadius: "var(--radius-lg)",
           backdropFilter: 'blur(28px)',
           WebkitBackdropFilter: 'blur(28px)',
         },
         classNames: {
-          toast: "rounded-[var(--radius-md)]",
-          actionButton: "rounded-[var(--radius-sm)]",
-          cancelButton: "rounded-[var(--radius-sm)]",
-          closeButton: "rounded-[var(--radius-sm)]",
+          toast: "rounded-[var(--radius-lg)]",
+          actionButton: "rounded-[var(--radius-md)]",
+          cancelButton: "rounded-[var(--radius-md)]",
+          closeButton: "rounded-[var(--radius-md)]",
         },
       }}
       style={
