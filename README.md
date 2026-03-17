@@ -135,6 +135,71 @@ OPENCHAMBER_OPENCODE_HOSTNAME=0.0.0.0 openchamber --port 3000
 </details>
 
 <details>
+<summary>systemd service (VPN / LAN access)</summary>
+
+Run OpenChamber and OpenCode as separate persistent services — useful when you want to access your
+dev machine over a VPN (e.g. Tailscale) or LAN without a Cloudflare tunnel.
+
+**How it works:**
+- OpenCode runs as its own service, binding only to `localhost`.
+- OpenChamber connects to it via `OPENCODE_HOST` and binds to all interfaces so it's reachable on your VPN IP.
+- `--foreground` keeps the CLI process alive so systemd can track and restart it.
+
+**`~/.config/systemd/user/opencode.service`**
+```ini
+[Unit]
+Description=OpenCode Server
+
+[Service]
+Type=simple
+ExecStart=opencode serve --port 4095
+Environment="PATH=/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/home/YOU/.local/bin:/home/YOU/.npm-global/bin:/usr/local/bin:/usr/bin:/bin"
+Environment=SSH_AUTH_SOCK=%t/ssh-agent.socket
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+```
+
+> **Why set `PATH` and `SSH_AUTH_SOCK`?**
+> systemd user services start with a minimal environment — no shell profile is sourced.
+> Without an explicit `PATH`, OpenCode won't find tools installed via Homebrew, npm, or `~/.local/bin`.
+> Without `SSH_AUTH_SOCK`, git operations over SSH (push, pull, clone) will fail because the agent socket isn't inherited.
+> Adjust the `PATH` to match your own tool installation paths.
+> `%t` expands to `$XDG_RUNTIME_DIR` (e.g. `/run/user/1000`), where most SSH agents write their socket.
+
+**`~/.config/systemd/user/openchamber.service`**
+```ini
+[Unit]
+Description=OpenChamber Web Server
+After=opencode.service
+
+[Service]
+Type=simple
+ExecStart=openchamber serve --port 3000 --ui-password your-password --foreground
+Environment="OPENCODE_HOST=http://localhost:4095"
+Environment="OPENCODE_SKIP_START=true"
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+```
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now opencode openchamber
+```
+
+OpenChamber will be reachable at `http://<your-vpn-hostname>:3000` from any device on your VPN.
+
+> **Tip:** Set `OPENCHAMBER_HOST` to restrict which interface the server binds to
+> (e.g. `Environment="OPENCHAMBER_HOST=100.x.x.x"` for a specific Tailscale IP).
+
+</details>
+
+<details>
 <summary>Docker</summary>
 
 ```bash
