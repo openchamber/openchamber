@@ -11,6 +11,14 @@ type Variant = {
 
 const variants = [
   {
+    variant: "static",
+    component: ({ children, className, ...props }) => (
+      <span {...props} className={className}>
+        {children}
+      </span>
+    ),
+  },
+  {
     variant: "shine",
     component: ({ children, className, ...props }) => (
         <motion.span
@@ -210,7 +218,7 @@ export type TextProps = {
   Partial<MotionProps>;
 
 export function Text({ variant = "shine", className, ...props }: TextProps) {
-  const FALLBACK_INDEX = 0;
+  const FALLBACK_INDEX = 1;
 
   const variantComponent = variants.find((v) => v.variant === variant)?.component;
 

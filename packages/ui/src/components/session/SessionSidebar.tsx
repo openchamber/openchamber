@@ -1170,6 +1170,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       renderSessionNode={renderSessionNode}
     />
   ) : null;
+  const isInlineEditing = Boolean(renamingFolderId || editingId || editingProjectDialogId);
 
   return (
     <div
@@ -1254,6 +1255,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         setGroupOrderByProject={setGroupOrderByProject}
         openSidebarMenuKey={openSidebarMenuKey}
         setOpenSidebarMenuKey={setOpenSidebarMenuKey}
+        isInlineEditing={isInlineEditing}
       />
 
       <SidebarFooter

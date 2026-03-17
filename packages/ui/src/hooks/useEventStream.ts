@@ -1462,6 +1462,17 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
               return true;
             }
 
+            if (currentSessionIdRef.current === sessionId) {
+              const explicitSelection = useContextStore.getState().getSessionAgentSelection(sessionId);
+              if (explicitSelection && explicitSelection !== agentCandidate) {
+                const status = useSessionStore.getState().sessionStatus?.get(sessionId);
+                const isBusy = status?.type === 'busy' || status?.type === 'retry';
+                if (isBusy) {
+                  return false;
+                }
+              }
+            }
+
             const last = lastUserAgentSelectionRef.current.get(sessionId);
             if (!last) return true;
 

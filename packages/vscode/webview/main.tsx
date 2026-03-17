@@ -971,10 +971,7 @@ onCommand('addToContext', (payload) => {
   // Import the store dynamically to avoid circular dependencies
   import('@/stores/useSessionStore').then(({ useSessionStore }) => {
     const store = useSessionStore.getState();
-    const currentText = store.pendingInputText || '';
-    // Append to existing text with double newline separator
-    const newText = currentText ? `${currentText}\n\n${text}` : text;
-    store.setPendingInputText(newText);
+    store.setPendingInputText(text, 'append');
   });
 });
 

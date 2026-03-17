@@ -903,6 +903,7 @@ const execGit = async (args: string[], cwd: string): Promise<{ stdout: string; s
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
       env,
+      windowsHide: true,
     });
 
     let stdout = '';

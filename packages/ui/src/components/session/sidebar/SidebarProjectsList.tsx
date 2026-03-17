@@ -16,15 +16,15 @@ import { SortableGroupItem, SortableProjectItem } from './sortableItems';
 import { formatProjectLabel } from './utils';
 
 type ProjectSection = {
-    project: {
-      id: string;
-      label?: string;
-      normalizedPath: string;
-      icon?: string;
-      color?: string;
-      iconImage?: { mime: string; updatedAt: number; source: 'custom' | 'auto' };
-      iconBackground?: string;
-    };
+  project: {
+    id: string;
+    label?: string;
+    normalizedPath: string;
+    icon?: string;
+    color?: string;
+    iconImage?: { mime: string; updatedAt: number; source: 'custom' | 'auto' };
+    iconBackground?: string;
+  };
   groups: SessionGroup[];
 };
 
@@ -62,6 +62,7 @@ type Props = {
   setGroupOrderByProject: React.Dispatch<React.SetStateAction<Map<string, string[]>>>;
   openSidebarMenuKey: string | null;
   setOpenSidebarMenuKey: (key: string | null) => void;
+  isInlineEditing: boolean;
 };
 
 export function SidebarProjectsList(props: Props): React.ReactNode {
@@ -119,6 +120,7 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
             sensors={sensors}
             collisionDetection={closestCenter}
             onDragEnd={(event) => {
+              if (props.isInlineEditing) return;
               const { active, over } = event;
               if (!over || active.id === over.id) return;
               const oldIndex = props.sectionsForRender.findIndex((section) => section.project.id === active.id);
@@ -197,6 +199,7 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
                             sensors={sensors}
                             collisionDetection={closestCenter}
                             onDragEnd={(event) => {
+                              if (props.isInlineEditing) return;
                               const { active, over } = event;
                               if (!over || active.id === over.id) return;
                               const oldIndex = nestedGroups.findIndex((item) => item.id === active.id);
@@ -216,7 +219,7 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
                               {nestedGroups.map((group) => {
                                 const groupKey = `${projectKey}:${group.id}`;
                                 return (
-                                  <SortableGroupItem key={group.id} id={group.id}>
+                                  <SortableGroupItem key={group.id} id={group.id} disabled={props.isInlineEditing}>
                                     {props.renderGroupSessions(group, groupKey, projectKey)}
                                   </SortableGroupItem>
                                 );

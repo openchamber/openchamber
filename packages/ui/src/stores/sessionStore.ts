@@ -728,16 +728,21 @@ export const useSessionStore = create<SessionStore>()(
 
                         try {
                             const pageSize = 500;
+                            const previousArchivedSessions = dedupeSessionsById(get().archivedSessions);
                             const firstPage = await apiClient.experimental.session.list({ limit: pageSize, archived: false });
                             let liveSessions = dedupeSessionsById(Array.isArray(firstPage.data) ? firstPage.data as Session[] : []);
                             let archivedSessions: Session[] = [];
+                            let hasLoadedArchivedSessions = false;
 
                             const apply = async () => {
                                 if (!isLatestRequest()) {
                                     return;
                                 }
                                 const projectResults = await buildProjectResults(liveSessions);
-                                await applyProjectResults(projectResults, dedupeSessionsById(archivedSessions));
+                                const archivedForRender = hasLoadedArchivedSessions
+                                    ? dedupeSessionsById(archivedSessions)
+                                    : previousArchivedSessions;
+                                await applyProjectResults(projectResults, archivedForRender);
                             };
 
                             await apply();
@@ -770,6 +775,7 @@ export const useSessionStore = create<SessionStore>()(
                                         ? (response.data as Session[]).filter((session) => Boolean(session.time?.archived))
                                         : [];
                                     if (page.length > 0) {
+                                        hasLoadedArchivedSessions = true;
                                         archivedSessions = dedupeSessionsById([...archivedSessions, ...page]);
                                         await apply();
                                     }
@@ -778,6 +784,12 @@ export const useSessionStore = create<SessionStore>()(
                                         break;
                                     }
                                     archivedCursor = next;
+                                }
+
+                                if (!hasLoadedArchivedSessions && isLatestRequest()) {
+                                    hasLoadedArchivedSessions = true;
+                                    archivedSessions = [];
+                                    await apply();
                                 }
                             };
 

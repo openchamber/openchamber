@@ -31,6 +31,8 @@ import nord_dark_Raw from './nord-dark.json';
 import nord_light_Raw from './nord-light.json';
 import oc_2_dark_Raw from './oc-2-dark.json';
 import oc_2_light_Raw from './oc-2-light.json';
+import openchamber_dark_Raw from './openchamber-dark.json';
+import openchamber_light_Raw from './openchamber-light.json';
 import onedarkpro_dark_Raw from './onedarkpro-dark.json';
 import onedarkpro_light_Raw from './onedarkpro-light.json';
 import orng_dark_Raw from './orng-dark.json';
@@ -57,6 +59,8 @@ import vitesse_dark_dark_Raw from './vitesse-dark-dark.json';
 import vitesse_light_light_Raw from './vitesse-light-light.json';
 
 export const presetThemes: Theme[] = [
+  openchamber_dark_Raw as Theme,
+  openchamber_light_Raw as Theme,
   amoled_dark_Raw as Theme,
   amoled_light_Raw as Theme,
   aura_dark_Raw as Theme,
