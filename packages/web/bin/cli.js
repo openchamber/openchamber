@@ -596,6 +596,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     quiet: false,
     explicitPort: false,
     explicitUiPassword: false,
+    foreground: false,
   };
 
   const removedFlagErrors = [];
@@ -788,6 +789,10 @@ function parseArgs(argv = process.argv.slice(2)) {
       case 'v':
         versionRequested = true;
         break;
+      case 'foreground':
+      case 'no-daemon':
+        options.foreground = true;
+        break;
       case 'daemon':
       case 'd':
         removedFlagErrors.push('`--daemon` was removed. OpenChamber now always runs in daemon mode.');
@@ -854,6 +859,8 @@ OPTIONS:
   -p, --port              Web server port (default: ${DEFAULT_PORT})
   --host                  Bind address (default: 127.0.0.1)
   --ui-password           Protect browser UI with single password
+  --foreground            Run server in foreground (use with systemd/process managers)
+  --no-daemon             Alias for --foreground
   -h, --help              Show help
   -v, --version           Show version
 
@@ -861,6 +868,7 @@ ENVIRONMENT:
   OPENCHAMBER_HOST             Bind address (e.g. 0.0.0.0 for all interfaces)
   OPENCHAMBER_UI_PASSWORD      Alternative to --ui-password flag
   OPENCHAMBER_DATA_DIR         Override OpenChamber data directory
+  OPENCHAMBER_HOST             IP/hostname for the web server to bind to (default: all interfaces)
   OPENCODE_HOST               External OpenCode server base URL, e.g. http://hostname:4096
   OPENCODE_PORT               Port of external OpenCode server to connect to
   OPENCODE_SKIP_START          Skip starting OpenCode, use external server
@@ -869,6 +877,7 @@ ENVIRONMENT:
 EXAMPLES:
   openchamber                    # Start in daemon mode on default port 3000 (or free port)
   openchamber --port 8080        # Start on port 8080 (daemon)
+  openchamber serve --foreground # Start in foreground (for systemd Type=simple)
   openchamber tunnel help        # Show tunnel lifecycle help
   openchamber logs               # Follow logs for latest running instance
 `);
@@ -966,7 +975,7 @@ _openchamber_tunnel() {
   commands="serve stop restart status tunnel logs update"
   tunnel_commands="help providers ready doctor status start stop profile completion"
   profile_commands="list show add remove"
-  common_flags="--port --json --all --help --version --plain --quiet"
+  common_flags="--port --foreground --no-daemon --json --all --help --version --plain --quiet"
   start_flags="--provider --mode --profile --config --token --token-file --token-stdin --hostname --connect-ttl --session-ttl --qr --no-qr --dry-run --show-secrets"
 
   if [[ \${COMP_CWORD} -eq 1 ]]; then
@@ -1072,6 +1081,8 @@ compdef _openchamber openchamber
 # Save to ~/.config/fish/completions/openchamber.fish
 
 complete -c openchamber -n '__fish_use_subcommand' -a 'serve' -d 'Start the web server'
+complete -c openchamber -n '__fish_seen_subcommand_from serve' -l foreground -d 'Run in foreground (for systemd/process managers)'
+complete -c openchamber -n '__fish_seen_subcommand_from serve' -l no-daemon -d 'Run in foreground (alias for --foreground)'
 complete -c openchamber -n '__fish_use_subcommand' -a 'stop' -d 'Stop running instance(s)'
 complete -c openchamber -n '__fish_use_subcommand' -a 'restart' -d 'Stop and start the server'
 complete -c openchamber -n '__fish_use_subcommand' -a 'status' -d 'Show server status'
@@ -2742,6 +2753,39 @@ const commands = {
         console.warn(`Warning: ${warningLine}; ${warningDetail}`);
       }
     }
+    // Foreground mode: run server inline so the CLI process is the server process.
+    // Required for process managers like systemd (Type=simple) that track the
+    // direct child rather than a detached grandchild.
+    if (options.foreground) {
+      // Propagate resolved values into env before importing the server module.
+      if (opencodeBinary) {
+        process.env.OPENCODE_BINARY = opencodeBinary;
+      }
+      if (effectiveUiPassword) {
+        process.env.OPENCHAMBER_UI_PASSWORD = effectiveUiPassword;
+      }
+
+      // Close the log fd – in foreground mode stdout/stderr are inherited from
+      // the parent (e.g. journald), so file logging is not needed.
+      try {
+        fs.closeSync(logFd);
+      } catch {
+      }
+
+      if (!isQuietMode(options) && !isJsonMode(options)) {
+        console.log(`Starting OpenChamber on port ${targetPort === 0 ? 'auto' : targetPort} (foreground)`);
+      }
+
+      const { startWebUiServer } = await import(pathToFileURL(serverPath).href);
+      await startWebUiServer({
+        port: targetPort,
+        uiPassword: effectiveUiPassword,
+        attachSignals: true,
+        exitOnShutdown: true,
+      });
+      return targetPort;
+    }
+
     const serverArgs = [serverPath, '--port', String(targetPort)];
     const effectiveHost = typeof options.host === 'string' && options.host.length > 0 ? options.host : undefined;
     if (effectiveHost) {
