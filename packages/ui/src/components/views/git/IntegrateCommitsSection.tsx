@@ -46,7 +46,6 @@ export const IntegrateCommitsSection: React.FC<{
   defaultTargetBranch: string;
   refreshKey?: number;
   onRefresh?: () => void;
-  variant?: 'framed' | 'plain';
 }> = ({
   repoRoot,
   sourceBranch,
@@ -55,7 +54,6 @@ export const IntegrateCommitsSection: React.FC<{
   defaultTargetBranch,
   refreshKey,
   onRefresh,
-  variant = 'framed',
 }) => {
   const currentSessionId = useSessionStore((s) => s.currentSessionId);
   const setActiveMainTab = useUIStore((s) => s.setActiveMainTab);
@@ -337,15 +335,9 @@ Important:
     return null;
   }
 
-  const containerClassName =
-    variant === 'framed'
-      ? 'rounded-xl border border-border/60 bg-background/70 overflow-hidden'
-      : 'border-0 bg-transparent rounded-none';
-  const headerClassName =
-    variant === 'framed'
-      ? 'px-3 py-2 border-b border-border/40 flex items-center justify-between gap-2'
-      : 'px-0 py-3 border-b border-border/40 flex items-center justify-between gap-2';
-  const bodyClassName = variant === 'framed' ? 'flex flex-col gap-3 p-3' : 'flex flex-col gap-3 py-3';
+  const containerClassName = 'border-0 bg-transparent rounded-none';
+  const headerClassName = 'px-0 py-3 border-b border-border/40 flex items-center justify-between gap-2';
+  const bodyClassName = 'flex flex-col gap-3 py-3';
 
   return (
     <section className={containerClassName}>

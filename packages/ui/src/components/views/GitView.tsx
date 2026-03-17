@@ -1861,7 +1861,6 @@ export const GitView: React.FC = () => {
                   {(changeEntries?.length ?? 0) > 0 ? (
                     <>
                       <ChangesSection
-                        variant="plain"
                         maxListHeightClassName="max-h-[40vh]"
                         changeEntries={changeEntries}
                         onVisiblePathsChange={setVisibleChangePaths}
@@ -1887,7 +1886,6 @@ export const GitView: React.FC = () => {
                       />
 
                       <CommitSection
-                        variant="plain"
                         selectedCount={selectedCount}
                         commitMessage={commitMessage}
                         onCommitMessageChange={setCommitMessage}
@@ -1945,7 +1943,6 @@ export const GitView: React.FC = () => {
                 <div className="space-y-4">
                   {integrateCommitsProps ? (
                     <IntegrateCommitsSection
-                      variant="plain"
                       repoRoot={integrateCommitsProps.repoRoot}
                       sourceBranch={integrateCommitsProps.sourceBranch}
                       worktreeMetadata={integrateCommitsProps.worktreeMetadata}
@@ -1974,7 +1971,6 @@ export const GitView: React.FC = () => {
                 <div className="space-y-4">
                   {pullRequestProps ? (
                     <PullRequestSection
-                      variant="plain"
                       directory={pullRequestProps.directory}
                       branch={pullRequestProps.branch}
                       baseBranch={baseBranch}
