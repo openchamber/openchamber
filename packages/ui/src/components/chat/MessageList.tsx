@@ -1097,14 +1097,25 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         useFlushSync: false,
     });
 
-    const virtualRows = shouldVirtualize ? virtualizer.getVirtualItems() : [];
+    const isVirtualRowInRange = React.useCallback(
+        (row: VirtualItem) => row.index >= 0 && row.index < stagedEntries.length,
+        [stagedEntries.length],
+    );
+
+    const virtualRows = shouldVirtualize ? virtualizer.getVirtualItems().filter(isVirtualRowInRange) : [];
     const lastNonEmptyVirtualRowsRef = React.useRef<VirtualItem[]>([]);
     if (shouldVirtualize && virtualRows.length > 0) {
         lastNonEmptyVirtualRowsRef.current = virtualRows;
+    } else if (!shouldVirtualize && lastNonEmptyVirtualRowsRef.current.length > 0) {
+        lastNonEmptyVirtualRowsRef.current = [];
     }
 
+    const fallbackVirtualRows = shouldVirtualize
+        ? lastNonEmptyVirtualRowsRef.current.filter(isVirtualRowInRange)
+        : [];
+
     const effectiveVirtualRows = shouldVirtualize
-        ? (virtualRows.length > 0 ? virtualRows : lastNonEmptyVirtualRowsRef.current)
+        ? (virtualRows.length > 0 ? virtualRows : fallbackVirtualRows)
         : [];
 
     const renderVirtualized = shouldVirtualize && effectiveVirtualRows.length > 0;

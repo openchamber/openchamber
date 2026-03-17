@@ -219,6 +219,7 @@ async function execGit(args: string[], cwd: string): Promise<{ stdout: string; s
       const proc = spawn(gitPath, args, {
         cwd: normalizedCwd,
         env,
+        windowsHide: true,
       });
 
       let stdout = '';

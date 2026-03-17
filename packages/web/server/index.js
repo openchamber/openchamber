@@ -5885,7 +5885,7 @@ function killProcessOnPort(port) {
   if (!port) return;
   try {
     // Kill any process listening on our port to clean up orphaned children.
-    const result = spawnSync('lsof', ['-ti', `:${port}`], { encoding: 'utf8', timeout: 5000 });
+    const result = spawnSync('lsof', ['-ti', `:${port}`], { encoding: 'utf8', timeout: 5000, windowsHide: true });
     const output = result.stdout || '';
     const myPid = process.pid;
     for (const pidStr of output.split(/\s+/)) {
@@ -12865,18 +12865,18 @@ async function main(options = {}) {
         // macOS: open -R selects the file in Finder; open opens a folder
         const stat = await fsPromises.stat(resolved);
         if (stat.isDirectory()) {
-          spawn('open', [resolved], { stdio: 'ignore', detached: true }).unref();
+          spawn('open', [resolved], { windowsHide: true, stdio: 'ignore', detached: true }).unref();
         } else {
-          spawn('open', ['-R', resolved], { stdio: 'ignore', detached: true }).unref();
+          spawn('open', ['-R', resolved], { windowsHide: true, stdio: 'ignore', detached: true }).unref();
         }
       } else if (platform === 'win32') {
         // Windows: explorer /select, highlights the file
-        spawn('explorer', ['/select,', resolved], { stdio: 'ignore', detached: true }).unref();
+        spawn('explorer', ['/select,', resolved], { windowsHide: true, stdio: 'ignore', detached: true }).unref();
       } else {
         // Linux: xdg-open opens the parent directory
         const stat = await fsPromises.stat(resolved);
         const dir = stat.isDirectory() ? resolved : path.dirname(resolved);
-        spawn('xdg-open', [dir], { stdio: 'ignore', detached: true }).unref();
+        spawn('xdg-open', [dir], { windowsHide: true, stdio: 'ignore', detached: true }).unref();
       }
 
       res.json({ success: true, path: resolved });

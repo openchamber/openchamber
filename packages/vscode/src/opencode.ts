@@ -359,6 +359,7 @@ async function spawnManagedOpenCodeServer(
     cwd: workingDirectory,
     env: { ...process.env },
     stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
     shell: shouldUseWindowsShell(binary),
   });
 
