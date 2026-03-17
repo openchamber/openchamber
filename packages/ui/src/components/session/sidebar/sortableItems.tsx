@@ -303,8 +303,9 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
 
 const SortableGroupItemBase: React.FC<{
   id: string;
+  disabled?: boolean;
   children: React.ReactNode;
-}> = ({ id, children }) => {
+}> = ({ id, disabled = false, children }) => {
   const {
     attributes,
     listeners,
@@ -312,7 +313,7 @@ const SortableGroupItemBase: React.FC<{
     transform,
     transition,
     isDragging,
-  } = useSortable({ id });
+  } = useSortable({ id, disabled });
 
   return (
     <div

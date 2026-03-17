@@ -972,6 +972,8 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     ],
   );
 
+  const isInlineEditing = Boolean(renamingFolderId || editingId || editingProjectId);
+
   return (
     <div
       ref={sessionSearchContainerRef}
@@ -1053,6 +1055,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         settingsAutoCreateWorktree={settingsAutoCreateWorktree}
         getOrderedGroups={getOrderedGroups}
         setGroupOrderByProject={setGroupOrderByProject}
+        isInlineEditing={isInlineEditing}
       />
 
       <NewWorktreeDialog
