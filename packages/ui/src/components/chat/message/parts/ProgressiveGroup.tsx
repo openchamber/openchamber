@@ -207,7 +207,7 @@ const normalizePathValue = (value: string): string => {
     if (!trimmed) {
         return '';
     }
-    return trimmed.replace(/\\/g, '/');
+    return trimmed.replace(/\\/g, '/').replace(/\/{2,}/g, '/');
 };
 
 const trimTrailingSlashes = (value: string): string => {
@@ -239,6 +239,45 @@ const getRelativePathFromDirectory = (filePath: string, currentDirectory: string
     }
 
     return normalizedPath;
+};
+
+const renderReadFilePath = (displayPath: string) => {
+    const lastSlash = displayPath.lastIndexOf('/');
+
+    if (lastSlash === -1) {
+        return (
+            <span
+                className="min-w-0 flex-1 truncate whitespace-nowrap typography-meta leading-5"
+                style={{ color: 'var(--tools-title)' }}
+                title={displayPath}
+            >
+                {displayPath}
+            </span>
+        );
+    }
+
+    const dir = displayPath.slice(0, lastSlash);
+    const name = displayPath.slice(lastSlash + 1);
+    const hasAbsoluteRoot = dir.startsWith('/');
+    const displayDir = hasAbsoluteRoot ? dir.slice(1) : dir;
+
+    return (
+        <span className="min-w-0 inline-flex max-w-full flex-1 items-baseline overflow-hidden typography-meta leading-5" title={displayPath}>
+            {hasAbsoluteRoot ? <span className="flex-shrink-0" style={{ color: 'var(--tools-description)' }}>/</span> : null}
+            <span
+                className="min-w-0 shrink truncate whitespace-nowrap"
+                style={{
+                    color: 'var(--tools-description)',
+                    direction: 'rtl',
+                    textAlign: 'left',
+                }}
+            >
+                {displayDir}
+            </span>
+            <span className="flex-shrink-0" style={{ color: 'var(--tools-description)' }}>/</span>
+            <span className="flex-shrink-0" style={{ color: 'var(--tools-title)' }}>{name}</span>
+        </span>
+    );
 };
 
 const resolveAbsolutePath = (currentDirectory: string, filePath: string): string => {
@@ -503,17 +542,7 @@ export const StaticToolRow: React.FC<{
                         title={entry.offset ? `${entry.displayPath}:${entry.offset}` : entry.displayPath}
                     >
                         {showToolFileIcons ? <FileTypeIcon filePath={entry.path} className="h-3.5 w-3.5" /> : null}
-                        <span
-                            className="min-w-0 flex-1 truncate whitespace-nowrap typography-meta leading-5"
-                            style={{
-                                color: 'var(--tools-description)',
-                                direction: 'rtl',
-                                textAlign: 'left',
-                            }}
-                            title={entry.displayPath}
-                        >
-                            {entry.displayPath}
-                        </span>
+                        {renderReadFilePath(entry.displayPath)}
                     </button>
                 ))
                 : null}
@@ -521,7 +550,7 @@ export const StaticToolRow: React.FC<{
                 ? descriptions.map((desc, index) => (
                     <span key={`${desc}-${index}`} className="inline-flex min-w-0 flex-1">
                         <Text
-                            variant={animateTailText ? 'generate-effect' : undefined}
+                            variant={animateTailText ? 'generate-effect' : 'static'}
                             className="min-w-0 flex-1 truncate whitespace-nowrap typography-meta leading-5"
                             style={{ color: 'var(--tools-description)' }}
                             title={desc}
@@ -551,7 +580,7 @@ export const StaticToolRow: React.FC<{
                 : null}
             {!isReadGroup && !isSearchGroup && !isFetchGroup && descriptions.length > 0 ? (
                 <Text
-                    variant={animateTailText ? 'generate-effect' : undefined}
+                    variant={animateTailText ? 'generate-effect' : 'static'}
                     className="min-w-0 flex-1 truncate whitespace-nowrap typography-meta leading-5"
                     style={{ color: 'var(--tools-description)' }}
                 >

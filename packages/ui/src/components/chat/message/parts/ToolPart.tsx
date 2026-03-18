@@ -104,7 +104,7 @@ const getMultiFileDescription = (
                     <span key={entry.path} className="inline-flex min-w-0 max-w-full items-center gap-1 typography-meta leading-5" style={{ color: 'var(--tools-description)' }}>
                         {showFileIcons ? <FileTypeIcon filePath={entry.path} className="h-3.5 w-3.5" /> : null}
                         <Text
-                            variant={animate ? 'generate-effect' : undefined}
+                            variant={animate ? 'generate-effect' : 'static'}
                             className="min-w-0 max-w-full truncate typography-meta leading-5"
                             style={{ color: 'var(--tools-description)' }}
                             title={entry.path}
@@ -303,14 +303,36 @@ const getPrimaryDiffFromMetadata = (
     return undefined;
 };
 
-const getRelativePath = (absolutePath: string, currentDirectory: string): string => {
-    if (absolutePath.startsWith(currentDirectory)) {
-        const relativePath = absolutePath.substring(currentDirectory.length);
+const normalizeDisplayPath = (value: string): string => {
+    const trimmed = value.trim().replace(/\\/g, '/').replace(/\/{2,}/g, '/');
+    if (!trimmed || trimmed === '/') {
+        return trimmed;
+    }
+    return trimmed.replace(/\/+$/, '');
+};
 
-        return relativePath.startsWith('/') ? relativePath.substring(1) : relativePath;
+const getRelativePath = (absolutePath: string, currentDirectory: string): string => {
+    const normalizedAbsolutePath = normalizeDisplayPath(absolutePath);
+    const normalizedCurrentDirectory = normalizeDisplayPath(currentDirectory);
+
+    if (!normalizedAbsolutePath) {
+        return '';
     }
 
-    return absolutePath;
+    if (!normalizedCurrentDirectory) {
+        return normalizedAbsolutePath;
+    }
+
+    if (normalizedAbsolutePath === normalizedCurrentDirectory) {
+        return '.';
+    }
+
+    const prefix = `${normalizedCurrentDirectory}/`;
+    if (normalizedAbsolutePath.startsWith(prefix)) {
+        return normalizedAbsolutePath.slice(prefix.length);
+    }
+
+    return normalizedAbsolutePath;
 };
 
 const usePierreThemeConfig = () => {
@@ -385,6 +407,13 @@ const getToolDescriptionPath = (part: ToolPartType, state: ToolStateUnion, curre
     }
 
     if ((part.tool === 'edit' || part.tool === 'multiedit') && input) {
+        const filePath = input?.filePath || input?.file_path || input?.path || metadata?.filePath || metadata?.file_path || metadata?.path;
+        if (typeof filePath === 'string') {
+            return getRelativePath(filePath, currentDirectory);
+        }
+    }
+
+    if (part.tool === 'read' && input) {
         const filePath = input?.filePath || input?.file_path || input?.path || metadata?.filePath || metadata?.file_path || metadata?.path;
         if (typeof filePath === 'string') {
             return getRelativePath(filePath, currentDirectory);
@@ -855,7 +884,7 @@ const TaskToolSummary: React.FC<{
                                                     </span>
                                                 ) : (
                                                     <Text
-                                                        variant={animateTailText ? 'generate-effect' : undefined}
+                                                        variant={animateTailText ? 'generate-effect' : 'static'}
                                                         className={cn(
                                                             'typography-meta flex-1 min-w-0 text-muted-foreground/70',
                                                             isMobile ? 'whitespace-normal break-words' : 'truncate'
@@ -966,11 +995,14 @@ const renderPathLikeGitChanges = (path: string, grow = true) => {
 
     const dir = path.slice(0, lastSlash);
     const name = path.slice(lastSlash + 1);
+    const hasAbsoluteRoot = dir.startsWith('/');
+    const displayDir = hasAbsoluteRoot ? dir.slice(1) : dir;
 
     return (
         <span className={cn('min-w-0 flex items-baseline overflow-hidden typography-ui-label', grow && 'flex-1')} title={path}>
+            {hasAbsoluteRoot ? <span className="flex-shrink-0 text-muted-foreground">/</span> : null}
             <span className="min-w-0 truncate text-muted-foreground" style={{ direction: 'rtl', textAlign: 'left' }}>
-                {dir}
+                {displayDir}
             </span>
             <span className="flex-shrink-0">
                 <span className="text-muted-foreground">/</span>
@@ -1000,20 +1032,23 @@ const renderAnimatedPathWithIcon = (path: string, _animate = true, grow = true, 
 
     const dir = path.slice(0, lastSlash);
     const name = path.slice(lastSlash + 1);
+    const hasAbsoluteRoot = dir.startsWith('/');
+    const displayDir = hasAbsoluteRoot ? dir.slice(1) : dir;
 
     return (
         <span className={cn('min-w-0 inline-flex items-center gap-1 overflow-hidden', grow && 'flex-1')} title={path}>
             {showFileIcons ? <FileTypeIcon filePath={path} className="h-3.5 w-3.5 flex-shrink-0" /> : null}
-            <span className={cn('min-w-0 inline-flex items-baseline overflow-hidden typography-meta', grow && 'flex-1')}>
+            <span className={cn('min-w-0 inline-flex max-w-full items-baseline overflow-hidden typography-meta', grow && 'flex-1')}>
+                {hasAbsoluteRoot ? <span className="flex-shrink-0" style={{ color: 'var(--tools-description)' }}>/</span> : null}
                 <span
-                    className="min-w-0 flex-1 truncate whitespace-nowrap"
+                    className="min-w-0 shrink truncate whitespace-nowrap"
                     style={{
                         color: 'var(--tools-description)',
                         direction: 'rtl',
                         textAlign: 'left',
                     }}
                 >
-                    {dir}
+                    {displayDir}
                 </span>
                 <span className="flex-shrink-0" style={{ color: 'var(--tools-description)' }}>/</span>
                 <span className="flex-shrink-0" style={{ color: 'var(--tools-title)' }}>
@@ -1937,7 +1972,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
                                     renderAnimatedPathWithIcon(descriptionPath, animateTailText, false, showToolFileIcons)
                                 ) : (
                                     <Text
-                                        variant={animateTailText ? 'generate-effect' : undefined}
+                                        variant={animateTailText ? 'generate-effect' : 'static'}
                                         className="min-w-0 truncate typography-meta"
                                         style={{ color: 'var(--tools-description)' }}
                                         title={description}

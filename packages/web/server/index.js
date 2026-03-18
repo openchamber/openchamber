@@ -111,6 +111,101 @@ const normalizeDirectoryPath = (value) => {
   return trimmed;
 };
 
+const normalizePathForPersistence = (value) => {
+  if (typeof value !== 'string') {
+    return value;
+  }
+
+  const normalized = normalizeDirectoryPath(value);
+  if (typeof normalized !== 'string') {
+    return normalized;
+  }
+
+  const trimmed = normalized.trim();
+  if (!trimmed) {
+    return trimmed;
+  }
+
+  if (process.platform !== 'win32') {
+    return trimmed;
+  }
+
+  return trimmed.replace(/\//g, '\\');
+};
+
+const areStringArraysEqual = (a, b) => {
+  if (!Array.isArray(a) || !Array.isArray(b)) {
+    return false;
+  }
+  if (a.length !== b.length) {
+    return false;
+  }
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) {
+      return false;
+    }
+  }
+  return true;
+};
+
+const normalizeSettingsPaths = (input) => {
+  const settings = input && typeof input === 'object' ? input : {};
+  let next = settings;
+  let changed = false;
+
+  const ensureNext = () => {
+    if (next === settings) {
+      next = { ...settings };
+    }
+  };
+
+  const normalizePathField = (key) => {
+    if (typeof settings[key] !== 'string' || settings[key].length === 0) {
+      return;
+    }
+    const normalized = normalizePathForPersistence(settings[key]);
+    if (normalized !== settings[key]) {
+      ensureNext();
+      next[key] = normalized;
+      changed = true;
+    }
+  };
+
+  const normalizePathArrayField = (key) => {
+    if (!Array.isArray(settings[key])) {
+      return;
+    }
+
+    const normalized = normalizeStringArray(
+      settings[key]
+        .map((entry) => (typeof entry === 'string' ? normalizePathForPersistence(entry) : entry))
+        .filter((entry) => typeof entry === 'string' && entry.length > 0)
+    );
+
+    if (!areStringArraysEqual(normalized, settings[key])) {
+      ensureNext();
+      next[key] = normalized;
+      changed = true;
+    }
+  };
+
+  normalizePathField('lastDirectory');
+  normalizePathField('homeDirectory');
+  normalizePathArrayField('approvedDirectories');
+  normalizePathArrayField('pinnedDirectories');
+
+  if (Array.isArray(settings.projects)) {
+    const normalizedProjects = sanitizeProjects(settings.projects) || [];
+    if (JSON.stringify(normalizedProjects) !== JSON.stringify(settings.projects)) {
+      ensureNext();
+      next.projects = normalizedProjects;
+      changed = true;
+    }
+  }
+
+  return { settings: next, changed };
+};
+
 const OPENCHAMBER_USER_CONFIG_ROOT = path.join(os.homedir(), '.config', 'openchamber');
 const OPENCHAMBER_USER_THEMES_DIR = path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'themes');
 
@@ -562,7 +657,7 @@ const searchFilesystemFiles = async (rootPath, options) => {
           }
 
           const result = await new Promise((resolve) => {
-            const child = spawn('git', ['check-ignore', '--', ...pathsToCheck], {
+            const child = spawn(resolveGitBinaryForSpawn(), ['check-ignore', '--', ...pathsToCheck], {
               cwd: dir,
               windowsHide: true,
               stdio: ['ignore', 'pipe', 'pipe'],
@@ -1136,7 +1231,11 @@ const buildTemplateVariables = async (payload, sessionId) => {
   if (worktreeDir) {
     try {
       const { simpleGit } = await import('simple-git');
-      const git = simpleGit({ baseDir: worktreeDir, spawnOptions: { windowsHide: true } });
+      const git = simpleGit({
+        baseDir: worktreeDir,
+        spawnOptions: { windowsHide: true },
+        binary: resolveGitBinaryForSpawn(),
+      });
       branch = await Promise.race([
         git.revparse(['--abbrev-ref', 'HEAD']),
         new Promise((_, reject) => setTimeout(() => reject(new Error('git timeout')), 3000)),
@@ -1802,7 +1901,8 @@ const sanitizeProjects = (input) => {
     const candidate = entry;
     const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
     const rawPath = typeof candidate.path === 'string' ? candidate.path.trim() : '';
-    const normalizedPath = rawPath ? path.resolve(normalizeDirectoryPath(rawPath)) : '';
+    const resolvedPath = rawPath ? path.resolve(normalizeDirectoryPath(rawPath)) : '';
+    const normalizedPath = resolvedPath ? normalizePathForPersistence(resolvedPath) : '';
     const label = typeof candidate.label === 'string' ? candidate.label.trim() : '';
     const icon = typeof candidate.icon === 'string' ? candidate.icon.trim() : '';
     const iconImage = candidate.iconImage && typeof candidate.iconImage === 'object'
@@ -1912,10 +2012,16 @@ const sanitizeSettingsUpdate = (payload) => {
     result.splashFgDark = candidate.splashFgDark.trim();
   }
   if (typeof candidate.lastDirectory === 'string' && candidate.lastDirectory.length > 0) {
-    result.lastDirectory = candidate.lastDirectory;
+    const normalized = normalizePathForPersistence(candidate.lastDirectory);
+    if (typeof normalized === 'string' && normalized.length > 0) {
+      result.lastDirectory = normalized;
+    }
   }
   if (typeof candidate.homeDirectory === 'string' && candidate.homeDirectory.length > 0) {
-    result.homeDirectory = candidate.homeDirectory;
+    const normalized = normalizePathForPersistence(candidate.homeDirectory);
+    if (typeof normalized === 'string' && normalized.length > 0) {
+      result.homeDirectory = normalized;
+    }
   }
 
   // Absolute path to the opencode CLI binary (optional override).
@@ -1936,13 +2042,21 @@ const sanitizeSettingsUpdate = (payload) => {
   }
 
   if (Array.isArray(candidate.approvedDirectories)) {
-    result.approvedDirectories = normalizeStringArray(candidate.approvedDirectories);
+    result.approvedDirectories = normalizeStringArray(
+      candidate.approvedDirectories
+        .map((entry) => (typeof entry === 'string' ? normalizePathForPersistence(entry) : entry))
+        .filter((entry) => typeof entry === 'string' && entry.length > 0)
+    );
   }
   if (Array.isArray(candidate.securityScopedBookmarks)) {
     result.securityScopedBookmarks = normalizeStringArray(candidate.securityScopedBookmarks);
   }
   if (Array.isArray(candidate.pinnedDirectories)) {
-    result.pinnedDirectories = normalizeStringArray(candidate.pinnedDirectories);
+    result.pinnedDirectories = normalizeStringArray(
+      candidate.pinnedDirectories
+        .map((entry) => (typeof entry === 'string' ? normalizePathForPersistence(entry) : entry))
+        .filter((entry) => typeof entry === 'string' && entry.length > 0)
+    );
   }
 
 
@@ -2732,10 +2846,11 @@ const readSettingsFromDiskMigrated = async () => {
   const migration3 = await migrateSettingsFromLegacyCollapsedProjects(migration2.settings);
   const migration4 = await migrateSettingsNotificationDefaults(migration3.settings);
   const migration5 = await migrateSettingsFromLegacyNamedTunnelKeys(migration4.settings);
-  if (migration1.changed || migration2.changed || migration3.changed || migration4.changed || migration5.changed) {
-    await writeSettingsToDisk(migration5.settings);
+  const migration6 = normalizeSettingsPaths(migration5.settings);
+  if (migration1.changed || migration2.changed || migration3.changed || migration4.changed || migration5.changed || migration6.changed) {
+    await writeSettingsToDisk(migration6.settings);
   }
-  return migration5.settings;
+  return migration6.settings;
 };
 
 const getOrCreateVapidKeys = async () => {
@@ -3401,6 +3516,11 @@ const persistSettings = async (changes) => {
     const sanitized = sanitizeSettingsUpdate(changes);
     let next = mergePersistedSettings(current, sanitized);
 
+    const normalizedState = normalizeSettingsPaths(next);
+    if (normalizedState.changed) {
+      next = normalizedState.settings;
+    }
+
     if (Array.isArray(next.projects)) {
       console.log(`[persistSettings] Validating ${next.projects.length} projects...`);
       const validated = await validateProjectEntries(next.projects);
@@ -3795,6 +3915,7 @@ function getLoginShellEnvSnapshot() {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
         maxBuffer: 10 * 1024 * 1024,
+        windowsHide: true,
       });
 
       if (result.status !== 0) {
@@ -3833,6 +3954,7 @@ function getWindowsShellEnvSnapshot() {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
         maxBuffer: 10 * 1024 * 1024,
+        windowsHide: true,
       });
       if (result.status !== 0) {
         continue;
@@ -3852,6 +3974,7 @@ function getWindowsShellEnvSnapshot() {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
       maxBuffer: 10 * 1024 * 1024,
+      windowsHide: true,
     });
     if (result.status === 0 && typeof result.stdout === 'string' && result.stdout.length > 0) {
       return parseNullSeparatedEnvSnapshot(result.stdout.replace(/\r?\n/g, '\0'));
@@ -3921,10 +4044,87 @@ let resolvedOpencodeBinary = null;
 let resolvedOpencodeBinarySource = null;
 let resolvedNodeBinary = null;
 let resolvedBunBinary = null;
+let resolvedGitBinary = null;
 let useWslForOpencode = false;
 let resolvedWslBinary = null;
 let resolvedWslOpencodePath = null;
 let resolvedWslDistro = null;
+
+function resolveGitBinaryForSpawn() {
+  if (process.platform !== 'win32') {
+    return 'git';
+  }
+
+  if (resolvedGitBinary) {
+    return resolvedGitBinary;
+  }
+
+  const explicit = [process.env.GIT_BINARY, process.env.OPENCHAMBER_GIT_BINARY]
+    .map((value) => (typeof value === 'string' ? value.trim() : ''))
+    .filter(Boolean);
+  for (const candidate of explicit) {
+    if (isExecutable(candidate)) {
+      resolvedGitBinary = candidate;
+      return resolvedGitBinary;
+    }
+  }
+
+  const candidates = [];
+  const normalizeGitCandidate = (candidate) => {
+    if (typeof candidate !== 'string') {
+      return '';
+    }
+    const trimmed = candidate.trim();
+    if (!trimmed) {
+      return '';
+    }
+    const ext = path.extname(trimmed).toLowerCase();
+    if (ext === '.cmd' || ext === '.bat' || ext === '.com') {
+      const exeCandidate = trimmed.slice(0, -ext.length) + '.exe';
+      if (isExecutable(exeCandidate)) {
+        return exeCandidate;
+      }
+    }
+    return trimmed;
+  };
+
+  const pathCandidate = normalizeGitCandidate(searchPathFor('git'));
+  if (pathCandidate && isExecutable(pathCandidate)) {
+    candidates.push(pathCandidate);
+  }
+
+  const pathExeCandidate = normalizeGitCandidate(searchPathFor('git.exe'));
+  if (pathExeCandidate && isExecutable(pathExeCandidate)) {
+    candidates.push(pathExeCandidate);
+  }
+
+  const programRoots = [
+    process.env.ProgramFiles,
+    process.env['ProgramFiles(x86)'],
+    process.env.LocalAppData,
+  ]
+    .map((value) => (typeof value === 'string' ? value.trim() : ''))
+    .filter(Boolean);
+  for (const root of programRoots) {
+    const installCandidates = [
+      path.join(root, 'Git', 'cmd', 'git.exe'),
+      path.join(root, 'Git', 'bin', 'git.exe'),
+      path.join(root, 'Git', 'mingw64', 'bin', 'git.exe'),
+      path.join(root, 'Programs', 'Git', 'cmd', 'git.exe'),
+      path.join(root, 'Programs', 'Git', 'bin', 'git.exe'),
+    ];
+    for (const candidate of installCandidates) {
+      const normalized = normalizeGitCandidate(candidate);
+      if (normalized && isExecutable(normalized)) {
+        candidates.push(normalized);
+      }
+    }
+  }
+
+  const preferredExe = candidates.find((candidate) => candidate.toLowerCase().endsWith('.exe'));
+  resolvedGitBinary = preferredExe || candidates[0] || 'git.exe';
+  return resolvedGitBinary;
+}
 
 function isExecutable(filePath) {
   try {
@@ -3996,6 +4196,7 @@ function resolveWslExecutablePath() {
     const result = spawnSync('where', ['wsl'], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
     });
     if (result.status === 0) {
       const lines = (result.stdout || '')
@@ -4047,6 +4248,7 @@ function probeWslForOpencode() {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
         timeout: 6000,
+        windowsHide: true,
       },
     );
 
@@ -4163,6 +4365,7 @@ function resolveOpencodeCliPath() {
       const result = spawnSync('where', ['opencode'], {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
       });
       if (result.status === 0) {
         const lines = (result.stdout || '')
@@ -4198,6 +4401,7 @@ function resolveOpencodeCliPath() {
       const result = spawnSync(shell, ['-lic', 'command -v opencode'], {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
       });
       if (result.status === 0) {
         const found = (result.stdout || '').trim().split(/\s+/).pop() || '';
@@ -4248,6 +4452,7 @@ function resolveNodeCliPath() {
       const result = spawnSync('where', ['node'], {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
       });
       if (result.status === 0) {
         const lines = (result.stdout || '')
@@ -4270,6 +4475,7 @@ function resolveNodeCliPath() {
       const result = spawnSync(shell, ['-lic', 'command -v node'], {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
       });
       if (result.status === 0) {
         const found = (result.stdout || '').trim().split(/\s+/).pop() || '';
@@ -4329,6 +4535,7 @@ function resolveBunCliPath() {
       const result = spawnSync('where', ['bun'], {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
       });
       if (result.status === 0) {
         const lines = (result.stdout || '')
@@ -4351,6 +4558,7 @@ function resolveBunCliPath() {
       const result = spawnSync(shell, ['-lic', 'command -v bun'], {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
       });
       if (result.status === 0) {
         const found = (result.stdout || '').trim().split(/\s+/).pop() || '';
@@ -5677,7 +5885,7 @@ function killProcessOnPort(port) {
   if (!port) return;
   try {
     // Kill any process listening on our port to clean up orphaned children.
-    const result = spawnSync('lsof', ['-ti', `:${port}`], { encoding: 'utf8', timeout: 5000 });
+    const result = spawnSync('lsof', ['-ti', `:${port}`], { encoding: 'utf8', timeout: 5000, windowsHide: true });
     const output = result.stdout || '';
     const myPid = process.pid;
     for (const pidStr of output.split(/\s+/)) {
@@ -5761,6 +5969,7 @@ async function createManagedOpenCodeServerProcess({
   const child = spawn(binary, args, {
     cwd,
     env,
+    windowsHide: true,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
@@ -7573,28 +7782,13 @@ async function main(options = {}) {
         if (value.includes('mobi') || value.includes('android') || value.includes('iphone')) return 'mobile';
         return 'desktop';
       };
-      const inferArch = (ua) => {
-        const value = (ua || '').toLowerCase();
-        if (!value) return 'unknown';
-        if (value.includes('aarch64') || value.includes('arm64') || value.includes(' arm;') || value.includes('armv')) return 'arm64';
-        if (value.includes('x86_64') || value.includes('x64') || value.includes('amd64') || value.includes('win64') || value.includes('x86-64')) return 'x64';
-        return 'unknown';
-      };
-      const inferPlatform = (ua) => {
-        const value = (ua || '').toLowerCase();
-        if (!value) return undefined;
-        if (value.includes('mac os') || value.includes('macintosh') || value.includes('darwin')) return 'macos';
-        if (value.includes('windows') || value.includes('win32') || value.includes('win64')) return 'windows';
-        if (value.includes('linux') || value.includes('x11')) return 'linux';
-        return 'web';
-      };
       const userAgent = typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'] : '';
 
       const updateInfo = await checkForUpdates({
         appType: parseString(req.query.appType),
         deviceClass: parseString(req.query.deviceClass) || inferDeviceClass(userAgent),
-        platform: parseString(req.query.platform) || inferPlatform(userAgent),
-        arch: parseString(req.query.arch) || inferArch(userAgent),
+        platform: parseString(req.query.platform),
+        arch: parseString(req.query.arch),
         instanceMode: parseString(req.query.instanceMode),
         currentVersion: parseString(req.query.currentVersion),
         reportUsage: parseReportUsage(parseString(req.query.reportUsage)),
@@ -12656,18 +12850,18 @@ async function main(options = {}) {
         // macOS: open -R selects the file in Finder; open opens a folder
         const stat = await fsPromises.stat(resolved);
         if (stat.isDirectory()) {
-          spawn('open', [resolved], { stdio: 'ignore', detached: true }).unref();
+          spawn('open', [resolved], { windowsHide: true, stdio: 'ignore', detached: true }).unref();
         } else {
-          spawn('open', ['-R', resolved], { stdio: 'ignore', detached: true }).unref();
+          spawn('open', ['-R', resolved], { windowsHide: true, stdio: 'ignore', detached: true }).unref();
         }
       } else if (platform === 'win32') {
         // Windows: explorer /select, highlights the file
-        spawn('explorer', ['/select,', resolved], { stdio: 'ignore', detached: true }).unref();
+        spawn('explorer', ['/select,', resolved], { windowsHide: true, stdio: 'ignore', detached: true }).unref();
       } else {
         // Linux: xdg-open opens the parent directory
         const stat = await fsPromises.stat(resolved);
         const dir = stat.isDirectory() ? resolved : path.dirname(resolved);
-        spawn('xdg-open', [dir], { stdio: 'ignore', detached: true }).unref();
+        spawn('xdg-open', [dir], { windowsHide: true, stdio: 'ignore', detached: true }).unref();
       }
 
       res.json({ success: true, path: resolved });
@@ -12718,6 +12912,7 @@ async function main(options = {}) {
       const child = spawn(shell, [shellFlag, command], {
         cwd: resolvedCwd,
         env: execEnv,
+        windowsHide: true,
         stdio: ['ignore', 'pipe', 'pipe'],
       });
 
@@ -12988,7 +13183,7 @@ async function main(options = {}) {
               // Use git check-ignore with paths as arguments
               // Pass paths directly as arguments (works for reasonable directory sizes)
               const result = await new Promise((resolve) => {
-                const child = spawn('git', ['check-ignore', '--', ...pathsToCheck], {
+                const child = spawn(resolveGitBinaryForSpawn(), ['check-ignore', '--', ...pathsToCheck], {
                   cwd: resolvedPath,
                   windowsHide: true,
                   stdio: ['ignore', 'pipe', 'pipe'],

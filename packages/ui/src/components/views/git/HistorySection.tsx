@@ -1,5 +1,5 @@
 import React from 'react';
-import { RiArrowUpSLine, RiArrowDownSLine } from '@remixicon/react';
+import { RiArrowDownSLine, RiArrowUpLine, RiArrowUpSLine } from '@remixicon/react';
 import {
   Collapsible,
   CollapsibleContent,
@@ -30,6 +30,11 @@ interface HistorySectionProps {
   loadingCommitHashes: Set<string>;
   onCopyHash: (hash: string) => void;
   showHeader?: boolean;
+  branchDivider?: {
+    insertBeforeIndex: number;
+    branchName: string;
+    direction: 'up' | 'down';
+  } | null;
 }
 
 export const HistorySection: React.FC<HistorySectionProps> = ({
@@ -43,6 +48,7 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
   loadingCommitHashes,
   onCopyHash,
   showHeader = true,
+  branchDivider = null,
 }) => {
   const { t } = useLanguage();
   const [isOpen, setIsOpen] = React.useState(true);
@@ -50,6 +56,11 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
   if (!log) {
     return null;
   }
+
+  const hasDivider =
+    branchDivider !== null &&
+    branchDivider.insertBeforeIndex > 0 &&
+    branchDivider.insertBeforeIndex < log.all.length;
 
   const content = (
     <ScrollableOverlay outerClassName="min-h-0 max-h-[50vh]" className="w-full">
@@ -61,17 +72,42 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
         </div>
       ) : (
         <ul className="divide-y divide-border/60">
-          {log.all.map((entry) => (
-            <HistoryCommitRow
-              key={entry.hash}
-              entry={entry}
-              isExpanded={expandedCommitHashes.has(entry.hash)}
-              onToggle={() => onToggleCommit(entry.hash)}
-              files={commitFilesMap.get(entry.hash) ?? []}
-              isLoadingFiles={loadingCommitHashes.has(entry.hash)}
-              onCopyHash={onCopyHash}
-            />
-          ))}
+          {log.all.map((entry, index) => {
+            const isBoundary = hasDivider && index === branchDivider.insertBeforeIndex;
+            const roundTop = isBoundary;
+            const roundBottom = hasDivider && index === branchDivider.insertBeforeIndex - 1;
+
+            return (
+              <React.Fragment key={entry.hash}>
+                {isBoundary ? (
+                  <li className="px-3 py-2" aria-hidden>
+                    <div className="flex items-center gap-2">
+                      <span className="h-px flex-1 bg-border/60" />
+                      <span className="inline-flex max-w-[80%] items-center gap-1 typography-micro text-muted-foreground">
+                        <span className="truncate" title={branchDivider.branchName}>{branchDivider.branchName}</span>
+                        {branchDivider.direction === 'down' ? (
+                          <RiArrowDownSLine className="size-3.5" />
+                        ) : (
+                          <RiArrowUpLine className="size-3.5" />
+                        )}
+                      </span>
+                      <span className="h-px flex-1 bg-border/60" />
+                    </div>
+                  </li>
+                ) : null}
+                <HistoryCommitRow
+                  entry={entry}
+                  isExpanded={expandedCommitHashes.has(entry.hash)}
+                  onToggle={() => onToggleCommit(entry.hash)}
+                  files={commitFilesMap.get(entry.hash) ?? []}
+                  isLoadingFiles={loadingCommitHashes.has(entry.hash)}
+                  onCopyHash={onCopyHash}
+                  roundTop={roundTop}
+                  roundBottom={roundBottom}
+                />
+              </React.Fragment>
+            );
+          })}
         </ul>
       )}
     </ScrollableOverlay>

@@ -176,6 +176,8 @@ const SessionFolderItemBase = <TSessionNode,>({
             <form
               className="flex min-w-0 flex-1 items-center gap-1"
               data-keyboard-avoid="true"
+              onPointerDown={(event) => event.stopPropagation()}
+              onMouseDown={(event) => event.stopPropagation()}
               onSubmit={(event) => {
                 event.preventDefault();
                 handleSaveRename();
@@ -189,6 +191,8 @@ const SessionFolderItemBase = <TSessionNode,>({
                 autoFocus
                 placeholder={t('sessionFolder.folderName')}
                 onClick={(event) => event.stopPropagation()}
+                onPointerDown={(event) => event.stopPropagation()}
+                onMouseDown={(event) => event.stopPropagation()}
                 onKeyDown={(event) => {
                   if (event.key === 'Escape') {
                     event.stopPropagation();
@@ -204,6 +208,8 @@ const SessionFolderItemBase = <TSessionNode,>({
                 type="submit"
                 className="shrink-0 text-muted-foreground hover:text-foreground"
                 onClick={(event) => event.stopPropagation()}
+                onPointerDown={(event) => event.stopPropagation()}
+                onMouseDown={(event) => event.stopPropagation()}
               >
                 <RiCheckLine className="size-4" />
               </button>
@@ -213,6 +219,8 @@ const SessionFolderItemBase = <TSessionNode,>({
                   event.stopPropagation();
                   handleCancelRename();
                 }}
+                onPointerDown={(event) => event.stopPropagation()}
+                onMouseDown={(event) => event.stopPropagation()}
                 className="shrink-0 text-muted-foreground hover:text-foreground"
               >
                 <RiCloseLine className="size-4" />

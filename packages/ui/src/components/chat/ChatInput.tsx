@@ -60,6 +60,24 @@ const MAX_VISIBLE_TEXTAREA_LINES = 8;
 const EMPTY_QUEUE: QueuedMessage[] = [];
 const FILE_MENTION_TOKEN = /^@[^\s]+$/;
 
+const appendWithLineBreaks = (base: string, next: string): string => {
+    const separator = !base
+        ? ''
+        : base.endsWith('\n\n')
+            ? ''
+            : base.endsWith('\n')
+                ? '\n'
+                : '\n\n';
+
+    const nextWithTrailingBreaks = next.endsWith('\n\n')
+        ? next
+        : next.endsWith('\n')
+            ? `${next}\n`
+            : `${next}\n\n`;
+
+    return `${base}${separator}${nextWithTrailingBreaks}`;
+};
+
 interface ChatInputProps {
     onOpenSettings?: () => void;
     scrollToBottom?: (options?: { instant?: boolean; force?: boolean }) => void;
@@ -591,11 +609,9 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
             if (pending?.text) {
                 if (pending.mode === 'append') {
                     setMessage((prev) => {
-                        const next = pending.text.trim();
-                        if (!next) return prev;
-                        const base = prev.trimEnd();
-                        if (!base.trim()) return next;
-                        return `${base} ${next}`;
+                        const next = pending.text;
+                        if (!next.trim()) return prev;
+                        return appendWithLineBreaks(prev, next);
                     });
                 } else {
                     setMessage(pending.text);

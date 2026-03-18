@@ -67,6 +67,11 @@ type SyncAction = 'fetch' | 'pull' | 'push' | null;
 type CommitAction = 'commit' | 'commitAndPush' | null;
 type BranchOperation = 'merge' | 'rebase' | null;
 type ActionTab = 'commit' | 'branch' | 'pr' | 'worktree';
+type HistoryBranchDivider = {
+  insertBeforeIndex: number;
+  branchName: string;
+  direction: 'up' | 'down';
+} | null;
 
 const GIT_ACTION_TAB_STORAGE_KEY = 'oc.git.actionTab';
 
@@ -410,6 +415,7 @@ export const GitView: React.FC = () => {
   const [expandedCommitHashes, setExpandedCommitHashes] = React.useState<Set<string>>(new Set());
   const [commitFilesMap, setCommitFilesMap] = React.useState<Map<string, CommitFileEntry[]>>(new Map());
   const [loadingCommitHashes, setLoadingCommitHashes] = React.useState<Set<string>>(new Set());
+  const [historyBranchDivider, setHistoryBranchDivider] = React.useState<HistoryBranchDivider>(null);
   const [remoteUrl, setRemoteUrl] = React.useState<string | null>(null);
   const [gitmojiEmojis, setGitmojiEmojis] = React.useState<GitmojiEntry[]>([]);
   const [gitmojiSearch, setGitmojiSearch] = React.useState('');
@@ -1219,6 +1225,62 @@ export const GitView: React.FC = () => {
       branch: currentBranch,
     };
   }, [canShowPullRequestSection, currentBranch, currentDirectory]);
+
+  React.useEffect(() => {
+    if (!currentDirectory || !git || !log?.all?.length || !currentBranch || !baseBranch || currentBranch === baseBranch) {
+      setHistoryBranchDivider(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    const resolveBranchDivider = async () => {
+      try {
+        const branchOnlyLog = await git.getGitLog(currentDirectory, {
+          from: baseBranch,
+          to: 'HEAD',
+          maxCount: logMaxCountLocal,
+        });
+
+        if (cancelled) {
+          return;
+        }
+
+        const branchHashes = new Set(
+          (branchOnlyLog?.all ?? [])
+            .map((entry) => entry.hash)
+            .filter((hash) => typeof hash === 'string' && hash.length > 0)
+        );
+
+        if (branchHashes.size === 0) {
+          setHistoryBranchDivider(null);
+          return;
+        }
+
+        const insertBeforeIndex = log.all.findIndex((entry) => !branchHashes.has(entry.hash));
+        if (insertBeforeIndex <= 0) {
+          setHistoryBranchDivider(null);
+          return;
+        }
+
+        setHistoryBranchDivider({
+          insertBeforeIndex,
+          branchName: currentBranch,
+          direction: 'up',
+        });
+      } catch {
+        if (!cancelled) {
+          setHistoryBranchDivider(null);
+        }
+      }
+    };
+
+    void resolveBranchDivider();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [baseBranch, currentBranch, currentDirectory, git, log, logMaxCountLocal]);
   // Keep these sections stable in layout; individual cards render placeholders when unavailable.
 
   const toggleFileSelection = (path: string) => {
@@ -1960,6 +2022,7 @@ export const GitView: React.FC = () => {
               loadingCommitHashes={loadingCommitHashes}
               onCopyHash={handleCopyCommitHash}
               showHeader={false}
+              branchDivider={historyBranchDivider}
             />
           </div>
         </DialogContent>

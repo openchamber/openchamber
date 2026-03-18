@@ -61,6 +61,7 @@ type Props = {
   settingsAutoCreateWorktree: boolean;
   getOrderedGroups: (projectId: string, groups: SessionGroup[]) => SessionGroup[];
   setGroupOrderByProject: React.Dispatch<React.SetStateAction<Map<string, string[]>>>;
+  isInlineEditing: boolean;
 };
 
 export function SidebarProjectsList(props: Props): React.ReactNode {
@@ -128,6 +129,12 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
             const isRepo = props.projectRepoStatus.get(projectKey);
             const isHovered = props.hoveredProjectId === projectKey;
             const orderedGroups = props.getOrderedGroups(projectKey, section.groups);
+            const sortableEntries = orderedGroups.map((group) => ({
+              sortableId: `${projectKey}:${group.id}`,
+              groupId: group.id,
+            }));
+            const sortableGroupIds = sortableEntries.map((entry) => entry.sortableId);
+            const sortableIdToGroupId = new Map(sortableEntries.map((entry) => [entry.sortableId, entry.groupId]));
 
             return (
               <SortableProjectItem
@@ -185,8 +192,11 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
                         onDragEnd={(event) => {
                           const { active, over } = event;
                           if (!over || active.id === over.id) return;
-                          const oldIndex = orderedGroups.findIndex((item) => item.id === active.id);
-                          const newIndex = orderedGroups.findIndex((item) => item.id === over.id);
+                          const activeId = typeof active.id === 'string' ? sortableIdToGroupId.get(active.id) : null;
+                          const overId = typeof over.id === 'string' ? sortableIdToGroupId.get(over.id) : null;
+                          if (!activeId || !overId) return;
+                          const oldIndex = orderedGroups.findIndex((item) => item.id === activeId);
+                          const newIndex = orderedGroups.findIndex((item) => item.id === overId);
                           if (oldIndex === -1 || newIndex === -1 || oldIndex === newIndex) return;
                           const next = arrayMove(orderedGroups, oldIndex, newIndex).map((item) => item.id);
                           props.setGroupOrderByProject((prev) => {
@@ -196,11 +206,11 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
                           });
                         }}
                       >
-                        <SortableContext items={orderedGroups.map((group) => group.id)} strategy={verticalListSortingStrategy}>
+                        <SortableContext items={sortableGroupIds} strategy={verticalListSortingStrategy}>
                           {orderedGroups.map((group) => {
                             const groupKey = `${projectKey}:${group.id}`;
                             return (
-                              <SortableGroupItem key={group.id} id={group.id}>
+                              <SortableGroupItem key={groupKey} id={groupKey} disabled={props.isInlineEditing}>
                                 {props.renderGroupSessions(group, groupKey, projectKey)}
                               </SortableGroupItem>
                             );

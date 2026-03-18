@@ -8,6 +8,116 @@ import { promisify } from 'util';
 const fsp = fs.promises;
 const execFileAsync = promisify(execFile);
 const gpgconfCandidates = ['gpgconf', '/opt/homebrew/bin/gpgconf', '/usr/local/bin/gpgconf'];
+let resolvedGitBinary = null;
+
+const isExecutableFile = (candidate) => {
+  if (typeof candidate !== 'string' || candidate.trim().length === 0) {
+    return false;
+  }
+  try {
+    const stat = fs.statSync(candidate);
+    if (!stat.isFile()) {
+      return false;
+    }
+    if (process.platform === 'win32') {
+      const ext = path.extname(candidate).toLowerCase();
+      return ext.length === 0 || ext === '.exe' || ext === '.cmd' || ext === '.bat' || ext === '.com';
+    }
+    fs.accessSync(candidate, fs.constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const normalizeGitExecutableCandidate = (candidate) => {
+  if (typeof candidate !== 'string') {
+    return null;
+  }
+  const trimmed = candidate.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const ext = path.extname(trimmed).toLowerCase();
+  if (ext === '.cmd' || ext === '.bat' || ext === '.com') {
+    const exeCandidate = trimmed.slice(0, -ext.length) + '.exe';
+    if (isExecutableFile(exeCandidate)) {
+      return exeCandidate;
+    }
+  }
+
+  return trimmed;
+};
+
+const listPathExecutableCandidates = (binaryName) => {
+  const currentPath = process.env.PATH || '';
+  const seen = new Set();
+  const matches = [];
+  for (const segment of currentPath.split(path.delimiter)) {
+    const dir = typeof segment === 'string' ? segment.trim() : '';
+    if (!dir || seen.has(dir)) {
+      continue;
+    }
+    seen.add(dir);
+    matches.push(path.join(dir, binaryName));
+  }
+  return matches;
+};
+
+const listWindowsGitInstallCandidates = () => {
+  const roots = [
+    process.env.ProgramFiles,
+    process.env['ProgramFiles(x86)'],
+    process.env.LocalAppData,
+  ]
+    .map((value) => (typeof value === 'string' ? value.trim() : ''))
+    .filter(Boolean);
+
+  const candidates = [];
+  for (const root of roots) {
+    candidates.push(path.join(root, 'Git', 'cmd', 'git.exe'));
+    candidates.push(path.join(root, 'Git', 'bin', 'git.exe'));
+    candidates.push(path.join(root, 'Git', 'mingw64', 'bin', 'git.exe'));
+    candidates.push(path.join(root, 'Programs', 'Git', 'cmd', 'git.exe'));
+    candidates.push(path.join(root, 'Programs', 'Git', 'bin', 'git.exe'));
+  }
+  return candidates;
+};
+
+const resolveGitBinary = () => {
+  if (process.platform !== 'win32') {
+    return 'git';
+  }
+  if (resolvedGitBinary) {
+    return resolvedGitBinary;
+  }
+
+  const explicit = [process.env.GIT_BINARY, process.env.OPENCHAMBER_GIT_BINARY]
+    .map((value) => (typeof value === 'string' ? value.trim() : ''))
+    .filter(Boolean);
+  for (const candidate of explicit) {
+    if (isExecutableFile(candidate)) {
+      resolvedGitBinary = candidate;
+      return resolvedGitBinary;
+    }
+  }
+
+  const discovered = [
+    ...listPathExecutableCandidates('git.exe'),
+    ...listPathExecutableCandidates('git'),
+    ...listWindowsGitInstallCandidates(),
+  ]
+    .map(normalizeGitExecutableCandidate)
+    .filter(Boolean)
+    .filter((candidate) => isExecutableFile(candidate));
+
+  const preferredExe = discovered.find((candidate) => candidate.toLowerCase().endsWith('.exe'));
+  resolvedGitBinary = preferredExe || discovered[0] || 'git.exe';
+  return resolvedGitBinary;
+};
+
+const getGitBinary = () => resolveGitBinary();
 
 /**
  * Escape an SSH key path for use in core.sshCommand.
@@ -126,10 +236,11 @@ const buildGitEnv = async () => {
 const createGit = async (directory) => {
   const env = await buildGitEnv();
   const spawnOptions = { windowsHide: true };
+  const binary = getGitBinary();
   if (!directory) {
-    return simpleGit({ env, spawnOptions });
+    return simpleGit({ env, spawnOptions, binary });
   }
-  return simpleGit({ baseDir: normalizeDirectoryPath(directory), env, spawnOptions });
+  return simpleGit({ baseDir: normalizeDirectoryPath(directory), env, spawnOptions, binary });
 };
 
 const normalizeDirectoryPath = (value) => {
@@ -413,7 +524,7 @@ const parseGitErrorText = (error) => {
 
 const runGitCommand = async (cwd, args) => {
   try {
-    const { stdout, stderr } = await execFileAsync('git', args, {
+    const { stdout, stderr } = await execFileAsync(getGitBinary(), args, {
       cwd,
       env: await buildGitEnv(),
       windowsHide: true,
@@ -623,6 +734,7 @@ const runWorktreeStartCommand = async (directory, command) => {
     const result = await execFileAsync('cmd', ['/c', text], {
       cwd: directory,
       env: await buildGitEnv(),
+      windowsHide: true,
       maxBuffer: 20 * 1024 * 1024,
     }).then(({ stdout, stderr }) => ({ success: true, stdout, stderr })).catch((error) => ({
       success: false,
@@ -1451,9 +1563,10 @@ export async function getFileDiff(directory, { path: filePath, staged = false } 
     if (isImage) {
       // For images, use git show with raw output and convert to base64
       try {
-        const { stdout } = await execFileAsync('git', ['show', `HEAD:${filePath}`], {
+        const { stdout } = await execFileAsync(getGitBinary(), ['show', `HEAD:${filePath}`], {
           cwd: directoryPath,
           encoding: 'buffer',
+          windowsHide: true,
           maxBuffer: 50 * 1024 * 1024, // 50MB max
         });
         if (stdout && stdout.length > 0) {

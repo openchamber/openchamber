@@ -508,7 +508,11 @@ function isBunRuntime() {
 
 function isBunInstalled() {
   try {
-    const result = spawnSync(BUN_BIN, ['--version'], { stdio: 'ignore', env: process.env });
+    const result = spawnSync(BUN_BIN, ['--version'], {
+      stdio: 'ignore',
+      env: process.env,
+      windowsHide: true,
+    });
     return result.status === 0;
   } catch {
     return false;
