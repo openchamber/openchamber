@@ -65,7 +65,7 @@ import { useGitStatus } from '@/stores/useGitStore';
 import { useDirectoryShowHidden } from '@/lib/directoryShowHidden';
 import { useFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
 import { copyTextToClipboard } from '@/lib/clipboard';
-import { triggerFileDownload } from '@/lib/fileDownload';
+import { canTriggerFileDownload, triggerFileDownload } from '@/lib/fileDownload';
 import { notifyFileContentInvalidated } from '@/lib/fileContentInvalidation';
 import { uploadFileWithFallback, type UploadAttemptResult, type UploadProgressUpdate } from '@/lib/fileUpload';
 import { cn } from '@/lib/utils';
@@ -557,6 +557,7 @@ export const SidebarFilesTree: React.FC = () => {
   const canDelete = Boolean(files.delete);
   const canReveal = runtime.isDesktop && Boolean(files.revealPath);
   const canUploadFiles = Boolean(files.uploadFile || files.writeFile);
+  const canDownloadFiles = canTriggerFileDownload();
   const hasNativeDesktopDrop = isTauriShell();
 
   const pointerSensor = useSensor(PointerSensor, {
@@ -799,11 +800,11 @@ export const SidebarFilesTree: React.FC = () => {
   }, [addOpenPath, files, openContextFile, root, setSelectedPath]);
 
   const handleContextMenuDownloadFile = React.useCallback((node: FileNode) => {
-    if (node.type !== 'file') {
+    if (node.type !== 'file' || !canDownloadFiles) {
       return;
     }
     triggerFileDownload(node.path, node.name);
-  }, []);
+  }, [canDownloadFiles]);
 
   const toggleDirectory = React.useCallback(async (dirPath: string) => {
     const normalized = normalizePath(dirPath);
@@ -1694,7 +1695,7 @@ export const SidebarFilesTree: React.FC = () => {
           canDelete,
           canReveal,
           canUpload: canUploadFiles,
-          canDownload: true,
+          canDownload: canDownloadFiles,
         },
         contextMenuPath,
         setContextMenuPath,

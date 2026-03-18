@@ -4,6 +4,7 @@ import { spawn, spawnSync } from 'child_process';
 import fs from 'fs';
 import http from 'http';
 import net from 'net';
+import { Transform } from 'stream';
 import { pipeline } from 'stream/promises';
 import { WebSocketServer } from 'ws';
 import { fileURLToPath } from 'url';
@@ -87,6 +88,21 @@ const FILE_SEARCH_EXCLUDED_DIRS = new Set([
   'tmp',
   'logs'
 ]);
+const OPENCHAMBER_FS_UPLOAD_MAX_BYTES = (() => {
+  const raw = Number(process.env.OPENCHAMBER_FS_UPLOAD_MAX_BYTES);
+  if (Number.isFinite(raw) && raw > 0) {
+    return Math.trunc(raw);
+  }
+  return 512 * 1024 * 1024;
+})();
+const FS_UPLOAD_TOO_LARGE_ERROR_CODE = 'OPENCHAMBER_UPLOAD_TOO_LARGE';
+const FS_UPLOAD_TOO_LARGE_ERROR_MESSAGE = 'Upload payload is too large for current server limits';
+
+const createFsUploadTooLargeError = () => {
+  const error = new Error(FS_UPLOAD_TOO_LARGE_ERROR_MESSAGE);
+  error.code = FS_UPLOAD_TOO_LARGE_ERROR_CODE;
+  return error;
+};
 
 // Lock to prevent race conditions in persistSettings
 let persistSettingsLock = Promise.resolve();
@@ -12988,6 +13004,24 @@ async function main(options = {}) {
       return res.status(400).json({ error: 'Invalid expected upload size' });
     }
 
+    const contentLengthHeader = Array.isArray(req.headers['content-length'])
+      ? req.headers['content-length'][0]
+      : req.headers['content-length'];
+    const parsedContentLength = typeof contentLengthHeader === 'string'
+      ? Number.parseInt(contentLengthHeader, 10)
+      : Number.NaN;
+    const contentLengthBytes = Number.isFinite(parsedContentLength) && parsedContentLength >= 0
+      ? parsedContentLength
+      : undefined;
+
+    if (contentLengthBytes !== undefined && contentLengthBytes > OPENCHAMBER_FS_UPLOAD_MAX_BYTES) {
+      return res.status(413).json({ error: FS_UPLOAD_TOO_LARGE_ERROR_MESSAGE });
+    }
+
+    if (typeof expectedSizeBytes === 'number' && expectedSizeBytes > OPENCHAMBER_FS_UPLOAD_MAX_BYTES) {
+      return res.status(413).json({ error: FS_UPLOAD_TOO_LARGE_ERROR_MESSAGE });
+    }
+
     let tempFilePath = '';
 
     try {
@@ -13005,14 +13039,23 @@ async function main(options = {}) {
       tempFilePath = `${targetWritePath}.upload-${Date.now()}-${crypto.randomUUID()}.tmp`;
 
       let receivedBytes = 0;
-      req.on('data', (chunk) => {
-        if (chunk && typeof chunk.length === 'number') {
-          receivedBytes += chunk.length;
+      const uploadLimitStream = new Transform({
+        transform(chunk, _encoding, callback) {
+          if (chunk && typeof chunk.length === 'number') {
+            receivedBytes += chunk.length;
+          }
+
+          if (receivedBytes > OPENCHAMBER_FS_UPLOAD_MAX_BYTES) {
+            callback(createFsUploadTooLargeError());
+            return;
+          }
+
+          callback(null, chunk);
         }
       });
 
       const writeStream = fs.createWriteStream(tempFilePath, { flags: 'w' });
-      await pipeline(req, writeStream);
+      await pipeline(req, uploadLimitStream, writeStream);
 
       if (typeof expectedSizeBytes === 'number' && receivedBytes !== expectedSizeBytes) {
         await fsPromises.rm(tempFilePath, { force: true });
@@ -13042,6 +13085,9 @@ async function main(options = {}) {
       }
 
       const err = error;
+      if (err && typeof err === 'object' && err.code === FS_UPLOAD_TOO_LARGE_ERROR_CODE) {
+        return res.status(413).json({ error: FS_UPLOAD_TOO_LARGE_ERROR_MESSAGE });
+      }
       if (err && typeof err === 'object' && err.code === 'EACCES') {
         return res.status(403).json({ error: 'Access denied' });
       }

@@ -29,7 +29,7 @@ import {
 } from '@remixicon/react';
 import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
-import { triggerFileDownload } from '@/lib/fileDownload';
+import { canTriggerFileDownload, triggerFileDownload } from '@/lib/fileDownload';
 import { subscribeToFileContentInvalidated } from '@/lib/fileContentInvalidation';
 import { uploadFileWithFallback } from '@/lib/fileUpload';
 
@@ -901,6 +901,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const canDelete = Boolean(files.delete);
   const canReveal = runtime.isDesktop && Boolean(files.revealPath);
   const canUploadFiles = Boolean(files.uploadFile || files.writeFile);
+  const canDownloadFiles = canTriggerFileDownload();
   const openInApps = useOpenInAppsStore((state) => state.availableApps);
   const openInCacheStale = useOpenInAppsStore((state) => state.isCacheStale);
   const initializeOpenInApps = useOpenInAppsStore((state) => state.initialize);
@@ -2195,19 +2196,19 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
   // Download button handler (selected file)
   const handleDownloadFile = React.useCallback(() => {
-    if (!selectedFile) {
+    if (!selectedFile || !canDownloadFiles) {
       return;
     }
     triggerFileDownload(selectedFile.path, selectedFile.name);
-  }, [selectedFile]);
+  }, [canDownloadFiles, selectedFile]);
 
   // Context menu handler (any file)
   const handleContextMenuDownloadFile = React.useCallback((node: FileNode) => {
-    if (node.type !== 'file') {
+    if (node.type !== 'file' || !canDownloadFiles) {
       return;
     }
     triggerFileDownload(node.path, node.name);
-  }, []);
+  }, [canDownloadFiles]);
 
   const uploadFile = React.useCallback(async (
     file: File,
@@ -2349,7 +2350,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
               canDelete,
               canReveal,
               canUpload: canUploadFiles,
-              canDownload: true,
+              canDownload: canDownloadFiles,
             }}
             contextMenuPath={contextMenuPath}
             setContextMenuPath={setContextMenuPath}
@@ -3565,6 +3566,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
               >
                 <div className={cn('h-full', shouldMaskEditorForPendingNavigation && 'invisible')}>
                   <CodeMirrorEditor
+                    key={activeTextEditorFile.path}
                     value={getEditorDraftForPath(activeTextEditorFile.path)}
                     onChange={(nextValue) => handleEditorDraftChange(activeTextEditorFile.path, nextValue)}
                     extensions={editorExtensions}
@@ -3692,7 +3694,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                 <div className="typography-ui text-muted-foreground max-w-xs">
                   {nonDisplayableBinaryDescription}. This file cannot be displayed as text.
                 </div>
-                {!runtime.isDesktop && (
+                {canDownloadFiles && (
                   <Button
                     variant="outline"
                     size="sm"
@@ -3906,7 +3908,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                 <div className="typography-ui text-muted-foreground max-w-xs">
                   {nonDisplayableBinaryDescription}. This file cannot be displayed as text.
                 </div>
-                {!runtime.isDesktop && (
+                {canDownloadFiles && (
                   <Button
                     variant="outline"
                     size="sm"

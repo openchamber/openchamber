@@ -248,15 +248,26 @@ export const createWebFilesAPI = (): FilesAPI => ({
     });
 
     if (!response.ok) {
-      const error = await response
-        .json()
-        .catch(async () => ({ error: (await response.text().catch(() => response.statusText)) || response.statusText }));
+      const rawError = await response.text().catch(() => '');
+      let errorMessage = rawError.trim() || response.statusText;
 
-      if (response.status === 413) {
-        throw new Error((error as { error?: string }).error || 'Upload payload is too large for current server limits');
+      if (rawError) {
+        let parsedError: { error?: string; message?: string } | null = null;
+
+        try {
+          parsedError = JSON.parse(rawError) as { error?: string; message?: string };
+        } catch {
+          parsedError = null;
+        }
+
+        errorMessage = parsedError?.error || parsedError?.message || errorMessage;
       }
 
-      throw new Error((error as { error?: string }).error || 'Failed to write file');
+      if (response.status === 413) {
+        throw new Error(errorMessage || 'Upload payload is too large for current server limits');
+      }
+
+      throw new Error(errorMessage || 'Failed to write file');
     }
 
     const result = await response.json().catch(() => ({}));
