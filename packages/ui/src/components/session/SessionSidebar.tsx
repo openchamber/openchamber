@@ -493,6 +493,52 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     previousStreamingIdsRef.current = nextStreamingIds;
   }, [sessionStatus, safeStorage]);
 
+  React.useEffect(() => {
+    const busyIds: string[] = [];
+    sessionStatus?.forEach((status, sessionId) => {
+      if (status?.type === 'busy' || status?.type === 'retry') {
+        busyIds.push(sessionId);
+      }
+    });
+
+    if (busyIds.length === 0) {
+      return;
+    }
+
+    setActiveNowEntries((prev) => {
+      const known = new Set(prev.map((entry) => entry.sessionId));
+      let next = prev;
+      let changed = false;
+
+      busyIds.forEach((sessionId) => {
+        if (known.has(sessionId)) {
+          return;
+        }
+
+        const session = allKnownSessionsById.get(sessionId);
+        if (!session || session.time?.archived) {
+          return;
+        }
+
+        const isSubtask = Boolean((session as Session & { parentID?: string | null }).parentID);
+        if (isSubtask) {
+          return;
+        }
+
+        next = addActiveNowSession(next, sessionId);
+        known.add(sessionId);
+        changed = true;
+      });
+
+      if (!changed) {
+        return prev;
+      }
+
+      persistActiveNowEntries(safeStorage, next);
+      return next;
+    });
+  }, [sessionStatus, allKnownSessionsById, safeStorage]);
+
   const childrenMap = React.useMemo(() => {
     const map = new Map<string, Session[]>();
     sortedSessions.forEach((session) => {

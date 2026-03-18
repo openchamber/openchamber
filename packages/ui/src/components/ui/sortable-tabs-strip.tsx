@@ -414,12 +414,15 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                 {closable ? (
                   <button
                     type="button"
+                    onPointerDown={(event) => {
+                      event.stopPropagation();
+                    }}
                     onClick={(event) => {
                       event.stopPropagation();
                       onClose?.(item.id);
                     }}
                     className={cn(
-                      'inline-flex !min-h-0 !min-w-0 items-center justify-center transition-opacity',
+                      'relative z-20 inline-flex !min-h-0 !min-w-0 items-center justify-center transition-opacity',
                       usesActivePillIndicator
                         ? '-ml-2.5 mr-1 h-[88%] w-5 self-center !aspect-auto rounded-md'
                         : 'aspect-square h-[65%] min-h-4 max-h-5 rounded-sm mr-1',
