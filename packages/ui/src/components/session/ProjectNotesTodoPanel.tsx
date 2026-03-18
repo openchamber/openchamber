@@ -196,7 +196,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
       routeToChat();
       const fenced = `\`\`\`md\n${todoText}\n\`\`\``;
       setPendingInputText(fenced, 'append');
-      toast.success('Todo sent to current session');
+      toast.success(t('projectNotes.todoSentToCurrentSession'));
       onActionComplete?.();
     },
     [currentSessionId, onActionComplete, routeToChat, setPendingInputText, t]

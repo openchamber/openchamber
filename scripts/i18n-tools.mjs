@@ -104,6 +104,20 @@ const NON_TRANSLATABLE_TERMS = new Set([
   'esc',
 ]);
 
+const LANGUAGE_SELF_NAMES = new Set([
+  'English',
+  '简体中文',
+  '繁體中文',
+  '日本語',
+  '한국어',
+  'Français',
+  'Deutsch',
+  'Español',
+  'Português',
+  'Italiano',
+  'Українська',
+]);
+
 const T_CALL_PATTERN = /\bt\s*\(\s*(['"])([^'"`]+?)\1/g;
 const T_DYNAMIC_PREFIX_PATTERN = /\bt\s*\(\s*`([a-z][\w-]*(?:\.[a-z][\w-]*)*\.)\$\{[^}]+\}[^`]*`\s*[),]/g;
 const T_IDENTIFIER_CALL_PATTERN = /\bt\s*\(\s*([A-Za-z_$][\w$]*)\s*[),]/g;
@@ -506,6 +520,7 @@ function loadLocaleObject(localePath) {
 function looksLikeHumanText(text) {
   const candidate = text.trim();
   if (candidate.length < 2) return false;
+   if (LANGUAGE_SELF_NAMES.has(candidate)) return false;
   if (URL_PATTERN.test(candidate)) return false;
   if (FILE_LIKE_PATTERN.test(candidate)) return false;
   if (candidate.includes('/') && !candidate.includes(' ')) return false;
