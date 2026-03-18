@@ -30,6 +30,7 @@ const EMPTY_MESSAGES: Array<{ info: Message; parts: Part[] }> = [];
 const EMPTY_PERMISSIONS: PermissionRequest[] = [];
 const EMPTY_QUESTIONS: QuestionRequest[] = [];
 const IDLE_SESSION_STATUS = { type: 'idle' as const };
+const SESSION_RESELECTED_EVENT = 'openchamber:session-reselected';
 
 type HydratingToolSkeletonRow = {
     id: string;
@@ -255,6 +256,7 @@ export const ChatContainer: React.FC = () => {
         isPinned,
         isOverflowing,
     });
+    const { resumeToBottomInstant } = timelineController;
 
     React.useEffect(() => {
         activeTurnChangeRef.current = timelineController.handleActiveTurnChange;
@@ -268,6 +270,26 @@ export const ChatContainer: React.FC = () => {
         scrollToMessage: timelineController.scrollToMessage,
         resumeToBottom: timelineController.resumeToBottom,
     });
+
+    React.useEffect(() => {
+        if (typeof window === 'undefined' || !currentSessionId) {
+            return;
+        }
+
+        const handleSessionReselected = (event: Event) => {
+            const customEvent = event as CustomEvent<string>;
+            if (customEvent.detail !== currentSessionId) {
+                return;
+            }
+
+            resumeToBottomInstant();
+        };
+
+        window.addEventListener(SESSION_RESELECTED_EVENT, handleSessionReselected as EventListener);
+        return () => {
+            window.removeEventListener(SESSION_RESELECTED_EVENT, handleSessionReselected as EventListener);
+        };
+    }, [currentSessionId, resumeToBottomInstant]);
 
     React.useLayoutEffect(() => {
         const container = scrollRef.current;

@@ -51,6 +51,7 @@ export interface UseChatTimelineControllerResult {
     loadEarlier: () => Promise<void>;
     revealBufferedTurns: () => Promise<boolean>;
     resumeToBottom: () => void;
+    resumeToBottomInstant: () => void;
     scrollToTurn: (turnId: string, options?: { behavior?: ScrollBehavior }) => Promise<boolean>;
     scrollToMessage: (messageId: string, options?: { behavior?: ScrollBehavior }) => Promise<boolean>;
     captureViewportAnchor: () => ViewportAnchor | null;
@@ -394,6 +395,14 @@ export const useChatTimelineController = ({
         scrollToBottom({ force: true });
     }, [scrollToBottom]);
 
+    const resumeToBottomInstant = React.useCallback(() => {
+        const nextStart = getInitialTurnStart(turnModelRef.current.turnCount);
+        setTurnStart(nextStart);
+        setPendingRevealWork(false);
+        setIsLoadingOlder(false);
+        scrollToBottom({ instant: true, force: true });
+    }, [scrollToBottom]);
+
     const handleActiveTurnChange = React.useCallback((turnId: string | null) => {
         setActiveTurnId(turnId);
     }, []);
@@ -411,6 +420,7 @@ export const useChatTimelineController = ({
         loadEarlier,
         revealBufferedTurns,
         resumeToBottom,
+        resumeToBottomInstant,
         scrollToTurn,
         scrollToMessage,
         captureViewportAnchor,

@@ -72,7 +72,6 @@ const PROGRAMMATIC_SCROLL_SUPPRESS_MS = 200;
 const DIRECT_SCROLL_INTENT_WINDOW_MS = 250;
 // Threshold for re-pinning: 10% of container height (matches bottom spacer)
 const PIN_THRESHOLD_RATIO = 0.10;
-const SORTED_PIN_THRESHOLD_PX = 24;
 
 export const useChatScrollManager = ({
     currentSessionId,
@@ -81,7 +80,6 @@ export const useChatScrollManager = ({
     updateViewportAnchor,
     isSyncing,
     isMobile,
-    chatRenderMode = 'live',
     onActiveTurnChange,
 }: UseChatScrollManagerOptions): UseChatScrollManagerResult => {
     const scrollRef = React.useRef<HTMLDivElement | null>(null);
@@ -97,11 +95,8 @@ export const useChatScrollManager = ({
     }, []);
 
     const getAutoFollowThreshold = React.useCallback(() => {
-        if (chatRenderMode === 'sorted') {
-            return SORTED_PIN_THRESHOLD_PX;
-        }
         return getPinThreshold();
-    }, [chatRenderMode, getPinThreshold]);
+    }, [getPinThreshold]);
 
     const [showScrollButton, setShowScrollButton] = React.useState(false);
     const [isPinned, setIsPinned] = React.useState(true);
@@ -221,7 +216,7 @@ export const useChatScrollManager = ({
         // Re-pin at bottom should always work (even momentum scroll)
         if (!isPinnedRef.current) {
             const distanceFromBottom = getDistanceFromBottom();
-            if (!scrollingUp && distanceFromBottom <= getPinThreshold()) {
+            if (distanceFromBottom <= getPinThreshold()) {
                 updatePinnedState(true);
             }
         }
