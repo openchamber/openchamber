@@ -243,6 +243,7 @@ export const Header: React.FC<HeaderProps> = ({
 
   const getContextUsage = useSessionStore((state) => state.getContextUsage);
   const openNewSessionDraft = useSessionStore((state) => state.openNewSessionDraft);
+  const isNewSessionDraftOpen = useSessionStore((state) => Boolean(state.newSessionDraft?.open));
   const currentSessionId = useSessionStore((state) => state.currentSessionId);
   const currentSessionMessages = useSessionStore((state) => {
     if (!currentSessionId) {
@@ -1721,30 +1722,32 @@ export const Header: React.FC<HeaderProps> = ({
             className="mr-2"
           />
         )}
-        <div className="mr-3 min-w-0">
-          <div className="truncate pl-1 typography-ui-label text-[14px] font-normal leading-tight text-foreground">
-            {currentSessionTitle}
-          </div>
-          {(activeProjectLabel || currentBranchLabel || currentSessionPrLabel || hasNonZeroSessionChanges) ? (
-            <div className="flex min-w-0 items-center gap-1.5 truncate pl-1 typography-micro text-[10.5px] font-normal leading-tight text-muted-foreground/75">
-              {activeProjectLabel ? <span className="truncate">{activeProjectLabel}</span> : null}
-              {currentBranchLabel ? (
-                <span className="inline-flex min-w-0 items-center gap-0.5">
-                  <RiGitBranchLine className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" />
-                  <span className="truncate">{currentBranchLabel}</span>
-                </span>
-              ) : null}
-              {currentSessionPrLabel ? <span className="truncate">{currentSessionPrLabel}</span> : null}
-              {hasNonZeroSessionChanges ? (
-                <span className="inline-flex flex-shrink-0 items-center gap-0 text-[0.92em]">
-                  <span className="text-status-success/80">+{currentSessionChanges.additions}</span>
-                  <span className="text-muted-foreground/60">/</span>
-                  <span className="text-status-error/65">-{currentSessionChanges.deletions}</span>
-                </span>
-              ) : null}
+        {!isNewSessionDraftOpen ? (
+          <div className="mr-3 min-w-0">
+            <div className="truncate pl-1 typography-ui-label text-[14px] font-normal leading-tight text-foreground">
+              {currentSessionTitle}
             </div>
-          ) : null}
-        </div>
+            {(activeProjectLabel || currentBranchLabel || currentSessionPrLabel || hasNonZeroSessionChanges) ? (
+              <div className="flex min-w-0 items-center gap-1.5 truncate pl-1 typography-micro text-[10.5px] font-normal leading-tight text-muted-foreground/75">
+                {activeProjectLabel ? <span className="truncate">{activeProjectLabel}</span> : null}
+                {currentBranchLabel ? (
+                  <span className="inline-flex min-w-0 items-center gap-0.5">
+                    <RiGitBranchLine className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" />
+                    <span className="truncate">{currentBranchLabel}</span>
+                  </span>
+                ) : null}
+                {currentSessionPrLabel ? <span className="truncate">{currentSessionPrLabel}</span> : null}
+                {hasNonZeroSessionChanges ? (
+                  <span className="inline-flex flex-shrink-0 items-center gap-0 text-[0.92em]">
+                    <span className="text-status-success/80">+{currentSessionChanges.additions}</span>
+                    <span className="text-muted-foreground/60">/</span>
+                    <span className="text-status-error/65">-{currentSessionChanges.deletions}</span>
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
 
         {tabs.length > 0 && (
           <div className="flex items-center gap-1 rounded-lg bg-[var(--surface-muted)]/50 p-1">

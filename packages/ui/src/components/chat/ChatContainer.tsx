@@ -366,7 +366,7 @@ export const ChatContainer: React.FC = () => {
             >
                 {!isDesktopExpandedInput ? (
                 <div className="flex-1 flex items-center justify-center">
-                    <ChatEmptyState showDraftContext />
+                    <ChatEmptyState />
                 </div>
                 ) : null}
                 <div
