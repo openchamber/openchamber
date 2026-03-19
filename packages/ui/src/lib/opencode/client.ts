@@ -129,6 +129,7 @@ export type DirectorySwitchResult = {
 };
 
 const normalizeFsPath = (path: string): string => path.replace(/\\/g, "/");
+const FS_LIST_CACHE_TTL_MS = 400;
 
 const getDesktopFilesApi = (): FilesAPI | null => {
   if (typeof window === "undefined") {
@@ -161,6 +162,8 @@ class OpencodeService {
   private globalSseStaleDeltas: Set<string> = new Set();
   private globalSseFlushTimer: ReturnType<typeof setTimeout> | null = null;
   private globalSseLastFlushAt = 0;
+  private listDirectoryInFlight: Map<string, Promise<FilesystemEntry[]>> = new Map();
+  private listDirectoryCache: Map<string, { entries: FilesystemEntry[]; expiresAt: number }> = new Map();
 
   constructor(baseUrl: string = DEFAULT_BASE_URL) {
     const desktopBase = resolveDesktopBaseUrl();
@@ -2030,6 +2033,20 @@ class OpencodeService {
   }
 
   async listLocalDirectory(directoryPath: string | null | undefined, options?: { respectGitignore?: boolean }): Promise<FilesystemEntry[]> {
+    const normalizedDirectoryPath = typeof directoryPath === 'string' ? normalizeFsPath(directoryPath.trim()) : '';
+    const cacheKey = `${normalizedDirectoryPath}|${options?.respectGitignore ? '1' : '0'}`;
+    const now = Date.now();
+    const cached = this.listDirectoryCache.get(cacheKey);
+    if (cached && cached.expiresAt > now) {
+      return cached.entries;
+    }
+
+    const inFlight = this.listDirectoryInFlight.get(cacheKey);
+    if (inFlight) {
+      return inFlight;
+    }
+
+    const task = (async () => {
     const desktopFiles = getDesktopFilesApi();
     if (desktopFiles) {
       try {
@@ -2037,13 +2054,18 @@ class OpencodeService {
         if (!result || !Array.isArray(result.entries)) {
           return [];
         }
-        return result.entries.map<FilesystemEntry>((entry) => ({
+        const entries = result.entries.map<FilesystemEntry>((entry) => ({
           name: entry.name,
           path: normalizeFsPath(entry.path),
           isDirectory: !!entry.isDirectory,
           isFile: !entry.isDirectory,
           isSymbolicLink: false,
         }));
+        this.listDirectoryCache.set(cacheKey, {
+          entries,
+          expiresAt: Date.now() + FS_LIST_CACHE_TTL_MS,
+        });
+        return entries;
       } catch (error) {
         console.error('Failed to list directory contents:', error);
         throw error;
@@ -2071,11 +2093,25 @@ class OpencodeService {
         return [];
       }
 
-      return result.entries as FilesystemEntry[];
+      const entries = result.entries as FilesystemEntry[];
+      this.listDirectoryCache.set(cacheKey, {
+        entries,
+        expiresAt: Date.now() + FS_LIST_CACHE_TTL_MS,
+      });
+      return entries;
     } catch (error) {
       console.error('Failed to list directory contents:', error);
       throw error;
     }
+    })();
+
+    const trackedTask = task.finally(() => {
+      if (this.listDirectoryInFlight.get(cacheKey) === trackedTask) {
+        this.listDirectoryInFlight.delete(cacheKey);
+      }
+    });
+    this.listDirectoryInFlight.set(cacheKey, trackedTask);
+    return trackedTask;
   }
 
   async searchFiles(

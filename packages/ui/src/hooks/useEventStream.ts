@@ -176,9 +176,10 @@ declare global {
   }
 }
 
-const RESYNC_DEBOUNCE_MS = 750;
-const QUESTION_RECONCILE_COOLDOWN_MS = 1500;
-const PERMISSION_RECONCILE_COOLDOWN_MS = 1500;
+const RESYNC_DEBOUNCE_MS = 1800;
+const QUESTION_RECONCILE_COOLDOWN_MS = 3000;
+const PERMISSION_RECONCILE_COOLDOWN_MS = 3000;
+const DERIVED_STATE_REFRESH_COOLDOWN_MS = 2500;
 
 const readEventDirectory = (props: Record<string, unknown>): string => {
   const directory = readStringProp(props, ['directory']);
@@ -534,6 +535,8 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
   const sessionActivityPhaseRef = React.useRef<Map<string, 'idle' | 'busy' | 'cooldown'>>(new Map());
   const sessionActivityLastRefreshAtRef = React.useRef<number>(0);
   const sessionActivityRefreshInFlightRef = React.useRef<Promise<void> | null>(null);
+  const lastDerivedActivityRepairAtRef = React.useRef<number>(0);
+  const lastDerivedStatusRepairAtRef = React.useRef<number>(0);
   const scheduleSoftResyncRef = React.useRef<
     (sessionId: string, reason: string, limit?: number) => Promise<void>
   >(() => Promise.resolve());
@@ -895,21 +898,29 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
 
   const repairSessionDerivedState = React.useCallback((
     reason: string,
-    options?: { refreshActivity?: boolean; pollStatus?: boolean }
+    options?: { refreshActivity?: boolean; pollStatus?: boolean; immediate?: boolean }
   ) => {
     const refreshActivity = options?.refreshActivity !== false;
     const pollStatus = options?.pollStatus !== false;
+    const immediate = options?.immediate === true;
+    const now = Date.now();
 
     if (streamDebugEnabled()) {
-      console.debug('[useEventStream] Repairing derived session state', { reason, refreshActivity, pollStatus });
+      console.debug('[useEventStream] Repairing derived session state', { reason, refreshActivity, pollStatus, immediate });
     }
 
     if (refreshActivity) {
-      void refreshSessionActivityStatus();
+      if (immediate || now - lastDerivedActivityRepairAtRef.current >= DERIVED_STATE_REFRESH_COOLDOWN_MS) {
+        lastDerivedActivityRepairAtRef.current = now;
+        void refreshSessionActivityStatus();
+      }
     }
 
     if (pollStatus) {
-      triggerSessionStatusPoll();
+      if (immediate || now - lastDerivedStatusRepairAtRef.current >= DERIVED_STATE_REFRESH_COOLDOWN_MS) {
+        lastDerivedStatusRepairAtRef.current = now;
+        triggerSessionStatusPoll();
+      }
     }
   }, [refreshSessionActivityStatus]);
 

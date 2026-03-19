@@ -2,7 +2,7 @@ import React from 'react';
 import { isWebRuntime } from '@/lib/desktop';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 
-const HEARTBEAT_MS = 10000;
+const HEARTBEAT_MS = 20000;
 
 const resolveVisibilityState = (): 'visible' | 'hidden' => {
   if (typeof document === 'undefined') return 'visible';

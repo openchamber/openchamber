@@ -11,6 +11,7 @@ const GIT_POLL_BASE_INTERVAL = 5000;
 const GIT_POLL_MAX_INTERVAL = 10000;
 const GIT_POLL_BACKOFF_STEP = 5000;
 const LOG_STALE_THRESHOLD = 10000;
+const REPO_CHECK_STALE_THRESHOLD = 60_000;
 const DIFF_PREFETCH_MAX_FILES = 25;
 const DIFF_PREFETCH_FOCUS_MAX_FILES = 40;
 const DIFF_PREFETCH_CONCURRENCY = 4;
@@ -28,6 +29,7 @@ interface DirectoryGitState {
   log: GitLogResponse | null;
   identity: GitIdentitySummary | null;
   diffCache: Map<string, { original: string; modified: string; fetchedAt: number; isBinary?: boolean }>;
+  lastRepoCheckAt: number;
   lastStatusFetch: number;
   lastStatusChange: number;
   lastLogFetch: number;
@@ -117,6 +119,7 @@ const createEmptyDirectoryState = (): DirectoryGitState => ({
   log: null,
   identity: null,
   diffCache: new Map(),
+  lastRepoCheckAt: 0,
   lastStatusFetch: 0,
   lastStatusChange: 0,
   lastLogFetch: 0,
@@ -319,7 +322,15 @@ export const useGitStore = create<GitStore>()(
         let statusChanged = false;
 
         try {
-          const isRepo = await git.checkIsGitRepository(directory);
+          const now = Date.now();
+          const shouldProbeRepository =
+            dirState.isGitRepo !== true ||
+            now - (dirState.lastRepoCheckAt || 0) > REPO_CHECK_STALE_THRESHOLD;
+
+          let isRepo = dirState.isGitRepo === true;
+          if (shouldProbeRepository) {
+            isRepo = await git.checkIsGitRepository(directory);
+          }
 
           if (!isRepo) {
             const newDirectories = new Map(directories);
@@ -327,7 +338,8 @@ export const useGitStore = create<GitStore>()(
               ...dirState,
               isGitRepo: false,
               status: null,
-              lastStatusFetch: Date.now(),
+              lastRepoCheckAt: now,
+              lastStatusFetch: now,
             });
             set({ directories: newDirectories, isLoadingStatus: false });
             return false;
@@ -369,6 +381,7 @@ export const useGitStore = create<GitStore>()(
               isGitRepo: true,
               status: newStatus,
               diffCache: nextDiffCache,
+              lastRepoCheckAt: shouldProbeRepository ? now : currentDirState.lastRepoCheckAt,
               lastStatusFetch: Date.now(),
               lastStatusChange: hasFileContentChange ? Date.now() : currentDirState.lastStatusChange,
             });
@@ -380,6 +393,7 @@ export const useGitStore = create<GitStore>()(
             newDirectories.set(directory, {
               ...currentDirState,
               isGitRepo: true,
+              lastRepoCheckAt: shouldProbeRepository ? now : currentDirState.lastRepoCheckAt,
               lastStatusFetch: Date.now(),
               lastStatusChange: currentDirState.lastStatusChange,
             });

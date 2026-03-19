@@ -11,7 +11,7 @@ import { useSessionStore } from '@/stores/useSessionStore';
 export function useGitPolling() {
     const { git } = useRuntimeAPIs();
     const fallbackDirectory = useDirectoryStore((state) => state.currentDirectory);
-    const { currentSessionId, sessions, worktreeMetadata: worktreeMap } = useSessionStore();
+    const { currentSessionId, sessions, worktreeMetadata: worktreeMap, sessionStatus } = useSessionStore();
     const { setActiveDirectory, startPolling, stopPolling, fetchAll } = useGitStore();
 
     const effectiveDirectory = React.useMemo(() => {
@@ -25,8 +25,16 @@ export function useGitPolling() {
         return worktreeMetadata?.path ?? sessionDirectory ?? fallbackDirectory ?? null;
     }, [currentSessionId, sessions, worktreeMap, fallbackDirectory]);
 
+    const shouldPauseBackgroundPolling = React.useMemo(() => {
+        if (!currentSessionId) {
+            return false;
+        }
+        const activeStatus = sessionStatus?.get(currentSessionId)?.type;
+        return activeStatus === 'busy' || activeStatus === 'retry';
+    }, [currentSessionId, sessionStatus]);
+
     React.useEffect(() => {
-        if (!effectiveDirectory || !git) {
+        if (!effectiveDirectory || !git || shouldPauseBackgroundPolling) {
             stopPolling();
             return;
         }
@@ -40,5 +48,5 @@ export function useGitPolling() {
         return () => {
             stopPolling();
         };
-    }, [effectiveDirectory, git, setActiveDirectory, startPolling, stopPolling, fetchAll]);
+    }, [effectiveDirectory, git, setActiveDirectory, shouldPauseBackgroundPolling, startPolling, stopPolling, fetchAll]);
 }
