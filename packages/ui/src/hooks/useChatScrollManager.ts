@@ -546,34 +546,74 @@ export const useChatScrollManager = ({
 
         spy.setContainer(container);
 
-        const registerTurns = () => {
-            spy.clear();
-            const turnNodes = container.querySelectorAll<HTMLElement>('[data-turn-id]');
-            turnNodes.forEach((node) => {
-                const turnId = node.dataset.turnId;
-                if (!turnId) {
-                    return;
-                }
-                spy.register(node, turnId);
-            });
-            spy.markDirty();
-        };
+        const elementByTurnId = new Map<string, HTMLElement>();
 
-        registerTurns();
-
-        let registerTimer: ReturnType<typeof setTimeout> | null = null;
-        const scheduleRegisterTurns = () => {
-            if (registerTimer !== null) {
-                return;
+        const registerTurnNode = (node: HTMLElement): boolean => {
+            const turnId = node.dataset.turnId;
+            if (!turnId) {
+                return false;
             }
-            registerTimer = setTimeout(() => {
-                registerTimer = null;
-                registerTurns();
-            }, 80);
+            elementByTurnId.set(turnId, node);
+            spy.register(node, turnId);
+            return true;
         };
 
-        const mutationObserver = new MutationObserver(() => {
-            scheduleRegisterTurns();
+        const unregisterTurnNode = (node: HTMLElement): boolean => {
+            const turnId = node.dataset.turnId;
+            if (!turnId) {
+                return false;
+            }
+            if (elementByTurnId.get(turnId) !== node) {
+                return false;
+            }
+            elementByTurnId.delete(turnId);
+            spy.unregister(turnId);
+            return true;
+        };
+
+        const collectTurnNodes = (node: Node): HTMLElement[] => {
+            if (!(node instanceof HTMLElement)) {
+                return [];
+            }
+            const collected: HTMLElement[] = [];
+            if (node.matches('[data-turn-id]')) {
+                collected.push(node);
+            }
+            node.querySelectorAll<HTMLElement>('[data-turn-id]').forEach((turnNode) => {
+                collected.push(turnNode);
+            });
+            return collected;
+        };
+
+        container.querySelectorAll<HTMLElement>('[data-turn-id]').forEach((node) => {
+            registerTurnNode(node);
+        });
+        spy.markDirty();
+
+        const mutationObserver = new MutationObserver((records) => {
+            let changed = false;
+
+            records.forEach((record) => {
+                record.removedNodes.forEach((node) => {
+                    collectTurnNodes(node).forEach((turnNode) => {
+                        if (unregisterTurnNode(turnNode)) {
+                            changed = true;
+                        }
+                    });
+                });
+
+                record.addedNodes.forEach((node) => {
+                    collectTurnNodes(node).forEach((turnNode) => {
+                        if (registerTurnNode(turnNode)) {
+                            changed = true;
+                        }
+                    });
+                });
+            });
+
+            if (changed) {
+                spy.markDirty();
+            }
         });
         mutationObserver.observe(container, { subtree: true, childList: true });
 
@@ -585,9 +625,6 @@ export const useChatScrollManager = ({
         return () => {
             container.removeEventListener('scroll', handleScroll);
             mutationObserver.disconnect();
-            if (registerTimer !== null) {
-                clearTimeout(registerTimer);
-            }
             spy.destroy();
             onActiveTurnChange(null);
         };

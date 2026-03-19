@@ -318,6 +318,33 @@ const withShellBridgeDetails = (message: ChatMessageEntry, details: ShellBridgeD
     };
 };
 
+const normalizedMessageBySource = new WeakMap<ChatMessageEntry, ChatMessageEntry>();
+
+const getNormalizedMessageForDisplay = (message: ChatMessageEntry): ChatMessageEntry => {
+    const cached = normalizedMessageBySource.get(message);
+    if (cached) {
+        return cached;
+    }
+
+    const filteredParts = filterSyntheticParts(message.parts);
+    const normalized = filteredParts === message.parts
+        ? message
+        : {
+            ...message,
+            parts: filteredParts,
+        };
+
+    normalizedMessageBySource.set(message, normalized);
+    return normalized;
+};
+
+const isAssistantTextOnlyMessage = (message: ChatMessageEntry): boolean => {
+    if (resolveMessageRole(message) !== 'assistant') {
+        return false;
+    }
+    return message.parts.length > 0 && message.parts.every((part) => part?.type === 'text');
+};
+
 interface MessageListProps {
     sessionKey: string;
     turnStart: number;
@@ -813,6 +840,11 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         previousOrder: string[];
         animatedIds: Set<string>;
     }>({ sessionKey: undefined, previousOrder: [], animatedIds: new Set() });
+    const baseDisplayCacheRef = React.useRef<{
+        input: ChatMessageEntry[];
+        output: ChatMessageEntry[];
+        outputIndexById: Map<string, number>;
+    } | null>(null);
 
     const stableOnMessageContentChange = useStableEvent(onMessageContentChange);
     const stableGetAnimationHandlers = useStableEvent(getAnimationHandlers);
@@ -843,8 +875,48 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
 
 
     const baseDisplayMessages = React.useMemo(() => {
-        const seenIdsFromTail = new Set<string>();
+        const cached = baseDisplayCacheRef.current;
+        if (cached && cached.input.length === messages.length && messages.length > 0) {
+            let changedCount = 0;
+            let changedIndex = -1;
+            let idsStable = true;
 
+            for (let index = 0; index < messages.length; index += 1) {
+                if (messages[index]?.info?.id !== cached.input[index]?.info?.id) {
+                    idsStable = false;
+                    break;
+                }
+                if (messages[index] !== cached.input[index]) {
+                    changedCount += 1;
+                    changedIndex = index;
+                    if (changedCount > 1) {
+                        break;
+                    }
+                }
+            }
+
+            if (idsStable && changedCount === 1 && changedIndex === messages.length - 1) {
+                const changedMessage = messages[changedIndex];
+                const previousMessage = changedIndex > 0 ? messages[changedIndex - 1] : undefined;
+                const bridgeSensitive = isUserSubtaskMessage(previousMessage) || isUserShellMarkerMessage(previousMessage);
+
+                if (changedMessage && isAssistantTextOnlyMessage(changedMessage) && !bridgeSensitive) {
+                    const outputIndex = cached.outputIndexById.get(changedMessage.info.id);
+                    if (outputIndex !== undefined) {
+                        const nextOutput = [...cached.output];
+                        nextOutput[outputIndex] = getNormalizedMessageForDisplay(changedMessage);
+                        baseDisplayCacheRef.current = {
+                            input: messages,
+                            output: nextOutput,
+                            outputIndexById: cached.outputIndexById,
+                        };
+                        return nextOutput;
+                    }
+                }
+            }
+        }
+
+        const seenIdsFromTail = new Set<string>();
         const dedupedMessages: ChatMessageEntry[] = [];
         for (let index = messages.length - 1; index >= 0; index -= 1) {
             const message = messages[index];
@@ -855,26 +927,13 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                 }
                 seenIdsFromTail.add(messageId);
             }
-            dedupedMessages.push(message);
+            dedupedMessages.push(getNormalizedMessageForDisplay(message));
         }
         dedupedMessages.reverse();
 
-        const normalizedMessages = dedupedMessages
-            .map((message) => {
-                const filteredParts = filterSyntheticParts(message.parts);
-                const normalized = filteredParts === message.parts
-                    ? message
-                    : {
-                        ...message,
-                        parts: filteredParts,
-                    };
-                return normalized;
-            });
-
         const output: ChatMessageEntry[] = [];
-
-        for (let index = 0; index < normalizedMessages.length; index += 1) {
-            const current = normalizedMessages[index];
+        for (let index = 0; index < dedupedMessages.length; index += 1) {
+            const current = dedupedMessages[index];
             const previous = output.length > 0 ? output[output.length - 1] : undefined;
 
             if (isUserSubtaskMessage(previous)) {
@@ -895,6 +954,19 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
 
             output.push(current);
         }
+
+        const outputIndexById = new Map<string, number>();
+        output.forEach((message, index) => {
+            const id = message.info?.id;
+            if (typeof id === 'string' && id.length > 0) {
+                outputIndexById.set(id, index);
+            }
+        });
+        baseDisplayCacheRef.current = {
+            input: messages,
+            output,
+            outputIndexById,
+        };
 
         return output;
     }, [messages]);

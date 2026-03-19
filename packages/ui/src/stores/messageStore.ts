@@ -215,6 +215,56 @@ const upsertMessageSessionIndex = (source: Map<string, string>, messageId: strin
     return next;
 };
 
+type StoredMessage = { info: any; parts: Part[] };
+
+const sessionMessagePositionCache = new Map<string, Map<string, number>>();
+
+const buildSessionMessagePositionIndex = (messages: StoredMessage[]): Map<string, number> => {
+    const index = new Map<string, number>();
+    for (let position = 0; position < messages.length; position += 1) {
+        const id = (messages[position]?.info as { id?: unknown })?.id;
+        if (typeof id === 'string' && id.length > 0) {
+            index.set(id, position);
+        }
+    }
+    return index;
+};
+
+const primeSessionMessagePositionIndex = (sessionId: string, messages: StoredMessage[]) => {
+    sessionMessagePositionCache.set(sessionId, buildSessionMessagePositionIndex(messages));
+};
+
+const updateSessionMessagePositionEntry = (sessionId: string, messageId: string, position: number) => {
+    let sessionIndex = sessionMessagePositionCache.get(sessionId);
+    if (!sessionIndex) {
+        sessionIndex = new Map<string, number>();
+        sessionMessagePositionCache.set(sessionId, sessionIndex);
+    }
+    sessionIndex.set(messageId, position);
+};
+
+const resolveSessionMessagePosition = (sessionId: string, messageId: string, messages: StoredMessage[]): number => {
+    const sessionIndex = sessionMessagePositionCache.get(sessionId);
+    const cachedPosition = sessionIndex?.get(messageId);
+    if (
+        typeof cachedPosition === 'number'
+        && cachedPosition >= 0
+        && cachedPosition < messages.length
+        && (messages[cachedPosition]?.info as { id?: unknown })?.id === messageId
+    ) {
+        return cachedPosition;
+    }
+
+    const resolved = messages.findIndex((message) => message.info.id === messageId);
+    if (resolved !== -1) {
+        updateSessionMessagePositionEntry(sessionId, messageId, resolved);
+    } else if (sessionIndex) {
+        sessionIndex.delete(messageId);
+    }
+
+    return resolved;
+};
+
 const removeMessageSessionIndexEntries = (source: Map<string, string>, ids: Iterable<string>) => {
     const next = new Map(source);
     let mutated = false;
@@ -433,6 +483,7 @@ export const useMessageStore = create<MessageStore>()(
                             });
 
                             newMessages.set(sessionId, mergedMessages);
+                            primeSessionMessagePositionIndex(sessionId, mergedMessages);
 
                             const newMemoryState = new Map(state.sessionMemoryState);
                             newMemoryState.set(sessionId, {
@@ -980,7 +1031,10 @@ export const useMessageStore = create<MessageStore>()(
                     }
 
                     const existingMessagesSnapshot = stateSnapshot.messages.get(sessionId) || [];
-                    const existingMessageSnapshot = existingMessagesSnapshot.find((m) => m.info.id === messageId);
+                    const existingMessageSnapshotIndex = resolveSessionMessagePosition(sessionId, messageId, existingMessagesSnapshot);
+                    const existingMessageSnapshot = existingMessageSnapshotIndex >= 0
+                        ? existingMessagesSnapshot[existingMessageSnapshotIndex]
+                        : undefined;
 
                     const actualRole = (() => {
                         if (role === 'user') return 'user';
@@ -1133,7 +1187,7 @@ export const useMessageStore = create<MessageStore>()(
                             }
                         }
 
-                        const messageIndex = messagesArray.findIndex((m) => m.info.id === messageId);
+                        const messageIndex = resolveSessionMessagePosition(sessionId, messageId, messagesArray);
 
                         if (messageIndex !== -1 && actualRole === 'user') {
                             const existingMessage = messagesArray[messageIndex];
@@ -1279,6 +1333,7 @@ export const useMessageStore = create<MessageStore>()(
 
                                 const newMessages = new Map(state.messages);
                                 newMessages.set(sessionId, updatedMessages);
+                                primeSessionMessagePositionIndex(sessionId, updatedMessages);
 
                                 return finalizeAbortState({ messages: newMessages, ...updates });
                             }
@@ -1388,6 +1443,7 @@ export const useMessageStore = create<MessageStore>()(
 
                             const newMessages = new Map(state.messages);
                             newMessages.set(sessionId, nextMessages);
+                            updateSessionMessagePositionEntry(sessionId, messageId, nextMessages.length - 1);
 
                             if (actualRole === 'assistant') {
                                 updates.messageStreamStates = touchStreamingLifecycle(state.messageStreamStates, messageId);
@@ -1465,7 +1521,7 @@ export const useMessageStore = create<MessageStore>()(
                 applyPartDelta: (sessionId: string, messageId: string, partId: string, field: string, delta: string, role?: string, currentSessionId?: string) => {
                     set((state) => {
                         const sessionMessages = state.messages.get(sessionId) || [];
-                        const messageIndex = sessionMessages.findIndex((message) => message.info.id === messageId);
+                        const messageIndex = resolveSessionMessagePosition(sessionId, messageId, sessionMessages);
                         if (messageIndex === -1) {
                             return state;
                         }
@@ -1563,6 +1619,10 @@ export const useMessageStore = create<MessageStore>()(
                         if (sessionId) {
                             return sessionId;
                         }
+                        const indexedSession = state.messageSessionIndex.get(messageId);
+                        if (indexedSession) {
+                            return indexedSession;
+                        }
                         for (const [candidateId, sessionMessages] of state.messages.entries()) {
                             if (sessionMessages.some((msg) => msg.info.id === messageId)) {
                                 return candidateId;
@@ -1578,7 +1638,7 @@ export const useMessageStore = create<MessageStore>()(
                         }
 
                         const sessionMessages = state.messages.get(targetSessionId) ?? [];
-                        const messageIndex = sessionMessages.findIndex((msg) => msg.info.id === messageId);
+                        const messageIndex = resolveSessionMessagePosition(targetSessionId, messageId, sessionMessages);
                         if (messageIndex === -1) {
                             return state;
                         }
@@ -1713,15 +1773,27 @@ export const useMessageStore = create<MessageStore>()(
 
                         let updatedMessages = state.messages;
                         let messagesModified = false;
+                        const indexedSessionId = state.messageSessionIndex.get(messageId);
+                        const sessionIdCandidates = indexedSessionId
+                            ? [
+                                indexedSessionId,
+                                ...Array.from(state.messages.keys()).filter((sessionId) => sessionId !== indexedSessionId),
+                            ]
+                            : Array.from(state.messages.keys());
 
-                        state.messages.forEach((sessionMessages, sessionId) => {
-                            if (messagesModified) return;
-                            const idx = sessionMessages.findIndex((msg) => msg.info.id === messageId);
-                            if (idx === -1) return;
+                        for (const sessionId of sessionIdCandidates) {
+                            const sessionMessages = state.messages.get(sessionId);
+                            if (!sessionMessages) {
+                                continue;
+                            }
+                            const idx = resolveSessionMessagePosition(sessionId, messageId, sessionMessages);
+                            if (idx === -1) {
+                                continue;
+                            }
 
                             const message = sessionMessages[idx];
                             if ((message.info as any)?.animationSettled) {
-                                return;
+                                break;
                             }
 
                             const updatedMessage = {
@@ -1739,7 +1811,8 @@ export const useMessageStore = create<MessageStore>()(
                             newMessages.set(sessionId, sessionArray);
                             updatedMessages = newMessages;
                             messagesModified = true;
-                        });
+                            break;
+                        }
 
                         const updates: Partial<MessageState> & { messageStreamStates: Map<string, MessageStreamLifecycle> } = {
                             messageStreamStates: next,
@@ -1756,7 +1829,7 @@ export const useMessageStore = create<MessageStore>()(
                         const sessionMessages = state.messages.get(sessionId) ?? [];
                         const normalizedSessionMessages = [...sessionMessages];
 
-                        const messageIndex = normalizedSessionMessages.findIndex((msg) => msg.info.id === messageId);
+                        const messageIndex = resolveSessionMessagePosition(sessionId, messageId, normalizedSessionMessages);
                         const pendingEntry = state.pendingAssistantParts.get(messageId);
 
                         const ensureClientRole = (info: any) => {
@@ -1829,6 +1902,7 @@ export const useMessageStore = create<MessageStore>()(
                                     return aTime - bTime;
                                 });
                                 newMessages.set(sessionId, appended);
+                                primeSessionMessagePositionIndex(sessionId, appended);
 
                                 const updates: Partial<MessageState> = {
                                     messages: newMessages,
@@ -1875,6 +1949,7 @@ export const useMessageStore = create<MessageStore>()(
 
                             const appended = [...normalizedSessionMessages, newMessage];
                             newMessages.set(sessionId, appended);
+                            updateSessionMessagePositionEntry(sessionId, messageId, appended.length - 1);
 
                             const updates: Partial<MessageState> = {
                                 messages: newMessages,
@@ -2163,6 +2238,7 @@ export const useMessageStore = create<MessageStore>()(
                         });
 
                         newMessages.set(sessionId, mergedMessages);
+                        primeSessionMessagePositionIndex(sessionId, mergedMessages);
 
                         const result: Record<string, any> = {
                             messages: newMessages,
