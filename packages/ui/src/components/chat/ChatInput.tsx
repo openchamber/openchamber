@@ -2474,7 +2474,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
     const sendIconSizeClass = isMobile ? 'h-4 w-4' : (isVSCode ? 'h-3.5 w-3.5' : 'h-4 w-4');
     const stopIconSizeClass = isMobile ? 'h-6 w-6' : (isVSCode ? 'h-4 w-4' : 'h-5 w-5');
     const iconSizeClass = isMobile ? 'h-[18px] w-[18px]' : (isVSCode ? 'h-4 w-4' : 'h-[18px] w-[18px]');
-    const shieldButtonClass = isMobile ? 'h-7 px-1' : (isVSCode ? 'h-5 px-0.5' : 'h-[22px] px-1');
+    const shieldButtonClass = isMobile ? 'h-7 px-0.5' : (isVSCode ? 'h-5 px-0' : 'h-[22px] px-0.5');
     const shieldIconSizeClass = isMobile ? 'h-4 w-4' : (isVSCode ? 'h-3.5 w-3.5' : 'h-4 w-4');
 
     const iconButtonBaseClass = 'flex cursor-pointer items-center justify-center text-foreground transition-none outline-none focus:outline-none flex-shrink-0 disabled:cursor-not-allowed';
@@ -2506,6 +2506,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
             className={cn(
                 iconButtonBaseClass,
                 shieldButtonClass,
+                '-mx-1 md:-mx-1.5',
                 'rounded-md hover:bg-transparent',
                 !permissionScopeSessionId && 'opacity-30',
             )}
