@@ -796,7 +796,10 @@ export const MainLayout: React.FC = () => {
 
                     {/* Mobile multi-run launcher: full screen */}
                     {isMultiRunLauncherOpen && (
-                        <div className="absolute inset-0 z-10 bg-background header-safe-area">
+                        <div
+                            className="absolute inset-0 z-10 bg-background"
+                            style={{ paddingTop: 'var(--oc-safe-area-top, 0px)' }}
+                        >
                             <ErrorBoundary>
                                 <MultiRunLauncher
                                     initialPrompt={multiRunLauncherPrefillPrompt}
@@ -809,7 +812,10 @@ export const MainLayout: React.FC = () => {
 
                     {/* Mobile settings: full screen */}
                     {isSettingsDialogOpen && (
-                        <div className="absolute inset-0 z-10 bg-background header-safe-area">
+                        <div
+                            className="absolute inset-0 z-10 bg-background"
+                            style={{ paddingTop: 'var(--oc-safe-area-top, 0px)' }}
+                        >
                             <ErrorBoundary><SettingsView onClose={() => setSettingsDialogOpen(false)} /></ErrorBoundary>
                         </div>
                     )}
