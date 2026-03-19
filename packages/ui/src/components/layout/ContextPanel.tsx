@@ -518,8 +518,8 @@ export const ContextPanel: React.FC = () => {
       {!isExpanded && (
         <div
           className={cn(
-            'absolute left-0 top-0 z-20 h-full w-[4px] cursor-col-resize transition-colors hover:bg-primary/50',
-            isResizing && 'bg-primary'
+            'absolute left-0 top-0 z-20 h-full w-[3px] cursor-col-resize transition-colors hover:bg-[var(--interactive-border)]/80',
+            isResizing && 'bg-[var(--interactive-border)]'
           )}
           onPointerDown={handleResizeStart}
           onPointerMove={handleResizeMove}

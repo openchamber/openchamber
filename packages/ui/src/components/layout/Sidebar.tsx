@@ -137,8 +137,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
             {isOpen && (
                 <div
                     className={cn(
-                        'absolute right-0 top-0 z-20 h-full w-[4px] cursor-col-resize hover:bg-primary/50 transition-colors',
-                        isResizing && 'bg-primary'
+                        'absolute right-0 top-0 z-20 h-full w-[3px] cursor-col-resize hover:bg-[var(--interactive-border)]/80 transition-colors',
+                        isResizing && 'bg-[var(--interactive-border)]'
                     )}
                     onPointerDown={handlePointerDown}
                     onPointerMove={handlePointerMove}

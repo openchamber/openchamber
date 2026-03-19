@@ -146,8 +146,8 @@ export const BottomTerminalDock: React.FC<BottomTerminalDockProps> = ({ isOpen, 
       {isOpen && !isFullscreen && (
         <div
           className={cn(
-            'absolute left-0 top-0 z-20 h-[4px] w-full cursor-row-resize hover:bg-primary/50 transition-colors',
-            isResizing && 'bg-primary'
+            'absolute left-0 top-0 z-20 h-[3px] w-full cursor-row-resize hover:bg-[var(--interactive-border)]/80 transition-colors',
+            isResizing && 'bg-[var(--interactive-border)]'
           )}
           onPointerDown={handlePointerDown}
           role="separator"
