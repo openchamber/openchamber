@@ -81,69 +81,8 @@ interface ProjectActivityResult {
 
 export const projectTurnActivity = (input: ProjectActivityInput): ProjectActivityResult => {
     const activityParts: TurnActivityRecord[] = [];
-    const hasTools = input.assistantMessages.some((message) =>
-        message.parts.some((part) => part.type === 'tool')
-    );
-    const hasReasoning = input.assistantMessages.some((message) =>
-        message.parts.some((part) => part.type === 'reasoning' && Boolean(getPartText(part)))
-    );
-
-    input.assistantMessages.forEach((message) => {
-        message.parts.forEach((part, partIndex) => {
-            if (part.type === 'tool') {
-                activityParts.push({
-                    ...buildTurnPartRecord(input.turnId, message.info.id, part, partIndex),
-                    kind: 'tool',
-                });
-                return;
-            }
-
-            if (part.type === 'reasoning') {
-                const text = getPartText(part);
-                if (!text) {
-                    return;
-                }
-                activityParts.push({
-                    ...buildTurnPartRecord(input.turnId, message.info.id, part, partIndex),
-                    kind: 'reasoning',
-                });
-                return;
-            }
-
-            if (!input.showTextJustificationActivity || part.type !== 'text') {
-                return;
-            }
-
-            if (!isAssistantMessageCompleted(message)) {
-                return;
-            }
-
-            const finish = getMessageFinish(message);
-            if (!finish) {
-                return;
-            }
-
-            if (finish === 'stop') {
-                return;
-            }
-
-            const text = getPartText(part);
-            if (!text) {
-                return;
-            }
-
-            activityParts.push({
-                ...buildTurnPartRecord(input.turnId, message.info.id, part, partIndex),
-                kind: 'justification',
-            });
-        });
-    });
-
-    const activitySegments: TurnActivityGroup[] = [];
-    const activityByPart = new WeakMap<object, TurnActivityRecord>();
-    activityParts.forEach((activity) => {
-        activityByPart.set(activity.part as object, activity);
-    });
+    let hasTools = false;
+    let hasReasoning = false;
 
     const taskMessageById = new Map<string, string>();
     const taskOrder: string[] = [];
@@ -151,32 +90,66 @@ export const projectTurnActivity = (input: ProjectActivityInput): ProjectActivit
     let currentAfterToolPartId: string | null = null;
 
     input.assistantMessages.forEach((message) => {
-        const messageId = message.info.id;
+        const messageCompleted = isAssistantMessageCompleted(message);
+        const finish = getMessageFinish(message);
 
         message.parts.forEach((part, partIndex) => {
-            if (part.type === 'tool') {
-                const toolName = (part as { tool?: unknown }).tool;
-                if (isStandaloneTool(toolName)) {
-                    const toolPartId = part.id ?? `${messageId}-part-${partIndex}-${part.type}`;
-                    if (!taskMessageById.has(toolPartId)) {
-                        taskMessageById.set(toolPartId, messageId);
-                        taskOrder.push(toolPartId);
-                    }
-                    currentAfterToolPartId = toolPartId;
-                    return;
-                }
+            const isTool = part.type === 'tool';
+            if (isTool) {
+                hasTools = true;
             }
 
-            const activity = activityByPart.get(part as object);
-            if (!activity) {
+            const text = part.type === 'reasoning' || part.type === 'text'
+                ? getPartText(part)
+                : undefined;
+
+            if (part.type === 'reasoning' && text) {
+                hasReasoning = true;
+            }
+
+            const toolName = isTool
+                ? (part as { tool?: unknown }).tool
+                : undefined;
+            const standaloneTool = isTool && isStandaloneTool(toolName);
+            if (standaloneTool) {
+                const toolPartId = part.id ?? `${message.info.id}-part-${partIndex}-${part.type}`;
+                if (!taskMessageById.has(toolPartId)) {
+                    taskMessageById.set(toolPartId, message.info.id);
+                    taskOrder.push(toolPartId);
+                }
+                currentAfterToolPartId = toolPartId;
+            }
+
+            let kind: TurnActivityRecord['kind'] | null = null;
+            if (isTool) {
+                kind = 'tool';
+            } else if (part.type === 'reasoning') {
+                if (text) {
+                    kind = 'reasoning';
+                }
+            } else if (
+                input.showTextJustificationActivity
+                && part.type === 'text'
+                && messageCompleted
+                && typeof finish === 'string'
+                && finish !== 'stop'
+                && text
+            ) {
+                kind = 'justification';
+            }
+
+            if (!kind) {
                 return;
             }
 
-            if (activity.kind === 'tool') {
-                const toolName = (activity.part as { tool?: unknown }).tool;
-                if (isStandaloneTool(toolName)) {
-                    return;
-                }
+            const activity: TurnActivityRecord = {
+                ...buildTurnPartRecord(input.turnId, message.info.id, part, partIndex),
+                kind,
+            };
+            activityParts.push(activity);
+
+            if (kind === 'tool' && standaloneTool) {
+                return;
             }
 
             const list = partsByAfterTool.get(currentAfterToolPartId) ?? [];
@@ -184,6 +157,8 @@ export const projectTurnActivity = (input: ProjectActivityInput): ProjectActivit
             partsByAfterTool.set(currentAfterToolPartId, list);
         });
     });
+
+    const activitySegments: TurnActivityGroup[] = [];
 
     const pickStartAnchor = (segmentParts: TurnActivityRecord[]): string | undefined => {
         if (segmentParts.length === 0) {

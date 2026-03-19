@@ -736,7 +736,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
               className={cn(
                 'relative flex h-full min-h-0 flex-col overflow-hidden border-r',
                 isDesktopApp
-                  ? 'bg-[color:var(--sidebar-overlay-strong)] backdrop-blur supports-[backdrop-filter]:bg-[color:var(--sidebar-overlay-soft)]'
+                  ? 'bg-[color:var(--sidebar-overlay-strong)] supports-[backdrop-filter]:bg-[color:var(--sidebar-overlay-soft)]'
                   : runtimeCtx.isVSCode
                     ? 'bg-background'
                     : 'bg-sidebar',

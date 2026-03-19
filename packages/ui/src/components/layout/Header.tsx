@@ -2186,7 +2186,7 @@ export const Header: React.FC<HeaderProps> = ({
     isMobile && 'border-b border-border/50',
     isMobile
       ? 'bg-background'
-      : (isDesktopApp ? 'bg-background' : 'bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80')
+      : (isDesktopApp ? 'bg-background' : 'bg-background/95 supports-[backdrop-filter]:bg-background/80')
   );
 
   return (

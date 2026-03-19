@@ -49,7 +49,7 @@ export const MemoryDebugPanel: React.FC<MemoryDebugPanelProps> = ({ onClose }) =
   const cachedSessionCount = messages.size;
 
   return (
-    <Card className="fixed bottom-4 right-4 w-96 p-4 shadow-none z-50 bg-background/95 backdrop-blur bottom-safe-area">
+    <Card className="fixed bottom-4 right-4 w-96 p-4 shadow-none z-50 bg-background/95 bottom-safe-area">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <RiDatabase2Line className="h-4 w-4" />

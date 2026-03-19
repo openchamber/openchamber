@@ -19,6 +19,7 @@ import { getSafeStorage } from "./utils/safeStorage";
 import { useFileStore } from "./fileStore";
 import { useSessionStore } from "./sessionStore";
 import { useContextStore } from "./contextStore";
+import { useUIStore } from "./useUIStore";
 
 // Helper function to clean up pending user message metadata
 const cleanupPendingUserMessageMeta = (
@@ -38,6 +39,379 @@ const lastContentRegistry = new Map<string, string>();
 const streamingCooldownTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const loadMessagesInFlightBySession = new Map<string, Promise<void>>();
 const loadMessagesRequestSeqBySession = new Map<string, number>();
+
+interface QueuedStreamingPart {
+    sessionId: string;
+    messageId: string;
+    part: Part;
+    role?: string;
+    currentSessionId?: string;
+}
+
+interface QueuedPartDelta {
+    sessionId: string;
+    messageId: string;
+    partId: string;
+    field: string;
+    delta: string;
+    role?: string;
+    currentSessionId?: string;
+}
+
+type StreamingPartImmediateHandler = (
+    sessionId: string,
+    messageId: string,
+    part: Part,
+    role?: string,
+    currentSessionId?: string,
+) => void;
+
+const queuedNonTextStreamingPartsByKey = new Map<string, QueuedStreamingPart>();
+const queuedNonTextStreamingPartOrder: string[] = [];
+let nonTextStreamingFlushScheduled = false;
+let nonTextStreamingFlushRafId: number | null = null;
+let nonTextStreamingFlushTimeoutId: ReturnType<typeof setTimeout> | null = null;
+const NON_TEXT_STREAMING_QUEUE_HARD_LIMIT = 2500;
+
+const queuedPartDeltasByKey = new Map<string, QueuedPartDelta>();
+const queuedPartDeltaOrder: string[] = [];
+let partDeltaFlushScheduled = false;
+let partDeltaFlushRafId: number | null = null;
+let partDeltaFlushTimeoutId: ReturnType<typeof setTimeout> | null = null;
+const PART_DELTA_QUEUE_HARD_LIMIT = 3500;
+const ENABLE_STREAMING_FRAME_BATCHING = true;
+const TOOL_STREAMING_BATCH_DELAY_MS = 120;
+
+const clearNonTextStreamingFlushSchedule = () => {
+    if (nonTextStreamingFlushRafId !== null) {
+        cancelAnimationFrame(nonTextStreamingFlushRafId);
+        nonTextStreamingFlushRafId = null;
+    }
+    if (nonTextStreamingFlushTimeoutId !== null) {
+        clearTimeout(nonTextStreamingFlushTimeoutId);
+        nonTextStreamingFlushTimeoutId = null;
+    }
+    nonTextStreamingFlushScheduled = false;
+};
+
+const queuedStreamingPartKey = (entry: QueuedStreamingPart): string => {
+    const partKey = getPartKey(entry.part) ?? `${entry.part.type ?? "unknown"}`;
+    const roleKey = typeof entry.role === 'string' ? entry.role : '';
+    return `${entry.sessionId}:${entry.messageId}:${roleKey}:${partKey}`;
+};
+
+const enqueueNonTextStreamingPart = (entry: QueuedStreamingPart) => {
+    const key = queuedStreamingPartKey(entry);
+    if (!queuedNonTextStreamingPartsByKey.has(key)) {
+        queuedNonTextStreamingPartOrder.push(key);
+    }
+    queuedNonTextStreamingPartsByKey.set(key, entry);
+};
+
+const flushQueuedNonTextStreamingParts = (
+    immediateHandler: StreamingPartImmediateHandler,
+    filter?: (entry: QueuedStreamingPart) => boolean,
+) => {
+    if (queuedNonTextStreamingPartOrder.length === 0) {
+        clearNonTextStreamingFlushSchedule();
+        return;
+    }
+
+    const batch: QueuedStreamingPart[] = [];
+    const nextOrder: string[] = [];
+
+    for (const key of queuedNonTextStreamingPartOrder) {
+        const entry = queuedNonTextStreamingPartsByKey.get(key);
+        if (!entry) {
+            continue;
+        }
+        if (filter && !filter(entry)) {
+            nextOrder.push(key);
+            continue;
+        }
+        batch.push(entry);
+        queuedNonTextStreamingPartsByKey.delete(key);
+    }
+
+    queuedNonTextStreamingPartOrder.length = 0;
+    queuedNonTextStreamingPartOrder.push(...nextOrder);
+
+    if (batch.length === 0) {
+        if (queuedNonTextStreamingPartOrder.length === 0) {
+            clearNonTextStreamingFlushSchedule();
+        }
+        return;
+    }
+
+    for (const entry of batch) {
+        immediateHandler(entry.sessionId, entry.messageId, entry.part, entry.role, entry.currentSessionId);
+    }
+
+    if (queuedNonTextStreamingPartOrder.length === 0) {
+        clearNonTextStreamingFlushSchedule();
+    }
+};
+
+const flushQueuedNonTextStreamingPartsForSession = (
+    immediateHandler: StreamingPartImmediateHandler,
+    sessionId: string,
+) => {
+    flushQueuedNonTextStreamingParts(immediateHandler, (entry) => entry.sessionId === sessionId);
+};
+
+const flushQueuedNonTextStreamingPartsForMessage = (
+    immediateHandler: StreamingPartImmediateHandler,
+    sessionId: string,
+    messageId: string,
+) => {
+    flushQueuedNonTextStreamingParts(
+        immediateHandler,
+        (entry) => entry.sessionId === sessionId && entry.messageId === messageId,
+    );
+};
+
+const discardQueuedNonTextStreamingPartsForSession = (sessionId: string): void => {
+    if (queuedNonTextStreamingPartOrder.length === 0) {
+        return;
+    }
+
+    for (let i = queuedNonTextStreamingPartOrder.length - 1; i >= 0; i -= 1) {
+        const key = queuedNonTextStreamingPartOrder[i];
+        const entry = queuedNonTextStreamingPartsByKey.get(key);
+        if (!entry) {
+            queuedNonTextStreamingPartOrder.splice(i, 1);
+            continue;
+        }
+        if (entry.sessionId === sessionId) {
+            queuedNonTextStreamingPartsByKey.delete(key);
+            queuedNonTextStreamingPartOrder.splice(i, 1);
+        }
+    }
+
+    if (queuedNonTextStreamingPartOrder.length === 0) {
+        clearNonTextStreamingFlushSchedule();
+    }
+};
+
+const scheduleNonTextStreamingFlush = (flush: () => void): void => {
+    if (nonTextStreamingFlushScheduled) {
+        return;
+    }
+    nonTextStreamingFlushScheduled = true;
+    nonTextStreamingFlushTimeoutId = setTimeout(() => {
+        nonTextStreamingFlushTimeoutId = null;
+        if (!nonTextStreamingFlushScheduled) {
+            return;
+        }
+        flush();
+    }, TOOL_STREAMING_BATCH_DELAY_MS);
+};
+
+const clearPartDeltaFlushSchedule = () => {
+    if (partDeltaFlushRafId !== null) {
+        cancelAnimationFrame(partDeltaFlushRafId);
+        partDeltaFlushRafId = null;
+    }
+    if (partDeltaFlushTimeoutId !== null) {
+        clearTimeout(partDeltaFlushTimeoutId);
+        partDeltaFlushTimeoutId = null;
+    }
+    partDeltaFlushScheduled = false;
+};
+
+const queuedPartDeltaKey = (entry: QueuedPartDelta): string => {
+    const roleKey = typeof entry.role === 'string' ? entry.role : '';
+    return `${entry.sessionId}:${entry.messageId}:${entry.partId}:${entry.field}:${roleKey}`;
+};
+
+const enqueuePartDelta = (entry: QueuedPartDelta) => {
+    const key = queuedPartDeltaKey(entry);
+    const existing = queuedPartDeltasByKey.get(key);
+    if (existing) {
+        existing.delta += entry.delta;
+        if (!existing.currentSessionId && entry.currentSessionId) {
+            existing.currentSessionId = entry.currentSessionId;
+        }
+        return;
+    }
+
+    queuedPartDeltasByKey.set(key, { ...entry });
+    queuedPartDeltaOrder.push(key);
+};
+
+const flushQueuedPartDeltas = (
+    immediateHandler: (
+        sessionId: string,
+        messageId: string,
+        partId: string,
+        field: string,
+        delta: string,
+        role?: string,
+        currentSessionId?: string,
+    ) => void,
+    filter?: (entry: QueuedPartDelta) => boolean,
+) => {
+    if (queuedPartDeltaOrder.length === 0) {
+        clearPartDeltaFlushSchedule();
+        return;
+    }
+
+    const batch: QueuedPartDelta[] = [];
+    const nextOrder: string[] = [];
+
+    for (const key of queuedPartDeltaOrder) {
+        const entry = queuedPartDeltasByKey.get(key);
+        if (!entry) {
+            continue;
+        }
+        if (filter && !filter(entry)) {
+            nextOrder.push(key);
+            continue;
+        }
+        batch.push(entry);
+        queuedPartDeltasByKey.delete(key);
+    }
+
+    queuedPartDeltaOrder.length = 0;
+    queuedPartDeltaOrder.push(...nextOrder);
+
+    if (batch.length === 0) {
+        if (queuedPartDeltaOrder.length === 0) {
+            clearPartDeltaFlushSchedule();
+        }
+        return;
+    }
+
+    for (const entry of batch) {
+        immediateHandler(
+            entry.sessionId,
+            entry.messageId,
+            entry.partId,
+            entry.field,
+            entry.delta,
+            entry.role,
+            entry.currentSessionId,
+        );
+    }
+
+    if (queuedPartDeltaOrder.length === 0) {
+        clearPartDeltaFlushSchedule();
+    }
+};
+
+const flushQueuedPartDeltasForSession = (
+    immediateHandler: (
+        sessionId: string,
+        messageId: string,
+        partId: string,
+        field: string,
+        delta: string,
+        role?: string,
+        currentSessionId?: string,
+    ) => void,
+    sessionId: string,
+) => {
+    flushQueuedPartDeltas(immediateHandler, (entry) => entry.sessionId === sessionId);
+};
+
+const flushQueuedPartDeltasForMessage = (
+    immediateHandler: (
+        sessionId: string,
+        messageId: string,
+        partId: string,
+        field: string,
+        delta: string,
+        role?: string,
+        currentSessionId?: string,
+    ) => void,
+    sessionId: string,
+    messageId: string,
+) => {
+    flushQueuedPartDeltas(
+        immediateHandler,
+        (entry) => entry.sessionId === sessionId && entry.messageId === messageId,
+    );
+};
+
+const discardQueuedPartDeltasForSession = (sessionId: string): void => {
+    if (queuedPartDeltaOrder.length === 0) {
+        return;
+    }
+
+    for (let i = queuedPartDeltaOrder.length - 1; i >= 0; i -= 1) {
+        const key = queuedPartDeltaOrder[i];
+        const entry = queuedPartDeltasByKey.get(key);
+        if (!entry) {
+            queuedPartDeltaOrder.splice(i, 1);
+            continue;
+        }
+        if (entry.sessionId === sessionId) {
+            queuedPartDeltasByKey.delete(key);
+            queuedPartDeltaOrder.splice(i, 1);
+        }
+    }
+
+    if (queuedPartDeltaOrder.length === 0) {
+        clearPartDeltaFlushSchedule();
+    }
+};
+
+const schedulePartDeltaFlush = (flush: () => void): void => {
+    if (partDeltaFlushScheduled) {
+        return;
+    }
+    partDeltaFlushScheduled = true;
+    partDeltaFlushTimeoutId = setTimeout(() => {
+        partDeltaFlushTimeoutId = null;
+        if (!partDeltaFlushScheduled) {
+            return;
+        }
+        flush();
+    }, TOOL_STREAMING_BATCH_DELAY_MS);
+};
+
+const shouldBatchStreamingPart = (part: Part | undefined): boolean => {
+    if (!part || typeof part.type !== 'string') {
+        return false;
+    }
+
+    if (part.type === 'tool') {
+        return true;
+    }
+
+    if (part.type === 'text' || part.type === 'reasoning') {
+        return useUIStore.getState().chatRenderMode === 'sorted';
+    }
+
+    return false;
+};
+
+const shouldBatchPartDelta = (
+    messagesBySession: Map<string, StoredMessage[]>,
+    sessionId: string,
+    messageId: string,
+    partId: string,
+): boolean => {
+    const sessionMessages = messagesBySession.get(sessionId);
+    if (!sessionMessages || sessionMessages.length === 0) {
+        return false;
+    }
+    const messageIndex = resolveSessionMessagePosition(sessionId, messageId, sessionMessages);
+    if (messageIndex === -1) {
+        return false;
+    }
+    const targetMessage = sessionMessages[messageIndex];
+    const targetPart = targetMessage.parts.find((part) => part?.id === partId);
+    if (targetPart?.type === 'tool') {
+        return true;
+    }
+
+    if (targetPart?.type === 'text' || targetPart?.type === 'reasoning') {
+        return useUIStore.getState().chatRenderMode === 'sorted';
+    }
+
+    return false;
+};
 
 const RECENT_SEND_EMPTY_GUARD_MS = 15_000;
 
@@ -363,6 +737,7 @@ interface MessageActions {
     abortCurrentOperation: (currentSessionId?: string) => Promise<void>;
     _addStreamingPartImmediate: (sessionId: string, messageId: string, part: Part, role?: string, currentSessionId?: string) => void;
     addStreamingPart: (sessionId: string, messageId: string, part: Part, role?: string, currentSessionId?: string) => void;
+    _applyPartDeltaImmediate: (sessionId: string, messageId: string, partId: string, field: string, delta: string, role?: string, currentSessionId?: string) => void;
     applyPartDelta: (sessionId: string, messageId: string, partId: string, field: string, delta: string, role?: string, currentSessionId?: string) => void;
     forceCompleteMessage: (sessionId: string | null | undefined, messageId: string, source?: "timeout" | "cooldown") => void;
     completeStreamingMessage: (sessionId: string, messageId: string) => void;
@@ -942,6 +1317,9 @@ export const useMessageStore = create<MessageStore>()(
                     if (!currentSessionId) {
                         return;
                     }
+
+                    discardQueuedNonTextStreamingPartsForSession(currentSessionId);
+                    discardQueuedPartDeltasForSession(currentSessionId);
 
                     const stateSnapshot = get();
                     const { abortControllers, messages: storeMessages } = stateSnapshot;
@@ -1590,10 +1968,37 @@ export const useMessageStore = create<MessageStore>()(
                 },
 
                 addStreamingPart: (sessionId: string, messageId: string, part: Part, role?: string, currentSessionId?: string) => {
-                    get()._addStreamingPartImmediate(sessionId, messageId, part, role, currentSessionId);
+                    if (!ENABLE_STREAMING_FRAME_BATCHING) {
+                        get()._addStreamingPartImmediate(sessionId, messageId, part, role, currentSessionId);
+                        return;
+                    }
+
+                    if (!shouldBatchStreamingPart(part)) {
+                        get()._addStreamingPartImmediate(sessionId, messageId, part, role, currentSessionId);
+                        return;
+                    }
+
+                    enqueueNonTextStreamingPart({
+                        sessionId,
+                        messageId,
+                        part,
+                        role,
+                        currentSessionId,
+                    });
+
+                    const flushQueuedParts = () => {
+                        flushQueuedNonTextStreamingParts(get()._addStreamingPartImmediate);
+                    };
+
+                    if (queuedNonTextStreamingPartOrder.length >= NON_TEXT_STREAMING_QUEUE_HARD_LIMIT) {
+                        flushQueuedParts();
+                        return;
+                    }
+
+                    scheduleNonTextStreamingFlush(flushQueuedParts);
                 },
 
-                applyPartDelta: (sessionId: string, messageId: string, partId: string, field: string, delta: string, role?: string, currentSessionId?: string) => {
+                _applyPartDeltaImmediate: (sessionId: string, messageId: string, partId: string, field: string, delta: string, role?: string, currentSessionId?: string) => {
                     set((state) => {
                         const sessionMessages = state.messages.get(sessionId) || [];
                         const messageIndex = resolveSessionMessagePosition(sessionId, messageId, sessionMessages);
@@ -1687,6 +2092,39 @@ export const useMessageStore = create<MessageStore>()(
 
                         return updates;
                     });
+                },
+
+                applyPartDelta: (sessionId: string, messageId: string, partId: string, field: string, delta: string, role?: string, currentSessionId?: string) => {
+                    if (!ENABLE_STREAMING_FRAME_BATCHING) {
+                        get()._applyPartDeltaImmediate(sessionId, messageId, partId, field, delta, role, currentSessionId);
+                        return;
+                    }
+
+                    if (!shouldBatchPartDelta(get().messages, sessionId, messageId, partId)) {
+                        get()._applyPartDeltaImmediate(sessionId, messageId, partId, field, delta, role, currentSessionId);
+                        return;
+                    }
+
+                    enqueuePartDelta({
+                        sessionId,
+                        messageId,
+                        partId,
+                        field,
+                        delta,
+                        role,
+                        currentSessionId,
+                    });
+
+                    const flushQueuedDeltas = () => {
+                        flushQueuedPartDeltas(get()._applyPartDeltaImmediate);
+                    };
+
+                    if (queuedPartDeltaOrder.length >= PART_DELTA_QUEUE_HARD_LIMIT) {
+                        flushQueuedDeltas();
+                        return;
+                    }
+
+                    schedulePartDeltaFlush(flushQueuedDeltas);
                 },
 
                 forceCompleteMessage: (sessionId: string | null | undefined, messageId: string, source: "timeout" | "cooldown" = "timeout") => {
@@ -2145,6 +2583,9 @@ export const useMessageStore = create<MessageStore>()(
                 },
 
                 completeStreamingMessage: (sessionId: string, messageId: string) => {
+                    flushQueuedNonTextStreamingPartsForMessage(get()._addStreamingPartImmediate, sessionId, messageId);
+                    flushQueuedPartDeltasForMessage(get()._applyPartDeltaImmediate, sessionId, messageId);
+
                     const state = get();
 
                     (window as any).__messageTracker?.(
@@ -2250,6 +2691,9 @@ export const useMessageStore = create<MessageStore>()(
                     messages: { info: Message; parts: Part[] }[],
                     options?: { replace?: boolean }
                 ) => {
+                    flushQueuedNonTextStreamingPartsForSession(get()._addStreamingPartImmediate, sessionId);
+                    flushQueuedPartDeltasForSession(get()._applyPartDeltaImmediate, sessionId);
+
                     // Filter out reverted messages first
                     const revertMessageId = getSessionRevertMessageId(sessionId);
                     const messagesWithoutReverted = filterMessagesByRevertPoint(messages, revertMessageId);

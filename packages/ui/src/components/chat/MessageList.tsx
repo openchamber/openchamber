@@ -876,7 +876,10 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
 
     const baseDisplayMessages = React.useMemo(() => {
         const cached = baseDisplayCacheRef.current;
-        if (cached && cached.input.length === messages.length && messages.length > 0) {
+        const lastMessage = messages.length > 0 ? messages[messages.length - 1] : undefined;
+        const canUseTailFastPath = Boolean(lastMessage && isAssistantTextOnlyMessage(lastMessage));
+
+        if (cached && canUseTailFastPath && cached.input.length === messages.length && messages.length > 0) {
             let changedCount = 0;
             let changedIndex = -1;
             let idsStable = true;

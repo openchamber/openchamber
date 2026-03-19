@@ -1368,10 +1368,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
       ? 'streamdown-content streamdown-reasoning'
       : 'streamdown-content';
 
-  const streamdownAnimated = React.useMemo(
-    () => ({ animation: 'blurIn' as const, duration: 150, easing: 'ease-out' }),
-    [],
-  );
+  const streamdownAnimated = undefined;
 
   const markdownContent = (
     <div className={cn('break-words w-full min-w-0', className)} ref={streamdownContainerRef}>

@@ -71,10 +71,9 @@ const variants = [
               className={cn(
                 "inline-block whitespace-pre align-baseline"
               )}
-              initial={{ opacity: 0, filter: "blur(3px)" }}
+              initial={{ opacity: 0 }}
               animate={{
                 opacity: 1,
-                filter: "blur(0px)",
               }}
               transition={{
                 ease: "easeOut",

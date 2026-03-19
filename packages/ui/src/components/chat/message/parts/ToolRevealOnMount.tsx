@@ -25,7 +25,7 @@ export const ToolRevealOnMount: React.FC<ToolRevealOnMountProps> = ({
             return;
         }
         target.style.opacity = '';
-        target.style.filter = '';
+        // target.style.filter = '';
         target.style.transform = '';
         target.style.maskImage = '';
         target.style.webkitMaskImage = '';
@@ -61,7 +61,7 @@ export const ToolRevealOnMount: React.FC<ToolRevealOnMountProps> = ({
                 CSS.supports('-webkit-mask-image', 'linear-gradient(to right, black, transparent)'));
 
         el.style.opacity = '0';
-        el.style.filter = wipe ? 'blur(3px)' : 'blur(2px)';
+        // el.style.filter = wipe ? 'blur(3px)' : 'blur(2px)';
         el.style.transform = wipe ? 'translateX(-0.06em)' : 'translateY(0.04em)';
 
         if (maskSupported) {
@@ -84,16 +84,15 @@ export const ToolRevealOnMount: React.FC<ToolRevealOnMountProps> = ({
 
             const keyframes: Keyframe[] = maskSupported
                 ? [
-                    { opacity: 0, filter: 'blur(3px)', transform: 'translateX(-0.06em)', maskPosition: '100% 0%' },
-                    { opacity: 1, filter: 'blur(0px)', transform: 'translateX(0)', maskPosition: '0% 0%' },
+                    { opacity: 0, transform: 'translateX(-0.06em)', maskPosition: '100% 0%' },
+                    { opacity: 1, transform: 'translateX(0)', maskPosition: '0% 0%' },
                 ]
                 : [
                     {
                         opacity: 0,
-                        filter: wipe ? 'blur(3px)' : 'blur(2px)',
                         transform: wipe ? 'translateX(-0.06em)' : 'translateY(0.04em)',
                     },
-                    { opacity: 1, filter: 'blur(0px)', transform: wipe ? 'translateX(0)' : 'translateY(0)' },
+                    { opacity: 1, transform: wipe ? 'translateX(0)' : 'translateY(0)' },
                 ];
 
             animation = node.animate(keyframes, {

@@ -396,7 +396,7 @@ export const ChatContainer: React.FC = () => {
                         'relative z-10',
                         isDesktopExpandedInput
                             ? 'flex-1 min-h-0 bg-background'
-                            : 'bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80'
+                            : 'bg-background/95 supports-[backdrop-filter]:bg-background/80'
                     )}
                 >
                     <ChatInput scrollToBottom={scrollToBottom} />
@@ -466,7 +466,7 @@ export const ChatContainer: React.FC = () => {
                         'relative z-10',
                         isDesktopExpandedInput
                             ? 'flex-1 min-h-0 bg-background'
-                            : 'bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80'
+                            : 'bg-background/95 supports-[backdrop-filter]:bg-background/80'
                     )}
                 >
                     <ChatInput scrollToBottom={scrollToBottom} />
@@ -529,7 +529,7 @@ export const ChatContainer: React.FC = () => {
                     'relative z-10',
                     isDesktopExpandedInput
                         ? 'flex-1 min-h-0 bg-background'
-                        : 'bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80'
+                        : 'bg-background/95 supports-[backdrop-filter]:bg-background/80'
                 )}
             >
                 {!isDesktopExpandedInput && sessionMessages.length > 0 && (
