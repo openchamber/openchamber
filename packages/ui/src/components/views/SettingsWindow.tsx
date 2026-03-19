@@ -14,7 +14,6 @@ interface SettingsWindowProps {
  */
 export const SettingsWindow: React.FC<SettingsWindowProps> = ({ open, onOpenChange }) => {
   const descriptionId = React.useId();
-  const skipNextOverlayClickRef = React.useRef(false);
 
   const hasOpenFloatingMenu = React.useCallback(() => {
     if (typeof document === 'undefined') {
@@ -31,15 +30,8 @@ export const SettingsWindow: React.FC<SettingsWindowProps> = ({ open, onOpenChan
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay
           className="fixed inset-0 z-50 bg-black/50 backdrop-blur-md"
-          onPointerDown={() => {
-            skipNextOverlayClickRef.current = hasOpenFloatingMenu();
-          }}
-          onClick={(event) => {
+          onPointerDown={(event) => {
             event.stopPropagation();
-            if (skipNextOverlayClickRef.current) {
-              skipNextOverlayClickRef.current = false;
-              return;
-            }
             if (hasOpenFloatingMenu()) {
               return;
             }
