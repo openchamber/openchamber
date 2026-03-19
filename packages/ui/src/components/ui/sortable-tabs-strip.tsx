@@ -112,6 +112,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
   const tabRefs = React.useRef<Map<string, HTMLElement>>(new Map());
   const [pillRect, setPillRect] = React.useState<{ left: number; top: number; width: number; height: number } | null>(null);
 
+
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
   );
@@ -150,14 +151,24 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
       return;
     }
 
-    const containerRect = container.getBoundingClientRect();
-    const tabRect = activeTab.getBoundingClientRect();
+    // Walk offsetParent chain to compute position relative to the scroll container.
+    // Unlike getBoundingClientRect, offsetLeft/offsetTop are unaffected by CSS
+    // transforms (e.g. dropdown entry scale animation), preventing pill mis-positioning
+    // on first render.
+    let left = 0;
+    let top = 0;
+    let el: HTMLElement | null = activeTab;
+    while (el && el !== container) {
+      left += el.offsetLeft;
+      top += el.offsetTop;
+      el = el.offsetParent as HTMLElement | null;
+    }
 
     const nextRect = {
-      left: tabRect.left - containerRect.left + container.scrollLeft,
-      top: tabRect.top - containerRect.top + container.scrollTop,
-      width: tabRect.width,
-      height: tabRect.height,
+      left,
+      top,
+      width: activeTab.offsetWidth,
+      height: activeTab.offsetHeight,
     };
 
     setPillRect((prev) => (isSamePillRect(prev, nextRect) ? prev : nextRect));
@@ -234,6 +245,8 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
   React.useLayoutEffect(() => {
     updateActivePillRect();
   });
+
+
 
   React.useEffect(() => {
     if (!isScrollable || !activeId) {
