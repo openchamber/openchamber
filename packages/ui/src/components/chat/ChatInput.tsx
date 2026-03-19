@@ -10,11 +10,14 @@ import {
     RiFolderLine,
     RiFullscreenLine,
     RiGitPullRequestLine,
+    RiShieldCheckLine,
+    RiShieldLine,
     RiGithubLine,
     RiSendPlane2Line,
 } from '@remixicon/react';
 import { BrowserVoiceButton } from '@/components/voice';
 import { useSessionStore } from '@/stores/useSessionStore';
+import { useSessionStore as useSessionManagementStore } from '@/stores/sessionStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useMessageQueueStore, type QueuedMessage } from '@/stores/messageQueueStore';
@@ -60,6 +63,7 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, getProjectIconImageUrl } from '@/lib/projectMeta';
 import { useGitBranches, useGitStore } from '@/stores/useGitStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { usePermissionStore } from '@/stores/permissionStore';
 
 const MAX_VISIBLE_TEXTAREA_LINES = 8;
 const EMPTY_QUEUE: QueuedMessage[] = [];
@@ -213,6 +217,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
     const consumePendingInputText = useSessionStore((state) => state.consumePendingInputText);
     const pendingInputText = useSessionStore((state) => state.pendingInputText);
     const consumePendingSyntheticParts = useSessionStore((state) => state.consumePendingSyntheticParts);
+    const currentManagementSessionId = useSessionManagementStore((state) => state.currentSessionId);
     const projects = useProjectsStore((state) => state.projects);
     const activeProjectId = useProjectsStore((state) => state.activeProjectId);
     const setActiveProjectIdOnly = useProjectsStore((state) => state.setActiveProjectIdOnly);
@@ -227,6 +232,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
     const chatSearchDirectory = useChatSearchDirectory();
     const [showAbortStatus, setShowAbortStatus] = React.useState(false);
     const [textareaScrollTop, setTextareaScrollTop] = React.useState(0);
+    const setSessionAutoAccept = usePermissionStore((state) => state.setSessionAutoAccept);
 
     const isDesktopExpanded = isExpandedInput && !isMobile;
     const chatInputRadius = 'var(--radius-lg)';
@@ -2468,9 +2474,61 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
     const sendIconSizeClass = isMobile ? 'h-4 w-4' : (isVSCode ? 'h-3.5 w-3.5' : 'h-4 w-4');
     const stopIconSizeClass = isMobile ? 'h-6 w-6' : (isVSCode ? 'h-4 w-4' : 'h-5 w-5');
     const iconSizeClass = isMobile ? 'h-[18px] w-[18px]' : (isVSCode ? 'h-4 w-4' : 'h-[18px] w-[18px]');
+    const shieldButtonClass = isMobile ? 'h-7 px-1' : (isVSCode ? 'h-5 px-0.5' : 'h-[22px] px-1');
+    const shieldIconSizeClass = isMobile ? 'h-4 w-4' : (isVSCode ? 'h-3.5 w-3.5' : 'h-4 w-4');
 
     const iconButtonBaseClass = 'flex cursor-pointer items-center justify-center text-foreground transition-none outline-none focus:outline-none flex-shrink-0 disabled:cursor-not-allowed';
     const footerIconButtonClass = cn(iconButtonBaseClass, buttonSizeClass);
+    const permissionScopeSessionId = currentSessionId ?? currentManagementSessionId;
+    const permissionAutoAcceptEnabled = usePermissionStore((state) => {
+        if (!permissionScopeSessionId) {
+            return false;
+        }
+        return state.isSessionAutoAccepting(permissionScopeSessionId);
+    });
+
+    const handlePermissionAutoAcceptToggle = React.useCallback(() => {
+        if (!permissionScopeSessionId) {
+            toast.error('Open a session first');
+            return;
+        }
+
+        const nextEnabled = !permissionAutoAcceptEnabled;
+        setSessionAutoAccept(permissionScopeSessionId, nextEnabled).catch(() => {
+            toast.error('Failed to toggle permission auto-accept');
+        });
+    }, [permissionAutoAcceptEnabled, permissionScopeSessionId, setSessionAutoAccept]);
+
+    const permissionAutoAcceptButton = (
+        <button
+            type="button"
+            onClick={handlePermissionAutoAcceptToggle}
+            className={cn(
+                iconButtonBaseClass,
+                shieldButtonClass,
+                'rounded-md hover:bg-transparent',
+                !permissionScopeSessionId && 'opacity-30',
+            )}
+            onMouseDown={(event) => {
+                event.preventDefault();
+            }}
+            onPointerDownCapture={(event) => {
+                if (event.pointerType === 'touch') {
+                    event.preventDefault();
+                    event.stopPropagation();
+                }
+            }}
+            aria-pressed={permissionAutoAcceptEnabled}
+            aria-label={permissionAutoAcceptEnabled ? 'Disable permission auto-accept' : 'Enable permission auto-accept'}
+            title={permissionAutoAcceptEnabled ? 'Disable permission auto-accept' : 'Enable permission auto-accept'}
+        >
+            {permissionAutoAcceptEnabled ? (
+                <RiShieldCheckLine className={cn(shieldIconSizeClass)} style={{ color: 'var(--status-success)' }} />
+            ) : (
+                <RiShieldLine className={cn(shieldIconSizeClass)} />
+            )}
+        </button>
+    );
 
     // Send button - respects queue mode setting
     const sendButton = (
@@ -3113,6 +3171,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                                             />
                                         </div>
                                         <div className="flex items-center gap-x-1 flex-shrink-0">
+                                            {permissionAutoAcceptButton}
                                             <BrowserVoiceButton />
                                             {actionButtons}
                                         </div>
@@ -3169,6 +3228,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                                 </div>
                                 <div className={cn('flex items-center flex-1 justify-end', footerGapClass, 'md:gap-x-3')}>
                                     <ModelControls className={cn('flex-1 min-w-0 justify-end')} />
+                                    {permissionAutoAcceptButton}
                                     <BrowserVoiceButton />
                                     {actionButtons}
                                 </div>

@@ -706,12 +706,7 @@ export const useSessionStore = create<SessionStore>()(
                 updateMessageInfo: (sessionId: string, messageId: string, messageInfo: Record<string, unknown>) => useMessageStore.getState().updateMessageInfo(sessionId, messageId, messageInfo),
                 updateSessionCompaction: (sessionId: string, compactingTimestamp?: number | null) => useMessageStore.getState().updateSessionCompaction(sessionId, compactingTimestamp ?? null),
                 addPermission: (permission: PermissionRequest) => {
-                    const contextData = {
-                        currentAgentContext: useContextStore.getState().currentAgentContext,
-                        sessionAgentSelections: useContextStore.getState().sessionAgentSelections,
-                        getSessionAgentEditMode: useContextStore.getState().getSessionAgentEditMode,
-                    };
-                    return usePermissionStore.getState().addPermission(permission, contextData);
+                    return usePermissionStore.getState().addPermission(permission);
                 },
                 respondToPermission: (sessionId: string, requestId: string, response: PermissionResponse) => usePermissionStore.getState().respondToPermission(sessionId, requestId, response),
                 dismissPermission: (sessionId: string, requestId: string) => usePermissionStore.getState().dismissPermission(sessionId, requestId),

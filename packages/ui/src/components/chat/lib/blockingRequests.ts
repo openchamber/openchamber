@@ -18,11 +18,30 @@ export const collectVisibleSessionIdsForBlockingRequests = (
         return [];
     }
 
-    const childIds = sessions
-        .filter((session) => session.parentID === currentSessionId)
-        .map((session) => session.id);
+    const childrenByParent = new Map<string, string[]>();
+    for (const session of sessions) {
+        if (!session.parentID) {
+            continue;
+        }
+        const existing = childrenByParent.get(session.parentID) ?? [];
+        existing.push(session.id);
+        childrenByParent.set(session.parentID, existing);
+    }
 
-    return [currentSessionId, ...childIds];
+    const scoped = [currentSessionId];
+    const seen = new Set(scoped);
+    for (const sessionId of scoped) {
+        const children = childrenByParent.get(sessionId) ?? [];
+        for (const childId of children) {
+            if (seen.has(childId)) {
+                continue;
+            }
+            seen.add(childId);
+            scoped.push(childId);
+        }
+    }
+
+    return scoped;
 };
 
 export const flattenBlockingRequests = <T extends { id: string }>(

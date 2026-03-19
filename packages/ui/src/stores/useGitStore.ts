@@ -7,8 +7,10 @@ import type {
   GitIdentitySummary,
 } from '@/lib/api/types';
 
-const GIT_POLL_BASE_INTERVAL = 5000;
-const GIT_POLL_MAX_INTERVAL = 10000;
+const GIT_POLL_BASE_INTERVAL = 20000;
+const GIT_POLL_MAX_INTERVAL = 45000;
+const GIT_POLL_BUSY_BASE_INTERVAL = 30000;
+const GIT_POLL_BUSY_MAX_INTERVAL = 60000;
 const GIT_POLL_BACKOFF_STEP = 5000;
 const LOG_STALE_THRESHOLD = 10000;
 const REPO_CHECK_STALE_THRESHOLD = 60_000;
@@ -50,6 +52,7 @@ interface GitStore {
 
   pollIntervalId: ReturnType<typeof setTimeout> | null;
   currentPollInterval: number;
+  pollingMode: 'normal' | 'busy';
 
   setActiveDirectory: (directory: string | null) => void;
   getDirectoryState: (directory: string) => DirectoryGitState | null;
@@ -69,6 +72,7 @@ interface GitStore {
   setLogMaxCount: (directory: string, maxCount: number) => void;
 
   startPolling: (git: GitAPI) => void;
+  setPollingMode: (mode: 'normal' | 'busy') => void;
   stopPolling: () => void;
 
   refresh: (git: GitAPI, options?: { force?: boolean }) => Promise<void>;
@@ -265,6 +269,20 @@ const getChangedFilePaths = (oldStatus: GitStatus | null, newStatus: GitStatus |
   return changed;
 };
 
+const getPollingBounds = (mode: 'normal' | 'busy') => {
+  if (mode === 'busy') {
+    return {
+      base: GIT_POLL_BUSY_BASE_INTERVAL,
+      max: GIT_POLL_BUSY_MAX_INTERVAL,
+    };
+  }
+
+  return {
+    base: GIT_POLL_BASE_INTERVAL,
+    max: GIT_POLL_MAX_INTERVAL,
+  };
+};
+
 export const useGitStore = create<GitStore>()(
   devtools(
     (set, get) => ({
@@ -277,6 +295,7 @@ export const useGitStore = create<GitStore>()(
       isLoadingIdentity: false,
       pollIntervalId: null,
       currentPollInterval: GIT_POLL_BASE_INTERVAL,
+      pollingMode: 'normal',
 
       setActiveDirectory: (directory) => {
         const { activeDirectory, directories, recentDirectories } = get();
@@ -651,6 +670,21 @@ export const useGitStore = create<GitStore>()(
         set({ directories: newDirectories });
       },
 
+      setPollingMode: (mode) => {
+        const { pollingMode, currentPollInterval } = get();
+        if (pollingMode === mode) {
+          return;
+        }
+
+        const bounds = getPollingBounds(mode);
+        const nextInterval = Math.min(Math.max(currentPollInterval, bounds.base), bounds.max);
+
+        set({
+          pollingMode: mode,
+          currentPollInterval: nextInterval,
+        });
+      },
+
       startPolling: (git) => {
         const { pollIntervalId } = get();
         if (pollIntervalId) return;
@@ -691,14 +725,15 @@ export const useGitStore = create<GitStore>()(
               }
             }
 
+            const bounds = getPollingBounds(get().pollingMode);
             if (anyStatusChanged) {
               // Reset to base interval on changes
-              set({ currentPollInterval: GIT_POLL_BASE_INTERVAL });
+              set({ currentPollInterval: bounds.base });
             } else {
               // Backoff when no changes
               const newInterval = Math.min(
                 currentPollInterval + GIT_POLL_BACKOFF_STEP,
-                GIT_POLL_MAX_INTERVAL
+                bounds.max
               );
               set({ currentPollInterval: newInterval });
             }
@@ -713,14 +748,15 @@ export const useGitStore = create<GitStore>()(
           return timeoutId;
         };
 
-        set({ pollIntervalId: schedulePoll(), currentPollInterval: GIT_POLL_BASE_INTERVAL });
+        const bounds = getPollingBounds(get().pollingMode);
+        set({ pollIntervalId: schedulePoll(), currentPollInterval: bounds.base });
       },
 
       stopPolling: () => {
         const { pollIntervalId } = get();
         if (pollIntervalId) {
           clearTimeout(pollIntervalId);
-          set({ pollIntervalId: null, currentPollInterval: GIT_POLL_BASE_INTERVAL });
+          set({ pollIntervalId: null, currentPollInterval: GIT_POLL_BASE_INTERVAL, pollingMode: 'normal' });
         }
       },
 

@@ -180,6 +180,24 @@ const RESYNC_DEBOUNCE_MS = 1800;
 const QUESTION_RECONCILE_COOLDOWN_MS = 3000;
 const PERMISSION_RECONCILE_COOLDOWN_MS = 3000;
 const DERIVED_STATE_REFRESH_COOLDOWN_MS = 2500;
+const GIT_REFRESH_HINT_DEDUP_WINDOW_MS = 5000;
+const GIT_REFRESH_HINT_TOOL_NAMES = new Set([
+  'edit',
+  'multiedit',
+  'apply_patch',
+  'write',
+  'file_write',
+  'create',
+  'bash',
+]);
+const GIT_REFRESH_HINT_COMPLETED_STATES = new Set([
+  'completed',
+  'complete',
+  'failed',
+  'error',
+  'cancelled',
+  'canceled',
+]);
 
 const readEventDirectory = (props: Record<string, unknown>): string => {
   const directory = readStringProp(props, ['directory']);
@@ -537,6 +555,7 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
   const sessionActivityRefreshInFlightRef = React.useRef<Promise<void> | null>(null);
   const lastDerivedActivityRepairAtRef = React.useRef<number>(0);
   const lastDerivedStatusRepairAtRef = React.useRef<number>(0);
+  const lastGitRefreshHintAtRef = React.useRef<Map<string, number>>(new Map());
   const scheduleSoftResyncRef = React.useRef<
     (sessionId: string, reason: string, limit?: number) => Promise<void>
   >(() => Promise.resolve());
@@ -607,6 +626,44 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
     },
     [bootstrapState]
   );
+
+  const emitGitRefreshHint = React.useCallback((params: {
+    directory: string;
+    sessionId: string;
+    messageId: string;
+    partId?: string | null;
+    toolName: string;
+    toolState: string;
+  }) => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const dedupKey = `${params.sessionId}:${params.messageId}:${params.partId ?? 'unknown'}:${params.toolName}:${params.toolState}`;
+    const now = Date.now();
+    const lastAt = lastGitRefreshHintAtRef.current.get(dedupKey) ?? 0;
+    if (now - lastAt < GIT_REFRESH_HINT_DEDUP_WINDOW_MS) {
+      return;
+    }
+
+    lastGitRefreshHintAtRef.current.set(dedupKey, now);
+    if (lastGitRefreshHintAtRef.current.size > 600) {
+      const firstKey = lastGitRefreshHintAtRef.current.keys().next().value;
+      if (typeof firstKey === 'string') {
+        lastGitRefreshHintAtRef.current.delete(firstKey);
+      }
+    }
+
+    window.dispatchEvent(new CustomEvent('openchamber:git-refresh-hint', {
+      detail: {
+        directory: params.directory,
+        sessionId: params.sessionId,
+        messageId: params.messageId,
+        toolName: params.toolName,
+        toolState: params.toolState,
+      },
+    }));
+  }, []);
 
 
   const currentSessionIdRef = React.useRef<string | null>(currentSessionId);
@@ -1246,10 +1303,28 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
           const partTime = (messagePart as { time?: { end?: unknown } }).time;
           const partHasEnded = typeof partTime?.end === 'number';
           const toolState = (messagePart as { state?: { status?: unknown } }).state?.status;
+          const normalizedToolState = typeof toolState === 'string' ? toolState.toLowerCase() : null;
           const toolName = typeof (messagePart as { tool?: unknown }).tool === 'string'
             ? (messagePart as { tool: string }).tool.toLowerCase()
             : null;
           const textContent = (messagePart as { text?: unknown }).text;
+
+          if (
+            partType === 'tool'
+            && toolName
+            && GIT_REFRESH_HINT_TOOL_NAMES.has(toolName)
+            && normalizedToolState
+            && GIT_REFRESH_HINT_COMPLETED_STATES.has(normalizedToolState)
+          ) {
+            emitGitRefreshHint({
+              directory,
+              sessionId,
+              messageId,
+              partId: updatedPartId,
+              toolName,
+              toolState: normalizedToolState,
+            });
+          }
 
           if (partType === 'tool' && toolName === 'question') {
             requestPendingQuestionsRefresh();
@@ -1257,7 +1332,7 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
 
           const isStreamingPart = (() => {
             if (partType === 'tool') {
-              return toolState === 'running' || toolState === 'pending';
+              return normalizedToolState === 'running' || normalizedToolState === 'pending';
             }
             if (partType === 'reasoning') {
               return !partHasEnded;
@@ -2093,6 +2168,7 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
     updateSessionActivityPhase,
     repairSessionDerivedState,
     dispatchRuntimeNotification,
+    emitGitRefreshHint,
     writePartTypeHint,
   ]);
 

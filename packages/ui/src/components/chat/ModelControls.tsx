@@ -37,7 +37,6 @@ import { Input } from '@/components/ui/input';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
-import { Switch } from '@/components/ui/switch';
 import { TextLoop } from '@/components/ui/TextLoop';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useIsVSCodeRuntime } from '@/hooks/useRuntimeAPIs';
@@ -350,14 +349,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         ? (sessionSavedAgentName || stickySessionAgentName || currentAgentName)
         : currentAgentName;
 
-    const sessionIdForEditMode = currentSessionId ?? '__global__';
-    const sessionEditMode = useContextStore((state) => {
-        if (!uiAgentName) {
-            return undefined;
-        }
-        return state.getSessionAgentEditMode(sessionIdForEditMode, uiAgentName, 'ask');
-    });
-    const setSessionAgentEditMode = useContextStore((state) => state.setSessionAgentEditMode);
     const {
         toggleFavoriteModel,
         isFavoriteModel,
@@ -506,21 +497,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         return getCurrentAgent?.();
     }, [agents, getCurrentAgent, uiAgentName]);
 
-    const agentEditAction = React.useMemo<PermissionAction>(() => {
-        if (!currentAgent) {
-            return 'deny';
-        }
-        return resolveWildcardPermissionAction(currentAgent.permission, 'edit') ?? 'allow';
-    }, [currentAgent]);
-
-    const selectionContextReady = Boolean(uiAgentName);
-
-    const approveEditsAvailable = agentEditAction === 'ask';
-    const approveEditsChecked = approveEditsAvailable
-        ? sessionEditMode === 'allow' || sessionEditMode === 'full'
-        : agentEditAction === 'allow';
-    const approveEditsDisabled = !selectionContextReady || !approveEditsAvailable;
-
     const sizeVariant: 'mobile' | 'vscode' | 'default' = isMobile ? 'mobile' : isVSCodeRuntime ? 'vscode' : 'default';
     const buttonHeight = sizeVariant === 'mobile' ? 'h-9' : sizeVariant === 'vscode' ? 'h-6' : 'h-8';
     const editToggleIconClass = sizeVariant === 'mobile' ? 'h-5 w-5' : sizeVariant === 'vscode' ? 'h-4 w-4' : 'h-4 w-4';
@@ -544,13 +520,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         }
         return <RiQuestionLine className={combinedClassName} style={iconStyle} />;
     }, [editToggleIconClass]);
-
-    const handleApproveEditsToggle = React.useCallback((checked: boolean) => {
-        if (!selectionContextReady || !currentAgentName || !approveEditsAvailable) {
-            return;
-        }
-        setSessionAgentEditMode(sessionIdForEditMode, currentAgentName, checked ? 'allow' : 'ask', 'ask');
-    }, [approveEditsAvailable, currentAgentName, selectionContextReady, setSessionAgentEditMode, sessionIdForEditMode]);
 
     const currentProvider = getCurrentProvider();
     const models = Array.isArray(currentProvider?.models) ? currentProvider.models : [];
@@ -1819,23 +1788,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 onClose={closeMobilePanel}
                 title="Select agent"
                 contentMaxHeightClassName="max-h-[min(52dvh,360px)]"
-                footer={(
-                    <div className="flex items-center justify-between">
-                        <span
-                            className={cn(
-                                'typography-meta font-medium',
-                                approveEditsDisabled ? 'text-muted-foreground' : 'text-foreground'
-                            )}
-                        >
-                            Auto-approve edits
-                        </span>
-                        <Switch
-                            checked={approveEditsChecked}
-                            disabled={approveEditsDisabled}
-                            onCheckedChange={handleApproveEditsToggle}
-                        />
-                    </div>
-                )}
             >
                 <div className="flex flex-col gap-2">
                     {selectableDesktopAgents.map((agent) => {
@@ -2753,24 +2705,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                         )}
                                     </div>
                                 </ScrollableOverlay>
-                                <DropdownMenuSeparator />
-                                <div className="flex flex-col gap-1 px-1 py-0.5">
-                                    <div className="rounded-xl bg-transparent">
-                                        <div className="flex items-center justify-between px-2 py-2">
-                                            <span className={cn(
-                                                'typography-meta font-medium',
-                                                approveEditsDisabled ? 'text-muted-foreground' : 'text-foreground'
-                                            )}>
-                                                Auto-approve edits
-                                            </span>
-                                            <Switch
-                                                checked={approveEditsChecked}
-                                                disabled={approveEditsDisabled}
-                                                onCheckedChange={handleApproveEditsToggle}
-                                            />
-                                        </div>
-                                    </div>
-                                </div>
                             </DropdownMenuContent>
                         </DropdownMenu>
                         {renderAgentTooltipContent()}
