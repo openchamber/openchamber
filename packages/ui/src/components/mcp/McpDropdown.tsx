@@ -94,7 +94,7 @@ export const McpDropdownContent: React.FC<McpDropdownContentProps> = ({ active, 
 
   return (
     <div className={cn('w-full', className)}>
-      <div className="sticky top-0 z-20 bg-[var(--surface-elevated)] border-b border-[var(--interactive-border)]">
+      <div className="border-b border-[var(--interactive-border)]">
         <div className="flex items-center justify-between gap-3 px-4 py-2.5">
           <div className="min-w-0 flex items-baseline gap-2">
             <div className="typography-ui-header font-semibold text-foreground">MCP Servers</div>
