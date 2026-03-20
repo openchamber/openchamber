@@ -743,6 +743,34 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     });
   }, []);
 
+  const collapseAllProjects = React.useCallback(() => {
+    ignoreIntersectionUntil.current = Date.now() + 150;
+    setCollapsedProjects(() => {
+      const allIds = new Set(projects.map((p) => p.id));
+      try {
+        safeStorage.setItem(PROJECT_COLLAPSE_STORAGE_KEY, JSON.stringify(Array.from(allIds)));
+      } catch { /* ignored */ }
+      if (!isVSCode) {
+        scheduleCollapsedProjectsPersist(allIds);
+      }
+      return allIds;
+    });
+  }, [projects, isVSCode, safeStorage, scheduleCollapsedProjectsPersist]);
+
+  const expandAllProjects = React.useCallback(() => {
+    ignoreIntersectionUntil.current = Date.now() + 150;
+    setCollapsedProjects(() => {
+      const empty = new Set<string>();
+      try {
+        safeStorage.setItem(PROJECT_COLLAPSE_STORAGE_KEY, JSON.stringify([]));
+      } catch { /* ignored */ }
+      if (!isVSCode) {
+        scheduleCollapsedProjectsPersist(empty);
+      }
+      return empty;
+    });
+  }, [isVSCode, safeStorage, scheduleCollapsedProjectsPersist]);
+
   const toggleProject = React.useCallback((projectId: string) => {
     // Ignore intersection events for a short period after toggling
     ignoreIntersectionUntil.current = Date.now() + 150;
@@ -1310,6 +1338,8 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         setSessionSearchQuery={setSessionSearchQuery}
         hasSessionSearchQuery={hasSessionSearchQuery}
         searchMatchCount={searchMatchCount}
+        collapseAllProjects={collapseAllProjects}
+        expandAllProjects={expandAllProjects}
       />
 
       <SidebarProjectsList
