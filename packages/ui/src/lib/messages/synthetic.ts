@@ -1,5 +1,8 @@
 import type { Part } from "@opencode-ai/sdk/v2";
 
+const GITHUB_ISSUE_CONTEXT_PREFIX = 'GitHub issue context (JSON)';
+const GITHUB_PR_CONTEXT_PREFIX = 'GitHub pull request context (JSON)';
+
 export const isSyntheticPart = (part: Part | undefined): boolean => {
     if (!part || typeof part !== "object") {
         return false;
@@ -31,6 +34,20 @@ export const filterSyntheticParts = (parts: Part[] | undefined): Part[] => {
 
     const hasNonSynthetic = parts.some((part) => !isSyntheticPart(part));
 
+    const shouldKeepSyntheticPart = (part: Part): boolean => {
+        if (!isSyntheticPart(part) || part.type !== 'text') {
+            return false;
+        }
+
+        const text = (part as { text?: unknown }).text;
+        if (typeof text !== 'string') {
+            return false;
+        }
+
+        const trimmed = text.trimStart();
+        return trimmed.startsWith(GITHUB_ISSUE_CONTEXT_PREFIX) || trimmed.startsWith(GITHUB_PR_CONTEXT_PREFIX);
+    };
+
     // If there are non-synthetic parts, filter out synthetic ones
     if (hasNonSynthetic) {
         // Optimization: Check if there are actually any synthetic parts to filter.
@@ -39,7 +56,7 @@ export const filterSyntheticParts = (parts: Part[] | undefined): Part[] => {
         if (!hasSynthetic) {
             return parts;
         }
-        return parts.filter((part) => !isSyntheticPart(part));
+        return parts.filter((part) => !isSyntheticPart(part) || shouldKeepSyntheticPart(part));
     }
 
     // If all parts are synthetic, return them all (so message is displayed)

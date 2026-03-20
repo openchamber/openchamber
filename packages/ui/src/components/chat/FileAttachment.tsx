@@ -1,9 +1,10 @@
 import React, { useRef, memo } from 'react';
-import { RiAttachment2, RiCloseLine, RiFileImageLine, RiFileLine, RiFilePdfLine } from '@remixicon/react';
+import { RiAttachment2, RiCloseLine, RiFileImageLine, RiFileLine, RiFilePdfLine, RiGithubLine, RiGitPullRequestLine } from '@remixicon/react';
 import { useSessionStore, type AttachedFile } from '@/stores/useSessionStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { toast } from '@/components/ui';
 import { cn } from '@/lib/utils';
+import { openExternalUrl } from '@/lib/url';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { useIsVSCodeRuntime } from '@/hooks/useRuntimeAPIs';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
@@ -313,6 +314,19 @@ interface FilePart {
   size?: number;
 }
 
+const GITHUB_ISSUE_LINK_MIME = 'application/vnd.github.issue-link';
+const GITHUB_PR_LINK_MIME = 'application/vnd.github.pull-request-link';
+
+const getGitHubLinkKind = (file: FilePart): 'issue' | 'pr' | null => {
+  if (file.mime === GITHUB_ISSUE_LINK_MIME) {
+    return 'issue';
+  }
+  if (file.mime === GITHUB_PR_LINK_MIME) {
+    return 'pr';
+  }
+  return null;
+};
+
 interface MessageFilesDisplayProps {
   files: FilePart[];
   onShowPopup?: (content: ToolPopupContent) => void;
@@ -399,19 +413,39 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false }
             {otherFiles.map((file, index) => {
               const fileName = extractFilename(file.filename || file.url);
               const sizeText = formatFileSize(file.size);
+              const githubLinkKind = getGitHubLinkKind(file);
               return (
                 <Tooltip key={`file-${file.url || file.filename || index}`}>
                   <TooltipTrigger asChild>
-                    <div className="inline-flex items-center bg-muted/30 border border-border/30 typography-meta gap-1 px-2 py-0.5 rounded-lg">
-                      {file.mime?.includes('pdf') ? (
-                        <RiFilePdfLine className="text-muted-foreground h-3.5 w-3.5" />
-                      ) : (
-                        <RiFileLine className="text-muted-foreground h-3.5 w-3.5" />
-                      )}
-                      <div className="overflow-hidden max-w-[140px]">
-                        <span className="truncate block" title={fileName}>{fileName}</span>
+                    {githubLinkKind && file.url ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void openExternalUrl(file.url || '');
+                        }}
+                        className="inline-flex items-center bg-muted/30 border border-border/30 typography-meta gap-1 px-2 py-0.5 rounded-lg text-foreground hover:text-primary transition-colors"
+                      >
+                        {githubLinkKind === 'pr' ? (
+                          <RiGitPullRequestLine className="text-muted-foreground h-3.5 w-3.5" />
+                        ) : (
+                          <RiGithubLine className="text-muted-foreground h-3.5 w-3.5" />
+                        )}
+                        <div className="overflow-hidden max-w-[220px]">
+                          <span className="truncate block" title={fileName}>{fileName}</span>
+                        </div>
+                      </button>
+                    ) : (
+                      <div className="inline-flex items-center bg-muted/30 border border-border/30 typography-meta gap-1 px-2 py-0.5 rounded-lg">
+                        {file.mime?.includes('pdf') ? (
+                          <RiFilePdfLine className="text-muted-foreground h-3.5 w-3.5" />
+                        ) : (
+                          <RiFileLine className="text-muted-foreground h-3.5 w-3.5" />
+                        )}
+                        <div className="overflow-hidden max-w-[140px]">
+                          <span className="truncate block" title={fileName}>{fileName}</span>
+                        </div>
                       </div>
-                    </div>
+                    )}
                   </TooltipTrigger>
                   <TooltipContent>
                     <p>{fileName}{sizeText ? ` (${sizeText})` : ''}</p>
@@ -478,6 +512,7 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false }
         const fileName = extractFilename(file.filename || file.url);
         const isImage = file.mime?.startsWith('image/');
         const sizeText = formatFileSize(file.size);
+        const githubLinkKind = getGitHubLinkKind(file);
 
         if (isImage && file.url) {
           return (
@@ -497,6 +532,40 @@ export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false }
                 {sizeText && <p className="text-xs opacity-80">{sizeText}</p>}
               </div>
             </div>
+          );
+        }
+
+        if (githubLinkKind && file.url) {
+          return (
+            <Tooltip key={index}>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void openExternalUrl(file.url || '');
+                  }}
+                  className={cn(
+                    "flex items-center gap-2 p-2 rounded-lg border border-border/40 bg-muted/10 hover:bg-muted/20 transition-colors text-left",
+                    compact ? "text-xs" : "text-sm"
+                  )}
+                >
+                  <div className="flex-shrink-0">
+                    {githubLinkKind === 'pr' ? (
+                      <RiGitPullRequestLine className={cn("text-muted-foreground", compact ? "h-3.5 w-3.5" : "h-4 w-4")} />
+                    ) : (
+                      <RiGithubLine className={cn("text-muted-foreground", compact ? "h-3.5 w-3.5" : "h-4 w-4")} />
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium truncate">{fileName}</p>
+                    {sizeText && <p className="text-xs text-muted-foreground">{sizeText}</p>}
+                  </div>
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>{fileName}{sizeText ? ` (${sizeText})` : ''}</p>
+              </TooltipContent>
+            </Tooltip>
           );
         }
 
