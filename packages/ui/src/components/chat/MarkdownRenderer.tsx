@@ -11,6 +11,7 @@ import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
 
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { openExternalUrl } from '@/lib/url';
 import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
 import { getStreamdownThemePair } from '@/lib/shiki/appThemeRegistry';
 import { getDefaultTheme } from '@/lib/theme/themes';
@@ -1377,12 +1378,20 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
          mode={isStreaming && !disableStreamAnimation ? 'streaming' : 'static'}
          shikiTheme={shikiThemes}
          className={streamdownClassName}
-         controls={streamdownControls}
-         plugins={streamdownPlugins}
-         components={streamdownComponents}
-         animated={disableStreamAnimation ? undefined : streamdownAnimated}
-         isAnimating={disableStreamAnimation ? false : isStreaming}
-        >
+          controls={streamdownControls}
+          plugins={streamdownPlugins}
+          components={streamdownComponents}
+          animated={disableStreamAnimation ? undefined : streamdownAnimated}
+          isAnimating={disableStreamAnimation ? false : isStreaming}
+          // @ts-expect-error Streamdown type missing linkSafety in older minor
+          linkSafety={{
+            enabled: true,
+            onLinkCheck: async (url: string) => {
+              await openExternalUrl(url);
+              return false;
+            },
+          }}
+         >
         {content}
       </Streamdown>
     </div>
@@ -1460,7 +1469,17 @@ export const SimpleMarkdownRenderer: React.FC<{
         plugins={streamdownPlugins}
         components={streamdownComponents}
         // @ts-expect-error Streamdown type missing linkSafety in older minor
-        linkSafety={disableLinkSafety ? { enabled: false } : undefined}
+        linkSafety={
+          disableLinkSafety
+            ? { enabled: false }
+            : {
+                enabled: true,
+                onLinkCheck: async (url: string) => {
+                  await openExternalUrl(url);
+                  return false;
+                },
+              }
+        }
       >
         {renderedContent}
       </Streamdown>

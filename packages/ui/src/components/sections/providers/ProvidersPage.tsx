@@ -17,6 +17,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
 import { cn } from '@/lib/utils';
 import { copyTextToClipboard } from '@/lib/clipboard';
+import { openExternalUrl } from '@/lib/url';
 import type { ModelMetadata } from '@/types';
 
 const COMPACT_NUMBER_FORMATTER = new Intl.NumberFormat('en-US', {
@@ -406,7 +407,7 @@ export const ProvidersPage: React.FC = () => {
       }));
 
       if (urlCandidate) {
-        window.open(urlCandidate, '_blank', 'noopener,noreferrer');
+        void openExternalUrl(urlCandidate);
       }
       setPendingOAuth({ providerId, methodIndex });
       toast.message('Complete the OAuth flow in your browser');
@@ -721,7 +722,7 @@ export const ProvidersPage: React.FC = () => {
                                 <div className="flex items-center gap-2 mt-2">
                                   <Input value={oauthDetails[codeKey]?.url} readOnly className="text-xs text-muted-foreground" />
                                   <div className="flex gap-1 shrink-0">
-                                    <Button variant="outline" size="xs" className="!font-normal" onClick={() => window.open(oauthDetails[codeKey]?.url, '_blank', 'noopener,noreferrer')}>Open</Button>
+                                    <Button variant="outline" size="xs" className="!font-normal" onClick={() => openExternalUrl(oauthDetails[codeKey]?.url ?? '')}>Open</Button>
                                     <Button variant="outline" size="xs" className="!font-normal" onClick={() => handleCopyOAuthLink(oauthDetails[codeKey]?.url ?? '')}>Copy</Button>
                                   </div>
                                 </div>
@@ -914,7 +915,7 @@ export const ProvidersPage: React.FC = () => {
                             <div className="flex items-center gap-2 mt-2">
                               <Input value={oauthDetails[codeKey]?.url} readOnly className="text-xs text-muted-foreground" />
                               <div className="flex gap-1 shrink-0">
-                                <Button variant="outline" size="xs" className="!font-normal" onClick={() => window.open(oauthDetails[codeKey]?.url, '_blank', 'noopener,noreferrer')}>Open</Button>
+                                <Button variant="outline" size="xs" className="!font-normal" onClick={() => openExternalUrl(oauthDetails[codeKey]?.url ?? '')}>Open</Button>
                                 <Button variant="outline" size="xs" className="!font-normal" onClick={() => handleCopyOAuthLink(oauthDetails[codeKey]?.url ?? '')}>Copy</Button>
                               </div>
                             </div>

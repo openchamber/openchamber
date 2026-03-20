@@ -2355,6 +2355,10 @@ fn build_init_script(local_origin: &str) -> String {
     // Remove it if present so the UI-owned host switcher is the only one.
     init_script.push_str("\ntry{var old=document.getElementById('__oc-instance-switcher');if(old)old.remove();}catch(_e){}");
 
+    // Override window.open to use Tauri shell.open in desktop runtime
+    // This ensures external links open in system browser instead of new window in the app
+    init_script.push_str("\ntry{(function(){var _origOpen=window.open;window.open=function(url,target, features){if(typeof url==='string'&&(url.startsWith('http://')||url.startsWith('https://'))){var t=window.__TAURI__;if(t&&t.shell&&t.shell.open){t.shell.open(url);return null;}}return _origOpen.call(window, url, target, features);};})();}catch(_e){}");
+
     if !cfg!(debug_assertions) {
         init_script.push_str("\ntry{document.addEventListener('contextmenu',function(e){var t=e&&e.target;if(!t||typeof t.closest!=='function'){e.preventDefault();return;}if(t.closest('.terminal-viewport-container,[data-oc-allow-native-contextmenu],a,input,textarea,[contenteditable=\"true\"]')){return;}e.preventDefault();},true);}catch(_e){}");
     }
