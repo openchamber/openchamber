@@ -427,7 +427,7 @@ export const ProjectActionsSection: React.FC<ProjectActionsSectionProps> = ({ pr
             onClick={handleSave}
             disabled={!canSave}
           >
-            {isSaving ? 'Saving...' : 'Save Actions'}
+            {isSaving ? t('common.saving') : t('projectActions.saveActions')}
           </Button>
         </div>
       </section>

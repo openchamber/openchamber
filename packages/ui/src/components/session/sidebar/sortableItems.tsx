@@ -310,7 +310,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="bottom" sideOffset={4}>
-                      <p>{isRepo ? 'New draft session' : 'New session'}</p>
+                      <p>{isRepo ? t('sessionSidebar.newDraftSession') : t('sessionSidebar.newSession')}</p>
                     </TooltipContent>
                   </Tooltip>
                 </div>
