@@ -1393,6 +1393,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         onOpenShortcuts={toggleHelpDialog}
         onOpenAbout={() => setAboutDialogOpen(true)}
         onOpenUpdate={handleOpenUpdateDialog}
+        showRuntimeButtons={!isVSCode}
         showUpdateButton={showSidebarUpdateButton}
       />
 
