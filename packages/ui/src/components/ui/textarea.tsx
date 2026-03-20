@@ -17,7 +17,10 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
         ref={ref as React.Ref<HTMLTextAreaElement>}
         disableHorizontal
         fillContainer={fillContainer}
-        outerClassName={cn("w-full rounded-lg focus-within:ring-1 focus-within:ring-primary/50", outerClassName)}
+        outerClassName={cn(
+          "w-full rounded-lg focus-within:ring-1 focus-within:ring-inset focus-within:ring-primary/50",
+          outerClassName
+        )}
         scrollbarClassName={scrollbarClassName}
         className={cn(
           "text-foreground border border-border/80 placeholder:text-muted-foreground appearance-none dark:bg-input/30 flex min-h-16 w-full rounded-lg bg-transparent px-3 py-2 typography-markdown outline-none focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 md:typography-ui-label",
