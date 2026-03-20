@@ -835,6 +835,27 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     await loadDirectory(root);
   }, [loadDirectory, root]);
 
+  /**
+   * Incrementally refresh a single directory without nuking the rest of the
+   * tree.  After the operation the parent directory is reloaded in-place so
+   * the new/renamed/deleted entry becomes visible immediately while every
+   * other expanded directory keeps its cached children.
+   */
+  const refreshDirectory = React.useCallback(async (dirPath: string) => {
+    if (!dirPath) {
+      await refreshRoot();
+      return;
+    }
+    const normalized = normalizePath(dirPath);
+    // Remove from loaded set so loadDirectory will actually fetch again.
+    loadedDirsRef.current = new Set(loadedDirsRef.current);
+    loadedDirsRef.current.delete(normalized);
+    // Also cancel any in-flight request for this dir so the new fetch wins.
+    inFlightDirsRef.current = new Set(inFlightDirsRef.current);
+    inFlightDirsRef.current.delete(normalized);
+    await loadDirectory(normalized);
+  }, [loadDirectory, refreshRoot]);
+
   const lastFilesViewDirRef = React.useRef<string>('');
   const lastFilesViewTreeKeyRef = React.useRef<string>('');
 
@@ -905,7 +926,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         .then(async (result) => {
           if (result.success) {
             toast.success('File created');
-            await refreshRoot();
+            await refreshDirectory(parentPath);
           }
           finishDialogOperation();
         })
@@ -928,7 +949,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         .then(async (result) => {
           if (result.success) {
             toast.success('Folder created');
-            await refreshRoot();
+            await refreshDirectory(parentPath);
           }
           finishDialogOperation();
         })
@@ -959,7 +980,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         .then(async (result) => {
           if (result.success) {
             toast.success('Renamed successfully');
-            await refreshRoot();
+            await refreshDirectory(parentDir);
             if (root) {
               removeOpenPathsByPrefix(root, oldPath);
             }
@@ -990,15 +1011,17 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         return;
       }
 
-      await files.delete(dialogData.path)
+      const deletedPath = dialogData.path;
+      const parentDir = deletedPath.split('/').slice(0, -1).join('/');
+      await files.delete(deletedPath)
         .then(async (result) => {
           if (result.success) {
             toast.success('Deleted successfully');
-            await refreshRoot();
+            await refreshDirectory(parentDir);
             if (root) {
-              removeOpenPathsByPrefix(root, dialogData.path);
+              removeOpenPathsByPrefix(root, deletedPath);
             }
-            if (selectedFile?.path === dialogData.path || selectedFile?.path.startsWith(`${dialogData.path}/`)) {
+            if (selectedFile?.path === deletedPath || selectedFile?.path.startsWith(`${deletedPath}/`)) {
               if (root) {
                 setSelectedPath(root, null);
               }
@@ -1019,7 +1042,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     }
 
     done();
-  }, [activeDialog, dialogData, dialogInputValue, files, refreshRoot, isMobile, removeOpenPathsByPrefix, root, selectedFile?.path, setSelectedPath]);
+  }, [activeDialog, dialogData, dialogInputValue, files, refreshDirectory, isMobile, removeOpenPathsByPrefix, root, selectedFile?.path, setSelectedPath]);
 
   React.useEffect(() => {
     if (!currentDirectory) {
