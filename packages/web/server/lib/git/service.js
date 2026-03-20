@@ -237,10 +237,18 @@ const createGit = async (directory) => {
   const env = await buildGitEnv();
   const spawnOptions = { windowsHide: true };
   const binary = getGitBinary();
+  const hasCustomBinary = typeof binary === 'string' && binary.trim() && binary !== 'git' && binary !== 'git.exe';
+  const unsafe = hasCustomBinary ? { allowUnsafeCustomBinary: true } : undefined;
   if (!directory) {
-    return simpleGit({ env, spawnOptions, binary });
+    return simpleGit({ env, spawnOptions, binary, unsafe });
   }
-  return simpleGit({ baseDir: normalizeDirectoryPath(directory), env, spawnOptions, binary });
+  return simpleGit({
+    baseDir: normalizeDirectoryPath(directory),
+    env,
+    spawnOptions,
+    binary,
+    unsafe,
+  });
 };
 
 const normalizeDirectoryPath = (value) => {
