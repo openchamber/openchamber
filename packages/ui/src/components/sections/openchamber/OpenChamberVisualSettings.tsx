@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { RiRestartLine, RiInformationLine } from '@remixicon/react';
 
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -151,8 +152,11 @@ interface OpenChamberVisualSettingsProps {
 }
 
 export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps> = ({ visibleSettings }) => {
+    const { t } = useTranslation();
     const { isMobile } = useDeviceInfo();
     const { browserTab } = usePwaDetection();
+    const language = useUIStore(state => state.language);
+    const setLanguage = useUIStore(state => state.setLanguage);
     const directoryShowHidden = useDirectoryShowHidden();
     const showReasoningTraces = useUIStore(state => state.showReasoningTraces);
     const setShowReasoningTraces = useUIStore(state => state.setShowReasoningTraces);
@@ -395,6 +399,28 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
 
     return (
         <div className="space-y-8">
+
+                {/* --- Language --- */}
+                <div className="mb-8 space-y-3">
+                    <section className="px-2 pb-2 pt-0 space-y-0.5">
+                        <div className="flex items-center justify-between gap-2">
+                            <span className="typography-ui-header font-medium text-foreground">
+                                {t('language.label')}
+                            </span>
+                            <div className="flex items-center gap-2">
+                                <Select value={language} onValueChange={setLanguage}>
+                                    <SelectTrigger aria-label={t('language.label')} className="w-fit">
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="en">{t('language.en')}</SelectItem>
+                                        <SelectItem value="vi">{t('language.vi')}</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        </div>
+                    </section>
+                </div>
 
                 {/* --- Appearance & Themes --- */}
                 {hasAppearanceSettings && (
