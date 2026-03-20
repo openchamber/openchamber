@@ -122,6 +122,7 @@ const T_CALL_PATTERN = /\bt\s*\(\s*(['"])([^'"`]+?)\1/g;
 const T_DYNAMIC_PREFIX_PATTERN = /\bt\s*\(\s*`([a-z][\w-]*(?:\.[a-z][\w-]*)*\.)\$\{[^}]+\}[^`]*`\s*[),]/g;
 const T_IDENTIFIER_CALL_PATTERN = /\bt\s*\(\s*([A-Za-z_$][\w$]*)\s*[),]/g;
 const IDENTIFIER_KEY_ASSIGN_PATTERN = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(['"])([a-z][\w-]*(?:\.[a-z][\w-]*)+)\2/g;
+const IDENTIFIER_DYNAMIC_PREFIX_ASSIGN_PATTERN = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*`([a-z][\w-]*(?:\.[a-z][\w-]*)*\.)\$\{[^}]+\}[^`]*`/g;
 const I18N_KEY_LITERAL_PATTERN = /(['"])([a-z][\w-]*(?:\.[a-z][\w-]*)+)\1/g;
 const I18N_CALL_PATTERN = /\b(?:i18n\.)?t\s*\(/;
 const ONLY_SYMBOLS_PATTERN = /^[\s\d_\-:/.#()[\]{}|]+$/;
@@ -412,6 +413,7 @@ function flattenLocaleKeys(value, prefix = '') {
 
 function collectUsages(sourceRoot) {
   const usages = [];
+  const dynamicPrefixes = new Set();
   const files = walkFiles(sourceRoot, SUPPORTED_SOURCE_EXTENSIONS);
   for (const filePath of files) {
     let text = '';
@@ -431,8 +433,16 @@ function collectUsages(sourceRoot) {
         usages.push({ key, filePath, lineNumber: i + 1 });
       }
     }
+
+    T_DYNAMIC_PREFIX_PATTERN.lastIndex = 0;
+    let prefixMatch;
+    while ((prefixMatch = T_DYNAMIC_PREFIX_PATTERN.exec(text)) !== null) {
+      const prefix = String(prefixMatch[1] ?? '').trim();
+      if (!prefix) continue;
+      dynamicPrefixes.add(prefix);
+    }
   }
-  return usages;
+  return { usages, dynamicPrefixes };
 }
 
 function collectI18nReferences(sourceRoot, allowFlatKeys) {
@@ -470,6 +480,7 @@ function collectI18nReferences(sourceRoot, allowFlatKeys) {
 
     // 3) Simple identifier flow: const k='a.b'; t(k)
     const identifierToKey = new Map();
+    const identifierToDynamicPrefix = new Map();
     IDENTIFIER_KEY_ASSIGN_PATTERN.lastIndex = 0;
     let assignMatch;
     while ((assignMatch = IDENTIFIER_KEY_ASSIGN_PATTERN.exec(text)) !== null) {
@@ -481,13 +492,27 @@ function collectI18nReferences(sourceRoot, allowFlatKeys) {
       inferredKeys.add(key);
     }
 
+    IDENTIFIER_DYNAMIC_PREFIX_ASSIGN_PATTERN.lastIndex = 0;
+    let dynamicAssignMatch;
+    while ((dynamicAssignMatch = IDENTIFIER_DYNAMIC_PREFIX_ASSIGN_PATTERN.exec(text)) !== null) {
+      const ident = String(dynamicAssignMatch[1] ?? '');
+      const prefix = String(dynamicAssignMatch[2] ?? '').trim();
+      if (!ident || !prefix) continue;
+      identifierToDynamicPrefix.set(ident, prefix);
+    }
+
     T_IDENTIFIER_CALL_PATTERN.lastIndex = 0;
     let identCallMatch;
     while ((identCallMatch = T_IDENTIFIER_CALL_PATTERN.exec(text)) !== null) {
       const ident = String(identCallMatch[1] ?? '');
       const mapped = identifierToKey.get(ident);
-      if (!mapped) continue;
-      usedKeys.add(mapped);
+      if (mapped) {
+        usedKeys.add(mapped);
+      }
+      const dynamicPrefix = identifierToDynamicPrefix.get(ident);
+      if (dynamicPrefix) {
+        dynamicPrefixes.add(dynamicPrefix);
+      }
     }
 
     // 4) Conservative fallback: keep any i18n-like key literal.
@@ -763,12 +788,19 @@ function runCheckKeys(flags) {
     return 2;
   }
 
-  const usages = collectUsages(sourceRoot);
+  const usageData = collectUsages(sourceRoot);
+  const usages = usageData.usages;
+  const inferredReferences = collectI18nReferences(sourceRoot, allowFlatKeys);
+  const detectedDynamicPrefixes = [...new Set([
+    ...allowDynamicPrefix,
+    ...usageData.dynamicPrefixes,
+    ...inferredReferences.dynamicPrefixes,
+  ])];
   const missingByLocale = new Map(localePaths.map((lp) => [lp, []]));
 
   for (const usage of usages) {
     if (!allowFlatKeys && !usage.key.includes('.')) continue;
-    if (shouldAllowDynamic(usage.key, allowDynamicPrefix)) continue;
+    if (shouldAllowDynamic(usage.key, detectedDynamicPrefixes)) continue;
     for (const [localePath, keys] of localeKeyMap.entries()) {
       if (!keys.has(usage.key)) {
         missingByLocale.get(localePath).push(usage);
@@ -779,6 +811,9 @@ function runCheckKeys(flags) {
   const totalMissing = Array.from(missingByLocale.values()).reduce((sum, items) => sum + items.length, 0);
   if (totalMissing === 0) {
     console.log(`OK: 未发现缺失 i18n keys。已检查 locale: ${localePaths.map(cwdRel).join(', ')}`);
+    if (detectedDynamicPrefixes.length > 0) {
+      console.log(`检测到动态 i18n 前缀: ${detectedDynamicPrefixes.sort().join(', ')}`);
+    }
     return 0;
   }
 
@@ -794,6 +829,9 @@ function runCheckKeys(flags) {
       const first = items.find((i) => i.key === key);
       console.log(`  - ${key}  (${cwdRel(first.filePath)}:${first.lineNumber})`);
     }
+  }
+  if (detectedDynamicPrefixes.length > 0) {
+    console.log(`\n动态 i18n 前缀: ${detectedDynamicPrefixes.sort().join(', ')}`);
   }
   return 1;
 }
@@ -862,25 +900,9 @@ function runCleanUnused(flags) {
     return 2;
   }
 
-  const sourceCorpus = buildSourceCorpus(sourceRoot);
-  const keepPrefixes = [...new Set([...allowDynamicPrefix])];
-
-  const usedKeys = new Set();
-  for (const localePath of localePaths) {
-    if (!fs.existsSync(localePath)) continue;
-    try {
-      const localeObj = loadLocaleObject(localePath);
-      const localeKeys = flattenLocaleKeys(localeObj);
-      for (const key of localeKeys) {
-        if (!allowFlatKeys && !key.includes('.')) continue;
-        if (sourceCorpus.includes(key)) {
-          usedKeys.add(key);
-        }
-      }
-    } catch {
-      // Parse/IO error is handled below with explicit reporting when processing locale.
-    }
-  }
+  const references = collectI18nReferences(sourceRoot, allowFlatKeys);
+  const usedKeys = references.usedKeys;
+  const keepPrefixes = [...new Set([...allowDynamicPrefix, ...references.dynamicPrefixes])];
 
   let totalRemoved = 0;
   for (const localePath of localePaths) {
@@ -936,7 +958,10 @@ function runCleanUnused(flags) {
 }
 
 export {
+  collectI18nReferences,
   looksLikeHumanText,
+  removeUnusedKeys,
+  runCheckKeys,
   scanFileForGaps,
   scanFileForGapsAst,
   runScanGaps,

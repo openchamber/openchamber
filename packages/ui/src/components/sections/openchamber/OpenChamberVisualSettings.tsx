@@ -443,7 +443,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 )}
                                                 onClick={() => setThemeMode(option.value)}
                                             >
-                                                {option.label}
+                                                {t(option.label)}
                                             </Button>
                                         ))}
                                     </div>

@@ -1156,7 +1156,7 @@ export const TunnelSettings: React.FC = () => {
                         }}
                         disabled={isSavingMode || state === 'starting' || state === 'stopping'}
                       >
-                        {option.label}
+                        {t(option.label)}
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent sideOffset={8} className="max-w-xs">
@@ -1183,7 +1183,7 @@ export const TunnelSettings: React.FC = () => {
                 </SelectTrigger>
                 <SelectContent>
                   {BOOTSTRAP_TTL_OPTIONS.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                    <SelectItem key={option.value} value={option.value}>{t(option.label)}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -1203,7 +1203,7 @@ export const TunnelSettings: React.FC = () => {
                 </SelectTrigger>
                 <SelectContent>
                   {SESSION_TTL_OPTIONS.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                    <SelectItem key={option.value} value={option.value}>{t(option.label)}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>

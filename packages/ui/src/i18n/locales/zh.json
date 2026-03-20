@@ -8,7 +8,6 @@
     "edit": "编辑",
     "close": "关闭",
     "loading": "加载中...",
-    "no": "否",
     "ok": "确定",
     "back": "返回",
     "refresh": "刷新",
@@ -36,9 +35,6 @@
     "title": "设置",
     "general": "通用",
     "language": "语言",
-    "theme": "主题",
-    "fontSize": "字体大小",
-    "terminal": "终端",
     "jumpToPages": "跳转到常用页面。",
     "providers": "提供商",
     "providersDescription": "连接模型 + 凭据",
@@ -86,7 +82,6 @@
     "openPlan": "打开计划",
     "openInstanceUsageMcp": "打开实例、使用量和 MCP",
     "openServicesUsageMcp": "打开服务、使用量和 MCP",
-    "current": "当前",
     "currentInstance": "当前实例",
     "services": "服务",
     "nextTab": "下一个标签",
@@ -291,7 +286,6 @@
     "discard": "放弃",
     "openFiles": "打开的文件",
     "selectAFile": "选择一个文件",
-    "switchToEditMode": "切换到编辑模式",
     "findInFile": "在文件中查找",
     "copyFailed": "复制失败",
     "copyFileContents": "复制文件内容",
@@ -702,7 +696,6 @@
   "historySection": {
     "title": "历史",
     "noCommitsFound": "未找到提交",
-    "commits": "提交",
     "commitsPlaceholder": "提交",
     "commitsCount": "{{count}} 条提交"
   },
@@ -713,7 +706,7 @@
     "revertAllChanges": "还原所有更改？",
     "discardLocalChangesForFiles": "这将丢弃列表中 {{count}} 个文件的本地更改。",
     "discardLocalChangesForFiles_other": "这将丢弃列表中 {{count}} 个文件的本地更改。",
-    "revertAll": "全部还原"
+    "revertAllChanges": "还原所有更改？"
   },
   "gitStash": {
     "operationMerge": "合并",
@@ -1575,8 +1568,6 @@
     "importSshConfig": "从 SSH 配置导入",
     "loadingSshHosts": "正在加载 SSH 主机...",
     "noSshConfigHosts": "未找到 SSH 配置主机。",
-    "create": "创建",
-    "cancel": "取消",
     "actions": "操作",
     "actionsDescription": "连接、检查日志和管理此实例。",
     "connect": "连接",
@@ -1719,9 +1710,7 @@
     "connectLinkTtl": "连接链接 TTL",
     "tunnelSessionTtl": "隧道会话 TTL",
     "quickTunnelWarning": "快速隧道是尽力而为的，Cloudflare 不保证正常运行时间。",
-    "reliableAccess": "如需更可靠的长期访问，请切换到命名隧道模式。",
     "tunnelType": "隧道类型",
-    "add": "添加",
     "hostname": "主机名：",
     "pasteToken": "为此隧道粘贴令牌",
     "savedTokenAvailable": "可用已保存的令牌（可选替换）",
@@ -1770,7 +1759,6 @@
     "tunnelStopped": "隧道已停止",
     "connectCopied": "连接链接已复制",
     "failedCopyUrl": "复制 URL 失败",
-    "failedSaveSelected": "保存选定的命名隧道失败",
     "failedSaveSelectedManagedRemoteTunnel": "保存所选托管远程隧道失败",
     "tunnelNameRequired": "隧道名称是必填项",
     "managedRemoteTunnelHostnameRequired": "托管远程隧道主机名是必填项",
@@ -1911,11 +1899,8 @@
     "deleteServerPrompt": "删除 \"{{name}}\"？",
     "deleteServerDescription": "这将从中移除该服务器",
     "opencodeNeedsReload": "OpenCode 需要重新加载。",
-    "preview": "预览",
-    "savedReload": "已保存。OpenCode 重新加载中…",
-    "selectServer": "从侧边栏选择 MCP 服务器",
-    "orAddNew": "或添加新服务器",
-    "configureNew": "配置新 MCP 服务器"
+    "savedReloading": "已保存。OpenCode 重新加载中…",
+    "configureNewServer": "配置新 MCP 服务器"
   },
   "skillsCatalogPage": {
     "title": "技能目录",
@@ -1976,9 +1961,7 @@
     "desktopSshForward": "桌面 SSH 转发",
     "useOutputOrManualUrl": "使用输出/手动 URL",
     "noEnabledLocalSshForwards": "没有可用的本地 SSH 转发。",
-    "noActions": "尚未配置动作。",
-    "actionName": "名称",
-    "desktopSsh": "桌面 SSH 转发"
+    "desktopSshForward": "桌面 SSH 转发"
   },
   "skillsPage": {
     "skillNameRequired": "技能名称为必填项",
@@ -2036,11 +2019,11 @@
     "content": "内容",
     "fileContentPlaceholder": "文件内容...",
     "createFile": "创建文件",
-    "basicInfo": "基本信息",
-    "configureNew": "配置新技能",
-    "modifyFile": "修改文件内容",
-    "selectSkill": "从侧边栏选择技能",
-    "orCreateNew": "或创建新技能"
+    "basicInformation": "基本信息",
+    "configureNewSkill": "配置新技能",
+    "modifyFileContent": "修改文件内容",
+    "selectSkillFromSidebar": "请从侧边栏选择技能",
+    "orCreateNewOne": "或创建一个新的"
   },
   "commandsPage": {
     "commandNameRequired": "命令名称是必填项",
@@ -2070,9 +2053,9 @@
     "commandTemplate": "命令模板",
     "commandTemplatePlaceholder": "您的命令模板在这里...",
     "templateHelp": "$ARGUMENTS 用户输入 · !`cmd` shell 输出 · @file 文件内容",
-    "configureNew": "配置新斜杠命令",
-    "selectCommand": "从侧边栏选择命令",
-    "orCreateNew": "或创建新命令"
+    "configureNewSlashCommand": "配置新斜杠命令",
+    "selectCommandFromSidebar": "从侧边栏选择命令",
+    "orCreateNewOne": "或创建新命令"
   },
   "worktreeSectionContent": {
     "selectProject": "选择项目",
@@ -2258,6 +2241,29 @@
       "themeCyclingPersists": "循环切换主题会跨会话记住你的偏好"
     }
   },
+  "keyboardShortcutActions": {
+    "open_command_palette": "打开命令面板",
+    "focus_input": "聚焦输入框",
+    "open_settings": "打开设置",
+    "toggle_terminal": "切换终端停靠栏",
+    "toggle_terminal_expanded": "切换终端展开状态",
+    "toggle_sidebar": "切换侧边栏",
+    "toggle_right_sidebar": "切换右侧边栏",
+    "open_right_sidebar_git": "打开右侧边栏 Git 标签",
+    "open_right_sidebar_files": "打开右侧边栏文件标签",
+    "cycle_right_sidebar_tab": "循环右侧边栏标签",
+    "new_chat": "新建会话",
+    "new_chat_worktree": "在 Worktree 中新建会话",
+    "open_timeline": "打开时间线",
+    "open_help": "打开键盘快捷键",
+    "toggle_context_plan": "切换计划上下文面板",
+    "toggle_services_menu": "切换服务菜单",
+    "cycle_services_tab": "循环服务标签",
+    "cycle_theme": "循环切换主题",
+    "cycle_favorite_model_forward": "向前循环切换收藏模型",
+    "cycle_favorite_model_backward": "向后循环切换收藏模型",
+    "expand_input": "展开输入框"
+  },
   "sessionRetentionSettings": {
     "title": "会话保留",
     "description": "在设定保留周期后自动清理旧会话。",
@@ -2266,6 +2272,8 @@
     "retentionPeriodInDays": "保留天数",
     "days": "天",
     "manualCleanup": "手动清理",
+    "runCleanupNow": "立即运行清理",
+    "cleaningUp": "清理中...",
     "eligibleNow": "当前可清理",
     "noSessionsEligible": "当前没有可清理的会话",
     "deletedSessions": "已删除 {{count}} 个会话",

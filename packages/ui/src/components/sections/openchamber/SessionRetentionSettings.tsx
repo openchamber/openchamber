@@ -121,7 +121,7 @@ export const SessionRetentionSettings: React.FC = () => {
               disabled={isRunning}
               className="!font-normal"
             >
-              {isRunning ? 'Cleaning up...' : 'Run cleanup now'}
+              {isRunning ? t('sessionRetentionSettings.cleaningUp') : t('sessionRetentionSettings.runCleanupNow')}
             </Button>
           </div>
         </div>

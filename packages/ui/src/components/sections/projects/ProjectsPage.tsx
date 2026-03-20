@@ -425,7 +425,7 @@ export const ProjectsPage: React.FC = () => {
                       onClick={() => fileInputRef.current?.click()}
                       disabled={isUploadingIcon}
                     >
-                      {isUploadingIcon ? 'Uploading...' : 'Upload Icon'}
+                      {isUploadingIcon ? t('projectEdit.uploading') : t('projectEdit.uploadIcon')}
                     </Button>
                     <Button
                       size="xs"
@@ -434,7 +434,7 @@ export const ProjectsPage: React.FC = () => {
                       onClick={() => void handleDiscoverIcon()}
                       disabled={isDiscoveringIcon}
                     >
-                      {isDiscoveringIcon ? 'Discovering...' : 'Discover Favicon'}
+                      {isDiscoveringIcon ? t('projectEdit.discovering') : t('projectEdit.discoverFavicon')}
                     </Button>
                   </>
                 )}
@@ -446,7 +446,7 @@ export const ProjectsPage: React.FC = () => {
                     onClick={() => void handleRemoveImageIcon()}
                     disabled={isRemovingCustomIcon}
                   >
-                    {isRemovingCustomIcon ? 'Removing...' : 'Remove Project Icon'}
+                    {isRemovingCustomIcon ? t('projectEdit.removing') : t('projectEdit.removeProjectIcon')}
                   </Button>
                 )}
                 {pendingRemoveImageIcon && (

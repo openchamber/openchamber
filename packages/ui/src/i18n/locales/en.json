@@ -8,7 +8,6 @@
     "edit": "Edit",
     "close": "Close",
     "loading": "Loading...",
-    "no": "No",
     "ok": "OK",
     "back": "Back",
     "refresh": "Refresh",
@@ -36,9 +35,6 @@
     "title": "Settings",
     "general": "General",
     "language": "Language",
-    "theme": "Theme",
-    "fontSize": "Font Size",
-    "terminal": "Terminal",
     "jumpToPages": "Jump to common pages.",
     "providers": "Providers",
     "providersDescription": "Connect models + credentials",
@@ -86,7 +82,6 @@
     "openPlan": "Open plan",
     "openInstanceUsageMcp": "Open instance, usage and MCP",
     "openServicesUsageMcp": "Open services, usage and MCP",
-    "current": "Current",
     "currentInstance": "Current instance",
     "services": "Services",
     "nextTab": "next tab",
@@ -291,7 +286,6 @@
     "discard": "Discard",
     "openFiles": "Open files",
     "selectAFile": "Select a file",
-    "switchToEditMode": "Switch to edit mode",
     "findInFile": "Find in file",
     "copyFailed": "Failed to copy",
     "copyFileContents": "Copy file contents",
@@ -702,7 +696,6 @@
   "historySection": {
     "title": "History",
     "noCommitsFound": "No commits found",
-    "commits": "Commits",
     "commitsPlaceholder": "Commits",
     "commitsCount": "{{count}} commits"
   },
@@ -713,7 +706,7 @@
     "revertAllChanges": "Revert all changes?",
     "discardLocalChangesForFiles": "This will discard local changes for {{count}} file in the list.",
     "discardLocalChangesForFiles_other": "This will discard local changes for {{count}} files in the list.",
-    "revertAll": "Revert all"
+    "revertAllChanges": "Revert all changes?"
   },
   "gitStash": {
     "operationMerge": "Merge",
@@ -1488,8 +1481,6 @@
     "importSshConfig": "Import from SSH config",
     "loadingSshHosts": "Loading SSH hosts...",
     "noSshConfigHosts": "No SSH config hosts found.",
-    "create": "Create",
-    "cancel": "Cancel",
     "actions": "Actions",
     "actionsDescription": "Connect, inspect logs, and manage this instance.",
     "connect": "Connect",
@@ -1632,9 +1623,7 @@
     "connectLinkTtl": "Connect link TTL",
     "tunnelSessionTtl": "Tunnel session TTL",
     "quickTunnelWarning": "Quick Tunnel is best effort and Cloudflare does not guarantee uptime.",
-    "reliableAccess": "For more reliable long-lived access, switch to Named Tunnel mode.",
     "tunnelType": "Tunnel type",
-    "add": "Add",
     "hostname": "Hostname:",
     "pasteToken": "Paste token for this tunnel",
     "savedTokenAvailable": "Saved token available (optional to replace)",
@@ -1683,7 +1672,6 @@
     "tunnelStopped": "Tunnel stopped",
     "connectCopied": "Connect link copied",
     "failedCopyUrl": "Failed to copy URL",
-    "failedSaveSelected": "Failed to save selected named tunnel",
     "failedSaveSelectedManagedRemoteTunnel": "Failed to save selected managed remote tunnel",
     "tunnelNameRequired": "Tunnel name is required",
     "managedRemoteTunnelHostnameRequired": "Managed remote tunnel hostname is required",
@@ -1824,11 +1812,8 @@
     "deleteServerPrompt": "Delete \"{{name}}\"?",
     "deleteServerDescription": "This removes the server from",
     "opencodeNeedsReload": "OpenCode will need to reload.",
-    "preview": "Preview",
-    "savedReload": "Saved. OpenCode reloading…",
-    "selectServer": "Select an MCP server from the sidebar",
-    "orAddNew": "or add a new one",
-    "configureNew": "Configure a new MCP server"
+    "savedReloading": "Saved. OpenCode reloading…",
+    "configureNewServer": "Configure a new MCP server"
   },
   "skillsCatalogPage": {
     "title": "Skills Catalog",
@@ -1889,9 +1874,7 @@
     "desktopSshForward": "Desktop SSH forward",
     "useOutputOrManualUrl": "Use output/manual URL",
     "noEnabledLocalSshForwards": "No enabled local SSH forwards available.",
-    "noActions": "No actions configured yet.",
-    "actionName": "Action name",
-    "desktopSsh": "Desktop SSH forward"
+    "desktopSshForward": "Desktop SSH forward"
   },
   "skillsPage": {
     "skillNameRequired": "Skill name is required",
@@ -1949,11 +1932,11 @@
     "content": "Content",
     "fileContentPlaceholder": "File content...",
     "createFile": "Create File",
-    "basicInfo": "Basic Information",
-    "configureNew": "Configure a new skill",
-    "modifyFile": "Modify the file content",
-    "selectSkill": "Select a skill from the sidebar",
-    "orCreateNew": "or create a new one"
+    "basicInformation": "Basic Information",
+    "configureNewSkill": "Configure a new skill",
+    "modifyFileContent": "Modify the file content",
+    "selectSkillFromSidebar": "Select a skill from the sidebar",
+    "orCreateNewOne": "or create a new one"
   },
   "commandsPage": {
     "commandNameRequired": "Command name is required",
@@ -1983,9 +1966,9 @@
     "commandTemplate": "Command Template",
     "commandTemplatePlaceholder": "Your command template here...",
     "templateHelp": "$ARGUMENTS user input · !`cmd` shell output · @file file contents",
-    "configureNew": "Configure a new slash command",
-    "selectCommand": "Select a command from the sidebar",
-    "orCreateNew": "or create a new one"
+    "configureNewSlashCommand": "Configure a new slash command",
+    "selectCommandFromSidebar": "Select a command from the sidebar",
+    "orCreateNewOne": "or create a new one"
   },
   "worktreeSectionContent": {
     "selectProject": "Select a project",
@@ -2171,6 +2154,29 @@
       "themeCyclingPersists": "Theme cycling remembers your preference across sessions"
     }
   },
+  "keyboardShortcutActions": {
+    "open_command_palette": "Open Command Palette",
+    "focus_input": "Focus Input",
+    "open_settings": "Open Settings",
+    "toggle_terminal": "Toggle Terminal Dock",
+    "toggle_terminal_expanded": "Toggle Terminal Expanded",
+    "toggle_sidebar": "Toggle Sidebar",
+    "toggle_right_sidebar": "Toggle Right Sidebar",
+    "open_right_sidebar_git": "Open Right Sidebar Git Tab",
+    "open_right_sidebar_files": "Open Right Sidebar Files Tab",
+    "cycle_right_sidebar_tab": "Cycle Right Sidebar Tab",
+    "new_chat": "New Session",
+    "new_chat_worktree": "New Session with Worktree",
+    "open_timeline": "Open Timeline",
+    "open_help": "Open Keyboard Shortcuts",
+    "toggle_context_plan": "Toggle Plan Context Panel",
+    "toggle_services_menu": "Toggle Services Menu",
+    "cycle_services_tab": "Cycle Services Tab",
+    "cycle_theme": "Cycle Theme",
+    "cycle_favorite_model_forward": "Cycle Favorite Model Forward",
+    "cycle_favorite_model_backward": "Cycle Favorite Model Backward",
+    "expand_input": "Expand Input"
+  },
   "sessionRetentionSettings": {
     "title": "Session retention",
     "description": "Automatically clean up old sessions after the configured retention period.",
@@ -2179,6 +2185,8 @@
     "retentionPeriodInDays": "Retention period in days",
     "days": "days",
     "manualCleanup": "Manual cleanup",
+    "runCleanupNow": "Run cleanup now",
+    "cleaningUp": "Cleaning up...",
     "eligibleNow": "Eligible now",
     "noSessionsEligible": "No sessions are currently eligible for cleanup",
     "deletedSessions": "Deleted {{count}} session(s)",
