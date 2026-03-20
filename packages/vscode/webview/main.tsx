@@ -251,7 +251,10 @@ onThemeChange((payload) => {
 const workspaceFolder = window.__VSCODE_CONFIG__?.workspaceFolder;
 if (workspaceFolder) {
   const normalizeWorkspacePath = (value: string) => {
-    const normalized = value.replace(/\\/g, '/');
+    const normalized = value
+      .replace(/\\/g, '/')
+      .replace(/^([a-z]):\//, (_, letter: string) => `${letter.toUpperCase()}:/`)
+      .replace(/^\/([a-z]):\//, (_, letter: string) => `/${letter.toUpperCase()}:/`);
     if (normalized === '/') {
       return '/';
     }

@@ -275,7 +275,10 @@ const normalizePath = (value?: string | null): string | null => {
     if (!trimmed) {
         return null;
     }
-    const replaced = trimmed.replace(/\\/g, "/");
+    const replaced = trimmed
+        .replace(/\\/g, "/")
+        .replace(/^([a-z]):\//, (_, letter: string) => `${letter.toUpperCase()}:/`)
+        .replace(/^\/([a-z]):\//, (_, letter: string) => `/${letter.toUpperCase()}:/`);
     if (replaced === "/") {
         return "/";
     }

@@ -258,7 +258,7 @@ class OpencodeService {
 
   // Set the current working directory for all API calls
   setDirectory(directory: string | undefined) {
-    this.currentDirectory = directory;
+    this.currentDirectory = this.normalizeCandidatePath(directory) ?? directory;
   }
 
   getDirectory(): string | undefined {
@@ -272,7 +272,7 @@ class OpencodeService {
       }
 
       const previousDirectory = this.currentDirectory;
-      this.currentDirectory = directory;
+      this.currentDirectory = this.normalizeCandidatePath(directory) ?? directory;
       try {
         return await fn();
       } finally {
