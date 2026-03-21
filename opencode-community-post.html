@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OpenCode + Anthropic Auth — opencode community</title>
+  <style>
+    /* ── Reset ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    /* ── Pixel grid background ── */
+    @keyframes pixelFlicker {
+      0%,100% { opacity: .03; }
+      50%      { opacity: .06; }
+    }
+
+    body {
+      background-color: #0d0d0d;
+      background-image:
+        linear-gradient(rgba(0,255,136,.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,255,136,.04) 1px, transparent 1px);
+      background-size: 24px 24px;
+      font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+      color: #e0e0e0;
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      padding: 32px 16px 48px;
+    }
+
+    /* ── Card wrapper ── */
+    .card {
+      width: 100%;
+      max-width: 680px;
+      background: #111113;
+      border: 1px solid #222;
+      border-radius: 4px;
+      overflow: hidden;
+      box-shadow:
+        0 0 0 1px #1a1a1a,
+        0 8px 40px rgba(0,0,0,.8),
+        0 0 60px rgba(0,255,136,.04);
+    }
+
+    /* ── Header banner ── */
+    .banner {
+      position: relative;
+      background: #0a0a0a;
+      padding: 36px 32px 28px;
+      border-bottom: 1px solid #1e1e1e;
+      overflow: hidden;
+    }
+
+    /* Scanline overlay */
+    .banner::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0,0,0,.18) 2px,
+        rgba(0,0,0,.18) 4px
+      );
+      pointer-events: none;
+      z-index: 1;
+    }
+
+    /* Pixel mosaic dots */
+    .banner::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background-image:
+        radial-gradient(circle, rgba(0,255,136,.08) 1px, transparent 1px);
+      background-size: 12px 12px;
+      animation: pixelFlicker 3s ease-in-out infinite;
+      pointer-events: none;
+      z-index: 1;
+    }
+
+    .banner-inner { position: relative; z-index: 2; }
+
+    .brand-tag {
+      font-family: 'Courier New', 'Lucida Console', monospace;
+      font-size: 10px;
+      letter-spacing: .25em;
+      color: #00ff88;
+      text-transform: uppercase;
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .brand-tag::before {
+      content: '';
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      background: #00ff88;
+      box-shadow: 0 0 8px #00ff88;
+      animation: blink 1.2s step-end infinite;
+    }
+
+    @keyframes blink { 50% { opacity: 0; } }
+
+    .banner h1 {
+      font-family: 'Courier New', 'Lucida Console', monospace;
+      font-size: clamp(18px, 4vw, 26px);
+      font-weight: 700;
+      color: #ffffff;
+      line-height: 1.35;
+      letter-spacing: -.01em;
+      text-shadow:
+        0 0 8px rgba(255,255,255,.3),
+        0 0 20px rgba(0,255,136,.15);
+    }
+
+    .banner h1 .warning {
+      color: #fbbf24;
+      text-shadow: 0 0 12px rgba(251,191,36,.4);
+    }
+
+    .meta-row {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-top: 16px;
+      flex-wrap: wrap;
+    }
+
+    .badge {
+      font-family: 'Courier New', monospace;
+      font-size: 10px;
+      letter-spacing: .1em;
+      padding: 3px 8px;
+      border-radius: 2px;
+      text-transform: uppercase;
+    }
+
+    .badge-urgent {
+      background: rgba(251,191,36,.1);
+      border: 1px solid rgba(251,191,36,.3);
+      color: #fbbf24;
+    }
+
+    .badge-version {
+      background: rgba(0,255,136,.08);
+      border: 1px solid rgba(0,255,136,.25);
+      color: #00ff88;
+    }
+
+    .badge-ok {
+      background: rgba(74,222,128,.08);
+      border: 1px solid rgba(74,222,128,.2);
+      color: #4ade80;
+    }
+
+    /* ── Content area ── */
+    .content { padding: 28px 32px 24px; }
+
+    /* ── Section ── */
+    .section {
+      margin-bottom: 28px;
+      padding-left: 16px;
+      border-left: 2px solid #252525;
+      position: relative;
+    }
+
+    .section.accent { border-left-color: #00ff88; }
+    .section.warn   { border-left-color: #fbbf24; }
+    .section.info   { border-left-color: #38bdf8; }
+
+    .section-label {
+      font-family: 'Courier New', monospace;
+      font-size: 10px;
+      letter-spacing: .2em;
+      color: #555;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+
+    .section h2 {
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+      font-weight: 700;
+      color: #fff;
+      letter-spacing: .05em;
+      margin-bottom: 10px;
+      text-shadow: 0 0 6px rgba(255,255,255,.15);
+    }
+
+    p {
+      font-size: 14.5px;
+      line-height: 1.75;
+      color: #c8c8c8;
+      margin-bottom: 10px;
+    }
+
+    p:last-child { margin-bottom: 0; }
+
+    /* inline code */
+    code {
+      font-family: 'Courier New', monospace;
+      font-size: 12.5px;
+      color: #4ade80;
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      padding: 1px 6px;
+      border-radius: 2px;
+    }
+
+    /* highlight text */
+    .hl { color: #ffffff; font-weight: 600; }
+    .hl-warn { color: #fbbf24; font-weight: 600; }
+    .hl-green { color: #4ade80; font-weight: 600; }
+
+    /* ── Code block ── */
+    .code-block {
+      margin: 14px 0;
+      border-radius: 3px;
+      overflow: hidden;
+      border: 1px solid #1e2533;
+    }
+
+    .code-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #161b22;
+      padding: 7px 14px;
+      border-bottom: 1px solid #1e2533;
+    }
+
+    .code-lang {
+      font-family: 'Courier New', monospace;
+      font-size: 10px;
+      letter-spacing: .12em;
+      color: #4ade80;
+      text-transform: uppercase;
+    }
+
+    .code-dots {
+      display: flex;
+      gap: 5px;
+    }
+
+    .code-dots span {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+
+    .dot-r { background: #ff5f57; }
+    .dot-y { background: #febc2e; }
+    .dot-g { background: #28c840; }
+
+    .code-body {
+      background: #0d1117;
+      padding: 16px 18px;
+      overflow-x: auto;
+    }
+
+    .code-body pre {
+      font-family: 'Courier New', 'Lucida Console', monospace;
+      font-size: 12.5px;
+      line-height: 1.8;
+      color: #e6edf3;
+      white-space: pre;
+      tab-size: 2;
+    }
+
+    /* syntax colours */
+    .tok-key   { color: #79c0ff; }
+    .tok-str   { color: #a5d6ff; }
+    .tok-val   { color: #4ade80; }
+    .tok-cmt   { color: #6e7681; font-style: italic; }
+    .tok-cmd   { color: #4ade80; }
+    .tok-flag  { color: #ffa657; }
+    .tok-url   { color: #79c0ff; }
+
+    /* ── Divider ── */
+    .divider {
+      height: 1px;
+      background: linear-gradient(90deg, transparent, #222 20%, #222 80%, transparent);
+      margin: 24px 0;
+    }
+
+    /* ── TL;DR box ── */
+    .tldr {
+      background: rgba(0,255,136,.04);
+      border: 1px solid rgba(0,255,136,.15);
+      border-radius: 3px;
+      padding: 16px 20px;
+      margin-bottom: 24px;
+    }
+
+    .tldr-label {
+      font-family: 'Courier New', monospace;
+      font-size: 10px;
+      letter-spacing: .2em;
+      color: #00ff88;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .tldr-label::before { content: '▶'; font-size: 8px; }
+
+    .tldr p {
+      font-size: 13.5px;
+      color: #d0d0d0;
+      line-height: 1.7;
+    }
+
+    /* ── Tagline ── */
+    .tagline {
+      text-align: center;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+      color: #555;
+      letter-spacing: .05em;
+      padding: 0 8px;
+      line-height: 1.6;
+    }
+
+    .tagline strong { color: #888; }
+
+    /* ── Footer ── */
+    .footer {
+      border-top: 1px solid #1a1a1a;
+      background: #0a0a0a;
+      padding: 16px 32px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .footer-brand {
+      font-family: 'Courier New', monospace;
+      font-size: 10px;
+      letter-spacing: .15em;
+      color: #333;
+      text-transform: uppercase;
+    }
+
+    .footer-brand span { color: #00ff88; }
+
+    .footer-note {
+      font-family: 'Courier New', monospace;
+      font-size: 9px;
+      letter-spacing: .1em;
+      color: #2a2a2a;
+      text-transform: uppercase;
+    }
+
+    /* ── List ── */
+    ul.checklist {
+      list-style: none;
+      padding: 0;
+      margin: 6px 0;
+    }
+
+    ul.checklist li {
+      font-size: 14px;
+      line-height: 1.75;
+      color: #c8c8c8;
+      padding-left: 20px;
+      position: relative;
+      margin-bottom: 4px;
+    }
+
+    ul.checklist li::before {
+      content: '›';
+      position: absolute;
+      left: 0;
+      color: #00ff88;
+      font-weight: 700;
+    }
+
+    /* ── Warning strip ── */
+    .warn-strip {
+      background: rgba(251,191,36,.05);
+      border: 1px solid rgba(251,191,36,.12);
+      border-radius: 2px;
+      padding: 10px 14px;
+      margin-bottom: 14px;
+      font-family: 'Courier New', monospace;
+      font-size: 11.5px;
+      color: #c8a000;
+      letter-spacing: .03em;
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+    }
+
+    .warn-strip .icon { flex-shrink: 0; }
+  </style>
+</head>
+<body>
+
+<div class="card">
+
+  <!-- ── Banner ── -->
+  <div class="banner">
+    <div class="banner-inner">
+      <div class="brand-tag">opencode community</div>
+      <h1>
+        <span class="warning">⚠</span> OpenCode + Anthropic auth<br>
+        những gì bạn cần biết ngay
+      </h1>
+      <div class="meta-row">
+        <span class="badge badge-urgent">action required</span>
+        <span class="badge badge-version">v1.3.0 → breaking</span>
+        <span class="badge badge-ok">v1.2.27 still ok</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Content ── -->
+  <div class="content">
+
+    <!-- Tình hình -->
+    <div class="section warn">
+      <div class="section-label">// tình hình</div>
+      <h2>WHAT HAPPENED</h2>
+      <div class="warn-strip">
+        <span class="icon">!</span>
+        <span>Anthropic đã gửi luật sư tới SST. OpenCode <strong>v1.3.0 sẽ xóa Anthropic auth</strong>.</span>
+      </div>
+      <ul class="checklist">
+        <li>Version <span class="hl-warn">v1.3.0+</span> — Anthropic auth bị remove hoàn toàn</li>
+        <li>Version <span class="hl-green">v1.2.27</span> — hiện tại vẫn hoạt động bình thường</li>
+        <li>Autoupdate = rủi ro, có thể update lên v1.3.0 bất cứ lúc nào</li>
+      </ul>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- Giải pháp 1 -->
+    <div class="section accent">
+      <div class="section-label">// giải pháp 1 · dễ nhất</div>
+      <h2>CONFIG + TẮT AUTOUPDATE</h2>
+      <p>
+        Thêm <code>opencode-claude-auth</code> vào plugin list và tắt autoupdate
+        trong file config. Đây là cách nhanh nhất — không cần fork hay rebuild.
+      </p>
+
+      <div class="code-block">
+        <div class="code-header">
+          <span class="code-lang">json · opencode config</span>
+          <div class="code-dots">
+            <span class="dot-r"></span>
+            <span class="dot-y"></span>
+            <span class="dot-g"></span>
+          </div>
+        </div>
+        <div class="code-body">
+<pre>{
+  <span class="tok-key">"autoupdate"</span>: <span class="tok-val">false</span>,
+  <span class="tok-key">"plugin"</span>: [<span class="tok-str">"opencode-claude-auth"</span>]
+}</pre>
+        </div>
+      </div>
+
+      <ul class="checklist">
+        <li>Tắt <code>autoupdate</code> trước — ưu tiên số 1</li>
+        <li>Plugin <code>opencode-claude-auth</code> giữ auth flow hoạt động</li>
+        <li>Không cần rebuild hay compile gì thêm</li>
+      </ul>
+    </div>
+
+    <!-- Giải pháp 2 -->
+    <div class="section info">
+      <div class="section-label">// giải pháp 2 · cho ai muốn control cao hơn</div>
+      <h2>FORK TẠI COMMIT ỔN ĐỊNH</h2>
+      <p>
+        Clone repo, checkout đúng commit <code>8e09e8c61</code> trước khi auth bị xóa,
+        tạo branch riêng và push lên repo cá nhân private.
+      </p>
+
+      <div class="code-block">
+        <div class="code-header">
+          <span class="code-lang">bash · fork &amp; preserve</span>
+          <div class="code-dots">
+            <span class="dot-r"></span>
+            <span class="dot-y"></span>
+            <span class="dot-g"></span>
+          </div>
+        </div>
+        <div class="code-body">
+<pre><span class="tok-cmd">git clone</span> <span class="tok-url">https://github.com/sst/opencode</span>
+<span class="tok-cmd">cd</span> opencode <span class="tok-cmt">&amp;&amp; git checkout</span> <span class="tok-flag">8e09e8c61</span>
+<span class="tok-cmd">git checkout</span> <span class="tok-flag">-b</span> maintain/with-anthropic-auth
+<span class="tok-cmt"># push lên repo cá nhân → set private</span></pre>
+        </div>
+      </div>
+
+      <ul class="checklist">
+        <li>Commit <span class="hl">8e09e8c61</span> — điểm cuối trước khi auth bị strip</li>
+        <li>Set repo <span class="hl-warn">private</span> để tránh vi phạm ToS</li>
+        <li>Phù hợp nếu bạn cần customize thêm hoặc tự build</li>
+      </ul>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- TL;DR -->
+    <div class="tldr">
+      <div class="tldr-label">TL;DR · action plan</div>
+      <p>
+        Dùng <span class="hl-green">v1.2.27</span> +
+        <code>opencode-claude-auth</code> plugin +
+        <span class="hl-warn">tắt autoupdate</span> là đủ cho 99% trường hợp.
+        Fork chỉ cần thiết nếu muốn self-host hoặc maintain long-term.
+      </p>
+    </div>
+
+    <!-- Tagline -->
+    <div class="tagline">
+      <strong>Không có drama. Chỉ cần action trước khi lỡ update.</strong> 🔒
+    </div>
+
+  </div>
+
+  <!-- ── Footer ── -->
+  <div class="footer">
+    <div class="footer-brand">
+      <span>opencode</span> community vietnam
+    </div>
+    <div class="footer-note">chia sẻ tự do · không drama</div>
+  </div>
+
+</div>
+
+</body>
+</html>
