@@ -135,6 +135,16 @@
     overscroll-behavior-y: none;
   }
 
+  /* Desktop shell: prevent Radix UI DismissableLayer from setting
+     body { pointer-events: none } on modal menus/selects/dialogs.
+     In Tauri with transparent: true on macOS, pointer-events: none on body
+     causes WKWebView to treat the entire page as click-through, so
+     pointerdown events never fire and dropdowns/selects can't be dismissed
+     by clicking outside. */
+  :root.desktop-runtime body {
+    pointer-events: auto !important;
+  }
+
   :root.desktop-runtime body,
   :root.desktop-runtime #root {
     background: transparent !important;

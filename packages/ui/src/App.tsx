@@ -21,6 +21,7 @@ import { usePwaInstallPrompt } from '@/hooks/usePwaInstallPrompt';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
 import { useGitHubPrBackgroundTracking } from '@/hooks/useGitHubPrBackgroundTracking';
 import { GitPollingProvider } from '@/hooks/useGitPolling';
+import { useRadixDismissWorkaround } from '@/hooks/useRadixDismissWorkaround';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { hasModifier } from '@/lib/utils';
 import { isDesktopLocalOriginActive, isDesktopShell } from '@/lib/desktop';
@@ -380,6 +381,7 @@ function App({ apis }: AppProps) {
   useRouter();
 
   useKeyboardShortcuts();
+  useRadixDismissWorkaround();
 
   const handleToggleMemoryDebug = React.useCallback(() => {
     setShowMemoryDebug(prev => !prev);
