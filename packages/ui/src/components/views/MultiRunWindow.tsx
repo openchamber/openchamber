@@ -42,8 +42,8 @@ export const MultiRunWindow: React.FC<MultiRunWindowProps> = ({
           }}
           className={cn(
             'fixed z-50 top-[50%] left-[50%] translate-x-[-50%] translate-y-[-50%]',
-            'w-[90vw] max-w-[1000px] h-[85vh] max-h-[920px]',
-            'rounded-xl border shadow-none overflow-hidden',
+            'w-[90vw] max-w-[720px] h-[680px] max-h-[85vh]',
+            'flex flex-col rounded-xl border shadow-none overflow-hidden',
             'bg-background'
           )}
         >

@@ -204,15 +204,29 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
 
   const hasResults = filteredFavorites.length > 0 || filteredRecents.length > 0 || filteredProviders.length > 0;
 
-  // Calculate available height when dropdown opens
+  // Calculate available height: space above trigger within visible area
   React.useEffect(() => {
-    if (isOpen && triggerRef.current) {
-      const rect = triggerRef.current.getBoundingClientRect();
-      // Space above trigger minus padding from top edge
-      const spaceAbove = rect.top - 100;
-      // Cap at 400px max, minimum 150px
-      setAvailableHeight(Math.max(150, Math.min(400, spaceAbove)));
+    if (!isOpen || !triggerRef.current) return;
+
+    const triggerRect = triggerRef.current.getBoundingClientRect();
+
+    // Find the nearest dialog or overflow ancestor to constrain within
+    let container: HTMLElement | null = triggerRef.current.parentElement;
+    while (container) {
+      if (container.getAttribute('role') === 'dialog' || container.hasAttribute('data-scroll-shadow')) {
+        break;
+      }
+      const style = getComputedStyle(container);
+      if (style.overflow === 'auto' || style.overflow === 'hidden' || style.overflowY === 'auto' || style.overflowY === 'hidden') {
+        break;
+      }
+      container = container.parentElement;
     }
+
+    const topBound = container ? container.getBoundingClientRect().top : 0;
+    const spaceAbove = triggerRect.top - topBound - 16;
+    // Cap: min 150, max 300
+    setAvailableHeight(Math.max(150, Math.min(300, spaceAbove)));
   }, [isOpen]);
 
   // Focus search input when opened
@@ -391,10 +405,9 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
 
             return (
               <div
-                className="absolute bottom-full left-0 mb-1 z-50 w-[min(380px,calc(100vw-2rem))] flex flex-col overflow-hidden rounded-xl border border-border/50 bg-[var(--surface-elevated)]/75 shadow-none backdrop-blur-xl supports-[backdrop-filter]:bg-[var(--surface-elevated)]/60"
+                className="absolute bottom-full left-0 mb-1 z-50 w-[min(380px,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] flex flex-col overflow-hidden rounded-xl border border-border/50 shadow-lg"
                 style={{
-                  backdropFilter: 'blur(24px)',
-                  WebkitBackdropFilter: 'blur(24px)',
+                  background: 'linear-gradient(var(--surface-elevated),var(--surface-elevated)),linear-gradient(var(--surface-background),var(--surface-background))',
                 }}
               >
                 {/* Search input */}
@@ -428,7 +441,7 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
                     {/* Favorites Section */}
                     {filteredFavorites.length > 0 && (
                       <>
-                        <div className="typography-micro font-semibold text-muted-foreground uppercase tracking-wider sticky top-0 z-10 -mx-1 flex items-center gap-2 border-b border-border/30 bg-[var(--surface-elevated)]/80 px-3 py-1.5 backdrop-blur-md supports-[backdrop-filter]:bg-[var(--surface-elevated)]/60">
+                        <div className="typography-micro font-semibold text-muted-foreground uppercase tracking-wider sticky top-0 z-10 -mx-1 flex items-center gap-2 border-b border-border/30 px-3 py-1.5 [background:linear-gradient(var(--surface-elevated),var(--surface-elevated)),linear-gradient(var(--surface-background),var(--surface-background))]">
                           <RiStarFill className="h-4 w-4 text-primary" />
                           Favorites
                         </div>
@@ -443,7 +456,7 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
                     {filteredRecents.length > 0 && (
                       <>
                         {filteredFavorites.length > 0 && <div className="h-px bg-border/40 my-1" />}
-                        <div className="typography-micro font-semibold text-muted-foreground uppercase tracking-wider sticky top-0 z-10 -mx-1 flex items-center gap-2 border-b border-border/30 bg-[var(--surface-elevated)]/80 px-3 py-1.5 backdrop-blur-md supports-[backdrop-filter]:bg-[var(--surface-elevated)]/60">
+                        <div className="typography-micro font-semibold text-muted-foreground uppercase tracking-wider sticky top-0 z-10 -mx-1 flex items-center gap-2 border-b border-border/30 px-3 py-1.5 [background:linear-gradient(var(--surface-elevated),var(--surface-elevated)),linear-gradient(var(--surface-background),var(--surface-background))]">
                           <RiTimeLine className="h-4 w-4" />
                           Recent
                         </div>
@@ -463,7 +476,7 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
                     {filteredProviders.map((provider, index) => (
                       <React.Fragment key={provider.id}>
                         {index > 0 && <div className="h-px bg-border/40 my-1" />}
-                        <div className="typography-micro font-semibold text-muted-foreground uppercase tracking-wider sticky top-0 z-10 -mx-1 flex items-center gap-2 border-b border-border/30 bg-[var(--surface-elevated)]/80 px-3 py-1.5 backdrop-blur-md supports-[backdrop-filter]:bg-[var(--surface-elevated)]/60">
+                        <div className="typography-micro font-semibold text-muted-foreground uppercase tracking-wider sticky top-0 z-10 -mx-1 flex items-center gap-2 border-b border-border/30 px-3 py-1.5 [background:linear-gradient(var(--surface-elevated),var(--surface-elevated)),linear-gradient(var(--surface-background),var(--surface-background))]">
                           <ProviderLogo
                             providerId={provider.id}
                             className="h-4 w-4 flex-shrink-0"

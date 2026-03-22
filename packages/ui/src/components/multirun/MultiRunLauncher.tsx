@@ -1,5 +1,5 @@
 import React from 'react';
-import { RiAddLine, RiArrowDownSLine, RiAttachment2, RiCloseLine, RiFileImageLine, RiFileLine } from '@remixicon/react';
+import { RiAddLine, RiArrowDownSLine, RiAttachment2, RiCloseLine, RiFileImageLine, RiFileLine, RiFolderLine, RiInformationLine, RiTerminalLine } from '@remixicon/react';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -7,6 +7,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { cn, formatDirectoryName } from '@/lib/utils';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useMultiRunStore } from '@/stores/useMultiRunStore';
@@ -19,6 +20,9 @@ import { ModelMultiSelect, generateInstanceId, type ModelSelectionWithId } from 
 import { BranchSelector, useBranchOptions } from './BranchSelector';
 import { AgentSelector } from './AgentSelector';
 import { isDesktopShell } from '@/lib/desktop';
+import { useThemeSystem } from '@/contexts/useThemeSystem';
+import { PROJECT_ICON_MAP, PROJECT_COLOR_MAP, getProjectIconImageUrl } from '@/lib/projectMeta';
+import type { ProjectEntry } from '@/lib/api/types';
 
 /** Max file size in bytes (10MB) */
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
@@ -46,9 +50,39 @@ interface MultiRunLauncherProps {
   isWindowed?: boolean;
 }
 
+/** Info tooltip - small icon that shows helper text on hover */
+const InfoTip: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <Tooltip delayDuration={200}>
+    <TooltipTrigger asChild>
+      <button type="button" tabIndex={-1} className="inline-flex items-center justify-center text-muted-foreground/50 hover:text-muted-foreground transition-colors">
+        <RiInformationLine className="h-3.5 w-3.5" />
+      </button>
+    </TooltipTrigger>
+    <TooltipContent side="top" className="max-w-[240px]">
+      {children}
+    </TooltipContent>
+  </Tooltip>
+);
+
+/** Compact field label */
+const FieldLabel: React.FC<{
+  htmlFor?: string;
+  required?: boolean;
+  children: React.ReactNode;
+  info?: React.ReactNode;
+}> = ({ htmlFor, required, children, info }) => (
+  <div className="flex items-center gap-1.5">
+    <label htmlFor={htmlFor} className="typography-meta font-medium text-foreground">
+      {children}
+      {required && <span className="text-destructive ml-0.5">*</span>}
+    </label>
+    {info && info}
+  </div>
+);
+
 /**
  * Launcher form for creating a new Multi-Run group.
- * Replaces the main content area (tabs) with a form.
+ * Compact, centered card layout with adaptive grid.
  */
 export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
   initialPrompt,
@@ -110,13 +144,38 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
     }
   }, [activeProjectId, setActiveProjectIdOnly]);
 
-  const projectSelectLabel = React.useCallback((project: { label?: string; path: string }) => {
-    const label = project.label?.trim();
-    if (label) {
-      return label;
-    }
-    return formatDirectoryName(project.path, homeDirectory);
-  }, [homeDirectory]);
+  const { currentTheme } = useThemeSystem();
+
+  const renderProjectLabel = React.useCallback((project: ProjectEntry) => {
+    const displayLabel = project.label?.trim() || formatDirectoryName(project.path, homeDirectory);
+    const imageUrl = getProjectIconImageUrl(
+      { id: project.id, iconImage: project.iconImage ?? null },
+      {
+        themeVariant: currentTheme.metadata.variant,
+        iconColor: currentTheme.colors.surface.foreground,
+      },
+    );
+    const ProjectIcon = project.icon ? PROJECT_ICON_MAP[project.icon] : null;
+    const iconColor = project.color ? PROJECT_COLOR_MAP[project.color] : undefined;
+
+    return (
+      <span className="inline-flex min-w-0 items-center gap-1.5">
+        {imageUrl ? (
+          <span
+            className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center overflow-hidden rounded-[3px]"
+            style={project.iconBackground ? { backgroundColor: project.iconBackground } : undefined}
+          >
+            <img src={imageUrl} alt="" className="h-full w-full object-contain" draggable={false} />
+          </span>
+        ) : ProjectIcon ? (
+          <ProjectIcon className="h-3.5 w-3.5 shrink-0" style={iconColor ? { color: iconColor } : undefined} />
+        ) : (
+          <RiFolderLine className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80" style={iconColor ? { color: iconColor } : undefined} />
+        )}
+        <span className="truncate">{displayLabel}</span>
+      </span>
+    );
+  }, [homeDirectory, currentTheme.metadata.variant, currentTheme.colors.surface.foreground]);
 
   const projectRef = React.useMemo<ProjectRef | null>(() => {
     if (selectedProject?.path) {
@@ -232,7 +291,7 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
   }, [onCancel]);
 
   // Use the BranchSelector hook for branch state management
-  const [worktreeBaseBranch, setWorktreeBaseBranch] = React.useState<string>('HEAD');
+  const [worktreeBaseBranch, setWorktreeBaseBranch] = React.useState<string>('');
   const { isLoading: isLoadingWorktreeBaseBranches, isGitRepository } = useBranchOptions(selectedProjectDirectory);
 
   const createMultiRun = useMultiRunStore((state) => state.createMultiRun);
@@ -393,16 +452,18 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
   };
 
   const isValid = Boolean(
-    name.trim() && prompt.trim() && selectedModels.length >= 2 && isGitRepository && !isLoadingWorktreeBaseBranches
+    name.trim() && prompt.trim() && selectedModels.length >= 2 && worktreeBaseBranch && isGitRepository && !isLoadingWorktreeBaseBranches
   );
 
+  const configuredSetupCount = setupCommands.filter(cmd => cmd.trim()).length;
+
   return (
-    <div className="flex flex-col h-full bg-background">
+    <form onSubmit={handleSubmit} className="flex flex-col h-full bg-background" data-keyboard-avoid="true">
       {!isWindowed ? (
         <header
           onMouseDown={handleDragStart}
           className={cn(
-            'relative flex h-12 items-center justify-center border-b app-region-drag select-none',
+            'relative flex h-12 shrink-0 items-center justify-center border-b app-region-drag select-none',
             desktopHeaderPaddingClass,
             macosHeaderSizeClass,
           )}
@@ -431,243 +492,235 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
         </header>
       ) : null}
 
-      {/* Content with chat-column max-width */}
-      <div className="flex-1 overflow-auto">
-        <div className="chat-column py-6">
-          <form onSubmit={handleSubmit} className="space-y-6" data-keyboard-avoid="true">
-            {/* Project selection */}
-            <div className="space-y-2">
-              <label htmlFor="multirun-project" className="typography-ui-label font-medium text-foreground">
-                Project <span className="text-destructive">*</span>
-              </label>
-              {projects.length > 0 ? (
-                <Select
-                  value={selectedProjectId ?? undefined}
-                  onValueChange={handleProjectChange}
-                >
-                  <SelectTrigger id="multirun-project" size="lg" className="max-w-full sm:max-w-md">
-                    <SelectValue placeholder="Select a project" />
-                  </SelectTrigger>
-                  <SelectContent fitContent>
-                    {projects.map((project) => (
-                      <SelectItem key={project.id} value={project.id} className="max-w-[24rem] truncate">
-                        {projectSelectLabel(project)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              ) : (
-                <p className="typography-micro text-muted-foreground">Add a project to use Multi-Run.</p>
-              )}
-            </div>
+      {/* Scrollable content */}
+      <ScrollShadow className="flex-1 min-h-0 overflow-auto" size={64} hideTopShadow>
+        <div className="mx-auto w-full max-w-2xl px-4 sm:px-6 py-5">
+          <div className="flex flex-col gap-5">
 
-             {/* Group name (required) */}
-            <div className="space-y-2">
-              <label htmlFor="group-name" className="typography-ui-label font-medium text-foreground">
-                Group name <span className="text-destructive">*</span>
-              </label>
-              <Input
-                id="group-name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. feature-auth, bugfix-login"
-                className="typography-body max-w-full sm:max-w-xs"
-                required
-              />
-              <p className="typography-micro text-muted-foreground">
-                Used for worktree directory and branch names
-              </p>
-            </div>
-
-            {/* Worktree creation */}
-            <div className="space-y-3">
-              <div className="space-y-1">
-                <p className="typography-ui-label font-medium text-foreground">Worktrees</p>
-                <p className="typography-micro text-muted-foreground">
-                  Create one worktree per model by creating a new branch from a base branch.
-                </p>
+            {/* ── Config grid: 2-column on sm+, single column on narrow ── */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
+              {/* Project */}
+              <div className="flex flex-col gap-1">
+                <FieldLabel htmlFor="multirun-project" required>Project</FieldLabel>
+                {projects.length > 0 ? (
+                  <Select
+                    value={selectedProjectId ?? undefined}
+                    onValueChange={handleProjectChange}
+                  >
+                    <SelectTrigger id="multirun-project" size="lg" className="w-fit max-w-full">
+                      {selectedProject ? (
+                        <SelectValue>{renderProjectLabel(selectedProject)}</SelectValue>
+                      ) : (
+                        <SelectValue placeholder="Select project" />
+                      )}
+                    </SelectTrigger>
+                    <SelectContent fitContent>
+                      {projects.map((project) => (
+                        <SelectItem key={project.id} value={project.id} className="max-w-[24rem]">
+                          {renderProjectLabel(project)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <p className="typography-micro text-muted-foreground py-2">Add a project first.</p>
+                )}
               </div>
 
-              <div className="space-y-2">
-                <label
-                  className="typography-meta font-medium text-foreground"
+              {/* Group name */}
+              <div className="flex flex-col gap-1">
+                <FieldLabel
+                  htmlFor="group-name"
+                  required
+                  info={<InfoTip>Used for worktree directory and branch names</InfoTip>}
+                >
+                  Group name
+                </FieldLabel>
+                <Input
+                  id="group-name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="feature-auth, bugfix-login"
+                  className="typography-meta w-full"
+                  required
+                />
+              </div>
+
+              {/* Base branch */}
+              <div className="flex flex-col gap-1">
+                <FieldLabel
                   htmlFor="multirun-worktree-base-branch"
+                  info={<InfoTip>New branch created from this base per model</InfoTip>}
                 >
                   Base branch
-                </label>
+                </FieldLabel>
                 <BranchSelector
                   directory={selectedProjectDirectory}
                   value={worktreeBaseBranch}
                   onChange={setWorktreeBaseBranch}
                   id="multirun-worktree-base-branch"
                 />
-                <p className="typography-micro text-muted-foreground">
-                  Creates new branches from{' '}
-                  <code className="font-mono text-xs text-muted-foreground">{worktreeBaseBranch || 'HEAD'}</code>.
-                </p>
               </div>
 
-              {/* Setup commands collapsible */}
-              <Collapsible open={isSetupCommandsOpen} onOpenChange={setIsSetupCommandsOpen}>
-                <CollapsibleTrigger className="w-full flex items-center justify-between py-1 hover:bg-[var(--interactive-hover)] rounded-md px-1 -mx-1 transition-colors">
-                  <p className="typography-ui-label font-medium text-foreground">
-                    Setup commands
-                    {setupCommands.filter(cmd => cmd.trim()).length > 0 && (
-                      <span className="font-normal text-muted-foreground/70">
-                        {' '}({setupCommands.filter(cmd => cmd.trim()).length} configured)
-                      </span>
-                    )}
-                  </p>
-                  <RiArrowDownSLine className={cn(
-                    'h-4 w-4 text-muted-foreground transition-transform duration-200',
-                    isSetupCommandsOpen && 'rotate-180'
-                  )} />
-                </CollapsibleTrigger>
-                <CollapsibleContent>
-                  <div className="pt-2 space-y-2">
-                    <p className="typography-micro text-muted-foreground/70">
-                      Commands run in each new worktree. Use <code className="font-mono text-xs">$ROOT_PROJECT_PATH</code> for project root.
-                    </p>
-                    {isLoadingSetupCommands ? (
-                      <p className="typography-meta text-muted-foreground/70">Loading...</p>
-                    ) : (
-                      <div className="space-y-1.5">
-                        {setupCommands.map((command, index) => (
-                          <div key={index} className="flex gap-2">
-                            <Input
-                              value={command}
-                              onChange={(e) => {
-                                const newCommands = [...setupCommands];
-                                newCommands[index] = e.target.value;
-                                setSetupCommands(newCommands);
-                              }}
-                              placeholder="e.g., bun install"
-                              className="h-8 flex-1 font-mono text-xs"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const newCommands = setupCommands.filter((_, i) => i !== index);
-                                setSetupCommands(newCommands);
-                              }}
-                              className="flex-shrink-0 flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-                              aria-label="Remove command"
-                            >
-                              <RiCloseLine className="h-4 w-4" />
-                            </button>
-                          </div>
-                        ))}
-                        <button
-                          type="button"
-                          onClick={() => setSetupCommands([...setupCommands, ''])}
-                          className="flex items-center gap-1.5 typography-meta text-muted-foreground hover:text-foreground transition-colors"
-                        >
-                          <RiAddLine className="h-3.5 w-3.5" />
-                          Add command
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </CollapsibleContent>
-              </Collapsible>
+              {/* Agent */}
+              <div className="flex flex-col gap-1">
+                <FieldLabel
+                  htmlFor="multirun-agent"
+                  info={<InfoTip>Agent used for all runs. Defaults to your configured agent.</InfoTip>}
+                >
+                  Agent
+                </FieldLabel>
+                <AgentSelector
+                  value={selectedAgent}
+                  onChange={setSelectedAgent}
+                  id="multirun-agent"
+                />
+              </div>
             </div>
 
-            {/* Agent selection */}
-            <div className="space-y-2">
-              <label
-                className="typography-ui-label font-medium text-foreground"
-                htmlFor="multirun-agent"
-              >
-                Agent
-              </label>
-              <AgentSelector
-                value={selectedAgent}
-                onChange={setSelectedAgent}
-                id="multirun-agent"
-              />
-              <p className="typography-micro text-muted-foreground">
-                Defaults to your configured default agent.
-              </p>
-            </div>
+            {/* ── Setup commands (collapsible, full width) ── */}
+            <Collapsible open={isSetupCommandsOpen} onOpenChange={setIsSetupCommandsOpen}>
+              <CollapsibleTrigger className="w-full flex items-center gap-2 py-1.5 px-2 -mx-2 rounded-lg hover:bg-[var(--interactive-hover)]/50 transition-colors group">
+                <RiTerminalLine className="h-3.5 w-3.5 text-muted-foreground/70" />
+                <span className="typography-meta font-medium text-muted-foreground group-hover:text-foreground transition-colors">
+                  Setup commands
+                </span>
+                {configuredSetupCount > 0 && (
+                  <span
+                    className="inline-flex items-center justify-center h-4 min-w-4 px-1 rounded-full typography-micro font-medium"
+                    style={{
+                      backgroundColor: 'var(--primary-base)',
+                      color: 'var(--primary-foreground)',
+                      fontSize: '0.625rem',
+                      lineHeight: 1,
+                    }}
+                  >
+                    {configuredSetupCount}
+                  </span>
+                )}
+                <RiArrowDownSLine className={cn(
+                  'h-3.5 w-3.5 text-muted-foreground/50 transition-transform duration-200 ml-auto',
+                  isSetupCommandsOpen && 'rotate-180'
+                )} />
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <div className="pt-2 space-y-1.5">
+                  {isLoadingSetupCommands ? (
+                    <p className="typography-meta text-muted-foreground/70 px-2">Loading...</p>
+                  ) : (
+                    <>
+                      {setupCommands.map((command, index) => (
+                        <div key={index} className="flex gap-1.5">
+                          <Input
+                            value={command}
+                            onChange={(e) => {
+                              const newCommands = [...setupCommands];
+                              newCommands[index] = e.target.value;
+                              setSetupCommands(newCommands);
+                            }}
+                            placeholder="bun install"
+                            className="h-8 flex-1 font-mono text-xs"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const newCommands = setupCommands.filter((_, i) => i !== index);
+                              setSetupCommands(newCommands);
+                            }}
+                            className="flex-shrink-0 flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                            aria-label="Remove command"
+                          >
+                            <RiCloseLine className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() => setSetupCommands([...setupCommands, ''])}
+                        className="flex items-center gap-1 typography-meta text-muted-foreground hover:text-foreground transition-colors px-1"
+                      >
+                        <RiAddLine className="h-3 w-3" />
+                        Add command
+                      </button>
+                    </>
+                  )}
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
 
-            {/* Prompt */}
-            <div className="space-y-2">
-              <label htmlFor="prompt" className="typography-ui-label font-medium text-foreground">
-                Prompt <span className="text-destructive">*</span>
-              </label>
+            {/* ── Prompt ── */}
+            <div className="flex flex-col gap-1.5">
+              <FieldLabel htmlFor="prompt" required>Prompt</FieldLabel>
               <Textarea
                 id="prompt"
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
                 placeholder="Enter the prompt to send to all models..."
-                className="typography-body min-h-[120px] max-h-[400px] resize-none overflow-y-auto field-sizing-content"
+                className="typography-meta min-h-[100px] max-h-[300px] resize-none overflow-y-auto field-sizing-content"
                 required
               />
-            </div>
 
-            {/* File attachments */}
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <label className="typography-ui-label font-medium text-foreground">
-                  Attachments
-                </label>
-                <span className="typography-micro text-muted-foreground">(optional, same files for all runs)</span>
-              </div>
-              
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                className="hidden"
-                onChange={handleFileSelect}
-                accept="*/*"
-              />
-              
-              <div className="flex flex-wrap gap-2 items-center">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-7"
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  <RiAttachment2 className="h-3.5 w-3.5 mr-1.5" />
-                  Attach files
-                </Button>
-                
+              {/* File attachments inline */}
+              <div className="flex flex-wrap items-center gap-1.5">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  className="hidden"
+                  onChange={handleFileSelect}
+                  accept="*/*"
+                />
+                <Tooltip delayDuration={300}>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="inline-flex items-center gap-1 h-6 px-2 rounded-md typography-micro text-muted-foreground hover:text-foreground hover:bg-[var(--interactive-hover)]/50 transition-colors"
+                    >
+                      <RiAttachment2 className="h-3 w-3" />
+                      Attach
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>Same files sent to all runs</TooltipContent>
+                </Tooltip>
+
                 {attachedFiles.map((file) => (
                   <div
                     key={file.id}
-                    className="inline-flex items-center gap-1.5 px-2 py-1 bg-muted/30 border border-border/30 rounded-md typography-meta"
+                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md typography-micro border"
+                    style={{
+                      backgroundColor: 'var(--surface-elevated)',
+                      borderColor: 'var(--interactive-border)',
+                    }}
                   >
                     {file.mimeType.startsWith('image/') ? (
-                      <RiFileImageLine className="h-3.5 w-3.5 text-muted-foreground" />
+                      <RiFileImageLine className="h-3 w-3 text-muted-foreground" />
                     ) : (
-                      <RiFileLine className="h-3.5 w-3.5 text-muted-foreground" />
+                      <RiFileLine className="h-3 w-3 text-muted-foreground" />
                     )}
-                    <span className="truncate max-w-[120px]" title={file.filename}>
+                    <span className="truncate max-w-[100px]" title={file.filename}>
                       {file.filename}
-                    </span>
-                    <span className="text-muted-foreground text-xs">
-                      ({file.size < 1024 ? `${file.size}B` : file.size < 1024 * 1024 ? `${(file.size / 1024).toFixed(1)}KB` : `${(file.size / (1024 * 1024)).toFixed(1)}MB`})
                     </span>
                     <button
                       type="button"
                       onClick={() => handleRemoveFile(file.id)}
-                      className="text-muted-foreground hover:text-destructive ml-0.5"
+                      className="text-muted-foreground hover:text-destructive"
                     >
-                      <RiCloseLine className="h-3.5 w-3.5" />
+                      <RiCloseLine className="h-3 w-3" />
                     </button>
                   </div>
                 ))}
               </div>
             </div>
 
-            {/* Model selection */}
-            <div className="space-y-2">
-              <label className="typography-ui-label font-medium text-foreground">
-                Models <span className="text-destructive">*</span>
-              </label>
+            {/* ── Models ── */}
+            <div className="flex flex-col gap-1.5">
+              <FieldLabel
+                required
+                info={<InfoTip>Select 2–{MAX_MODELS} models. Same model can be added multiple times.</InfoTip>}
+              >
+                Models
+              </FieldLabel>
               <ModelMultiSelect
                 selectedModels={selectedModels}
                 onAdd={handleAddModel}
@@ -678,38 +731,48 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
               />
             </div>
 
-            {/* Error message */}
+            {/* ── Error ── */}
             {error && (
-              <div className="px-4 py-3 rounded-lg bg-destructive/10 border border-destructive/30 text-destructive typography-body">
+              <div
+                className="px-3 py-2 rounded-lg typography-meta"
+                style={{
+                  backgroundColor: 'var(--status-error-background)',
+                  color: 'var(--status-error)',
+                  borderWidth: 1,
+                  borderColor: 'var(--status-error-border)',
+                }}
+              >
                 {error}
               </div>
             )}
+          </div>
+        </div>
+      </ScrollShadow>
 
-            {/* Action buttons */}
-            <div className="flex items-center justify-end gap-3 pt-4">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={onCancel}
-              >
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                disabled={!isValid || isSubmitting}
-              >
-                {isSubmitting ? (
-                  'Creating...'
-                ) : (
-                  <>
-                    Start ({selectedModels.length} models)
-                  </>
-                )}
-              </Button>
-            </div>
-          </form>
+      {/* ── Fixed footer ── */}
+      <div className="shrink-0 px-4 sm:px-6 py-3">
+        <div className="mx-auto w-full max-w-2xl flex items-center justify-end gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={onCancel}
+          >
+            Cancel
+          </Button>
+          <Button
+            type="submit"
+            size="sm"
+            disabled={!isValid || isSubmitting}
+          >
+            {isSubmitting ? (
+              'Creating...'
+            ) : (
+              <>Start ({selectedModels.length} models)</>
+            )}
+          </Button>
         </div>
       </div>
-    </div>
+    </form>
   );
 };
