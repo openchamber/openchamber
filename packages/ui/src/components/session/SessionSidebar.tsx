@@ -902,6 +902,14 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       : null),
     [activeProjectForHeader],
   );
+  const activeProjectLabelForHeader = React.useMemo(
+    () => (activeProjectForHeader
+      ? activeProjectForHeader.label?.trim()
+        || formatDirectoryName(activeProjectForHeader.normalizedPath, homeDirectory)
+        || activeProjectForHeader.normalizedPath
+      : null),
+    [activeProjectForHeader, homeDirectory],
+  );
 
   const activeProjectIsRepo = React.useMemo(
     () => (activeProjectForHeader ? Boolean(projectRepoStatus.get(activeProjectForHeader.id)) : false),
@@ -1287,6 +1295,14 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     openNewSessionDraft();
   }, [mobileVariant, openNewSessionDraft, setActiveMainTab, setSessionSwitcherOpen]);
 
+  const handleOpenMultiRunFromHeader = React.useCallback(() => {
+    setActiveMainTab('chat');
+    if (mobileVariant) {
+      setSessionSwitcherOpen(false);
+    }
+    openMultiRunLauncher();
+  }, [mobileVariant, openMultiRunLauncher, setActiveMainTab, setSessionSwitcherOpen]);
+
   return (
     <div
       ref={sessionSearchContainerRef}
@@ -1325,6 +1341,14 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         hideDirectoryControls={hideDirectoryControls}
         handleOpenDirectoryDialog={handleOpenDirectoryDialog}
         handleNewSession={handleSidebarNewSession}
+        useMobileNotesPanel={useMobileNotesPanel}
+        projectNotesPanelOpen={projectNotesPanelOpen}
+        setProjectNotesPanelOpen={setProjectNotesPanelOpen}
+        activeProjectRefForHeader={activeProjectRefForHeader}
+        activeProjectLabelForHeader={activeProjectLabelForHeader}
+        canOpenMultiRun={projects.length > 0}
+        openMultiRunLauncher={handleOpenMultiRunFromHeader}
+        stableActiveProjectIsRepo={stableActiveProjectIsRepo}
         headerActionIconClass={headerActionIconClass}
         reserveHeaderActionsSpace={reserveHeaderActionsSpace}
         headerActionButtonClass={headerActionButtonClass}
@@ -1364,7 +1388,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         setSessionSwitcherOpen={setSessionSwitcherOpen}
         openNewSessionDraft={openNewSessionDraft}
         openNewWorktreeDialog={openNewWorktreeDialog}
-        openMultiRunLauncher={openMultiRunLauncher}
         openProjectEditDialog={setEditingProjectDialogId}
         removeProject={removeProject}
         projectHeaderSentinelRefs={projectHeaderSentinelRefs}
@@ -1381,6 +1404,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         onOpenShortcuts={toggleHelpDialog}
         onOpenAbout={() => setAboutDialogOpen(true)}
         onOpenUpdate={handleOpenUpdateDialog}
+        showRuntimeButtons={!isVSCode}
         showUpdateButton={showSidebarUpdateButton}
       />
 
@@ -1435,10 +1459,11 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         <MobileOverlayPanel
           open={projectNotesPanelOpen}
           onClose={() => setProjectNotesPanelOpen(false)}
-          title={t('sessionSidebar.projectNotes')}
+          title={activeProjectLabelForHeader ? `Project notes - ${activeProjectLabelForHeader}` : 'Project notes'}
         >
           <ProjectNotesTodoPanel
             projectRef={activeProjectRefForHeader}
+            projectLabel={activeProjectLabelForHeader}
             canCreateWorktree={stableActiveProjectIsRepo}
             onActionComplete={() => setProjectNotesPanelOpen(false)}
             className="p-0"

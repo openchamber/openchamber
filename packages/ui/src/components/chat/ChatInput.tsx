@@ -64,6 +64,7 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, getProjectIconImageUrl } from '@/lib/projectMeta';
 import { useGitBranches, useGitStore } from '@/stores/useGitStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { createWorktreeDraft } from '@/lib/worktreeSessionCreator';
 import { usePermissionStore } from '@/stores/permissionStore';
 
 const MAX_VISIBLE_TEXTAREA_LINES = 8;
@@ -2377,9 +2378,21 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
     }, [availableWorktreesByProject, projectRootBranchOption?.value, selectedDraftProject, selectedDraftProjectPath]);
 
     const selectedDraftDirectory = React.useMemo(
-        () => normalizePath(newSessionDraft?.directoryOverride ?? null) ?? selectedDraftProjectPath,
-        [newSessionDraft?.directoryOverride, selectedDraftProjectPath],
+        () => normalizePath(newSessionDraft?.bootstrapPendingDirectory ?? null)
+            ?? normalizePath(newSessionDraft?.directoryOverride ?? null)
+            ?? selectedDraftProjectPath,
+        [newSessionDraft?.bootstrapPendingDirectory, newSessionDraft?.directoryOverride, selectedDraftProjectPath],
     );
+
+    const shouldKeepMissingSelectedDraftDirectory = React.useMemo(() => {
+        const pendingDirectory = normalizePath(newSessionDraft?.bootstrapPendingDirectory ?? null);
+        return Boolean(
+            newSessionDraft?.preserveDirectoryOverride
+            ||
+            newSessionDraft?.pendingWorktreeRequestId
+            || (pendingDirectory && pendingDirectory === selectedDraftDirectory)
+        );
+    }, [newSessionDraft?.bootstrapPendingDirectory, newSessionDraft?.pendingWorktreeRequestId, newSessionDraft?.preserveDirectoryOverride, selectedDraftDirectory]);
 
     const draftBranchItems = React.useMemo(() => {
         const baseItems: Array<{ value: string; label: string }> = [];
@@ -2394,11 +2407,14 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
         if (baseItems.some((option) => option.value === selectedDraftDirectory)) {
             return baseItems;
         }
+        if (!shouldKeepMissingSelectedDraftDirectory) {
+            return baseItems;
+        }
         return [
             ...baseItems,
             { value: selectedDraftDirectory, label: formatDirectoryName(selectedDraftDirectory) },
         ];
-    }, [projectRootBranchOption, selectedDraftDirectory, worktreeBranchOptions]);
+    }, [projectRootBranchOption, selectedDraftDirectory, shouldKeepMissingSelectedDraftDirectory, worktreeBranchOptions]);
 
     const selectedDraftBranchLabel = React.useMemo(() => {
         const selectedValue = selectedDraftDirectory ?? draftBranchItems[0]?.value ?? null;
@@ -2418,6 +2434,16 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
         return worktreeBranchOptions.some((option) => option.value === selectedDraftDirectory);
     }, [projectRootBranchOption?.value, selectedDraftDirectory, worktreeBranchOptions]);
 
+    React.useEffect(() => {
+        if (!newSessionDraft?.open || !newSessionDraft?.preserveDirectoryOverride) {
+            return;
+        }
+        if (!selectedDraftDirectory || !selectedDraftBranchIsKnown) {
+            return;
+        }
+        useSessionStore.getState().setDraftPreserveDirectoryOverride(false);
+    }, [newSessionDraft?.open, newSessionDraft?.preserveDirectoryOverride, selectedDraftBranchIsKnown, selectedDraftDirectory]);
+
     const shouldShowDraftBranchSelector = React.useMemo(() => {
         if (isDiscoveringDraftBranches) {
             return false;
@@ -2429,6 +2455,10 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
     }, [isDiscoveringDraftBranches, projectRootBranchOption, worktreeBranchOptions.length]);
 
     const handleDraftProjectChange = React.useCallback((projectId: string) => {
+        const draft = useSessionStore.getState().newSessionDraft;
+        if (draft?.pendingWorktreeRequestId || draft?.bootstrapPendingDirectory || draft?.preserveDirectoryOverride) {
+            return;
+        }
         const project = projects.find((entry) => entry.id === projectId);
         if (!project) {
             return;
@@ -2439,17 +2469,21 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
         setNewSessionDraftTarget({
             projectId,
             directoryOverride: project.path,
-        });
+        }, { force: true });
     }, [activeProjectId, projects, setActiveProjectIdOnly, setNewSessionDraftTarget]);
 
     const handleDraftDirectoryChange = React.useCallback((directory: string) => {
+        const draft = useSessionStore.getState().newSessionDraft;
+        if (draft?.pendingWorktreeRequestId || draft?.bootstrapPendingDirectory || draft?.preserveDirectoryOverride) {
+            return;
+        }
         if (!selectedDraftProject) {
             return;
         }
         setNewSessionDraftTarget({
             projectId: selectedDraftProject.id,
             directoryOverride: directory,
-        });
+        }, { force: true });
     }, [selectedDraftProject, setNewSessionDraftTarget]);
 
     const renderProjectLabelWithIcon = React.useCallback((project: {
@@ -2494,6 +2528,9 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
         if (!showDraftTargetSelectors || !selectedDraftProject || !selectedDraftDirectory) {
             return;
         }
+        if (newSessionDraft?.pendingWorktreeRequestId || newSessionDraft?.bootstrapPendingDirectory || newSessionDraft?.preserveDirectoryOverride) {
+            return;
+        }
         const valid = draftBranchItems.some((option) => option.value === selectedDraftDirectory);
         if (valid) {
             return;
@@ -2502,7 +2539,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
             projectId: selectedDraftProject.id,
             directoryOverride: selectedDraftProject.path,
         });
-    }, [draftBranchItems, selectedDraftDirectory, selectedDraftProject, setNewSessionDraftTarget, showDraftTargetSelectors]);
+    }, [draftBranchItems, newSessionDraft?.bootstrapPendingDirectory, newSessionDraft?.pendingWorktreeRequestId, newSessionDraft?.preserveDirectoryOverride, selectedDraftDirectory, selectedDraftProject, setNewSessionDraftTarget, showDraftTargetSelectors]);
 
     const footerPaddingClass = isMobile ? 'px-1.5 py-1.5' : (isVSCode ? 'px-1.5 py-1' : 'px-2.5 py-1.5');
     const buttonSizeClass = isMobile ? 'h-8 w-8' : (isVSCode ? 'h-5 w-5' : 'h-6 w-6');
@@ -2988,19 +3025,25 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                                             </SelectItem>
                                         </SelectGroup>
                                     ) : null}
-                                    {worktreeBranchOptions.length > 0 ? (
-                                        <>
-                                            {projectRootBranchOption ? <SelectSeparator /> : null}
-                                            <SelectGroup>
-                                                <SelectLabel>{t('chatInput.worktrees')}</SelectLabel>
-                                                {worktreeBranchOptions.map((option) => (
-                                                    <SelectItem key={option.value} value={option.value} className="max-w-[24rem] truncate">
-                                                        {option.label}
-                                                    </SelectItem>
-                                                ))}
-                                            </SelectGroup>
-                                        </>
-                                    ) : null}
+                                    {projectRootBranchOption ? <SelectSeparator /> : null}
+                                    <SelectGroup>
+                                        <div className="flex items-center justify-between px-2 py-1.5">
+                                            <span className="text-muted-foreground typography-meta">Worktrees</span>
+                                            <button
+                                                type="button"
+                                                className="text-muted-foreground typography-meta hover:text-foreground cursor-pointer"
+                                                onPointerDown={(e) => { e.stopPropagation(); }}
+                                                onClick={(e) => { e.preventDefault(); e.stopPropagation(); void createWorktreeDraft(); }}
+                                            >
+                                                + New
+                                            </button>
+                                        </div>
+                                        {worktreeBranchOptions.map((option) => (
+                                            <SelectItem key={option.value} value={option.value} className="max-w-[24rem] truncate">
+                                                {option.label}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectGroup>
                                     {selectedDraftDirectory && !selectedDraftBranchIsKnown ? (
                                         <SelectItem value={selectedDraftDirectory} className="max-w-[24rem] truncate">
                                             {selectedDraftBranchLabel}

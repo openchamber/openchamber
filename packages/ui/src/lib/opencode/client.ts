@@ -15,6 +15,7 @@ import type {
 } from "@opencode-ai/sdk/v2";
 import type { PermissionRequest } from "@/types/permission";
 import type { QuestionRequest } from "@/types/question";
+import { waitForWorktreeBootstrap } from "@/lib/worktrees/worktreeBootstrap";
 type StreamEvent<TData> = {
   data: TData;
   event?: string;
@@ -258,7 +259,7 @@ class OpencodeService {
 
   // Set the current working directory for all API calls
   setDirectory(directory: string | undefined) {
-    this.currentDirectory = directory;
+    this.currentDirectory = this.normalizeCandidatePath(directory) ?? directory;
   }
 
   getDirectory(): string | undefined {
@@ -272,7 +273,7 @@ class OpencodeService {
       }
 
       const previousDirectory = this.currentDirectory;
-      this.currentDirectory = directory;
+      this.currentDirectory = this.normalizeCandidatePath(directory) ?? directory;
       try {
         return await fn();
       } finally {
@@ -699,6 +700,10 @@ class OpencodeService {
     // Ensure we have at least one part
     if (parts.length === 0) {
       throw new Error('Message must have at least one part (text or file)');
+    }
+
+    if (this.currentDirectory) {
+      await waitForWorktreeBootstrap(this.currentDirectory);
     }
 
     // Use async prompt endpoint so the client doesn't block waiting

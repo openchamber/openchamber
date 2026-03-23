@@ -16,14 +16,25 @@ import {
   RiCloseLine,
   RiContractUpDownLine,
   RiExpandUpDownLine,
+  RiStickyNoteLine,
 } from '@remixicon/react';
+import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
+import type { ProjectRef } from '@/lib/openchamberConfig';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
-import { useLanguage } from '@/hooks/useLanguage';
+import { ProjectNotesTodoPanel } from '../ProjectNotesTodoPanel';
 
 type Props = {
   hideDirectoryControls: boolean;
   handleOpenDirectoryDialog: () => void;
   handleNewSession: () => void;
+  useMobileNotesPanel: boolean;
+  projectNotesPanelOpen: boolean;
+  setProjectNotesPanelOpen: (open: boolean) => void;
+  activeProjectRefForHeader: ProjectRef | null;
+  activeProjectLabelForHeader: string | null;
+  canOpenMultiRun: boolean;
+  openMultiRunLauncher: () => void;
+  stableActiveProjectIsRepo: boolean;
   headerActionIconClass: string;
   reserveHeaderActionsSpace: boolean;
   headerActionButtonClass: string;
@@ -44,6 +55,14 @@ export function SidebarHeader(props: Props): React.ReactNode {
     hideDirectoryControls,
     handleOpenDirectoryDialog,
     handleNewSession,
+    useMobileNotesPanel,
+    projectNotesPanelOpen,
+    setProjectNotesPanelOpen,
+    activeProjectRefForHeader,
+    activeProjectLabelForHeader,
+    canOpenMultiRun,
+    openMultiRunLauncher,
+    stableActiveProjectIsRepo,
     headerActionIconClass,
     reserveHeaderActionsSpace,
     headerActionButtonClass,
@@ -100,6 +119,64 @@ export function SidebarHeader(props: Props): React.ReactNode {
             </div>
 
             <div className="flex items-center gap-1.5">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={openMultiRunLauncher}
+                    className={headerActionButtonClass}
+                    aria-label="New multi-run"
+                    disabled={!canOpenMultiRun}
+                  >
+                    <ArrowsMerge className={headerActionIconClass} />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" sideOffset={4}><p>New multi-run</p></TooltipContent>
+              </Tooltip>
+
+              {useMobileNotesPanel ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={() => setProjectNotesPanelOpen(true)}
+                      className={headerActionButtonClass}
+                      aria-label="Project notes"
+                      disabled={!activeProjectRefForHeader}
+                    >
+                      <RiStickyNoteLine className={headerActionIconClass} />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" sideOffset={4}><p>Project notes</p></TooltipContent>
+                </Tooltip>
+              ) : (
+                <DropdownMenu open={projectNotesPanelOpen} onOpenChange={setProjectNotesPanelOpen} modal={false}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <DropdownMenuTrigger asChild>
+                        <button
+                          type="button"
+                          className={headerActionButtonClass}
+                          aria-label="Project notes"
+                          disabled={!activeProjectRefForHeader}
+                        >
+                          <RiStickyNoteLine className={headerActionIconClass} />
+                        </button>
+                      </DropdownMenuTrigger>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" sideOffset={4}><p>Project notes</p></TooltipContent>
+                  </Tooltip>
+                  <DropdownMenuContent align="start" className="w-[420px] max-w-[min(92vw,420px)] p-0">
+                    <ProjectNotesTodoPanel
+                      projectRef={activeProjectRefForHeader}
+                      projectLabel={activeProjectLabelForHeader}
+                      canCreateWorktree={stableActiveProjectIsRepo}
+                      onActionComplete={() => setProjectNotesPanelOpen(false)}
+                    />
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button

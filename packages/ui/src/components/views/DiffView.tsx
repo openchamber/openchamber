@@ -946,8 +946,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
     const diffViewMode = useUIStore((state) => state.diffViewMode);
     const setDiffViewMode = useUIStore((state) => state.setDiffViewMode);
     const openContextFileAtLine = useUIStore((state) => state.openContextFileAtLine);
-    // Default to wrap on mobile
-    const diffWrapLines = isMobile || diffWrapLinesStore;
+    const diffWrapLines = diffWrapLinesStore;
 
     const isStackedView = diffViewMode === 'stacked';
     const isMobileLayout = isMobile || screenWidth <= 768;

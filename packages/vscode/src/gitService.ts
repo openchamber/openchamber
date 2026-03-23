@@ -14,6 +14,39 @@ import type { API as GitAPI, Repository, GitExtension, Status } from './git.d';
 
 let gitApi: GitAPI | null = null;
 let gitExtensionEnabled = false;
+const worktreeBootstrapState = new Map<string, { status: 'pending' | 'ready' | 'failed'; error: string | null; updatedAt: number }>();
+
+const WORKTREE_BOOTSTRAP_PENDING = 'pending' as const;
+const WORKTREE_BOOTSTRAP_READY = 'ready' as const;
+const WORKTREE_BOOTSTRAP_FAILED = 'failed' as const;
+
+const toBootstrapStateKey = (directory: string): string => {
+  const normalized = normalizeDirectoryPath(directory);
+  if (!normalized) {
+    return '';
+  }
+  return path.resolve(normalized);
+};
+
+const setWorktreeBootstrapState = (directory: string, status: 'pending' | 'ready' | 'failed', error: string | null = null): void => {
+  const key = toBootstrapStateKey(directory);
+  if (!key) {
+    return;
+  }
+  worktreeBootstrapState.set(key, {
+    status,
+    error: typeof error === 'string' && error.trim().length > 0 ? error.trim() : null,
+    updatedAt: Date.now(),
+  });
+};
+
+const clearWorktreeBootstrapState = (directory: string): void => {
+  const key = toBootstrapStateKey(directory);
+  if (!key) {
+    return;
+  }
+  worktreeBootstrapState.delete(key);
+};
 
 const execFileAsync = promisify(execFile);
 const gpgconfCandidates = ['gpgconf', '/opt/homebrew/bin/gpgconf', '/usr/local/bin/gpgconf'];
@@ -1290,30 +1323,80 @@ const syncProjectSandboxRemove = async (projectID: string, primaryWorktree: stri
   });
 };
 
-const queueWorktreeStartScripts = (directory: string, projectID: string, startCommand: string | undefined) => {
+const runWorktreeStartScripts = async (directory: string, projectID: string, startCommand: string | undefined) => {
+  const projectStart = await loadProjectStartCommand(projectID);
+  if (projectStart) {
+    const projectResult = await runWorktreeStartCommand(directory, projectStart);
+    if (!projectResult.success) {
+      console.warn('[GitService] Worktree project start command failed:', projectResult.message || projectResult.stderr || projectResult.stdout);
+      return;
+    }
+  }
+
+  const extraCommand = String(startCommand || '').trim();
+  if (!extraCommand) {
+    return;
+  }
+  const extraResult = await runWorktreeStartCommand(directory, extraCommand);
+  if (!extraResult.success) {
+    console.warn('[GitService] Worktree start command failed:', extraResult.message || extraResult.stderr || extraResult.stdout);
+  }
+};
+
+const queueWorktreeBootstrap = (args: {
+  directory: string;
+  projectID: string;
+  primaryWorktree: string;
+  localBranch: string;
+  setUpstream: boolean;
+  upstreamRemote: string;
+  upstreamBranch: string;
+  ensureRemoteName: string;
+  ensureRemoteUrl: string;
+  startCommand: string | undefined;
+}) => {
+  const {
+    directory,
+    projectID,
+    primaryWorktree,
+    localBranch,
+    setUpstream,
+    upstreamRemote,
+    upstreamBranch,
+    ensureRemoteName,
+    ensureRemoteUrl,
+    startCommand,
+  } = args;
   setTimeout(() => {
     const run = async () => {
-      const projectStart = await loadProjectStartCommand(projectID);
-      if (projectStart) {
-        const projectResult = await runWorktreeStartCommand(directory, projectStart);
-        if (!projectResult.success) {
-          console.warn('[GitService] Worktree project start command failed:', projectResult.message || projectResult.stderr || projectResult.stdout);
-          return;
-        }
+      await runGitCommandOrThrow(directory, ['reset', '--hard'], 'Failed to populate worktree');
+      if (setUpstream) {
+        await applyUpstreamConfiguration({
+          primaryWorktree,
+          worktreeDirectory: directory,
+          localBranch,
+          setUpstream,
+          upstreamRemote,
+          upstreamBranch,
+          ensureRemoteName,
+          ensureRemoteUrl,
+        }).catch((error) => {
+          console.warn('[GitService] Worktree upstream configuration failed:', error instanceof Error ? error.message : String(error));
+        });
       }
-
-      const extraCommand = String(startCommand || '').trim();
-      if (!extraCommand) {
-        return;
-      }
-      const extraResult = await runWorktreeStartCommand(directory, extraCommand);
-      if (!extraResult.success) {
-        console.warn('[GitService] Worktree start command failed:', extraResult.message || extraResult.stderr || extraResult.stdout);
-      }
+      await runWorktreeStartScripts(directory, projectID, startCommand).catch((error) => {
+        console.warn('[GitService] Worktree start script task failed:', error instanceof Error ? error.message : String(error));
+      });
+      setWorktreeBootstrapState(directory, WORKTREE_BOOTSTRAP_READY);
     };
 
     void run().catch((error) => {
-      console.warn('[GitService] Worktree start script task failed:', error instanceof Error ? error.message : String(error));
+      setWorktreeBootstrapState(
+        directory,
+        WORKTREE_BOOTSTRAP_FAILED,
+        error instanceof Error ? error.message : String(error)
+      );
+      console.warn('[GitService] Worktree bootstrap task failed:', error instanceof Error ? error.message : String(error));
     });
   }, 0);
 };
@@ -1584,6 +1667,28 @@ export async function validateWorktreeCreate(directory: string, input: CreateGit
   }
 }
 
+export async function previewWorktreeCreate(directory: string, input: CreateGitWorktreePayload = {}): Promise<GitWorktreeInfo> {
+  const mode = input?.mode === 'existing' ? 'existing' : 'new';
+  const context = await resolveWorktreeProjectContext(directory);
+  await fs.promises.mkdir(context.worktreeRoot, { recursive: true });
+
+  const preferredName = String(input?.worktreeName || input?.name || '').trim();
+  const preferredBranchName = cleanBranchName(String(input?.branchName || '').trim());
+  const candidate = await resolveCandidateDirectory(
+    context.worktreeRoot,
+    preferredName,
+    mode === 'new' && preferredBranchName ? preferredBranchName : '',
+    context.primaryWorktree
+  );
+
+  return {
+    name: candidate.name,
+    branch: mode === 'new' ? candidate.branch : preferredBranchName,
+    path: candidate.directory,
+    head: '',
+  };
+}
+
 export async function createWorktree(directory: string, input: CreateGitWorktreePayload = {}): Promise<GitWorktreeInfo> {
   const mode = input?.mode === 'existing' ? 'existing' : 'new';
   const context = await resolveWorktreeProjectContext(directory);
@@ -1675,7 +1780,6 @@ export async function createWorktree(directory: string, input: CreateGitWorktree
   }
 
   await runGitCommandOrThrow(context.primaryWorktree, worktreeAddArgs, 'Failed to create git worktree');
-  await runGitCommandOrThrow(candidate.directory, ['reset', '--hard'], 'Failed to populate worktree');
 
   try {
     await syncProjectSandboxAdd(context.projectID, context.primaryWorktree, candidate.directory);
@@ -1687,20 +1791,20 @@ export async function createWorktree(directory: string, input: CreateGitWorktree
   const upstreamRemote = String(input?.upstreamRemote || inferredUpstream?.remote || '').trim();
   const upstreamBranch = String(input?.upstreamBranch || inferredUpstream?.branch || '').trim();
 
-  if (shouldSetUpstream) {
-    await applyUpstreamConfiguration({
-      primaryWorktree: context.primaryWorktree,
-      worktreeDirectory: candidate.directory,
-      localBranch,
-      setUpstream: shouldSetUpstream,
-      upstreamRemote,
-      upstreamBranch,
-      ensureRemoteName,
-      ensureRemoteUrl,
-    });
-  }
+  setWorktreeBootstrapState(candidate.directory, WORKTREE_BOOTSTRAP_PENDING);
 
-  queueWorktreeStartScripts(candidate.directory, context.projectID, input?.startCommand);
+  queueWorktreeBootstrap({
+    directory: candidate.directory,
+    projectID: context.projectID,
+    primaryWorktree: context.primaryWorktree,
+    localBranch,
+    setUpstream: shouldSetUpstream,
+    upstreamRemote,
+    upstreamBranch,
+    ensureRemoteName,
+    ensureRemoteUrl,
+    startCommand: input?.startCommand,
+  });
 
   const headResult = await runGitCommand(candidate.directory, ['rev-parse', 'HEAD']);
   const head = String(headResult.stdout || '').trim();
@@ -1710,6 +1814,24 @@ export async function createWorktree(directory: string, input: CreateGitWorktree
     name: candidate.name,
     branch: localBranch,
     path: candidate.directory,
+  };
+}
+
+export async function getWorktreeBootstrapStatus(directory: string): Promise<{ status: 'pending' | 'ready' | 'failed'; error: string | null; updatedAt: number }> {
+  const key = toBootstrapStateKey(directory);
+  if (!key) {
+    throw new Error('Worktree directory is required');
+  }
+
+  const current = worktreeBootstrapState.get(key);
+  if (current) {
+    return current;
+  }
+
+  return {
+    status: WORKTREE_BOOTSTRAP_READY,
+    error: null,
+    updatedAt: Date.now(),
   };
 }
 
@@ -1754,6 +1876,8 @@ export async function removeWorktree(directory: string, input: RemoveGitWorktree
       console.warn('[GitService] Failed to sync OpenCode sandbox metadata (remove):', error instanceof Error ? error.message : String(error));
     }
 
+    clearWorktreeBootstrapState(targetDirectory);
+
     return true;
   }
 
@@ -1779,6 +1903,8 @@ export async function removeWorktree(directory: string, input: RemoveGitWorktree
   } catch (error) {
     console.warn('[GitService] Failed to sync OpenCode sandbox metadata (remove):', error instanceof Error ? error.message : String(error));
   }
+
+  clearWorktreeBootstrapState(matchedEntry.worktree);
 
   return true;
 }

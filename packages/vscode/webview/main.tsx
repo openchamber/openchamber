@@ -251,7 +251,10 @@ onThemeChange((payload) => {
 const workspaceFolder = window.__VSCODE_CONFIG__?.workspaceFolder;
 if (workspaceFolder) {
   const normalizeWorkspacePath = (value: string) => {
-    const normalized = value.replace(/\\/g, '/');
+    const normalized = value
+      .replace(/\\/g, '/')
+      .replace(/^([a-z]):\//, (_, letter: string) => `${letter.toUpperCase()}:/`)
+      .replace(/^\/([a-z]):\//, (_, letter: string) => `/${letter.toUpperCase()}:/`);
     if (normalized === '/') {
       return '/';
     }
@@ -751,12 +754,16 @@ const handleLocalApiRequest = async (url: URL, init?: RequestInit) => {
       const currentVersion = url.searchParams.get('currentVersion') || undefined;
       const instanceMode = url.searchParams.get('instanceMode') || 'local';
       const deviceClass = url.searchParams.get('deviceClass') || 'desktop';
+      const platform = url.searchParams.get('platform') || undefined;
+      const arch = url.searchParams.get('arch') || undefined;
       const reportUsageRaw = (url.searchParams.get('reportUsage') || 'true').toLowerCase();
       const reportUsage = !(reportUsageRaw === 'false' || reportUsageRaw === '0' || reportUsageRaw === 'no');
       const data = await sendBridgeMessage('api:openchamber:update-check', {
         currentVersion,
         instanceMode,
         deviceClass,
+        platform,
+        arch,
         reportUsage,
       });
       return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });

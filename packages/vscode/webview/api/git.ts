@@ -142,6 +142,20 @@ export const createVSCodeGitAPI = (): GitAPI => ({
     });
   },
 
+  getGitWorktreeBootstrapStatus: async (directory: string): Promise<{ status: 'pending' | 'ready' | 'failed'; error: string | null; updatedAt: number }> => {
+    return sendBridgeMessage<{ status: 'pending' | 'ready' | 'failed'; error: string | null; updatedAt: number }>('api:git/worktrees/bootstrap-status', {
+      directory,
+    });
+  },
+
+  previewGitWorktree: async (directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeCreateResult> => {
+    return sendBridgeMessage<GitWorktreeCreateResult>('api:git/worktrees/preview', {
+      directory,
+      method: 'POST',
+      ...(payload || {}),
+    });
+  },
+
   createGitWorktree: async (directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeCreateResult> => {
     return sendBridgeMessage<GitWorktreeCreateResult>('api:git/worktrees', {
       directory,

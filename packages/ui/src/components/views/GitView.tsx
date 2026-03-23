@@ -61,7 +61,7 @@ import { BranchIntegrationSection, type OperationLogEntry } from './git/BranchIn
 import type { GitRemote } from '@/lib/gitApi';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { cn } from '@/lib/utils';
-import { generateCommitMessage as generateSessionCommitMessage } from '@/lib/gitApi';
+import { generateCommitMessage as generateSessionCommitMessage, getGitWorktreeBootstrapStatus } from '@/lib/gitApi';
 
 type SyncAction = 'fetch' | 'pull' | 'push' | null;
 type CommitAction = 'commit' | 'commitAndPush' | null;
@@ -225,11 +225,14 @@ export const GitView: React.FC = () => {
   const { t } = useLanguage();
   const { git } = useRuntimeAPIs();
   const currentDirectory = useEffectiveDirectory();
+  const [worktreeBootstrapStatus, setWorktreeBootstrapStatus] = React.useState<'pending' | 'ready' | 'failed' | null>(null);
+  const [isWaitingForGitRefreshAfterBootstrap, setIsWaitingForGitRefreshAfterBootstrap] = React.useState(false);
   const {
     currentSessionId,
     worktreeMetadata: worktreeMap,
     availableWorktrees,
     newSessionDraft,
+    setDraftBootstrapPendingDirectory,
   } = useSessionStore();
   const normalizedCurrentDirectory = normalizePath(currentDirectory);
   const inferredWorktreeMetadata = React.useMemo(() => {
@@ -289,6 +292,78 @@ export const GitView: React.FC = () => {
   const openContextDiff = useUIStore((state) => state.openContextDiff);
   const navigateToDiff = useUIStore((state) => state.navigateToDiff);
   const setRightSidebarOpen = useUIStore((state) => state.setRightSidebarOpen);
+  const previousBootstrapStatusRef = React.useRef<'pending' | 'ready' | 'failed' | null>(null);
+
+  React.useEffect(() => {
+    if (!currentDirectory) {
+      setWorktreeBootstrapStatus(null);
+      setIsWaitingForGitRefreshAfterBootstrap(false);
+      return;
+    }
+
+    let cancelled = false;
+    let timeoutId: number | null = null;
+
+    const poll = async () => {
+      try {
+        const next = await getGitWorktreeBootstrapStatus(currentDirectory);
+        if (cancelled) {
+          return;
+        }
+        setWorktreeBootstrapStatus(next.status);
+        if (next.status === 'pending') {
+          timeoutId = window.setTimeout(() => {
+            void poll();
+          }, 500);
+        }
+      } catch {
+        if (!cancelled) {
+          setWorktreeBootstrapStatus(null);
+        }
+      }
+    };
+
+    void poll();
+
+    return () => {
+      cancelled = true;
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, [currentDirectory]);
+
+  React.useEffect(() => {
+    const previous = previousBootstrapStatusRef.current;
+    previousBootstrapStatusRef.current = worktreeBootstrapStatus;
+
+    if (!currentDirectory || !git) {
+      return;
+    }
+
+    if (previous === 'pending' && worktreeBootstrapStatus === 'ready') {
+      setIsWaitingForGitRefreshAfterBootstrap(true);
+      void fetchAll(currentDirectory, git).finally(() => {
+        window.setTimeout(() => {
+          setIsWaitingForGitRefreshAfterBootstrap(false);
+        }, 1200);
+      });
+    }
+
+    if (worktreeBootstrapStatus === 'failed') {
+      setDraftBootstrapPendingDirectory(null);
+      setIsWaitingForGitRefreshAfterBootstrap(false);
+    }
+  }, [currentDirectory, fetchAll, git, setDraftBootstrapPendingDirectory, worktreeBootstrapStatus]);
+
+  const normalizedDraftBootstrapPendingDirectory = normalizePath(newSessionDraft?.bootstrapPendingDirectory ?? null);
+  const isDraftBootstrapPendingForCurrentDirectory = Boolean(
+    currentDirectory && normalizedDraftBootstrapPendingDirectory && normalizedDraftBootstrapPendingDirectory === normalizePath(currentDirectory)
+  );
+  const isPendingWorktreeSetup = Boolean(
+    currentDirectory && (worktreeBootstrapStatus === 'pending' || isDraftBootstrapPendingForCurrentDirectory)
+  );
+  const shouldHideNotGitState = isPendingWorktreeSetup || isWaitingForGitRefreshAfterBootstrap;
 
   const initialSnapshot = React.useMemo(() => {
     if (!currentDirectory) return null;
@@ -1833,6 +1908,20 @@ export const GitView: React.FC = () => {
   }
 
   if (isGitRepo === false) {
+    if (shouldHideNotGitState) {
+      return (
+        <div className="flex h-full flex-col items-center justify-center px-4 text-center">
+          <RiLoader4Line className="mb-3 size-6 animate-spin text-muted-foreground" />
+          <p className="typography-ui-label font-semibold text-foreground">
+            Worktree setup is in progress
+          </p>
+          <p className="typography-meta mt-1 text-muted-foreground">
+            Git tools will appear as soon as the new worktree is ready.
+          </p>
+        </div>
+      );
+    }
+
     return (
       <div className="flex h-full flex-col items-center justify-center px-4 text-center">
         <RiGitBranchLine className="mb-3 size-6 text-muted-foreground" />

@@ -871,16 +871,12 @@ Nice-to-have:
         localStorage.setItem(LAST_SOURCE_BRANCH_KEY, newBranchState.sourceBranch);
       }
       
-      toast.success(t('branchPickerDialog.worktreeCreated'), {
-        description: `${metadata.branch || metadata.name}${sourceLabel ? ` from ${sourceLabel}` : ''}`,
+      toast.success('Worktree created', {
+        description: `${metadata.branch || metadata.name}${sourceLabel ? ` from ${sourceLabel}` : ''} - bootstrapping in background`,
       });
 
-      try {
-        await loadSessions();
-      } catch {
-        // best effort
-      }
-      
+      void loadSessions().catch(() => undefined);
+
       onOpenChange(false);
 
       if (createdSessionId) {

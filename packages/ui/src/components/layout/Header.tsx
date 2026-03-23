@@ -594,7 +594,7 @@ export const Header: React.FC<HeaderProps> = ({
     if (!state.newSessionDraft?.open) {
       return '';
     }
-    return normalize(state.newSessionDraft.directoryOverride ?? '');
+    return normalize(state.newSessionDraft.bootstrapPendingDirectory ?? state.newSessionDraft.directoryOverride ?? '');
   });
 
   const openDirectory = React.useMemo(() => {

@@ -558,10 +558,8 @@ interface UIStore {
   stickyUserHeader: boolean;
   showMobileSessionStatusBar: boolean;
   isMobileSessionStatusBarCollapsed: boolean;
-  viewPagerPage: 'left' | 'center' | 'right';
-
   isExpandedInput: boolean;
-
+  reportUsage: boolean;
   shortcutOverrides: Record<string, ShortcutCombo>;
   setTheme: (theme: 'light' | 'dark' | 'system') => void;
   setLanguage: (language: 'en' | 'zh') => void;
@@ -669,11 +667,13 @@ interface UIStore {
   setStickyUserHeader: (value: boolean) => void;
   setShowMobileSessionStatusBar: (value: boolean) => void;
   setIsMobileSessionStatusBarCollapsed: (value: boolean) => void;
+  viewPagerPage: 'left' | 'center' | 'right';
   setViewPagerPage: (page: 'left' | 'center' | 'right') => void;
   toggleExpandedInput: () => void;
   setExpandedInput: (value: boolean) => void;
   openMultiRunLauncher: () => void;
   openMultiRunLauncherWithPrompt: (prompt: string) => void;
+  setReportUsage: (value: boolean) => void;
   setShortcutOverride: (actionId: string, combo: ShortcutCombo) => void;
   clearShortcutOverride: (actionId: string) => void;
   resetAllShortcutOverrides: () => void;
@@ -782,6 +782,7 @@ export const useUIStore = create<UIStore>()(
         showMobileSessionStatusBar: true,
         isMobileSessionStatusBarCollapsed: false,
         isExpandedInput: false,
+        reportUsage: true,
         shortcutOverrides: {},
 
         setTheme: (theme) => {
@@ -1693,6 +1694,9 @@ export const useUIStore = create<UIStore>()(
         },
         setIsMobileSessionStatusBarCollapsed: (value) => {
           set({ isMobileSessionStatusBarCollapsed: value });
+        },
+        setReportUsage: (value) => {
+          set({ reportUsage: value });
         },
         viewPagerPage: 'center',
         setViewPagerPage: (page: 'left' | 'center' | 'right') => {

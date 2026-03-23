@@ -56,3 +56,4 @@ This module provides OpenCode server integration utilities for the web server ru
 - All file writes include automatic backup before modification.
 - Config merging follows priority: custom > project > user.
 - UI auth uses scrypt for password hashing with constant-time comparison.
+- Tunnel auth treats `host.docker.internal` as local-only when the socket remote IP is private/loopback.

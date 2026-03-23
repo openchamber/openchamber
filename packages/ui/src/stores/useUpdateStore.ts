@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { UpdateInfo, UpdateProgress } from '@/lib/desktop';
 import { getDeviceInfo } from '@/lib/device';
+import { useUIStore } from './useUIStore';
 import {
   checkForDesktopUpdates,
   downloadDesktopUpdate,
@@ -66,7 +67,10 @@ function detectPlatform(): 'macos' | 'windows' | 'linux' | 'web' {
 }
 
 function mapRuntimeParams(runtime: ClientRuntime): URLSearchParams {
-  const params = new URLSearchParams({ reportUsage: 'true' });
+  // Check if user has opted out of usage reporting (default: true/enabled from UI store)
+  const shouldReportUsage = useUIStore.getState().reportUsage;
+  
+  const params = new URLSearchParams({ reportUsage: shouldReportUsage ? 'true' : 'false' });
   params.set('deviceClass', detectDeviceClass());
   params.set('arch', detectArch());
   params.set('platform', detectPlatform());

@@ -393,6 +393,9 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   if (typeof settings.stickyUserHeader === 'boolean' && settings.stickyUserHeader !== store.stickyUserHeader) {
     store.setStickyUserHeader(settings.stickyUserHeader);
   }
+  if (typeof settings.reportUsage === 'boolean' && settings.reportUsage !== store.reportUsage) {
+    store.setReportUsage(settings.reportUsage);
+  }
   if (typeof settings.fontSize === 'number' && Number.isFinite(settings.fontSize) && settings.fontSize !== store.fontSize) {
     store.setFontSize(settings.fontSize);
   }
@@ -838,6 +841,10 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   const skillCatalogs = sanitizeSkillCatalogs(candidate.skillCatalogs);
   if (skillCatalogs) {
     result.skillCatalogs = skillCatalogs;
+  }
+
+  if (typeof candidate.reportUsage === 'boolean') {
+    result.reportUsage = candidate.reportUsage;
   }
 
   return result;

@@ -6,3 +6,4 @@ export { TerminalView } from './TerminalView';
 export { FilesView } from './FilesView';
 export { SettingsView } from './SettingsView';
 export { SettingsWindow } from './SettingsWindow';
+export { MultiRunWindow } from './MultiRunWindow';

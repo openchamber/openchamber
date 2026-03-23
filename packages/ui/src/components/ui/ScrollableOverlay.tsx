@@ -53,7 +53,8 @@ export const ScrollableOverlay = React.forwardRef<HTMLElement, ScrollableOverlay
       >
         {useScrollShadow ? (
           <ScrollShadow
-            ref={containerRef as React.Ref<HTMLDivElement>}
+            as={Component}
+            ref={containerRef as React.Ref<HTMLElement>}
             size={scrollShadowSize}
             className={cn(
               "overlay-scrollbar-target overlay-scrollbar-container",

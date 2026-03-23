@@ -274,7 +274,7 @@ export const CommandPalette: React.FC = () => {
           </CommandItem>
           <CommandItem onSelect={handleCreateWorktreeSession}>
             <RiGitBranchLine className="mr-2 h-4 w-4" />
-            <span>{t('commandPalette.newSessionWithWorktree')}</span>
+            <span>New Worktree Draft</span>
             <CommandShortcut>
               {shortcut('new_chat_worktree')}
             </CommandShortcut>

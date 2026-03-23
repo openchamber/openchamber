@@ -453,6 +453,33 @@ export async function validateGitWorktree(
   return gitHttp.validateGitWorktree(directory, payload);
 }
 
+export async function getGitWorktreeBootstrapStatus(
+  directory: string,
+): Promise<import('./api/types').GitWorktreeBootstrapStatus> {
+  const runtime = getRuntimeGit();
+  if (runtime?.worktree?.bootstrapStatus) {
+    return runtime.worktree.bootstrapStatus(directory);
+  }
+  if (runtime?.getGitWorktreeBootstrapStatus) {
+    return runtime.getGitWorktreeBootstrapStatus(directory);
+  }
+  return gitHttp.getGitWorktreeBootstrapStatus(directory);
+}
+
+export async function previewGitWorktree(
+  directory: string,
+  payload: import('./api/types').CreateGitWorktreePayload
+): Promise<import('./api/types').GitWorktreeCreateResult> {
+  const runtime = getRuntimeGit();
+  if (runtime?.worktree?.preview) {
+    return runtime.worktree.preview(directory, payload);
+  }
+  if (runtime?.previewGitWorktree) {
+    return runtime.previewGitWorktree(directory, payload);
+  }
+  return gitHttp.previewGitWorktree(directory, payload);
+}
+
 export async function createGitWorktree(
   directory: string,
   payload: import('./api/types').CreateGitWorktreePayload

@@ -55,7 +55,6 @@ type Props = {
   setSessionSwitcherOpen: (open: boolean) => void;
   openNewSessionDraft: (options?: { directoryOverride?: string | null }) => void;
   openNewWorktreeDialog: () => void;
-  openMultiRunLauncher: () => void;
   openProjectEditDialog: (id: string) => void;
   removeProject: (id: string) => void;
   projectHeaderSentinelRefs: React.MutableRefObject<Map<string, HTMLDivElement | null>>;
@@ -186,10 +185,6 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
                       props.setActiveMainTab('chat');
                       if (props.mobileVariant) props.setSessionSwitcherOpen(false);
                       props.openNewWorktreeDialog();
-                    }}
-                    onOpenMultiRunLauncher={() => {
-                      if (projectKey !== props.activeProjectId) props.setActiveProjectIdOnly(projectKey);
-                      props.openMultiRunLauncher();
                     }}
                     onRenameStart={() => props.openProjectEditDialog(projectKey)}
                     onClose={() => props.removeProject(projectKey)}

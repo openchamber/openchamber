@@ -113,8 +113,38 @@ const execFileAsync = promisify(execFile);
 const gpgconfCandidates = ['gpgconf', '/opt/homebrew/bin/gpgconf', '/usr/local/bin/gpgconf'];
 
 const OPENCHAMBER_SHARED_SETTINGS_PATH = path.join(os.homedir(), '.config', 'openchamber', 'settings.json');
-const VSCODE_INSTALL_ID_KEY = 'openchamber.installId.vscode';
 const UPDATE_CHECK_URL = process.env.OPENCHAMBER_UPDATE_API_URL || 'https://api.openchamber.dev/v1/update/check';
+
+const getOpenChamberConfigDir = (): string => {
+  if (process.platform === 'win32') {
+    const appData = process.env.APPDATA;
+    if (appData) return path.join(appData, 'openchamber');
+  }
+  return path.join(os.homedir(), '.config', 'openchamber');
+};
+
+const sanitizeInstallScope = (scope: string): 'desktop-tauri' | 'vscode' | 'web' => {
+  if (scope === 'desktop-tauri' || scope === 'vscode' || scope === 'web') return scope;
+  return 'web';
+};
+
+const getOrCreateInstallId = (scope: string): string => {
+  const configDir = getOpenChamberConfigDir();
+  const normalizedScope = sanitizeInstallScope(scope);
+  const idPath = path.join(configDir, `install-id-${normalizedScope}`);
+
+  try {
+    const existing = fs.readFileSync(idPath, 'utf8').trim();
+    if (existing) return existing;
+  } catch {
+    // Generate new id.
+  }
+
+  const installId = randomUUID();
+  fs.mkdirSync(configDir, { recursive: true });
+  fs.writeFileSync(idPath, `${installId}\n`, { encoding: 'utf8', mode: 0o600 });
+  return installId;
+};
 
 const mapNodePlatformToApiPlatform = (value: string): 'macos' | 'windows' | 'linux' | 'web' => {
   if (value === 'darwin') return 'macos';
@@ -127,22 +157,6 @@ const mapNodeArchToApiArch = (value: string): 'arm64' | 'x64' | 'unknown' => {
   if (value === 'arm64' || value === 'aarch64') return 'arm64';
   if (value === 'x64' || value === 'amd64') return 'x64';
   return 'unknown';
-};
-
-const getOrCreateVSCodeInstallId = async (ctx?: BridgeContext): Promise<string> => {
-  const state = ctx?.context?.globalState;
-  if (state) {
-    const existing = state.get<string>(VSCODE_INSTALL_ID_KEY);
-    if (typeof existing === 'string' && existing.trim().length > 0) {
-      return existing.trim();
-    }
-  }
-
-  const generated = randomUUID();
-  if (state) {
-    await state.update(VSCODE_INSTALL_ID_KEY, generated);
-  }
-  return generated;
 };
 
 const guessMimeTypeFromExtension = (ext: string) => {
@@ -2935,14 +2949,20 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
           const deviceClass = typeof body.deviceClass === 'string' && body.deviceClass.trim().length > 0
             ? body.deviceClass.trim()
             : 'desktop';
+          const platformRaw = typeof body.platform === 'string' && body.platform.trim().length > 0
+            ? body.platform.trim()
+            : os.platform();
+          const archRaw = typeof body.arch === 'string' && body.arch.trim().length > 0
+            ? body.arch.trim()
+            : os.arch();
           const reportUsage = body.reportUsage !== false;
 
-          const installId = await getOrCreateVSCodeInstallId(ctx);
+          const installId = getOrCreateInstallId('vscode');
           const requestBody = {
             appType: 'vscode',
             deviceClass,
-            platform: mapNodePlatformToApiPlatform(os.platform()),
-            arch: mapNodeArchToApiArch(os.arch()),
+            platform: mapNodePlatformToApiPlatform(platformRaw),
+            arch: mapNodeArchToApiArch(archRaw),
             channel: 'stable',
             currentVersion,
             installId,
@@ -3139,6 +3159,21 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
         }
       }
 
+      case 'vscode:openExternalUrl': {
+        const { url } = (payload || {}) as { url?: string };
+        const target = typeof url === 'string' ? url.trim() : '';
+        if (!target) {
+          return { id, type, success: false, error: 'URL is required' };
+        }
+        try {
+          await vscode.env.openExternal(vscode.Uri.parse(target));
+          return { id, type, success: true, data: { opened: true } };
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          return { id, type, success: false, error: errorMessage };
+        }
+      }
+
       case 'notifications:can-notify': {
         return { id, type, success: true, data: true };
       }
@@ -3305,6 +3340,24 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
           return { id, type, success: false, error: 'Directory is required' };
         }
         const result = await gitService.validateWorktreeCreate(directory, (payload || {}) as gitService.CreateGitWorktreePayload);
+        return { id, type, success: true, data: result };
+      }
+
+      case 'api:git/worktrees/bootstrap-status': {
+        const { directory } = (payload || {}) as { directory?: string };
+        if (!directory) {
+          return { id, type, success: false, error: 'Directory is required' };
+        }
+        const result = await gitService.getWorktreeBootstrapStatus(directory);
+        return { id, type, success: true, data: result };
+      }
+
+      case 'api:git/worktrees/preview': {
+        const { directory } = (payload || {}) as { directory?: string };
+        if (!directory) {
+          return { id, type, success: false, error: 'Directory is required' };
+        }
+        const result = await gitService.previewWorktreeCreate(directory, (payload || {}) as gitService.CreateGitWorktreePayload);
         return { id, type, success: true, data: result };
       }
 

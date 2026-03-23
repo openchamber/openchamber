@@ -306,6 +306,12 @@ export interface GitWorktreeValidationResult {
   };
 }
 
+export interface GitWorktreeBootstrapStatus {
+  status: 'pending' | 'ready' | 'failed';
+  error: string | null;
+  updatedAt: number;
+}
+
 export interface CreateGitWorktreePayload {
   mode?: 'new' | 'existing';
   /** Worktree folder name (falls back to OpenCode name generation when omitted). */
@@ -380,6 +386,8 @@ export interface GeneratedPullRequestDescription {
 export interface GitWorktreeAPI {
   list(directory: string): Promise<GitWorktreeInfo[]>;
   validate?(directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeValidationResult>;
+  bootstrapStatus?(directory: string): Promise<GitWorktreeBootstrapStatus>;
+  preview?(directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeCreateResult>;
   create?(directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeCreateResult>;
   remove?(directory: string, payload: RemoveGitWorktreePayload): Promise<{ success: boolean }>;
 }
@@ -402,6 +410,8 @@ export interface GitAPI {
   ): Promise<GeneratedPullRequestDescription>;
   listGitWorktrees(directory: string): Promise<GitWorktreeInfo[]>;
   validateGitWorktree?(directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeValidationResult>;
+  getGitWorktreeBootstrapStatus?(directory: string): Promise<GitWorktreeBootstrapStatus>;
+  previewGitWorktree?(directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeCreateResult>;
   createGitWorktree?(directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeCreateResult>;
   deleteGitWorktree?(directory: string, payload: RemoveGitWorktreePayload): Promise<{ success: boolean }>;
   createGitCommit(directory: string, message: string, options?: CreateGitCommitOptions): Promise<GitCommitResult>;
@@ -619,6 +629,7 @@ export interface EditorAPI {
 export interface VSCodeAPI {
   executeCommand(command: string, ...args: unknown[]): Promise<unknown>;
   openAgentManager(): Promise<void>;
+  openExternalUrl(url: string): Promise<void>;
 }
 
 export interface PushSubscribePayload {

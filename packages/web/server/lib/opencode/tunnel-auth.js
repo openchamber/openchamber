@@ -80,11 +80,107 @@ const normalizeHost = (candidate) => {
   return trimmed.replace(/:\d+$/, '');
 };
 
-const isLocalHost = (host) => {
+const normalizeIpCandidate = (candidate) => {
+  if (typeof candidate !== 'string') {
+    return null;
+  }
+
+  const trimmed = candidate.trim().toLowerCase();
+  if (!trimmed) {
+    return null;
+  }
+
+  const withoutBrackets = trimmed.startsWith('[') && trimmed.endsWith(']')
+    ? trimmed.slice(1, -1)
+    : trimmed;
+
+  const withoutZone = withoutBrackets.split('%')[0];
+  if (!withoutZone) {
+    return null;
+  }
+
+  if (withoutZone.startsWith('::ffff:')) {
+    const mappedIpv4 = withoutZone.slice('::ffff:'.length);
+    if (/^\d+\.\d+\.\d+\.\d+$/.test(mappedIpv4)) {
+      return mappedIpv4;
+    }
+  }
+
+  return withoutZone;
+};
+
+const getSocketRemoteIp = (req) => {
+  const remoteAddress = req?.socket?.remoteAddress || req?.connection?.remoteAddress;
+  return normalizeIpCandidate(remoteAddress);
+};
+
+const isPrivateOrLoopbackIpv4 = (candidate) => {
+  const octets = candidate.split('.').map((part) => Number(part));
+  if (octets.length !== 4 || octets.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
+    return false;
+  }
+
+  const [first, second] = octets;
+  if (first === 127) {
+    return true;
+  }
+  if (first === 10) {
+    return true;
+  }
+  if (first === 172 && second >= 16 && second <= 31) {
+    return true;
+  }
+  if (first === 192 && second === 168) {
+    return true;
+  }
+  if (first === 169 && second === 254) {
+    return true;
+  }
+  return false;
+};
+
+const isPrivateOrLoopbackIpv6 = (candidate) => {
+  if (candidate === '::1') {
+    return true;
+  }
+
+  if (candidate.startsWith('fc') || candidate.startsWith('fd')) {
+    return true;
+  }
+
+  return candidate.startsWith('fe8')
+    || candidate.startsWith('fe9')
+    || candidate.startsWith('fea')
+    || candidate.startsWith('feb');
+};
+
+const isPrivateOrLoopbackIp = (candidate) => {
+  const normalized = normalizeIpCandidate(candidate);
+  if (!normalized) {
+    return false;
+  }
+
+  if (normalized.includes(':')) {
+    return isPrivateOrLoopbackIpv6(normalized);
+  }
+
+  return isPrivateOrLoopbackIpv4(normalized);
+};
+
+const isLocalHost = (host, req) => {
   if (!host) {
     return false;
   }
-  return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
+
+  if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]') {
+    return true;
+  }
+
+  if (host === 'host.docker.internal') {
+    return isPrivateOrLoopbackIp(getSocketRemoteIp(req));
+  }
+
+  return false;
 };
 
 const getClientIp = (req) => {
@@ -163,7 +259,7 @@ export const createTunnelAuth = () => {
       return 'tunnel';
     }
 
-    if (isLocalHost(reqHost)) {
+    if (isLocalHost(reqHost, req)) {
       return 'local';
     }
 

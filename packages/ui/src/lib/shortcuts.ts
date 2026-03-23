@@ -196,8 +196,8 @@ const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
   {
     id: 'new_chat_worktree',
     defaultCombo: 'mod+shift+n',
-    label: 'New session with worktree',
-    description: 'Start a new session in a worktree',
+    label: 'New worktree draft',
+    description: 'Create a new worktree and open a draft in it',
     customizable: true,
   },
   {

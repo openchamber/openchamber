@@ -426,6 +426,24 @@ export const SidebarFilesTree: React.FC = () => {
     await loadDirectory(root);
   }, [loadDirectory, root]);
 
+  /**
+   * Incrementally refresh a single directory without nuking the rest of the
+   * tree.  Only the given directory is reloaded in-place; every other expanded
+   * directory keeps its cached children so the UI does not flash/reset.
+   */
+  const refreshDirectory = React.useCallback(async (dirPath: string) => {
+    if (!dirPath) {
+      await refreshRoot();
+      return;
+    }
+    const normalized = normalizePath(dirPath);
+    loadedDirsRef.current = new Set(loadedDirsRef.current);
+    loadedDirsRef.current.delete(normalized);
+    inFlightDirsRef.current = new Set(inFlightDirsRef.current);
+    inFlightDirsRef.current.delete(normalized);
+    await loadDirectory(normalized);
+  }, [loadDirectory, refreshRoot]);
+
   React.useEffect(() => {
     if (!root) return;
 
@@ -589,8 +607,8 @@ export const SidebarFilesTree: React.FC = () => {
       await files.writeFile(newPath, '')
         .then(async (result) => {
           if (result.success) {
-            toast.success(t('sidebarFilesTree.fileCreated'));
-            await refreshRoot();
+            toast.success('File created');
+            await refreshDirectory(parentPath);
           }
           closeDialog();
         })
@@ -613,8 +631,8 @@ export const SidebarFilesTree: React.FC = () => {
       await files.createDirectory(newPath)
         .then(async (result) => {
           if (result.success) {
-            toast.success(t('sidebarFilesTree.folderCreated'));
-            await refreshRoot();
+            toast.success('Folder created');
+            await refreshDirectory(parentPath);
           }
           closeDialog();
         })
@@ -643,8 +661,8 @@ export const SidebarFilesTree: React.FC = () => {
       await files.rename(oldPath, newPath)
         .then(async (result) => {
           if (result.success) {
-            toast.success(t('sidebarFilesTree.renamedSuccessfully'));
-            await refreshRoot();
+            toast.success('Renamed successfully');
+            await refreshDirectory(parentDir);
             if (root) {
               removeOpenPathsByPrefix(root, oldPath);
             }
@@ -666,15 +684,17 @@ export const SidebarFilesTree: React.FC = () => {
         return;
       }
 
-      await files.delete(dialogData.path)
+      const deletedPath = dialogData.path;
+      const parentDir = deletedPath.split('/').slice(0, -1).join('/');
+      await files.delete(deletedPath)
         .then(async (result) => {
           if (result.success) {
-            toast.success(t('sidebarFilesTree.deletedSuccessfully'));
-            await refreshRoot();
+            toast.success('Deleted successfully');
+            await refreshDirectory(parentDir);
             if (root) {
-              removeOpenPathsByPrefix(root, dialogData.path);
+              removeOpenPathsByPrefix(root, deletedPath);
             }
-            if (selectedPath === dialogData.path || (selectedPath && selectedPath.startsWith(dialogData.path + '/'))) {
+            if (selectedPath === deletedPath || (selectedPath && selectedPath.startsWith(deletedPath + '/'))) {
               setSelectedPath(root, null);
             }
           }
@@ -686,7 +706,7 @@ export const SidebarFilesTree: React.FC = () => {
     }
 
     done();
-  }, [activeDialog, dialogData, dialogInputValue, files, refreshRoot, removeOpenPathsByPrefix, root, selectedPath, setSelectedPath, t]);
+  }, [activeDialog, dialogData, dialogInputValue, files, refreshDirectory, removeOpenPathsByPrefix, root, selectedPath, setSelectedPath]);
 
   // --- Tree rendering (matching FilesView with indent guides) ---
 

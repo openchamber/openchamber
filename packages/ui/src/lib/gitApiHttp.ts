@@ -424,6 +424,30 @@ export async function validateGitWorktree(directory: string, payload: CreateGitW
   return response.json();
 }
 
+export async function getGitWorktreeBootstrapStatus(directory: string): Promise<import('./api/types').GitWorktreeBootstrapStatus> {
+  const response = await fetch(buildUrl(`${API_BASE}/worktrees/bootstrap-status`, directory));
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(error.error || 'Failed to get worktree bootstrap status');
+  }
+  return response.json();
+}
+
+export async function previewGitWorktree(directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeCreateResult> {
+  const response = await fetch(buildUrl(`${API_BASE}/worktrees/preview`, directory), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload ?? {}),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(error.error || 'Failed to preview worktree');
+  }
+
+  return response.json();
+}
+
 export async function createGitWorktree(directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeCreateResult> {
   const response = await fetch(buildUrl(`${API_BASE}/worktrees`, directory), {
     method: 'POST',

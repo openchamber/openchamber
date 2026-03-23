@@ -59,7 +59,7 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
   const [prompt, setPrompt] = React.useState('');
   const [selectedModels, setSelectedModels] = React.useState<ModelSelectionWithId[]>([]);
   const [selectedAgent, setSelectedAgent] = React.useState<string>('');
-  const [baseBranch, setBaseBranch] = React.useState('HEAD');
+  const [baseBranch, setBaseBranch] = React.useState('');
   const [attachedFiles, setAttachedFiles] = React.useState<AttachedFile[]>([]);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [setupCommands, setSetupCommands] = React.useState<string[]>([]);
@@ -208,6 +208,7 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
     groupName.trim() && 
     prompt.trim() && 
     selectedModels.length >= 1 && 
+    baseBranch &&
     isGitRepository && 
     !isLoadingBranches
   );

@@ -1,3 +1,5 @@
+import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+
 /**
  * Utility for opening external URLs with Tauri shell support.
  * In desktop runtime, uses tauri.shell.open() for proper system browser handling.
@@ -54,6 +56,16 @@ export const openExternalUrl = async (url: string): Promise<boolean> => {
   }
 
   const normalizedTarget = parsed.toString();
+
+  const runtimeApis = getRegisteredRuntimeAPIs();
+  if (runtimeApis?.runtime?.isVSCode && runtimeApis.vscode?.openExternalUrl) {
+    try {
+      await runtimeApis.vscode.openExternalUrl(normalizedTarget);
+      return true;
+    } catch {
+      return false;
+    }
+  }
 
   const tauri = (window as unknown as { __TAURI__?: TauriShell }).__TAURI__;
   if (tauri?.shell?.open) {

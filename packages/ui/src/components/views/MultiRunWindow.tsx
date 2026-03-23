@@ -1,20 +1,20 @@
 import React from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
+import { RiCloseLine } from '@remixicon/react';
 import { cn } from '@/lib/utils';
-import { SettingsView } from './SettingsView';
-import { useLanguage } from '@/hooks/useLanguage';
+import { MultiRunLauncher } from '@/components/multirun';
 
-interface SettingsWindowProps {
+interface MultiRunWindowProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  initialPrompt?: string;
 }
 
-/**
- * Settings rendered as a centered window with blurred backdrop.
- * Used for desktop and web (non-mobile) environments.
- */
-export const SettingsWindow: React.FC<SettingsWindowProps> = ({ open, onOpenChange }) => {
-  const { t } = useLanguage();
+export const MultiRunWindow: React.FC<MultiRunWindowProps> = ({
+  open,
+  onOpenChange,
+  initialPrompt,
+}) => {
   const descriptionId = React.useId();
 
   const hasOpenFloatingMenu = React.useCallback(() => {
@@ -42,15 +42,30 @@ export const SettingsWindow: React.FC<SettingsWindowProps> = ({ open, onOpenChan
           }}
           className={cn(
             'fixed z-50 top-[50%] left-[50%] translate-x-[-50%] translate-y-[-50%]',
-            'w-[90vw] max-w-[960px] h-[85vh] max-h-[900px]',
-            'rounded-xl border shadow-none overflow-hidden',
+            'w-[90vw] max-w-[720px] h-[680px] max-h-[85vh]',
+            'flex flex-col rounded-xl border shadow-none overflow-hidden',
             'bg-background'
           )}
         >
+          <div className="absolute right-0.5 top-0.5 z-50">
+            <button
+              type="button"
+              onClick={() => onOpenChange(false)}
+              aria-label="Close multi-run"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md p-0.5 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            >
+              <RiCloseLine className="h-5 w-5" />
+            </button>
+          </div>
           <DialogPrimitive.Description id={descriptionId} className="sr-only">
-            {t('settings.windowDescription')}
+            OpenChamber Multi-Run window.
           </DialogPrimitive.Description>
-          <SettingsView onClose={() => onOpenChange(false)} isWindowed />
+          <MultiRunLauncher
+            initialPrompt={initialPrompt}
+            onCreated={() => onOpenChange(false)}
+            onCancel={() => onOpenChange(false)}
+            isWindowed
+          />
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>
     </DialogPrimitive.Root>

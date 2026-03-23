@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.9.1] - 2026-03-20
+
+- Sessions/UI: restored Project Notes access in the sidebar, polished notes/todo editing, and fixed project action overlap so project controls stay reachable for non-git directories.
+- Chat/GitHub: linked issues and pull requests now appear as user-message attachments and open more reliably across runtimes.
+- Settings/MCP: adding MCP servers now consistently respects user vs project scope, preventing user-scope entries from being written into project config files.
+- VSCode/Reliability: managed server startup now imports login-shell environment values and normalizes Windows workspace paths, reducing missing session/model state and proxy-related connection issues.
+- Sessions: sidebar lists now keep sessions visible in both Recent and Project sections for easier discovery (thanks to @nguyenngothuong).
+- Files: file trees now refresh incrementally after create/rename/delete actions, so changes appear faster without full reloads (thanks to @nguyenngothuong).
+- Sessions/Worktrees: draft sessions now resolve the correct project when opened from worktree paths (thanks to @yulia-ivashko).
+- Desktop: improved stale server-process cleanup on startup and fixed external link opening behavior for more predictable app interactions (thanks to @jwcrystal).
+- Usage: added MiniMax Weekly quota provider support for broader usage tracking coverage (thanks to @nzlov).
+
+
 ## [1.9.0] - 2026-03-20
 
 - UI/Navigation: delivered a major sidebar redesign with clearer hierarchy, unified action patterns, and improved session organization for better navigation through multiple projects (thanks to @yulia-ivashko).

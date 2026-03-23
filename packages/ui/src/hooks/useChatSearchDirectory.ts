@@ -27,8 +27,8 @@ export const useChatSearchDirectory = (): string | undefined => {
     }
   }
 
-  if (newSessionDraft?.open && newSessionDraft.directoryOverride) {
-    return newSessionDraft.directoryOverride;
+  if (newSessionDraft?.open && (newSessionDraft.bootstrapPendingDirectory || newSessionDraft.directoryOverride)) {
+    return (newSessionDraft.bootstrapPendingDirectory || newSessionDraft.directoryOverride) ?? undefined;
   }
 
   if (activeProjectId) {
