@@ -870,7 +870,6 @@ ENVIRONMENT:
   OPENCHAMBER_HOST             Bind address (e.g. 0.0.0.0 for all interfaces)
   OPENCHAMBER_UI_PASSWORD      Alternative to --ui-password flag
   OPENCHAMBER_DATA_DIR         Override OpenChamber data directory
-  OPENCHAMBER_HOST             IP/hostname for the web server to bind to (default: all interfaces)
   OPENCODE_HOST               External OpenCode server base URL, e.g. http://hostname:4096
   OPENCODE_PORT               Port of external OpenCode server to connect to
   OPENCODE_SKIP_START          Skip starting OpenCode, use external server
