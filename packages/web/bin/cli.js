@@ -570,6 +570,7 @@ function parseArgs(argv = process.argv.slice(2)) {
   const args = Array.isArray(argv) ? [...argv] : [];
   const options = {
     port: DEFAULT_PORT,
+    host: undefined,
     uiPassword: process.env.OPENCHAMBER_UI_PASSWORD || undefined,
     json: false,
     all: false,
@@ -656,6 +657,15 @@ function parseArgs(argv = process.argv.slice(2)) {
 
         options.port = parsed;
         options.explicitPort = true;
+        break;
+      }
+      case 'host': {
+        const { value, nextIndex } = consumeValue(i, inlineValue);
+        i = nextIndex;
+        if (typeof value !== 'string' || value.trim().length === 0) {
+          throw new TunnelCliError('Missing value for --host.', EXIT_CODE.USAGE_ERROR);
+        }
+        options.host = value.trim();
         break;
       }
       case 'ui-password': {
@@ -842,16 +852,19 @@ COMMANDS:
 
 OPTIONS:
   -p, --port              Web server port (default: ${DEFAULT_PORT})
+  --host                  Bind address (default: 127.0.0.1)
   --ui-password           Protect browser UI with single password
   -h, --help              Show help
   -v, --version           Show version
 
 ENVIRONMENT:
+  OPENCHAMBER_HOST             Bind address (e.g. 0.0.0.0 for all interfaces)
   OPENCHAMBER_UI_PASSWORD      Alternative to --ui-password flag
   OPENCHAMBER_DATA_DIR         Override OpenChamber data directory
   OPENCODE_HOST               External OpenCode server base URL, e.g. http://hostname:4096
   OPENCODE_PORT               Port of external OpenCode server to connect to
   OPENCODE_SKIP_START          Skip starting OpenCode, use external server
+  OPENCHAMBER_OPENCODE_HOSTNAME  Bind hostname for managed OpenCode server (default: 127.0.0.1)
 
 EXAMPLES:
   openchamber                    # Start in daemon mode on default port 3000 (or free port)
@@ -2730,6 +2743,10 @@ const commands = {
       }
     }
     const serverArgs = [serverPath, '--port', String(targetPort)];
+    const effectiveHost = typeof options.host === 'string' && options.host.length > 0 ? options.host : undefined;
+    if (effectiveHost) {
+      serverArgs.push('--host', effectiveHost);
+    }
 
     const serveSpin = showOutput ? createSpinner(options) : null;
 
@@ -2741,6 +2758,7 @@ const commands = {
         ...process.env,
         OPENCHAMBER_PORT: String(targetPort),
         OPENCODE_BINARY: opencodeBinary,
+        ...(effectiveHost ? { OPENCHAMBER_HOST: effectiveHost } : {}),
         ...(effectiveUiPassword ? { OPENCHAMBER_UI_PASSWORD: effectiveUiPassword } : {}),
         ...(process.env.OPENCODE_SKIP_START ? { OPENCHAMBER_SKIP_OPENCODE_START: process.env.OPENCODE_SKIP_START } : {}),
       },

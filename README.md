@@ -127,6 +127,11 @@ OPENCODE_PORT=4096 OPENCODE_SKIP_START=true openchamber
 OPENCODE_HOST=https://myhost:4096 OPENCODE_SKIP_START=true openchamber
 ```
 
+Bind managed OpenCode server to all interfaces (use only on trusted networks):
+```bash
+OPENCHAMBER_OPENCODE_HOSTNAME=0.0.0.0 openchamber --port 3000
+```
+
 </details>
 
 <details>

@@ -13,6 +13,7 @@ export interface WebUiServerController {
 
 export interface StartWebUiServerOptions {
   port?: number;
+  host?: string;
   attachSignals?: boolean;
   exitOnShutdown?: boolean;
   uiPassword?: string | null;
@@ -27,6 +28,7 @@ export declare function setupProxy(app: Express): void;
 export declare function restartOpenCode(): Promise<void>;
 export declare function parseArgs(argv?: string[]): {
   port: number;
+  host?: string;
   uiPassword: string | null;
   tryCfTunnel: boolean;
   tunnelProvider?: string;

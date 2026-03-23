@@ -16,6 +16,7 @@ services:
       - ./data/ssh:/home/openchamber/.ssh
       - ./workspaces:/home/openchamber/workspaces
     #environment:
+    # OPENCHAMBER_HOST: 0.0.0.0  # Bind address (default in Docker: 0.0.0.0)
     # UI_PASSWORD: your_secure_password_here  # Uncomment to set UI password
     # OPENCHAMBER_TUNNEL_PROVIDER: cloudflare
     # OPENCHAMBER_TUNNEL_MODE: quick  # quick | managed-remote | managed-local
@@ -25,4 +26,5 @@ services:
     # OH_MY_OPENCODE: true # enable oh-my-opencode
     # OPENCODE_HOST: http://172.17.0.1:4096 # Connect to external OpenCode server
     # OPENCODE_SKIP_START: true # skip start opencode
+    # OPENCHAMBER_OPENCODE_HOSTNAME: 0.0.0.0 # Bind OpenCode to all interfaces
     restart: unless-stopped
