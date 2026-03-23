@@ -10,6 +10,7 @@ import os from 'os';
 import crypto from 'crypto';
 import { createUiAuth } from './lib/opencode/ui-auth.js';
 import { createTunnelAuth } from './lib/opencode/tunnel-auth.js';
+import { startAnthropicOAuth, completeAnthropicOAuth, isAnthropicProvider } from './lib/opencode/anthropic-oauth.js';
 import {
   printTunnelWarning,
 } from './lib/cloudflare-tunnel.js';
@@ -7220,6 +7221,7 @@ async function main(options = {}) {
       req.path.startsWith('/api/push') ||
       req.path.startsWith('/api/voice') ||
       req.path.startsWith('/api/tts') ||
+      req.path.startsWith('/api/provider') ||
       req.path.startsWith('/api/openchamber/tunnel')
     ) {
 
@@ -11718,6 +11720,71 @@ async function main(options = {}) {
     } catch (error) {
       console.error('Failed to get provider sources:', error);
       res.status(500).json({ error: error.message || 'Failed to get provider sources' });
+    }
+  });
+
+  app.post('/api/provider/:providerId/oauth/authorize', async (req, res) => {
+    try {
+      const { providerId } = req.params;
+      if (!providerId) {
+        return res.status(400).json({ error: 'Provider ID is required' });
+      }
+
+      const { method } = req.body || {};
+      if (method !== 0 && method !== '0') {
+        return res.status(400).json({ error: 'Unsupported OAuth method' });
+      }
+
+      if (!isAnthropicProvider(providerId)) {
+        return res.status(400).json({ error: 'Provider does not support OAuth' });
+      }
+
+      const oauthData = await startAnthropicOAuth();
+      
+      res.json({
+        data: {
+          url: oauthData.url,
+          user_code: null,
+          instructions: 'You will be redirected to Anthropic to authorize. After authorizing, copy the code from the URL and paste it in the callback.',
+          verification_uri: 'https://console.anthropic.com/oauth/code/callback',
+          verifier: oauthData.verifier
+        }
+      });
+    } catch (error) {
+      console.error('Failed to start OAuth flow:', error);
+      res.status(500).json({ error: error.message || 'Failed to start OAuth flow' });
+    }
+  });
+
+  app.post('/api/provider/:providerId/oauth/callback', async (req, res) => {
+    try {
+      const { providerId } = req.params;
+      if (!providerId) {
+        return res.status(400).json({ error: 'Provider ID is required' });
+      }
+
+      const { method, code, verifier } = req.body || {};
+      if (method !== 0 && method !== '0') {
+        return res.status(400).json({ error: 'Unsupported OAuth method' });
+      }
+
+      if (!isAnthropicProvider(providerId)) {
+        return res.status(400).json({ error: 'Provider does not support OAuth' });
+      }
+
+      if (!code) {
+        return res.status(400).json({ error: 'Authorization code is required' });
+      }
+
+      const result = await completeAnthropicOAuth(code, verifier || '');
+      
+      res.json({
+        success: true,
+        providerId: result.providerId
+      });
+    } catch (error) {
+      console.error('Failed to complete OAuth flow:', error);
+      res.status(500).json({ error: error.message || 'Failed to complete OAuth flow' });
     }
   });
 
