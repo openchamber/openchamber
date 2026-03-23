@@ -851,7 +851,7 @@ USAGE:
 COMMANDS:
   serve          Start the web server (daemon default)
   stop           Stop running instance(s)
-  restart        Stop and start the server (foreground instances stay attached)
+  restart        Stop and start the server
   status         Show server status
   tunnel         Tunnel lifecycle commands
   logs           Tail OpenChamber logs
@@ -3223,47 +3223,15 @@ const commands = {
       }
     }
 
-    // Determine launch mode for each instance: explicit flag wins, else persisted mode.
-    const resolveRestartMode = (instance) => {
-      if (options.foreground) return 'foreground';
-      const storedOptions = readInstanceOptions(instance.instanceFilePath) || {};
-      return storedOptions.launchMode === 'foreground' ? 'foreground' : 'daemon';
-    };
-
-    // Sort: daemon instances first, foreground last (foreground will block).
-    const sorted = [...runningInstances].sort((a, b) => {
-      const modeA = resolveRestartMode(a) === 'foreground' ? 1 : 0;
-      const modeB = resolveRestartMode(b) === 'foreground' ? 1 : 0;
-      return modeA - modeB;
-    });
-
-    const hasForegroundRestart = sorted.some((inst) => resolveRestartMode(inst) === 'foreground');
-
-    for (const instance of sorted) {
+    for (const instance of runningInstances) {
       const storedOptions = readInstanceOptions(instance.instanceFilePath) || { port: instance.port };
-      const launchMode = resolveRestartMode(instance);
+      const launchMode = instance.launchMode || 'daemon';
       const isForeground = launchMode === 'foreground';
 
       const restartPort = options.explicitPort ? options.port : instance.port;
 
-      // Print attach notice before the foreground restart (it will block).
-      if (isForeground) {
-        if (showOutput) {
-          logStatus('info', 'Restarting in foreground mode; command will stay attached. Press Ctrl+C to stop.');
-          logStatus('info', `Restarting OpenChamber on port ${restartPort} (foreground)...`);
-        } else if (isQuietMode(options) && !isJsonMode(options)) {
-          process.stdout.write(`restarting ${restartPort} mode:foreground attached\n`);
-        }
-
-        // Foreground serve() blocks forever — emit final summary after the
-        // stop succeeds but before the serve call (see below).
-      }
-
-      // Use spinner only for daemon restarts; foreground prints a static line
-      // above and then enters inline server mode (spinner would conflict with
-      // continuous server output).
-      const restartSpin = (!isForeground && showOutput) ? createSpinner(options) : null;
-      if (!isForeground && showOutput && !restartSpin) {
+      const restartSpin = showOutput ? createSpinner(options) : null;
+      if (showOutput && !restartSpin) {
         logStatus('info', `restarting port ${instance.port}`, `mode: ${launchMode}`);
       }
       restartSpin?.start(`Restarting OpenChamber on port ${instance.port}...`);
@@ -3274,37 +3242,34 @@ const commands = {
           quiet: true,
           suppressQuietOutput: true,
         });
-        await new Promise((resolve) => setTimeout(resolve, 500));
 
-        // Foreground serve() blocks forever, so emit the final restart
-        // summary now — after stop succeeded but before serve blocks.
-        // Daemon instances are sorted first, so `restarted` already
-        // contains all their results.
+        // Foreground instances are managed by a process manager (systemd,
+        // Docker, etc.) that will restart them automatically after stop.
+        // Do not call serve() here — just record the stop as a successful
+        // restart and let the process manager handle the actual restart.
         if (isForeground) {
           restarted.push({ fromPort: instance.port, toPort: restartPort, launchMode, ok: true });
-          if (isJsonMode(options)) {
-            printJson({ restartedCount: restarted.length, willAttach: true, results: restarted.map((r) => ({ ...r, launchMode: r.launchMode })) });
-          } else if (showOutput) {
-            clackOutro(`${restarted.length} instance(s) restarted`);
-          } else if (isQuietMode(options)) {
-            process.stdout.write(`restarted ${restarted.length}\n`);
+          restartSpin?.stop(`Stopped foreground instance on port ${instance.port} (process manager will restart)`);
+          if (showOutput && !restartSpin) {
+            logStatus('success', `port ${instance.port} stopped`, 'process manager will restart');
           }
+          continue;
         }
+
+        await new Promise((resolve) => setTimeout(resolve, 500));
 
         const restartedPort = await this.serve({
           port: restartPort,
           explicitPort: true,
           uiPassword: options.explicitUiPassword ? options.uiPassword : storedOptions.uiPassword,
-          foreground: isForeground,
           suppressStartupSummary: true,
-          quiet: !isForeground,
+          quiet: true,
           suppressUiPasswordWarning: true,
           suppressQuietOutput: true,
         });
-        // Note: if isForeground, serve() blocks forever and we never reach here.
         restarted.push({ fromPort: instance.port, toPort: restartedPort, launchMode, ok: true });
         restartSpin?.stop(`Restarted OpenChamber on port ${restartedPort}`);
-        if (showOutput && !restartSpin && !isForeground) {
+        if (showOutput && !restartSpin) {
           logStatus('success', `port ${restartedPort} restarted`, `mode: ${launchMode}`);
         }
       } catch (error) {
@@ -3318,8 +3283,7 @@ const commands = {
     }
 
     if (isJsonMode(options)) {
-      const willAttach = hasForegroundRestart;
-      printJson({ restartedCount: restarted.length, willAttach, results: restarted.map((r) => ({ ...r, launchMode: r.launchMode })) });
+      printJson({ restartedCount: restarted.length, results: restarted.map((r) => ({ ...r, launchMode: r.launchMode })) });
       return;
     }
 
