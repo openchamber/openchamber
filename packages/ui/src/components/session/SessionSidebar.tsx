@@ -1032,6 +1032,44 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     ];
   }, [activeNowSessions, sessionSidebarMetaById]);
 
+  const recentSessionIds = React.useMemo(() => {
+    return new Set(activitySections.flatMap((section) => section.items.map((item) => item.node.session.id)));
+  }, [activitySections]);
+
+  const sectionsForSidebarRender = React.useMemo(() => {
+    if (!isVSCode || hasSessionSearchQuery || recentSessionIds.size === 0) {
+      return sectionsForRender;
+    }
+
+    const filterNodes = (nodes: SessionNode[]): SessionNode[] => {
+      return nodes.reduce<SessionNode[]>((acc, node) => {
+        if (recentSessionIds.has(node.session.id)) {
+          return acc;
+        }
+
+        const filteredChildren = filterNodes(node.children);
+        if (filteredChildren.length === node.children.length) {
+          acc.push(node);
+          return acc;
+        }
+
+        acc.push({
+          ...node,
+          children: filteredChildren,
+        });
+        return acc;
+      }, []);
+    };
+
+    return sectionsForRender.map((section) => ({
+      ...section,
+      groups: section.groups.map((group) => ({
+        ...group,
+        sessions: filterNodes(group.sessions),
+      })),
+    }));
+  }, [isVSCode, hasSessionSearchQuery, recentSessionIds, sectionsForRender]);
+
   const desktopHeaderActionButtonClass =
     'inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-md leading-none text-foreground hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed';
   const mobileHeaderActionButtonClass =
@@ -1363,7 +1401,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
       <SidebarProjectsList
         topContent={topContent}
-        sectionsForRender={sectionsForRender}
+        sectionsForRender={sectionsForSidebarRender}
         projectSections={projectSections}
         activeProjectId={activeProjectId}
         showOnlyMainWorkspace={showOnlyMainWorkspace}
