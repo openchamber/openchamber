@@ -143,7 +143,7 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-export type VisibleSetting = 'theme' | 'pwaInstallName' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'activityRenderMode' | 'stickyUserHeader' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'reasoning' | 'showToolFileIcons' | 'expandedTools' | 'queueMode' | 'terminalQuickKeys' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage';
+export type VisibleSetting = 'language' | 'theme' | 'pwaInstallName' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'activityRenderMode' | 'stickyUserHeader' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'reasoning' | 'showToolFileIcons' | 'expandedTools' | 'queueMode' | 'terminalQuickKeys' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage';
 
 interface OpenChamberVisualSettingsProps {
     /** Which settings to show. If undefined, shows all. */
@@ -1282,12 +1282,12 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                 {shouldShow('reportUsage') && (
                     <div className="space-y-3">
                         <section className="px-2 pb-2 pt-0">
-                            <h4 className="typography-ui-header font-medium text-foreground mb-2">Privacy</h4>
+                            <h4 className="typography-ui-header font-medium text-foreground mb-2">{t('appearance.privacy')}</h4>
                             <div className="flex items-start gap-2 py-1.5">
                                 <Checkbox
                                     checked={reportUsage}
                                     onChange={handleReportUsageChange}
-                                    ariaLabel="Send anonymous usage reports"
+                                    ariaLabel={t('appearance.sendAnonymousUsageReports')}
                                 />
                                 <div className="flex min-w-0 flex-col gap-0.5">
                                     <div
@@ -1303,10 +1303,10 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             }
                                         }}
                                     >
-                                        <span className="typography-ui-label text-foreground">Send anonymous usage reports</span>
+                                        <span className="typography-ui-label text-foreground">{t('appearance.sendAnonymousUsageReports')}</span>
                                     </div>
                                     <span className="typography-meta text-muted-foreground pointer-events-none">
-                                        Helps us understand which app versions are actively used so we can prioritize improvements. Only app version, platform, and runtime are collected - no personal data or code.
+                                        {t('appearance.sendAnonymousUsageReportsDescription')}
                                     </span>
                                 </div>
                             </div>

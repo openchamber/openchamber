@@ -22,6 +22,7 @@ import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
 import type { ProjectRef } from '@/lib/openchamberConfig';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { ProjectNotesTodoPanel } from '../ProjectNotesTodoPanel';
+import { useLanguage } from '@/hooks/useLanguage';
 
 type Props = {
   hideDirectoryControls: boolean;
@@ -125,13 +126,13 @@ export function SidebarHeader(props: Props): React.ReactNode {
                     type="button"
                     onClick={openMultiRunLauncher}
                     className={headerActionButtonClass}
-                    aria-label="New multi-run"
+                    aria-label={t('sessionSidebar.newMultiRun')}
                     disabled={!canOpenMultiRun}
                   >
                     <ArrowsMerge className={headerActionIconClass} />
                   </button>
                 </TooltipTrigger>
-                <TooltipContent side="bottom" sideOffset={4}><p>New multi-run</p></TooltipContent>
+                <TooltipContent side="bottom" sideOffset={4}><p>{t('sessionSidebar.newMultiRun')}</p></TooltipContent>
               </Tooltip>
 
               {useMobileNotesPanel ? (
@@ -141,13 +142,13 @@ export function SidebarHeader(props: Props): React.ReactNode {
                       type="button"
                       onClick={() => setProjectNotesPanelOpen(true)}
                       className={headerActionButtonClass}
-                      aria-label="Project notes"
+                       aria-label={t('sessionSidebar.projectNotes')}
                       disabled={!activeProjectRefForHeader}
                     >
                       <RiStickyNoteLine className={headerActionIconClass} />
                     </button>
                   </TooltipTrigger>
-                  <TooltipContent side="bottom" sideOffset={4}><p>Project notes</p></TooltipContent>
+                   <TooltipContent side="bottom" sideOffset={4}><p>{t('sessionSidebar.projectNotes')}</p></TooltipContent>
                 </Tooltip>
               ) : (
                 <DropdownMenu open={projectNotesPanelOpen} onOpenChange={setProjectNotesPanelOpen} modal={false}>
@@ -157,14 +158,14 @@ export function SidebarHeader(props: Props): React.ReactNode {
                         <button
                           type="button"
                           className={headerActionButtonClass}
-                          aria-label="Project notes"
+                           aria-label={t('sessionSidebar.projectNotes')}
                           disabled={!activeProjectRefForHeader}
                         >
                           <RiStickyNoteLine className={headerActionIconClass} />
                         </button>
                       </DropdownMenuTrigger>
                     </TooltipTrigger>
-                    <TooltipContent side="bottom" sideOffset={4}><p>Project notes</p></TooltipContent>
+                    <TooltipContent side="bottom" sideOffset={4}><p>{t('sessionSidebar.projectNotes')}</p></TooltipContent>
                   </Tooltip>
                   <DropdownMenuContent align="start" className="w-[420px] max-w-[min(92vw,420px)] p-0">
                     <ProjectNotesTodoPanel
@@ -225,11 +226,11 @@ export function SidebarHeader(props: Props): React.ReactNode {
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={collapseAllProjects} className="flex items-center gap-2">
                     <RiContractUpDownLine className="h-4 w-4" />
-                    <span>Collapse all</span>
+                    <span>{t('sessionSidebar.collapseAll')}</span>
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={expandAllProjects} className="flex items-center gap-2">
                     <RiExpandUpDownLine className="h-4 w-4" />
-                    <span>Expand all</span>
+                    <span>{t('sessionSidebar.expandAll')}</span>
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>

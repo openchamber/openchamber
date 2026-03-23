@@ -3028,14 +3028,14 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                                     {projectRootBranchOption ? <SelectSeparator /> : null}
                                     <SelectGroup>
                                         <div className="flex items-center justify-between px-2 py-1.5">
-                                            <span className="text-muted-foreground typography-meta">Worktrees</span>
+                                            <span className="text-muted-foreground typography-meta">{t('chatInput.worktrees')}</span>
                                             <button
                                                 type="button"
                                                 className="text-muted-foreground typography-meta hover:text-foreground cursor-pointer"
                                                 onPointerDown={(e) => { e.stopPropagation(); }}
                                                 onClick={(e) => { e.preventDefault(); e.stopPropagation(); void createWorktreeDraft(); }}
                                             >
-                                                + New
+                                                + {t('common.new')}
                                             </button>
                                         </div>
                                         {worktreeBranchOptions.map((option) => (

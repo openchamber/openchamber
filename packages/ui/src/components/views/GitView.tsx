@@ -1913,10 +1913,10 @@ export const GitView: React.FC = () => {
         <div className="flex h-full flex-col items-center justify-center px-4 text-center">
           <RiLoader4Line className="mb-3 size-6 animate-spin text-muted-foreground" />
           <p className="typography-ui-label font-semibold text-foreground">
-            Worktree setup is in progress
+            {t('gitView.worktreeSetupInProgress')}
           </p>
           <p className="typography-meta mt-1 text-muted-foreground">
-            Git tools will appear as soon as the new worktree is ready.
+            {t('gitView.worktreeSetupInProgressHint')}
           </p>
         </div>
       );

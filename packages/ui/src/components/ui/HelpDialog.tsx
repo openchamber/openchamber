@@ -114,7 +114,7 @@ export const HelpDialog: React.FC = () => {
         },
         {
           id: 'new_chat_worktree',
-          description: "Create New Worktree Draft",
+          description: t('keyboardShortcutsDialog.items.createNewSessionInWorktree'),
           icon: RiGitBranchLine,
           keys: '',
         },

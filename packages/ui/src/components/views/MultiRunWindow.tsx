@@ -3,6 +3,7 @@ import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { RiCloseLine } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import { MultiRunLauncher } from '@/components/multirun';
+import { useLanguage } from '@/hooks/useLanguage';
 
 interface MultiRunWindowProps {
   open: boolean;
@@ -15,6 +16,7 @@ export const MultiRunWindow: React.FC<MultiRunWindowProps> = ({
   onOpenChange,
   initialPrompt,
 }) => {
+  const { t } = useLanguage();
   const descriptionId = React.useId();
 
   const hasOpenFloatingMenu = React.useCallback(() => {
@@ -51,14 +53,14 @@ export const MultiRunWindow: React.FC<MultiRunWindowProps> = ({
             <button
               type="button"
               onClick={() => onOpenChange(false)}
-              aria-label="Close multi-run"
+              aria-label={t('multirun.closeWindow')}
               className="inline-flex h-7 w-7 items-center justify-center rounded-md p-0.5 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             >
               <RiCloseLine className="h-5 w-5" />
             </button>
           </div>
           <DialogPrimitive.Description id={descriptionId} className="sr-only">
-            OpenChamber Multi-Run window.
+            {t('multirun.windowDescription')}
           </DialogPrimitive.Description>
           <MultiRunLauncher
             initialPrompt={initialPrompt}

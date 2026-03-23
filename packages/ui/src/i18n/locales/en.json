@@ -29,7 +29,8 @@
     "copyFailed": "Copy failed",
     "description": "Description",
     "done": "Done",
-    "actions": "Actions"
+    "actions": "Actions",
+    "new": "New"
   },
   "settings": {
     "title": "Settings",
@@ -185,7 +186,10 @@
     "editTools": "Edit tools",
     "showReasoningTraces": "Show Reasoning Traces",
     "showToolFileIcons": "Show Tool File Icons",
-    "enableSpellcheckInTextInputs": "Enable Spellcheck in Text Inputs"
+    "enableSpellcheckInTextInputs": "Enable Spellcheck in Text Inputs",
+    "privacy": "Privacy",
+    "sendAnonymousUsageReports": "Send anonymous usage reports",
+    "sendAnonymousUsageReportsDescription": "Helps us understand which app versions are actively used so we can prioritize improvements. Only app version, platform, and runtime are collected - no personal data or code."
   },
   "chatInput": {
     "sendMessage": "Send message",
@@ -308,7 +312,11 @@
     "openInDesktopApp": "Open in desktop app",
     "closeFile": "Close {{name}}",
     "largeFilePreviewLimited": "This file is large ({{sizeKb}}KB). Preview may be limited.",
-    "openingFileAtChange": "Opening file at change..."
+    "openingFileAtChange": "Opening file at change...",
+    "fileCreated": "File created",
+    "folderCreated": "Folder created",
+    "renamedSuccessfully": "Renamed successfully",
+    "deletedSuccessfully": "Deleted successfully"
   },
   "sidebarFilesTree": {
     "pathCopied": "Path copied to clipboard",
@@ -385,7 +393,9 @@
     "prStateMergeConflicts": "Merge conflicts",
     "prStateMergeBlocked": "Merge blocked",
     "prStateDraft": "Draft PR",
-    "prStateClosed": "Closed"
+    "prStateClosed": "Closed",
+    "collapseAll": "Collapse all",
+    "expandAll": "Expand all"
   },
   "sessionDialogs": {
     "failedToOpenDirectory": "Failed to open directory",
@@ -542,17 +552,17 @@
   "multirun": {
     "newMultiRun": "New Multi-Run",
     "closeEsc": "Close (Esc)",
+    "closeWindow": "Close multi-run",
+    "windowDescription": "OpenChamber Multi-Run window.",
+    "project": "Project",
+    "selectProject": "Select project",
+    "addProjectFirst": "Add a project first.",
     "groupName": "Group name",
     "groupNamePlaceholder": "e.g. feature-auth, bugfix-login",
     "groupNameHelp": "Used for worktree directory and branch names",
-    "worktrees": "Worktrees",
-    "worktreesHelp": "Create one worktree per model by creating a new branch from a base branch.",
     "baseBranch": "Base branch",
     "createsNewBranchesFrom": "Creates new branches from",
     "setupCommands": "Setup commands",
-    "configuredCount": "{{count}} configured",
-    "setupCommandsHelp": "Commands run in each new worktree. Use",
-    "forProjectRoot": "for project root",
     "setupCommandPlaceholder": "e.g., bun install",
     "removeCommand": "Remove command",
     "addCommand": "Add command",
@@ -560,13 +570,13 @@
     "agentHelp": "Defaults to your configured default agent.",
     "prompt": "Prompt",
     "promptPlaceholder": "Enter the prompt to send to all models...",
-    "attachments": "Attachments",
     "attachmentsHelp": "optional, same files for all runs",
     "models": "Models",
+    "modelsHelp": "Select {{min}}-{{max}} models. The same model can be added multiple times.",
     "creating": "Creating...",
     "startWithModels": "Start ({{count}} models)",
     "loadingBranches": "Loading branches...",
-    "selectBranch": "Select a branch",
+    "noBranchesFound": "No branches found",
     "default": "Default",
     "notInGitRepository": "Not in a git repository.",
     "addModel": "Add model",
@@ -574,14 +584,13 @@
     "noModelsFound": "No models found",
     "favorites": "Favorites",
     "recent": "Recent",
-    "currentHead": "Current (HEAD)",
-    "currentHeadWithBranch": "Current (HEAD: {{branch}})",
     "thinking": "Thinking",
     "selectFromToModels": "Select from {{min}} to {{max}} models.",
     "selectFromModels": "Select from {{min}} models.",
     "fileTooLarge": "File \"{{name}}\" is too large (max 10MB)",
     "failedToAttachFile": "Failed to attach \"{{name}}\"",
-    "attachedFilesCount": "Attached {{count}} files"
+    "attachedFilesCount": "Attached {{count}} files",
+    "attach": "Attach"
   },
   "pullRequest": {
     "noActiveSession": "No active session",
@@ -716,8 +725,7 @@
     "changedFiles": "Changed files",
     "revertAllChanges": "Revert all changes?",
     "discardLocalChangesForFiles": "This will discard local changes for {{count}} file in the list.",
-    "discardLocalChangesForFiles_other": "This will discard local changes for {{count}} files in the list.",
-    "revertAllChanges": "Revert all changes?"
+    "discardLocalChangesForFiles_other": "This will discard local changes for {{count}} files in the list."
   },
   "gitStash": {
     "operationMerge": "Merge",
@@ -883,10 +891,11 @@
     "worktreeActionsOnlyForGitRepos": "Worktree actions are only available for Git repositories",
     "todoSentToNewWorktreeSession": "Todo sent to new worktree session",
     "selectProjectToAddNotes": "Select a project to add notes",
-    "quickNotes": "Quick notes",
     "captureContextPlaceholder": "Capture context...",
     "todo": "Todo",
     "itemsCount": "{{count}} items",
+    "itemsCountSingle": "{{count}} item",
+    "quickNotesWithProject": "Quick notes - {{project}}",
     "clearCompleted": "Clear completed",
     "addTodoPlaceholder": "Add a todo...",
     "addTodo": "Add todo",
@@ -896,7 +905,9 @@
     "sendTodo": "Send \"{{text}}\"",
     "sendToCurrentSession": "Send to current session",
     "sendToNewSession": "Send to new session",
-    "sendToNewWorktreeSession": "Send to new worktree session"
+    "sendToNewWorktreeSession": "Send to new worktree session",
+    "expandTodo": "Expand todo \"{{text}}\"",
+    "collapseTodo": "Collapse todo \"{{text}}\""
   },
   "rightSidebar": {
     "resizeRightPanel": "Resize right panel",
@@ -1017,6 +1028,8 @@
     "failedToRebaseOntoBranch": "Failed to rebase onto {{branch}}",
     "failedToAbortConflictOperation": "Failed to abort {{operation}}",
     "uncommittedChangesDetected": "Uncommitted changes detected",
+    "worktreeSetupInProgress": "Worktree setup is in progress",
+    "worktreeSetupInProgressHint": "Git tools will appear as soon as the new worktree is ready.",
     "tabs": {
       "commit": "Commit",
       "update": "Update",
@@ -1787,7 +1800,7 @@
     "commandCannotBeEmptyForLocal": "Command cannot be empty for a local server",
     "urlCannotBeEmptyForRemote": "URL cannot be empty for a remote server",
     "serverCreatedReloading": "MCP server created. OpenCode reloading...",
-    "savedReloading": "Saved. OpenCode reloading...",
+    "savedReloading": "Saved. OpenCode reloading…",
     "failedToSave": "Failed to save",
     "errorOccurred": "An error occurred",
     "serverDeleted": "\"{{name}}\" deleted",
@@ -1822,9 +1835,7 @@
     "saveChanges": "Save Changes",
     "deleteServerPrompt": "Delete \"{{name}}\"?",
     "deleteServerDescription": "This removes the server from",
-    "opencodeNeedsReload": "OpenCode will need to reload.",
-    "savedReloading": "Saved. OpenCode reloading…",
-    "configureNewServer": "Configure a new MCP server"
+    "opencodeNeedsReload": "OpenCode will need to reload."
   },
   "skillsCatalogPage": {
     "title": "Skills Catalog",
@@ -1885,8 +1896,7 @@
     "overrideUrlTooltip": "If this field is filled, custom URL is used. If empty, app opens best URL from output.",
     "desktopSshForward": "Desktop SSH forward",
     "useOutputOrManualUrl": "Use output/manual URL",
-    "noEnabledLocalSshForwards": "No enabled local SSH forwards available.",
-    "desktopSshForward": "Desktop SSH forward"
+    "noEnabledLocalSshForwards": "No enabled local SSH forwards available."
   },
   "skillsPage": {
     "skillNameRequired": "Skill name is required",
@@ -1943,12 +1953,7 @@
     "relativePathHint": "Relative path within the skill directory. Subdirectories will be created automatically.",
     "content": "Content",
     "fileContentPlaceholder": "File content...",
-    "createFile": "Create File",
-    "basicInformation": "Basic Information",
-    "configureNewSkill": "Configure a new skill",
-    "modifyFileContent": "Modify the file content",
-    "selectSkillFromSidebar": "Select a skill from the sidebar",
-    "orCreateNewOne": "or create a new one"
+    "createFile": "Create File"
   },
   "commandsPage": {
     "commandNameRequired": "Command name is required",
@@ -1977,10 +1982,7 @@
     "overrideModel": "Override Model",
     "commandTemplate": "Command Template",
     "commandTemplatePlaceholder": "Your command template here...",
-    "templateHelp": "$ARGUMENTS user input · !`cmd` shell output · @file file contents",
-    "configureNewSlashCommand": "Configure a new slash command",
-    "selectCommandFromSidebar": "Select a command from the sidebar",
-    "orCreateNewOne": "or create a new one"
+    "templateHelp": "$ARGUMENTS user input · !`cmd` shell output · @file file contents"
   },
   "worktreeSectionContent": {
     "selectProject": "Select a project",
@@ -2559,7 +2561,10 @@
     "worktreeDirectoryRequired": "Worktree directory is required",
     "sessionCreatedFromIssue": "Session created from issue",
     "sessionCreatedFromPr": "Session created from PR",
-    "failedToSendGithubContext": "Failed to send GitHub context"
+    "failedToSendGithubContext": "Failed to send GitHub context",
+    "worktreeCreated": "Worktree created",
+    "worktreeCreatedDescription": "{{name}} - bootstrapping in background",
+    "worktreeCreatedFromSourceDescription": "{{name}} from {{source}} - bootstrapping in background"
   },
   "gitHeader": {
     "gitIdentity": "Git identity",

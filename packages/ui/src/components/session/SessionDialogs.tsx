@@ -422,7 +422,7 @@ export const SessionDialogs: React.FC = () => {
             });
             return false;
         }
-    }, [canRemoveRemoteBranches, currentDirectory, deleteDialogShouldRemoveRemote, getProjectRefForWorktree, newSessionDraft?.directoryOverride, newSessionDraft?.open, setDraftBootstrapPendingDirectory, setNewSessionDraftTarget]);
+    }, [canRemoveRemoteBranches, currentDirectory, deleteDialogShouldRemoveRemote, getProjectRefForWorktree, newSessionDraft?.directoryOverride, newSessionDraft?.open, setDraftBootstrapPendingDirectory, setNewSessionDraftTarget, t]);
 
     const handleConfirmDelete = React.useCallback(async () => {
         if (!deleteDialog) {

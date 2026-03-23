@@ -871,8 +871,10 @@ Nice-to-have:
         localStorage.setItem(LAST_SOURCE_BRANCH_KEY, newBranchState.sourceBranch);
       }
       
-      toast.success('Worktree created', {
-        description: `${metadata.branch || metadata.name}${sourceLabel ? ` from ${sourceLabel}` : ''} - bootstrapping in background`,
+      toast.success(t('newWorktreeDialog.worktreeCreated'), {
+        description: sourceLabel
+          ? t('newWorktreeDialog.worktreeCreatedFromSourceDescription', { name: metadata.branch || metadata.name, source: sourceLabel })
+          : t('newWorktreeDialog.worktreeCreatedDescription', { name: metadata.branch || metadata.name }),
       });
 
       void loadSessions().catch(() => undefined);

@@ -607,7 +607,7 @@ export const SidebarFilesTree: React.FC = () => {
       await files.writeFile(newPath, '')
         .then(async (result) => {
           if (result.success) {
-            toast.success('File created');
+            toast.success(t('sidebarFilesTree.fileCreated'));
             await refreshDirectory(parentPath);
           }
           closeDialog();
@@ -631,7 +631,7 @@ export const SidebarFilesTree: React.FC = () => {
       await files.createDirectory(newPath)
         .then(async (result) => {
           if (result.success) {
-            toast.success('Folder created');
+            toast.success(t('sidebarFilesTree.folderCreated'));
             await refreshDirectory(parentPath);
           }
           closeDialog();
@@ -661,7 +661,7 @@ export const SidebarFilesTree: React.FC = () => {
       await files.rename(oldPath, newPath)
         .then(async (result) => {
           if (result.success) {
-            toast.success('Renamed successfully');
+            toast.success(t('sidebarFilesTree.renamedSuccessfully'));
             await refreshDirectory(parentDir);
             if (root) {
               removeOpenPathsByPrefix(root, oldPath);
@@ -689,7 +689,7 @@ export const SidebarFilesTree: React.FC = () => {
       await files.delete(deletedPath)
         .then(async (result) => {
           if (result.success) {
-            toast.success('Deleted successfully');
+            toast.success(t('sidebarFilesTree.deletedSuccessfully'));
             await refreshDirectory(parentDir);
             if (root) {
               removeOpenPathsByPrefix(root, deletedPath);
@@ -706,7 +706,7 @@ export const SidebarFilesTree: React.FC = () => {
     }
 
     done();
-  }, [activeDialog, dialogData, dialogInputValue, files, refreshDirectory, removeOpenPathsByPrefix, root, selectedPath, setSelectedPath]);
+  }, [activeDialog, dialogData, dialogInputValue, files, refreshDirectory, removeOpenPathsByPrefix, root, selectedPath, setSelectedPath, t]);
 
   // --- Tree rendering (matching FilesView with indent guides) ---
 

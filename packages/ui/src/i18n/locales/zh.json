@@ -29,7 +29,8 @@
     "copyFailed": "复制失败",
     "description": "描述",
     "done": "完成",
-    "actions": "操作"
+    "actions": "操作",
+    "new": "新建"
   },
   "settings": {
     "title": "设置",
@@ -185,7 +186,10 @@
     "editTools": "编辑工具",
     "showReasoningTraces": "显示推理轨迹",
     "showToolFileIcons": "显示工具文件图标",
-    "enableSpellcheckInTextInputs": "在文本输入中启用拼写检查"
+    "enableSpellcheckInTextInputs": "在文本输入中启用拼写检查",
+    "privacy": "隐私",
+    "sendAnonymousUsageReports": "发送匿名使用报告",
+    "sendAnonymousUsageReportsDescription": "这能帮助我们了解哪些应用版本正在被积极使用，以便更好地安排改进优先级。仅收集应用版本、平台和运行时信息，不会收集个人数据或代码。"
   },
   "chatInput": {
     "sendMessage": "发送消息",
@@ -308,7 +312,11 @@
     "openInDesktopApp": "在桌面应用中打开",
     "closeFile": "关闭 {{name}}",
     "largeFilePreviewLimited": "该文件较大（{{sizeKb}}KB），预览可能受限。",
-    "openingFileAtChange": "正在定位到变更位置打开文件..."
+    "openingFileAtChange": "正在定位到变更位置打开文件...",
+    "fileCreated": "文件已创建",
+    "folderCreated": "文件夹已创建",
+    "renamedSuccessfully": "重命名成功",
+    "deletedSuccessfully": "删除成功"
   },
   "sidebarFilesTree": {
     "pathCopied": "路径已复制到剪贴板",
@@ -385,7 +393,9 @@
     "prStateMergeConflicts": "合并冲突",
     "prStateMergeBlocked": "合并受阻",
     "prStateDraft": "草稿 PR",
-    "prStateClosed": "已关闭"
+    "prStateClosed": "已关闭",
+    "collapseAll": "全部折叠",
+    "expandAll": "全部展开"
   },
   "sessionDialogs": {
     "failedToOpenDirectory": "无法打开目录",
@@ -542,17 +552,17 @@
   "multirun": {
     "newMultiRun": "新多重运行",
     "closeEsc": "关闭 (Esc)",
+    "closeWindow": "关闭多重运行",
+    "windowDescription": "OpenChamber 多重运行窗口。",
+    "project": "项目",
+    "selectProject": "选择项目",
+    "addProjectFirst": "请先添加一个项目。",
     "groupName": "组名称",
     "groupNamePlaceholder": "例如：feature-auth, bugfix-login",
     "groupNameHelp": "用于 worktree 目录和分支名称",
-    "worktrees": "Worktrees",
-    "worktreesHelp": "通过从基础分支创建新分支来为每个模型创建一个 worktree。",
     "baseBranch": "基础分支",
     "createsNewBranchesFrom": "从中创建新分支",
     "setupCommands": "设置命令",
-    "configuredCount": "已配置 {{count}} 个",
-    "setupCommandsHelp": "在每个新 worktree 中运行的命令。使用",
-    "forProjectRoot": "作为项目根目录",
     "setupCommandPlaceholder": "例如：bun install",
     "removeCommand": "移除命令",
     "addCommand": "添加命令",
@@ -560,13 +570,13 @@
     "agentHelp": "默认为您配置的默认智能体。",
     "prompt": "提示词",
     "promptPlaceholder": "输入要发送到所有模型的提示词...",
-    "attachments": "附件",
     "attachmentsHelp": "可选，相同文件用于所有运行",
     "models": "模型",
+    "modelsHelp": "请选择 {{min}}-{{max}} 个模型。同一个模型可以添加多次。",
     "creating": "创建中...",
     "startWithModels": "开始 ({{count}} 个模型)",
     "loadingBranches": "加载分支中...",
-    "selectBranch": "选择分支",
+    "noBranchesFound": "未找到分支",
     "default": "默认",
     "notInGitRepository": "不在 Git 仓库中。",
     "addModel": "添加模型",
@@ -574,14 +584,13 @@
     "noModelsFound": "未找到模型",
     "favorites": "收藏",
     "recent": "最近",
-    "currentHead": "当前（HEAD）",
-    "currentHeadWithBranch": "当前（HEAD: {{branch}}）",
     "thinking": "思考",
     "selectFromToModels": "请选择 {{min}} 到 {{max}} 个模型。",
     "selectFromModels": "请选择至少 {{min}} 个模型。",
     "fileTooLarge": "文件 \"{{name}}\" 太大（最大 10MB）",
     "failedToAttachFile": "附加 \"{{name}}\" 失败",
-    "attachedFilesCount": "已附加 {{count}} 个文件"
+    "attachedFilesCount": "已附加 {{count}} 个文件",
+    "attach": "附加"
   },
   "pullRequest": {
     "noActiveSession": "无活动会话",
@@ -716,8 +725,7 @@
     "changedFiles": "Changed files",
     "revertAllChanges": "还原所有更改？",
     "discardLocalChangesForFiles": "这将丢弃列表中 {{count}} 个文件的本地更改。",
-    "discardLocalChangesForFiles_other": "这将丢弃列表中 {{count}} 个文件的本地更改。",
-    "revertAllChanges": "还原所有更改？"
+    "discardLocalChangesForFiles_other": "这将丢弃列表中 {{count}} 个文件的本地更改。"
   },
   "gitStash": {
     "operationMerge": "合并",
@@ -883,10 +891,11 @@
     "worktreeActionsOnlyForGitRepos": "Worktree 操作仅适用于 Git 仓库",
     "todoSentToNewWorktreeSession": "待办已发送到新 worktree 会话",
     "selectProjectToAddNotes": "选择项目以添加笔记",
-    "quickNotes": "快速笔记",
     "captureContextPlaceholder": "捕获上下文...",
     "todo": "待办",
     "itemsCount": "{{count}} 项",
+    "itemsCountSingle": "{{count}} 项",
+    "quickNotesWithProject": "快速笔记 - {{project}}",
     "clearCompleted": "清除已完成",
     "addTodoPlaceholder": "添加待办...",
     "addTodo": "添加待办",
@@ -896,7 +905,9 @@
     "sendTodo": "发送 \"{{text}}\"",
     "sendToCurrentSession": "发送到当前会话",
     "sendToNewSession": "发送到新会话",
-    "sendToNewWorktreeSession": "发送到新 worktree 会话"
+    "sendToNewWorktreeSession": "发送到新 worktree 会话",
+    "expandTodo": "展开待办 \"{{text}}\"",
+    "collapseTodo": "收起待办 \"{{text}}\""
   },
   "voiceSettings": {
     "setupTitle": "语音设置",
@@ -1104,6 +1115,8 @@
     "failedToRebaseOntoBranch": "变基到分支 {{branch}} 失败",
     "failedToAbortConflictOperation": "中止 {{operation}} 失败",
     "uncommittedChangesDetected": "检测到未提交的更改",
+    "worktreeSetupInProgress": "Worktree 正在初始化",
+    "worktreeSetupInProgressHint": "新的 worktree 就绪后，Git 工具会立即显示。",
     "tabs": {
       "commit": "提交",
       "update": "更新",
@@ -1874,7 +1887,7 @@
     "commandCannotBeEmptyForLocal": "本地服务器的命令不能为空",
     "urlCannotBeEmptyForRemote": "远程服务器的 URL 不能为空",
     "serverCreatedReloading": "MCP 服务器已创建。OpenCode 正在重载...",
-    "savedReloading": "已保存。OpenCode 正在重载...",
+    "savedReloading": "已保存。OpenCode 重新加载中…",
     "failedToSave": "保存失败",
     "errorOccurred": "发生错误",
     "serverDeleted": "\"{{name}}\" 已删除",
@@ -1885,7 +1898,7 @@
     "selectServerFromSidebar": "请从侧边栏选择 MCP 服务器",
     "orAddNewOne": "或新增一个",
     "newMcpServer": "新建 MCP 服务器",
-    "configureNewServer": "配置新的 MCP 服务器",
+    "configureNewServer": "配置新 MCP 服务器",
     "localStdio": "本地 · stdio",
     "remoteSse": "远程 · SSE",
     "transport": "传输",
@@ -1909,9 +1922,7 @@
     "saveChanges": "保存更改",
     "deleteServerPrompt": "删除 \"{{name}}\"？",
     "deleteServerDescription": "这将从中移除该服务器",
-    "opencodeNeedsReload": "OpenCode 需要重新加载。",
-    "savedReloading": "已保存。OpenCode 重新加载中…",
-    "configureNewServer": "配置新 MCP 服务器"
+    "opencodeNeedsReload": "OpenCode 需要重新加载。"
   },
   "skillsCatalogPage": {
     "title": "技能目录",
@@ -1972,8 +1983,7 @@
     "overrideUrlTooltip": "填写时使用自定义 URL；留空时从输出中自动选择最佳 URL。",
     "desktopSshForward": "桌面 SSH 转发",
     "useOutputOrManualUrl": "使用输出/手动 URL",
-    "noEnabledLocalSshForwards": "没有可用的本地 SSH 转发。",
-    "desktopSshForward": "桌面 SSH 转发"
+    "noEnabledLocalSshForwards": "没有可用的本地 SSH 转发。"
   },
   "skillsPage": {
     "skillNameRequired": "技能名称为必填项",
@@ -2030,12 +2040,7 @@
     "relativePathHint": "技能目录内的相对路径。子目录会自动创建。",
     "content": "内容",
     "fileContentPlaceholder": "文件内容...",
-    "createFile": "创建文件",
-    "basicInformation": "基本信息",
-    "configureNewSkill": "配置新技能",
-    "modifyFileContent": "修改文件内容",
-    "selectSkillFromSidebar": "请从侧边栏选择技能",
-    "orCreateNewOne": "或创建一个新的"
+    "createFile": "创建文件"
   },
   "commandsPage": {
     "commandNameRequired": "命令名称是必填项",
@@ -2064,10 +2069,7 @@
     "overrideModel": "覆盖模型",
     "commandTemplate": "命令模板",
     "commandTemplatePlaceholder": "您的命令模板在这里...",
-    "templateHelp": "$ARGUMENTS 用户输入 · !`cmd` shell 输出 · @file 文件内容",
-    "configureNewSlashCommand": "配置新斜杠命令",
-    "selectCommandFromSidebar": "从侧边栏选择命令",
-    "orCreateNewOne": "或创建新命令"
+    "templateHelp": "$ARGUMENTS 用户输入 · !`cmd` shell 输出 · @file 文件内容"
   },
   "worktreeSectionContent": {
     "selectProject": "选择项目",
@@ -2559,7 +2561,10 @@
     "worktreeDirectoryRequired": "Worktree 目录不能为空",
     "sessionCreatedFromIssue": "已从 Issue 创建会话",
     "sessionCreatedFromPr": "已从 PR 创建会话",
-    "failedToSendGithubContext": "发送 GitHub 上下文失败"
+    "failedToSendGithubContext": "发送 GitHub 上下文失败",
+    "worktreeCreated": "Worktree 已创建",
+    "worktreeCreatedDescription": "{{name}} - 正在后台初始化",
+    "worktreeCreatedFromSourceDescription": "{{name}} 源自 {{source}} - 正在后台初始化"
   },
   "gitHeader": {
     "gitIdentity": "Git 身份",

@@ -235,13 +235,13 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
         if (!newWorktreePath) {
           return;
         }
-        toast.success('Todo sent to new worktree session');
+        toast.success(t('projectNotes.todoSentToNewWorktreeSession'));
         onActionComplete?.();
       } finally {
         setSendingTodoId(null);
       }
     },
-    [canCreateWorktree, onActionComplete, projectRef, routeToChat]
+    [canCreateWorktree, onActionComplete, projectRef, routeToChat, t]
   );
 
   if (!projectRef) {
@@ -257,7 +257,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
       <div className="space-y-1">
         <div className="flex items-center justify-between gap-2">
           <h3 className="min-w-0 truncate typography-ui-label font-semibold text-foreground" title={projectRef.path}>
-            Quick notes - {projectLabel?.trim() || projectRef.path.split('/').filter(Boolean).pop() || projectRef.path}
+            {t('projectNotes.quickNotesWithProject', { project: projectLabel?.trim() || projectRef.path.split('/').filter(Boolean).pop() || projectRef.path })}
           </h3>
           <span className="typography-meta text-muted-foreground">{notes.length}/{OPENCHAMBER_PROJECT_NOTES_MAX_LENGTH}</span>
         </div>
@@ -265,7 +265,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
           value={notes}
           onChange={(event) => setNotes(event.target.value.slice(0, OPENCHAMBER_PROJECT_NOTES_MAX_LENGTH))}
           onBlur={handleNotesBlur}
-          placeholder="Capture context, reminders, or links"
+          placeholder={t('projectNotes.captureContextPlaceholder')}
           className="min-h-28 max-h-80 resize-none"
           useScrollShadow
           scrollShadowSize={56}
@@ -276,8 +276,12 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
       <div className="space-y-2">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
-            <h3 className="typography-ui-label font-semibold text-foreground">Todo</h3>
-            <span className="typography-meta text-muted-foreground">{todos.length} item{todos.length === 1 ? '' : 's'}</span>
+            <h3 className="typography-ui-label font-semibold text-foreground">{t('projectNotes.todo')}</h3>
+            <span className="typography-meta text-muted-foreground">
+              {todos.length === 1
+                ? t('projectNotes.itemsCountSingle', { count: todos.length })
+                : t('projectNotes.itemsCount', { count: todos.length })}
+            </span>
             <button
               type="button"
               onClick={handleClearCompletedTodos}
@@ -327,7 +331,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
                   <Checkbox
                     checked={todo.completed}
                     onChange={(checked) => handleToggleTodo(todo.id, checked)}
-                    ariaLabel={`Mark "${todo.text}" complete`}
+                    ariaLabel={t('projectNotes.markTodoComplete', { text: todo.text })}
                     className="mt-[3px] self-start"
                   />
                   <button
@@ -340,7 +344,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
                       todo.completed && 'text-muted-foreground line-through'
                     )}
                     title={isExpandedTodo ? undefined : todo.text}
-                    aria-label={isExpandedTodo ? `Collapse todo "${todo.text}"` : `Expand todo "${todo.text}"`}
+                    aria-label={isExpandedTodo ? t('projectNotes.collapseTodo', { text: todo.text }) : t('projectNotes.expandTodo', { text: todo.text })}
                   >
                     {todo.text}
                   </button>
@@ -349,7 +353,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
                       type="button"
                       onClick={() => handleDeleteTodo(todo.id)}
                       className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-                      aria-label={`Delete "${todo.text}"`}
+                      aria-label={t('projectNotes.deleteTodo', { text: todo.text })}
                     >
                       <RiDeleteBinLine className="h-3.5 w-3.5" />
                     </button>
@@ -359,23 +363,23 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
                           type="button"
                           disabled={sendingTodoId === todo.id}
                           className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed disabled:opacity-50"
-                          aria-label={`Send "${todo.text}"`}
+                          aria-label={t('projectNotes.sendTodo', { text: todo.text })}
                         >
                           <RiSendPlaneLine className="h-3.5 w-3.5" />
                         </button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end" className="w-56">
                         <DropdownMenuItem onClick={() => handleSendToCurrentSession(todo.text)}>
-                          Send to current session
+                          {t('projectNotes.sendToCurrentSession')}
                         </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => handleSendToNewSession(todo.text)}>
-                          Send to new session
+                          {t('projectNotes.sendToNewSession')}
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={() => void handleSendToNewWorktreeSession(todo.id, todo.text)}
                           disabled={!canCreateWorktree}
                         >
-                          Send to new worktree session
+                          {t('projectNotes.sendToNewWorktreeSession')}
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>

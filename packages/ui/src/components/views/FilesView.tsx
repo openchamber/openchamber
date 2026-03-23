@@ -928,7 +928,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       await files.writeFile(newPath, '')
         .then(async (result) => {
           if (result.success) {
-            toast.success('File created');
+            toast.success(t('filesView.fileCreated'));
             await refreshDirectory(parentPath);
           }
           finishDialogOperation();
@@ -951,7 +951,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       await files.createDirectory(newPath)
         .then(async (result) => {
           if (result.success) {
-            toast.success('Folder created');
+            toast.success(t('filesView.folderCreated'));
             await refreshDirectory(parentPath);
           }
           finishDialogOperation();
@@ -982,7 +982,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       await files.rename(oldPath, newPath)
         .then(async (result) => {
           if (result.success) {
-            toast.success('Renamed successfully');
+            toast.success(t('filesView.renamedSuccessfully'));
             await refreshDirectory(parentDir);
             if (root) {
               removeOpenPathsByPrefix(root, oldPath);
@@ -1019,7 +1019,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       await files.delete(deletedPath)
         .then(async (result) => {
           if (result.success) {
-            toast.success('Deleted successfully');
+            toast.success(t('filesView.deletedSuccessfully'));
             await refreshDirectory(parentDir);
             if (root) {
               removeOpenPathsByPrefix(root, deletedPath);
@@ -1045,7 +1045,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     }
 
     done();
-  }, [activeDialog, dialogData, dialogInputValue, files, refreshDirectory, isMobile, removeOpenPathsByPrefix, root, selectedFile?.path, setSelectedPath]);
+  }, [activeDialog, dialogData, dialogInputValue, files, refreshDirectory, isMobile, removeOpenPathsByPrefix, root, selectedFile?.path, setSelectedPath, t]);
 
   React.useEffect(() => {
     if (!currentDirectory) {
