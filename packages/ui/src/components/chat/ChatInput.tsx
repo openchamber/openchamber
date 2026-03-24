@@ -1812,7 +1812,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                 toast.error(error instanceof Error ? error.message : t('chatInput.failedToAttachImageFromClipboard'));
             }
         }
-    }, [addAttachedFile, currentSessionId, newSessionDraftOpen, insertTextAtSelection]);
+    }, [addAttachedFile, currentSessionId, newSessionDraftOpen, insertTextAtSelection, t]);
 
     const handleFileSelect = (file: { name: string; path: string; relativePath?: string }) => {
 
@@ -2326,7 +2326,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                 toast.error(error instanceof Error ? error.message : t('chatInput.failedToAttachFile'));
             }
         }
-    }, [addAttachedFile]);
+    }, [addAttachedFile, t]);
 
     const handleVSCodePickFiles = React.useCallback(async () => {
         try {

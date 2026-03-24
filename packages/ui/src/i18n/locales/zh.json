@@ -212,8 +212,6 @@
     "attachmentsTooLargeToSend": "附件过大无法发送。请减少图片数量或大小。",
     "failedToSendAttachments": "发送附件失败。请尝试减少文件数量或缩小图片。",
     "failedToAttachImageFromClipboard": "从剪贴板附加图片失败",
-    "failedToAttachDroppedFile": "附加拖拽文件失败",
-    "failedToAttachDroppedFiles": "附加拖拽文件失败",
     "failedToAttachFile": "附加文件失败",
     "failedToPickFilesInVSCode": "在 VS Code 中选择文件失败",
     "byAuthor": "作者 {{author}}",
@@ -2358,7 +2356,8 @@
     "settings": "设置",
     "showUsedQuota": "显示已用配额",
     "showRemainingQuota": "显示剩余配额",
-    "refreshRateLimits": "刷新速率限制"
+    "refreshRateLimits": "刷新速率限制",
+    "resizeSessionsSidebar": "调整会话侧边栏宽度"
   },
   "mcpDropdown": {
     "mcpServers": "MCP 服务器",

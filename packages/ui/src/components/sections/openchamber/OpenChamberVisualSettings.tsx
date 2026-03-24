@@ -23,6 +23,7 @@ import { isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
 import { useDeviceInfo } from '@/lib/device';
 import { usePwaDetection } from '@/hooks/usePwaDetection';
 import { updateDesktopSettings } from '@/lib/persistence';
+import { LANGUAGE_OPTIONS, type Language } from '@/contexts/language-context';
 import {
     setDirectoryShowHidden,
     useDirectoryShowHidden,
@@ -413,13 +414,14 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     <span className="typography-ui-header font-medium text-foreground">{t('settings.general')}</span>
                                     <div className="flex items-center gap-2 py-1.5">
                                         <span className="typography-ui-label text-foreground shrink-0">{t('settings.language')}</span>
-                                        <Select value={language} onValueChange={(value) => setLanguage(value as 'en' | 'zh')}>
+                                        <Select value={language} onValueChange={(value) => setLanguage(value as Language)}>
                                             <SelectTrigger aria-label={t('appearance.selectLanguage')} className="w-fit">
                                                 <SelectValue placeholder={t('appearance.selectLanguage')} />
                                             </SelectTrigger>
                                             <SelectContent>
-                                                <SelectItem value="en">English</SelectItem>
-                                                <SelectItem value="zh">简体中文</SelectItem>
+                                                {LANGUAGE_OPTIONS.map((option) => (
+                                                    <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                                                ))}
                                             </SelectContent>
                                         </Select>
                                     </div>

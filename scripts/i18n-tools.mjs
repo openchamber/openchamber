@@ -17,7 +17,11 @@ const SUPPORTED_GAP_SCAN_EXTENSIONS = new Set(['.tsx', '.jsx']);
 const DEFAULT_SOURCE_ROOT = 'packages/ui/src';
 const DEFAULT_GAP_SCAN_ROOT = 'packages/ui/src/components';
 const DEFAULT_LOCALES = [
+  'packages/ui/src/i18n/locales/de.json',
   'packages/ui/src/i18n/locales/en.json',
+  'packages/ui/src/i18n/locales/fr.json',
+  'packages/ui/src/i18n/locales/ko.json',
+  'packages/ui/src/i18n/locales/ru.json',
   'packages/ui/src/i18n/locales/zh.json',
 ];
 

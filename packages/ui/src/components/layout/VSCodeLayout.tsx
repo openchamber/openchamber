@@ -460,7 +460,7 @@ export const VSCodeLayout: React.FC = () => {
               onPointerCancel={handleExpandedSidebarResizeEnd}
               role="separator"
               aria-orientation="vertical"
-              aria-label="Resize sessions sidebar"
+              aria-label={t('vscodeLayout.resizeSessionsSidebar')}
             />
           </div>
           {/* Chat content */}
