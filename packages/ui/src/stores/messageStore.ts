@@ -77,6 +77,7 @@ const queuedNonTextStreamingPartOrder: string[] = [];
 let nonTextStreamingFlushScheduled = false;
 let nonTextStreamingFlushRafId: number | null = null;
 let nonTextStreamingFlushTimeoutId: ReturnType<typeof setTimeout> | null = null;
+let nonTextStreamingLastFlushAt = 0;
 const NON_TEXT_STREAMING_QUEUE_HARD_LIMIT = 2500;
 
 const queuedPartDeltasByKey = new Map<string, QueuedPartDelta>();
@@ -84,15 +85,17 @@ const queuedPartDeltaOrder: string[] = [];
 let partDeltaFlushScheduled = false;
 let partDeltaFlushRafId: number | null = null;
 let partDeltaFlushTimeoutId: ReturnType<typeof setTimeout> | null = null;
+let partDeltaLastFlushAt = 0;
 const PART_DELTA_QUEUE_HARD_LIMIT = 3500;
 const ENABLE_STREAMING_FRAME_BATCHING = true;
-const STREAMING_BATCH_DELAY_MS = 120;
+const STREAMING_BATCH_FLUSH_MS = 16;
 const MESSAGE_INFO_QUEUE_HARD_LIMIT = 500;
 
 const queuedMessageInfoUpdatesByKey = new Map<string, QueuedMessageInfoUpdate>();
 const queuedMessageInfoOrder: string[] = [];
 let messageInfoFlushScheduled = false;
 let messageInfoFlushTimeoutId: ReturnType<typeof setTimeout> | null = null;
+let messageInfoLastFlushAt = 0;
 
 const shouldCadenceBatchPartType = (partType: string | undefined): boolean => {
     if (!partType) {
@@ -172,6 +175,7 @@ const flushQueuedNonTextStreamingParts = (
         return;
     }
 
+    nonTextStreamingLastFlushAt = Date.now();
     streamPerfObserve('ui.message_store.non_text_flush_batch_size', batch.length);
     for (const entry of batch) {
         immediateHandler(entry.sessionId, entry.messageId, entry.part, entry.role, entry.currentSessionId);
@@ -228,13 +232,15 @@ const scheduleNonTextStreamingFlush = (flush: () => void): void => {
         return;
     }
     nonTextStreamingFlushScheduled = true;
+    const elapsed = Date.now() - nonTextStreamingLastFlushAt;
+    const delay = Math.max(0, STREAMING_BATCH_FLUSH_MS - elapsed);
     nonTextStreamingFlushTimeoutId = setTimeout(() => {
         nonTextStreamingFlushTimeoutId = null;
         if (!nonTextStreamingFlushScheduled) {
             return;
         }
         flush();
-    }, STREAMING_BATCH_DELAY_MS);
+    }, delay);
 };
 
 const clearPartDeltaFlushSchedule = () => {
@@ -336,6 +342,7 @@ const flushQueuedMessageInfoUpdates = (
         return;
     }
 
+    messageInfoLastFlushAt = Date.now();
     streamPerfObserve('ui.message_store.message_info_flush_batch_size', batch.length);
     streamPerfMeasure('ui.message_store.message_info_flush_ms', () => {
         for (const entry of batch) {
@@ -391,13 +398,15 @@ const scheduleMessageInfoFlush = (flush: () => void): void => {
         return;
     }
     messageInfoFlushScheduled = true;
+    const elapsed = Date.now() - messageInfoLastFlushAt;
+    const delay = Math.max(0, STREAMING_BATCH_FLUSH_MS - elapsed);
     messageInfoFlushTimeoutId = setTimeout(() => {
         messageInfoFlushTimeoutId = null;
         if (!messageInfoFlushScheduled) {
             return;
         }
         flush();
-    }, STREAMING_BATCH_DELAY_MS);
+    }, delay);
 };
 
 const queuedPartDeltaKey = (entry: QueuedPartDelta): string => {
@@ -464,6 +473,7 @@ const flushQueuedPartDeltas = (
         return;
     }
 
+    partDeltaLastFlushAt = Date.now();
     streamPerfObserve('ui.message_store.part_delta_flush_batch_size', batch.length);
     streamPerfMeasure('ui.message_store.part_delta_flush_ms', () => {
         for (const entry of batch) {
@@ -541,18 +551,43 @@ const discardQueuedPartDeltasForSession = (sessionId: string): void => {
     }
 };
 
+const discardQueuedPartDeltasForPart = (sessionId: string, messageId: string, partId: string): void => {
+    if (queuedPartDeltaOrder.length === 0) {
+        return;
+    }
+
+    for (let i = queuedPartDeltaOrder.length - 1; i >= 0; i -= 1) {
+        const key = queuedPartDeltaOrder[i];
+        const entry = queuedPartDeltasByKey.get(key);
+        if (!entry) {
+            queuedPartDeltaOrder.splice(i, 1);
+            continue;
+        }
+        if (entry.sessionId === sessionId && entry.messageId === messageId && entry.partId === partId) {
+            queuedPartDeltasByKey.delete(key);
+            queuedPartDeltaOrder.splice(i, 1);
+        }
+    }
+
+    if (queuedPartDeltaOrder.length === 0) {
+        clearPartDeltaFlushSchedule();
+    }
+};
+
 const schedulePartDeltaFlush = (flush: () => void): void => {
     if (partDeltaFlushScheduled) {
         return;
     }
     partDeltaFlushScheduled = true;
+    const elapsed = Date.now() - partDeltaLastFlushAt;
+    const delay = Math.max(0, STREAMING_BATCH_FLUSH_MS - elapsed);
     partDeltaFlushTimeoutId = setTimeout(() => {
         partDeltaFlushTimeoutId = null;
         if (!partDeltaFlushScheduled) {
             return;
         }
         flush();
-    }, STREAMING_BATCH_DELAY_MS);
+    }, delay);
 };
 
 const shouldBatchStreamingPart = (part: Part | undefined): boolean => {
@@ -2237,6 +2272,11 @@ export const useMessageStore = create<MessageStore>()(
                 },
 
                 addStreamingPart: (sessionId: string, messageId: string, part: Part, role?: string, currentSessionId?: string) => {
+                    const incomingPartId = typeof part?.id === 'string' ? part.id : null;
+                    if (incomingPartId) {
+                        discardQueuedPartDeltasForPart(sessionId, messageId, incomingPartId);
+                    }
+
                     if (!ENABLE_STREAMING_FRAME_BATCHING) {
                         get()._addStreamingPartImmediate(sessionId, messageId, part, role, currentSessionId);
                         return;
@@ -2275,6 +2315,10 @@ export const useMessageStore = create<MessageStore>()(
 
                 _applyPartDeltaImmediate: (sessionId: string, messageId: string, partId: string, field: string, delta: string, role?: string, currentSessionId?: string) => {
                     streamPerfCount('ui.message_store.apply_part_delta_immediate');
+                    if (typeof delta !== 'string' || delta.length === 0) {
+                        streamPerfCount('ui.message_store.apply_part_delta_immediate_noop');
+                        return;
+                    }
                     streamPerfObserve('ui.message_store.apply_part_delta_chars', delta.length);
                     streamPerfMeasure('ui.message_store.apply_part_delta_immediate_ms', () => set((state) => {
                         const sessionMessages = state.messages.get(sessionId) || [];
@@ -2293,6 +2337,10 @@ export const useMessageStore = create<MessageStore>()(
                         const existingField = existingPart[field];
 
                         const nextFieldValue = `${typeof existingField === 'string' ? existingField : ''}${delta}`;
+                        if (nextFieldValue === existingField) {
+                            streamPerfCount('ui.message_store.apply_part_delta_immediate_noop');
+                            return state;
+                        }
                         const nextPart: Record<string, unknown> = {
                             ...existingPart,
                             [field]: nextFieldValue,

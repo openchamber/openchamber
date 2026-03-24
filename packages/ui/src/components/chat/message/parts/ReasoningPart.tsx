@@ -8,6 +8,7 @@ import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { useUIStore } from '@/stores/useUIStore';
 import { useDurationTickerNow } from './useDurationTicker';
 import { MarkdownRenderer } from '../../MarkdownRenderer';
+import { useStreamingTextThrottle } from '../../hooks/useStreamingTextThrottle';
 
 type PartWithText = Part & { text?: string; content?: string; time?: { start?: number; end?: number } };
 
@@ -201,16 +202,21 @@ const ReasoningPart: React.FC<ReasoningPartProps> = ({
     const textContent = React.useMemo(() => cleanReasoningText(rawText), [rawText]);
     const time = partWithText.time;
     const isStreaming = chatRenderMode === 'live' && typeof time?.end !== 'number';
+    const throttledText = useStreamingTextThrottle({
+        text: textContent,
+        isStreaming,
+        identityKey: `${messageId}:${part.id ?? 'reasoning'}`,
+    });
 
     // Show reasoning even if time.end isn't set yet (during streaming)
     // Only hide if there's no text content
-    if (!textContent || textContent.trim().length === 0) {
+    if (!throttledText || throttledText.trim().length === 0) {
         return null;
     }
 
     return (
         <ReasoningTimelineBlock
-            text={textContent}
+            text={throttledText}
             variant="thinking"
             onContentChange={onContentChange}
             blockId={part.id || `${messageId}-reasoning`}

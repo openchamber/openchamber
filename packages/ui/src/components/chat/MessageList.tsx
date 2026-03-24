@@ -943,6 +943,13 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         output: ChatMessageEntry[];
         outputIndexById: Map<string, number>;
     } | null>(null);
+    const staticRenderEntriesCacheRef = React.useRef<{
+        input: ChatMessageEntry[];
+        output: RenderEntry[];
+        staticTurns: TurnRecord[];
+        lastTurnId: string | null;
+        ungroupedMessageIds: Set<string>;
+    } | null>(null);
 
     const stableOnMessageContentChange = useStableEvent(onMessageContentChange);
     const stableGetAnimationHandlers = useStableEvent(getAnimationHandlers);
@@ -1130,6 +1137,48 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         showTextJustificationActivity: chatRenderMode === 'sorted',
     });
     const staticRenderEntries = React.useMemo<RenderEntry[]>(() => streamPerfMeasure('ui.message_list.render_entries_ms', () => {
+        const cached = staticRenderEntriesCacheRef.current;
+        const lastMessage = displayMessages.length > 0 ? displayMessages[displayMessages.length - 1] : undefined;
+        const hasTrailingCandidate = Boolean(lastMessage) && (
+            (streamingTurn
+                ? (streamingTurn.userMessage.info.id === lastMessage?.info.id
+                    || streamingTurn.assistantMessages.some((assistant) => assistant.info.id === lastMessage?.info.id))
+                : false)
+            || (lastMessage ? projection.ungroupedMessageIds.has(lastMessage.info.id) : false)
+        );
+
+        if (
+            cached
+            && hasTrailingCandidate
+            && cached.input.length === displayMessages.length
+            && cached.staticTurns === staticTurns
+            && cached.lastTurnId === projection.lastTurnId
+            && cached.ungroupedMessageIds === projection.ungroupedMessageIds
+            && displayMessages.length > 0
+        ) {
+            let changedCount = 0;
+            let changedIndex = -1;
+            let idsStable = true;
+
+            for (let index = 0; index < displayMessages.length; index += 1) {
+                if (displayMessages[index]?.info?.id !== cached.input[index]?.info?.id) {
+                    idsStable = false;
+                    break;
+                }
+                if (displayMessages[index] !== cached.input[index]) {
+                    changedCount += 1;
+                    changedIndex = index;
+                    if (changedCount > 1) {
+                        break;
+                    }
+                }
+            }
+
+            if (idsStable && changedCount === 1 && changedIndex === displayMessages.length - 1) {
+                return cached.output;
+            }
+        }
+
         const turnEntries = staticTurns.map((turn) => ({
             kind: 'turn' as const,
             key: `turn:${turn.turnId}`,
@@ -1167,8 +1216,16 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
             });
         });
 
+        staticRenderEntriesCacheRef.current = {
+            input: displayMessages,
+            output: orderedEntries,
+            staticTurns,
+            lastTurnId: projection.lastTurnId,
+            ungroupedMessageIds: projection.ungroupedMessageIds,
+        };
+
         return orderedEntries;
-    }), [displayMessages, projection.lastTurnId, projection.ungroupedMessageIds, staticTurns]);
+    }), [displayMessages, projection.lastTurnId, projection.ungroupedMessageIds, staticTurns, streamingTurn]);
 
     const trailingStreamingEntry = React.useMemo<RenderEntry | undefined>(() => {
         if (streamingTurn) {
@@ -1595,7 +1652,11 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                                             data-index={virtualRow.index}
                                             ref={virtualizer.measureElement}
                                             className="absolute left-0 top-0 w-full [overflow-anchor:none]"
-                                            style={{ transform: `translateY(${virtualRow.start}px)` }}
+                                            style={{
+                                                transform: `translateY(${virtualRow.start}px)`,
+                                                contentVisibility: 'auto',
+                                                containIntrinsicSize: 'auto 520px',
+                                            }}
                                         >
                                             <MessageListEntry
                                                 entry={entry}

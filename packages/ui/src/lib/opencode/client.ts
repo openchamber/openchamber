@@ -1425,7 +1425,11 @@ class OpencodeService {
       if (!sessionId) {
         return null;
       }
-      return `openchamber:session-status:${sessionId}`;
+      return `openchamber:session-status:${event.directory}:${sessionId}`;
+    }
+
+    if (eventType === 'lsp.updated') {
+      return `lsp.updated:${event.directory}`;
     }
 
     if (eventType === 'message.part.updated') {
@@ -1442,6 +1446,25 @@ class OpencodeService {
         return null;
       }
       return `message.part.delta:${deltaKey}`;
+    }
+
+    if (eventType === 'message.updated') {
+      const messageId = typeof properties?.messageID === 'string'
+        ? properties.messageID
+        : typeof properties?.messageId === 'string'
+          ? properties.messageId
+          : typeof properties?.id === 'string'
+            ? properties.id
+            : null;
+      const sessionId = typeof properties?.sessionID === 'string'
+        ? properties.sessionID
+        : typeof properties?.sessionId === 'string'
+          ? properties.sessionId
+          : null;
+      if (!messageId || !sessionId) {
+        return null;
+      }
+      return `message.updated:${event.directory}:${sessionId}:${messageId}`;
     }
 
     return null;

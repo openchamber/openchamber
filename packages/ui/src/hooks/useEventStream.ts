@@ -1115,8 +1115,14 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
       if (!event.properties) return;
 
       const props = event.properties as Record<string, unknown>;
-      const shouldProcessSessionMetadata = !HOT_CONTENT_EVENT_TYPES.has(event.type)
-        && event.type !== 'session.abort'
+
+      if (HOT_CONTENT_EVENT_TYPES.has(event.type)) {
+        if (handleContentEvent(event)) {
+          return;
+        }
+      }
+
+      const shouldProcessSessionMetadata = event.type !== 'session.abort'
         && event.type !== 'session.error';
 
       if (shouldProcessSessionMetadata) {
@@ -1147,7 +1153,7 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
         }
       }
 
-      if (handleContentEvent(event)) {
+      if (!HOT_CONTENT_EVENT_TYPES.has(event.type) && handleContentEvent(event)) {
         return;
       }
 
