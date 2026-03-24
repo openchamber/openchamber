@@ -141,13 +141,13 @@ return (
             </div>
           </div>
 
-          {/* Big New Session button */}
+          {/* New Session button */}
           <button
             type="button"
             onClick={handleNewSession}
-            className="flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 text-primary-foreground shadow-sm transition-colors hover:bg-primary/90"
+            className="flex h-8 w-full items-center justify-center gap-2 rounded-md border border-border bg-[var(--surface-elevated)] px-3 text-foreground shadow-sm transition-colors hover:bg-interactive-hover"
           >
-            <RiChatNewLine className="h-5 w-5" />
+            <RiChatNewLine className="h-4 w-4" />
             <span className="typography-ui-label font-medium">New Chat</span>
           </button>
 
