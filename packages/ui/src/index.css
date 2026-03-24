@@ -785,11 +785,10 @@ html:not(.dark) .chat-scroll {
   font-size: var(--text-code) !important;
 }
 
-/* Reasoning markdown renders at meta size, dimmed and italic. */
+/* Reasoning markdown renders at meta size, dimmed. */
 .streamdown-content.streamdown-reasoning {
   font-size: var(--text-meta);
   color: var(--muted-foreground);
-  font-style: italic;
 }
 
 .streamdown-content.streamdown-reasoning strong,

@@ -270,6 +270,66 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand('openchamber.attachExplorerToChat', async (resource?: vscode.Uri, resources?: vscode.Uri[]) => {
+      const uriCandidates: vscode.Uri[] = [];
+      if (Array.isArray(resources)) {
+        uriCandidates.push(...resources.filter((entry): entry is vscode.Uri => entry instanceof vscode.Uri));
+      }
+      if (resource instanceof vscode.Uri) {
+        uriCandidates.push(resource);
+      }
+      if (uriCandidates.length === 0) {
+        const activeEditorUri = vscode.window.activeTextEditor?.document.uri;
+        if (activeEditorUri) {
+          uriCandidates.push(activeEditorUri);
+        }
+      }
+
+      const uniqueUris = Array.from(new Map(uriCandidates.map((uri) => [uri.toString(), uri])).values());
+      const mentionPaths: string[] = [];
+      const skippedEntries: string[] = [];
+
+      for (const uri of uniqueUris) {
+        if (uri.scheme !== 'file') {
+          skippedEntries.push(uri.toString());
+          continue;
+        }
+
+        try {
+          const stat = await vscode.workspace.fs.stat(uri);
+          if ((stat.type & vscode.FileType.Directory) !== 0) {
+            skippedEntries.push(vscode.workspace.asRelativePath(uri, false));
+            continue;
+          }
+        } catch {
+          skippedEntries.push(vscode.workspace.asRelativePath(uri, false));
+          continue;
+        }
+
+        const relativePath = vscode.workspace.asRelativePath(uri, false).replace(/\\/g, '/').trim();
+        if (!relativePath) {
+          skippedEntries.push(uri.fsPath || uri.toString());
+          continue;
+        }
+        mentionPaths.push(relativePath);
+      }
+
+      if (mentionPaths.length === 0) {
+        vscode.window.showWarningMessage('OpenChamber: No file selected to mention');
+        return;
+      }
+
+      await vscode.commands.executeCommand('openchamber.openSidebar');
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      chatViewProvider?.addFileMentions(mentionPaths);
+
+      if (skippedEntries.length > 0) {
+        vscode.window.showInformationMessage('OpenChamber: Some selected entries were skipped (folders or unsupported resources)');
+      }
+    })
+  );
+
+  context.subscriptions.push(
     vscode.commands.registerCommand('openchamber.explain', async () => {
       const editor = vscode.window.activeTextEditor;
       if (!editor) {

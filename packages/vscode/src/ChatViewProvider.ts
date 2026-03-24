@@ -5,6 +5,7 @@ import type { OpenCodeManager, ConnectionStatus } from './opencode';
 import { getWebviewShikiThemes } from './shikiThemes';
 import { getWebviewHtml } from './webviewHtml';
 import { openSseProxy } from './sseProxy';
+import { resolveWebviewDevServerUrl } from './webviewDevServer';
 
 export class ChatViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'openchamber.chatView';
@@ -20,12 +21,15 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private _cachedError?: string;
   private _sseCounter = 0;
   private _sseStreams = new Map<string, AbortController>();
+  private readonly _webviewDevServerUrl: string | null;
 
   constructor(
     private readonly _context: vscode.ExtensionContext,
     private readonly _extensionUri: vscode.Uri,
     private readonly _openCodeManager?: OpenCodeManager
-  ) {}
+  ) {
+    this._webviewDevServerUrl = resolveWebviewDevServerUrl(this._context);
+  }
 
   public resolveWebviewView(
     webviewView: vscode.WebviewView
@@ -108,6 +112,27 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         payload: { text }
       });
     }
+  }
+
+  public addFileMentions(paths: string[]) {
+    if (!this._view) {
+      return;
+    }
+
+    const cleanedPaths = paths
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0);
+
+    if (cleanedPaths.length === 0) {
+      return;
+    }
+
+    this._view.show(true);
+    this._view.webview.postMessage({
+      type: 'command',
+      command: 'addFileMentions',
+      payload: { paths: cleanedPaths },
+    });
   }
 
   public createNewSessionWithPrompt(prompt: string) {
@@ -277,6 +302,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       workspaceFolder,
       initialStatus,
       cliAvailable,
+      devServerUrl: this._webviewDevServerUrl,
     });
   }
 }

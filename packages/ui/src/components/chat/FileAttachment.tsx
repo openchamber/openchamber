@@ -22,23 +22,14 @@ export const FileAttachmentButton = memo(() => {
   const iconSizeClass = isMobile ? 'h-5 w-5' : 'h-[18px] w-[18px]';
 
   const attachFiles = async (files: FileList | File[]) => {
-    let attachedCount = 0;
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
-      const sizeBefore = useSessionStore.getState().attachedFiles.length;
       try {
         await addAttachedFile(file);
-        const sizeAfter = useSessionStore.getState().attachedFiles.length;
-        if (sizeAfter > sizeBefore) {
-          attachedCount++;
-        }
       } catch (error) {
         console.error('File attach failed', error);
         toast.error(error instanceof Error ? error.message : t('chatInput.failedToAttachFile'));
       }
-    }
-    if (attachedCount > 0) {
-      toast.success(`Attached ${attachedCount} file${attachedCount > 1 ? 's' : ''}`);
     }
   };
 

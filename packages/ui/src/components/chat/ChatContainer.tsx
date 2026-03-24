@@ -414,39 +414,58 @@ export const ChatContainer: React.FC = () => {
     if (isSessionHydrating && sessionMessages.length === 0 && !streamingMessageId) {
         return (
             <div
-                className="relative flex flex-col h-full bg-background gap-0"
+                className="relative flex flex-col h-full bg-background"
                 style={isMobile ? { paddingBottom: 'var(--oc-keyboard-inset, 0px)' } : undefined}
             >
                 {returnToParentButton}
-                <div className="flex-1 overflow-y-auto bg-background pt-6">
-                    <div className="space-y-4">
-                        {HYDRATING_SKELETON_ITEMS.map((item) => (
-                            <div key={item.id} className="group w-full">
-                                <div className="chat-message-column">
-                                    <div className="space-y-2.5 px-4 py-3">
-                                        <div className="space-y-1.5">
-                                            {item.toolRows.map((row) => {
-                                                return (
-                                                    <div key={`${item.id}-${row.id}`} className="flex items-center gap-2">
-                                                        <Skeleton className="h-3.5 w-3.5 rounded-full flex-shrink-0" />
-                                                        <Skeleton className={cn('h-4 rounded-md', row.titleWidth)} />
-                                                        <Skeleton className={cn('h-4 rounded-md', row.detailWidth)} />
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
-                                        <div className="space-y-1.5 pt-1">
-                                            <Skeleton className={cn('h-4 rounded-md', item.textWidths[0])} />
-                                            <Skeleton className={cn('h-4 rounded-md', item.textWidths[1])} />
-                                            <Skeleton className={cn('h-4 rounded-md', item.textWidths[2])} />
+                <div
+                    className={cn(
+                        'relative min-h-0',
+                        isDesktopExpandedInput
+                            ? 'absolute inset-0 opacity-0 pointer-events-none'
+                            : 'flex-1'
+                    )}
+                    aria-hidden={isDesktopExpandedInput}
+                >
+                    <div className="absolute inset-0 overflow-y-auto overflow-x-hidden bg-background pt-6">
+                        <div className="space-y-4">
+                            {HYDRATING_SKELETON_ITEMS.map((item) => (
+                                <div key={item.id} className="group w-full">
+                                    <div className="chat-message-column">
+                                        <div className="space-y-2.5 px-4 py-3">
+                                            <div className="space-y-1.5">
+                                                {item.toolRows.map((row) => {
+                                                    return (
+                                                        <div key={`${item.id}-${row.id}`} className="flex items-center gap-2">
+                                                            <Skeleton className="h-3.5 w-3.5 rounded-full flex-shrink-0" />
+                                                            <Skeleton className={cn('h-4 rounded-md', row.titleWidth)} />
+                                                            <Skeleton className={cn('h-4 rounded-md', row.detailWidth)} />
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                            <div className="space-y-1.5 pt-1">
+                                                <Skeleton className={cn('h-4 rounded-md', item.textWidths[0])} />
+                                                <Skeleton className={cn('h-4 rounded-md', item.textWidths[1])} />
+                                                <Skeleton className={cn('h-4 rounded-md', item.textWidths[2])} />
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
-                            </div>
-                        ))}
+                            ))}
+                        </div>
                     </div>
                 </div>
-                <ChatInput scrollToBottom={scrollToBottom} />
+                <div
+                    className={cn(
+                        'relative z-10',
+                        isDesktopExpandedInput
+                            ? 'flex-1 min-h-0 bg-background'
+                            : 'bg-background/95 supports-[backdrop-filter]:bg-background/80'
+                    )}
+                >
+                    <ChatInput scrollToBottom={scrollToBottom} />
+                </div>
             </div>
         );
     }
@@ -458,11 +477,21 @@ export const ChatContainer: React.FC = () => {
                 style={isMobile ? { paddingBottom: 'var(--oc-keyboard-inset, 0px)' } : undefined}
             >
                 {returnToParentButton}
-                {!isDesktopExpandedInput ? (
-                <div className="flex-1 flex items-center justify-center">
-                    <ChatEmptyState />
+                <div
+                    className={cn(
+                        'relative min-h-0',
+                        isDesktopExpandedInput
+                            ? 'absolute inset-0 opacity-0 pointer-events-none'
+                            : 'flex-1'
+                    )}
+                    aria-hidden={isDesktopExpandedInput}
+                >
+                    {!isDesktopExpandedInput ? (
+                        <div className="absolute inset-0 flex items-center justify-center">
+                            <ChatEmptyState />
+                        </div>
+                    ) : null}
                 </div>
-                ) : null}
                 <div
                     className={cn(
                         'relative z-10',

@@ -13,7 +13,31 @@ export interface WebviewHtmlOptions {
   panelType?: PanelType;
   initialSessionId?: string;
   viewMode?: 'sidebar' | 'editor';
+  devServerUrl?: string | null;
 }
+
+const asCspToken = (value: string | null | undefined): string | null => {
+  if (!value) {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+};
+
+const toOrigin = (value: string | null | undefined): string | null => {
+  if (!value) {
+    return null;
+  }
+  try {
+    return new URL(value).origin;
+  } catch {
+    return null;
+  }
+};
+
+const uniqueTokens = (values: Array<string | null | undefined>): string => {
+  return Array.from(new Set(values.map(asCspToken).filter((value): value is string => Boolean(value)))).join(' ');
+};
 
 export function getWebviewHtml(options: WebviewHtmlOptions): string {
   const {
@@ -25,10 +49,18 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
     panelType = 'chat',
     initialSessionId,
     viewMode = 'sidebar',
+    devServerUrl,
   } = options;
 
   const scriptPath = vscode.Uri.joinPath(extensionUri, 'dist', 'webview', 'assets', 'index.js');
   const scriptUri = webview.asWebviewUri(scriptPath);
+  const normalizedDevServerUrl = asCspToken(devServerUrl)?.replace(/\/$/, '') ?? null;
+  const devServerOrigin = toOrigin(normalizedDevServerUrl);
+  const styleSrc = uniqueTokens([webview.cspSource, "'unsafe-inline'", devServerOrigin]);
+  const scriptSrc = uniqueTokens([webview.cspSource, "'unsafe-inline'", "'unsafe-eval'", devServerOrigin]);
+  const connectSrc = uniqueTokens(['*', 'ws:', 'wss:', 'http:', 'https:', devServerOrigin]);
+  const imgSrc = uniqueTokens([webview.cspSource, 'data:', 'https:', devServerOrigin]);
+  const fontSrc = uniqueTokens([webview.cspSource, 'data:', devServerOrigin]);
 
   const themeKind = getThemeKindName(vscode.window.activeColorTheme.kind);
 
@@ -45,7 +77,7 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src ${webview.cspSource} 'unsafe-inline' 'unsafe-eval'; connect-src * ws: wss: http: https:; img-src ${webview.cspSource} data: https:; font-src ${webview.cspSource} data:;">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${styleSrc}; script-src ${scriptSrc}; connect-src ${connectSrc}; img-src ${imgSrc}; font-src ${fontSrc};">
   <style>
     html, body, #root { height: 100%; width: 100%; margin: 0; padding: 0; }
     body { 
@@ -171,7 +203,105 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
       }
     });
   </script>
-  <script type="module" src="${scriptUri}"></script>
+  <script type="module">
+    const prodEntryUrl = ${JSON.stringify(scriptUri.toString())};
+    const devServerUrl = ${normalizedDevServerUrl ? JSON.stringify(normalizedDevServerUrl) : 'null'};
+
+    const loadProductionBundle = () => {
+      const script = document.createElement('script');
+      script.type = 'module';
+      script.src = prodEntryUrl;
+      document.body.appendChild(script);
+    };
+
+    if (!devServerUrl) {
+      loadProductionBundle();
+    } else {
+      const baseUrl = devServerUrl;
+
+      const statusEl = document.getElementById('loading-status');
+      const setStatus = (text) => {
+        if (statusEl) {
+          statusEl.textContent = text;
+        }
+      };
+
+      const retryDelayMs = 500;
+      let attempt = 0;
+
+      const waitForRootMount = (timeoutMs) => {
+        const root = document.getElementById('root');
+        if (!root) {
+          return Promise.resolve(false);
+        }
+
+        if (root.childNodes.length > 0) {
+          return Promise.resolve(true);
+        }
+
+        return new Promise((resolve) => {
+          const observer = new MutationObserver(() => {
+            if (root.childNodes.length > 0) {
+              observer.disconnect();
+              clearTimeout(timer);
+              resolve(true);
+            }
+          });
+
+          observer.observe(root, { childList: true, subtree: true });
+          const timer = window.setTimeout(() => {
+            observer.disconnect();
+            resolve(root.childNodes.length > 0);
+          }, timeoutMs);
+        });
+      };
+
+      const tryLoadDevBundle = () => {
+        const viteClientUrl = baseUrl + '/@vite/client';
+        const reactRefreshUrl = baseUrl + '/@react-refresh';
+        const devEntryUrl = baseUrl + '/main.tsx';
+        const hostLabel = (() => {
+          try {
+            return new URL(baseUrl).host;
+          } catch {
+            return baseUrl;
+          }
+        })();
+
+        setStatus('Starting webview dev server (' + hostLabel + ')...');
+
+        Promise.resolve()
+          .then(() => import(viteClientUrl))
+          .then(() => import(reactRefreshUrl))
+          .then((mod) => {
+            const runtime = mod && mod.default ? mod.default : null;
+            if (runtime && typeof runtime.injectIntoGlobalHook === 'function') {
+              runtime.injectIntoGlobalHook(window);
+              window.$RefreshReg$ = () => {};
+              window.$RefreshSig$ = () => (type) => type;
+              window.__vite_plugin_react_preamble_installed__ = true;
+            }
+          })
+          .then(() => import(devEntryUrl))
+          .then(() => waitForRootMount(4000))
+          .then((mounted) => {
+            if (!mounted) {
+              throw new Error('Dev bundle loaded but app did not mount');
+            }
+          })
+          .catch((error) => {
+            attempt += 1;
+            console.warn('[OpenChamber] VS Code webview dev bundle unavailable, retrying...', error);
+            setStatus('Waiting for webview dev server (' + hostLabel + ')... attempt ' + attempt);
+            window.setTimeout(() => {
+              tryLoadDevBundle();
+            }, retryDelayMs);
+          });
+      };
+
+      tryLoadDevBundle();
+    }
+  </script>
 </body>
 </html>`;
 }

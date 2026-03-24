@@ -292,8 +292,8 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                           onNewSession();
                         }}
                         className={cn(
-                          'h-6 w-6 rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
-                          mobileVariant ? 'inline-flex items-center justify-center' : isHovered ? 'inline-flex items-center justify-center' : 'hidden',
+                          'inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity',
+                          mobileVariant ? 'opacity-100' : isHovered ? 'opacity-100' : 'opacity-0 pointer-events-none',
                         )}
                         aria-label={isRepo ? t('sessionSidebar.newDraftSession') : t('sessionSidebar.newSession')}
                       >

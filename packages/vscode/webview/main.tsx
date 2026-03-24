@@ -982,6 +982,27 @@ onCommand('addToContext', (payload) => {
   });
 });
 
+onCommand('addFileMentions', (payload) => {
+  const rawPaths = Array.isArray((payload as { paths?: unknown[] })?.paths)
+    ? (payload as { paths: unknown[] }).paths
+    : [];
+  const paths = rawPaths
+    .filter((entry): entry is string => typeof entry === 'string')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+
+  if (paths.length === 0) {
+    return;
+  }
+
+  const mentionText = paths.map((relativePath) => `@${relativePath}`).join(' ');
+
+  import('@/stores/useSessionStore').then(({ useSessionStore }) => {
+    const store = useSessionStore.getState();
+    store.setPendingInputText(mentionText, 'append-inline');
+  });
+});
+
 // Listen for createSessionWithPrompt command from extension (Explain, Improve Code)
 onCommand('createSessionWithPrompt', (payload) => {
   const { prompt } = payload as { prompt: string };

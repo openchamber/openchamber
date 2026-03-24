@@ -200,7 +200,7 @@ export interface SessionStore {
     userSummaryTitles: Map<string, { title: string; createdAt: number | null }>;
 
     pendingInputText: string | null;
-    pendingInputMode: 'replace' | 'append';
+    pendingInputMode: 'replace' | 'append' | 'append-inline';
     /** Synthetic context parts to include with the next message sent */
     pendingSyntheticParts: SyntheticContextPart[] | null;
 
@@ -320,8 +320,8 @@ export interface SessionStore {
       handleSlashUndo: (sessionId: string) => Promise<void>;
       handleSlashRedo: (sessionId: string) => Promise<void>;
       forkFromMessage: (sessionId: string, messageId: string) => Promise<void>;
-      setPendingInputText: (text: string | null, mode?: 'replace' | 'append') => void;
-      consumePendingInputText: () => { text: string; mode: 'replace' | 'append' } | null;
+      setPendingInputText: (text: string | null, mode?: 'replace' | 'append' | 'append-inline') => void;
+      consumePendingInputText: () => { text: string; mode: 'replace' | 'append' | 'append-inline' } | null;
       setPendingSyntheticParts: (parts: SyntheticContextPart[] | null) => void;
      consumePendingSyntheticParts: () => SyntheticContextPart[] | null;
    }

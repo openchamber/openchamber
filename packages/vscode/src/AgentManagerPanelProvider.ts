@@ -5,6 +5,7 @@ import type { OpenCodeManager, ConnectionStatus } from './opencode';
 import { getWebviewShikiThemes } from './shikiThemes';
 import { getWebviewHtml } from './webviewHtml';
 import { openSseProxy } from './sseProxy';
+import { resolveWebviewDevServerUrl } from './webviewDevServer';
 
 export class AgentManagerPanelProvider {
   public static readonly viewType = 'openchamber.agentManager';
@@ -16,12 +17,15 @@ export class AgentManagerPanelProvider {
   private _cachedError?: string;
   private _sseCounter = 0;
   private _sseStreams = new Map<string, AbortController>();
+  private readonly _webviewDevServerUrl: string | null;
 
   constructor(
     private readonly _context: vscode.ExtensionContext,
     private readonly _extensionUri: vscode.Uri,
     private readonly _openCodeManager?: OpenCodeManager
-  ) {}
+  ) {
+    this._webviewDevServerUrl = resolveWebviewDevServerUrl(this._context);
+  }
 
   public createOrShow(): void {
     // If panel exists, reveal it
@@ -227,6 +231,7 @@ export class AgentManagerPanelProvider {
       initialStatus: this._cachedStatus,
       cliAvailable,
       panelType: 'agentManager',
+      devServerUrl: this._webviewDevServerUrl,
     });
   }
 }

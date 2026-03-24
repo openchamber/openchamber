@@ -132,13 +132,20 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
   const setPendingInputText = useSessionStore((s) => s.setPendingInputText);
   const messages = useSessionStore((s) => s.messages);
   const createSession = useSessionStore((s) => s.createSession);
-  const { currentProviderId, currentModelId, currentAgentName, voiceProvider, speechRate, speechPitch, speechVolume, sayVoice, browserVoice, openaiVoice, summarizeVoiceConversation, summarizeCharacterThreshold } = useConfigStore();
-  
+  const { currentProviderId, currentModelId, currentAgentName, voiceModeEnabled, voiceProvider, speechRate, speechPitch, speechVolume, sayVoice, browserVoice, openaiVoice, summarizeVoiceConversation, summarizeCharacterThreshold } = useConfigStore();
+
+  const shouldCheckOpenAIAvailability = voiceModeEnabled && voiceProvider === 'openai';
+  const shouldCheckSayAvailability = voiceModeEnabled && voiceProvider === 'say';
+
   // Server TTS for mobile (bypasses Safari audio restrictions)
-  const { speak: speakServerTTS, stop: stopServerTTS, isAvailable: isServerTTSAvailable, unlockAudio: unlockServerTTSAudio } = useServerTTS();
-  
+  const { speak: speakServerTTS, stop: stopServerTTS, isAvailable: isServerTTSAvailable, unlockAudio: unlockServerTTSAudio } = useServerTTS({
+    enabled: shouldCheckOpenAIAvailability,
+  });
+
   // macOS Say TTS
-  const { speak: speakSayTTS, stop: stopSayTTS, isAvailable: isSayTTSAvailable, unlockAudio: unlockSayTTSAudio } = useSayTTS();
+  const { speak: speakSayTTS, stop: stopSayTTS, isAvailable: isSayTTSAvailable, unlockAudio: unlockSayTTSAudio } = useSayTTS({
+    enabled: shouldCheckSayAvailability,
+  });
   
   // Update messages ref when messages change
   useEffect(() => {

@@ -171,6 +171,11 @@ export const VoiceSettings: React.FC = () => {
     }, [isBrowserPreviewPlaying]);
 
     useEffect(() => {
+        if (!voiceModeEnabled || voiceProvider !== 'openai') {
+            setIsOpenAIAvailable(openaiApiKey.trim().length > 0);
+            return;
+        }
+
         const checkOpenAIAvailability = async () => {
             try {
                 const response = await fetch('/api/tts/status');
@@ -184,9 +189,15 @@ export const VoiceSettings: React.FC = () => {
         };
 
         checkOpenAIAvailability();
-    }, [openaiApiKey]);
+    }, [openaiApiKey, voiceModeEnabled, voiceProvider]);
 
     useEffect(() => {
+        if (!voiceModeEnabled) {
+            setIsSayAvailable(false);
+            setSayVoices([]);
+            return;
+        }
+
         fetch('/api/tts/say/status')
             .then(res => res.json())
             .then(data => {
@@ -203,7 +214,7 @@ export const VoiceSettings: React.FC = () => {
             .catch(() => {
                 setIsSayAvailable(false);
             });
-    }, []);
+    }, [voiceModeEnabled]);
 
     const previewVoice = useCallback(async () => {
         if (previewAudio) {

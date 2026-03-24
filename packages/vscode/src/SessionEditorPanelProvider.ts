@@ -5,6 +5,7 @@ import type { OpenCodeManager, ConnectionStatus } from './opencode';
 import { getWebviewShikiThemes } from './shikiThemes';
 import { getWebviewHtml } from './webviewHtml';
 import { openSseProxy } from './sseProxy';
+import { resolveWebviewDevServerUrl } from './webviewDevServer';
 
 type SessionPanelState = {
   panel: vscode.WebviewPanel;
@@ -18,12 +19,15 @@ export class SessionEditorPanelProvider {
   private _cachedError?: string;
   private _sseCounter = 0;
   private _panels = new Map<string, SessionPanelState>();
+  private readonly _webviewDevServerUrl: string | null;
 
   constructor(
     private readonly _context: vscode.ExtensionContext,
     private readonly _extensionUri: vscode.Uri,
     private readonly _openCodeManager?: OpenCodeManager
-  ) {}
+  ) {
+    this._webviewDevServerUrl = resolveWebviewDevServerUrl(this._context);
+  }
 
   public createOrShowNewSession(): void {
     // Generate unique panel ID for new session drafts
@@ -266,6 +270,7 @@ export class SessionEditorPanelProvider {
       panelType: 'chat',
       initialSessionId: sessionId ?? undefined,
       viewMode: 'editor',
+      devServerUrl: this._webviewDevServerUrl,
     });
   }
 }

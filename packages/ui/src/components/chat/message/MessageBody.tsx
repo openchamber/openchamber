@@ -1191,16 +1191,16 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
                             />
                         );
                     } else {
-                        const partText = (part as { text?: string }).text;
-                        if (partText && partText.trim().length > 0) {
-                            rendered.push(
-                                <FadeInOnReveal key={`reasoning-${messageId}-${i}`}>
-                                    <div className="my-0.5 text-sm text-muted-foreground/60 italic leading-relaxed whitespace-pre-wrap">
-                                        {partText}
-                                    </div>
-                                </FadeInOnReveal>
-                            );
-                        }
+                        rendered.push(
+                            <AssistantTextPart
+                                key={`reasoning-${messageId}-${i}`}
+                                part={part}
+                                messageId={messageId}
+                                streamPhase={streamPhase}
+                                chatRenderMode={chatRenderMode}
+                                onContentChange={onContentChange}
+                            />
+                        );
                     }
                 }
                 i++;

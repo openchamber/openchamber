@@ -71,6 +71,103 @@ const MAX_VISIBLE_TEXTAREA_LINES = 8;
 const EMPTY_QUEUE: QueuedMessage[] = [];
 const FILE_MENTION_TOKEN = /^@[^\s]+$/;
 const CHAT_DRAFT_PERSIST_DEBOUNCE_MS = 500;
+const VS_CODE_DROP_DATA_TYPES = [
+    'CodeFiles',
+    'codefiles',
+    'application/vnd.code.tree',
+    'application/vnd.code.tree.explorer',
+    'text/uri-list',
+    'text/plain',
+];
+
+const FILE_URI_PREFIX = 'file://';
+
+const isLikelyAbsolutePath = (value: string): boolean => (
+    value.startsWith('/')
+    || value.startsWith('\\\\')
+    || /^[A-Za-z]:[\\/]/.test(value)
+);
+
+const toLikelyFileDropReference = (value: string): string | null => {
+    const trimmed = value.trim().replace(/^['"]+|['"]+$/g, '');
+    if (!trimmed) {
+        return null;
+    }
+
+    if (/[\r\n]/.test(trimmed)) {
+        return null;
+    }
+
+    if (trimmed.toLowerCase().startsWith(FILE_URI_PREFIX)) {
+        return trimmed;
+    }
+
+    if (isLikelyAbsolutePath(trimmed)) {
+        return trimmed;
+    }
+
+    return null;
+};
+
+const collectStringLeaves = (input: unknown, output: Set<string>, depth = 0): void => {
+    if (depth > 6 || input == null) {
+        return;
+    }
+
+    if (typeof input === 'string') {
+        output.add(input);
+        return;
+    }
+
+    if (Array.isArray(input)) {
+        for (const item of input) {
+            collectStringLeaves(item, output, depth + 1);
+        }
+        return;
+    }
+
+    if (typeof input !== 'object') {
+        return;
+    }
+
+    for (const value of Object.values(input)) {
+        collectStringLeaves(value, output, depth + 1);
+    }
+};
+
+const parseDroppedFileReferences = (rawPayload: string): string[] => {
+    const extracted = new Set<string>();
+
+    const addCandidatesFromText = (value: string): void => {
+        const direct = toLikelyFileDropReference(value);
+        if (direct) {
+            extracted.add(direct);
+            return;
+        }
+
+        for (const line of value.split(/\r?\n/)) {
+            const candidate = toLikelyFileDropReference(line);
+            if (candidate) {
+                extracted.add(candidate);
+            }
+        }
+    };
+
+    addCandidatesFromText(rawPayload);
+
+    try {
+        const parsed = JSON.parse(rawPayload) as unknown;
+        const leaves = new Set<string>();
+        collectStringLeaves(parsed, leaves);
+        for (const leaf of leaves) {
+            addCandidatesFromText(leaf);
+        }
+    } catch {
+        // Ignore non-JSON payloads.
+    }
+
+    return Array.from(extracted);
+};
 
 const normalizePath = (value?: string | null): string | null => {
     if (typeof value !== 'string') {
@@ -118,6 +215,18 @@ const appendWithLineBreaks = (base: string, next: string): string => {
             : `${next}\n\n`;
 
     return `${base}${separator}${nextWithTrailingBreaks}`;
+};
+
+const appendInlineText = (base: string, next: string): string => {
+    const nextTrimmed = next.trim();
+    if (!nextTrimmed) {
+        return base;
+    }
+    if (!base) {
+        return `${nextTrimmed} `;
+    }
+    const separator = /[\s\n]$/.test(base) ? '' : ' ';
+    return `${base}${separator}${nextTrimmed} `;
 };
 
 interface ChatInputProps {
@@ -191,6 +300,9 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
     const [draftMessage, setDraftMessage] = React.useState(''); // Preserves input when entering history mode
     const textareaRef = React.useRef<HTMLTextAreaElement>(null);
     const dropZoneRef = React.useRef<HTMLDivElement>(null);
+    const suppressNextFileDropTextInsertRef = React.useRef(false);
+    const suppressNextFileDropTextInsertTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+    const pendingDroppedAbsolutePathsRef = React.useRef<string[]>([]);
     const canAcceptDropRef = React.useRef(false);
     const nativeDragInsideDropZoneRef = React.useRef(false);
     const mentionRef = React.useRef<FileMentionHandle>(null);
@@ -218,6 +330,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
     const clearAttachedFiles = useSessionStore((state) => state.clearAttachedFiles);
     const saveSessionAgentSelection = useSessionStore((state) => state.saveSessionAgentSelection);
     const consumePendingInputText = useSessionStore((state) => state.consumePendingInputText);
+    const setPendingInputText = useSessionStore((state) => state.setPendingInputText);
     const pendingInputText = useSessionStore((state) => state.pendingInputText);
     const consumePendingSyntheticParts = useSessionStore((state) => state.consumePendingSyntheticParts);
     const currentManagementSessionId = useSessionManagementStore((state) => state.currentSessionId);
@@ -715,6 +828,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                         if (!next.trim()) return prev;
                         return appendWithLineBreaks(prev, next);
                     });
+                } else if (pending.mode === 'append-inline') {
+                    setMessage((prev) => appendInlineText(prev, pending.text));
                 } else {
                     setMessage(pending.text);
                 }
@@ -1580,7 +1695,49 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
         updateAutocompleteState(nextValue, cursorPosition);
     }, [adjustTextareaHeight, message, updateAutocompleteState]);
 
+    const clearDropTextSuppression = React.useCallback(() => {
+        suppressNextFileDropTextInsertRef.current = false;
+        pendingDroppedAbsolutePathsRef.current = [];
+        if (suppressNextFileDropTextInsertTimeoutRef.current) {
+            clearTimeout(suppressNextFileDropTextInsertTimeoutRef.current);
+            suppressNextFileDropTextInsertTimeoutRef.current = null;
+        }
+    }, []);
+
+    const scheduleDropTextSuppressionExpiry = React.useCallback(() => {
+        if (suppressNextFileDropTextInsertTimeoutRef.current) {
+            clearTimeout(suppressNextFileDropTextInsertTimeoutRef.current);
+        }
+        suppressNextFileDropTextInsertTimeoutRef.current = setTimeout(() => {
+            clearDropTextSuppression();
+        }, 700);
+    }, [clearDropTextSuppression]);
+
+    const handleBeforeInput = React.useCallback((e: React.FormEvent<HTMLTextAreaElement>) => {
+        if (!isVSCodeRuntime() || !suppressNextFileDropTextInsertRef.current) {
+            return;
+        }
+
+        const nativeInputEvent = e.nativeEvent as InputEvent | undefined;
+        if (nativeInputEvent?.inputType === 'insertFromDrop') {
+            e.preventDefault();
+            clearDropTextSuppression();
+        }
+    }, [clearDropTextSuppression]);
+
     const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+        const nativeInputEvent = e.nativeEvent as InputEvent | undefined;
+        if (isVSCodeRuntime() && suppressNextFileDropTextInsertRef.current) {
+            const candidateAbsolutePaths = pendingDroppedAbsolutePathsRef.current;
+            const isLikelyDropTextInsertion = nativeInputEvent?.inputType === 'insertFromDrop'
+                || candidateAbsolutePaths.some((path) => path.length > 0 && e.target.value.includes(path));
+
+            if (isLikelyDropTextInsertion) {
+                clearDropTextSuppression();
+                return;
+            }
+        }
+
         const value = e.target.value;
         const cursorPosition = e.target.selectionStart ?? value.length;
 
@@ -1606,6 +1763,12 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
         adjustTextareaHeight();
         updateAutocompleteState(value, cursorPosition);
     };
+
+    React.useEffect(() => {
+        return () => {
+            clearDropTextSuppression();
+        };
+    }, [clearDropTextSuppression]);
 
     const handlePaste = React.useCallback(async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
         const fileMap = new Map<string, File>();
@@ -1641,26 +1804,15 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
             insertTextAtSelection(pastedText);
         }
 
-        let attachedCount = 0;
-
         for (const file of imageFiles) {
-            const sizeBefore = useSessionStore.getState().attachedFiles.length;
             try {
                 await addAttachedFile(file);
-                const sizeAfter = useSessionStore.getState().attachedFiles.length;
-                if (sizeAfter > sizeBefore) {
-                    attachedCount += 1;
-                }
             } catch (error) {
                 console.error('Clipboard image attach failed', error);
                 toast.error(error instanceof Error ? error.message : t('chatInput.failedToAttachImageFromClipboard'));
             }
         }
-
-        if (attachedCount > 0) {
-            toast.success(`Attached ${attachedCount} image${attachedCount > 1 ? 's' : ''} from clipboard`);
-        }
-    }, [addAttachedFile, currentSessionId, newSessionDraftOpen, insertTextAtSelection, t]);
+    }, [addAttachedFile, currentSessionId, newSessionDraftOpen, insertTextAtSelection]);
 
     const handleFileSelect = (file: { name: string; path: string; relativePath?: string }) => {
 
@@ -1845,12 +1997,26 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
         if (dataTransfer.files && dataTransfer.files.length > 0) return true;
         if (dataTransfer.types) {
             const types = Array.from(dataTransfer.types);
-            if (types.includes('Files')) return true;
-            if (types.includes('text/uri-list')) return true;
+            const lowerTypes = types.map((type) => type.toLowerCase());
+            if (lowerTypes.includes('files')) return true;
+            if (lowerTypes.includes('text/uri-list')) return true;
+            if (lowerTypes.includes('codefiles')) return true;
+            if (lowerTypes.some((type) => type.includes('vnd.code.tree'))) return true;
         }
 
-        const uriList = dataTransfer.getData('text/uri-list') || dataTransfer.getData('text/plain');
-        return typeof uriList === 'string' && uriList.toLowerCase().includes('file://');
+        for (const dataType of VS_CODE_DROP_DATA_TYPES) {
+            let payload = '';
+            try {
+                payload = dataTransfer.getData(dataType);
+            } catch {
+                continue;
+            }
+            if (payload && parseDroppedFileReferences(payload).length > 0) {
+                return true;
+            }
+        }
+
+        return false;
     }, []);
 
     const collectDroppedFiles = React.useCallback((dataTransfer: DataTransfer | null | undefined): File[] => {
@@ -1872,83 +2038,26 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
     const collectDroppedFileUris = React.useCallback((dataTransfer: DataTransfer | null | undefined): string[] => {
         if (!dataTransfer || typeof dataTransfer.getData !== 'function') return [];
 
-        const rawUriList = dataTransfer.getData('text/uri-list') || dataTransfer.getData('text/plain');
-        if (!rawUriList) return [];
+        const extracted = new Set<string>();
 
-        const candidates = rawUriList
-            .split(/\r?\n/)
-            .map((value) => value.trim())
-            .filter((value) => value.length > 0 && !value.startsWith('#'))
-            .filter((value) => value.toLowerCase().startsWith('file://'));
-
-        return Array.from(new Set(candidates));
-    }, []);
-
-    const attachVSCodeDroppedUris = React.useCallback(async (uris: string[]) => {
-        if (uris.length === 0) return;
-
-        try {
-            const response = await fetch('/api/vscode/drop-files', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ uris }),
-            });
-
-            if (!response.ok) {
-                throw new Error(`Failed to attach dropped files (${response.status})`);
+        for (const dataType of VS_CODE_DROP_DATA_TYPES) {
+            let rawPayload = '';
+            try {
+                rawPayload = dataTransfer.getData(dataType);
+            } catch {
+                continue;
+            }
+            if (!rawPayload) {
+                continue;
             }
 
-            const data = await response.json();
-            const picked = Array.isArray(data?.files) ? data.files : [];
-            const skipped = Array.isArray(data?.skipped) ? data.skipped : [];
-
-            if (skipped.length > 0) {
-                const summary = skipped
-                    .map((entry: { name?: string; reason?: string }) => `${entry?.name || 'file'}: ${entry?.reason || 'skipped'}`)
-                    .join('\n');
-                toast.error(`Some dropped files were skipped:\n${summary}`);
+            for (const candidate of parseDroppedFileReferences(rawPayload)) {
+                extracted.add(candidate);
             }
-
-            let attachedCount = 0;
-            for (const file of picked as Array<{ name: string; mimeType?: string; dataUrl?: string }>) {
-                if (!file?.dataUrl) continue;
-
-                const sizeBefore = useSessionStore.getState().attachedFiles.length;
-                try {
-                    const [meta, base64] = file.dataUrl.split(',');
-                    const mime = file.mimeType || (meta?.match(/data:(.*);base64/)?.[1] || 'application/octet-stream');
-                    if (!base64) continue;
-
-                    const binary = atob(base64);
-                    const bytes = new Uint8Array(binary.length);
-                    for (let i = 0; i < binary.length; i++) {
-                        bytes[i] = binary.charCodeAt(i);
-                    }
-
-                    const blob = new Blob([bytes], { type: mime });
-                    const localFile = new File([blob], file.name || 'file', { type: mime });
-                    await addAttachedFile(localFile);
-
-                    const sizeAfter = useSessionStore.getState().attachedFiles.length;
-                    if (sizeAfter > sizeBefore) {
-                        attachedCount += 1;
-                    }
-                } catch (error) {
-                    console.error('Dropped file attach failed', error);
-                    toast.error(error instanceof Error ? error.message : t('chatInput.failedToAttachDroppedFile'));
-                }
-            }
-
-            if (attachedCount > 0) {
-                toast.success(`Attached ${attachedCount} file${attachedCount > 1 ? 's' : ''}`);
-            }
-        } catch (error) {
-            console.error('VS Code dropped file attach failed', error);
-            toast.error(error instanceof Error ? error.message : t('chatInput.failedToAttachDroppedFiles'));
         }
-    }, [addAttachedFile, t]);
+
+        return Array.from(extracted);
+    }, []);
 
     const normalizeDroppedPath = React.useCallback((rawPath: string): string => {
         const input = rawPath.trim();
@@ -1988,6 +2097,24 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
         return normalizedAbsolutePath;
     }, [chatSearchDirectory]);
 
+    const addVSCodeDroppedUrisAsMentions = React.useCallback((uris: string[]) => {
+        if (uris.length === 0) return;
+
+        const mentions = Array.from(new Set(uris
+            .map((entry) => normalizeDroppedPath(entry))
+            .map((entry) => toProjectRelativeMentionPath(entry))
+            .map((entry) => entry.trim().replace(/^\.\//, ''))
+            .filter((entry) => entry.length > 0)
+            .map((entry) => `@${entry}`)));
+
+        if (mentions.length === 0) {
+            return;
+        }
+
+        setPendingInputText(mentions.join(' '), 'append-inline');
+        toast.success(`Added ${mentions.length} file mention${mentions.length > 1 ? 's' : ''}`);
+    }, [normalizeDroppedPath, setPendingInputText, toProjectRelativeMentionPath]);
+
     const handleDragEnter = (e: React.DragEvent) => {
         if (!hasDraggedFiles(e.dataTransfer)) {
             return;
@@ -2016,11 +2143,14 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
         e.stopPropagation();
         if (e.currentTarget === e.target) {
             setIsDragging(false);
+            clearDropTextSuppression();
         }
     };
 
     const handleDrop = async (e: React.DragEvent) => {
-        if (!hasDraggedFiles(e.dataTransfer)) {
+        const draggedFiles = hasDraggedFiles(e.dataTransfer);
+        if (!draggedFiles) {
+            clearDropTextSuppression();
             return;
         }
         e.preventDefault();
@@ -2034,32 +2164,40 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
         if (files.length === 0 && isVSCodeRuntime()) {
             const droppedUris = collectDroppedFileUris(e.dataTransfer);
             if (droppedUris.length > 0) {
-                await attachVSCodeDroppedUris(droppedUris);
+                pendingDroppedAbsolutePathsRef.current = droppedUris
+                    .map((entry) => normalizeDroppedPath(entry))
+                    .map((entry) => entry.trim())
+                    .filter((entry) => entry.length > 0);
+                addVSCodeDroppedUrisAsMentions(droppedUris);
+            } else {
+                clearDropTextSuppression();
             }
             return;
         }
 
-        let attachedCount = 0;
-
         if (files.length > 0) {
             for (const file of files) {
-                const sizeBefore = useSessionStore.getState().attachedFiles.length;
                 try {
                     await addAttachedFile(file);
-                    const sizeAfter = useSessionStore.getState().attachedFiles.length;
-                    if (sizeAfter > sizeBefore) {
-                        attachedCount += 1;
-                    }
                 } catch (error) {
                     console.error('File attach failed', error);
                     toast.error(error instanceof Error ? error.message : t('chatInput.failedToAttachFile'));
                 }
             }
         }
+        clearDropTextSuppression();
+    };
 
-        if (attachedCount > 0) {
-            toast.success(`Attached ${attachedCount} file${attachedCount > 1 ? 's' : ''}`);
+    const handleDropCapture = (e: React.DragEvent) => {
+        if (!isVSCodeRuntime()) {
+            return;
         }
+        if (!hasDraggedFiles(e.dataTransfer)) {
+            return;
+        }
+        suppressNextFileDropTextInsertRef.current = true;
+        scheduleDropTextSuppressionExpiry();
+        e.preventDefault();
     };
 
     // Tauri desktop: handle native file drops via onDragDropEvent
@@ -2120,9 +2258,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                             : [];
                         if (paths.length === 0) return;
 
-                        let attachedCount = 0;
                         for (const path of paths) {
-                            const sizeBefore = useSessionStore.getState().attachedFiles.length;
                             try {
                                 const normalizedPath = normalizeDroppedPath(path);
                                 const fileName = normalizedPath.split(/[\\/]/).pop() || normalizedPath;
@@ -2151,15 +2287,10 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                                 }
 
                                 await addAttachedFile(file);
-                                const sizeAfter = useSessionStore.getState().attachedFiles.length;
-                                if (sizeAfter > sizeBefore) attachedCount++;
                             } catch (error) {
                                 console.error('Failed to attach dropped file:', path, error);
                                 toast.error(`Failed to attach ${path.split(/[\\/]/).pop() || 'file'}`);
                             }
-                        }
-                        if (attachedCount > 0) {
-                            toast.success(`Attached ${attachedCount} file${attachedCount > 1 ? 's' : ''}`);
                         }
                     }
                 });
@@ -2185,27 +2316,17 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
     const fileInputRef = React.useRef<HTMLInputElement>(null);
 
     const attachFiles = React.useCallback(async (files: FileList | File[]) => {
-        let attachedCount = 0;
         const list = Array.isArray(files) ? files : Array.from(files);
 
         for (const file of list) {
-            const sizeBefore = useSessionStore.getState().attachedFiles.length;
             try {
                 await addAttachedFile(file);
-                const sizeAfter = useSessionStore.getState().attachedFiles.length;
-                if (sizeAfter > sizeBefore) {
-                    attachedCount += 1;
-                }
             } catch (error) {
                 console.error('File attach failed', error);
                 toast.error(error instanceof Error ? error.message : t('chatInput.failedToAttachFile'));
             }
         }
-
-        if (attachedCount > 0) {
-            toast.success(`Attached ${attachedCount} file${attachedCount > 1 ? 's' : ''}`);
-        }
-    }, [addAttachedFile, t]);
+    }, [addAttachedFile]);
 
     const handleVSCodePickFiles = React.useCallback(async () => {
         try {
@@ -3070,6 +3191,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                         backgroundColor: currentTheme?.colors?.surface?.subtle,
                     }}
                     ref={dropZoneRef}
+                    onDropCapture={handleDropCapture}
                     onDragEnter={handleDragEnter}
                     onDragOver={handleDragOver}
                     onDragLeave={handleDragLeave}
@@ -3194,10 +3316,12 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                             data-chat-input="true"
                             value={message}
                             onChange={handleTextChange}
+                            onBeforeInput={handleBeforeInput}
                             onKeyDown={handleKeyDown}
                             onPaste={handlePaste}
                             onDragEnter={handleDragEnter}
                             onDragOver={handleDragOver}
+                            onDropCapture={handleDropCapture}
                             onDrop={handleDrop}
                             onPointerDownCapture={handleTextareaPointerDownCapture}
                             onKeyUp={updateAutocompleteOverlayPosition}

@@ -19,6 +19,52 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useConfigStore } from '@/stores/useConfigStore';
 
+interface ServerTTSStatusCache {
+  available: boolean;
+  checkedAt: number;
+}
+
+interface UseServerTTSOptions {
+  enabled?: boolean;
+}
+
+const SERVER_TTS_STATUS_TTL_MS = 30000;
+let serverTTSStatusCache: ServerTTSStatusCache | null = null;
+let serverTTSStatusRequest: Promise<boolean> | null = null;
+
+async function getServerTTSStatus(): Promise<boolean> {
+  const now = Date.now();
+  if (serverTTSStatusCache && now - serverTTSStatusCache.checkedAt < SERVER_TTS_STATUS_TTL_MS) {
+    return serverTTSStatusCache.available;
+  }
+
+  if (serverTTSStatusRequest) {
+    return serverTTSStatusRequest;
+  }
+
+  serverTTSStatusRequest = (async () => {
+    try {
+      const response = await fetch('/api/tts/status');
+      if (!response.ok) {
+        serverTTSStatusCache = { available: false, checkedAt: Date.now() };
+        return false;
+      }
+
+      const data = await response.json();
+      const available = Boolean(data.available);
+      serverTTSStatusCache = { available, checkedAt: Date.now() };
+      return available;
+    } catch {
+      serverTTSStatusCache = { available: false, checkedAt: Date.now() };
+      return false;
+    } finally {
+      serverTTSStatusRequest = null;
+    }
+  })();
+
+  return serverTTSStatusRequest;
+}
+
 export interface UseServerTTSReturn {
   /** Whether TTS is currently playing */
   isPlaying: boolean;
@@ -69,7 +115,8 @@ function getAudioContext(): AudioContext {
   return sharedAudioContext;
 }
 
-export function useServerTTS(): UseServerTTSReturn {
+export function useServerTTS(options: UseServerTTSOptions = {}): UseServerTTSReturn {
+  const enabled = options.enabled ?? true;
   const [isPlaying, setIsPlaying] = useState(false);
   const [isAvailable, setIsAvailable] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -82,29 +129,30 @@ export function useServerTTS(): UseServerTTSReturn {
 
   // Check if server TTS is available
   const checkAvailability = useCallback(async (): Promise<boolean> => {
-    try {
-      const response = await fetch('/api/tts/status');
-      if (response.ok) {
-        const data = await response.json();
-        // Available if server has key OR user has provided their own key
-        const hasServerKey = data.available;
-        const hasClientKey = openaiApiKey && openaiApiKey.trim().length > 0;
-        const available = hasServerKey || hasClientKey;
-        setIsAvailable(available);
-        return available;
-      }
-      setIsAvailable(false);
-      return false;
-    } catch (err) {
-      console.error('[useServerTTS] Failed to check availability:', err);
+    if (!enabled) {
       setIsAvailable(false);
       return false;
     }
-  }, [openaiApiKey]);
+
+    const hasClientKey = Boolean(openaiApiKey && openaiApiKey.trim().length > 0);
+    if (hasClientKey) {
+      setIsAvailable(true);
+      return true;
+    }
+
+    try {
+      const hasServerKey = await getServerTTSStatus();
+      setIsAvailable(hasServerKey);
+      return hasServerKey;
+    } catch {
+      setIsAvailable(false);
+      return false;
+    }
+  }, [enabled, openaiApiKey]);
 
   // Check availability on mount and when API key changes
   useEffect(() => {
-    checkAvailability();
+    void checkAvailability();
   }, [checkAvailability]);
 
   // Stop current playback

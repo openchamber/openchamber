@@ -61,6 +61,8 @@ const DEFAULT_TUNNEL_PROVIDER_CAPABILITIES = [cloudflareTunnelProviderCapabiliti
 
 let onCancelCleanup = null;
 let activeCommandOptions = null;
+let foregroundServerActive = false;
+let foregroundShutdown = null;
 
 function setCancelCleanup(handler) {
   onCancelCleanup = typeof handler === 'function' ? handler : null;
@@ -596,6 +598,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     quiet: false,
     explicitPort: false,
     explicitUiPassword: false,
+    foreground: false,
   };
 
   const removedFlagErrors = [];
@@ -788,6 +791,10 @@ function parseArgs(argv = process.argv.slice(2)) {
       case 'v':
         versionRequested = true;
         break;
+      case 'foreground':
+      case 'no-daemon':
+        options.foreground = true;
+        break;
       case 'daemon':
       case 'd':
         removedFlagErrors.push('`--daemon` was removed. OpenChamber now always runs in daemon mode.');
@@ -854,6 +861,8 @@ OPTIONS:
   -p, --port              Web server port (default: ${DEFAULT_PORT})
   --host                  Bind address (default: 127.0.0.1)
   --ui-password           Protect browser UI with single password
+  --foreground            Run server in foreground (use with systemd/process managers)
+  --no-daemon             Alias for --foreground
   -h, --help              Show help
   -v, --version           Show version
 
@@ -869,6 +878,7 @@ ENVIRONMENT:
 EXAMPLES:
   openchamber                    # Start in daemon mode on default port 3000 (or free port)
   openchamber --port 8080        # Start on port 8080 (daemon)
+  openchamber serve --foreground # Start in foreground (for systemd Type=simple)
   openchamber tunnel help        # Show tunnel lifecycle help
   openchamber logs               # Follow logs for latest running instance
 `);
@@ -966,7 +976,7 @@ _openchamber_tunnel() {
   commands="serve stop restart status tunnel logs update"
   tunnel_commands="help providers ready doctor status start stop profile completion"
   profile_commands="list show add remove"
-  common_flags="--port --json --all --help --version --plain --quiet"
+  common_flags="--port --foreground --no-daemon --json --all --help --version --plain --quiet"
   start_flags="--provider --mode --profile --config --token --token-file --token-stdin --hostname --connect-ttl --session-ttl --qr --no-qr --dry-run --show-secrets"
 
   if [[ \${COMP_CWORD} -eq 1 ]]; then
@@ -1072,6 +1082,8 @@ compdef _openchamber openchamber
 # Save to ~/.config/fish/completions/openchamber.fish
 
 complete -c openchamber -n '__fish_use_subcommand' -a 'serve' -d 'Start the web server'
+complete -c openchamber -n '__fish_seen_subcommand_from serve' -l foreground -d 'Run in foreground (for systemd/process managers)'
+complete -c openchamber -n '__fish_seen_subcommand_from serve' -l no-daemon -d 'Run in foreground (alias for --foreground)'
 complete -c openchamber -n '__fish_use_subcommand' -a 'stop' -d 'Stop running instance(s)'
 complete -c openchamber -n '__fish_use_subcommand' -a 'restart' -d 'Stop and start the server'
 complete -c openchamber -n '__fish_use_subcommand' -a 'status' -d 'Show server status'
@@ -1738,6 +1750,7 @@ function writeInstanceOptions(instanceFilePath, options, onNotice) {
   try {
     const toStore = {
       port: options.port,
+      launchMode: options.launchMode === 'foreground' ? 'foreground' : 'daemon',
       uiPassword: typeof options.uiPassword === 'string' ? options.uiPassword : undefined,
       hasUiPassword: typeof options.uiPassword === 'string',
       startedAt: Number.isFinite(options.startedAt) ? options.startedAt : Date.now(),
@@ -1988,7 +2001,8 @@ async function discoverRunningInstances() {
       if (Number.isFinite(storedOptions?.startedAt)) {
         startedAt = storedOptions.startedAt;
       }
-      instances.push({ port, pid, pidFilePath, instanceFilePath, mtime, startedAt });
+      const launchMode = storedOptions?.launchMode === 'foreground' ? 'foreground' : 'daemon';
+      instances.push({ port, pid, pidFilePath, instanceFilePath, mtime, startedAt, launchMode });
     }
   } catch {
   }
@@ -2742,6 +2756,124 @@ const commands = {
         console.warn(`Warning: ${warningLine}; ${warningDetail}`);
       }
     }
+    // Foreground mode: run server inline so the CLI process is the server process.
+    // Required for process managers like systemd (Type=simple) that track the
+    // direct child rather than a detached grandchild.
+    // IMPORTANT: foreground MUST remain inline (in-process). Do not convert to
+    // child-process orchestration — that causes shell job-control suspension.
+    if (options.foreground) {
+      if (isJsonMode(options)) {
+        throw new TunnelCliError(
+          '--json is not supported with --foreground. Use --json with background (daemon) mode instead.',
+          EXIT_CODE.USAGE_ERROR
+        );
+      }
+
+      // Propagate resolved values into env before importing the server module.
+      if (opencodeBinary) {
+        process.env.OPENCODE_BINARY = opencodeBinary;
+      }
+      if (effectiveUiPassword) {
+        process.env.OPENCHAMBER_UI_PASSWORD = effectiveUiPassword;
+      }
+
+      // In --quiet mode, redirect stdout/stderr to the log file so that
+      // server runtime output (console.log calls) does not pollute the
+      // deterministic CLI output contract.  In plain human mode, close the
+      // log fd and let output go to the inherited terminal as before.
+      const suppressServerOutput = isQuietMode(options);
+      // Keep a reference to the real stdout.write so CLI output (port, JSON)
+      // can bypass the log-file redirect.
+      const realStdoutWrite = process.stdout.write.bind(process.stdout);
+      if (suppressServerOutput) {
+        const logStream = fs.createWriteStream(null, { fd: logFd });
+        process.stdout.write = (chunk, encoding, callback) => {
+          return logStream.write(chunk, encoding, callback);
+        };
+        process.stderr.write = (chunk, encoding, callback) => {
+          return logStream.write(chunk, encoding, callback);
+        };
+      } else {
+        // Close the log fd – in foreground human mode stdout/stderr are
+        // inherited from the parent (e.g. journald/terminal).
+        try {
+          fs.closeSync(logFd);
+        } catch {
+        }
+      }
+
+      if (!isQuietMode(options)) {
+        console.log(`Starting OpenChamber on port ${targetPort === 0 ? 'auto' : targetPort} (foreground)`);
+      }
+
+      const effectiveHost = typeof options.host === 'string' && options.host.length > 0
+        ? options.host : undefined;
+
+      const { startWebUiServer } = await import(pathToFileURL(serverPath).href);
+      const controller = await startWebUiServer({
+        port: targetPort,
+        host: effectiveHost,
+        uiPassword: effectiveUiPassword,
+        attachSignals: false,
+        exitOnShutdown: false,
+      });
+
+      const resolvedPort = controller.getPort();
+
+      // Write PID / instance files so status, stop, and restart can discover
+      // this foreground instance the same way they discover daemon instances.
+      const fgPidFilePath = await getPidFilePath(resolvedPort);
+      const fgInstanceFilePath = await getInstanceFilePath(resolvedPort);
+      writePidFile(fgPidFilePath, process.pid, emitNotice);
+      writeInstanceOptions(fgInstanceFilePath, {
+        port: resolvedPort,
+        launchMode: 'foreground',
+        uiPassword: effectiveUiPassword,
+      }, emitNotice);
+
+      if (isQuietMode(options)) {
+        if (!options.suppressQuietOutput) {
+          realStdoutWrite(`${resolvedPort}\n`);
+        }
+      }
+
+      // Clean up PID / instance files.
+      const cleanupFiles = () => {
+        removePidFile(fgPidFilePath);
+        removeInstanceFile(fgInstanceFilePath);
+      };
+
+      process.on('exit', cleanupFiles);
+
+      // Idempotent graceful shutdown with deterministic exit codes.
+      let shutdownInProgress = false;
+      const shutdownForegroundServer = async (signal = 'SIGTERM') => {
+        if (shutdownInProgress) return;
+        shutdownInProgress = true;
+        try {
+          await controller.stop({ exitProcess: false });
+        } catch {
+        }
+        cleanupFiles();
+        foregroundServerActive = false;
+        foregroundShutdown = null;
+        const exitCode = signal === 'SIGINT' ? 130 : signal === 'SIGQUIT' ? 131 : 143;
+        process.exit(exitCode);
+      };
+
+      // Expose shutdown to the global SIGINT handler.
+      foregroundShutdown = shutdownForegroundServer;
+      foregroundServerActive = true;
+
+      // Register signal handlers (additive, no removeAllListeners).
+      process.on('SIGINT', () => { void shutdownForegroundServer('SIGINT'); });
+      process.on('SIGTERM', () => { void shutdownForegroundServer('SIGTERM'); });
+      process.on('SIGQUIT', () => { void shutdownForegroundServer('SIGQUIT'); });
+
+      // Block forever – the process stays alive until signalled.
+      await new Promise(() => {});
+    }
+
     const serverArgs = [serverPath, '--port', String(targetPort)];
     const effectiveHost = typeof options.host === 'string' && options.host.length > 0 ? options.host : undefined;
     if (effectiveHost) {
@@ -2822,6 +2954,7 @@ const commands = {
     writePidFile(pidFilePath, child.pid, emitNotice);
     writeInstanceOptions(instanceFilePath, {
       port: resolvedPort,
+      launchMode: 'daemon',
       uiPassword: effectiveUiPassword,
     }, emitNotice);
 
@@ -2830,6 +2963,7 @@ const commands = {
       pid: child.pid,
       url: buildLocalUrl(resolvedPort, '/'),
       logs: `openchamber logs -p ${resolvedPort}`,
+      launchMode: 'daemon',
     };
 
     if (isJsonMode(options)) {
@@ -3091,9 +3225,14 @@ const commands = {
 
     for (const instance of runningInstances) {
       const storedOptions = readInstanceOptions(instance.instanceFilePath) || { port: instance.port };
+      const launchMode = instance.launchMode || 'daemon';
+      const isForeground = launchMode === 'foreground';
+
+      const restartPort = options.explicitPort ? options.port : instance.port;
+
       const restartSpin = showOutput ? createSpinner(options) : null;
       if (showOutput && !restartSpin) {
-        logStatus('info', `restarting port ${instance.port}`);
+        logStatus('info', `restarting port ${instance.port}`, `mode: ${launchMode}`);
       }
       restartSpin?.start(`Restarting OpenChamber on port ${instance.port}...`);
       try {
@@ -3103,9 +3242,24 @@ const commands = {
           quiet: true,
           suppressQuietOutput: true,
         });
+
+        // Foreground instances are managed by a process manager (systemd,
+        // Docker, etc.) that will restart them automatically after stop.
+        // Do not call serve() here — just record the stop as a successful
+        // restart and let the process manager handle the actual restart.
+        if (isForeground) {
+          restarted.push({ fromPort: instance.port, toPort: restartPort, launchMode, ok: true });
+          restartSpin?.stop(`Stopped foreground instance on port ${instance.port} (process manager will restart)`);
+          if (showOutput && !restartSpin) {
+            logStatus('success', `port ${instance.port} stopped`, 'process manager will restart');
+          }
+          continue;
+        }
+
         await new Promise((resolve) => setTimeout(resolve, 500));
+
         const restartedPort = await this.serve({
-          port: options.explicitPort ? options.port : (storedOptions.port || instance.port),
+          port: restartPort,
           explicitPort: true,
           uiPassword: options.explicitUiPassword ? options.uiPassword : storedOptions.uiPassword,
           suppressStartupSummary: true,
@@ -3113,10 +3267,10 @@ const commands = {
           suppressUiPasswordWarning: true,
           suppressQuietOutput: true,
         });
-        restarted.push({ fromPort: instance.port, toPort: restartedPort, ok: true });
+        restarted.push({ fromPort: instance.port, toPort: restartedPort, launchMode, ok: true });
         restartSpin?.stop(`Restarted OpenChamber on port ${restartedPort}`);
         if (showOutput && !restartSpin) {
-          logStatus('success', `port ${restartedPort} restarted`);
+          logStatus('success', `port ${restartedPort} restarted`, `mode: ${launchMode}`);
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -3129,7 +3283,7 @@ const commands = {
     }
 
     if (isJsonMode(options)) {
-      printJson({ restartedCount: restarted.length, results: restarted });
+      printJson({ restartedCount: restarted.length, results: restarted.map((r) => ({ ...r, launchMode: r.launchMode })) });
       return;
     }
 
@@ -3157,6 +3311,7 @@ const commands = {
           runtime: 'desktop',
           port: desktopInstance.port,
           pid: Number.isFinite(desktopInstance.pid) ? desktopInstance.pid : null,
+          launchMode: null,
           passwordProtected: null,
         }
       : null;
@@ -3170,6 +3325,7 @@ const commands = {
         runtime: 'cli',
         port: instance.port,
         pid: instance.pid,
+        launchMode: instance.launchMode || 'daemon',
         passwordProtected,
       };
     });
@@ -3194,7 +3350,7 @@ const commands = {
 
       for (const instance of instances) {
         process.stdout.write(
-          `port ${instance.port} pass:${toPasswordProtectionLabel(instance.passwordProtected)}\n`
+          `port ${instance.port} mode:${instance.launchMode || 'n/a'} pass:${toPasswordProtectionLabel(instance.passwordProtected)}\n`
         );
       }
       return;
@@ -3210,11 +3366,13 @@ const commands = {
 
     for (const instance of instances) {
       const pidSuffix = Number.isFinite(instance.pid) ? ` (PID: ${instance.pid})` : '';
+      const modeDetail = instance.launchMode ? `mode: ${instance.launchMode}` : '';
       const protectionDetail = `password: ${toPasswordProtectionLabel(instance.passwordProtected)}`;
+      const detail = modeDetail ? `${modeDetail}; ${protectionDetail}` : protectionDetail;
       if (instance.runtime === 'desktop') {
-        logStatus('info', `desktop app on port ${instance.port}${pidSuffix}`, protectionDetail);
+        logStatus('info', `desktop app on port ${instance.port}${pidSuffix}`, detail);
       } else {
-        logStatus('success', `port ${instance.port}${pidSuffix}`, protectionDetail);
+        logStatus('success', `port ${instance.port}${pidSuffix}`, detail);
       }
     }
 
@@ -4644,6 +4802,12 @@ if (isCliExecution) {
   let isHandlingSigint = false;
   process.on('SIGINT', () => {
     if (isHandlingSigint) {
+      return;
+    }
+    if (foregroundServerActive) {
+      if (typeof foregroundShutdown === 'function') {
+        void foregroundShutdown('SIGINT');
+      }
       return;
     }
     isHandlingSigint = true;

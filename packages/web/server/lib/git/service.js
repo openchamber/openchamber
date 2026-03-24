@@ -563,6 +563,11 @@ const parseGitErrorText = (error) => {
     .trim();
 };
 
+const isNotGitRepositoryError = (error) => {
+  const text = parseGitErrorText(error);
+  return /not a git repository/i.test(text);
+};
+
 const runGitCommand = async (cwd, args) => {
   try {
     const { stdout, stderr } = await execFileAsync(getGitBinary(), args, {
@@ -1065,8 +1070,8 @@ export async function isGitRepository(directory) {
     return false;
   }
 
-  const gitDir = path.join(directoryPath, '.git');
-  return fs.existsSync(gitDir);
+  const result = await runGitCommand(directoryPath, ['rev-parse', '--git-dir']);
+  return result.success;
 }
 
 export async function getGlobalIdentity() {
@@ -1411,7 +1416,9 @@ export async function getStatus(directory) {
       rebaseInProgress,
     };
   } catch (error) {
-    console.error('Failed to get Git status:', error);
+    if (!isNotGitRepositoryError(error)) {
+      console.error('Failed to get Git status:', error);
+    }
     throw error;
   }
 }

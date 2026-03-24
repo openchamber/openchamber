@@ -1188,7 +1188,7 @@ export const useSessionStore = create<SessionStore>()(
                     }
                 },
 
-                setPendingInputText: (text: string | null, mode: 'replace' | 'append' = 'replace') => {
+                setPendingInputText: (text: string | null, mode: 'replace' | 'append' | 'append-inline' = 'replace') => {
                     set({ pendingInputText: text, pendingInputMode: mode });
                 },
 

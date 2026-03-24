@@ -183,6 +183,50 @@ const guessMimeTypeFromExtension = (ext: string) => {
   }
 };
 
+const hasUriScheme = (value: string): boolean => /^[A-Za-z][A-Za-z\d+.-]*:/.test(value);
+
+const parseDroppedFileReference = (rawReference: string):
+  | { uri: vscode.Uri }
+  | { skipped: { name: string; reason: string } } => {
+  const trimmed = rawReference.trim().replace(/^['"]+|['"]+$/g, '');
+  if (!trimmed) {
+    return { skipped: { name: rawReference, reason: 'Empty drop reference' } };
+  }
+
+  if (hasUriScheme(trimmed)) {
+    try {
+      const parsed = vscode.Uri.parse(trimmed, true);
+      if (parsed.scheme !== 'file') {
+        return {
+          skipped: {
+            name: trimmed,
+            reason: `Unsupported URI scheme: ${parsed.scheme || 'unknown'}`,
+          },
+        };
+      }
+      return { uri: parsed };
+    } catch (error) {
+      return {
+        skipped: {
+          name: trimmed,
+          reason: error instanceof Error ? error.message : 'Invalid URI',
+        },
+      };
+    }
+  }
+
+  if (!path.isAbsolute(trimmed)) {
+    return {
+      skipped: {
+        name: trimmed,
+        reason: 'Drop reference is not an absolute file path',
+      },
+    };
+  }
+
+  return { uri: vscode.Uri.file(trimmed) };
+};
+
 const readUriAsAttachment = async (
   uri: vscode.Uri,
   fallbackName?: string,
@@ -1934,24 +1978,13 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
         const dedupedUris = Array.from(new Set(uris.map((value) => value.trim())));
 
         for (const rawUri of dedupedUris) {
-          let uri: vscode.Uri;
-          try {
-            uri = vscode.Uri.parse(rawUri, true);
-          } catch (error) {
-            skipped.push({
-              name: rawUri,
-              reason: error instanceof Error ? error.message : 'Invalid URI',
-            });
+          const parsed = parseDroppedFileReference(rawUri);
+          if ('skipped' in parsed) {
+            skipped.push(parsed.skipped);
             continue;
           }
 
-          if (uri.scheme !== 'file') {
-            skipped.push({
-              name: rawUri,
-              reason: `Unsupported URI scheme: ${uri.scheme}`,
-            });
-            continue;
-          }
+          const uri = parsed.uri;
 
           const name = path.basename(uri.fsPath || uri.path || rawUri);
 

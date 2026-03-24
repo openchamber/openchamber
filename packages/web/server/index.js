@@ -12021,6 +12021,17 @@ async function main(options = {}) {
 
   app.get('/api/git/status', async (req, res) => {
     const { getStatus, isGitRepository } = await getGitLibraries();
+
+    const extractGitErrorText = (error) => {
+      const message = typeof error?.message === 'string' ? error.message : '';
+      const stderr = typeof error?.stderr === 'string' ? error.stderr : '';
+      const stdout = typeof error?.stdout === 'string' ? error.stdout : '';
+      return [message, stderr, stdout]
+        .map((value) => String(value || '').trim())
+        .filter(Boolean)
+        .join('\n');
+    };
+
     try {
       const directory = req.query.directory;
       if (!directory) {
@@ -12035,6 +12046,10 @@ async function main(options = {}) {
       const status = await getStatus(directory);
       res.json(status);
     } catch (error) {
+      const errorText = extractGitErrorText(error);
+      if (/not a git repository/i.test(errorText)) {
+        return res.json({ isGitRepository: false, files: [], branch: null, ahead: 0, behind: 0 });
+      }
       console.error('Failed to get git status:', error);
       res.status(500).json({ error: error.message || 'Failed to get git status' });
     }

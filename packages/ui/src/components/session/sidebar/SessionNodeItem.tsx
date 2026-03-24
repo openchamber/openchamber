@@ -154,6 +154,15 @@ export function SessionNodeItem(props: Props): React.ReactNode {
   const displayMode = useSessionDisplayStore((state) => state.displayMode);
   const isMinimalMode = displayMode === 'minimal';
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
+  const revealOnHoverClass = isVSCode
+    ? 'group-hover:opacity-100 group-hover:pointer-events-auto'
+    : 'group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto';
+  const hideOnHoverClass = isVSCode
+    ? 'group-hover:opacity-0'
+    : 'group-hover:opacity-0 group-focus-within:opacity-0';
+  const revealPaddingClass = isVSCode
+    ? 'group-hover:pr-5'
+    : 'group-hover:pr-5 group-focus-within:pr-5';
   const suppressNextSelectRef = React.useRef(false);
 
   const session = node.session;
@@ -435,7 +444,9 @@ export function SessionNodeItem(props: Props): React.ReactNode {
                     }}
                     className={cn(
                       'flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none disabled:cursor-not-allowed transition-[padding]',
-                      mobileVariant ? 'pr-7' : '',
+                      mobileVariant
+                        ? (isVSCode ? revealPaddingClass : 'pr-7')
+                        : '',
                     )}
                   >
                     <div className={cn('flex w-full items-center min-w-0 flex-1 overflow-hidden', isMinimalMode ? 'gap-1' : 'gap-1')}>
@@ -448,7 +459,7 @@ export function SessionNodeItem(props: Props): React.ReactNode {
                             'whitespace-nowrap text-right text-[0.72rem] text-muted-foreground/75 transition-opacity duration-150',
                             isMenuOpen
                               ? 'opacity-0'
-                              : 'group-hover:opacity-0 group-focus-within:opacity-0',
+                              : hideOnHoverClass,
                           )}>
                             {sessionCompactUpdatedLabel}
                           </span>
@@ -460,7 +471,7 @@ export function SessionNodeItem(props: Props): React.ReactNode {
                                   'absolute inset-y-0 right-0 inline-flex h-4 w-4 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity',
                                   isMenuOpen
                                     ? 'opacity-100 pointer-events-auto'
-                                    : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto',
+                                    : cn('opacity-0 pointer-events-none', revealOnHoverClass),
                                 )}
                                 aria-label={t('sessionSidebar.sessionMenu')}
                                 onClick={handleMenuTriggerClick}
@@ -511,7 +522,12 @@ export function SessionNodeItem(props: Props): React.ReactNode {
                   e.stopPropagation();
                   handleSessionDoubleClick();
                 }}
-                className={cn('flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none disabled:cursor-not-allowed transition-[padding]', mobileVariant ? 'pr-7' : 'group-hover:pr-5 group-focus-within:pr-5')}
+                className={cn(
+                  'flex min-w-0 flex-1 cursor-pointer flex-col gap-0 overflow-hidden rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-foreground select-none disabled:cursor-not-allowed transition-[padding]',
+                  mobileVariant
+                    ? (isVSCode ? revealPaddingClass : 'pr-7')
+                    : revealPaddingClass
+                )}
               >
                 <div className={cn('flex w-full items-center min-w-0 flex-1 overflow-hidden', isMinimalMode ? 'gap-1' : 'gap-1')}>
                     {inlineStatusMarker}
@@ -552,9 +568,9 @@ export function SessionNodeItem(props: Props): React.ReactNode {
                 'transition-opacity',
                 isMenuOpen
                   ? 'opacity-100 pointer-events-auto'
-                  : mobileVariant
+                  : (mobileVariant && !isVSCode)
                     ? 'opacity-100 pointer-events-auto'
-                    : 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto',
+                    : cn('opacity-0 pointer-events-none', revealOnHoverClass),
               ),
             )}>
               <DropdownMenu open={isMenuOpen} onOpenChange={handleMenuOpenChange}>
@@ -566,7 +582,7 @@ export function SessionNodeItem(props: Props): React.ReactNode {
                       isMinimalMode && !mobileVariant
                         ? (isMenuOpen
                             ? 'h-4 w-4 opacity-100 pointer-events-auto'
-                            : 'h-4 w-4 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto')
+                            : cn('h-4 w-4 opacity-0 pointer-events-none', revealOnHoverClass))
                         : 'h-6 w-6 opacity-100',
                     )}
                     aria-label={t('sessionSidebar.sessionMenu')}

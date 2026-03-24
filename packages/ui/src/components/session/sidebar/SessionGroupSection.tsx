@@ -92,6 +92,7 @@ type Props = {
   }>;
   onToggleCollapsedGroup: (groupKey: string) => void;
   dragHandleProps?: SortableDragHandleProps | null;
+  compactBodyPadding?: boolean;
 };
 
 export function SessionGroupSection(props: Props): React.ReactNode {
@@ -134,6 +135,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
     prVisualStateByDirectoryBranch,
     onToggleCollapsedGroup,
     dragHandleProps,
+    compactBodyPadding = false,
   } = props;
 
   const searchData = hasSessionSearchQuery ? groupSearchDataByGroup.get(group) : null;
@@ -375,8 +377,8 @@ export function SessionGroupSection(props: Props): React.ReactNode {
     ? (hasWorktreeDeleteAction ? 'pr-14' : 'pr-7')
     : isMinimalMode
       ? (hasWorktreeDeleteAction
-          ? 'pr-10 group-hover/gh:pr-14 group-focus-within/gh:pr-14'
-          : 'pr-10')
+          ? 'pr-2 group-hover/gh:pr-14 group-focus-within/gh:pr-14'
+          : 'pr-2')
       : (hasWorktreeDeleteAction
           ? 'pr-5 group-hover/gh:pr-14 group-focus-within/gh:pr-14'
           : 'pr-5');
@@ -417,8 +419,10 @@ export function SessionGroupSection(props: Props): React.ReactNode {
     </SessionFolderDndScope>
   );
 
+  const groupBodyPaddingClass = compactBodyPadding ? 'pb-2 pl-1' : 'pb-3 pl-4';
+
   if (hideGroupLabel) {
-    return <div className="oc-group"><div className="oc-group-body pb-3 pl-4">{body}</div></div>;
+    return <div className="oc-group"><div className={cn('oc-group-body', groupBodyPaddingClass)}>{body}</div></div>;
   }
 
   return (
@@ -440,12 +444,12 @@ export function SessionGroupSection(props: Props): React.ReactNode {
         <div
           ref={dragHandleProps?.setActivatorNodeRef}
           className={cn(
-            'min-w-0 flex items-start gap-1 pl-0.5 transition-[padding] cursor-grab active:cursor-grabbing',
+            'min-w-0 flex flex-1 items-start gap-1 overflow-hidden pl-0.5 transition-[padding] cursor-grab active:cursor-grabbing',
             groupHeaderRightPadding,
           )}
           {...(dragHandleProps?.listeners ?? {})}
         >
-          <div className="min-w-0 flex flex-col justify-center gap-0.5">
+          <div className="min-w-0 flex flex-1 flex-col justify-center gap-0.5 overflow-hidden">
             <p className="text-[14px] font-normal truncate text-foreground/92">
               {showInlinePrTitle && prIndicator ? (
                 <span className="inline-flex min-w-0 max-w-full items-center">
@@ -505,17 +509,17 @@ export function SessionGroupSection(props: Props): React.ReactNode {
                   <span className="ml-1 min-w-0 flex-1 truncate leading-none align-middle">{group.branch}</span>
                 </span>
               ) : group.isArchivedBucket ? (
-                <span className="inline-flex min-w-0 items-center gap-1">
+                <span className="inline-flex min-w-0 max-w-full items-center gap-1">
                   <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center">
                     <RiArchiveLine className="h-3.5 w-3.5 shrink-0 text-muted-foreground group-hover/gh:hidden" />
                     <span className="hidden text-muted-foreground group-hover/gh:inline-flex h-3.5 w-3.5 items-center justify-center">
                       {isCollapsed ? <RiArrowRightSLine className="h-3.5 w-3.5" /> : <RiArrowDownSLine className="h-3.5 w-3.5" />}
                     </span>
                   </span>
-                  <span className="truncate">{renderHighlightedText(group.label, normalizedSessionSearchQuery)}</span>
+                  <span className="min-w-0 flex-1 truncate">{renderHighlightedText(group.label, normalizedSessionSearchQuery)}</span>
                 </span>
               ) : (!group.isMain || group.worktree) ? (
-                <span className="inline-flex min-w-0 items-center gap-1">
+                <span className="inline-flex min-w-0 max-w-full items-center gap-1">
                   <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center">
                     <RiGitBranchLine
                       className="h-3.5 w-3.5 shrink-0 text-muted-foreground group-hover/gh:hidden"
@@ -525,7 +529,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
                       {isCollapsed ? <RiArrowRightSLine className="h-3.5 w-3.5" /> : <RiArrowDownSLine className="h-3.5 w-3.5" />}
                     </span>
                   </span>
-                  <span className="truncate">{renderHighlightedText(group.label, normalizedSessionSearchQuery)}</span>
+                  <span className="min-w-0 flex-1 truncate">{renderHighlightedText(group.label, normalizedSessionSearchQuery)}</span>
                 </span>
               ) : (
                 renderHighlightedText(group.label, normalizedSessionSearchQuery)
@@ -661,7 +665,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
            </div>
          ) : null}
       </div>
-      {!isCollapsed ? <div className="oc-group-body pb-3 pl-4">{body}</div> : null}
+      {!isCollapsed ? <div className={cn('oc-group-body', groupBodyPaddingClass)}>{body}</div> : null}
     </div>
   );
 }
