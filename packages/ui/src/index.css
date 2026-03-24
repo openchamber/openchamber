@@ -848,6 +848,8 @@ html:not(.dark) .chat-scroll {
 .streamdown-content code[data-streamdown="inline-code"] {
   background-color: var(--markdown-inline-code-bg, var(--surface-muted)) !important;
   color: var(--markdown-inline-code, var(--foreground)) !important;
+  word-break: break-all;
+  overflow-wrap: break-word;
 }
 
 /* Markdown headings - use theme colors */
