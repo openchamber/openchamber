@@ -1044,6 +1044,116 @@ interface MessageActions {
 
 type MessageStore = MessageState & MessageActions;
 
+const evictDormantSessions = (
+    state: MessageState,
+    preferredSessionId?: string | null,
+): Partial<MessageState> | null => {
+    const maxSessions = Math.max(1, getMemoryLimits().MAX_SESSIONS);
+    if (state.messages.size <= maxSessions) {
+        return null;
+    }
+
+    const activeSessionId = preferredSessionId ?? useSessionStore.getState().currentSessionId;
+    const protectedSessionIds = new Set<string>();
+    if (typeof activeSessionId === 'string' && activeSessionId.length > 0) {
+        protectedSessionIds.add(activeSessionId);
+    }
+
+    state.streamingMessageIds.forEach((streamingMessageId, sessionId) => {
+        if (typeof streamingMessageId === 'string' && streamingMessageId.length > 0) {
+            protectedSessionIds.add(sessionId);
+        }
+    });
+
+    state.sessionMemoryState.forEach((memoryState, sessionId) => {
+        if (memoryState?.isStreaming) {
+            protectedSessionIds.add(sessionId);
+        }
+    });
+
+    const candidates = [...state.messages.keys()]
+        .filter((sessionId) => !protectedSessionIds.has(sessionId))
+        .map((sessionId) => ({
+            sessionId,
+            lastAccessedAt: state.sessionMemoryState.get(sessionId)?.lastAccessedAt ?? 0,
+        }))
+        .sort((left, right) => left.lastAccessedAt - right.lastAccessedAt);
+
+    const removableSlots = Math.max(0, state.messages.size - maxSessions);
+    if (removableSlots === 0 || candidates.length === 0) {
+        return null;
+    }
+
+    const evictedSessionIds = candidates.slice(0, removableSlots).map((entry) => entry.sessionId);
+    if (evictedSessionIds.length === 0) {
+        return null;
+    }
+
+    const nextMessages = new Map(state.messages);
+    const nextSessionMemoryState = new Map(state.sessionMemoryState);
+    const nextSessionHistoryMeta = new Map(state.sessionHistoryMeta);
+    const nextStreamingMessageIds = new Map(state.streamingMessageIds);
+    const nextAbortControllers = new Map(state.abortControllers);
+    const nextSessionCompactionUntil = new Map(state.sessionCompactionUntil);
+    const nextSessionAbortFlags = new Map(state.sessionAbortFlags);
+    const nextPendingUserMessageMetaBySession = new Map(state.pendingUserMessageMetaBySession);
+    const nextPendingAssistantParts = new Map(state.pendingAssistantParts);
+
+    const removedMessageIds: string[] = [];
+
+    for (const sessionId of evictedSessionIds) {
+        const sessionMessages = nextMessages.get(sessionId) ?? [];
+        sessionMessages.forEach((message) => {
+            const id = (message?.info as { id?: unknown })?.id;
+            if (typeof id === 'string' && id.length > 0) {
+                removedMessageIds.push(id);
+                nextPendingAssistantParts.delete(id);
+            }
+        });
+
+        nextMessages.delete(sessionId);
+        nextSessionMemoryState.delete(sessionId);
+        nextSessionHistoryMeta.delete(sessionId);
+        nextStreamingMessageIds.delete(sessionId);
+        nextAbortControllers.delete(sessionId);
+        nextSessionCompactionUntil.delete(sessionId);
+        nextSessionAbortFlags.delete(sessionId);
+        nextPendingUserMessageMetaBySession.delete(sessionId);
+
+        discardQueuedNonTextStreamingPartsForSession(sessionId);
+        discardQueuedPartDeltasForSession(sessionId);
+        discardQueuedMessageInfoUpdatesForSession(sessionId);
+
+        const cooldownTimer = streamingCooldownTimers.get(sessionId);
+        if (cooldownTimer) {
+            clearTimeout(cooldownTimer);
+            streamingCooldownTimers.delete(sessionId);
+        }
+    }
+
+    let nextMessageSessionIndex = state.messageSessionIndex;
+    if (removedMessageIds.length > 0) {
+        clearLifecycleTimersForIds(removedMessageIds);
+        nextMessageSessionIndex = removeMessageSessionIndexEntries(state.messageSessionIndex, removedMessageIds);
+    }
+
+    const nextMessageStreamStates = removeLifecycleEntries(state.messageStreamStates, removedMessageIds);
+
+    return {
+        messages: nextMessages,
+        sessionMemoryState: nextSessionMemoryState,
+        sessionHistoryMeta: nextSessionHistoryMeta,
+        streamingMessageIds: nextStreamingMessageIds,
+        abortControllers: nextAbortControllers,
+        sessionCompactionUntil: nextSessionCompactionUntil,
+        sessionAbortFlags: nextSessionAbortFlags,
+        pendingUserMessageMetaBySession: nextPendingUserMessageMetaBySession,
+        pendingAssistantParts: nextPendingAssistantParts,
+        messageSessionIndex: nextMessageSessionIndex,
+        messageStreamStates: nextMessageStreamStates,
+    };
+};
+
 export const useMessageStore = create<MessageStore>()(
     devtools(
         persist(
@@ -1292,7 +1402,18 @@ export const useMessageStore = create<MessageStore>()(
                                         result.messageSessionIndex = indexAccumulator;
                                     }
 
-                                    return result;
+                                    const nextStateForEviction = {
+                                        ...state,
+                                        ...result,
+                                    } as MessageState;
+                                    const evictionPatch = evictDormantSessions(nextStateForEviction, sessionId);
+                                    if (!evictionPatch) {
+                                        return result;
+                                    }
+                                    return {
+                                        ...result,
+                                        ...evictionPatch,
+                                    };
                                 });
                             } finally {
                                 set((snapshot) => {
@@ -3177,7 +3298,18 @@ export const useMessageStore = create<MessageStore>()(
                             result.messageSessionIndex = indexAccumulator;
                         }
 
-                        return result;
+                        const nextStateForEviction = {
+                            ...state,
+                            ...result,
+                        } as MessageState;
+                        const evictionPatch = evictDormantSessions(nextStateForEviction, sessionId);
+                        if (!evictionPatch) {
+                            return result;
+                        }
+                        return {
+                            ...result,
+                            ...evictionPatch,
+                        };
                     });
 
                     setTimeout(() => {

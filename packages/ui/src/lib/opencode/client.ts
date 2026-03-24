@@ -1357,6 +1357,35 @@ class OpencodeService {
     return `${event.directory}:${messageId}:${partId}:${field}`;
   }
 
+  private getGlobalSseDeltaPartScopeKey(event: RoutedOpencodeEvent): string | null {
+    const payload = event.payload as unknown as Record<string, unknown>;
+    const eventType = typeof payload.type === 'string' ? payload.type : null;
+    if (eventType !== 'message.part.delta') {
+      return null;
+    }
+
+    const properties =
+      typeof payload.properties === 'object' && payload.properties !== null
+        ? (payload.properties as Record<string, unknown>)
+        : null;
+    const messageId = typeof properties?.messageID === 'string'
+      ? properties.messageID
+      : typeof properties?.messageId === 'string'
+        ? properties.messageId
+        : null;
+    const partId = typeof properties?.partID === 'string'
+      ? properties.partID
+      : typeof properties?.partId === 'string'
+        ? properties.partId
+        : null;
+
+    if (!messageId || !partId) {
+      return null;
+    }
+
+    return `${event.directory}:${messageId}:${partId}`;
+  }
+
   private getGlobalSseUpdatedPartKey(event: RoutedOpencodeEvent): string | null {
     const payload = event.payload as unknown as Record<string, unknown>;
     const eventType = typeof payload.type === 'string' ? payload.type : null;
@@ -1390,6 +1419,37 @@ class OpencodeService {
     }
 
     return `${event.directory}:${messageId}:${partId}`;
+  }
+
+  private shouldSuppressDeltasForUpdatedPart(event: RoutedOpencodeEvent): boolean {
+    const payload = event.payload as unknown as Record<string, unknown>;
+    const eventType = typeof payload.type === 'string' ? payload.type : null;
+    if (eventType !== 'message.part.updated') {
+      return false;
+    }
+
+    const properties =
+      typeof payload.properties === 'object' && payload.properties !== null
+        ? (payload.properties as Record<string, unknown>)
+        : null;
+    const part =
+      properties?.part && typeof properties.part === 'object'
+        ? (properties.part as Record<string, unknown>)
+        : null;
+
+    if (!part) {
+      return false;
+    }
+
+    const updatedText = typeof part.text === 'string' ? part.text : null;
+    const updatedContent = typeof part.content === 'string' ? part.content : null;
+    const updatedValue = typeof part.value === 'string' ? part.value : null;
+
+    return Boolean(
+      (updatedText && updatedText.length > 0)
+      || (updatedContent && updatedContent.length > 0)
+      || (updatedValue && updatedValue.length > 0),
+    );
   }
 
   private getGlobalSseCoalesceKey(event: RoutedOpencodeEvent): string | null {
@@ -1536,7 +1596,9 @@ class OpencodeService {
         if (!event) continue;
         if (skip) {
           const deltaKey = this.getGlobalSseDeltaKey(event);
-          if (deltaKey && skip.has(deltaKey)) {
+          const deltaPartScopeKey = this.getGlobalSseDeltaPartScopeKey(event);
+          if ((deltaKey && skip.has(deltaKey)) || (deltaPartScopeKey && skip.has(deltaPartScopeKey))) {
+            streamPerfCount('ui.client.global_sse.drop_stale_delta');
             continue;
           }
         }
@@ -1565,6 +1627,17 @@ class OpencodeService {
 
   private enqueueGlobalSseEvent(event: RoutedOpencodeEvent) {
     streamPerfCount('ui.client.global_sse.enqueue');
+    const updatedPartKey = this.getGlobalSseUpdatedPartKey(event);
+    if (updatedPartKey && this.shouldSuppressDeltasForUpdatedPart(event)) {
+      this.globalSseStaleDeltas.add(updatedPartKey);
+    }
+
+    const deltaPartScopeKey = this.getGlobalSseDeltaPartScopeKey(event);
+    if (deltaPartScopeKey && this.globalSseStaleDeltas.has(deltaPartScopeKey)) {
+      streamPerfCount('ui.client.global_sse.drop_stale_delta_enqueue');
+      return;
+    }
+
     const key = this.getGlobalSseCoalesceKey(event);
     if (key) {
       const existingIndex = this.globalSseCoalesced.get(key);
@@ -1577,10 +1650,6 @@ class OpencodeService {
         }
 
         this.globalSseQueue[existingIndex] = undefined;
-        const updatedPartKey = this.getGlobalSseUpdatedPartKey(event);
-        if (updatedPartKey) {
-          this.globalSseStaleDeltas.add(updatedPartKey);
-        }
       }
       this.globalSseCoalesced.set(key, this.globalSseQueue.length);
     }

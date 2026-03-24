@@ -213,8 +213,103 @@ const readEventDirectory = (props: Record<string, unknown>): string => {
 
 const MAX_MESSAGE_CACHE_SIZE = 500;
 const MESSAGE_CACHE_EVICT_COUNT = 100;
+const MAX_MESSAGE_CACHE_SESSIONS = 6;
+const MAX_MESSAGE_CACHE_PER_SESSION = 160;
 const messageCache = new Map<string, { sessionId: string; message: { info: Message; parts: Part[] } | null }>();
+const messageCacheSessionAccess = new Map<string, number>();
+
+const dropMessageCacheKey = (cacheKey: string): void => {
+  const cached = messageCache.get(cacheKey);
+  messageCache.delete(cacheKey);
+  if (!cached) {
+    return;
+  }
+
+  const sessionId = cached.sessionId;
+  for (const entry of messageCache.values()) {
+    if (entry.sessionId === sessionId) {
+      return;
+    }
+  }
+  messageCacheSessionAccess.delete(sessionId);
+};
+
+const clearMessageCacheForSession = (sessionId: string): void => {
+  const keys: string[] = [];
+  for (const [key, value] of messageCache.entries()) {
+    if (value.sessionId === sessionId) {
+      keys.push(key);
+    }
+  }
+  for (const key of keys) {
+    dropMessageCacheKey(key);
+  }
+  messageCacheSessionAccess.delete(sessionId);
+};
+
+const touchMessageCacheSession = (sessionId: string): void => {
+  messageCacheSessionAccess.set(sessionId, Date.now());
+};
+
+const enforceMessageCacheSessionLimit = (activeSessionId: string | null | undefined): void => {
+  if (messageCacheSessionAccess.size <= MAX_MESSAGE_CACHE_SESSIONS) {
+    return;
+  }
+
+  const sessionsByAccess = [...messageCacheSessionAccess.entries()]
+    .sort((a, b) => a[1] - b[1])
+    .map(([sessionId]) => sessionId);
+
+  for (const sessionId of sessionsByAccess) {
+    if (messageCacheSessionAccess.size <= MAX_MESSAGE_CACHE_SESSIONS) {
+      break;
+    }
+    if (activeSessionId && sessionId === activeSessionId) {
+      continue;
+    }
+    clearMessageCacheForSession(sessionId);
+  }
+};
+
+const enforceMessageCachePerSessionLimit = (sessionId: string): void => {
+  let count = 0;
+  const keysForSession: string[] = [];
+
+  for (const [key, value] of messageCache.entries()) {
+    if (value.sessionId !== sessionId) {
+      continue;
+    }
+    count += 1;
+    keysForSession.push(key);
+  }
+
+  if (count <= MAX_MESSAGE_CACHE_PER_SESSION) {
+    return;
+  }
+
+  const dropCount = count - MAX_MESSAGE_CACHE_PER_SESSION;
+  for (let index = 0; index < dropCount; index += 1) {
+    const key = keysForSession[index];
+    if (!key) continue;
+    dropMessageCacheKey(key);
+  }
+};
+
+const enforceGlobalMessageCacheLimit = (): void => {
+  if (messageCache.size < MAX_MESSAGE_CACHE_SIZE) {
+    return;
+  }
+
+  let count = 0;
+  for (const key of messageCache.keys()) {
+    if (count++ >= MESSAGE_CACHE_EVICT_COUNT) break;
+    dropMessageCacheKey(key);
+  }
+};
+
 const getMessageFromStore = (sessionId: string, messageId: string): { info: Message; parts: Part[] } | null => {
+  touchMessageCacheSession(sessionId);
+  enforceMessageCacheSessionLimit(useSessionStore.getState().currentSessionId);
   const cacheKey = `${sessionId}:${messageId}`;
   const cached = messageCache.get(cacheKey);
   if (cached && cached.sessionId === sessionId) {
@@ -225,20 +320,16 @@ const getMessageFromStore = (sessionId: string, messageId: string): { info: Mess
   const sessionMessages = storeState.messages.get(sessionId) || [];
   const message = sessionMessages.find(m => m.info.id === messageId) || null;
 
-  if (messageCache.size >= MAX_MESSAGE_CACHE_SIZE) {
-    // Evict oldest entries (Map preserves insertion order)
-    let count = 0;
-    for (const key of messageCache.keys()) {
-      if (count++ >= MESSAGE_CACHE_EVICT_COUNT) break;
-      messageCache.delete(key);
-    }
-  }
+  enforceGlobalMessageCacheLimit();
 
   messageCache.set(cacheKey, { sessionId, message });
+  enforceMessageCachePerSessionLimit(sessionId);
   return message;
 };
 
 const getLatestMessageFromStore = (sessionId: string, messageId: string): { info: Message; parts: Part[] } | null => {
+  touchMessageCacheSession(sessionId);
+  enforceMessageCacheSessionLimit(useSessionStore.getState().currentSessionId);
   const storeState = useSessionStore.getState();
   const sessionMessages = storeState.messages.get(sessionId) || [];
   return sessionMessages.find((message) => message.info.id === messageId) || null;
@@ -1090,8 +1181,9 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
     const prevDirectory = previousSessionDirectoryRef.current;
 
       if (prevSessionId && nextSessionId && prevSessionId !== nextSessionId) {
-        // Clear the message cache on session switch to free memory
-        messageCache.clear();
+        // Keep hot-session cache warm, evict inactive session cache eagerly.
+        clearMessageCacheForSession(prevSessionId);
+        enforceMessageCacheSessionLimit(nextSessionId);
 
         if (prevDirectory && nextDirectory && prevDirectory !== nextDirectory) {
         repairSessionDerivedState('session_switch_directory');
@@ -2740,6 +2832,7 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
       clearSessionActivityTimers();
 
       messageCache.clear();
+      messageCacheSessionAccess.clear();
       // eslint-disable-next-line react-hooks/exhaustive-deps -- Intentionally accessing current ref value at cleanup time
       notifiedMessagesRef.current.clear();
       // eslint-disable-next-line react-hooks/exhaustive-deps -- Intentionally accessing current ref value at cleanup time
