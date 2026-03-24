@@ -16,7 +16,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { SortableTabsStrip, type SortableTabsStripItem } from '@/components/ui/sortable-tabs-strip';
 
-import { RiArrowLeftSLine, RiChat4Line, RiChatNewLine, RiCheckLine, RiCloseLine, RiCommandLine, RiEyeLine, RiFileTextLine, RiFolder6Line, RiGitBranchLine, RiGithubFill, RiLayoutLeftLine, RiLayoutRightLine, RiPlayListAddLine, RiRefreshLine, RiServerLine, RiStackLine, RiTerminalBoxLine, RiTimerLine, type RemixiconComponentType } from '@remixicon/react';
+import { RiArrowLeftSLine, RiChat4Line, RiChatNewLine, RiCheckLine, RiCloseLine, RiCommandLine, RiFileTextLine, RiFolder6Line, RiGitBranchLine, RiGithubFill, RiLayoutLeftLine, RiLayoutRightLine, RiPlayListAddLine, RiRefreshLine, RiServerLine, RiStackLine, RiTerminalBoxLine, RiTimerLine, type RemixiconComponentType } from '@remixicon/react';
 import { DiffIcon } from '@/components/icons/DiffIcon';
 import { useUIStore, type MainTab } from '@/stores/useUIStore';
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -229,8 +229,6 @@ export const Header: React.FC<HeaderProps> = ({
   const isSidebarOpen = useUIStore((state) => state.isSidebarOpen);
   const isRightSidebarOpen = useUIStore((state) => state.isRightSidebarOpen);
   const toggleBottomTerminal = useUIStore((state) => state.toggleBottomTerminal);
-  const isImmersionMode = useUIStore((state) => state.isImmersionMode);
-  const toggleImmersionMode = useUIStore((state) => state.toggleImmersionMode);
   const toggleRightSidebar = useUIStore((state) => state.toggleRightSidebar);
   const openContextOverview = useUIStore((state) => state.openContextOverview);
   const openContextPlan = useUIStore((state) => state.openContextPlan);
@@ -1689,38 +1687,6 @@ export const Header: React.FC<HeaderProps> = ({
           </TooltipContent>
         </Tooltip>
       ) : null}
-
-      {/* Immersion Mode Toggle */}
-      {activeMainTab === 'chat' && (
-        <Tooltip delayDuration={500}>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              aria-label="Immersion Mode"
-              aria-pressed={isImmersionMode}
-              onClick={() => {
-                // When entering immersion mode, also hide sidebars
-                if (!isImmersionMode) {
-                  useUIStore.getState().setSidebarOpen(false);
-                  useUIStore.getState().setRightSidebarOpen(false);
-                  useUIStore.getState().setBottomTerminalOpen(false);
-                }
-                toggleImmersionMode();
-              }}
-              className={cn(
-                desktopHeaderIconButtonClass,
-                'shrink-0',
-                isImmersionMode && 'text-primary'
-              )}
-            >
-              <RiEyeLine className="h-[18px] w-[18px]" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>
-            <p>Immersion Mode ({shortcutLabel('immersion_mode')})</p>
-          </TooltipContent>
-        </Tooltip>
-      )}
 
       <div className={cn('flex min-w-0 flex-1 items-center', !isSidebarOpen && 'pl-3')}>
         {!isLeftSidebarOpen ? (

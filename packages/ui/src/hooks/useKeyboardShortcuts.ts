@@ -335,51 +335,6 @@ export const useKeyboardShortcuts = () => {
         return;
       }
 
-      if (eventMatchesShortcut(e, combo('immersion_mode'))) {
-        e.preventDefault();
-        const { toggleImmersionMode, isImmersionMode } = useUIStore.getState();
-        // When entering immersion mode, also hide sidebars
-        if (!isImmersionMode) {
-          useUIStore.getState().setSidebarOpen(false);
-          useUIStore.getState().setRightSidebarOpen(false);
-          useUIStore.getState().setBottomTerminalOpen(false);
-        }
-        toggleImmersionMode();
-        return;
-      }
-
-      // Full Immersion Mode: Arrow key navigation
-      const { isImmersionMode, focusedMessageId, allMessageIds, setFocusedMessageId } = useUIStore.getState();
-      if (isImmersionMode && focusedMessageId && allMessageIds.length > 0) {
-        // Check if user is typing in an input - don't intercept
-        const target = e.target as HTMLElement;
-        const isInputFocused = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
-
-        if (!isInputFocused) {
-          if (e.key === 'ArrowUp') {
-            e.preventDefault();
-            const currentIndex = allMessageIds.indexOf(focusedMessageId);
-            if (currentIndex > 0) {
-              setFocusedMessageId(allMessageIds[currentIndex - 1]);
-            }
-            return;
-          }
-          if (e.key === 'ArrowDown') {
-            e.preventDefault();
-            const currentIndex = allMessageIds.indexOf(focusedMessageId);
-            if (currentIndex < allMessageIds.length - 1) {
-              setFocusedMessageId(allMessageIds[currentIndex + 1]);
-            }
-            return;
-          }
-          if (e.key === 'Enter') {
-            e.preventDefault();
-            // Enter just confirms/scrolls - the auto-scroll in ChatContainer already handles this
-            return;
-          }
-        }
-      }
-
       if (e.key === 'Escape') {
         const target = e.target as Element | null;
         const isInsideDialog = Boolean(target?.closest('[role="dialog"]'));
@@ -412,14 +367,6 @@ export const useKeyboardShortcuts = () => {
         // Check if any overlay is open or not on chat tab - don't process abort
         const hasOverlay = isCommandPaletteOpen || isHelpDialogOpen || isSessionSwitcherOpen || isAboutDialogOpen || isMultiRunLauncherOpen || isImagePreviewOpen;
         const isChatActive = activeMainTab === 'chat';
-
-        // Full Immersion Mode: Exit on ESC
-        const { isImmersionMode, setImmersionMode } = useUIStore.getState();
-        if (isImmersionMode) {
-          e.preventDefault();
-          setImmersionMode(false);
-          return;
-        }
 
         if (hasOverlay || !isChatActive) {
           resetAbortPriming();

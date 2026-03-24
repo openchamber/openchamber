@@ -306,13 +306,6 @@ const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
     customizable: true,
   },
   {
-    id: 'immersion_mode',
-    defaultCombo: 'mod+shift+i',
-    label: 'Immersion Mode',
-    description: 'Enter full immersion mode for focused reading',
-    customizable: true,
-  },
-  {
     id: 'abort_run',
     defaultCombo: 'escape',
     label: 'Abort active run',

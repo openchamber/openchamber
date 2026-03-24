@@ -876,58 +876,6 @@ html:not(.dark) .chat-scroll {
   color: var(--markdown-link, var(--primary));
 }
 
-/* Full Immersion Mode - Dimmed message effect */
-.immersion-dimmed {
-  opacity: 0.15 !important;
-  transition: opacity 0.3s ease;
-  pointer-events: none;
-}
-
-/* Full Immersion Mode - Spotlight message effect */
-.immersion-spotlight {
-  opacity: 1 !important;
-  box-shadow: 0 0 0 2px var(--primary, #3b82f6);
-  border-radius: var(--radius-lg);
-  transition: box-shadow 0.2s ease;
-}
-
-/* Full Immersion Mode - Exit button overlay */
-.immersion-exit-btn {
-  position: fixed;
-  top: 1rem;
-  right: 1rem;
-  z-index: 100;
-  padding: 0.5rem 1rem;
-  background: var(--surface-elevated, #1e1e1e);
-  border: 1px solid var(--border, #3f3f46);
-  border-radius: var(--radius-md);
-  color: var(--foreground, #fafafa);
-  font-size: 0.875rem;
-  cursor: pointer;
-  opacity: 0.7;
-  transition: opacity 0.2s ease;
-}
-
-.immersion-exit-btn:hover {
-  opacity: 1;
-}
-
-/* Full Immersion Mode - Navigation hint */
-.immersion-nav-hint {
-  position: fixed;
-  bottom: 1rem;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 100;
-  padding: 0.5rem 1rem;
-  background: var(--surface-elevated, #1e1e1e);
-  border: 1px solid var(--border, #3f3f46);
-  border-radius: var(--radius-md);
-  color: var(--muted-foreground, #a1a1aa);
-  font-size: 0.75rem;
-  opacity: 0.6;
-}
-
 /* Streamdown content a:hover {
   color: var(--markdown-link-hover, var(--primary));
 }

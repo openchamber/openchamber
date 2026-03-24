@@ -973,21 +973,13 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         : 'pt-0';
     const userMessageRadius = 'var(--radius-lg)';
 
-    // Full Immersion Mode
-    const isImmersionMode = useUIStore((state) => state.isImmersionMode);
-    const focusedMessageId = useUIStore((state) => state.focusedMessageId);
-    const isDimmed = isImmersionMode && focusedMessageId && focusedMessageId !== message.info.id;
-    const isSpotlight = isImmersionMode && focusedMessageId === message.info.id;
-
     return (
         <>
             <div
                 className={cn(
                     'group w-full',
                     isUser ? (isMobile ? 'pt-2' : 'pt-6') : assistantTopPaddingClass,
-                    isUser ? 'pb-0' : isFollowedByAssistant ? 'pb-0' : 'pb-8',
-                    isImmersionMode && isDimmed && 'immersion-dimmed',
-                    isImmersionMode && isSpotlight && 'immersion-spotlight'
+                    isUser ? 'pb-0' : isFollowedByAssistant ? 'pb-0' : 'pb-8'
                 )}
                 id={`message-${message.info.id}`}
                 data-message-id={message.info.id}
