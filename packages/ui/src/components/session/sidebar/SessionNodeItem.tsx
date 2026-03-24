@@ -39,6 +39,48 @@ import type { SessionNode, SessionSummaryMeta } from './types';
 import { formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText, resolveSessionDiffStats } from './utils';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 
+// Pre-defined palette with maximally distinct colors across hue + saturation + lightness.
+// Ordered so adjacent entries are perceptually far apart.
+const PROJECT_TAG_PALETTE: Array<[number, number, number]> = [
+  // [hue, saturation%, lightness%]
+  [  4,  80, 60],  // red
+  [210,  80, 62],  // blue
+  [ 38,  88, 56],  // orange
+  [155,  55, 50],  // teal-green
+  [270,  65, 66],  // purple
+  [ 55,  80, 52],  // gold/yellow
+  [330,  70, 64],  // pink
+  [185,  62, 48],  // cyan
+  [ 90,  55, 52],  // lime-green
+  [240,  55, 68],  // periwinkle
+  [ 20,  75, 62],  // amber
+  [300,  55, 62],  // magenta
+  [168,  48, 55],  // seafoam
+  [ 68,  65, 50],  // olive
+  [348,  65, 58],  // rose
+  [195,  70, 52],  // sky
+  [120,  45, 52],  // sage
+  [258,  70, 58],  // indigo
+];
+
+function getProjectTagColor(projectId: string | null | undefined): { text: string; bg: string } {
+  if (!projectId) {
+    const [h, s, l] = PROJECT_TAG_PALETTE[0]!;
+    return { text: `hsl(${h} ${s}% ${l}%)`, bg: `hsl(${h} ${s}% ${l}% / 0.13)` };
+  }
+  // djb2 hash → stable slot per projectId
+  let hash = 5381;
+  for (let i = 0; i < projectId.length; i++) {
+    hash = ((hash << 5) + hash) ^ projectId.charCodeAt(i);
+    hash |= 0;
+  }
+  const [h, s, l] = PROJECT_TAG_PALETTE[Math.abs(hash) % PROJECT_TAG_PALETTE.length]!;
+  return {
+    text: `hsl(${h} ${s}% ${l}%)`,
+    bg:   `hsl(${h} ${s}% ${l}% / 0.13)`,
+  };
+}
+
 const ATTENTION_DIAMOND_INDICES = new Set([1, 3, 4, 5, 7]);
 
 const getAttentionDiamondDelay = (index: number): string => {
@@ -94,9 +136,10 @@ type Props = {
   openContextPanelTab: (directory: string, options: { mode: 'chat'; dedupeKey: string; label: string }) => void;
   handleDeleteSession: (session: Session, source?: { archivedBucket?: boolean }) => void;
   mobileVariant: boolean;
-  renderSessionNode: (node: SessionNode, depth?: number, groupDirectory?: string | null, projectId?: string | null, archivedBucket?: boolean, secondaryMeta?: SecondaryMeta | null, renderContext?: 'project' | 'recent') => React.ReactNode;
+  renderSessionNode: (node: SessionNode, depth?: number, groupDirectory?: string | null, projectId?: string | null, archivedBucket?: boolean, secondaryMeta?: SecondaryMeta | null, renderContext?: 'project' | 'recent', projectColor?: string | null) => React.ReactNode;
   secondaryMeta?: SecondaryMeta | null;
   renderContext?: 'project' | 'recent';
+  projectColor?: string | null;
 };
 
 export function SessionNodeItem(props: Props): React.ReactNode {
@@ -145,6 +188,7 @@ export function SessionNodeItem(props: Props): React.ReactNode {
     renderSessionNode,
     secondaryMeta,
     renderContext = 'project',
+    projectColor,
   } = props;
   const hasSecondaryProjectLabel = Boolean(secondaryMeta?.projectLabel);
   const hasSecondaryBranchLabel = Boolean(secondaryMeta?.branchLabel);
@@ -527,8 +571,21 @@ export function SessionNodeItem(props: Props): React.ReactNode {
                   <div className="flex items-center justify-between gap-3 text-muted-foreground/60 min-w-0 overflow-hidden leading-tight" style={{ fontSize: 'calc(var(--text-ui-label) * 0.85)' }}>
                     <div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
                       <span className="flex-shrink-0">{sessionUpdatedLabel}</span>
-                      {sessionDiffStats ? <span className="flex flex-shrink-0 items-center gap-0 text-[0.92em]"><span className="text-status-success/80">+{sessionDiffStats.additions}</span><span className="text-muted-foreground/60">/</span><span className="text-status-error/65">-{sessionDiffStats.deletions}</span></span> : null}
-                      {hasSecondaryProjectLabel ? <span className="truncate">{secondaryMeta?.projectLabel}</span> : null}
+                      {renderContext === 'recent' && secondaryMeta?.projectLabel ? (
+                        (() => {
+                          const tagColor = getProjectTagColor(projectId);
+                          return (
+                            <span
+                              className="inline-flex items-center rounded px-1 py-0.5 text-[0.7rem] font-medium flex-shrink-0 leading-none"
+                              style={{ color: tagColor.text, backgroundColor: tagColor.bg }}
+                            >
+                              <span className="truncate max-w-[80px]">{secondaryMeta.projectLabel}</span>
+                            </span>
+                          );
+                        })()
+                      ) : hasSecondaryProjectLabel ? (
+                        <span className="truncate">{secondaryMeta?.projectLabel}</span>
+                      ) : null}
                       {hasSecondaryBranchLabel ? <span className="inline-flex min-w-0 items-center gap-0.5"><RiGitBranchLine className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" /><span className="truncate">{secondaryMeta?.branchLabel}</span></span> : null}
                     </div>
                   </div>
@@ -581,7 +638,7 @@ export function SessionNodeItem(props: Props): React.ReactNode {
         </div>
       </DraggableSessionRow>
       {hasChildren && isExpanded
-        ? node.children.map((child) => renderSessionNode(child, depth + 1, sessionDirectory ?? groupDirectory, projectId, archivedBucket, undefined, renderContext))
+        ? node.children.map((child) => renderSessionNode(child, depth + 1, sessionDirectory ?? groupDirectory, projectId, archivedBucket, undefined, renderContext, projectColor))
         : null}
     </React.Fragment>
   );

@@ -635,39 +635,8 @@ export const ProjectActionsButton = ({
   }
 
   if (actions.length === 0) {
-    if (compact) {
-      return (
-        <button
-          type="button"
-          className={cn(
-            'app-region-no-drag inline-flex h-9 w-9 items-center justify-center rounded-md p-2',
-            'typography-ui-label font-medium text-muted-foreground hover:bg-interactive-hover hover:text-foreground transition-colors',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-            className
-          )}
-          aria-label="Add action"
-          onClick={openProjectActionsSettings}
-        >
-          <RiAddLine className="h-5 w-5" />
-        </button>
-      );
-    }
-
-    return (
-      <button
-        type="button"
-        className={cn(
-          'app-region-no-drag inline-flex h-7 shrink-0 items-center gap-2 self-center rounded-md border border-[var(--interactive-border)]',
-          'bg-[var(--surface-elevated)] px-3 typography-ui-label font-medium text-foreground hover:bg-interactive-hover transition-colors',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-          className
-        )}
-        onClick={openProjectActionsSettings}
-      >
-        <RiAddLine className="h-4 w-4 text-muted-foreground" />
-        <span className="header-open-label whitespace-nowrap">Add action</span>
-      </button>
-    );
+    // Don't show any button when there are no actions configured
+    return null;
   }
 
   const resolvedSelected = selectedAction ?? actions[0] ?? null;

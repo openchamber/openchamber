@@ -845,9 +845,13 @@ html:not(.dark) .chat-scroll {
 }
 
 /* Override Streamdown's hardcoded bg-muted for inline code - use theme colors instead */
-.streamdown-content code[data-streamdown="inline-code"] {
+.streamdown-content code {
   background-color: var(--markdown-inline-code-bg, var(--surface-muted)) !important;
   color: var(--markdown-inline-code, var(--foreground)) !important;
+  word-break: break-all;
+  overflow-wrap: break-word;
+  max-width: 100%;
+  display: inline-block;
 }
 
 /* Markdown headings - use theme colors */
