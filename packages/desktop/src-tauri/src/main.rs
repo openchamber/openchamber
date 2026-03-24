@@ -276,7 +276,7 @@ fn build_macos_menu<R: tauri::Runtime>(
         MENU_ITEM_TOGGLE_MEMORY_DEBUG_ID,
         "Toggle Memory Debug",
         true,
-        Some("Cmd+Shift+D"),
+        Some("CmdOrCtrl+Shift+D"),
     )?;
 
     let help_dialog = MenuItem::with_id(

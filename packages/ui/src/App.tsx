@@ -405,14 +405,19 @@ function App({ apis }: AppProps) {
     }
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (hasModifier(e) && e.shiftKey && e.key === 'D') {
+      const isDebugShortcut = hasModifier(e)
+        && e.shiftKey
+        && !e.altKey
+        && (e.code === 'KeyD' || e.key.toLowerCase() === 'd');
+
+      if (isDebugShortcut) {
         e.preventDefault();
         setShowMemoryDebug(prev => !prev);
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [embeddedSessionChat]);
 
   React.useEffect(() => {

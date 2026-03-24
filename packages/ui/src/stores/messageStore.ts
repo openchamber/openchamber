@@ -13,14 +13,13 @@ import {
     clearLifecycleTimersForIds,
     clearLifecycleCompletionTimer
 } from "./utils/streamingUtils";
-import { extractTextFromPart, normalizeStreamingPart } from "./utils/messageUtils";
+import { arePartsEquivalent, extractTextFromPart, normalizeStreamingPart } from "./utils/messageUtils";
 import { filterMessagesByRevertPoint, normalizeMessageInfoForProjection } from "./utils/messageProjectors";
 import { getSafeStorage } from "./utils/safeStorage";
 import { streamDebugEnabled, streamPerfCount, streamPerfMeasure, streamPerfObserve } from "./utils/streamDebug";
 import { useFileStore } from "./fileStore";
 import { useSessionStore } from "./sessionStore";
 import { useContextStore } from "./contextStore";
-import { useUIStore } from "./useUIStore";
 
 // Helper function to clean up pending user message metadata
 const cleanupPendingUserMessageMeta = (
@@ -59,6 +58,12 @@ interface QueuedPartDelta {
     currentSessionId?: string;
 }
 
+interface QueuedMessageInfoUpdate {
+    sessionId: string;
+    messageId: string;
+    messageInfo: any;
+}
+
 type StreamingPartImmediateHandler = (
     sessionId: string,
     messageId: string,
@@ -81,7 +86,29 @@ let partDeltaFlushRafId: number | null = null;
 let partDeltaFlushTimeoutId: ReturnType<typeof setTimeout> | null = null;
 const PART_DELTA_QUEUE_HARD_LIMIT = 3500;
 const ENABLE_STREAMING_FRAME_BATCHING = true;
-const TOOL_STREAMING_BATCH_DELAY_MS = 120;
+const STREAMING_BATCH_DELAY_MS = 120;
+const MESSAGE_INFO_QUEUE_HARD_LIMIT = 500;
+
+const queuedMessageInfoUpdatesByKey = new Map<string, QueuedMessageInfoUpdate>();
+const queuedMessageInfoOrder: string[] = [];
+let messageInfoFlushScheduled = false;
+let messageInfoFlushTimeoutId: ReturnType<typeof setTimeout> | null = null;
+
+const shouldCadenceBatchPartType = (partType: string | undefined): boolean => {
+    if (!partType) {
+        return false;
+    }
+
+    if (partType === 'tool') {
+        return true;
+    }
+
+    if (partType === 'text' || partType === 'reasoning') {
+        return true;
+    }
+
+    return false;
+};
 
 const clearNonTextStreamingFlushSchedule = () => {
     if (nonTextStreamingFlushRafId !== null) {
@@ -207,7 +234,7 @@ const scheduleNonTextStreamingFlush = (flush: () => void): void => {
             return;
         }
         flush();
-    }, TOOL_STREAMING_BATCH_DELAY_MS);
+    }, STREAMING_BATCH_DELAY_MS);
 };
 
 const clearPartDeltaFlushSchedule = () => {
@@ -220,6 +247,157 @@ const clearPartDeltaFlushSchedule = () => {
         partDeltaFlushTimeoutId = null;
     }
     partDeltaFlushScheduled = false;
+};
+
+const clearMessageInfoFlushSchedule = () => {
+    if (messageInfoFlushTimeoutId !== null) {
+        clearTimeout(messageInfoFlushTimeoutId);
+        messageInfoFlushTimeoutId = null;
+    }
+    messageInfoFlushScheduled = false;
+};
+
+const queuedMessageInfoKey = (entry: QueuedMessageInfoUpdate): string => {
+    return `${entry.sessionId}:${entry.messageId}`;
+};
+
+const mergeQueuedMessageInfo = (base: any, patch: any): any => {
+    if (!base) {
+        return patch;
+    }
+    if (!patch) {
+        return base;
+    }
+
+    const merged = {
+        ...base,
+        ...patch,
+    };
+
+    if (base.time || patch.time) {
+        merged.time = {
+            ...(base.time ?? {}),
+            ...(patch.time ?? {}),
+        };
+    }
+
+    if (base.model || patch.model) {
+        merged.model = {
+            ...(base.model ?? {}),
+            ...(patch.model ?? {}),
+        };
+    }
+
+    return merged;
+};
+
+const enqueueMessageInfoUpdate = (entry: QueuedMessageInfoUpdate) => {
+    const key = queuedMessageInfoKey(entry);
+    const existing = queuedMessageInfoUpdatesByKey.get(key);
+    if (existing) {
+        existing.messageInfo = mergeQueuedMessageInfo(existing.messageInfo, entry.messageInfo);
+        return;
+    }
+    queuedMessageInfoUpdatesByKey.set(key, { ...entry });
+    queuedMessageInfoOrder.push(key);
+};
+
+const flushQueuedMessageInfoUpdates = (
+    immediateHandler: (sessionId: string, messageId: string, messageInfo: any) => void,
+    filter?: (entry: QueuedMessageInfoUpdate) => boolean,
+) => {
+    streamPerfCount('ui.message_store.message_info_flush');
+    if (queuedMessageInfoOrder.length === 0) {
+        clearMessageInfoFlushSchedule();
+        return;
+    }
+
+    const batch: QueuedMessageInfoUpdate[] = [];
+    const nextOrder: string[] = [];
+
+    for (const key of queuedMessageInfoOrder) {
+        const entry = queuedMessageInfoUpdatesByKey.get(key);
+        if (!entry) continue;
+        if (filter && !filter(entry)) {
+            nextOrder.push(key);
+            continue;
+        }
+        batch.push(entry);
+        queuedMessageInfoUpdatesByKey.delete(key);
+    }
+
+    queuedMessageInfoOrder.length = 0;
+    queuedMessageInfoOrder.push(...nextOrder);
+
+    if (batch.length === 0) {
+        if (queuedMessageInfoOrder.length === 0) {
+            clearMessageInfoFlushSchedule();
+        }
+        return;
+    }
+
+    streamPerfObserve('ui.message_store.message_info_flush_batch_size', batch.length);
+    streamPerfMeasure('ui.message_store.message_info_flush_ms', () => {
+        for (const entry of batch) {
+            immediateHandler(entry.sessionId, entry.messageId, entry.messageInfo);
+        }
+    });
+
+    if (queuedMessageInfoOrder.length === 0) {
+        clearMessageInfoFlushSchedule();
+    }
+};
+
+const flushQueuedMessageInfoUpdatesForSession = (
+    immediateHandler: (sessionId: string, messageId: string, messageInfo: any) => void,
+    sessionId: string,
+) => {
+    flushQueuedMessageInfoUpdates(immediateHandler, (entry) => entry.sessionId === sessionId);
+};
+
+const flushQueuedMessageInfoUpdatesForMessage = (
+    immediateHandler: (sessionId: string, messageId: string, messageInfo: any) => void,
+    sessionId: string,
+    messageId: string,
+) => {
+    flushQueuedMessageInfoUpdates(immediateHandler, (entry) => entry.sessionId === sessionId && entry.messageId === messageId);
+};
+
+const discardQueuedMessageInfoUpdatesForSession = (sessionId: string): void => {
+    if (queuedMessageInfoOrder.length === 0) {
+        return;
+    }
+
+    for (let i = queuedMessageInfoOrder.length - 1; i >= 0; i -= 1) {
+        const key = queuedMessageInfoOrder[i];
+        const entry = queuedMessageInfoUpdatesByKey.get(key);
+        if (!entry) {
+            queuedMessageInfoOrder.splice(i, 1);
+            continue;
+        }
+        if (entry.sessionId === sessionId) {
+            queuedMessageInfoUpdatesByKey.delete(key);
+            queuedMessageInfoOrder.splice(i, 1);
+        }
+    }
+
+    if (queuedMessageInfoOrder.length === 0) {
+        clearMessageInfoFlushSchedule();
+    }
+};
+
+const scheduleMessageInfoFlush = (flush: () => void): void => {
+    if (messageInfoFlushScheduled) {
+        return;
+    }
+    messageInfoFlushScheduled = true;
+    messageInfoFlushTimeoutId = setTimeout(() => {
+        messageInfoFlushTimeoutId = null;
+        if (!messageInfoFlushScheduled) {
+            return;
+        }
+        flush();
+    }, STREAMING_BATCH_DELAY_MS);
 };
 
 const queuedPartDeltaKey = (entry: QueuedPartDelta): string => {
@@ -374,7 +552,7 @@ const schedulePartDeltaFlush = (flush: () => void): void => {
             return;
         }
         flush();
-    }, TOOL_STREAMING_BATCH_DELAY_MS);
+    }, STREAMING_BATCH_DELAY_MS);
 };
 
 const shouldBatchStreamingPart = (part: Part | undefined): boolean => {
@@ -382,15 +560,7 @@ const shouldBatchStreamingPart = (part: Part | undefined): boolean => {
         return false;
     }
 
-    if (part.type === 'tool') {
-        return true;
-    }
-
-    if (part.type === 'text' || part.type === 'reasoning') {
-        return useUIStore.getState().chatRenderMode === 'sorted';
-    }
-
-    return false;
+    return shouldCadenceBatchPartType(part.type);
 };
 
 const shouldBatchPartDelta = (
@@ -409,15 +579,66 @@ const shouldBatchPartDelta = (
     }
     const targetMessage = sessionMessages[messageIndex];
     const targetPart = targetMessage.parts.find((part) => part?.id === partId);
-    if (targetPart?.type === 'tool') {
+    return shouldCadenceBatchPartType(targetPart?.type);
+};
+
+const shouldBatchMessageInfoUpdate = (messageInfo: any): boolean => {
+    const role = typeof messageInfo?.role === 'string' ? messageInfo.role : null;
+    if (role === 'user') {
+        return false;
+    }
+
+    const finish = typeof messageInfo?.finish === 'string' ? messageInfo.finish : null;
+    if (finish === 'stop' || finish === 'error') {
+        return false;
+    }
+
+    const status = typeof messageInfo?.status === 'string' ? messageInfo.status.toLowerCase() : null;
+    if (status === 'completed' || status === 'complete' || status === 'error' || status === 'failed') {
+        return false;
+    }
+
+    const completed = messageInfo?.time?.completed;
+    if (typeof completed === 'number' && Number.isFinite(completed)) {
+        return false;
+    }
+
+    return true;
+};
+
+const areMessageInfoFieldsEqual = (current: any, next: any): boolean => {
+    if (current === next) {
         return true;
     }
 
-    if (targetPart?.type === 'text' || targetPart?.type === 'reasoning') {
-        return useUIStore.getState().chatRenderMode === 'sorted';
+    const keys = new Set<string>([
+        ...Object.keys(current ?? {}),
+        ...Object.keys(next ?? {}),
+    ]);
+
+    for (const key of keys) {
+        const currentValue = current?.[key];
+        const nextValue = next?.[key];
+
+        if (key === 'time' || key === 'model' || key === 'tokens' || key === 'cost' || key === 'path') {
+            const nestedKeys = new Set<string>([
+                ...Object.keys(currentValue ?? {}),
+                ...Object.keys(nextValue ?? {}),
+            ]);
+            for (const nestedKey of nestedKeys) {
+                if (currentValue?.[nestedKey] !== nextValue?.[nestedKey]) {
+                    return false;
+                }
+            }
+            continue;
+        }
+
+        if (currentValue !== nextValue) {
+            return false;
+        }
     }
 
-    return false;
+    return true;
 };
 
 const RECENT_SEND_EMPTY_GUARD_MS = 15_000;
@@ -740,6 +961,7 @@ interface MessageActions {
     forceCompleteMessage: (sessionId: string | null | undefined, messageId: string, source?: "timeout" | "cooldown") => void;
     completeStreamingMessage: (sessionId: string, messageId: string) => void;
     markMessageStreamSettled: (messageId: string) => void;
+    _updateMessageInfoImmediate: (sessionId: string, messageId: string, messageInfo: any) => void;
     updateMessageInfo: (sessionId: string, messageId: string, messageInfo: any) => void;
     syncMessages: (
         sessionId: string,
@@ -1316,6 +1538,7 @@ export const useMessageStore = create<MessageStore>()(
                         return;
                     }
 
+                    discardQueuedMessageInfoUpdatesForSession(currentSessionId);
                     discardQueuedNonTextStreamingPartsForSession(currentSessionId);
                     discardQueuedPartDeltasForSession(currentSessionId);
 
@@ -1660,6 +1883,10 @@ export const useMessageStore = create<MessageStore>()(
                                 part,
                                 existingPartIndex !== -1 ? existingMessage.parts[existingPartIndex] : undefined
                             );
+                            if (existingPartIndex !== -1 && arePartsEquivalent(existingMessage.parts[existingPartIndex], normalizedPart)) {
+                                streamPerfCount('ui.message_store.add_streaming_part_noop');
+                                return state;
+                            }
                             (window as any).__messageTracker?.(messageId, `user_part_type:${(normalizedPart as any).type || 'unknown'}`);
 
                             const updatedMessage = { ...existingMessage };
@@ -1689,6 +1916,10 @@ export const useMessageStore = create<MessageStore>()(
                                 part,
                                 existingPartIndex !== -1 ? existingMessage.parts[existingPartIndex] : undefined
                             );
+                            if (existingPartIndex !== -1 && arePartsEquivalent(existingMessage.parts[existingPartIndex], normalizedPart)) {
+                                streamPerfCount('ui.message_store.add_streaming_part_noop');
+                                return finalizeAbortState({ ...updates });
+                            }
                             (window as any).__messageTracker?.(messageId, `part_type:${(normalizedPart as any).type || 'unknown'}`);
 
                             const updatedMessage = { ...existingMessage };
@@ -1815,6 +2046,10 @@ export const useMessageStore = create<MessageStore>()(
                             const pendingIndex = findMatchingPartIndex(pendingParts, part);
                             const existingPendingPart = pendingIndex !== -1 ? pendingParts[pendingIndex] : undefined;
                             const normalizedPart = normalizeStreamingPart(part, existingPendingPart);
+                            if (existingPendingPart && arePartsEquivalent(existingPendingPart, normalizedPart)) {
+                                streamPerfCount('ui.message_store.add_streaming_part_pending_noop');
+                                return state;
+                            }
                             (window as any).__messageTracker?.(messageId, `part_type:${(normalizedPart as any).type || 'unknown'}`);
 
                             if ((normalizedPart as any).type === 'text') {
@@ -1927,6 +2162,10 @@ export const useMessageStore = create<MessageStore>()(
                                 existingPart.id.length > 0
                             ) {
                                 (normalizedPart as Record<string, unknown>).id = existingPart.id;
+                            }
+                            if (existingPart && arePartsEquivalent(existingPart, normalizedPart)) {
+                                streamPerfCount('ui.message_store.add_streaming_part_noop');
+                                return finalizeAbortState({ ...updates });
                             }
                             (window as any).__messageTracker?.(messageId, `part_type:${(normalizedPart as any).type || 'unknown'}`);
 
@@ -2340,8 +2579,9 @@ export const useMessageStore = create<MessageStore>()(
                     clearLifecycleTimersForIds([messageId]);
                 },
 
-                updateMessageInfo: (sessionId: string, messageId: string, messageInfo: any) => {
-                    set((state) => {
+                _updateMessageInfoImmediate: (sessionId: string, messageId: string, messageInfo: any) => {
+                    streamPerfCount('ui.message_store.update_message_info_immediate');
+                    streamPerfMeasure('ui.message_store.update_message_info_immediate_ms', () => set((state) => {
                         const sessionMessages = state.messages.get(sessionId) ?? [];
                         const normalizedSessionMessages = [...sessionMessages];
 
@@ -2486,8 +2726,8 @@ export const useMessageStore = create<MessageStore>()(
                                 updates.pendingAssistantParts = newPending;
                             }
 
-                            return updates;
-                        }
+                                return updates;
+                            }
 
                         const existingMessage = normalizedSessionMessages[messageIndex];
 
@@ -2516,10 +2756,14 @@ export const useMessageStore = create<MessageStore>()(
                                  updatedInfo.mode = pendingMeta.mode;
                              }
  
-                             const updatedMessage = {
-                                 ...existingMessage,
-                                 info: updatedInfo
-                             };
+                              if (areMessageInfoFieldsEqual(existingMessage.info, updatedInfo) && !pendingMeta) {
+                                  return state;
+                              }
+
+                              const updatedMessage = {
+                                  ...existingMessage,
+                                  info: updatedInfo
+                              };
  
                              const newMessages = new Map(state.messages);
                              const updatedSessionMessages = [...normalizedSessionMessages];
@@ -2532,8 +2776,8 @@ export const useMessageStore = create<MessageStore>()(
                                  return { messages: newMessages, pendingUserMessageMetaBySession: nextPending };
                              }
  
-                             return { messages: newMessages };
-                         }
+                              return { messages: newMessages };
+                          }
 
 
                         const updatedInfo = {
@@ -2548,6 +2792,10 @@ export const useMessageStore = create<MessageStore>()(
                         updatedInfo.clientRole = updatedInfo.clientRole ?? existingMessage.info.clientRole ?? existingMessage.info.role;
                         if (updatedInfo.clientRole === "user") {
                             updatedInfo.userMessageMarker = true;
+                        }
+
+                        if (areMessageInfoFieldsEqual(existingMessage.info, updatedInfo) && !pendingEntry) {
+                            return state;
                         }
 
                         const updatedMessage = {
@@ -2572,7 +2820,7 @@ export const useMessageStore = create<MessageStore>()(
                         }
 
                         return updates;
-                    });
+                    }));
 
                     // Trigger completion when info.finish is present for assistant messages
                     const infoFinish = (messageInfo as { finish?: string })?.finish;
@@ -2585,7 +2833,31 @@ export const useMessageStore = create<MessageStore>()(
                     }
                 },
 
+                updateMessageInfo: (sessionId: string, messageId: string, messageInfo: any) => {
+                    streamPerfCount('ui.message_store.update_message_info');
+
+                    if (!ENABLE_STREAMING_FRAME_BATCHING || !shouldBatchMessageInfoUpdate(messageInfo)) {
+                        get()._updateMessageInfoImmediate(sessionId, messageId, messageInfo);
+                        return;
+                    }
+
+                    enqueueMessageInfoUpdate({ sessionId, messageId, messageInfo });
+                    streamPerfObserve('ui.message_store.message_info_queue_size', queuedMessageInfoOrder.length);
+
+                    const flushQueuedMessageInfos = () => {
+                        flushQueuedMessageInfoUpdates(get()._updateMessageInfoImmediate);
+                    };
+
+                    if (queuedMessageInfoOrder.length >= MESSAGE_INFO_QUEUE_HARD_LIMIT) {
+                        flushQueuedMessageInfos();
+                        return;
+                    }
+
+                    scheduleMessageInfoFlush(flushQueuedMessageInfos);
+                },
+
                 completeStreamingMessage: (sessionId: string, messageId: string) => {
+                    flushQueuedMessageInfoUpdatesForMessage(get()._updateMessageInfoImmediate, sessionId, messageId);
                     flushQueuedNonTextStreamingPartsForMessage(get()._addStreamingPartImmediate, sessionId, messageId);
                     flushQueuedPartDeltasForMessage(get()._applyPartDeltaImmediate, sessionId, messageId);
 
@@ -2694,6 +2966,7 @@ export const useMessageStore = create<MessageStore>()(
                     messages: { info: Message; parts: Part[] }[],
                     options?: { replace?: boolean }
                 ) => {
+                    flushQueuedMessageInfoUpdatesForSession(get()._updateMessageInfoImmediate, sessionId);
                     flushQueuedNonTextStreamingPartsForSession(get()._addStreamingPartImmediate, sessionId);
                     flushQueuedPartDeltasForSession(get()._applyPartDeltaImmediate, sessionId);
 

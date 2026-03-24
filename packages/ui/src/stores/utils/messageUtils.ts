@@ -214,3 +214,73 @@ export const normalizeStreamingPart = (incoming: Part, existing?: Part): Part =>
 
     return normalized as Part;
 };
+
+const deepEqualRecord = (left: Record<string, unknown>, right: Record<string, unknown>): boolean => {
+    const keys = new Set<string>([
+        ...Object.keys(left),
+        ...Object.keys(right),
+    ]);
+
+    for (const key of keys) {
+        const leftValue = left[key];
+        const rightValue = right[key];
+
+        if (Array.isArray(leftValue) || Array.isArray(rightValue)) {
+            if (!Array.isArray(leftValue) || !Array.isArray(rightValue) || leftValue.length !== rightValue.length) {
+                return false;
+            }
+            for (let index = 0; index < leftValue.length; index += 1) {
+                if (!deepEqualUnknown(leftValue[index], rightValue[index])) {
+                    return false;
+                }
+            }
+            continue;
+        }
+
+        if (!deepEqualUnknown(leftValue, rightValue)) {
+            return false;
+        }
+    }
+
+    return true;
+};
+
+const deepEqualUnknown = (left: unknown, right: unknown): boolean => {
+    if (left === right) {
+        return true;
+    }
+
+    if (!left || !right) {
+        return false;
+    }
+
+    if (typeof left !== typeof right) {
+        return false;
+    }
+
+    if (typeof left === 'object' && typeof right === 'object') {
+        if (Array.isArray(left) || Array.isArray(right)) {
+            if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) {
+                return false;
+            }
+            for (let index = 0; index < left.length; index += 1) {
+                if (!deepEqualUnknown(left[index], right[index])) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        return deepEqualRecord(left as Record<string, unknown>, right as Record<string, unknown>);
+    }
+
+    return false;
+};
+
+export const arePartsEquivalent = (left: Part | undefined, right: Part | undefined): boolean => {
+    if (!left || !right) {
+        return left === right;
+    }
+
+    return deepEqualUnknown(left, right);
+};
