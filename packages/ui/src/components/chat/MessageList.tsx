@@ -27,6 +27,7 @@ import { hasPendingUserSendAnimation, consumePendingUserSendAnimation } from '@/
 import { useAssistantStatus } from '@/hooks/useAssistantStatus';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { StatusRow } from './StatusRow';
+import { useLanguage } from '@/hooks/useLanguage';
 
 const MESSAGE_VIRTUALIZE_THRESHOLD = 40;
 const MESSAGE_VIRTUAL_OVERSCAN_MOBILE = 2;
@@ -826,6 +827,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     scrollToBottom,
     scrollRef,
 }, ref) => {
+    const { t } = useLanguage();
     const { isMobile } = useDeviceInfo();
     const { isWorking: sessionIsWorking } = useCurrentSessionActivity();
     const { working } = useAssistantStatus();
@@ -1426,7 +1428,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                     <div className="flex justify-center py-3">
                         {isLoadingOlder ? (
                             <span className="text-xs uppercase tracking-wide text-muted-foreground/80">
-                                Loading…
+                                {t('chatAutocomplete.loading')}
                             </span>
                         ) : (
                             <button
@@ -1434,7 +1436,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                                 onClick={stableOnLoadOlder}
                                 className="text-xs uppercase tracking-wide text-muted-foreground/80 hover:text-foreground"
                             >
-                                Load older messages
+                                {t('chatAutocomplete.loadOlderMessages')}
                             </button>
                         )}
                     </div>
@@ -1443,7 +1445,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                 {staging.isStaging ? (
                     <div className="flex justify-center py-1">
                         <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70">
-                            Revealing history…
+                            {t('chatAutocomplete.revealingHistory')}
                         </span>
                     </div>
                 ) : null}

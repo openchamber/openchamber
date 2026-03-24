@@ -47,6 +47,7 @@ import {
 import { generatePullRequestDescription } from '@/lib/gitApi';
 import { openExternalUrl } from '@/lib/url';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { useLanguage } from '@/hooks/useLanguage';
 import { useDeviceInfo } from '@/lib/device';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
@@ -278,6 +279,7 @@ export const PullRequestSection: React.FC<{
   remoteBranches?: string[];
   onGeneratedDescription?: () => void;
 }> = ({ directory, branch, baseBranch, trackingBranch, remotes = [], remoteBranches = [], onGeneratedDescription }) => {
+  const { t } = useLanguage();
   const { github } = useRuntimeAPIs();
   const githubAuthStatus = useGitHubAuthStore((state) => state.status);
   const githubAuthChecked = useGitHubAuthStore((state) => state.hasChecked);
@@ -516,7 +518,7 @@ export const PullRequestSection: React.FC<{
 
   const openChecksDialog = React.useCallback(async () => {
     if (!github?.prContext) {
-      toast.error('GitHub runtime API unavailable');
+      toast.error(t('pullRequest.githubRuntimeApiUnavailable'));
       return;
     }
     if (!pr) return;
@@ -532,15 +534,15 @@ export const PullRequestSection: React.FC<{
       setCheckDetails(ctx);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      toast.error('Failed to load check details', { description: message });
+      toast.error(t('pullRequest.failedToLoadCheckDetails'), { description: message });
     } finally {
       setIsLoadingCheckDetails(false);
     }
-  }, [directory, github, pr]);
+  }, [directory, github, pr, t]);
 
   const openCommentsDialog = React.useCallback(async () => {
     if (!github?.prContext) {
-      toast.error('GitHub runtime API unavailable');
+      toast.error(t('pullRequest.githubRuntimeApiUnavailable'));
       return;
     }
     if (!pr) return;
@@ -555,11 +557,11 @@ export const PullRequestSection: React.FC<{
       setCommentsDetails(ctx);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      toast.error('Failed to load comments', { description: message });
+      toast.error(t('pullRequest.failedToLoadComments'), { description: message });
     } finally {
       setIsLoadingCommentsDetails(false);
     }
-  }, [directory, github, pr]);
+  }, [directory, github, pr, t]);
 
   const formatTimestamp = React.useCallback((value?: string) => {
     if (!value) return '';
@@ -594,11 +596,11 @@ export const PullRequestSection: React.FC<{
     const issue = (commentsDetails?.issueComments ?? []).map((comment) => ({
       id: `issue-${comment.id}`,
       body: comment.body || '',
-      authorName: comment.author?.name || comment.author?.login || 'Unknown author',
+      authorName: comment.author?.name || comment.author?.login || t('pullRequest.unknownAuthor'),
       authorLogin: comment.author?.login || null,
       avatarUrl: comment.author?.avatarUrl || null,
       createdAt: comment.createdAt,
-      context: 'General comment',
+      context: t('pullRequest.generalComment'),
       path: null as string | null,
       line: null as number | null,
     }));
@@ -606,11 +608,11 @@ export const PullRequestSection: React.FC<{
     const review = (commentsDetails?.reviewComments ?? []).map((comment) => ({
       id: `review-${comment.id}`,
       body: comment.body || '',
-      authorName: comment.author?.name || comment.author?.login || 'Unknown author',
+      authorName: comment.author?.name || comment.author?.login || t('pullRequest.unknownAuthor'),
       authorLogin: comment.author?.login || null,
       avatarUrl: comment.author?.avatarUrl || null,
       createdAt: comment.createdAt,
-      context: 'Code review comment',
+      context: t('pullRequest.codeReviewComment'),
       path: comment.path || null,
       line: comment.line ?? null,
     }));
@@ -624,11 +626,11 @@ export const PullRequestSection: React.FC<{
       return aVal - bVal;
     });
     return all;
-  }, [commentsDetails]);
+  }, [commentsDetails, t]);
 
   const resolveChatDispatchTarget = React.useCallback((): ChatDispatchTarget | null => {
     if (!currentSessionId) {
-      toast.error('No active session', { description: 'Open a chat session first.' });
+      toast.error(t('pullRequest.noActiveSession'), { description: t('pullRequest.openChatSessionFirst') });
       return null;
     }
 
@@ -637,7 +639,7 @@ export const PullRequestSection: React.FC<{
     const providerID = currentProviderId || lastUsedProvider?.providerID;
     const modelID = currentModelId || lastUsedProvider?.modelID;
     if (!providerID || !modelID) {
-      toast.error('No model selected');
+      toast.error(t('pullRequest.noModelSelected'));
       return null;
     }
 
@@ -648,7 +650,7 @@ export const PullRequestSection: React.FC<{
       currentAgentName: currentAgentName ?? null,
       currentVariant: currentVariant ?? null,
     };
-  }, [currentSessionId]);
+  }, [currentSessionId, t]);
 
   const dispatchSyntheticPrompt = React.useCallback((
     target: ChatDispatchTarget,
@@ -671,9 +673,9 @@ export const PullRequestSection: React.FC<{
       target.currentVariant ?? undefined,
     ).catch((e) => {
       const message = e instanceof Error ? e.message : String(e);
-      toast.error('Failed to send message', { description: message });
+      toast.error(t('pullRequest.failedToSendMessage'), { description: message });
     });
-  }, []);
+  }, [t]);
 
   const renderCheckRunSummary = React.useCallback((run: GitHubCheckRun) => {
     const status = run.status || 'unknown';
@@ -694,7 +696,7 @@ export const PullRequestSection: React.FC<{
             <Button variant="outline" size="sm" asChild className="flex-shrink-0">
               <a href={run.detailsUrl} target="_blank" rel="noopener noreferrer">
                 <RiExternalLinkLine className="size-4" />
-                Open
+                {t('common.open')}
               </a>
             </Button>
           ) : null}
@@ -717,7 +719,9 @@ export const PullRequestSection: React.FC<{
         {Array.isArray(run.annotations) && run.annotations.length > 0 ? (
           <div className="space-y-1">
             <div className="typography-micro text-muted-foreground">
-              Failed annotations{run.annotations.length > 20 ? ` (showing 20/${run.annotations.length})` : ''}
+              {run.annotations.length > 20
+                ? t('pullRequestSection.failedAnnotationsWithCount', { count: run.annotations.length })
+                : t('pullRequestSection.failedAnnotations')}
             </div>
             <div className="space-y-1">
               {run.annotations.slice(0, 20).map((annotation, idx) => (
@@ -744,7 +748,7 @@ export const PullRequestSection: React.FC<{
 
         {run.job?.steps && run.job.steps.length > 0 ? (
           <div className="space-y-1">
-            <div className="typography-micro text-muted-foreground">Steps</div>
+            <div className="typography-micro text-muted-foreground">{t('pullRequest.steps')}</div>
             <div className="space-y-1">
               {run.job.steps.map((step, idx) => {
                 const c = (step.conclusion || '').toLowerCase();
@@ -788,11 +792,11 @@ export const PullRequestSection: React.FC<{
                     </button>
                     <CollapsibleContent>
                       <div className="ml-6 mt-1 rounded border border-border/40 bg-transparent px-2 py-2 typography-micro text-muted-foreground space-y-1">
-                        {typeof step.number === 'number' ? <div>Step: {step.number}</div> : null}
-                        {step.status ? <div>Status: {step.status}</div> : null}
-                        {step.conclusion ? <div>Conclusion: {step.conclusion}</div> : null}
-                        {step.startedAt ? <div>Started: {formatTimestamp(step.startedAt)}</div> : null}
-                        {step.completedAt ? <div>Completed: {formatTimestamp(step.completedAt)}</div> : null}
+                        {typeof step.number === 'number' ? <div>{t('pullRequest.step')}: {step.number}</div> : null}
+                        {step.status ? <div>{t('pullRequest.status')}: {step.status}</div> : null}
+                        {step.conclusion ? <div>{t('pullRequest.conclusion')}: {step.conclusion}</div> : null}
+                        {step.startedAt ? <div>{t('pullRequest.started')}: {formatTimestamp(step.startedAt)}</div> : null}
+                        {step.completedAt ? <div>{t('pullRequest.completed')}: {formatTimestamp(step.completedAt)}</div> : null}
                       </div>
                     </CollapsibleContent>
                   </Collapsible>
@@ -803,13 +807,13 @@ export const PullRequestSection: React.FC<{
         ) : null}
       </div>
     );
-  }, [expandedCheckStepKeys, formatTimestamp]);
+  }, [expandedCheckStepKeys, formatTimestamp, t]);
 
   const sendFailedChecksToChat = React.useCallback(async () => {
     setActiveMainTab('chat');
 
     if (!github?.prContext) {
-      toast.error('GitHub runtime API unavailable');
+      toast.error(t('pullRequest.githubRuntimeApiUnavailable'));
       return;
     }
     if (!directory || !pr) return;
@@ -828,7 +832,7 @@ export const PullRequestSection: React.FC<{
       });
 
       if (failed.length === 0) {
-        toast.message('No failed checks');
+        toast.message(t('pullRequest.noFailedChecks'));
         return;
       }
 
@@ -862,15 +866,15 @@ export const PullRequestSection: React.FC<{
       dispatchSyntheticPrompt(target, visibleText, instructionsText, payloadText);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      toast.error('Failed to load checks', { description: message });
+      toast.error(t('pullRequest.failedToLoadChecks'), { description: message });
     }
-  }, [directory, dispatchSyntheticPrompt, github, pr, resolveChatDispatchTarget, setActiveMainTab]);
+  }, [directory, dispatchSyntheticPrompt, github, pr, resolveChatDispatchTarget, setActiveMainTab, t]);
 
   const sendCommentsToChat = React.useCallback(async () => {
     setActiveMainTab('chat');
 
     if (!github?.prContext) {
-      toast.error('GitHub runtime API unavailable');
+      toast.error(t('pullRequest.githubRuntimeApiUnavailable'));
       return;
     }
     if (!directory || !pr) return;
@@ -885,7 +889,7 @@ export const PullRequestSection: React.FC<{
       const reviewComments = context.reviewComments ?? [];
       const total = issueComments.length + reviewComments.length;
       if (total === 0) {
-        toast.message('No PR comments');
+        toast.message(t('pullRequest.noPrComments'));
         return;
       }
 
@@ -905,9 +909,9 @@ export const PullRequestSection: React.FC<{
       dispatchSyntheticPrompt(target, visibleText, instructionsText, payloadText);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      toast.error('Failed to load PR comments', { description: message });
+      toast.error(t('pullRequest.failedToLoadPrComments'), { description: message });
     }
-  }, [directory, dispatchSyntheticPrompt, github, pr, resolveChatDispatchTarget, setActiveMainTab]);
+  }, [directory, dispatchSyntheticPrompt, github, pr, resolveChatDispatchTarget, setActiveMainTab, t]);
 
   const sendSingleCommentToChat = React.useCallback((comment: TimelineCommentItem) => {
     setCommentsDialogOpen(false);
@@ -1150,30 +1154,30 @@ export const PullRequestSection: React.FC<{
       onGeneratedDescription?.();
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      toast.error('Failed to generate description', { description: message });
+      toast.error(t('pullRequest.failedToGenerateDescription'), { description: message });
     } finally {
       setIsGenerating(false);
     }
-  }, [additionalContext, branch, directory, isGenerating, onGeneratedDescription, targetBaseBranch]);
+  }, [additionalContext, branch, directory, isGenerating, onGeneratedDescription, targetBaseBranch, t]);
 
   const createPr = React.useCallback(async () => {
     if (!github?.prCreate) {
-      toast.error('GitHub runtime API unavailable');
+      toast.error(t('pullRequest.githubRuntimeApiUnavailable'));
       return;
     }
     const trimmedTitle = title.trim();
     if (!trimmedTitle) {
-      toast.error('Title is required');
+      toast.error(t('pullRequest.titleRequired'));
       return;
     }
 
     const trimmedBase = targetBaseBranch.trim();
     if (!trimmedBase) {
-      toast.error('Base branch is required');
+      toast.error(t('pullRequest.baseBranchRequired'));
       return;
     }
     if (trimmedBase === branch) {
-      toast.error('Base branch must differ from head branch');
+      toast.error(t('pullRequest.baseBranchMustDifferFromHeadBranch'));
       return;
     }
 
@@ -1190,75 +1194,75 @@ export const PullRequestSection: React.FC<{
         draft,
         ...(selectedRemote ? { remote: selectedRemote.name } : {}),
       });
-      toast.success('PR created');
+      toast.success(t('pullRequest.prCreated'));
       updatePrStatus(prStatusKey, (prev) => (prev ? { ...prev, pr } : prev));
       await refresh({ force: true });
       scheduleActionRefresh();
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      toast.error('Failed to create PR', { description: message });
+      toast.error(t('pullRequest.failedToCreatePr'), { description: message });
     } finally {
       setIsCreating(false);
     }
-  }, [body, branch, directory, draft, github, prStatusKey, refresh, scheduleActionRefresh, selectedRemote, targetBaseBranch, title, updatePrStatus]);
+  }, [body, branch, directory, draft, github, prStatusKey, refresh, scheduleActionRefresh, selectedRemote, targetBaseBranch, title, updatePrStatus,t]);
 
   const mergePr = React.useCallback(async (pr: GitHubPullRequest) => {
     if (!github?.prMerge) {
-      toast.error('GitHub runtime API unavailable');
+      toast.error(t('pullRequest.githubRuntimeApiUnavailable'));
       return;
     }
     setIsMerging(true);
     try {
       const result = await github.prMerge({ directory, number: pr.number, method: mergeMethod });
       if (result.merged) {
-        toast.success('PR merged');
+        toast.success(t('pullRequest.prMerged'));
       } else {
-        toast.message('PR not merged', { description: result.message || 'Not mergeable' });
+        toast.message(t('pullRequest.prNotMerged'), { description: result.message || t('pullRequest.notMergeable') });
       }
       await refresh({ force: true });
       scheduleActionRefresh();
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      toast.error('Merge failed', { description: message });
+      toast.error(t('pullRequest.mergeFailed'), { description: message });
       if (pr.url) {
         void openExternal(pr.url);
       }
     } finally {
       setIsMerging(false);
     }
-  }, [directory, github, mergeMethod, refresh, scheduleActionRefresh]);
+  }, [directory, github, mergeMethod, refresh, scheduleActionRefresh,t]);
 
   const markReady = React.useCallback(async (pr: GitHubPullRequest) => {
     if (!github?.prReady) {
-      toast.error('GitHub runtime API unavailable');
+      toast.error(t('pullRequest.githubRuntimeApiUnavailable'));
       return;
     }
     setIsMarkingReady(true);
     try {
       await github.prReady({ directory, number: pr.number });
-      toast.success('Marked ready for review');
+      toast.success(t('pullRequest.markedReadyForReview'));
       await refresh({ force: true });
       scheduleActionRefresh();
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      toast.error('Failed to mark ready', { description: message });
+      toast.error(t('pullRequest.failedToMarkReady'), { description: message });
       if (pr.url) {
         void openExternal(pr.url);
       }
     } finally {
       setIsMarkingReady(false);
     }
-  }, [directory, github, refresh, scheduleActionRefresh]);
+  }, [directory, github, refresh, scheduleActionRefresh,t]);
 
   const updatePr = React.useCallback(async (pr: GitHubPullRequest) => {
     if (!github?.prUpdate) {
-      toast.error('GitHub runtime API unavailable');
+      toast.error(t('pullRequest.githubRuntimeApiUnavailable'));
       return;
     }
 
     const trimmedTitle = editTitle.trim();
     if (!trimmedTitle) {
-      toast.error('Title is required');
+      toast.error(t('pullRequest.titleRequired'));
       return;
     }
 
@@ -1280,16 +1284,16 @@ export const PullRequestSection: React.FC<{
           }
         : prev));
       setIsEditingPr(false);
-      toast.success('PR updated');
+      toast.success(t('pullRequest.prUpdated'));
       await refresh({ force: true });
       scheduleActionRefresh();
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      toast.error('Failed to update PR', { description: message });
+      toast.error(t('pullRequest.failedToUpdatePr'), { description: message });
     } finally {
       setIsUpdating(false);
     }
-  }, [directory, editBody, editTitle, github, prStatusKey, refresh, scheduleActionRefresh, updatePrStatus]);
+  }, [directory, editBody, editTitle, github, prStatusKey, refresh, scheduleActionRefresh, updatePrStatus,t]);
 
   if (!canShow) {
     return null;
@@ -1326,17 +1330,17 @@ export const PullRequestSection: React.FC<{
                     type="button"
                     className="inline-flex size-6 shrink-0 items-center justify-center rounded-md border border-border/60 bg-background/70 hover:bg-interactive-hover/60"
                     onClick={() => void openExternal(pr.url)}
-                    aria-label="Open PR on GitHub"
+                    aria-label={t('pullRequest.openPrOnGitHub')}
                   >
                     <PrStateIcon className="size-4 shrink-0" style={{ color: prColorVar }} />
                   </button>
                 </TooltipTrigger>
-                <TooltipContent><p>Open PR on GitHub</p></TooltipContent>
+                <TooltipContent><p>{t('pullRequest.openPrOnGitHub')}</p></TooltipContent>
               </Tooltip>
             ) : (
               <PrStateIcon className="size-4 shrink-0" style={{ color: 'var(--surface-muted-foreground)' }} />
             )}
-            <h3 className="typography-ui-header font-semibold text-foreground truncate">Pull Request</h3>
+            <h3 className="typography-ui-header font-semibold text-foreground truncate">{t('pullRequest.pullRequest')}</h3>
             {pr ? (
               <span className="typography-meta text-muted-foreground truncate">#{pr.number}</span>
             ) : null}
@@ -1346,7 +1350,7 @@ export const PullRequestSection: React.FC<{
             {checks ? (
               <span className="inline-flex items-center gap-2 typography-micro text-muted-foreground">
                 <span className={`h-2 w-2 rounded-full ${statusColor(checks.state)}`} />
-                {checks.total > 0 ? `${checks.success}/${checks.total} checks` : `${checks.state} checks`}
+                {checks.total > 0 ? `${checks.success}/${checks.total} ${t('pullRequest.checks')}` : `${checks.state} ${t('pullRequest.checks')}`}
               </span>
             ) : null}
             {hasMultipleRemotes ? (
@@ -1384,9 +1388,9 @@ export const PullRequestSection: React.FC<{
         {pr ? (
           <div className="typography-micro text-muted-foreground">
             <span style={{ color: prColorVar }}>
-              {pr.state}{pr.draft ? ' (draft)' : ''}
+              {pr.state}{pr.draft ? ` (${t('pullRequest.draftLowercase')})` : ''}
             </span>
-            {pr.mergeable === false ? ' · not mergeable' : ''}
+            {pr.mergeable === false ? ` · ${t('pullRequest.notMergeable')}` : ''}
             {pr.state === 'open' && typeof pr.mergeableState === 'string' && pr.mergeableState && pr.mergeableState !== 'unknown'
               ? ` · ${pr.mergeableState}`
               : ''}
@@ -1398,23 +1402,23 @@ export const PullRequestSection: React.FC<{
         {shouldShowConnectionNotice ? (
           <div className="space-y-2">
             <div className="typography-meta text-muted-foreground">
-              GitHub not connected. Connect your GitHub account in settings.
+              {t('pullRequest.githubNotConnected')}
             </div>
                 <Button variant="outline" size="sm" onClick={openGitHubSettings} className="w-fit">
-                  Open settings
+                  {t('pullRequest.openSettings')}
                 </Button>
               </div>
             ) : null}
 
             {error ? (
               <div className="space-y-2">
-                <div className="typography-ui-label text-foreground">PR status unavailable</div>
+                <div className="typography-ui-label text-foreground">{t('pullRequest.prStatusUnavailable')}</div>
                 <div className="typography-meta text-muted-foreground break-words">{error}</div>
                 {repoUrl ? (
                   <Button variant="outline" size="sm" asChild className="w-fit">
                     <a href={repoUrl} target="_blank" rel="noopener noreferrer">
                       <RiExternalLinkLine className="size-4" />
-                      Open Repo
+                      {t('pullRequest.openRepo')}
                     </a>
                   </Button>
                 ) : null}
@@ -1424,7 +1428,7 @@ export const PullRequestSection: React.FC<{
             {!pr && !isInitialStatusResolved && !error && !shouldShowConnectionNotice ? (
               <div className="flex items-center gap-2 typography-micro text-muted-foreground">
                 <RiLoader4Line className="size-4 animate-spin" />
-                Checking PR status...
+                {t('pullRequest.checkingPrStatus')}
               </div>
             ) : pr ? (
               <div className="flex flex-col gap-2">
@@ -1435,7 +1439,7 @@ export const PullRequestSection: React.FC<{
                         <Input
                           value={editTitle}
                           onChange={(e) => setEditTitle(e.target.value)}
-                          placeholder="PR title"
+                          placeholder={t('pullRequest.prTitlePlaceholder')}
                           autoCorrect={hasTouchInput ? "on" : "off"}
                           autoCapitalize={hasTouchInput ? "sentences" : "off"}
                           spellCheck={hasTouchInput}
@@ -1444,7 +1448,7 @@ export const PullRequestSection: React.FC<{
                           value={editBody}
                           onChange={(e) => setEditBody(e.target.value)}
                           className="min-h-[120px] bg-background/80"
-                          placeholder="Describe this PR"
+                          placeholder={t('pullRequest.describePrPlaceholder')}
                           autoCorrect={hasTouchInput ? "on" : "off"}
                           autoCapitalize={hasTouchInput ? "sentences" : "off"}
                           spellCheck={hasTouchInput}
@@ -1460,18 +1464,18 @@ export const PullRequestSection: React.FC<{
                           />
                         ) : (
                           <div className="typography-micro text-muted-foreground whitespace-pre-wrap break-words mt-1">
-                            {isHydratingCurrentPrBody ? 'Loading description...' : 'No description provided.'}
+                            {isHydratingCurrentPrBody ? t('pullRequest.loadingDescription') : t('pullRequest.noDescriptionProvided')}
                           </div>
                         )}
                       </>
                     )}
                     {canMerge && pr.draft ? (
                       <div className="typography-micro text-muted-foreground">
-                        Draft PRs must be marked ready before merge.
+                        {t('pullRequest.draftMustBeReadyBeforeMerge')}
                       </div>
                     ) : null}
                     {!canMerge ? (
-                      <div className="typography-micro text-muted-foreground">No merge permission; use Open in GitHub.</div>
+                      <div className="typography-micro text-muted-foreground">{t('pullRequest.noMergePermissionUseOpenInGitHub')}</div>
                     ) : null}
                   </div>
 
@@ -1492,12 +1496,12 @@ export const PullRequestSection: React.FC<{
                                     setEditBody(pr.body || '');
                                   }}
                                   disabled={isUpdating}
-                                  aria-label="Cancel editing"
+                                  aria-label={t('pullRequest.cancelEditing')}
                                 >
                                   <RiCloseLine className="size-4" />
                                 </Button>
                               </TooltipTrigger>
-                              <TooltipContent><p>Cancel editing</p></TooltipContent>
+                              <TooltipContent><p>{t('pullRequest.cancelEditing')}</p></TooltipContent>
                             </Tooltip>
                             <Tooltip delayDuration={300}>
                               <TooltipTrigger asChild>
@@ -1506,12 +1510,12 @@ export const PullRequestSection: React.FC<{
                                   className="h-7 w-7 px-0"
                                   onClick={() => updatePr(pr)}
                                   disabled={isUpdating || !editTitle.trim()}
-                                  aria-label="Save PR title and description"
+                                  aria-label={t('pullRequest.savePrTitleAndDescription')}
                                 >
                                   {isUpdating ? <RiLoader4Line className="size-4 animate-spin" /> : <RiCheckLine className="size-4" />}
                                 </Button>
                               </TooltipTrigger>
-                              <TooltipContent><p>Save PR title and description</p></TooltipContent>
+                              <TooltipContent><p>{t('pullRequest.savePrTitleAndDescription')}</p></TooltipContent>
                             </Tooltip>
                           </>
                         ) : (
@@ -1522,12 +1526,12 @@ export const PullRequestSection: React.FC<{
                                 size="sm"
                                 className="h-7 w-7 px-0"
                                 onClick={() => setIsEditingPr(true)}
-                                aria-label="Edit PR title and description"
+                                aria-label={t('pullRequest.editPrTitleAndDescription')}
                               >
                                 <RiEditLine className="size-4" />
                               </Button>
                             </TooltipTrigger>
-                            <TooltipContent><p>Edit PR title and description</p></TooltipContent>
+                            <TooltipContent><p>{t('pullRequest.editPrTitleAndDescription')}</p></TooltipContent>
                           </Tooltip>
                         )
                       ) : null}
@@ -1541,12 +1545,12 @@ export const PullRequestSection: React.FC<{
                               className="h-7 w-7 px-0"
                               onClick={openChecksDialog}
                               disabled={isLoadingCheckDetails}
-                              aria-label="Open checks details"
+                              aria-label={t('pullRequest.openChecksDetails')}
                             >
                               {isLoadingCheckDetails ? <RiLoader4Line className="size-4 animate-spin" /> : <RiInformationLine className="size-4" />}
                             </Button>
                           </TooltipTrigger>
-                          <TooltipContent><p>Open checks details</p></TooltipContent>
+                          <TooltipContent><p>{t('pullRequest.openChecksDetails')}</p></TooltipContent>
                         </Tooltip>
                       ) : null}
 
@@ -1558,12 +1562,12 @@ export const PullRequestSection: React.FC<{
                               size="sm"
                               className="h-7 w-7 px-0 border-[var(--status-success-border)] bg-[var(--status-success-background)] text-[var(--status-success)]"
                               onClick={sendFailedChecksToChat}
-                              aria-label="Resolve failed checks with agent"
+                              aria-label={t('pullRequest.resolveFailedChecksWithAgent')}
                             >
                               <RiErrorWarningLine className="size-4" />
                             </Button>
                           </TooltipTrigger>
-                          <TooltipContent><p>Resolve failed checks with agent</p></TooltipContent>
+                          <TooltipContent><p>{t('pullRequest.resolveFailedChecksWithAgent')}</p></TooltipContent>
                         </Tooltip>
                       ) : null}
 
@@ -1574,12 +1578,12 @@ export const PullRequestSection: React.FC<{
                             size="sm"
                             className="h-7 w-7 px-0"
                             onClick={openCommentsDialog}
-                            aria-label="Open PR comments"
+                            aria-label={t('pullRequest.openPrComments')}
                           >
                             <RiChat4Line className="size-4" />
                           </Button>
                         </TooltipTrigger>
-                        <TooltipContent><p>Open PR comments</p></TooltipContent>
+                        <TooltipContent><p>{t('pullRequest.openPrComments')}</p></TooltipContent>
                       </Tooltip>
 
                       <Tooltip delayDuration={300}>
@@ -1589,12 +1593,12 @@ export const PullRequestSection: React.FC<{
                             size="sm"
                             className="h-7 w-7 px-0 border-[var(--status-success-border)] bg-[var(--status-success-background)] text-[var(--status-success)]"
                             onClick={sendCommentsToChat}
-                            aria-label="Share comments with agent"
+                            aria-label={t('pullRequest.shareCommentsWithAgent')}
                           >
                             <RiAiGenerate2 className="size-4" />
                           </Button>
                         </TooltipTrigger>
-                        <TooltipContent><p>Share comments with agent</p></TooltipContent>
+                        <TooltipContent><p>{t('pullRequest.shareCommentsWithAgent')}</p></TooltipContent>
                       </Tooltip>
 
                       {canMerge && pr.draft && pr.state === 'open' ? (
@@ -1606,12 +1610,12 @@ export const PullRequestSection: React.FC<{
                               className="h-7 w-7 px-0"
                               onClick={() => markReady(pr)}
                               disabled={isMarkingReady || isMerging || isUpdating || isEditingPr}
-                              aria-label="Mark PR ready for review"
+                              aria-label={t('pullRequest.markPrReadyForReview')}
                             >
                               {isMarkingReady ? <RiLoader4Line className="size-4 animate-spin" /> : <RiCheckboxCircleLine className="size-4" />}
                             </Button>
                           </TooltipTrigger>
-                          <TooltipContent><p>Mark PR ready for review</p></TooltipContent>
+                          <TooltipContent><p>{t('pullRequest.markPrReadyForReview')}</p></TooltipContent>
                         </Tooltip>
                       ) : null}
                     </div>
@@ -1628,9 +1632,9 @@ export const PullRequestSection: React.FC<{
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="squash">Squash</SelectItem>
-                              <SelectItem value="merge">Merge</SelectItem>
-                              <SelectItem value="rebase">Rebase</SelectItem>
+                              <SelectItem value="squash">{t('pullRequest.squash')}</SelectItem>
+                              <SelectItem value="merge">{t('pullRequest.merge')}</SelectItem>
+                              <SelectItem value="rebase">{t('pullRequest.rebase')}</SelectItem>
                             </SelectContent>
                           </Select>
                           <Tooltip delayDuration={300}>
@@ -1640,12 +1644,12 @@ export const PullRequestSection: React.FC<{
                                 className="h-7 w-7 px-0"
                                 onClick={() => mergePr(pr)}
                                 disabled={isMerging || isMarkingReady || pr.state !== 'open' || pr.draft || isUpdating || isEditingPr}
-                                aria-label="Merge pull request"
+                                aria-label={t('pullRequest.mergePullRequest')}
                               >
                                 {isMerging ? <RiLoader4Line className="size-4 animate-spin" /> : <RiGitMergeLine className="size-4" />}
                               </Button>
                             </TooltipTrigger>
-                            <TooltipContent><p>Merge pull request</p></TooltipContent>
+                            <TooltipContent><p>{t('pullRequest.mergePullRequest')}</p></TooltipContent>
                           </Tooltip>
                         </>
                       ) : null}
@@ -1657,7 +1661,7 @@ export const PullRequestSection: React.FC<{
               <div className="flex flex-col gap-3">
                 <div className="flex items-center justify-between gap-2">
                   <div className="min-w-0">
-                    <div className="typography-ui-label text-foreground">Create PR</div>
+                    <div className="typography-ui-label text-foreground">{t('pullRequest.createPr')}</div>
                     <div className="typography-micro text-muted-foreground truncate">
                       {branch} → {targetBaseBranch}
                     </div>
@@ -1666,18 +1670,18 @@ export const PullRequestSection: React.FC<{
                     <Button variant="outline" size="sm" asChild>
                       <a href={repoUrl} target="_blank" rel="noopener noreferrer">
                         <RiExternalLinkLine className="size-4" />
-                        Repo
+                        {t('pullRequest.repo')}
                       </a>
                     </Button>
                   ) : null}
                 </div>
 
                 <label className="space-y-1">
-                  <div className="typography-micro text-muted-foreground">Title</div>
+                  <div className="typography-micro text-muted-foreground">{t('pullRequest.title')}</div>
                   <Input
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
-                    placeholder="PR title"
+                    placeholder={t('pullRequest.prTitlePlaceholder')}
                     autoCorrect={hasTouchInput ? "on" : "off"}
                     autoCapitalize={hasTouchInput ? "sentences" : "off"}
                     spellCheck={hasTouchInput}
@@ -1685,11 +1689,11 @@ export const PullRequestSection: React.FC<{
                 </label>
 
                 <label className="space-y-1">
-                  <div className="typography-micro text-muted-foreground">Base branch</div>
+                  <div className="typography-micro text-muted-foreground">{t('pullRequest.baseBranch')}</div>
                   {availableBaseBranches.length > 0 ? (
                     <Select value={targetBaseBranch} onValueChange={setTargetBaseBranch}>
                       <SelectTrigger className="h-9">
-                        <SelectValue placeholder="Select base branch" />
+                        <SelectValue placeholder={t('pullRequest.selectBaseBranch')} />
                       </SelectTrigger>
                       <SelectContent>
                         {availableBaseBranches.map((candidate) => (
@@ -1701,18 +1705,18 @@ export const PullRequestSection: React.FC<{
                     <Input
                       value={targetBaseBranch}
                       onChange={(e) => setTargetBaseBranch(e.target.value)}
-                      placeholder="main"
+                      placeholder={t('pullRequest.defaultBaseBranch')}
                     />
                   )}
                 </label>
 
                 <label className="space-y-1">
-                  <div className="typography-micro text-muted-foreground">Description</div>
+                  <div className="typography-micro text-muted-foreground">{t('pullRequest.description')}</div>
                   <Textarea
                     value={body}
                     onChange={(e) => setBody(e.target.value)}
                     className="min-h-[110px] bg-background/80"
-                    placeholder="What changed and why"
+                    placeholder={t('pullRequest.whatChangedAndWhy')}
                     autoCorrect={hasTouchInput ? "on" : "off"}
                     autoCapitalize={hasTouchInput ? "sentences" : "off"}
                     spellCheck={hasTouchInput}
@@ -1739,7 +1743,7 @@ export const PullRequestSection: React.FC<{
                       e.stopPropagation();
                       setDraft((v) => !v);
                     }}
-                    aria-label="Toggle draft PR"
+                    aria-label={t('pullRequest.toggleDraftPr')}
                     className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                   >
                     {draft ? (
@@ -1748,28 +1752,26 @@ export const PullRequestSection: React.FC<{
                       <RiCheckboxBlankLine className="size-4" />
                     )}
                   </button>
-                  <span className="typography-ui-label text-foreground select-none">Draft</span>
+                  <span className="typography-ui-label text-foreground select-none">{t('pullRequest.draft')}</span>
                 </div>
 
                 {/* Additional Context Section */}
                 {isMobile ? (
                   <div className="space-y-2">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="typography-micro text-muted-foreground">
-                        Additional context (optional)
-                      </span>
+                      <span className="typography-micro text-muted-foreground">{t('pullRequest.additionalContextOptional')}</span>
                       <Button
                         variant="outline"
                         size="sm"
                         onClick={() => setIsContextSheetOpen(true)}
                       >
-                        {additionalContext.trim() ? 'Edit' : 'Add'}
+                        {additionalContext.trim() ? t('common.edit') : t('common.add')}
                       </Button>
                     </div>
                     {additionalContext.trim() && (
                       <div className="flex items-center gap-2">
                         <span className="inline-flex items-center rounded-full bg-[var(--interactive-selection)] px-2 py-0.5 text-xs text-[var(--interactive-selection-foreground)]">
-                          Context added
+                          {t('pullRequest.contextAdded')}
                         </span>
                       </div>
                     )}
@@ -1777,11 +1779,9 @@ export const PullRequestSection: React.FC<{
                 ) : (
                   <Collapsible open={isContextOpen} onOpenChange={setIsContextOpen}>
                     <CollapsibleTrigger className="flex w-full items-center justify-between rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)] px-3 py-2 hover:bg-[var(--interactive-hover)]">
-                      <span className="typography-micro text-muted-foreground">
-                        Additional context (optional)
-                      </span>
+                      <span className="typography-micro text-muted-foreground">{t('pullRequest.additionalContextOptional')}</span>
                       <span className="typography-micro text-[var(--primary-base)]">
-                        {isContextOpen ? 'Hide' : additionalContext.trim() ? 'Edit' : 'Add'}
+                        {isContextOpen ? t('common.hide') : additionalContext.trim() ? t('common.edit') : t('common.add')}
                       </span>
                     </CollapsibleTrigger>
                     <CollapsibleContent>
@@ -1790,10 +1790,10 @@ export const PullRequestSection: React.FC<{
                           value={additionalContext}
                           onChange={(e) => setAdditionalContext(e.target.value)}
                           className="min-h-[100px] bg-transparent"
-                          placeholder="Explain why this change is needed...&#10;Mention how to test (commands / steps)...&#10;Call out risks / rollout plan..."
+                          placeholder={t('pullRequest.additionalContextPlaceholder')}
                         />
                         <p className="typography-micro text-muted-foreground">
-                          This text is only used to guide PR generation.
+                          {t('pullRequest.additionalContextHelp')}
                         </p>
                       </div>
                     </CollapsibleContent>
@@ -1804,14 +1804,14 @@ export const PullRequestSection: React.FC<{
                 <MobileOverlayPanel
                   open={isContextSheetOpen}
                   onClose={() => setIsContextSheetOpen(false)}
-                  title="Additional context"
+                  title={t('pullRequest.additionalContext')}
                   footer={
                     <Button
                       size="sm"
                       onClick={() => setIsContextSheetOpen(false)}
                       className="w-full"
                     >
-                      Done
+                      {t('common.done')}
                     </Button>
                   }
                 >
@@ -1820,11 +1820,11 @@ export const PullRequestSection: React.FC<{
                       value={additionalContext}
                       onChange={(e) => setAdditionalContext(e.target.value)}
                       className="min-h-[200px] bg-transparent"
-                      placeholder="Explain why this change is needed...&#10;Mention how to test (commands / steps)...&#10;Call out risks / rollout plan..."
+                      placeholder={t('pullRequest.additionalContextPlaceholder')}
                       autoFocus
                     />
                     <p className="typography-micro text-muted-foreground">
-                      This text is only used to guide PR generation.
+                      {t('pullRequest.additionalContextHelp')}
                     </p>
                   </div>
                 </MobileOverlayPanel>
@@ -1837,7 +1837,7 @@ export const PullRequestSection: React.FC<{
                     disabled={isGenerating || isCreating}
                   >
                     {isGenerating ? <RiLoader4Line className="size-4 animate-spin" /> : <RiAiGenerate2 className="size-4 text-primary" />}
-                    Generate
+                    {t('pullRequest.generate')}
                   </Button>
                   <div className="flex-1" />
                   <Button
@@ -1849,7 +1849,7 @@ export const PullRequestSection: React.FC<{
                     <span className="inline-flex size-4 items-center justify-center">
                       {isCreating ? <RiLoader4Line className="size-4 animate-spin" /> : <RiGitPullRequestLine className="size-4" />}
                     </span>
-                    <span>Create PR</span>
+                    <span>{t('pullRequest.createPr')}</span>
                   </Button>
                 </div>
               </div>
@@ -1861,10 +1861,10 @@ export const PullRequestSection: React.FC<{
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <RiGitPullRequestLine className="h-5 w-5" />
-              Check Details
+              {t('pullRequest.checkDetails')}
             </DialogTitle>
             <DialogDescription>
-              {pr ? `PR #${pr.number}` : 'Pull request'}
+              {pr ? `PR #${pr.number}` : t('pullRequest.pullRequest')}
             </DialogDescription>
           </DialogHeader>
 
@@ -1872,7 +1872,7 @@ export const PullRequestSection: React.FC<{
             {isLoadingCheckDetails ? (
               <div className="text-center text-muted-foreground py-8 flex items-center justify-center gap-2">
                 <RiLoader4Line className="h-4 w-4 animate-spin" />
-                Loading...
+                {t('common.loading')}
               </div>
             ) : null}
 
@@ -1888,7 +1888,7 @@ export const PullRequestSection: React.FC<{
                     );
                   })
                 ) : (
-                  <div className="text-center text-muted-foreground py-8">No check details available.</div>
+                  <div className="text-center text-muted-foreground py-8">{t('pullRequest.noCheckDetailsAvailable')}</div>
                 )}
               </div>
             ) : null}
@@ -1902,9 +1902,9 @@ export const PullRequestSection: React.FC<{
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <RiGitPullRequestLine className="h-5 w-5" />
-              PR Comments
+              {t('pullRequest.prComments')}
               {pr ? (
-                <span className="typography-meta text-muted-foreground">PR #{pr.number}</span>
+                <span className="typography-meta text-muted-foreground">{t('chatInput.pullRequestNumber', { number: pr.number })}</span>
               ) : null}
             </DialogTitle>
           </DialogHeader>
@@ -1913,7 +1913,7 @@ export const PullRequestSection: React.FC<{
             {isLoadingCommentsDetails ? (
               <div className="text-center text-muted-foreground py-8 flex items-center justify-center gap-2">
                 <RiLoader4Line className="h-4 w-4 animate-spin" />
-                Loading...
+                {t('common.loading')}
               </div>
             ) : null}
 
@@ -1949,13 +1949,13 @@ export const PullRequestSection: React.FC<{
                                       size="sm"
                                       className="h-6 px-0 has-[>svg]:px-0 sm:px-2 sm:has-[>svg]:px-2.5 text-[var(--status-success)] hover:bg-[var(--status-success-background)] hover:text-[var(--status-success)] justify-start"
                                       onClick={() => sendSingleCommentToChat(comment)}
-                                      aria-label="Send this comment to agent"
+                                      aria-label={t('pullRequest.sendThisCommentToAgent')}
                                     >
                                       <RiAiGenerate2 className="size-3.5" />
-                                      Send to agent
+                                      {t('pullRequest.sendToAgent')}
                                     </Button>
                                   </TooltipTrigger>
-                                  <TooltipContent><p>Send this comment to agent</p></TooltipContent>
+                                  <TooltipContent><p>{t('pullRequest.sendThisCommentToAgent')}</p></TooltipContent>
                                 </Tooltip>
                               </div>
                               <div className="typography-micro text-muted-foreground">
@@ -1977,7 +1977,7 @@ export const PullRequestSection: React.FC<{
                     </div>
                   </div>
                 ) : (
-                  <div className="text-center text-muted-foreground py-8">No comments found.</div>
+                  <div className="text-center text-muted-foreground py-8">{t('pullRequest.noCommentsFound')}</div>
                 )}
               </div>
             ) : null}

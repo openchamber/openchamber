@@ -18,9 +18,16 @@ import { RiAddLine, RiChatAi3Line, RiCheckLine, RiCodeLine, RiComputerLine, RiGi
 import { createWorktreeSession } from '@/lib/worktreeSessionCreator';
 import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
-import { SETTINGS_PAGE_METADATA, SETTINGS_GROUP_LABELS, type SettingsRuntimeContext } from '@/lib/settings/metadata';
+import {
+  SETTINGS_PAGE_METADATA,
+  type SettingsPageGroup,
+  type SettingsPageSlug,
+  type SettingsRuntimeContext,
+} from '@/lib/settings/metadata';
+import { useLanguage } from '@/hooks/useLanguage';
 
 export const CommandPalette: React.FC = () => {
+  const { t } = useLanguage();
   const {
     isCommandPaletteOpen,
     setCommandPaletteOpen,
@@ -129,16 +136,81 @@ export const CommandPalette: React.FC = () => {
       .filter((p) => (p.isAvailable ? p.isAvailable(settingsRuntimeCtx) : true));
   }, [settingsRuntimeCtx]);
 
+  const getSettingsGroupLabel = React.useCallback((group: SettingsPageGroup): string => {
+    switch (group) {
+      case 'appearance':
+        return t('settingsGroups.appearance');
+      case 'projects':
+        return t('settingsGroups.projects');
+      case 'general':
+        return t('settingsGroups.general');
+      case 'opencode':
+        return t('settingsGroups.opencode');
+      case 'git':
+        return t('settingsGroups.git');
+      case 'skills':
+        return t('settingsGroups.skills');
+      case 'usage':
+        return t('settingsGroups.usage');
+      case 'advanced':
+        return t('settingsGroups.advanced');
+      default:
+        return group;
+    }
+  }, [t]);
+
+  const getSettingsPageTitle = React.useCallback((slug: SettingsPageSlug): string => {
+    switch (slug) {
+      case 'appearance':
+        return t('settingsNav.appearance');
+      case 'chat':
+        return t('settingsNav.chat');
+      case 'notifications':
+        return t('settingsNav.notifications');
+      case 'sessions':
+        return t('settingsNav.sessions');
+      case 'shortcuts':
+        return t('settingsNav.shortcuts');
+      case 'git':
+        return t('settingsNav.git');
+      case 'projects':
+        return t('settingsNav.projects');
+      case 'remote-instances':
+        return t('settingsNav.remoteInstances');
+      case 'agents':
+        return t('settingsNav.agents');
+      case 'commands':
+        return t('settingsNav.commands');
+      case 'mcp':
+        return t('settingsNav.mcp');
+      case 'providers':
+        return t('settingsNav.providers');
+      case 'usage':
+        return t('settingsNav.usage');
+      case 'skills.installed':
+        return t('settingsNav.skills');
+      case 'skills.catalog':
+        return t('settingsNav.skillsCatalog');
+      case 'voice':
+        return t('settingsNav.voice');
+      case 'tunnel':
+        return t('settingsNav.remoteTunnel');
+      case 'home':
+        return t('settings.title');
+      default:
+        return t('settings.title');
+    }
+  }, [t]);
+
   const settingsItems = React.useMemo(() => {
-    const groupLabel = (group: string) => (SETTINGS_GROUP_LABELS as Record<string, string>)[group] ?? group;
     return settingsPages
       .slice()
       .sort((a, b) => {
-        const g = groupLabel(a.group).localeCompare(groupLabel(b.group));
+        const g = getSettingsGroupLabel(a.group).localeCompare(getSettingsGroupLabel(b.group));
         if (g !== 0) return g;
-        return a.title.localeCompare(b.title);
+        return getSettingsPageTitle(a.slug).localeCompare(getSettingsPageTitle(b.slug));
       });
-  }, [settingsPages]);
+  }, [getSettingsGroupLabel, getSettingsPageTitle, settingsPages]);
 
   const handleToggleRightSidebar = () => {
     toggleRightSidebar();
@@ -183,116 +255,116 @@ export const CommandPalette: React.FC = () => {
 
   return (
     <CommandDialog open={isCommandPaletteOpen} onOpenChange={setCommandPaletteOpen}>
-      <CommandInput placeholder="Type a command or search..." />
+      <CommandInput placeholder={t('commandPalette.typeCommandOrSearch')} />
       <CommandList>
-        <CommandEmpty>No results found.</CommandEmpty>
+        <CommandEmpty>{t('commandPalette.noResultsFound')}</CommandEmpty>
 
-        <CommandGroup heading="Actions">
+        <CommandGroup heading={t('commandPalette.actions')}>
           <CommandItem onSelect={handleOpenSessionList}>
             <RiLayoutLeftLine className="mr-2 h-4 w-4" />
-            <span>Open Session List</span>
+            <span>{t('commandPalette.openSessionList')}</span>
             <CommandShortcut>{shortcut('toggle_sidebar')}</CommandShortcut>
           </CommandItem>
           <CommandItem onSelect={handleCreateSession}>
             <RiAddLine className="mr-2 h-4 w-4" />
-            <span>New Session</span>
+            <span>{t('commandPalette.newSession')}</span>
             <CommandShortcut>
               {shortcut('new_chat')}
             </CommandShortcut>
           </CommandItem>
           <CommandItem onSelect={handleCreateWorktreeSession}>
             <RiGitBranchLine className="mr-2 h-4 w-4" />
-            <span>New Worktree Draft</span>
+            <span>{t('commandPalette.newSessionWithWorktree')}</span>
             <CommandShortcut>
               {shortcut('new_chat_worktree')}
             </CommandShortcut>
           </CommandItem>
           <CommandItem onSelect={handleToggleRightSidebar}>
             <RiLayoutRightLine className="mr-2 h-4 w-4" />
-            <span>Toggle Right Sidebar</span>
+            <span>{t('commandPalette.toggleRightSidebar')}</span>
             <CommandShortcut>{shortcut('toggle_right_sidebar')}</CommandShortcut>
           </CommandItem>
           <CommandItem onSelect={handleOpenRightSidebarGit}>
             <RiGitBranchLine className="mr-2 h-4 w-4" />
-            <span>Open Right Sidebar Git</span>
+            <span>{t('commandPalette.openRightSidebarGit')}</span>
             <CommandShortcut>{shortcut('open_right_sidebar_git')}</CommandShortcut>
           </CommandItem>
           <CommandItem onSelect={handleOpenRightSidebarFiles}>
             <RiLayoutRightLine className="mr-2 h-4 w-4" />
-            <span>Open Right Sidebar Files</span>
+            <span>{t('commandPalette.openRightSidebarFiles')}</span>
             <CommandShortcut>{shortcut('open_right_sidebar_files')}</CommandShortcut>
           </CommandItem>
           <CommandItem onSelect={handleToggleTerminalDock}>
             <RiTerminalBoxLine className="mr-2 h-4 w-4" />
-            <span>Toggle Terminal Dock</span>
+            <span>{t('commandPalette.toggleTerminalDock')}</span>
             <CommandShortcut>{shortcut('toggle_terminal')}</CommandShortcut>
           </CommandItem>
           <CommandItem onSelect={handleToggleTerminalExpanded}>
             <RiTerminalBoxLine className="mr-2 h-4 w-4" />
-            <span>Toggle Terminal Expanded</span>
+            <span>{t('commandPalette.toggleTerminalExpanded')}</span>
             <CommandShortcut>{shortcut('toggle_terminal_expanded')}</CommandShortcut>
           </CommandItem>
           <CommandItem onSelect={handleShowHelp}>
             <RiQuestionLine className="mr-2 h-4 w-4" />
-            <span>Keyboard Shortcuts</span>
+            <span>{t('commandPalette.keyboardShortcuts')}</span>
             <CommandShortcut>{shortcut('open_help')}</CommandShortcut>
           </CommandItem>
           <CommandItem onSelect={handleOpenDiffPanel}>
             <RiCodeLine className="mr-2 h-4 w-4" />
-            <span>Open Diff Panel</span>
+            <span>{t('commandPalette.openDiffPanel')}</span>
             <CommandShortcut>{shortcut('open_diff_panel')}</CommandShortcut>
           </CommandItem>
           <CommandItem onSelect={handleOpenTerminal}>
             <RiTerminalBoxLine className="mr-2 h-4 w-4" />
-            <span>Open Terminal</span>
+            <span>{t('commandPalette.openTerminal')}</span>
             <CommandShortcut>{shortcut('open_terminal_panel')}</CommandShortcut>
           </CommandItem>
           <CommandItem onSelect={handleOpenGitPanel}>
             <RiGitBranchLine className="mr-2 h-4 w-4" />
-            <span>Open Git Panel</span>
+            <span>{t('commandPalette.openGitPanel')}</span>
             <CommandShortcut>{shortcut('open_git_panel')}</CommandShortcut>
           </CommandItem>
           <CommandItem onSelect={handleOpenTimeline}>
             <RiTimeLine className="mr-2 h-4 w-4" />
-            <span>Open Timeline</span>
+            <span>{t('commandPalette.openTimeline')}</span>
             <CommandShortcut>{shortcut('open_timeline')}</CommandShortcut>
           </CommandItem>
           <CommandItem onSelect={handleOpenSettings}>
             <RiSettings3Line className="mr-2 h-4 w-4" />
-            <span>Open Settings</span>
+            <span>{t('commandPalette.openSettings')}</span>
             <CommandShortcut>{shortcut('open_settings')}</CommandShortcut>
           </CommandItem>
           <CommandItem onSelect={() => handleOpenSettingsPage('skills.catalog')}>
             <RiSettings3Line className="mr-2 h-4 w-4" />
-            <span>Open Skills Catalog</span>
+            <span>{t('commandPalette.openSkillsCatalog')}</span>
           </CommandItem>
         </CommandGroup>
 
-        <CommandGroup heading="Settings">
+        <CommandGroup heading={t('commandPalette.settings')}>
           {settingsItems.map((page) => (
             <CommandItem key={page.slug} onSelect={() => handleOpenSettingsPage(page.slug)}>
               <RiSettings3Line className="mr-2 h-4 w-4" />
-              <span>{SETTINGS_GROUP_LABELS[page.group]}: {page.title}</span>
+              <span>{getSettingsGroupLabel(page.group)}: {getSettingsPageTitle(page.slug)}</span>
             </CommandItem>
           ))}
         </CommandGroup>
 
         <CommandSeparator />
 
-        <CommandGroup heading="Theme">
+        <CommandGroup heading={t('commandPalette.theme')}>
           <CommandItem onSelect={() => handleSetThemeMode('light')}>
             <RiSunLine className="mr-2 h-4 w-4" />
-            <span>Light Theme</span>
+            <span>{t('commandPalette.lightTheme')}</span>
             {themeMode === 'light' && <RiCheckLine className="ml-auto h-4 w-4" />}
           </CommandItem>
           <CommandItem onSelect={() => handleSetThemeMode('dark')}>
             <RiMoonLine className="mr-2 h-4 w-4" />
-            <span>Dark Theme</span>
+            <span>{t('commandPalette.darkTheme')}</span>
             {themeMode === 'dark' && <RiCheckLine className="ml-auto h-4 w-4" />}
           </CommandItem>
           <CommandItem onSelect={() => handleSetThemeMode('system')}>
             <RiComputerLine className="mr-2 h-4 w-4" />
-            <span>System Theme</span>
+            <span>{t('commandPalette.systemTheme')}</span>
             {themeMode === 'system' && <RiCheckLine className="ml-auto h-4 w-4" />}
           </CommandItem>
         </CommandGroup>
@@ -300,7 +372,7 @@ export const CommandPalette: React.FC = () => {
         {currentSessions.length > 0 && (
           <>
             <CommandSeparator />
-            <CommandGroup heading="Recent Sessions">
+            <CommandGroup heading={t('commandPalette.recentSessions')}>
               {currentSessions.map((session) => (
                 <CommandItem
                   key={session.id}
@@ -308,7 +380,7 @@ export const CommandPalette: React.FC = () => {
                 >
                   <RiChatAi3Line className="mr-2 h-4 w-4" />
                   <span className="truncate">
-                    {session.title || 'Untitled Session'}
+                    {session.title || t('commandPalette.untitledSession')}
                   </span>
                 </CommandItem>
               ))}

@@ -2,6 +2,7 @@ import React from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { cn } from '@/lib/utils';
 import { SettingsView } from './SettingsView';
+import { useLanguage } from '@/hooks/useLanguage';
 
 interface SettingsWindowProps {
   open: boolean;
@@ -13,6 +14,7 @@ interface SettingsWindowProps {
  * Used for desktop and web (non-mobile) environments.
  */
 export const SettingsWindow: React.FC<SettingsWindowProps> = ({ open, onOpenChange }) => {
+  const { t } = useLanguage();
   const descriptionId = React.useId();
 
   const hasOpenFloatingMenu = React.useCallback(() => {
@@ -46,7 +48,7 @@ export const SettingsWindow: React.FC<SettingsWindowProps> = ({ open, onOpenChan
           )}
         >
           <DialogPrimitive.Description id={descriptionId} className="sr-only">
-            OpenChamber settings window.
+            {t('settings.windowDescription')}
           </DialogPrimitive.Description>
           <SettingsView onClose={() => onOpenChange(false)} isWindowed />
         </DialogPrimitive.Content>

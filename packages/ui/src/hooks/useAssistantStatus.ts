@@ -2,6 +2,7 @@ import React from 'react';
 import type { AssistantMessage, Message, Part, ReasoningPart, TextPart, ToolPart } from '@opencode-ai/sdk/v2';
 import { useShallow } from 'zustand/react/shallow';
 
+import i18n from '@/i18n';
 import type { MessageStreamPhase } from '@/stores/types/sessionTypes';
 import { useSessionStore } from '@/stores/useSessionStore';
 import { isFullySyntheticMessage } from '@/lib/messages/synthetic';
@@ -113,6 +114,56 @@ const getToolDisplayName = (part: ToolPart): string => {
     return typeof candidate.name === 'string' ? candidate.name : 'tool';
 };
 
+// 使用稳定的 i18n key 生成工具运行状态，避免界面中出现硬编码英文。
+const getToolStatusPhrase = (toolName: string): string => {
+    const TOOL_STATUS_KEYS: Record<string, string> = {
+        read: 'assistantStatus.toolStatus.read',
+        write: 'assistantStatus.toolStatus.write',
+        edit: 'assistantStatus.toolStatus.edit',
+        multiedit: 'assistantStatus.toolStatus.multiedit',
+        apply_patch: 'assistantStatus.toolStatus.applyPatch',
+        bash: 'assistantStatus.toolStatus.bash',
+        grep: 'assistantStatus.toolStatus.grep',
+        glob: 'assistantStatus.toolStatus.glob',
+        list: 'assistantStatus.toolStatus.list',
+        task: 'assistantStatus.toolStatus.task',
+        webfetch: 'assistantStatus.toolStatus.webfetch',
+        websearch: 'assistantStatus.toolStatus.websearch',
+        codesearch: 'assistantStatus.toolStatus.codesearch',
+        todowrite: 'assistantStatus.toolStatus.todowrite',
+        todoread: 'assistantStatus.toolStatus.todoread',
+        skill: 'assistantStatus.toolStatus.skill',
+        question: 'assistantStatus.toolStatus.question',
+        plan_enter: 'assistantStatus.toolStatus.planEnter',
+        plan_exit: 'assistantStatus.toolStatus.planExit',
+    };
+
+    const key = TOOL_STATUS_KEYS[toolName];
+    return key ? i18n.t(key) : i18n.t('assistantStatus.toolStatus.usingTool', { toolName });
+};
+
+// 兜底工作状态文案同样走 i18n，保持随机占位文本可随语言切换。
+const getRandomWorkingPhrase = (): string => {
+    const workingPhrases = [
+        'assistantStatus.workingPhrases.working',
+        'assistantStatus.workingPhrases.processing',
+        'assistantStatus.workingPhrases.preparing',
+        'assistantStatus.workingPhrases.warmingUp',
+        'assistantStatus.workingPhrases.gearsTurning',
+        'assistantStatus.workingPhrases.computing',
+        'assistantStatus.workingPhrases.calculating',
+        'assistantStatus.workingPhrases.analyzing',
+        'assistantStatus.workingPhrases.wheelsSpinning',
+        'assistantStatus.workingPhrases.calibrating',
+        'assistantStatus.workingPhrases.synthesizing',
+        'assistantStatus.workingPhrases.connectingDots',
+        'assistantStatus.workingPhrases.inspectingLogic',
+        'assistantStatus.workingPhrases.weighingOptions',
+    ];
+
+    return i18n.t(workingPhrases[Math.floor(Math.random() * workingPhrases.length)]);
+};
+
 export function useAssistantStatus(): AssistantStatusSnapshot {
     const { currentSessionId, messages, permissions, sessionAbortFlags } = useSessionStore(
         useShallow((state) => ({
@@ -154,7 +205,7 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
 
     const parsedStatus = React.useMemo<ParsedStatusResult>(() => {
         if (sessionMessages.length === 0) {
-            return { activePartType: undefined, activeToolName: undefined, statusText: 'working', isGenericStatus: true };
+            return { activePartType: undefined, activeToolName: undefined, statusText: i18n.t('assistantStatus.status.working'), isGenericStatus: true };
         }
 
         const assistantMessages = sessionMessages
@@ -164,7 +215,7 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
             );
 
         if (assistantMessages.length === 0) {
-            return { activePartType: undefined, activeToolName: undefined, statusText: 'working', isGenericStatus: true };
+            return { activePartType: undefined, activeToolName: undefined, statusText: i18n.t('assistantStatus.status.working'), isGenericStatus: true };
         }
 
         const sortedAssistantMessages = [...assistantMessages].sort((a, b) => {
@@ -227,59 +278,12 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
             }
         }
 
-        const TOOL_STATUS_PHRASES: Record<string, string> = {
-            read: 'reading file',
-            write: 'writing file',
-            edit: 'editing file',
-            multiedit: 'editing files',
-            apply_patch: 'applying patch',
-            bash: 'running command',
-            grep: 'searching content',
-            glob: 'finding files',
-            list: 'listing directory',
-            task: 'delegating task',
-            webfetch: 'fetching URL',
-            websearch: 'searching web',
-            codesearch: 'web code search',
-            todowrite: 'updating todos',
-            todoread: 'reading todos',
-            skill: 'learning skill',
-            question: 'asking question',
-            plan_enter: 'switching to planning',
-            plan_exit: 'switching to building',
-        };
-
-        const WORKING_PHRASES = [
-            'working',
-            'processing',
-            'preparing',
-            'warming up',
-            'gears turning',
-            'computing',
-            'calculating',
-            'analyzing',
-            'wheels spinning',
-            'calibrating',
-            'synthesizing',
-            'connecting dots',
-            'inspecting logic',
-            'weighing options',
-        ];
-
-        const getToolStatusPhrase = (toolName: string): string => {
-            return TOOL_STATUS_PHRASES[toolName] ?? `using ${toolName}`;
-        };
-
-        const getRandomWorkingPhrase = (): string => {
-            return WORKING_PHRASES[Math.floor(Math.random() * WORKING_PHRASES.length)];
-        };
-
         const isGenericStatus = activePartType === undefined;
         const statusText = (() => {
-            if (activePartType === 'editing') return 'editing file';
+            if (activePartType === 'editing') return i18n.t('assistantStatus.status.editingFile');
             if (activePartType === 'tool' && activeToolName) return getToolStatusPhrase(activeToolName);
-            if (activePartType === 'reasoning') return 'thinking';
-            if (activePartType === 'text') return 'composing';
+            if (activePartType === 'reasoning') return i18n.t('assistantStatus.status.thinking');
+            if (activePartType === 'text') return i18n.t('assistantStatus.status.composing');
             return getRandomWorkingPhrase();
         })();
 
@@ -398,7 +402,7 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
 
         return {
             ...baseWorking,
-            statusText: 'waiting for permission',
+            statusText: i18n.t('assistantStatus.status.waitingForPermission'),
             isWaitingForPermission: true,
             canAbort: false,
             retryInfo: null,

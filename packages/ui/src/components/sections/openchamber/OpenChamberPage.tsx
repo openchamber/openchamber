@@ -103,6 +103,7 @@ const ShortcutsSectionContent: React.FC = () => {
 const VisualSectionContent: React.FC = () => {
     const isVSCode = isVSCodeRuntime();
     return <OpenChamberVisualSettings visibleSettings={[
+        'language',
         'theme',
         'pwaInstallName',
         'fontSize',

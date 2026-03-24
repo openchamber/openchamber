@@ -64,6 +64,7 @@ import {
   formatProjectLabel,
   normalizePath,
 } from './sidebar/utils';
+import { useLanguage } from '@/hooks/useLanguage';
 
 const PROJECT_COLLAPSE_STORAGE_KEY = 'oc.sessions.projectCollapse';
 const GROUP_ORDER_STORAGE_KEY = 'oc.sessions.groupOrder';
@@ -153,6 +154,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   hideDirectoryControls = false,
   showOnlyMainWorkspace = false,
 }) => {
+  const { t } = useLanguage();
   const [isSessionSearchOpen, setIsSessionSearchOpen] = React.useState(false);
   const [sessionSearchQuery, setSessionSearchQuery] = React.useState('');
   const sessionSearchContainerRef = React.useRef<HTMLDivElement | null>(null);
@@ -567,8 +569,8 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
   const emptyState = (
     <div className="py-6 text-center text-muted-foreground">
-      <p className="typography-ui-label font-semibold">No sessions yet</p>
-      <p className="typography-meta mt-1">Create your first session to start coding.</p>
+      <p className="typography-ui-label font-semibold">{t('sessionSidebar.noSessionsYet')}</p>
+      <p className="typography-meta mt-1">{t('sessionSidebar.createFirstSession')}</p>
     </div>
   );
 
@@ -598,17 +600,17 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
     void updateStore.checkForUpdates().then(() => {
       const { available, error } = useUpdateStore.getState();
-      if (error) {
-        toast.error('Failed to check for updates', { description: error });
-        return;
-      }
-      if (!available) {
-        toast.success('You are on the latest version');
-        return;
-      }
+        if (error) {
+          toast.error(t('aboutSettings.checkForUpdates'), { description: error });
+          return;
+        }
+        if (!available) {
+          toast.success(t('aboutSettings.latestVersion'));
+          return;
+        }
       setUpdateDialogOpen(true);
     });
-  }, [updateStore]);
+  }, [t, updateStore]);
 
   const showSidebarUpdateButton =
     updateStore.available &&
@@ -682,21 +684,21 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         if (result.success && result.path) {
           const added = addProject(result.path, { id: result.projectId });
           if (!added) {
-            toast.error('Failed to add project', {
-              description: 'Please select a valid directory.',
+            toast.error(t('sessionDialogs.failedToOpenDirectory'), {
+              description: t('sessionDialogs.selectValidDirectoryPath'),
             });
           }
         } else if (result.error && result.error !== 'Directory selection cancelled') {
-          toast.error('Failed to select directory', {
+          toast.error(t('sessionDialogs.failedToOpenDirectory'), {
             description: result.error,
           });
         }
       })
       .catch((error) => {
         console.error('Desktop: Error selecting directory:', error);
-        toast.error('Failed to select directory');
+        toast.error(t('sessionDialogs.failedToOpenDirectory'));
       });
-  }, [addProject, tauriIpcAvailable]);
+  }, [addProject, t, tauriIpcAvailable]);
 
   const toggleParent = React.useCallback((sessionId: string) => {
     setExpandedParents((prev) => {
@@ -882,8 +884,8 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
   const searchEmptyState = (
     <div className="py-6 text-center text-muted-foreground">
-      <p className="typography-ui-label font-semibold">No matching sessions</p>
-      <p className="typography-meta mt-1">Try a different title, branch, folder, or path.</p>
+      <p className="typography-ui-label font-semibold">{t('sessionSidebar.noMatchingSessions')}</p>
+      <p className="typography-meta mt-1">{t('sessionSidebar.tryDifferentSearch')}</p>
     </div>
   );
 
@@ -1027,10 +1029,10 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       };
     };
 
-    return [
-      { key: 'active-now' as const, title: 'recent', items: activeNowSessions.map(toItem) },
-    ];
-  }, [activeNowSessions, sessionSidebarMetaById]);
+      return [
+       { key: 'active-now' as const, title: t('modelSelector.recent'), items: activeNowSessions.map(toItem) },
+     ];
+  }, [activeNowSessions, sessionSidebarMetaById, t]);
 
   const recentSessionIds = React.useMemo(() => {
     return new Set(activitySections.flatMap((section) => section.items.map((item) => item.node.session.id)));
@@ -1362,13 +1364,13 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                 type="button"
                 onClick={toggleSidebar}
                 className={desktopSidebarToggleButtonClass}
-                aria-label="Close sessions"
+                aria-label={t('header.closeSessions')}
               >
                 <RiLayoutLeftLine className="h-[18px] w-[18px]" />
               </button>
             </TooltipTrigger>
             <TooltipContent>
-              <p>Close sessions</p>
+              <p>{t('header.closeSessions')}</p>
             </TooltipContent>
           </Tooltip>
         </div>

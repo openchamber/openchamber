@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { devtools, persist, createJSONStorage } from 'zustand/middleware';
 
+import i18n from '@/i18n';
 import { closeTerminal } from '@/lib/terminalApi';
 import { getSafeSessionStorage } from '@/stores/utils/safeStorage';
 
@@ -100,6 +101,13 @@ const createEmptyDirectoryState = (firstTab: TerminalTab): DirectoryTerminalStat
 const findTabIndex = (state: DirectoryTerminalState, tabId: string): number =>
   state.tabs.findIndex((t) => t.id === tabId);
 
+const getDefaultTerminalTabLabel = (index?: number): string => {
+  if (typeof index === 'number' && Number.isFinite(index) && index > 1) {
+    return i18n.t('terminalView.defaultTabWithIndex', { index });
+  }
+  return i18n.t('terminalView.defaultTab');
+};
+
 export const useTerminalStore = create<TerminalStore>()(
   devtools(
     persist(
@@ -120,7 +128,7 @@ export const useTerminalStore = create<TerminalStore>()(
 
             const newSessions = new Map(state.sessions);
             const tabId = `tab-${state.nextTabId}`;
-            const firstTab = createEmptyTab(tabId, 'Terminal');
+            const firstTab = createEmptyTab(tabId, getDefaultTerminalTabLabel());
             newSessions.set(key, createEmptyDirectoryState(firstTab));
 
             return { sessions: newSessions, nextTabId: state.nextTabId + 1 };
@@ -155,7 +163,7 @@ export const useTerminalStore = create<TerminalStore>()(
 
             const nextTabId = state.nextTabId + 1;
             const labelIndex = (existing?.tabs.length ?? 0) + 1;
-            const label = `Terminal ${labelIndex}`;
+            const label = getDefaultTerminalTabLabel(labelIndex);
             const tab = createEmptyTab(tabId, label);
 
             if (!existing) {
@@ -260,7 +268,7 @@ export const useTerminalStore = create<TerminalStore>()(
 
             if (nextTabs.length === 0) {
               const newTabId = `tab-${state.nextTabId}`;
-              const newTab = createEmptyTab(newTabId, 'Terminal');
+              const newTab = createEmptyTab(newTabId, getDefaultTerminalTabLabel());
               newSessions.set(key, createEmptyDirectoryState(newTab));
               return { sessions: newSessions, nextTabId: state.nextTabId + 1 };
             }
@@ -476,7 +484,7 @@ export const useTerminalStore = create<TerminalStore>()(
 
               tabs.push({
                 id,
-                label: typeof rawTab.label === 'string' ? rawTab.label : 'Terminal',
+                label: typeof rawTab.label === 'string' ? rawTab.label : getDefaultTerminalTabLabel(),
                 terminalSessionId:
                   typeof rawTab.terminalSessionId === 'string' || rawTab.terminalSessionId === null
                     ? (rawTab.terminalSessionId as string | null)

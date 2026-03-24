@@ -1,5 +1,6 @@
 import React from 'react';
 import { cn } from '@/lib/utils';
+import { useLanguage } from '@/hooks/useLanguage';
 
 interface PermissionToastActionsProps {
   sessionTitle: string;
@@ -27,10 +28,11 @@ export const PermissionToastActions: React.FC<PermissionToastActionsProps> = ({
   onAlways,
   onDeny,
 }) => {
+  const { t } = useLanguage();
   const [isBusy, setIsBusy] = React.useState(false);
-  const actionContext = sessionTitle.trim().length > 0 ? ` for ${sessionTitle}` : '';
-  const sessionPreview = truncateToastText(sessionTitle, 64) || 'Session';
-  const permissionPreview = truncateToastText(permissionBody, 120) || 'Permission details unavailable';
+  const actionContext = sessionTitle.trim().length > 0 ? t('permissionToastActions.forSession', { sessionTitle }) : '';
+  const sessionPreview = truncateToastText(sessionTitle, 64) || t('permissionToastActions.sessionFallback');
+  const permissionPreview = truncateToastText(permissionBody, 120) || t('permissionToastActions.permissionUnavailable');
 
   const handleAction = async (action: () => Promise<void> | void) => {
     if (isBusy || disabled) return;
@@ -46,13 +48,13 @@ export const PermissionToastActions: React.FC<PermissionToastActionsProps> = ({
     <div className="min-w-0">
       <div className="mb-1.5 min-w-0 space-y-0.5">
         <p className="typography-meta text-muted-foreground" title={sessionTitle}>
-          Session:{' '}
+          {t('permissionToastActions.sessionLabel')}{' '}
           <span className="inline-block max-w-[280px] align-bottom truncate text-foreground">
             {sessionPreview}
           </span>
         </p>
         <p className="typography-meta text-muted-foreground" title={permissionBody}>
-          Permission:{' '}
+          {t('permissionToastActions.permissionLabel')}{' '}
           <span className="inline-block max-w-[280px] align-bottom truncate">
             {permissionPreview}
           </span>
@@ -63,7 +65,7 @@ export const PermissionToastActions: React.FC<PermissionToastActionsProps> = ({
         <button
           onClick={() => handleAction(onOnce)}
           disabled={disabled || isBusy}
-          aria-label={`Approve once${actionContext}`}
+          aria-label={t('permissionToastActions.approveOnceAria', { context: actionContext })}
           className={cn(
             "px-2 py-1 typography-meta font-medium rounded transition-colors h-6",
             "disabled:opacity-50 disabled:cursor-not-allowed"
@@ -79,13 +81,13 @@ export const PermissionToastActions: React.FC<PermissionToastActionsProps> = ({
             e.currentTarget.style.backgroundColor = 'rgb(var(--status-success) / 0.1)';
           }}
         >
-          Once
+          {t('permissionToastActions.once')}
         </button>
 
         <button
           onClick={() => handleAction(onAlways)}
           disabled={disabled || isBusy}
-          aria-label={`Approve always${actionContext}`}
+          aria-label={t('permissionToastActions.approveAlwaysAria', { context: actionContext })}
           className={cn(
             "px-2 py-1 typography-meta font-medium rounded transition-colors h-6",
             "disabled:opacity-50 disabled:cursor-not-allowed"
@@ -101,13 +103,13 @@ export const PermissionToastActions: React.FC<PermissionToastActionsProps> = ({
             e.currentTarget.style.backgroundColor = 'rgb(var(--muted) / 0.5)';
           }}
         >
-          Always
+          {t('permissionToastActions.always')}
         </button>
 
         <button
           onClick={() => handleAction(onDeny)}
           disabled={disabled || isBusy}
-          aria-label={`Deny permission${actionContext}`}
+          aria-label={t('permissionToastActions.denyPermissionAria', { context: actionContext })}
           className={cn(
             "px-2 py-1 typography-meta font-medium rounded transition-colors h-6",
             "disabled:opacity-50 disabled:cursor-not-allowed"
@@ -123,7 +125,7 @@ export const PermissionToastActions: React.FC<PermissionToastActionsProps> = ({
             e.currentTarget.style.backgroundColor = 'rgb(var(--status-error) / 0.1)';
           }}
         >
-          Deny
+          {t('permissionToastActions.deny')}
         </button>
       </div>
     </div>

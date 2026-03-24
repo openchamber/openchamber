@@ -13,6 +13,7 @@ import {
 } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import type { SessionFolder } from '@/stores/useSessionFoldersStore';
+import { useLanguage } from '@/hooks/useLanguage';
 
 interface SessionFolderItemProps<TSessionNode> {
   folder: SessionFolder;
@@ -79,6 +80,7 @@ const SessionFolderItemBase = <TSessionNode,>({
   hideActions = false,
   archivedBucket = false,
 }: SessionFolderItemProps<TSessionNode>) => {
+  const { t } = useLanguage();
   const [localRenaming, setLocalRenaming] = React.useState(false);
   const [localDraft, setLocalDraft] = React.useState('');
   const inputRef = React.useRef<HTMLInputElement | null>(null);
@@ -165,7 +167,7 @@ const SessionFolderItemBase = <TSessionNode,>({
                 }
               }
         }
-        aria-label={isCollapsed ? `Expand folder ${folder.name}` : `Collapse folder ${folder.name}`}
+        aria-label={isCollapsed ? t('sessionFolder.expandFolder', { name: folder.name }) : t('sessionFolder.collapseFolder', { name: folder.name })}
       >
         <div className={cn(
           'min-w-0 flex items-center gap-1.5 pl-1.5 flex-1 transition-[padding]',
@@ -192,7 +194,7 @@ const SessionFolderItemBase = <TSessionNode,>({
                 onChange={(event) => handleDraftChange(event.target.value)}
                 className="flex-1 min-w-0 bg-transparent typography-ui-label outline-none placeholder:text-muted-foreground"
                 autoFocus
-                placeholder="Folder name"
+                placeholder={t('sessionFolder.folderName')}
                 onClick={(event) => event.stopPropagation()}
                 onPointerDown={(event) => event.stopPropagation()}
                 onMouseDown={(event) => event.stopPropagation()}
@@ -265,8 +267,8 @@ const SessionFolderItemBase = <TSessionNode,>({
                     onNewSession();
                   }}
                   className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-                  aria-label={`New session in ${folder.name}`}
-                  title="New session"
+                  aria-label={t('sessionFolder.newSessionInFolder', { name: folder.name })}
+                  title={t('sessionFolder.newSession')}
                 >
                   <RiAddLine className="h-3.5 w-3.5" />
                 </button>
@@ -280,8 +282,8 @@ const SessionFolderItemBase = <TSessionNode,>({
                     onNewSubFolder();
                   }}
                   className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-                  aria-label={`New sub-folder in ${folder.name}`}
-                  title="New sub-folder"
+                  aria-label={t('sessionFolder.newSubFolderInFolder', { name: folder.name })}
+                  title={t('sessionFolder.newSubFolder')}
                 >
                   <RiFolderAddLine className="h-3.5 w-3.5" />
                 </button>
@@ -327,7 +329,7 @@ const SessionFolderItemBase = <TSessionNode,>({
             )
           ) : !subFolderItems ? (
             <div className="py-1 pl-1.5 text-left typography-micro text-muted-foreground/70">
-              Empty folder
+              {t('sessionFolder.emptyFolder')}
             </div>
           ) : null}
         </div>

@@ -49,6 +49,7 @@ import { useGitBranches, useGitStore } from '@/stores/useGitStore';
 import { GitHubIntegrationDialog } from './GitHubIntegrationDialog';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
+import { useLanguage } from '@/hooks/useLanguage';
 import type {
   GitHubIssue,
   GitHubIssueComment,
@@ -195,6 +196,7 @@ export function NewWorktreeDialog({
   onOpenChange,
   onWorktreeCreated,
 }: NewWorktreeDialogProps) {
+  const { t } = useLanguage();
   const { github, git } = useRuntimeAPIs();
   const isMobile = useUIStore((state) => state.isMobile);
   const githubAuthStatus = useGitHubAuthStore((state) => state.status);
@@ -406,7 +408,7 @@ export function NewWorktreeDialog({
     const agentName = resolveDefaultAgentName() || configState.currentAgentName || undefined;
 
     if (!providerID || !modelID) {
-      toast.error('No model selected');
+      toast.error(t('pullRequest.noModelSelected'));
       return;
     }
 
@@ -490,7 +492,7 @@ Do not implement changes until I confirm; end with: "Next actions: <1 sentence>"
         ],
       });
 
-      toast.success('Session created from issue');
+      toast.success(t('newWorktreeDialog.sessionCreatedFromIssue'));
       return;
     }
 
@@ -566,7 +568,7 @@ Nice-to-have:
         ],
       });
 
-      toast.success('Session created from PR');
+      toast.success(t('newWorktreeDialog.sessionCreatedFromPr'));
     }
   }, [
     applySessionModelAndAgentDefaults,
@@ -575,6 +577,7 @@ Nice-to-have:
     resolveDefaultAgentName,
     resolveDefaultModelSelection,
     resolveDefaultVariant,
+    t,
   ]);
 
   // Get current state based on mode
@@ -682,11 +685,11 @@ Nice-to-have:
       let worktreeError: string | null = null;
       
       if (!normalizedBranch) {
-        branchError = 'Branch name is required';
+        branchError = t('newWorktreeDialog.branchNameRequired');
       }
       
       if (!normalizedWorktree) {
-        worktreeError = 'Worktree directory is required';
+        worktreeError = t('newWorktreeDialog.worktreeDirectoryRequired');
       }
       
       // Only run server validation if we have values
@@ -739,6 +742,7 @@ Nice-to-have:
     validation.touched,
     validationAbortController,
     isCreating,
+    t,
   ]);
 
   // Extract branch name for dependency array
@@ -758,7 +762,7 @@ Nice-to-have:
   // Handle worktree creation
   const handleCreate = async () => {
     if (!projectRef || !projectDirectory) {
-      toast.error('No active project');
+      toast.error(t('githubIssuePicker.noActiveProject'));
       return;
     }
     
@@ -771,12 +775,12 @@ Nice-to-have:
     const normalizedWorktree = slugifyWorktreeName(worktreeName);
     
     if (!normalizedBranch) {
-      toast.error('Branch name is required');
+      toast.error(t('newWorktreeDialog.branchNameRequired'));
       return;
     }
     
     if (!normalizedWorktree) {
-      toast.error('Worktree directory is required');
+      toast.error(t('newWorktreeDialog.worktreeDirectoryRequired'));
       return;
     }
 
@@ -867,8 +871,10 @@ Nice-to-have:
         localStorage.setItem(LAST_SOURCE_BRANCH_KEY, newBranchState.sourceBranch);
       }
       
-      toast.success('Worktree created', {
-        description: `${metadata.branch || metadata.name}${sourceLabel ? ` from ${sourceLabel}` : ''} - bootstrapping in background`,
+      toast.success(t('newWorktreeDialog.worktreeCreated'), {
+        description: sourceLabel
+          ? t('newWorktreeDialog.worktreeCreatedFromSourceDescription', { name: metadata.branch || metadata.name, source: sourceLabel })
+          : t('newWorktreeDialog.worktreeCreatedDescription', { name: metadata.branch || metadata.name }),
       });
 
       void loadSessions().catch(() => undefined);
@@ -883,15 +889,15 @@ Nice-to-have:
           pr: linkedPrState,
           includeDiff: includePrDiff,
         }).catch((error) => {
-          const message = error instanceof Error ? error.message : 'Failed to send GitHub context';
-          toast.error('Failed to send GitHub context', { description: message });
+          const message = error instanceof Error ? error.message : t('newWorktreeDialog.failedToSendGithubContext');
+          toast.error(t('newWorktreeDialog.failedToSendGithubContext'), { description: message });
         });
       } else {
         onWorktreeCreated?.(metadata.path);
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to create worktree';
-      toast.error('Failed to create worktree', { description: message });
+      const message = error instanceof Error ? error.message : t('branchPickerDialog.failedToCreateWorktree');
+      toast.error(t('branchPickerDialog.failedToCreateWorktree'), { description: message });
     } finally {
       setIsCreating(false);
     }
@@ -991,7 +997,7 @@ Nice-to-have:
           disabled={isCreating}
           className={cn(isMobile && 'flex-1')}
         >
-          Cancel
+          {t('common.cancel')}
         </Button>
         <Button
           size="sm"
@@ -1000,7 +1006,7 @@ Nice-to-have:
           className={cn('gap-1.5', isMobile && 'flex-1')}
         >
           {isCreating && <RiLoader4Line className="h-3.5 w-3.5 animate-spin" />}
-          {isCreating ? 'Creating...' : 'Create Worktree'}
+          {isCreating ? t('multirun.creating') : t('branchPickerDialog.createWorktree')}
         </Button>
       </div>
     </div>
@@ -1011,7 +1017,7 @@ Nice-to-have:
       {isMobile ? (
         <MobileOverlayPanel
           open={open}
-          title="New Worktree"
+          title={t('newWorktreeDialog.newWorktree')}
           onClose={() => onOpenChange(false)}
           footer={footerContent}
         >
@@ -1019,8 +1025,8 @@ Nice-to-have:
           <div className="w-full mb-4">
             <SortableTabsStrip
               items={[
-                { id: 'new-branch', label: 'New Branch', icon: <RiGitBranchLine className="h-3.5 w-3.5" /> },
-                { id: 'existing-branch', label: 'Existing Branch', icon: <RiGitRepositoryLine className="h-3.5 w-3.5" /> },
+                { id: 'new-branch', label: t('newWorktreeDialog.newBranch'), icon: <RiGitBranchLine className="h-3.5 w-3.5" /> },
+                { id: 'existing-branch', label: t('newWorktreeDialog.existingBranch'), icon: <RiGitRepositoryLine className="h-3.5 w-3.5" /> },
               ]}
               activeId={mode}
               onSelect={(id) => handleModeChange(id as Mode)}
@@ -1035,7 +1041,7 @@ Nice-to-have:
             {mode === 'existing-branch' ? (
               <div className="space-y-1.5">
                 <label className="typography-ui-label text-foreground block font-semibold">
-                  Select Branch
+                  {t('newWorktreeDialog.selectBranch')}
                 </label>
                 <Button
                   variant="outline"
@@ -1052,24 +1058,24 @@ Nice-to-have:
                 {/* Mobile Branch Picker Overlay */}
                 <MobileOverlayPanel
                   open={existingBranchPickerOpen}
-                  title="Select Branch"
+                  title={t('newWorktreeDialog.selectBranch')}
                   onClose={() => setExistingBranchPickerOpen(false)}
                 >
                   <div className="space-y-4">
                     {isLoadingBranches ? (
                       <div className="px-2 py-8 text-center typography-small text-muted-foreground">
-                        Loading branches...
+                        {t('branchPickerDialog.loadingBranches')}
                       </div>
                     ) : localBranches.length === 0 && remoteBranches.length === 0 ? (
                       <div className="px-2 py-8 text-center typography-small text-muted-foreground">
-                        No branches found
+                        {t('branchSelector.noBranchesFound')}
                       </div>
                     ) : (
                       <>
                         {localBranches.length > 0 && (
                           <div className="space-y-2">
                             <div className="typography-small font-semibold text-foreground px-2">
-                              Local branches
+                              {t('newWorktreeDialog.localBranches')}
                             </div>
                             <div className="space-y-1">
                               {localBranches.map(branch => (
@@ -1100,7 +1106,7 @@ Nice-to-have:
                         {remoteBranches.length > 0 && (
                           <div className="space-y-2">
                             <div className="typography-small font-semibold text-foreground px-2">
-                              Remote branches
+                              {t('newWorktreeDialog.remoteBranches')}
                             </div>
                             <div className="space-y-1">
                               {remoteBranches.map(branch => (
@@ -1137,7 +1143,7 @@ Nice-to-have:
               <div className="space-y-1.5">
                 <div className="flex flex-col items-start gap-1.5">
                   <label className="typography-ui-label text-foreground block font-semibold">
-                    Branch Name
+                    {t('newWorktreeDialog.branchName')}
                   </label>
                   {mode === 'new-branch' && isGitHubConnected && (
                     <Button
@@ -1147,7 +1153,9 @@ Nice-to-have:
                       className="gap-1.5 h-7"
                     >
                       <RiGithubLine className="size-4 text-status-success" />
-                        {newBranchState.linkedIssue || newBranchState.linkedPr ? 'Change' : 'Start from GitHub Issue/PR'}
+                        {newBranchState.linkedIssue || newBranchState.linkedPr
+                          ? t('common.change')
+                          : t('newWorktreeDialog.startFromGithubIssuePr')}
                     </Button>
                   )}
                 </div>
@@ -1163,7 +1171,7 @@ Nice-to-have:
                     }));
                   }}
                   onBlur={() => setValidation(prev => ({ ...prev, touched: true }))}
-                  placeholder="feature/my-awesome-feature"
+                  placeholder={t('newWorktreeDialog.featurePlaceholder')}
                   disabled={!!newBranchState.linkedPr}
                   className={cn(
                     'h-8',
@@ -1175,7 +1183,7 @@ Nice-to-have:
                   <div className="flex items-center gap-1.5 text-muted-foreground">
                     <RiCheckLine className="h-3.5 w-3.5 text-status-success" />
                     <span className="typography-micro">
-                      Using PR branch: {newBranchState.linkedPr.head}
+                      {t('newWorktreeDialog.usingPrBranch', { branch: newBranchState.linkedPr.head })}
                     </span>
                   </div>
                 )}
@@ -1183,7 +1191,10 @@ Nice-to-have:
                   <div className="flex items-center gap-1.5 text-muted-foreground">
                     <RiCheckLine className="h-3.5 w-3.5 text-status-success" />
                     <span className="typography-micro">
-                      From issue #{newBranchState.linkedIssue.number}: {newBranchState.linkedIssue.title}
+                      {t('newWorktreeDialog.fromIssue', {
+                        number: newBranchState.linkedIssue.number,
+                        title: newBranchState.linkedIssue.title,
+                      })}
                     </span>
                   </div>
                 )}
@@ -1194,7 +1205,7 @@ Nice-to-have:
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <label className="typography-ui-label text-foreground font-semibold">
-                  Worktree Directory
+                  {t('newWorktreeDialog.worktreeDirectory')}
                 </label>
                 {mode !== 'existing-branch' && (
                   <button
@@ -1213,10 +1224,10 @@ Nice-to-have:
                         ? 'text-muted-foreground/40 cursor-not-allowed'
                         : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                     )}
-                    title="Reset to match branch name"
+                    title={t('newWorktreeDialog.resetToMatchBranchName')}
                   >
                     <RiRefreshLine className="h-3 w-3" />
-                    <span>Reset</span>
+                    <span>{t('common.resetButton')}</span>
                   </button>
                 )}
               </div>
@@ -1237,7 +1248,7 @@ Nice-to-have:
                   }
                 }}
                 onBlur={() => setValidation(prev => ({ ...prev, touched: true }))}
-                placeholder="my-worktree-directory"
+                placeholder={t('newWorktreeDialog.worktreeDirectoryPlaceholder')}
                 className={cn(
                   'h-8',
                   validation.touched && validation.worktreeError && 'border-destructive'
@@ -1249,7 +1260,7 @@ Nice-to-have:
             {mode === 'new-branch' && !newBranchState.linkedPr && (
               <div className="space-y-1.5">
                 <label className="typography-ui-label text-foreground block font-semibold">
-                  Source Branch
+                  {t('newWorktreeDialog.sourceBranch')}
                 </label>
                 <Button
                   variant="outline"
@@ -1258,37 +1269,37 @@ Nice-to-have:
                   className="w-full justify-between h-9"
                 >
                   <span className={newBranchState.sourceBranch ? 'text-foreground' : 'text-muted-foreground'}>
-                    {newBranchState.sourceBranch || 'Select source branch...'}
+                    {newBranchState.sourceBranch || t('newWorktreeDialog.selectSourceBranchPlaceholder')}
                   </span>
                   <RiGitBranchLine className="h-4 w-4 text-muted-foreground" />
                 </Button>
                 {newBranchState.sourceBranch && (
                   <div className="typography-micro text-muted-foreground">
-                    New branch will be created from {newBranchState.sourceBranch}
+                    {t('newWorktreeDialog.newBranchCreatedFrom', { branch: newBranchState.sourceBranch })}
                   </div>
                 )}
                 
                 {/* Mobile Source Branch Picker Overlay */}
                 <MobileOverlayPanel
                   open={sourceBranchPickerOpen}
-                  title="Select Source Branch"
+                  title={t('newWorktreeDialog.selectSourceBranch')}
                   onClose={() => setSourceBranchPickerOpen(false)}
                 >
                   <div className="space-y-4">
                     {isLoadingBranches ? (
                       <div className="px-2 py-8 text-center typography-small text-muted-foreground">
-                        Loading branches...
+                        {t('branchPickerDialog.loadingBranches')}
                       </div>
                     ) : localBranches.length === 0 && remoteBranches.length === 0 ? (
                       <div className="px-2 py-8 text-center typography-small text-muted-foreground">
-                        No branches found
+                        {t('branchSelector.noBranchesFound')}
                       </div>
                     ) : (
                       <>
                         {localBranches.length > 0 && (
                           <div className="space-y-2">
                             <div className="typography-small font-semibold text-foreground px-2">
-                              Local branches
+                              {t('newWorktreeDialog.localBranches')}
                             </div>
                             <div className="space-y-1">
                               {localBranches.map(branch => (
@@ -1314,7 +1325,7 @@ Nice-to-have:
                         {remoteBranches.length > 0 && (
                           <div className="space-y-2">
                             <div className="typography-small font-semibold text-foreground px-2">
-                              Remote branches
+                              {t('newWorktreeDialog.remoteBranches')}
                             </div>
                             <div className="space-y-1">
                               {remoteBranches.map(branch => (
@@ -1353,12 +1364,12 @@ Nice-to-have:
                   
                   {newBranchState.linkedIssue && (
                     <span className="typography-micro text-muted-foreground shrink-0">
-                      Issue #{newBranchState.linkedIssue.number}
+                      {t('newWorktreeDialog.issueNumber', { number: newBranchState.linkedIssue.number })}
                     </span>
                   )}
                   {newBranchState.linkedPr && (
                     <span className="typography-micro text-muted-foreground shrink-0">
-                      PR #{newBranchState.linkedPr.number}
+                      {t('newWorktreeDialog.prNumber', { number: newBranchState.linkedPr.number })}
                     </span>
                   )}
                   
@@ -1392,7 +1403,7 @@ Nice-to-have:
                     </span>
                     {newBranchState.includePrDiff && (
                       <span className="typography-micro px-1 py-0.5 rounded bg-status-success/10 text-status-success">
-                        +diff
+                        {t('newWorktreeDialog.diffTag')}
                       </span>
                     )}
                   </div>
@@ -1408,15 +1419,15 @@ Nice-to-have:
               <div className="flex items-center gap-3">
                 <DialogTitle className="flex items-center gap-2 shrink-0">
                   <RiGitBranchLine className="h-5 w-5" />
-                  New Worktree
+                  {t('newWorktreeDialog.newWorktree')}
                 </DialogTitle>
                 
                 {/* Mode Selection - using SortableTabsStrip */}
                 <div className="w-[280px] shrink-0">
                   <SortableTabsStrip
                     items={[
-                      { id: 'new-branch', label: 'New Branch', icon: <RiGitBranchLine className="h-3.5 w-3.5" /> },
-                      { id: 'existing-branch', label: 'Existing Branch', icon: <RiGitRepositoryLine className="h-3.5 w-3.5" /> },
+                      { id: 'new-branch', label: t('newWorktreeDialog.newBranch'), icon: <RiGitBranchLine className="h-3.5 w-3.5" /> },
+                      { id: 'existing-branch', label: t('newWorktreeDialog.existingBranch'), icon: <RiGitRepositoryLine className="h-3.5 w-3.5" /> },
                     ]}
                     activeId={mode}
                     onSelect={(id) => handleModeChange(id as Mode)}
@@ -1433,7 +1444,7 @@ Nice-to-have:
               {mode === 'existing-branch' ? (
                 <div className="space-y-1.5">
                   <label className="typography-ui-label text-foreground block font-semibold">
-                    Select Branch
+                    {t('newWorktreeDialog.selectBranch')}
                   </label>
                   <Select
                     value={existingBranchState.selectedBranch}
@@ -1447,22 +1458,22 @@ Nice-to-have:
                     }}
                   >
                     <SelectTrigger size="lg" className="w-fit">
-                      <SelectValue placeholder="Choose a branch..." />
+                      <SelectValue placeholder={t('newWorktreeDialog.chooseBranchPlaceholder')} />
                     </SelectTrigger>
                   <SelectContent className="max-h-[280px] max-w-[320px]">
                     {isLoadingBranches ? (
                       <div className="px-2 py-4 text-center typography-small text-muted-foreground">
-                        Loading branches...
+                        {t('branchPickerDialog.loadingBranches')}
                       </div>
                     ) : localBranches.length === 0 && remoteBranches.length === 0 ? (
                       <div className="px-2 py-4 text-center typography-small text-muted-foreground">
-                        No branches found
+                        {t('branchSelector.noBranchesFound')}
                       </div>
                     ) : (
                       <>
                         {localBranches.length > 0 && (
                           <SelectGroup>
-                            <SelectLabel className="typography-small font-semibold text-foreground">Local branches</SelectLabel>
+                            <SelectLabel className="typography-small font-semibold text-foreground">{t('newWorktreeDialog.localBranches')}</SelectLabel>
                             {localBranches.map(branch => (
                               <SelectItem key={branch} value={branch} className="whitespace-normal break-all">
                                 {branch}
@@ -1475,7 +1486,7 @@ Nice-to-have:
                         )}
                         {remoteBranches.length > 0 && (
                           <SelectGroup>
-                            <SelectLabel className="typography-small font-semibold text-foreground">Remote branches</SelectLabel>
+                            <SelectLabel className="typography-small font-semibold text-foreground">{t('newWorktreeDialog.remoteBranches')}</SelectLabel>
                             {remoteBranches.map(branch => (
                               <SelectItem key={`remotes/${branch}`} value={`remotes/${branch}`} className="whitespace-normal break-all">
                                 {branch}
@@ -1492,7 +1503,7 @@ Nice-to-have:
               <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
                     <label className="typography-ui-label text-foreground block font-semibold">
-                      Branch Name
+                      {t('newWorktreeDialog.branchName')}
                     </label>
                     {mode === 'new-branch' && isGitHubConnected && (
                       <Button
@@ -1502,7 +1513,9 @@ Nice-to-have:
                         className="gap-1.5 h-7"
                       >
                         <RiGithubLine className="size-4 text-status-success" />
-                      {newBranchState.linkedIssue || newBranchState.linkedPr ? 'Change' : 'Start from GitHub Issue/PR'}
+                      {newBranchState.linkedIssue || newBranchState.linkedPr
+                        ? t('common.change')
+                        : t('newWorktreeDialog.startFromGithubIssuePr')}
                       </Button>
                     )}
                   </div>
@@ -1518,7 +1531,7 @@ Nice-to-have:
                       }));
                     }}
                     onBlur={() => setValidation(prev => ({ ...prev, touched: true }))}
-                    placeholder="feature/my-awesome-feature"
+                    placeholder={t('newWorktreeDialog.featurePlaceholder')}
                     disabled={!!newBranchState.linkedPr}
                     className={cn(
                       'h-8',
@@ -1530,7 +1543,7 @@ Nice-to-have:
                     <div className="flex items-center gap-1.5 text-muted-foreground">
                       <RiCheckLine className="h-3.5 w-3.5 text-status-success" />
                       <span className="typography-micro">
-                        Using PR branch: {newBranchState.linkedPr.head}
+                        {t('newWorktreeDialog.usingPrBranch', { branch: newBranchState.linkedPr.head })}
                       </span>
                     </div>
                   )}
@@ -1538,7 +1551,10 @@ Nice-to-have:
                     <div className="flex items-center gap-1.5 text-muted-foreground">
                       <RiCheckLine className="h-3.5 w-3.5 text-status-success" />
                       <span className="typography-micro">
-                        From issue #{newBranchState.linkedIssue.number}: {newBranchState.linkedIssue.title}
+                        {t('newWorktreeDialog.fromIssue', {
+                          number: newBranchState.linkedIssue.number,
+                          title: newBranchState.linkedIssue.title,
+                        })}
                       </span>
                     </div>
                   )}
@@ -1549,7 +1565,7 @@ Nice-to-have:
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <label className="typography-ui-label text-foreground font-semibold">
-                    Worktree Directory
+                    {t('newWorktreeDialog.worktreeDirectory')}
                   </label>
                   {mode !== 'existing-branch' && (
                     <button
@@ -1568,10 +1584,10 @@ Nice-to-have:
                           ? 'text-muted-foreground/40 cursor-not-allowed'
                           : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                       )}
-                      title="Reset to match branch name"
+                      title={t('newWorktreeDialog.resetToMatchBranchName')}
                     >
                       <RiRefreshLine className="h-3 w-3" />
-                      <span>Reset</span>
+                      <span>{t('common.resetButton')}</span>
                     </button>
                   )}
                 </div>
@@ -1592,7 +1608,7 @@ Nice-to-have:
                     }
                   }}
                   onBlur={() => setValidation(prev => ({ ...prev, touched: true }))}
-                  placeholder="my-worktree-directory"
+                  placeholder={t('newWorktreeDialog.worktreeDirectoryPlaceholder')}
                   className={cn(
                     'h-8',
                     validation.touched && validation.worktreeError && 'border-destructive'
@@ -1604,29 +1620,29 @@ Nice-to-have:
               {mode === 'new-branch' && !newBranchState.linkedPr && (
                 <div className="space-y-1.5">
                   <label className="typography-ui-label text-foreground block font-semibold">
-                    Source Branch
+                    {t('newWorktreeDialog.sourceBranch')}
                   </label>
                   <Select 
                     value={newBranchState.sourceBranch} 
                     onValueChange={(value) => setNewBranchState(prev => ({ ...prev, sourceBranch: value }))}
                   >
                     <SelectTrigger size="lg" className="w-fit">
-                      <SelectValue placeholder="Select source branch..." />
+                      <SelectValue placeholder={t('newWorktreeDialog.selectSourceBranchPlaceholder')} />
                     </SelectTrigger>
                     <SelectContent className="max-h-[280px] max-w-[320px]">
                       {isLoadingBranches ? (
                         <div className="px-2 py-4 text-center typography-small text-muted-foreground">
-                          Loading branches...
+                          {t('branchPickerDialog.loadingBranches')}
                         </div>
                       ) : localBranches.length === 0 && remoteBranches.length === 0 ? (
                         <div className="px-2 py-4 text-center typography-small text-muted-foreground">
-                          No branches found
+                          {t('branchSelector.noBranchesFound')}
                         </div>
                       ) : (
                         <>
                           {localBranches.length > 0 && (
                             <SelectGroup>
-                              <SelectLabel className="typography-small font-semibold text-foreground">Local branches</SelectLabel>
+                              <SelectLabel className="typography-small font-semibold text-foreground">{t('newWorktreeDialog.localBranches')}</SelectLabel>
                               {localBranches.map(branch => (
                                 <SelectItem key={branch} value={branch} className="whitespace-normal break-all">
                                   {branch}
@@ -1639,7 +1655,7 @@ Nice-to-have:
                           )}
                           {remoteBranches.length > 0 && (
                             <SelectGroup>
-                              <SelectLabel className="typography-small font-semibold text-foreground">Remote branches</SelectLabel>
+                              <SelectLabel className="typography-small font-semibold text-foreground">{t('newWorktreeDialog.remoteBranches')}</SelectLabel>
                               {remoteBranches.map(branch => (
                                 <SelectItem key={`remotes/${branch}`} value={`remotes/${branch}`} className="whitespace-normal break-all">
                                   {branch}
@@ -1653,7 +1669,7 @@ Nice-to-have:
                   </Select>
                   {newBranchState.sourceBranch && (
                     <div className="typography-micro text-muted-foreground">
-                      New branch will be created from {newBranchState.sourceBranch}
+                      {t('newWorktreeDialog.newBranchCreatedFrom', { branch: newBranchState.sourceBranch })}
                     </div>
                   )}
                 </div>
@@ -1668,12 +1684,12 @@ Nice-to-have:
                     
                     {newBranchState.linkedIssue && (
                       <span className="typography-micro text-muted-foreground shrink-0">
-                        Issue #{newBranchState.linkedIssue.number}
+                        {t('newWorktreeDialog.issueNumber', { number: newBranchState.linkedIssue.number })}
                       </span>
                     )}
                     {newBranchState.linkedPr && (
                       <span className="typography-micro text-muted-foreground shrink-0">
-                        PR #{newBranchState.linkedPr.number}
+                        {t('newWorktreeDialog.prNumber', { number: newBranchState.linkedPr.number })}
                       </span>
                     )}
                     
@@ -1707,7 +1723,7 @@ Nice-to-have:
                       </span>
                       {newBranchState.includePrDiff && (
                         <span className="typography-micro px-1 py-0.5 rounded bg-status-success/10 text-status-success">
-                          +diff
+                          {t('newWorktreeDialog.diffTag')}
                         </span>
                       )}
                     </div>
@@ -1737,7 +1753,7 @@ Nice-to-have:
                   onClick={() => onOpenChange(false)}
                   disabled={isCreating}
                 >
-                  Cancel
+                  {t('common.cancel')}
                 </Button>
                 <Button
                   size="sm"
@@ -1746,7 +1762,7 @@ Nice-to-have:
                   className="gap-1.5"
                 >
                   {isCreating && <RiLoader4Line className="h-3.5 w-3.5 animate-spin" />}
-                  {isCreating ? 'Creating...' : 'Create Worktree'}
+                  {isCreating ? t('multirun.creating') : t('branchPickerDialog.createWorktree')}
                 </Button>
               </div>
             </DialogFooter>

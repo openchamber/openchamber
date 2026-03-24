@@ -1,4 +1,5 @@
 import React from 'react';
+import { useLanguage } from '@/hooks/useLanguage';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { Button } from '@/components/ui/button';
@@ -27,6 +28,7 @@ const getUsagePercent = (usage: { windows?: Record<string, { usedPercent: number
 };
 
 export const UsageSidebar: React.FC<UsageSidebarProps> = ({ onItemSelect }) => {
+  const { t } = useLanguage();
   const results = useQuotaStore((state) => state.results);
   const selectedProviderId = useQuotaStore((state) => state.selectedProviderId);
   const setSelectedProvider = useQuotaStore((state) => state.setSelectedProvider);
@@ -79,9 +81,9 @@ export const UsageSidebar: React.FC<UsageSidebarProps> = ({ onItemSelect }) => {
   return (
     <div className={cn('flex h-full flex-col', bgClass)}>
       <div className="border-b px-3 pt-4 pb-3">
-        <h2 className="text-base font-semibold text-foreground mb-3">Usage</h2>
+        <h2 className="text-base font-semibold text-foreground mb-3">{t('usageSidebar.usage')}</h2>
         <div className="flex items-center justify-between gap-2">
-          <span className="typography-meta text-muted-foreground">Total {QUOTA_PROVIDERS.length}</span>
+          <span className="typography-meta text-muted-foreground">{t('usageSidebar.totalProviders', { count: QUOTA_PROVIDERS.length })}</span>
           <div className="flex items-center gap-2">
             <Tooltip delayDuration={700}>
               <TooltipTrigger asChild>
@@ -89,12 +91,12 @@ export const UsageSidebar: React.FC<UsageSidebarProps> = ({ onItemSelect }) => {
                   <Checkbox
                     checked={usageAutoRefresh}
                     onChange={handleUsageAutoRefreshChange}
-                    ariaLabel="Toggle auto refresh"
+                    ariaLabel={t('usageSidebar.toggleAutoRefresh')}
                   />
                 </span>
               </TooltipTrigger>
               <TooltipContent side="bottom">
-                Auto-refresh usage data at set interval
+                {t('usageSidebar.autoRefreshTooltip')}
               </TooltipContent>
             </Tooltip>
             <Select
@@ -103,20 +105,20 @@ export const UsageSidebar: React.FC<UsageSidebarProps> = ({ onItemSelect }) => {
               disabled={!usageAutoRefresh}
             >
               <SelectTrigger className="w-fit">
-                <SelectValue placeholder="Interval" />
+                <SelectValue placeholder={t('usageSidebar.interval')} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="30000">30s</SelectItem>
-                <SelectItem value="60000">1m</SelectItem>
-                <SelectItem value="300000">5m</SelectItem>
+                <SelectItem value="30000">30s</SelectItem> {/* // i18n-scan-ignore */}
+                <SelectItem value="60000">1m</SelectItem> {/* // i18n-scan-ignore */}
+                <SelectItem value="300000">5m</SelectItem> {/* // i18n-scan-ignore */}
               </SelectContent>
             </Select>
             <Button size="sm"
               variant="ghost"
               className="h-7 w-7 px-0 text-muted-foreground"
               onClick={() => fetchAllQuotas()}
-              aria-label="Refresh usage"
-              title="Refresh usage"
+              aria-label={t('usageSidebar.refreshUsage')}
+              title={t('usageSidebar.refreshUsage')}
               disabled={isLoading}
             >
               <RiRefreshLine className={cn('h-3.5 w-3.5', isLoading && 'animate-spin')} />
@@ -124,14 +126,14 @@ export const UsageSidebar: React.FC<UsageSidebarProps> = ({ onItemSelect }) => {
           </div>
         </div>
         <div className="mt-2 flex items-center justify-between gap-2">
-          <span className="typography-micro text-muted-foreground">Display</span>
+          <span className="typography-micro text-muted-foreground">{t('usageSidebar.display')}</span>
           <Select value={usageDisplayMode} onValueChange={handleUsageDisplayModeChange}>
             <SelectTrigger className="w-fit">
-              <SelectValue placeholder="Display mode" />
+              <SelectValue placeholder={t('usageSidebar.displayMode')} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="usage">Usage</SelectItem>
-              <SelectItem value="remaining">Quota remaining</SelectItem>
+              <SelectItem value="usage">{t('usageSidebar.usageLabel')}</SelectItem>
+              <SelectItem value="remaining">{t('usageSidebar.quotaRemaining')}</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -175,7 +177,7 @@ export const UsageSidebar: React.FC<UsageSidebarProps> = ({ onItemSelect }) => {
                   {provider.name}
                 </span>
               {!configured && (
-                <span className="typography-micro text-muted-foreground/60 flex-shrink-0">Not set</span>
+                <span className="typography-micro text-muted-foreground/60 flex-shrink-0">{t('usageSidebar.notSet')}</span>
               )}
             </button>
           </div>

@@ -58,6 +58,7 @@ import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { GitHubIssuePickerDialog } from '@/components/session/GitHubIssuePickerDialog';
 import { GitHubPrPickerDialog } from '@/components/session/GitHubPrPickerDialog';
 import { useChatSearchDirectory } from '@/hooks/useChatSearchDirectory';
+import { useLanguage } from '@/hooks/useLanguage';
 import { opencodeClient } from '@/lib/opencode/client';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, getProjectIconImageUrl } from '@/lib/projectMeta';
@@ -267,6 +268,7 @@ const saveStoredDraft = (sessionId: string | null, draft: string): void => {
 };
 
 export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBottom }) => {
+    const { t } = useLanguage();
     // Track if we restored a draft on mount (for text selection)
     const initialDraftRef = React.useRef<string | null>(null);
     // Track initial session ID (captured at mount time for draft restoration)
@@ -1106,7 +1108,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                 normalized === 'failed to send message';
 
             if (normalized.includes('payload too large') || normalized.includes('413') || normalized.includes('entity too large')) {
-                toast.error('Attachments are too large to send. Please try reducing the number or size of images.');
+                toast.error(t('chatInput.attachmentsTooLargeToSend'));
                 if (allAttachments.length > 0) {
                     useFileStore.setState({ attachedFiles: allAttachments });
                 }
@@ -1116,7 +1118,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
             if (isSoftNetworkError) {
                 if (allAttachments.length > 0) {
                     useFileStore.setState({ attachedFiles: allAttachments });
-                    toast.error('Failed to send attachments. Try fewer files or smaller images.');
+                    toast.error(t('chatInput.failedToSendAttachments'));
                 }
                 return;
             }
@@ -1807,10 +1809,10 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                 await addAttachedFile(file);
             } catch (error) {
                 console.error('Clipboard image attach failed', error);
-                toast.error(error instanceof Error ? error.message : 'Failed to attach image from clipboard');
+                toast.error(error instanceof Error ? error.message : t('chatInput.failedToAttachImageFromClipboard'));
             }
         }
-    }, [addAttachedFile, currentSessionId, newSessionDraftOpen, insertTextAtSelection]);
+    }, [addAttachedFile, currentSessionId, newSessionDraftOpen, insertTextAtSelection, t]);
 
     const handleFileSelect = (file: { name: string; path: string; relativePath?: string }) => {
 
@@ -2179,7 +2181,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                     await addAttachedFile(file);
                 } catch (error) {
                     console.error('File attach failed', error);
-                    toast.error(error instanceof Error ? error.message : 'Failed to attach file');
+                    toast.error(error instanceof Error ? error.message : t('chatInput.failedToAttachFile'));
                 }
             }
         }
@@ -2321,10 +2323,10 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                 await addAttachedFile(file);
             } catch (error) {
                 console.error('File attach failed', error);
-                toast.error(error instanceof Error ? error.message : 'Failed to attach file');
+                toast.error(error instanceof Error ? error.message : t('chatInput.failedToAttachFile'));
             }
         }
-    }, [addAttachedFile]);
+    }, [addAttachedFile, t]);
 
     const handleVSCodePickFiles = React.useCallback(async () => {
         try {
@@ -2366,9 +2368,9 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
             }
         } catch (error) {
             console.error('VS Code file pick failed', error);
-            toast.error(error instanceof Error ? error.message : 'Failed to pick files in VS Code');
+            toast.error(error instanceof Error ? error.message : t('chatInput.failedToPickFilesInVSCode'));
         }
-    }, [attachFiles]);
+    }, [attachFiles, t]);
 
     const handlePickLocalFiles = React.useCallback(() => {
         if (isVSCodeRuntime()) {
@@ -2678,22 +2680,22 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
 
     const handlePermissionAutoAcceptToggle = React.useCallback(() => {
         if (!permissionScopeSessionId) {
-            toast.error('Open a session first');
+            toast.error(t('projectNotes.noActiveSessionSelected'));
             return;
         }
 
         const nextEnabled = !permissionAutoAcceptEnabled;
         setSessionAutoAccept(permissionScopeSessionId, nextEnabled).catch(() => {
-            toast.error('Failed to toggle permission auto-accept');
+            toast.error(t('chatInput.failedToTogglePermissionAutoAccept'));
         });
-    }, [permissionAutoAcceptEnabled, permissionScopeSessionId, setSessionAutoAccept]);
+    }, [permissionAutoAcceptEnabled, permissionScopeSessionId, setSessionAutoAccept, t]);
 
     const permissionAutoAcceptAriaLabel = permissionAutoAcceptEnabled
-        ? 'Disable permission auto-accept'
-        : 'Enable permission auto-accept';
+        ? t('chatInput.disablePermissionAutoAccept')
+        : t('chatInput.enablePermissionAutoAccept');
     const permissionAutoAcceptTooltipLabel = permissionAutoAcceptEnabled
-        ? 'Permission auto-accept: on'
-        : 'Permission auto-accept: off';
+        ? t('chatInput.permissionAutoAcceptOn')
+        : t('chatInput.permissionAutoAcceptOff');
 
     const permissionAutoAcceptButton = (
         <button
@@ -2755,7 +2757,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                     ? 'text-primary hover:text-primary'
                     : 'opacity-30'
             )}
-            aria-label="Send message"
+            aria-label={t('chatInput.sendMessage')}
         >
             <RiSendPlane2Line className={cn(sendIconSizeClass)} />
         </button>
@@ -2779,7 +2781,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                     ? 'text-primary hover:text-primary'
                     : 'opacity-30'
             )}
-            aria-label="Queue message"
+            aria-label={t('chatInput.queueMessage')}
         >
             <RiSendPlane2Line className={cn(sendIconSizeClass, '-rotate-90')} />
         </button>
@@ -2794,7 +2796,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                 footerIconButtonClass,
                 'text-[var(--status-error)] hover:text-[var(--status-error)]'
             )}
-            aria-label="Stop generating"
+            aria-label={t('chatInput.stopGenerating')}
         >
             <StopIcon className={cn(stopIconSizeClass)} />
         </button>
@@ -2827,8 +2829,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                         type="button"
                         className={footerIconButtonClass}
                         onClick={() => handlePickLocalFiles()}
-                        title="Attach files"
-                        aria-label="Attach files"
+                        title={t('chatInput.attachFiles')}
+                        aria-label={t('chatInput.attachFiles')}
                     >
                         <RiAttachment2 className={cn(iconSizeClass, 'text-current')} />
                     </button>
@@ -2838,8 +2840,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                             <button
                                 type="button"
                                 className={footerIconButtonClass}
-                                title="Add attachment"
-                                aria-label="Add attachment"
+                                title={t('chatInput.addAttachment')}
+                                aria-label={t('chatInput.addAttachment')}
                             >
                                 <RiAddCircleLine className={cn(iconSizeClass, 'text-current')} />
                             </button>
@@ -2851,7 +2853,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                                 }}
                             >
                                 <RiAttachment2 />
-                                Attach files
+                                {t('chatInput.attachFiles')}
                             </DropdownMenuItem>
                             <DropdownMenuItem
                                 onSelect={() => {
@@ -2861,7 +2863,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                                 }}
                             >
                                 <RiGithubLine />
-                                Link GitHub Issue
+                                {t('chatInput.linkGithubIssue')}
                             </DropdownMenuItem>
                             <DropdownMenuItem
                                 onSelect={() => {
@@ -2871,7 +2873,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                                 }}
                             >
                                 <RiGitPullRequestLine />
-                                Link GitHub PR
+                                {t('chatInput.linkGithubPr')}
                             </DropdownMenuItem>
                         </DropdownMenuContent>
                     </DropdownMenu>
@@ -2885,8 +2887,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
             type='button'
             onClick={onOpenSettings}
             className={footerIconButtonClass}
-            title='Model and agent settings'
-            aria-label='Model and agent settings'
+            title={t('chatInput.modelAndAgentSettings')}
+            aria-label={t('chatInput.modelAndAgentSettings')}
         >
             <RiAiAgentLine className={cn(iconSizeClass, 'text-current')} />
         </button>
@@ -2909,8 +2911,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                         }
                     }}
                     onClick={handleOpenCommandMenu}
-                    title="Commands"
-                    aria-label="Commands"
+                    title={t('chatInput.commands')}
+                    aria-label={t('chatInput.commands')}
                 >
                     <RiCommandLine className={cn(iconSizeClass)} />
                 </button>
@@ -2979,7 +2981,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                                 borderColor: currentTheme?.colors?.interactive?.border,
                             }}
                         >
-                            <span className="text-xs font-medium text-muted-foreground">Review comments:</span>
+                            <span className="text-xs font-medium text-muted-foreground">{t('chatInput.reviewComments')}:</span>
                             <span className="text-xs font-semibold" style={{ color: currentTheme?.colors?.status?.info }}>
                                 {draftCount}
                             </span>
@@ -3005,7 +3007,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                             <span className="text-muted-foreground flex-shrink-0">
                                 #{linkedIssue.number}
                                 {linkedIssue.author && (
-                                    <span className="ml-1">by {linkedIssue.author.login}</span>
+                                    <span className="ml-1">{t('chatInput.byAuthor', { author: linkedIssue.author.login })}</span>
                                 )}
                             </span>
                             <span className="text-foreground truncate">
@@ -3018,7 +3020,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                                     rel="noopener noreferrer"
                                     onClick={(e) => e.stopPropagation()}
                                     className="flex items-center justify-center h-6 w-6 hover:bg-[var(--interactive-hover)] rounded-full transition-colors"
-                                    aria-label="Open issue in browser"
+                                    aria-label={t('chatInput.openIssueInBrowser')}
                                 >
                                     <RiExternalLinkLine className="h-4 w-4 text-muted-foreground" />
                                 </a>
@@ -3028,7 +3030,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                                         setLinkedIssue(null);
                                     }}
                                     className="flex items-center justify-center h-6 w-6 hover:bg-[var(--interactive-hover)] rounded-full transition-colors cursor-pointer"
-                                    aria-label="Remove linked issue"
+                                    aria-label={t('chatInput.removeLinkedIssue')}
                                 >
                                     <RiCloseLine className="h-4 w-4 text-muted-foreground" />
                                 </span>
@@ -3051,9 +3053,9 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                                 />
                             )}
                             <span className="text-muted-foreground flex-shrink-0">
-                                PR #{linkedPr.number}
+                                {t('chatInput.pullRequestNumber', { number: linkedPr.number })}
                                 {linkedPr.author && (
-                                    <span className="ml-1">by {linkedPr.author.login}</span>
+                                    <span className="ml-1">{t('chatInput.byAuthor', { author: linkedPr.author.login })}</span>
                                 )}
                             </span>
                             <span className="text-foreground truncate">
@@ -3069,7 +3071,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                                     rel="noopener noreferrer"
                                     onClick={(e) => e.stopPropagation()}
                                     className="flex items-center justify-center h-6 w-6 hover:bg-[var(--interactive-hover)] rounded-full transition-colors"
-                                    aria-label="Open pull request in browser"
+                                    aria-label={t('chatInput.openPullRequestInBrowser')}
                                 >
                                     <RiExternalLinkLine className="h-4 w-4 text-muted-foreground" />
                                 </a>
@@ -3079,7 +3081,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                                         setLinkedPr(null);
                                     }}
                                     className="flex items-center justify-center h-6 w-6 hover:bg-[var(--interactive-hover)] rounded-full transition-colors cursor-pointer"
-                                    aria-label="Remove linked pull request"
+                                    aria-label={t('chatInput.removeLinkedPullRequest')}
                                 >
                                     <RiCloseLine className="h-4 w-4 text-muted-foreground" />
                                 </span>
@@ -3132,13 +3134,13 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                                     className="h-7 min-w-0 w-fit max-w-[48vw] sm:max-w-[20rem] border-transparent bg-transparent px-1.5 hover:bg-transparent data-[state=open]:bg-transparent"
                                 >
                                     <SelectValue>
-                                        {selectedDraftBranchLabel ?? 'Branch'}
+                                        {selectedDraftBranchLabel ?? t('chatInput.branch')}
                                     </SelectValue>
                                 </SelectTrigger>
                                 <SelectContent fitContent>
                                     {projectRootBranchOption ? (
                                         <SelectGroup>
-                                            <SelectLabel>Project root</SelectLabel>
+                                            <SelectLabel>{t('chatInput.projectRoot')}</SelectLabel>
                                             <SelectItem key={projectRootBranchOption.value} value={projectRootBranchOption.value} className="max-w-[24rem] truncate">
                                                 {projectRootBranchOption.label}
                                             </SelectItem>
@@ -3147,14 +3149,14 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                                     {projectRootBranchOption ? <SelectSeparator /> : null}
                                     <SelectGroup>
                                         <div className="flex items-center justify-between px-2 py-1.5">
-                                            <span className="text-muted-foreground typography-meta">Worktrees</span>
+                                            <span className="text-muted-foreground typography-meta">{t('chatInput.worktrees')}</span>
                                             <button
                                                 type="button"
                                                 className="text-muted-foreground typography-meta hover:text-foreground cursor-pointer"
                                                 onPointerDown={(e) => { e.stopPropagation(); }}
                                                 onClick={(e) => { e.preventDefault(); e.stopPropagation(); void createWorktreeDraft(); }}
                                             >
-                                                + New
+                                                + {t('common.new')}
                                             </button>
                                         </div>
                                         {worktreeBranchOptions.map((option) => (
@@ -3203,13 +3205,13 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                                         type="button"
                                         className={iconButtonBaseClass}
                                         onClick={() => handlePickLocalFiles()}
-                                        title="Attach files"
-                                        aria-label="Attach files"
+                                        title={t('chatInput.attachFiles')}
+                                        aria-label={t('chatInput.attachFiles')}
                                     >
                                         <RiAttachment2 className={cn(iconSizeClass, 'text-current')} />
                                     </button>
                                 </div>
-                                <p className="mt-2 typography-ui-label text-muted-foreground">Drop files here to attach</p>
+                                <p className="mt-2 typography-ui-label text-muted-foreground">{t('chatInput.dropFilesHere')}</p>
                             </div>
                         </div>
                     )}
@@ -3427,7 +3429,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                                                     event.preventDefault();
                                                 }}
                                                 onClick={() => setExpandedInput(!isExpandedInput)}
-                                                aria-label="Toggle focus mode"
+                                                aria-label={t('chatInput.toggleFocusMode')}
                                                 aria-pressed={isExpandedInput}
                                             >
                                                 <RiFullscreenLine className={cn(iconSizeClass)} />
@@ -3435,7 +3437,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                                         </TooltipTrigger>
                                         <TooltipContent side="top" sideOffset={8}>
                                             <div className="flex flex-col gap-0.5 text-center">
-                                                <span>Focus mode</span>
+                                                <span>{t('chatInput.focusMode')}</span>
                                                 <span className="font-mono opacity-60">
                                                     {isMacOS() ? '⌘⇧E' : 'Ctrl+Shift+E'}
                                                 </span>

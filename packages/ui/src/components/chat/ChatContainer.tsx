@@ -25,6 +25,7 @@ import {
     collectVisibleSessionIdsForBlockingRequests,
     flattenBlockingRequests,
 } from './lib/blockingRequests';
+import { useLanguage } from '@/hooks/useLanguage';
 
 const EMPTY_MESSAGES: Array<{ info: Message; parts: Part[] }> = [];
 const EMPTY_PERMISSIONS: PermissionRequest[] = [];
@@ -71,6 +72,7 @@ const HYDRATING_SKELETON_ITEMS: Array<{
 ];
 
 export const ChatContainer: React.FC = () => {
+    const { t } = useLanguage();
     const {
         currentSessionId,
         loadMessages,
@@ -200,8 +202,8 @@ export const ChatContainer: React.FC = () => {
             size="xs"
             onClick={handleReturnToParentSession}
             className="absolute left-3 top-3 z-20 !font-normal bg-[var(--surface-background)]/95"
-            aria-label="Return to parent session"
-            title={parentSession.title?.trim() ? `Return to: ${parentSession.title}` : 'Return to parent session'}
+            aria-label={t('chatContainer.returnToParentSession')}
+            title={parentSession.title?.trim() ? t('chatContainer.returnToSession', { title: parentSession.title }) : t('chatContainer.returnToParentSession')}
         >
             <RiArrowLeftLine className="h-4 w-4" />
             Parent

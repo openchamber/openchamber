@@ -20,6 +20,7 @@ import {
 } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { useLanguage } from '@/hooks/useLanguage';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionStore } from '@/stores/useSessionStore';
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -75,6 +76,7 @@ export function GitHubIssuePickerDialog({
   mode?: 'createSession' | 'select';
   onSelect?: (issue: { number: number; title: string; url: string; contextText: string; author?: { login: string; avatarUrl?: string } }) => void;
 }) {
+  const { t } = useLanguage();
   const { github } = useRuntimeAPIs();
   const githubAuthStatus = useGitHubAuthStore((state) => state.status);
   const githubAuthChecked = useGitHubAuthStore((state) => state.hasChecked);
@@ -99,7 +101,7 @@ export function GitHubIssuePickerDialog({
   const refresh = React.useCallback(async () => {
     if (!projectDirectory) {
       setResult(null);
-      setError('No active project');
+      setError(t('githubIssuePickerDialog.noActiveProject'));
       return;
     }
     if (githubAuthChecked && githubAuthStatus?.connected === false) {
@@ -112,7 +114,7 @@ export function GitHubIssuePickerDialog({
     }
     if (!github?.issuesList) {
       setResult(null);
-      setError('GitHub runtime API unavailable');
+      setError(t('githubIssuePickerDialog.runtimeApiUnavailable'));
       return;
     }
 
@@ -132,7 +134,7 @@ export function GitHubIssuePickerDialog({
     } finally {
       setIsLoading(false);
     }
-  }, [github, githubAuthChecked, githubAuthStatus, projectDirectory]);
+  }, [github, githubAuthChecked, githubAuthStatus, projectDirectory, t]);
 
   const loadMore = React.useCallback(async () => {
     if (!projectDirectory) return;
@@ -150,11 +152,11 @@ export function GitHubIssuePickerDialog({
       setHasMore(Boolean(next.hasMore));
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      toast.error('Failed to load more issues', { description: message });
+      toast.error(t('githubIssuePickerDialog.failedToLoadMoreIssues'), { description: message });
     } finally {
       setIsLoadingMore(false);
     }
-  }, [github, hasMore, isLoading, isLoadingMore, page, projectDirectory]);
+  }, [github, hasMore, isLoading, isLoadingMore, page, projectDirectory, t]);
 
   React.useEffect(() => {
     if (!open) {
@@ -268,11 +270,11 @@ export function GitHubIssuePickerDialog({
     if (mode === 'select') {
       // In select mode, fetch full issue details and return via onSelect
       if (!projectDirectory) {
-        toast.error('No active project');
+        toast.error(t('githubIssuePickerDialog.noActiveProject'));
         return;
       }
       if (!github?.issueGet || !github?.issueComments) {
-        toast.error('GitHub runtime API unavailable');
+        toast.error(t('githubIssuePickerDialog.runtimeApiUnavailable'));
         return;
       }
       if (startingIssueNumber) return;
@@ -280,24 +282,24 @@ export function GitHubIssuePickerDialog({
       try {
         const issueRes = await github.issueGet(projectDirectory, issueNumber);
         if (issueRes.connected === false) {
-          toast.error('GitHub not connected');
+          toast.error(t('githubIssuePickerDialog.notConnectedShort'));
           return;
         }
         if (!issueRes.repo) {
-          toast.error('Repo not resolvable', {
-            description: 'origin remote must be a GitHub URL',
+          toast.error(t('githubIssuePickerDialog.repoNotResolvable'), {
+            description: t('githubIssuePickerDialog.originRemoteMustBeGithubUrl'),
           });
           return;
         }
         const issue = issueRes.issue;
         if (!issue) {
-          toast.error('Issue not found');
+          toast.error(t('githubIssuePickerDialog.issueNotFound'));
           return;
         }
 
         const commentsRes = await github.issueComments(projectDirectory, issueNumber);
         if (commentsRes.connected === false) {
-          toast.error('GitHub not connected');
+          toast.error(t('githubIssuePickerDialog.notConnectedShort'));
           return;
         }
         const comments = commentsRes.comments ?? [];
@@ -320,7 +322,7 @@ export function GitHubIssuePickerDialog({
         onOpenChange(false);
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
-        toast.error('Failed to load issue details', { description: message });
+        toast.error(t('githubIssuePickerDialog.failedToLoadIssueDetails'), { description: message });
       } finally {
         setStartingIssueNumber(null);
       }
@@ -328,11 +330,11 @@ export function GitHubIssuePickerDialog({
     }
 
     if (!projectDirectory) {
-      toast.error('No active project');
+      toast.error(t('githubIssuePickerDialog.noActiveProject'));
       return;
     }
     if (!github?.issueGet || !github?.issueComments) {
-      toast.error('GitHub runtime API unavailable');
+      toast.error(t('githubIssuePickerDialog.runtimeApiUnavailable'));
       return;
     }
     if (startingIssueNumber) return;
@@ -340,24 +342,24 @@ export function GitHubIssuePickerDialog({
     try {
       const issueRes = await github.issueGet(projectDirectory, issueNumber);
       if (issueRes.connected === false) {
-        toast.error('GitHub not connected');
+        toast.error(t('githubIssuePickerDialog.notConnectedShort'));
         return;
       }
       if (!issueRes.repo) {
-        toast.error('Repo not resolvable', {
-          description: 'origin remote must be a GitHub URL',
+        toast.error(t('githubIssuePickerDialog.repoNotResolvable'), {
+          description: t('githubIssuePickerDialog.originRemoteMustBeGithubUrl'),
         });
         return;
       }
       const issue = issueRes.issue;
       if (!issue) {
-        toast.error('Issue not found');
+        toast.error(t('githubIssuePickerDialog.issueNotFound'));
         return;
       }
 
       const commentsRes = await github.issueComments(projectDirectory, issueNumber);
       if (commentsRes.connected === false) {
-        toast.error('GitHub not connected');
+        toast.error(t('githubIssuePickerDialog.notConnectedShort'));
         return;
       }
       const comments = commentsRes.comments ?? [];
@@ -404,7 +406,7 @@ export function GitHubIssuePickerDialog({
       const modelID = defaultModel?.modelID || configState.currentModelId || lastUsedProvider?.modelID;
       const agentName = resolveDefaultAgentName() || configState.currentAgentName || undefined;
       if (!providerID || !modelID) {
-        toast.error('No model selected');
+        toast.error(t('pullRequest.noModelSelected'));
         return;
       }
 
@@ -500,31 +502,43 @@ Do not implement changes until I confirm; end with: “Next actions: <1 sentence
         ],
       }).catch((e) => {
         const message = e instanceof Error ? e.message : String(e);
-        toast.error('Failed to send issue context', {
+        toast.error(t('githubIssuePickerDialog.failedToSendIssueContext'), {
           description: message,
         });
       });
 
-      toast.success('Session created from issue');
+      toast.success(t('newWorktreeDialog.sessionCreatedFromIssue'));
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      toast.error('Failed to start session', { description: message });
+      toast.error(t('githubIssuePickerDialog.failedToStartSession'), { description: message });
     } finally {
       setStartingIssueNumber(null);
     }
-  }, [createInWorktree, github, mode, onOpenChange, onSelect, projectDirectory, resolveDefaultAgentName, resolveDefaultModelSelection, resolveDefaultVariant, startingIssueNumber]);
+  }, [
+    createInWorktree,
+    github,
+    mode,
+    onOpenChange,
+    onSelect,
+    projectDirectory,
+    resolveDefaultAgentName,
+    resolveDefaultModelSelection,
+    resolveDefaultVariant,
+    startingIssueNumber,
+    t,
+  ]);
 
-  const title = mode === 'select' ? 'Link GitHub Issue' : 'New Session From GitHub Issue';
+  const title = mode === 'select' ? t('githubIssuePickerDialog.linkTitle') : t('githubIssuePickerDialog.newSessionTitle');
   const description = mode === 'select'
-    ? 'Select an issue to link to this session.'
-    : 'Seeds a new session with hidden issue context (title/body/labels/comments).';
+    ? t('githubIssuePickerDialog.linkDescription')
+    : t('githubIssuePickerDialog.newSessionDescription');
 
   const content = (
     <>
       <div className="relative mt-2">
         <RiSearchLine className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
-          placeholder="Search by title or #123, or paste issue URL"
+          placeholder={t('githubIssuePickerDialog.searchPlaceholder')}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           className="pl-9 w-full"
@@ -533,26 +547,26 @@ Do not implement changes until I confirm; end with: “Next actions: <1 sentence
 
       <div className={cn(isMobile ? 'min-h-0 mt-2' : 'flex-1 overflow-y-auto mt-2')}>
           {!projectDirectory ? (
-            <div className="text-center text-muted-foreground py-8">No active project selected.</div>
+            <div className="text-center text-muted-foreground py-8">{t('githubIssuePickerDialog.noActiveProjectSelected')}</div>
           ) : null}
 
           {!github ? (
-            <div className="text-center text-muted-foreground py-8">GitHub runtime API unavailable.</div>
+            <div className="text-center text-muted-foreground py-8">{t('githubIssuePickerDialog.runtimeApiUnavailable')}</div>
           ) : null}
 
           {isLoading ? (
             <div className="text-center text-muted-foreground py-8 flex items-center justify-center gap-2">
               <RiLoader4Line className="h-4 w-4 animate-spin" />
-              Loading issues...
+              {t('githubIssuePickerDialog.loadingIssues')}
             </div>
           ) : null}
 
           {connected === false ? (
             <div className="text-center text-muted-foreground py-8 space-y-3">
-              <div>GitHub not connected. Connect your GitHub account in settings.</div>
+              <div>{t('githubIssuePickerDialog.notConnected')}</div>
               <div className="flex justify-center">
                 <Button variant="outline" size="sm" onClick={openGitHubSettings}>
-                  Open settings
+                  {t('pullRequest.openSettings')}
                 </Button>
               </div>
             </div>
@@ -572,7 +586,7 @@ Do not implement changes until I confirm; end with: “Next actions: <1 sentence
             >
               <span className="typography-meta text-muted-foreground w-5 text-right flex-shrink-0">#</span>
               <p className="flex-1 min-w-0 typography-small text-foreground truncate ml-0.5">
-                Use issue #{directNumber}
+                {t('githubIssuePickerDialog.useIssueNumber', { number: directNumber })}
               </p>
               <div className="flex-shrink-0 h-5 flex items-center mr-2">
                 {startingIssueNumber === directNumber ? (
@@ -583,7 +597,9 @@ Do not implement changes until I confirm; end with: “Next actions: <1 sentence
           ) : null}
 
           {filtered.length === 0 && !isLoading && connected && github && projectDirectory ? (
-            <div className="text-center text-muted-foreground py-8">{query ? 'No issues found' : 'No open issues found'}</div>
+            <div className="text-center text-muted-foreground py-8">
+              {query ? t('githubIssuePickerDialog.noIssuesFound') : t('githubIssuePickerDialog.noOpenIssuesFound')}
+            </div>
           ) : null}
 
           {filtered.map((issue) => (
@@ -612,7 +628,7 @@ Do not implement changes until I confirm; end with: “Next actions: <1 sentence
                     rel="noopener noreferrer"
                     className="hidden group-hover:flex h-5 w-5 items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
                     onClick={(e) => e.stopPropagation()}
-                    aria-label="Open in GitHub"
+                    aria-label={t('githubIssuePickerDialog.openInGithub')}
                   >
                     <RiExternalLinkLine className="h-4 w-4" />
                   </a>
@@ -635,10 +651,10 @@ Do not implement changes until I confirm; end with: “Next actions: <1 sentence
                 {isLoadingMore ? (
                   <span className="inline-flex items-center gap-2">
                     <RiLoader4Line className="h-4 w-4 animate-spin" />
-                    Loading...
+                    {t('githubIssuePickerDialog.loading')}
                   </span>
                 ) : (
-                  'Load more'
+                  t('githubIssuePickerDialog.loadMore')
                 )}
               </button>
             </div>
@@ -647,7 +663,7 @@ Do not implement changes until I confirm; end with: “Next actions: <1 sentence
 
       {mode !== 'select' && (
         <div className="mt-4 p-3 bg-muted/30 rounded-lg">
-          <p className="typography-meta text-muted-foreground font-medium mb-2">Actions</p>
+          <p className="typography-meta text-muted-foreground font-medium mb-2">{t('githubIssuePickerDialog.actions')}</p>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-2">
             <div
               className="flex items-center gap-2 cursor-pointer"
@@ -669,7 +685,7 @@ Do not implement changes until I confirm; end with: “Next actions: <1 sentence
                   e.stopPropagation();
                   setCreateInWorktree((v) => !v);
                 }}
-                aria-label="Toggle worktree"
+                aria-label={t('githubIssuePickerDialog.toggleWorktree')}
                 className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               >
                 {createInWorktree ? (
@@ -678,7 +694,7 @@ Do not implement changes until I confirm; end with: “Next actions: <1 sentence
                   <RiCheckboxBlankLine className="h-4 w-4" />
                 )}
               </button>
-              <span className="typography-meta text-muted-foreground">Create in worktree</span>
+              <span className="typography-meta text-muted-foreground">{t('githubIssuePickerDialog.createInWorktree')}</span>
               <span className="typography-meta text-muted-foreground/70 hidden sm:inline">(issue-&lt;number&gt;-&lt;slug&gt;)</span>
             </div>
             <div className="hidden sm:block sm:flex-1" />
@@ -687,12 +703,12 @@ Do not implement changes until I confirm; end with: “Next actions: <1 sentence
                 <Button variant="outline" size="sm" asChild>
                   <a href={repoUrl} target="_blank" rel="noopener noreferrer">
                     <RiExternalLinkLine className="size-4" />
-                    Open Repo
+                    {t('pullRequest.openRepo')}
                   </a>
                 </Button>
               ) : null}
               <Button variant="outline" size="sm" onClick={refresh} disabled={isLoading || Boolean(startingIssueNumber)}>
-                Refresh
+                      {t('common.refresh')}
               </Button>
             </div>
           </div>

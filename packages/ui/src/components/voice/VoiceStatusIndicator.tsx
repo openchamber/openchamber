@@ -26,6 +26,7 @@ import {
     RiAlertLine,
 } from '@remixicon/react';
 import type { BrowserVoiceStatus } from '@/hooks/useBrowserVoice';
+import { useLanguage } from '@/hooks/useLanguage';
 
 export interface VoiceStatusIndicatorProps {
     /** Current voice status */
@@ -60,36 +61,30 @@ const statusConfig: Record<
     {
         icon: typeof RiMicLine;
         color: string;
-        label: string;
         animation?: string;
     }
 > = {
     idle: {
         icon: RiMicOffLine,
         color: 'text-muted-foreground',
-        label: 'Voice Ready',
     },
     listening: {
         icon: RiMicLine,
         color: 'text-primary',
-        label: 'Listening...',
         animation: 'animate-pulse',
     },
     processing: {
         icon: RiLoader4Line,
         color: 'text-primary',
-        label: 'Processing...',
         animation: 'animate-spin',
     },
     speaking: {
         icon: RiVolumeUpLine,
         color: 'text-green-500',
-        label: 'Speaking...',
     },
     error: {
         icon: RiAlertLine,
         color: 'text-destructive',
-        label: 'Voice Error',
     },
 };
 
@@ -103,10 +98,27 @@ export function VoiceStatusIndicator({
     className = '',
     conversationMode = false,
 }: VoiceStatusIndicatorProps) {
+    const { t } = useLanguage();
     const config = statusConfig[status];
     const Icon = config.icon;
     const sizeClass = sizeClasses[size];
     const containerClass = showLabel ? sizeClass.container : '';
+    const statusLabel = React.useMemo(() => {
+        switch (status) {
+            case 'idle':
+                return t('voiceStatusIndicator.voiceReady');
+            case 'listening':
+                return t('voiceStatusIndicator.listening');
+            case 'processing':
+                return t('voiceStatusIndicator.processing');
+            case 'speaking':
+                return t('voiceStatusIndicator.speaking');
+            case 'error':
+                return t('voiceStatusIndicator.voiceError');
+            default:
+                return t('voiceStatusIndicator.voiceReady');
+        }
+    }, [status, t]);
 
     return (
         <div className={`flex items-center ${containerClass} ${className}`}>
@@ -123,13 +135,13 @@ export function VoiceStatusIndicator({
                 {conversationMode && status === 'idle' && (
                     <span
                         className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-green-500 rounded-full"
-                        aria-label="Conversation mode active"
+                        aria-label={t('voiceStatusIndicator.conversationModeActive')}
                     />
                 )}
             </div>
             {showLabel && (
                 <span className={`typography-meta ${config.color}`}>
-                    {config.label}
+                    {statusLabel}
                 </span>
             )}
         </div>

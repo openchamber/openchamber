@@ -8,6 +8,7 @@ import { RiDiscordFill, RiGithubFill, RiTwitterXFill } from '@remixicon/react';
 import { debugUtils } from '@/lib/debug';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui';
+import { useLanguage } from '@/hooks/useLanguage';
 
 declare const __APP_VERSION__: string | undefined;
 
@@ -20,6 +21,7 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
   open,
   onOpenChange,
 }) => {
+  const { t } = useLanguage();
   const [version, setVersion] = React.useState<string | null>(null);
   const [isCopyingDiagnostics, setIsCopyingDiagnostics] = React.useState(false);
   const [copiedDiagnostics, setCopiedDiagnostics] = React.useState(false);
@@ -32,8 +34,8 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
     setCopiedDiagnostics(false);
     try {
       if (!diagnosticsReport) {
-        toast.error('Copy failed', {
-          description: 'Diagnostics not ready yet. Wait a second and retry.',
+        toast.error(t('common.copyFailed'), {
+          description: t('aboutDialog.diagnosticsNotReady'),
         });
         return;
       }
@@ -41,19 +43,19 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
       const result = await debugUtils.copyTextToClipboard(diagnosticsReport);
       if (result.ok) {
         setCopiedDiagnostics(true);
-        toast.success('Diagnostics copied');
+        toast.success(t('aboutDialog.diagnosticsCopied'));
       } else {
-        toast.error('Copy failed', {
+        toast.error(t('common.copyFailed'), {
           description: result.error,
         });
       }
     } catch (error) {
-      toast.error('Copy failed');
+      toast.error(t('common.copyFailed'));
       console.error('Failed to copy diagnostics:', error);
     } finally {
       setIsCopyingDiagnostics(false);
     }
-  }, [diagnosticsReport, isCopyingDiagnostics]);
+  }, [diagnosticsReport, isCopyingDiagnostics, t]);
 
   React.useEffect(() => {
     if (!open) return;
@@ -114,25 +116,25 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
           <OpenChamberLogo width={64} height={64} />
 
           <div className="space-y-1">
-            <h2 className="text-lg font-semibold">OpenChamber</h2>
+            <h2 className="text-lg font-semibold">{t('aboutDialog.openChamber')}</h2>
             {displayVersion && (
               <p className="typography-meta text-muted-foreground">
-                Version {displayVersion}
+                {t('aboutDialog.version', { version: displayVersion })}
               </p>
             )}
           </div>
 
           <p className="typography-meta text-muted-foreground">
-            A fan-made interface for{' '}
+            {t('aboutDialog.fanMadePrefix')}{' '}
             <a
               href="https://opencode.ai/"
               target="_blank"
               rel="noopener noreferrer"
               className="hover:text-foreground transition-colors"
             >
-              OpenCode
+              {t('aboutDialog.openCode')}
             </a>{' '}
-            agent
+            {t('aboutDialog.fanMadeSuffix')}
           </p>
 
           <div className="flex flex-col items-center gap-2 pt-2">
@@ -146,13 +148,13 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
               )}
             >
               {copiedDiagnostics
-                ? 'Diagnostics copied'
+                ? t('aboutDialog.diagnosticsCopied')
                 : isPreparingDiagnostics
-                  ? 'Preparing diagnostics...'
-                  : 'Copy diagnostics'}
+                  ? t('aboutDialog.preparingDiagnostics')
+                  : t('aboutDialog.copyDiagnostics')}
             </button>
             <p className="typography-micro text-muted-foreground">
-              Includes OpenChamber state, OpenCode health, directories, and projects.
+              {t('aboutDialog.diagnosticsHint')}
             </p>
           </div>
 
@@ -164,7 +166,7 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
               className="flex items-center gap-1.5 typography-meta text-muted-foreground hover:text-foreground transition-colors"
             >
               <RiGithubFill className="h-4 w-4" />
-              <span>GitHub</span>
+              <span>{t('aboutDialog.github')}</span>
             </a>
             <a
               href="https://discord.gg/ZYRSdnwwKA"
@@ -173,7 +175,7 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
               className="flex items-center gap-1.5 typography-meta text-muted-foreground hover:text-foreground transition-colors"
             >
               <RiDiscordFill className="h-4 w-4" />
-              <span>Discord</span>
+              <span>{t('aboutDialog.discord')}</span>
             </a>
             <a
               href="https://x.com/btriapitsyn"
@@ -182,12 +184,12 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
               className="flex items-center gap-1.5 typography-meta text-muted-foreground hover:text-foreground transition-colors"
             >
               <RiTwitterXFill className="h-4 w-4" />
-              <span>@btriapitsyn</span>
+              <span>@btriapitsyn</span> {/* // i18n-scan-ignore */}
             </a>
           </div>
 
           <p className="typography-meta text-muted-foreground/60 pt-2">
-            Made with love to comunity
+            {t('aboutDialog.madeWithLove')}
           </p>
         </div>
       </DialogContent>

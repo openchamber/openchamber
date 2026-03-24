@@ -4,6 +4,7 @@ import type { Part } from '@opencode-ai/sdk/v2';
 import { RiArrowDownSLine, RiArrowRightSLine, RiBrainAi3Line, RiChatAi3Line } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import type { ContentChangeReason } from '@/hooks/useChatScrollManager';
+import { useLanguage } from '@/hooks/useLanguage';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { useUIStore } from '@/stores/useUIStore';
 import { useDurationTickerNow } from './useDurationTicker';
@@ -16,12 +17,12 @@ export type ReasoningVariant = 'thinking' | 'justification';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type IconComponent = ComponentType<any>;
 
-const variantConfig: Record<
+const variantIconConfig: Record<
     ReasoningVariant,
-    { label: string; Icon: IconComponent }
+    { Icon: IconComponent }
 > = {
-    thinking: { label: 'Thinking', Icon: RiBrainAi3Line },
-    justification: { label: 'Justification', Icon: RiChatAi3Line },
+    thinking: { Icon: RiBrainAi3Line },
+    justification: { Icon: RiChatAi3Line },
 };
 
 const cleanReasoningText = (text: string): string => {
@@ -91,10 +92,12 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
     showDuration = true,
     isStreaming = false,
 }) => {
+    const { t } = useLanguage();
     const [isExpanded, setIsExpanded] = React.useState(false);
 
     const summary = React.useMemo(() => getReasoningSummary(text), [text]);
-    const { label, Icon } = variantConfig[variant];
+    const { Icon } = variantIconConfig[variant];
+    const label = variant === 'thinking' ? t('reasoningPart.thinking') : t('reasoningPart.justification');
     const timeStart = typeof time?.start === 'number' && Number.isFinite(time.start) ? time.start : undefined;
     const timeEnd = typeof time?.end === 'number' && Number.isFinite(time.end) ? time.end : undefined;
 

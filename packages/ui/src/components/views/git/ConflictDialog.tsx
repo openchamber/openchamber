@@ -12,6 +12,7 @@ import { RiAlertLine, RiLoader4Line, RiChat1Line, RiAddLine } from '@remixicon/r
 import { useSessionStore } from '@/stores/useSessionStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { toast } from '@/components/ui';
+import { useLanguage } from '@/hooks/useLanguage';
 import { getConflictDetails, type MergeConflictDetails } from '@/lib/gitApi';
 
 interface ConflictDialogProps {
@@ -33,6 +34,7 @@ export const ConflictDialog: React.FC<ConflictDialogProps> = ({
   onAbort,
   onClearState,
 }) => {
+  const { t } = useLanguage();
   const openNewSessionDraft = useSessionStore((state) => state.openNewSessionDraft);
   const currentSessionId = useSessionStore((state) => state.currentSessionId);
   const setPendingInputText = useSessionStore((state) => state.setPendingInputText);
@@ -56,13 +58,13 @@ export const ConflictDialog: React.FC<ConflictDialogProps> = ({
         setConflictDetails(details);
       })
       .catch((err) => {
-        const message = err instanceof Error ? err.message : 'Failed to load conflict details';
+        const message = err instanceof Error ? err.message : t('gitConflict.failedToLoadConflictDetails');
         setLoadError(message);
       })
       .finally(() => {
         setIsLoading(false);
       });
-  }, [open, directory]);
+  }, [open, directory, t]);
 
   const buildConflictContext = React.useCallback((): {
     visibleText: string;
@@ -124,12 +126,12 @@ Important:
   const handleResolveInCurrentSession = () => {
     const context = buildConflictContext();
     if (!context) {
-      toast.error('No conflict details available');
+      toast.error(t('gitConflict.noConflictDetailsAvailable'));
       return;
     }
 
     if (!currentSessionId) {
-      toast.error('No active session', { description: 'Open a chat session first or use "New Session".' });
+      toast.error(t('pullRequest.noActiveSession'), { description: t('gitConflict.openSessionFirstOrUseNewSession') });
       return;
     }
 
@@ -148,7 +150,7 @@ Important:
   const handleResolveInNewSession = () => {
     const context = buildConflictContext();
     if (!context) {
-      toast.error('No conflict details available');
+      toast.error(t('gitConflict.noConflictDetailsAvailable'));
       return;
     }
 
@@ -167,7 +169,7 @@ Important:
     onOpenChange(false);
   };
 
-  const operationLabel = operation === 'merge' ? 'Merge' : 'Rebase';
+  const operationLabel = operation === 'merge' ? t('branchIntegration.merge') : t('branchIntegration.rebase');
   const displayFiles = conflictDetails?.unmergedFiles || conflictFiles;
 
   return (
@@ -177,30 +179,30 @@ Important:
           <DialogHeader>
             <div className="flex items-center gap-2">
               <RiAlertLine className="size-5 shrink-0 text-[var(--status-warning)]" />
-              <DialogTitle>{operationLabel} Conflicts Detected</DialogTitle>
+              <DialogTitle>{t('gitConflict.conflictsDetectedTitle', { operation: operationLabel })}</DialogTitle>
             </div>
             <DialogDescription>
-              The {operation} operation resulted in conflicts that need to be resolved.
+              {t('gitConflict.operationResultedInConflicts', { operation })}
             </DialogDescription>
           </DialogHeader>
 
           {isLoading && (
             <div className="flex items-center justify-center gap-2 py-4 text-muted-foreground">
               <RiLoader4Line className="size-4 animate-spin" />
-              <span className="typography-meta">Loading conflict details...</span>
+              <span className="typography-meta">{t('gitConflict.loadingConflictDetails')}</span>
             </div>
           )}
 
           {loadError && (
             <div className="rounded-lg bg-[var(--status-error-bg)] p-3 text-[var(--status-error)] typography-meta break-words">
-              Error loading details: {loadError}
+              {t('gitConflict.errorLoadingDetails')}: {loadError}
             </div>
           )}
 
           {displayFiles.length > 0 && (
             <div className="space-y-2 overflow-hidden">
               <div className="flex items-center justify-between">
-                <p className="typography-meta text-muted-foreground">Conflicted files:</p>
+                <p className="typography-meta text-muted-foreground">{t('gitConflict.conflictedFiles')}</p>
                 <span className="typography-micro px-1.5 py-0.5 rounded bg-[var(--surface-elevated)] text-muted-foreground">
                   {displayFiles.length}
                 </span>
@@ -223,7 +225,7 @@ Important:
 
           {conflictDetails?.headInfo && (
             <div className="space-y-1 overflow-hidden">
-              <p className="typography-meta text-muted-foreground">HEAD information:</p>
+              <p className="typography-meta text-muted-foreground">{t('gitConflict.headInformation')}</p>
               <div className="typography-micro text-foreground font-mono bg-[var(--surface-elevated)] rounded-lg p-3 max-h-24 overflow-y-auto break-words whitespace-pre-wrap">
                 {conflictDetails.headInfo}
               </div>
@@ -242,7 +244,7 @@ Important:
               ) : (
                 <RiAddLine className="size-4" />
               )}
-              Resolve in New Session
+              {t('gitConflict.resolveInNewSession')}
             </Button>
             <Button
               variant="outline"
@@ -255,14 +257,14 @@ Important:
               ) : (
                 <RiChat1Line className="size-4" />
               )}
-              Resolve in Current Session
+              {t('gitConflict.resolveInCurrentSession')}
             </Button>
             <div className="flex gap-2 pt-1">
               <Button variant="ghost" size="sm" onClick={handleContinueLater} className="flex-1">
-                Continue Later
+                {t('gitConflict.continueLater')}
               </Button>
               <Button variant="destructive" size="sm" onClick={handleAbort} className="flex-1">
-                Abort {operationLabel}
+                {t('gitConflict.abortOperation', { operation: operationLabel })}
               </Button>
             </div>
           </div>

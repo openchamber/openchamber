@@ -1,10 +1,14 @@
+import i18n from '@/i18n';
+
 export interface ToolMetadata {
   displayName: string;
+  displayNameKey?: string;
   icon?: string;
   outputLanguage?: string;
   inputFields?: {
     key: string;
     label: string;
+    labelKey?: string;
     type: 'command' | 'file' | 'pattern' | 'text' | 'code';
     language?: string;
   }[];
@@ -15,200 +19,234 @@ export const TOOL_METADATA: Record<string, ToolMetadata> = {
 
   read: {
     displayName: 'Read File',
+    displayNameKey: 'toolMetadata.displayNames.read',
     category: 'file',
     outputLanguage: 'auto',
     inputFields: [
-      { key: 'filePath', label: 'File Path', type: 'file' },
-      { key: 'offset', label: 'Start Line', type: 'text' },
-      { key: 'limit', label: 'Lines to Read', type: 'text' }
+      { key: 'filePath', label: 'File Path', labelKey: 'toolMetadata.inputLabels.filePath', type: 'file' },
+      { key: 'offset', label: 'Start Line', labelKey: 'toolMetadata.inputLabels.startLine', type: 'text' },
+      { key: 'limit', label: 'Lines to Read', labelKey: 'toolMetadata.inputLabels.linesToRead', type: 'text' }
     ]
   },
   write: {
     displayName: 'Write File',
+    displayNameKey: 'toolMetadata.displayNames.write',
     category: 'file',
     outputLanguage: 'auto',
     inputFields: [
-      { key: 'filePath', label: 'File Path', type: 'file' },
-      { key: 'content', label: 'Content', type: 'code' }
+      { key: 'filePath', label: 'File Path', labelKey: 'toolMetadata.inputLabels.filePath', type: 'file' },
+      { key: 'content', label: 'Content', labelKey: 'toolMetadata.inputLabels.content', type: 'code' }
     ]
   },
   edit: {
     displayName: 'Edit File',
+    displayNameKey: 'toolMetadata.displayNames.edit',
     category: 'file',
     outputLanguage: 'diff',
     inputFields: [
-      { key: 'filePath', label: 'File Path', type: 'file' },
-      { key: 'oldString', label: 'Find', type: 'code' },
-      { key: 'newString', label: 'Replace', type: 'code' },
-      { key: 'replaceAll', label: 'Replace All', type: 'text' }
+      { key: 'filePath', label: 'File Path', labelKey: 'toolMetadata.inputLabels.filePath', type: 'file' },
+      { key: 'oldString', label: 'Find', labelKey: 'toolMetadata.inputLabels.find', type: 'code' },
+      { key: 'newString', label: 'Replace', labelKey: 'toolMetadata.inputLabels.replace', type: 'code' },
+      { key: 'replaceAll', label: 'Replace All', labelKey: 'toolMetadata.inputLabels.replaceAll', type: 'text' }
     ]
   },
   multiedit: {
     displayName: 'Multi-Edit',
+    displayNameKey: 'toolMetadata.displayNames.multiedit',
     category: 'file',
     outputLanguage: 'diff',
     inputFields: [
-      { key: 'filePath', label: 'File Path', type: 'file' },
-      { key: 'edits', label: 'Edits', type: 'code', language: 'json' }
+      { key: 'filePath', label: 'File Path', labelKey: 'toolMetadata.inputLabels.filePath', type: 'file' },
+      { key: 'edits', label: 'Edits', labelKey: 'toolMetadata.inputLabels.edits', type: 'code', language: 'json' }
     ]
   },
   apply_patch: {
     displayName: 'Apply Patch',
+    displayNameKey: 'toolMetadata.displayNames.apply_patch',
     category: 'file',
     outputLanguage: 'diff',
     inputFields: [
-      { key: 'patchText', label: 'Patch', type: 'code', language: 'diff' }
+      { key: 'patchText', label: 'Patch', labelKey: 'toolMetadata.inputLabels.patch', type: 'code', language: 'diff' }
     ]
   },
 
   bash: {
     displayName: 'Shell Command',
+    displayNameKey: 'toolMetadata.displayNames.bash',
     category: 'system',
     outputLanguage: 'text',
     inputFields: [
-      { key: 'command', label: 'Command', type: 'command', language: 'bash' },
-      { key: 'description', label: 'Description', type: 'text' },
-      { key: 'timeout', label: 'Timeout (ms)', type: 'text' }
+      { key: 'command', label: 'Command', labelKey: 'toolMetadata.inputLabels.command', type: 'command', language: 'bash' },
+      { key: 'description', label: 'Description', labelKey: 'toolMetadata.inputLabels.description', type: 'text' },
+      { key: 'timeout', label: 'Timeout (ms)', labelKey: 'toolMetadata.inputLabels.timeoutMs', type: 'text' }
     ]
   },
 
   grep: {
     displayName: 'Search Files',
+    displayNameKey: 'toolMetadata.displayNames.grep',
     category: 'search',
     outputLanguage: 'text',
     inputFields: [
-      { key: 'pattern', label: 'Pattern', type: 'pattern' },
-      { key: 'path', label: 'Directory', type: 'file' },
-      { key: 'include', label: 'Include Pattern', type: 'pattern' }
+      { key: 'pattern', label: 'Pattern', labelKey: 'toolMetadata.inputLabels.pattern', type: 'pattern' },
+      { key: 'path', label: 'Directory', labelKey: 'toolMetadata.inputLabels.directory', type: 'file' },
+      { key: 'include', label: 'Include Pattern', labelKey: 'toolMetadata.inputLabels.includePattern', type: 'pattern' }
     ]
   },
   glob: {
     displayName: 'Find Files',
+    displayNameKey: 'toolMetadata.displayNames.glob',
     category: 'search',
     outputLanguage: 'text',
     inputFields: [
-      { key: 'pattern', label: 'Pattern', type: 'pattern' },
-      { key: 'path', label: 'Directory', type: 'file' }
+      { key: 'pattern', label: 'Pattern', labelKey: 'toolMetadata.inputLabels.pattern', type: 'pattern' },
+      { key: 'path', label: 'Directory', labelKey: 'toolMetadata.inputLabels.directory', type: 'file' }
     ]
   },
   list: {
     displayName: 'List Directory',
+    displayNameKey: 'toolMetadata.displayNames.list',
     category: 'file',
     outputLanguage: 'text',
     inputFields: [
-      { key: 'path', label: 'Directory', type: 'file' },
-      { key: 'ignore', label: 'Ignore Patterns', type: 'pattern' }
+      { key: 'path', label: 'Directory', labelKey: 'toolMetadata.inputLabels.directory', type: 'file' },
+      { key: 'ignore', label: 'Ignore Patterns', labelKey: 'toolMetadata.inputLabels.ignorePatterns', type: 'pattern' }
     ]
   },
 
   task: {
     displayName: 'Agent Task',
+    displayNameKey: 'toolMetadata.displayNames.task',
     category: 'ai',
     outputLanguage: 'markdown',
     inputFields: [
-      { key: 'description', label: 'Task', type: 'text' },
-      { key: 'prompt', label: 'Instructions', type: 'text' },
-      { key: 'subagent_type', label: 'Agent Type', type: 'text' }
+      { key: 'description', label: 'Task', labelKey: 'toolMetadata.inputLabels.task', type: 'text' },
+      { key: 'prompt', label: 'Instructions', labelKey: 'toolMetadata.inputLabels.instructions', type: 'text' },
+      { key: 'subagent_type', label: 'Agent Type', labelKey: 'toolMetadata.inputLabels.agentType', type: 'text' }
     ]
   },
 
   webfetch: {
     displayName: 'Fetch URL',
+    displayNameKey: 'toolMetadata.displayNames.webfetch',
     category: 'web',
     outputLanguage: 'auto',
     inputFields: [
-      { key: 'url', label: 'URL', type: 'text' },
-      { key: 'format', label: 'Format', type: 'text' },
-      { key: 'timeout', label: 'Timeout', type: 'text' }
+      { key: 'url', label: 'URL', labelKey: 'toolMetadata.inputLabels.url', type: 'text' },
+      { key: 'format', label: 'Format', labelKey: 'toolMetadata.inputLabels.format', type: 'text' },
+      { key: 'timeout', label: 'Timeout', labelKey: 'toolMetadata.inputLabels.timeout', type: 'text' }
     ]
   },
 
    websearch: {
      displayName: 'Web Search',
+     displayNameKey: 'toolMetadata.displayNames.websearch',
      category: 'web',
      outputLanguage: 'markdown',
      inputFields: [
-       { key: 'query', label: 'Search Query', type: 'text' },
-       { key: 'numResults', label: 'Results Count', type: 'text' },
-       { key: 'type', label: 'Search Type', type: 'text' }
+       { key: 'query', label: 'Search Query', labelKey: 'toolMetadata.inputLabels.searchQuery', type: 'text' },
+       { key: 'numResults', label: 'Results Count', labelKey: 'toolMetadata.inputLabels.resultsCount', type: 'text' },
+       { key: 'type', label: 'Search Type', labelKey: 'toolMetadata.inputLabels.searchType', type: 'text' }
      ]
    },
    codesearch: {
      displayName: 'Code Search',
+     displayNameKey: 'toolMetadata.displayNames.codesearch',
      category: 'web',
      outputLanguage: 'markdown',
      inputFields: [
-       { key: 'query', label: 'Search Query', type: 'text' },
-       { key: 'tokensNum', label: 'Tokens', type: 'text' }
+       { key: 'query', label: 'Search Query', labelKey: 'toolMetadata.inputLabels.searchQuery', type: 'text' },
+       { key: 'tokensNum', label: 'Tokens', labelKey: 'toolMetadata.inputLabels.tokens', type: 'text' }
      ]
    },
 
    todowrite: {
      displayName: 'Update Todo List',
+     displayNameKey: 'toolMetadata.displayNames.todowrite',
      category: 'system',
      outputLanguage: 'json',
      inputFields: [
-       { key: 'todos', label: 'Todo Items', type: 'code', language: 'json' }
+       { key: 'todos', label: 'Todo Items', labelKey: 'toolMetadata.inputLabels.todoItems', type: 'code', language: 'json' }
      ]
    },
    todoread: {
      displayName: 'Read Todo List',
+     displayNameKey: 'toolMetadata.displayNames.todoread',
      category: 'system',
      outputLanguage: 'json',
      inputFields: []
    },
    skill: {
      displayName: 'Load Skill',
+     displayNameKey: 'toolMetadata.displayNames.skill',
      category: 'ai',
      outputLanguage: 'markdown',
      inputFields: [
-       { key: 'name', label: 'Skill Name', type: 'text' }
+       { key: 'name', label: 'Skill Name', labelKey: 'toolMetadata.inputLabels.skillName', type: 'text' }
      ]
    },
    question: {
-      displayName: 'Question',
-      category: 'ai',
-      outputLanguage: 'text',
-      inputFields: [
-        { key: 'questions', label: 'Questions', type: 'code', language: 'json' }
-      ]
-    },
+       displayName: 'Question',
+       displayNameKey: 'toolMetadata.displayNames.question',
+       category: 'ai',
+       outputLanguage: 'text',
+       inputFields: [
+         { key: 'questions', label: 'Questions', labelKey: 'toolMetadata.inputLabels.questions', type: 'code', language: 'json' }
+       ]
+     },
 
-    plan_enter: {
-      displayName: 'Plan Mode',
-      category: 'ai',
-      outputLanguage: 'text',
-      inputFields: []
-    },
+     plan_enter: {
+       displayName: 'Plan Mode',
+       displayNameKey: 'toolMetadata.displayNames.plan_enter',
+       category: 'ai',
+       outputLanguage: 'text',
+       inputFields: []
+     },
 
-    plan_exit: {
-      displayName: 'Build Mode',
-      category: 'ai',
-      outputLanguage: 'text',
-      inputFields: []
-    },
+     plan_exit: {
+       displayName: 'Build Mode',
+       displayNameKey: 'toolMetadata.displayNames.plan_exit',
+       category: 'ai',
+       outputLanguage: 'text',
+       inputFields: []
+     },
 
-    StructuredOutput: {
-      displayName: 'Structured Output',
-      category: 'ai',
-      outputLanguage: 'json',
-      inputFields: []
-    },
+     StructuredOutput: {
+       displayName: 'Structured Output',
+       displayNameKey: 'toolMetadata.displayNames.structuredOutput',
+       category: 'ai',
+       outputLanguage: 'json',
+       inputFields: []
+     },
 
-    structuredoutput: {
-      displayName: 'Structured Output',
-      category: 'ai',
-      outputLanguage: 'json',
-      inputFields: []
-    }
+     structuredoutput: {
+       displayName: 'Structured Output',
+       displayNameKey: 'toolMetadata.displayNames.structuredOutput',
+       category: 'ai',
+       outputLanguage: 'json',
+       inputFields: []
+     }
   };
 
 export function getToolMetadata(toolName: string): ToolMetadata {
-  return TOOL_METADATA[toolName] || {
-    displayName: toolName.charAt(0).toUpperCase() + toolName.slice(1).replace(/-/g, ' '),
-    category: 'system',
-    outputLanguage: 'text',
-    inputFields: []
+  const metadata = TOOL_METADATA[toolName];
+  if (!metadata) {
+    return {
+      displayName: toolName.charAt(0).toUpperCase() + toolName.slice(1).replace(/-/g, ' '),
+      category: 'system',
+      outputLanguage: 'text',
+      inputFields: []
+    };
+  }
+
+  // 运行时按当前语言解析文案，避免工具标题和参数标签固定为英文。
+  return {
+    ...metadata,
+    displayName: metadata.displayNameKey ? i18n.t(metadata.displayNameKey) : metadata.displayName,
+    inputFields: metadata.inputFields?.map((field) => ({
+      ...field,
+      label: field.labelKey ? i18n.t(field.labelKey) : field.label,
+    })) || [],
   };
 }
 

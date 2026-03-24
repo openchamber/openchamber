@@ -7,11 +7,13 @@ import { cn } from '@/lib/utils';
 import { openExternalUrl } from '@/lib/url';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { useIsVSCodeRuntime } from '@/hooks/useRuntimeAPIs';
+import { useLanguage } from '@/hooks/useLanguage';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 
 import type { ToolPopupContent } from './message/types';
 
 export const FileAttachmentButton = memo(() => {
+  const { t } = useLanguage();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { addAttachedFile } = useSessionStore();
   const { isMobile } = useUIStore();
@@ -26,7 +28,7 @@ export const FileAttachmentButton = memo(() => {
         await addAttachedFile(file);
       } catch (error) {
         console.error('File attach failed', error);
-        toast.error(error instanceof Error ? error.message : 'Failed to attach file');
+        toast.error(error instanceof Error ? error.message : t('chatInput.failedToAttachFile'));
       }
     }
   };
@@ -79,7 +81,7 @@ export const FileAttachmentButton = memo(() => {
       }
     } catch (error) {
       console.error('VS Code file pick failed', error);
-      toast.error(error instanceof Error ? error.message : 'Failed to pick files in VS Code');
+      toast.error(error instanceof Error ? error.message : t('chatInput.failedToPickFilesInVSCode'));
     }
   };
 
@@ -102,13 +104,13 @@ export const FileAttachmentButton = memo(() => {
               'hover:bg-muted text-muted-foreground',
               buttonSizeClass
             )}
-            aria-label="Attach files"
+            aria-label={t('chatInput.attachFiles')}
           >
             <RiAttachment2 className={iconSizeClass} />
           </button>
         </TooltipTrigger>
         <TooltipContent side="top">
-          <p>Attach files</p>
+          <p>{t('chatInput.attachFiles')}</p>
         </TooltipContent>
       </Tooltip>
     </>
@@ -123,6 +125,7 @@ interface ImagePreviewProps {
 }
 
 const ImagePreview = memo(({ file, onRemove }: ImagePreviewProps) => {
+  const { t } = useLanguage();
   const isLocalImagePreview =
     file.source !== 'server' &&
     file.mimeType.startsWith('image/') &&
@@ -181,7 +184,7 @@ const ImagePreview = memo(({ file, onRemove }: ImagePreviewProps) => {
       <button
         onClick={onRemove}
         className="absolute top-0.5 right-0.5 h-4 w-4 rounded-full bg-background/80 text-foreground hover:text-destructive flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-        title="Remove image"
+        title={t('fileAttachment.removeImage')}
         aria-label={`Remove ${displayName}`}
       >
         <RiCloseLine className="h-2.5 w-2.5" />

@@ -2,6 +2,7 @@ import React from 'react';
 import { toast } from '@/components/ui';
 import { isWebRuntime } from '@/lib/desktop';
 import { usePwaDetection } from '@/hooks/usePwaDetection';
+import { useLanguage } from '@/hooks/useLanguage';
 
 type InstallPromptOutcome = 'accepted' | 'dismissed';
 
@@ -12,6 +13,7 @@ type BeforeInstallPromptEvent = Event & {
 
 export const usePwaInstallPrompt = () => {
   const { browserTab } = usePwaDetection();
+  const { t } = useLanguage();
 
   React.useEffect(() => {
     if (typeof window === 'undefined' || !isWebRuntime() || !browserTab) {
@@ -41,7 +43,7 @@ export const usePwaInstallPrompt = () => {
       await promptEvent.prompt();
       const { outcome } = await promptEvent.userChoice;
       if (outcome === 'accepted') {
-        toast.success('Install started');
+        toast.success(t('pwaInstallPrompt.installStarted'));
       }
     };
 
@@ -58,10 +60,10 @@ export const usePwaInstallPrompt = () => {
         return;
       }
 
-      installToastId = toast.info('Install OpenChamber for quicker access', {
+      installToastId = toast.info(t('pwaInstallPrompt.installOpenChamberForQuickerAccess'), {
         duration: Infinity,
         action: {
-          label: 'Install',
+          label: t('pwaInstallPrompt.install'),
           onClick: () => {
             void triggerInstall();
           },
@@ -72,7 +74,7 @@ export const usePwaInstallPrompt = () => {
     const onAppInstalled = () => {
       deferredPrompt = null;
       dismissInstallToast();
-      toast.success('OpenChamber installed');
+      toast.success(t('pwaInstallPrompt.openChamberInstalled'));
     };
 
     window.addEventListener('beforeinstallprompt', onBeforeInstallPrompt as EventListener);
@@ -83,5 +85,5 @@ export const usePwaInstallPrompt = () => {
       window.removeEventListener('beforeinstallprompt', onBeforeInstallPrompt as EventListener);
       window.removeEventListener('appinstalled', onAppInstalled);
     };
-  }, [browserTab]);
+  }, [browserTab, t]);
 };

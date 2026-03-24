@@ -23,12 +23,14 @@ import { useSkillsStore } from '@/stores/useSkillsStore';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { cn } from '@/lib/utils';
 import { SettingsProjectSelector } from '@/components/sections/shared/SettingsProjectSelector';
+import { useLanguage } from '@/hooks/useLanguage';
 
 interface CommandsSidebarProps {
   onItemSelect?: () => void;
 }
 
 export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }) => {
+  const { t } = useLanguage();
   const [renameDialogCommand, setRenameDialogCommand] = React.useState<Command | null>(null);
   const [renameNewName, setRenameNewName] = React.useState('');
   const [confirmActionCommand, setConfirmActionCommand] = React.useState<Command | null>(null);
@@ -90,7 +92,7 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
 
   const handleDeleteCommand = async (command: Command) => {
     if (isCommandBuiltIn(command)) {
-      toast.error('Built-in commands cannot be deleted');
+      toast.error(t('commandsSidebar.builtinCommandsCannotBeDeleted'));
       return;
     }
 
@@ -122,15 +124,15 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
 
     if (success) {
       if (confirmActionType === 'delete') {
-        toast.success(`Command "${confirmActionCommand.name}" deleted successfully`);
+        toast.success(t('commandsSidebar.commandDeletedSuccessfully', { name: confirmActionCommand.name }));
       } else {
-        toast.success(`Command "${confirmActionCommand.name}" reset to default`);
+        toast.success(t('commandsSidebar.commandResetToDefault', { name: confirmActionCommand.name }));
       }
       closeConfirmActionDialog();
     } else if (confirmActionType === 'delete') {
-      toast.error('Failed to delete command');
+      toast.error(t('commandsSidebar.failedToDeleteCommand'));
     } else {
-      toast.error('Failed to reset command');
+      toast.error(t('commandsSidebar.failedToResetCommand'));
     }
 
     setIsConfirmActionPending(false);
@@ -171,7 +173,7 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
     const sanitizedName = renameNewName.trim().replace(/\s+/g, '-');
 
     if (!sanitizedName) {
-      toast.error('Command name is required');
+      toast.error(t('commandsSidebar.commandNameRequired'));
       return;
     }
 
@@ -181,7 +183,7 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
     }
 
     if (commands.some((cmd) => cmd.name === sanitizedName)) {
-      toast.error('A command with this name already exists');
+      toast.error(t('commandsSidebar.commandNameAlreadyExists'));
       return;
     }
 
@@ -198,13 +200,13 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
       // Delete old command
       const deleteSuccess = await deleteCommand(renameDialogCommand.name);
       if (deleteSuccess) {
-        toast.success(`Command renamed to "${sanitizedName}"`);
+        toast.success(t('commandsSidebar.commandRenamedTo', { name: sanitizedName }));
         setSelectedCommand(sanitizedName);
       } else {
-        toast.error('Failed to remove old command after rename');
+        toast.error(t('commandsSidebar.failedToRemoveOldCommandAfterRename'));
       }
     } else {
-      toast.error('Failed to rename command');
+      toast.error(t('commandsSidebar.failedToRenameCommand'));
     }
 
     setRenameDialogCommand(null);
@@ -216,10 +218,10 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
   return (
     <div className={cn('flex h-full flex-col', bgClass)}>
       <div className="border-b px-3 pt-4 pb-3">
-        <h2 className="text-base font-semibold text-foreground mb-3">Commands</h2>
+        <h2 className="text-base font-semibold text-foreground mb-3">{t('commandsSidebar.title')}</h2>
         <SettingsProjectSelector className="mb-3" />
         <div className="flex items-center justify-between gap-2">
-          <span className="typography-meta text-muted-foreground">Total {commandOnlyItems.length}</span>
+          <span className="typography-meta text-muted-foreground">{t('commandsSidebar.total', { count: commandOnlyItems.length })}</span>
           <Button size="sm"
             variant="ghost"
             className="h-7 w-7 px-0 -my-1 text-muted-foreground"
@@ -234,15 +236,15 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
         {commandOnlyItems.length === 0 ? (
           <div className="py-12 px-4 text-center text-muted-foreground">
             <RiTerminalBoxLine className="mx-auto mb-3 h-10 w-10 opacity-50" />
-            <p className="typography-ui-label font-medium">No commands configured</p>
-            <p className="typography-meta mt-1 opacity-75">Use the + button above to create one</p>
+            <p className="typography-ui-label font-medium">{t('commandsSidebar.noCommandsConfigured')}</p>
+            <p className="typography-meta mt-1 opacity-75">{t('commandsSidebar.usePlusToCreate')}</p>
           </div>
         ) : (
           <>
             {builtInCommands.length > 0 && (
               <>
                 <div className="px-2 pb-1.5 pt-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Built-in Commands
+                  {t('commandsSidebar.builtinCommands')}
                 </div>
                 {[...builtInCommands].sort((a, b) => a.name.localeCompare(b.name)).map((command) => (
                   <CommandListItem
@@ -266,7 +268,7 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
             {customCommands.length > 0 && (
               <>
                 <div className="px-2 pb-1.5 pt-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Custom Commands
+                  {t('commandsSidebar.customCommands')}
                 </div>
                 {[...customCommands].sort((a, b) => a.name.localeCompare(b.name)).map((command) => (
                   <CommandListItem
@@ -301,11 +303,11 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
       >
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>{confirmActionType === 'delete' ? 'Delete Command' : 'Reset Command'}</DialogTitle>
+            <DialogTitle>{confirmActionType === 'delete' ? t('commandsSidebar.deleteCommandTitle') : t('commandsSidebar.resetCommandTitle')}</DialogTitle>
             <DialogDescription>
               {confirmActionType === 'delete'
-                ? `Are you sure you want to delete command "${confirmActionCommand?.name}"?`
-                : `Are you sure you want to reset command "${confirmActionCommand?.name}" to its default configuration?`}
+                ? t('commandsSidebar.deleteCommandDescription', { name: confirmActionCommand?.name ?? '' })
+                : t('commandsSidebar.resetCommandDescription', { name: confirmActionCommand?.name ?? '' })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -315,10 +317,10 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
               onClick={closeConfirmActionDialog}
               disabled={isConfirmActionPending}
             >
-              Cancel
+              {t('common.cancel')}
             </Button>
             <Button size="sm" onClick={handleConfirmAction} disabled={isConfirmActionPending}>
-              {confirmActionType === 'delete' ? 'Delete' : 'Reset'}
+              {confirmActionType === 'delete' ? t('common.delete') : t('common.resetButton')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -328,15 +330,15 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
       <Dialog open={renameDialogCommand !== null} onOpenChange={(open) => !open && setRenameDialogCommand(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Rename Command</DialogTitle>
+            <DialogTitle>{t('commandsSidebar.renameCommandTitle')}</DialogTitle>
             <DialogDescription>
-              Enter a new name for the command "/{renameDialogCommand?.name}"
+              {t('commandsSidebar.renameCommandDescription', { name: renameDialogCommand?.name ?? '' })}
             </DialogDescription>
           </DialogHeader>
           <Input
             value={renameNewName}
             onChange={(e) => setRenameNewName(e.target.value)}
-            placeholder="New command name..."
+            placeholder={t('commandsSidebar.newCommandNamePlaceholder')}
             className="text-foreground placeholder:text-muted-foreground"
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
@@ -350,10 +352,10 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
               variant="ghost"
               onClick={() => setRenameDialogCommand(null)}
             >
-              Cancel
+               {t('common.cancel')}
             </Button>
             <Button size="sm" onClick={handleRenameCommand}>
-              Rename
+               {t('common.rename')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -385,6 +387,7 @@ const CommandListItem: React.FC<CommandListItemProps> = ({
   isMenuOpen,
   onMenuOpenChange,
 }) => {
+  const { t } = useLanguage();
   const isMobile = isMobileDeviceViaCSS();
   return (
     <div
@@ -409,7 +412,7 @@ const CommandListItem: React.FC<CommandListItemProps> = ({
             </span>
             {(command.scope || isCommandBuiltIn(command)) && (
               <span className="typography-micro text-muted-foreground bg-muted px-1 rounded flex-shrink-0 leading-none pb-px border border-border/50">
-                {isCommandBuiltIn(command) ? 'system' : command.scope}
+                {isCommandBuiltIn(command) ? t('commandsSidebar.systemBadge') : command.scope}
               </span>
             )}
           </div>
@@ -439,7 +442,7 @@ const CommandListItem: React.FC<CommandListItemProps> = ({
                 }}
               >
                 <RiEditLine className="h-4 w-4 mr-px" />
-                Rename
+                {t('common.rename')}
               </DropdownMenuItem>
             )}
 
@@ -450,7 +453,7 @@ const CommandListItem: React.FC<CommandListItemProps> = ({
               }}
             >
               <RiFileCopyLine className="h-4 w-4 mr-px" />
-              Duplicate
+              {t('common.duplicate')}
             </DropdownMenuItem>
 
             {onReset && (
@@ -461,7 +464,7 @@ const CommandListItem: React.FC<CommandListItemProps> = ({
                 }}
               >
                 <RiRestartLine className="h-4 w-4 mr-px" />
-                Reset
+                {t('common.resetButton')}
               </DropdownMenuItem>
             )}
 
@@ -474,7 +477,7 @@ const CommandListItem: React.FC<CommandListItemProps> = ({
                 className="text-destructive focus:text-destructive"
               >
                 <RiDeleteBinLine className="h-4 w-4 mr-px" />
-                Delete
+                {t('common.delete')}
               </DropdownMenuItem>
             )}
           </DropdownMenuContent>
