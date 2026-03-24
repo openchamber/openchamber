@@ -20,6 +20,7 @@ import { useFileStore } from "./fileStore";
 import { useSessionStore } from "./sessionStore";
 import { useContextStore } from "./contextStore";
 import { useUIStore } from "./useUIStore";
+import { useCommandsStore } from "./useCommandsStore";
 
 // Helper function to clean up pending user message metadata
 const cleanupPendingUserMessageMeta = (
@@ -1063,6 +1064,9 @@ export const useMessageStore = create<MessageStore>()(
                                 if (firstToken.length <= 1) return false;
                                 const tokenWithoutLeadingSlash = firstToken.slice(1);
                                 if (!tokenWithoutLeadingSlash.includes('/')) return false;
+                                // Namespaced commands (e.g. /colin/commit) contain '/' but
+                                // should not be treated as absolute file paths.
+                                if (useCommandsStore.getState().getCommandByName(tokenWithoutLeadingSlash)) return false;
                                 return true;
                             })();
                             const commandPayload = (() => {
