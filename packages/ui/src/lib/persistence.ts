@@ -770,6 +770,10 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
     && (candidate.chatRenderMode === 'sorted' || candidate.chatRenderMode === 'live')) {
     result.chatRenderMode = candidate.chatRenderMode;
   }
+  if (typeof candidate.messageStreamTransport === 'string'
+    && (candidate.messageStreamTransport === 'auto' || candidate.messageStreamTransport === 'ws' || candidate.messageStreamTransport === 'sse')) {
+    result.messageStreamTransport = candidate.messageStreamTransport;
+  }
   if (typeof candidate.activityRenderMode === 'string'
     && (candidate.activityRenderMode === 'collapsed' || candidate.activityRenderMode === 'summary')) {
     result.activityRenderMode = candidate.activityRenderMode;
