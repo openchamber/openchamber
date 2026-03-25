@@ -32,7 +32,6 @@ type Props = {
   sessionSearchQuery: string;
   setSessionSearchQuery: (value: string) => void;
   hasSessionSearchQuery: boolean;
-  searchMatchCount: number;
   collapseAllProjects: () => void;
   expandAllProjects: () => void;
 };
@@ -51,7 +50,6 @@ export function SidebarHeader(props: Props): React.ReactNode {
     sessionSearchQuery,
     setSessionSearchQuery,
     hasSessionSearchQuery,
-    searchMatchCount,
     collapseAllProjects,
     expandAllProjects,
   } = props;

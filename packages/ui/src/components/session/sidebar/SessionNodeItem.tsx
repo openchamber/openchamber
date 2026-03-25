@@ -573,7 +573,9 @@ export function SessionNodeItem(props: Props): React.ReactNode {
                       <span className="flex-shrink-0">{sessionUpdatedLabel}</span>
                       {renderContext === 'recent' && secondaryMeta?.projectLabel ? (
                         (() => {
-                          const tagColor = getProjectTagColor(projectId);
+                          const tagColor = projectColor
+                            ? { text: projectColor, bg: `${projectColor}20` }
+                            : getProjectTagColor(projectId);
                           return (
                             <span
                               className="inline-flex items-center rounded px-1 py-0.5 text-[0.7rem] font-medium flex-shrink-0 leading-none"

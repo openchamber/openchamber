@@ -863,7 +863,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     projectSections,
     groupSearchDataByGroup,
     sectionsForRender,
-    searchMatchCount,
   } = useSessionSidebarSections({
     normalizedProjects,
     getSessionsForProject,
@@ -1017,11 +1016,15 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     return map;
   }, [normalizedProjects]);
 
-  // Recently updated: all non-archived, non-subtask sessions sorted by updated_at desc
+  // Recently updated: non-archived, non-subtask sessions from the last 48 hours sorted by updated_at desc
   const recentSessions = React.useMemo(() => {
+    const FIFTY_EIGHT_HOURS_MS = 48 * 60 * 60 * 1000;
+    const cutoff = Date.now() - FIFTY_EIGHT_HOURS_MS;
     return sortedSessions.filter((session) => {
       if (session.time?.archived) return false;
       if ((session as Session & { parentID?: string | null }).parentID) return false;
+      const sessionTimestamp = session.time?.updated || session.time?.created || 0;
+      if (sessionTimestamp < cutoff) return false;
       return true;
     });
   }, [sortedSessions]);
@@ -1355,7 +1358,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         sessionSearchQuery={sessionSearchQuery}
         setSessionSearchQuery={setSessionSearchQuery}
         hasSessionSearchQuery={hasSessionSearchQuery}
-        searchMatchCount={searchMatchCount}
         collapseAllProjects={collapseAllProjects}
         expandAllProjects={expandAllProjects}
       />
