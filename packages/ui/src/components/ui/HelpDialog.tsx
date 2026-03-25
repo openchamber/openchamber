@@ -89,8 +89,18 @@ export const HelpDialog: React.FC = () => {
           keys: '',
         },
         {
+          keys: ["↑↓"],
+          description: "Navigate Models (in picker)",
+          icon: RiAiGenerate2,
+        },
+        {
+          keys: ["←→"],
+          description: "Adjust Thinking Mode (in picker, when supported)",
+          icon: RiBrainAi3Line,
+        },
+        {
           id: 'cycle_thinking_variant',
-          description: "Cycle Thinking Variant",
+          description: "Cycle Thinking Variant (global shortcut)",
           icon: RiBrainAi3Line,
           keys: '',
         },
