@@ -863,7 +863,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     projectSections,
     groupSearchDataByGroup,
     sectionsForRender,
-    searchMatchCount,
   } = useSessionSidebarSections({
     normalizedProjects,
     getSessionsForProject,
@@ -1007,22 +1006,47 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     loadMessages,
   });
 
+  const projectColorById = React.useMemo(() => {
+    const map = new Map<string, string>();
+    normalizedProjects.forEach((p) => {
+      if (p.color) {
+        map.set(p.id, p.color);
+      }
+    });
+    return map;
+  }, [normalizedProjects]);
+
+  // Recently updated: non-archived, non-subtask sessions from the last 48 hours sorted by updated_at desc
+  const recentSessions = React.useMemo(() => {
+    const FIFTY_EIGHT_HOURS_MS = 48 * 60 * 60 * 1000;
+    const cutoff = Date.now() - FIFTY_EIGHT_HOURS_MS;
+    return sortedSessions.filter((session) => {
+      if (session.time?.archived) return false;
+      if ((session as Session & { parentID?: string | null }).parentID) return false;
+      const sessionTimestamp = session.time?.updated || session.time?.created || 0;
+      if (sessionTimestamp < cutoff) return false;
+      return true;
+    });
+  }, [sortedSessions]);
+
   const activitySections = React.useMemo(() => {
     const toItem = (session: Session) => {
       const existing = sessionSidebarMetaById.get(session.id);
       const sessionDirectory = normalizePath((session as Session & { directory?: string | null }).directory ?? null);
+      const projectId = existing?.projectId ?? null;
       return {
         node: existing?.node ?? { session, children: [], worktree: null },
-        projectId: existing?.projectId ?? null,
+        projectId,
+        projectColor: projectId ? (projectColorById.get(projectId) ?? null) : null,
         groupDirectory: existing?.groupDirectory ?? sessionDirectory,
         secondaryMeta: existing?.secondaryMeta ?? null,
       };
     };
 
     return [
-      { key: 'active-now' as const, title: 'recent', items: activeNowSessions.map(toItem) },
+      { key: 'active-now' as const, title: 'recent', items: recentSessions.map(toItem) },
     ];
-  }, [activeNowSessions, sessionSidebarMetaById]);
+  }, [recentSessions, sessionSidebarMetaById, projectColorById]);
 
   const desktopHeaderActionButtonClass =
     'inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-md leading-none text-foreground hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed';
@@ -1045,6 +1069,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       archivedBucket = false,
       secondaryMeta?: { projectLabel?: string | null; branchLabel?: string | null } | null,
       renderContext: 'project' | 'recent' = 'project',
+      projectColor?: string | null,
     ): React.ReactNode => (
       <SessionNodeItem
         node={node}
@@ -1091,6 +1116,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         renderSessionNode={renderSessionNode}
         secondaryMeta={secondaryMeta}
         renderContext={renderContext}
+        projectColor={projectColor}
       />
     ),
     [
@@ -1332,7 +1358,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         sessionSearchQuery={sessionSearchQuery}
         setSessionSearchQuery={setSessionSearchQuery}
         hasSessionSearchQuery={hasSessionSearchQuery}
-        searchMatchCount={searchMatchCount}
         collapseAllProjects={collapseAllProjects}
         expandAllProjects={expandAllProjects}
       />
