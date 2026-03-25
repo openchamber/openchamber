@@ -47,6 +47,7 @@ const __dirname = path.dirname(__filename);
 const DEFAULT_PORT = 3000;
 const DESKTOP_NOTIFY_PREFIX = '[OpenChamberDesktopNotify] ';
 const uiNotificationClients = new Set();
+const uiNotificationWsClients = new Set();
 const HEALTH_CHECK_INTERVAL = 15000;
 const SHUTDOWN_TIMEOUT = 10000;
 const MODELS_DEV_API_URL = 'https://models.dev/api.json';
@@ -2259,6 +2260,12 @@ const sanitizeSettingsUpdate = (payload) => {
       result.chatRenderMode = mode;
     }
   }
+  if (typeof candidate.messageStreamTransport === 'string') {
+    const mode = candidate.messageStreamTransport.trim();
+    if (mode === 'auto' || mode === 'ws' || mode === 'sse') {
+      result.messageStreamTransport = mode;
+    }
+  }
   if (typeof candidate.activityRenderMode === 'string') {
     const mode = candidate.activityRenderMode.trim();
     if (mode === 'collapsed' || mode === 'summary') {
@@ -2902,6 +2909,9 @@ const getUiSessionTokenFromRequest = (req) => {
 const TERMINAL_INPUT_WS_MAX_REBINDS_PER_WINDOW = 128;
 const TERMINAL_INPUT_WS_REBIND_WINDOW_MS = 60 * 1000;
 const TERMINAL_INPUT_WS_HEARTBEAT_INTERVAL_MS = 15 * 1000;
+const MESSAGE_STREAM_GLOBAL_WS_PATH = '/api/global/event/ws';
+const MESSAGE_STREAM_DIRECTORY_WS_PATH = '/api/event/ws';
+const MESSAGE_STREAM_WS_HEARTBEAT_INTERVAL_MS = 15 * 1000;
 
 const rejectWebSocketUpgrade = (socket, statusCode, reason) => {
   if (!socket || socket.destroyed) {
@@ -2932,6 +2942,57 @@ const rejectWebSocketUpgrade = (socket, statusCode, reason) => {
   try {
     socket.destroy();
   } catch {
+  }
+};
+
+const sendMessageStreamWsFrame = (socket, payload) => {
+  if (!socket || socket.readyState !== 1) {
+    return false;
+  }
+
+  try {
+    socket.send(JSON.stringify(payload));
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const sendMessageStreamWsEvent = (socket, payload, options = {}) => {
+  return sendMessageStreamWsFrame(socket, {
+    type: 'event',
+    payload,
+    ...(typeof options.eventId === 'string' && options.eventId.length > 0 ? { eventId: options.eventId } : {}),
+    ...(typeof options.directory === 'string' && options.directory.length > 0 ? { directory: options.directory } : {}),
+  });
+};
+
+const broadcastGlobalUiEvent = (payload, options = {}) => {
+  const hasSseClients = uiNotificationClients.size > 0;
+  const hasWsClients = uiNotificationWsClients.size > 0;
+  if (!hasSseClients && !hasWsClients) {
+    return;
+  }
+
+  if (hasSseClients) {
+    for (const res of uiNotificationClients) {
+      try {
+        writeSseEvent(res, payload);
+      } catch {
+      }
+    }
+  }
+
+  if (hasWsClients) {
+    for (const socket of Array.from(uiNotificationWsClients)) {
+      const sent = sendMessageStreamWsEvent(socket, payload, {
+        directory: typeof options.directory === 'string' && options.directory.length > 0 ? options.directory : 'global',
+        eventId: typeof options.eventId === 'string' && options.eventId.length > 0 ? options.eventId : undefined,
+      });
+      if (!sent) {
+        uiNotificationWsClients.delete(socket);
+      }
+    }
   }
 };
 
@@ -3205,24 +3266,18 @@ const updateSessionState = (sessionId, status, eventId, metadata = {}) => {
   // This enables real-time updates without polling
   // Include needsAttention in the same event to ensure atomic updates
   const attentionChanged = !!attentionState && existingAttentionState?.needsAttention !== attentionState.needsAttention;
-  if (uiNotificationClients.size > 0 && (!existing || existing.status !== status || attentionChanged)) {
+  if ((!existing || existing.status !== status || attentionChanged)) {
     const state = sessionStates.get(sessionId);
-    for (const res of uiNotificationClients) {
-      try {
-        writeSseEvent(res, {
-          type: 'openchamber:session-status',
-          properties: {
-            sessionId,
-            status: state.status,
-            timestamp: state.lastUpdateAt,
-            metadata: state.metadata,
-            needsAttention: attentionState?.needsAttention ?? false
-          }
-        });
-      } catch {
-        // Client disconnected, will be cleaned up by close handler
+    broadcastGlobalUiEvent({
+      type: 'openchamber:session-status',
+      properties: {
+        sessionId,
+        status: state.status,
+        timestamp: state.lastUpdateAt,
+        metadata: state.metadata,
+        needsAttention: attentionState?.needsAttention ?? false
       }
-    }
+    });
   }
 
   // Also update activity phases for backward compatibility
@@ -3312,24 +3367,16 @@ const markSessionViewed = (sessionId, clientId) => {
     state.needsAttention = false;
 
     // Broadcast attention cleared event
-    if (uiNotificationClients.size > 0) {
-      for (const res of uiNotificationClients) {
-        try {
-          writeSseEvent(res, {
-            type: 'openchamber:session-status',
-            properties: {
-              sessionId,
-              status: state.status,
-              timestamp: Date.now(),
-              metadata: {},
-              needsAttention: false
-            }
-          });
-        } catch {
-          // Client disconnected
-        }
+    broadcastGlobalUiEvent({
+      type: 'openchamber:session-status',
+      properties: {
+        sessionId,
+        status: state.status,
+        timestamp: Date.now(),
+        metadata: {},
+        needsAttention: false
       }
-    }
+    });
   }
 };
 
@@ -3637,6 +3684,7 @@ const tunnelAuthController = createTunnelAuth();
 let runtimeManagedRemoteTunnelToken = '';
 let runtimeManagedRemoteTunnelHostname = '';
 let terminalInputWsServer = null;
+let messageStreamWsServer = null;
 const userProvidedOpenCodePassword =
   typeof hmrState.userProvidedOpenCodePassword === 'string' && hmrState.userProvidedOpenCodePassword.length > 0
     ? hmrState.userProvidedOpenCodePassword
@@ -5070,9 +5118,21 @@ function buildOpenCodeUrl(path, prefixOverride) {
 }
 
 function parseSseDataPayload(block) {
+  const envelope = parseSseEventEnvelope(block);
+  return envelope?.payload ?? null;
+}
+
+function parseSseEventEnvelope(block) {
   if (!block || typeof block !== 'string') {
     return null;
   }
+
+  const eventId = block
+    .split('\n')
+    .find((line) => line.startsWith('id:'))
+    ?.slice(3)
+    .trim() || null;
+
   const dataLines = block
     .split('\n')
     .filter((line) => line.startsWith('data:'))
@@ -5095,11 +5155,61 @@ function parseSseDataPayload(block) {
       typeof parsed.payload === 'object' &&
       parsed.payload !== null
     ) {
-      return parsed.payload;
+      return {
+        eventId,
+        directory: typeof parsed.directory === 'string' && parsed.directory.length > 0 ? parsed.directory : null,
+        payload: parsed.payload,
+      };
     }
-    return parsed;
+
+    const directory =
+      typeof parsed?.directory === 'string' && parsed.directory.length > 0
+        ? parsed.directory
+        : typeof parsed?.properties?.directory === 'string' && parsed.properties.directory.length > 0
+          ? parsed.properties.directory
+          : null;
+
+    return {
+      eventId,
+      directory,
+      payload: parsed,
+    };
   } catch {
     return null;
+  }
+}
+
+function processForwardedEventPayload(payload, emitSyntheticEvent) {
+  if (!payload || typeof payload !== 'object') {
+    return;
+  }
+
+  maybeCacheSessionInfoFromEvent(payload);
+
+  if (payload.type === 'session.status') {
+    const update = extractSessionStatusUpdate(payload);
+    if (update) {
+      updateSessionState(update.sessionId, update.type, update.eventId || `proxy-${Date.now()}`, {
+        attempt: update.attempt,
+        message: update.message,
+        next: update.next,
+      });
+    }
+  }
+
+  const transitions = deriveSessionActivityTransitions(payload);
+  if (transitions && transitions.length > 0) {
+    for (const activity of transitions) {
+      if (setSessionActivityPhase(activity.sessionId, activity.phase)) {
+        emitSyntheticEvent({
+          type: 'openchamber:session-activity',
+          properties: {
+            sessionId: activity.sessionId,
+            phase: activity.phase,
+          }
+        });
+      }
+    }
   }
 }
 
@@ -5203,26 +5313,17 @@ function broadcastUiNotification(payload) {
     return;
   }
 
-  if (uiNotificationClients.size === 0) {
+  if (uiNotificationClients.size === 0 && uiNotificationWsClients.size === 0) {
     return;
   }
 
-  for (const res of uiNotificationClients) {
-    try {
-      writeSseEvent(res, {
-        type: 'openchamber:notification',
-        properties: {
-          ...payload,
-          // Tell the UI whether the sidecar stdout notification channel is active.
-          // When true, the desktop UI should skip this SSE notification to avoid duplicates.
-          // When false (e.g. tauri dev), the UI must handle this SSE notification itself.
-          desktopStdoutActive: ENV_DESKTOP_NOTIFY,
-        },
-      });
-    } catch {
-      // ignore
-    }
-  }
+  broadcastGlobalUiEvent({
+    type: 'openchamber:notification',
+    properties: {
+      ...payload,
+      desktopStdoutActive: ENV_DESKTOP_NOTIFY,
+    },
+  });
 }
 
 function isStreamingAssistantPart(properties) {
@@ -7062,6 +7163,25 @@ async function gracefulShutdown(options = {}) {
     }
   }
 
+  if (messageStreamWsServer) {
+    try {
+      for (const client of messageStreamWsServer.clients) {
+        try {
+          client.terminate();
+        } catch {
+        }
+      }
+
+      await new Promise((resolve) => {
+        messageStreamWsServer.close(() => resolve());
+      });
+    } catch {
+    } finally {
+      messageStreamWsServer = null;
+      uiNotificationWsClients.clear();
+    }
+  }
+
   // Only stop OpenCode if we started it ourselves (not when using external server)
   if (!ENV_SKIP_OPENCODE_START && !isExternalOpenCode) {
     const portToKill = openCodePort;
@@ -8732,41 +8852,15 @@ async function main(options = {}) {
 
     const forwardBlock = (block) => {
       if (!block) return;
-      const payload = parseSseDataPayload(block);
+      const envelope = parseSseEventEnvelope(block);
+      const payload = envelope?.payload ?? null;
 
       res.write(`${block}
 
 `);
-      // Cache session titles from session.updated/session.created events (global stream)
-      maybeCacheSessionInfoFromEvent(payload);
-
-      // Keep server-authoritative session state fresh even if the
-      // background watcher is disconnected.
-      if (payload && payload.type === 'session.status') {
-        const update = extractSessionStatusUpdate(payload);
-        if (update) {
-          updateSessionState(update.sessionId, update.type, update.eventId || `proxy-${Date.now()}`, {
-            attempt: update.attempt,
-            message: update.message,
-            next: update.next,
-          });
-        }
-      }
-
-      const transitions = deriveSessionActivityTransitions(payload);
-      if (transitions && transitions.length > 0) {
-        for (const activity of transitions) {
-          if (setSessionActivityPhase(activity.sessionId, activity.phase)) {
-            writeSseEvent(res, {
-              type: 'openchamber:session-activity',
-              properties: {
-                sessionId: activity.sessionId,
-                phase: activity.phase,
-              }
-            });
-          }
-        }
-      }
+      processForwardedEventPayload(payload, (syntheticPayload) => {
+        writeSseEvent(res, syntheticPayload);
+      });
     };
 
     try {
@@ -8875,39 +8969,15 @@ async function main(options = {}) {
 
     const forwardBlock = (block) => {
       if (!block) return;
-      const payload = parseSseDataPayload(block);
+      const envelope = parseSseEventEnvelope(block);
+      const payload = envelope?.payload ?? null;
 
       res.write(`${block}
 
 `);
-      // Cache session titles from session.updated/session.created events (per-session stream)
-      maybeCacheSessionInfoFromEvent(payload);
-
-      if (payload && payload.type === 'session.status') {
-        const update = extractSessionStatusUpdate(payload);
-        if (update) {
-          updateSessionState(update.sessionId, update.type, update.eventId || `proxy-${Date.now()}`, {
-            attempt: update.attempt,
-            message: update.message,
-            next: update.next,
-          });
-        }
-      }
-
-      const transitions = deriveSessionActivityTransitions(payload);
-      if (transitions && transitions.length > 0) {
-        for (const activity of transitions) {
-          if (setSessionActivityPhase(activity.sessionId, activity.phase)) {
-            writeSseEvent(res, {
-              type: 'openchamber:session-activity',
-              properties: {
-                sessionId: activity.sessionId,
-                phase: activity.phase,
-              }
-            });
-          }
-        }
-      }
+      processForwardedEventPayload(payload, (syntheticPayload) => {
+        writeSseEvent(res, syntheticPayload);
+      });
     };
 
     try {
@@ -13681,6 +13751,210 @@ async function main(options = {}) {
 
         terminalInputWsServer.handleUpgrade(req, socket, head, (ws) => {
           terminalInputWsServer.emit('connection', ws, req);
+        });
+      } catch {
+        rejectWebSocketUpgrade(socket, 500, 'Upgrade failed');
+      }
+    };
+
+    void handleUpgrade();
+  });
+
+  messageStreamWsServer = new WebSocketServer({
+    noServer: true,
+  });
+
+  messageStreamWsServer.on('connection', (socket, req) => {
+    const rawUrl = typeof req?.url === 'string' ? req.url : MESSAGE_STREAM_GLOBAL_WS_PATH;
+    const pathname = parseRequestPathname(rawUrl);
+    const requestUrl = new URL(rawUrl, 'http://127.0.0.1');
+    const isGlobalStream = pathname === MESSAGE_STREAM_GLOBAL_WS_PATH;
+    const requestedLastEventId = requestUrl.searchParams.get('lastEventId')?.trim() || '';
+    const requestedDirectory = requestUrl.searchParams.get('directory')?.trim() || '';
+
+    const controller = new AbortController();
+    const cleanup = () => {
+      if (!controller.signal.aborted) {
+        controller.abort();
+      }
+      uiNotificationWsClients.delete(socket);
+    };
+
+    const pingInterval = setInterval(() => {
+      if (socket.readyState !== 1) {
+        return;
+      }
+
+      try {
+        socket.ping();
+      } catch {
+      }
+    }, MESSAGE_STREAM_WS_HEARTBEAT_INTERVAL_MS);
+
+    const heartbeatInterval = setInterval(() => {
+      sendMessageStreamWsEvent(socket, { type: 'openchamber:heartbeat', timestamp: Date.now() }, { directory: 'global' });
+    }, MESSAGE_STREAM_WS_HEARTBEAT_INTERVAL_MS);
+
+    socket.on('close', () => {
+      clearInterval(pingInterval);
+      clearInterval(heartbeatInterval);
+      cleanup();
+    });
+
+    socket.on('error', () => {
+      void 0;
+    });
+
+    const run = async () => {
+      let targetUrl;
+      try {
+        targetUrl = new URL(buildOpenCodeUrl(isGlobalStream ? '/global/event' : '/event', ''));
+      } catch {
+        sendMessageStreamWsFrame(socket, { type: 'error', message: 'OpenCode service unavailable' });
+        socket.close(1011, 'OpenCode service unavailable');
+        return;
+      }
+
+      if (!isGlobalStream && requestedDirectory) {
+        targetUrl.searchParams.set('directory', requestedDirectory);
+      }
+
+      const headers = {
+        Accept: 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        Connection: 'keep-alive',
+        ...getOpenCodeAuthHeaders(),
+      };
+
+      if (requestedLastEventId) {
+        headers['Last-Event-ID'] = requestedLastEventId;
+      }
+
+      let upstream;
+      try {
+        upstream = await fetch(targetUrl.toString(), {
+          headers,
+          signal: controller.signal,
+        });
+      } catch {
+        if (!controller.signal.aborted) {
+          sendMessageStreamWsFrame(socket, { type: 'error', message: 'Failed to connect to OpenCode event stream' });
+          socket.close(1011, 'Failed to connect to OpenCode event stream');
+        }
+        return;
+      }
+
+      if (!upstream.ok || !upstream.body) {
+        sendMessageStreamWsFrame(socket, {
+          type: 'error',
+          message: `OpenCode event stream unavailable (${upstream.status})`,
+        });
+        socket.close(1011, 'OpenCode event stream unavailable');
+        return;
+      }
+
+      sendMessageStreamWsFrame(socket, {
+        type: 'ready',
+        scope: isGlobalStream ? 'global' : 'directory',
+      });
+
+      if (isGlobalStream) {
+        uiNotificationWsClients.add(socket);
+      }
+
+      const decoder = new TextDecoder();
+      const reader = upstream.body.getReader();
+      let buffer = '';
+
+      const forwardBlock = (block) => {
+        if (!block) return;
+        const envelope = parseSseEventEnvelope(block);
+        const payload = envelope?.payload ?? null;
+        if (!payload) {
+          return;
+        }
+
+        const directory = isGlobalStream
+          ? (typeof envelope?.directory === 'string' && envelope.directory.length > 0 ? envelope.directory : 'global')
+          : (requestedDirectory || envelope?.directory || 'global');
+
+        sendMessageStreamWsEvent(socket, payload, {
+          directory,
+          eventId: typeof envelope?.eventId === 'string' && envelope.eventId.length > 0 ? envelope.eventId : undefined,
+        });
+
+        processForwardedEventPayload(payload, (syntheticPayload) => {
+          sendMessageStreamWsEvent(socket, syntheticPayload, { directory: 'global' });
+        });
+      };
+
+      try {
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n');
+
+          let separatorIndex = buffer.indexOf('\n\n');
+          while (separatorIndex !== -1) {
+            const block = buffer.slice(0, separatorIndex);
+            buffer = buffer.slice(separatorIndex + 2);
+            forwardBlock(block);
+            separatorIndex = buffer.indexOf('\n\n');
+          }
+        }
+
+        if (buffer.trim().length > 0) {
+          forwardBlock(buffer.trim());
+        }
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          console.warn('Message stream WS proxy error:', error);
+          sendMessageStreamWsFrame(socket, { type: 'error', message: 'Message stream proxy error' });
+          socket.close(1011, 'Message stream proxy error');
+        }
+      } finally {
+        cleanup();
+        try {
+          if (socket.readyState === 1 || socket.readyState === 0) {
+            socket.close();
+          }
+        } catch {
+        }
+      }
+    };
+
+    void run();
+  });
+
+  server.on('upgrade', (req, socket, head) => {
+    const pathname = parseRequestPathname(req.url);
+    if (pathname !== MESSAGE_STREAM_GLOBAL_WS_PATH && pathname !== MESSAGE_STREAM_DIRECTORY_WS_PATH) {
+      return;
+    }
+
+    const handleUpgrade = async () => {
+      try {
+        if (uiAuthController?.enabled) {
+          const sessionToken = await uiAuthController?.ensureSessionToken?.(req, null);
+          if (!sessionToken) {
+            rejectWebSocketUpgrade(socket, 401, 'UI authentication required');
+            return;
+          }
+
+          const originAllowed = await isRequestOriginAllowed(req);
+          if (!originAllowed) {
+            rejectWebSocketUpgrade(socket, 403, 'Invalid origin');
+            return;
+          }
+        }
+
+        if (!messageStreamWsServer) {
+          rejectWebSocketUpgrade(socket, 500, 'Message stream WebSocket unavailable');
+          return;
+        }
+
+        messageStreamWsServer.handleUpgrade(req, socket, head, (ws) => {
+          messageStreamWsServer.emit('connection', ws, req);
         });
       } catch {
         rejectWebSocketUpgrade(socket, 500, 'Upgrade failed');

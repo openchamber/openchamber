@@ -23,6 +23,16 @@ type StreamEvent<TData> = {
   retry?: number;
 };
 
+type MessageStreamTransportPreference = 'auto' | 'ws' | 'sse';
+
+type MessageStreamWsFrame = {
+  type: 'ready' | 'event' | 'error';
+  payload?: unknown;
+  eventId?: string;
+  directory?: string;
+  message?: string;
+};
+
 export type RoutedOpencodeEvent = {
   directory: string;
   payload: Event;
@@ -55,6 +65,12 @@ const ensureAbsoluteBaseUrl = (candidate: string): string => {
     console.warn("Failed to normalize OpenCode base URL:", error);
     return normalized;
   }
+};
+
+const toWebSocketUrl = (candidate: string): string => {
+  const normalized = new URL(candidate);
+  normalized.protocol = normalized.protocol === 'https:' ? 'wss:' : 'ws:';
+  return normalized.toString();
 };
 
 const resolveDesktopBaseUrl = (): string | null => {
@@ -163,6 +179,8 @@ class OpencodeService {
   private globalSseStaleDeltas: Set<string> = new Set();
   private globalSseFlushTimer: ReturnType<typeof setTimeout> | null = null;
   private globalSseLastFlushAt = 0;
+  private globalMessageStreamTransport: MessageStreamTransportPreference = 'auto';
+  private globalWsFallbackUntil = 0;
   private listDirectoryInFlight: Map<string, Promise<FilesystemEntry[]>> = new Map();
   private listDirectoryCache: Map<string, { entries: FilesystemEntry[]; expiresAt: number }> = new Map();
 
@@ -1277,6 +1295,36 @@ class OpencodeService {
     }
   }
 
+  private resolveGlobalEventTransport(): 'ws' | 'sse' {
+    if (this.globalMessageStreamTransport === 'sse') {
+      return 'sse';
+    }
+
+    if (this.globalMessageStreamTransport === 'ws') {
+      return 'ws';
+    }
+
+    return this.globalWsFallbackUntil > Date.now() ? 'sse' : 'ws';
+  }
+
+  private buildGlobalEventWsUrl(lastEventId?: string): string {
+    const normalizedBaseUrl = this.baseUrl.endsWith('/') ? this.baseUrl : `${this.baseUrl}/`;
+    const httpUrl = new URL('global/event/ws', normalizedBaseUrl);
+    if (lastEventId && lastEventId.length > 0) {
+      httpUrl.searchParams.set('lastEventId', lastEventId);
+    }
+    return toWebSocketUrl(httpUrl.toString());
+  }
+
+  private async runGlobalEventLoop(abortController: AbortController): Promise<void> {
+    if (this.resolveGlobalEventTransport() === 'ws') {
+      await this.runGlobalWsLoop(abortController);
+      return;
+    }
+
+    await this.runGlobalSseLoop(abortController);
+  }
+
   private ensureGlobalSseStarted() {
     if (this.globalSseTask) {
       return;
@@ -1285,7 +1333,7 @@ class OpencodeService {
     const abortController = new AbortController();
     this.globalSseAbortController = abortController;
 
-    this.globalSseTask = this.runGlobalSseLoop(abortController)
+    this.globalSseTask = this.runGlobalEventLoop(abortController)
       .catch((error) => {
         if ((error as Error)?.name === 'AbortError' || abortController.signal.aborted) {
           return;
@@ -1501,6 +1549,145 @@ class OpencodeService {
     this.scheduleGlobalSseFlush();
   }
 
+  private async runGlobalWsLoop(abortController: AbortController): Promise<void> {
+    let attempt = 0;
+    let lastEventId: string | undefined;
+    const RECONNECT_DELAY_MS = 250;
+    const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+    while (!abortController.signal.aborted) {
+      let opened = false;
+
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const socket = new WebSocket(this.buildGlobalEventWsUrl(lastEventId));
+
+          const cleanup = () => {
+            socket.onopen = null;
+            socket.onmessage = null;
+            socket.onerror = null;
+            socket.onclose = null;
+          };
+
+          const handleAbort = () => {
+            cleanup();
+            try {
+              socket.close();
+            } catch {
+              void 0;
+            }
+            resolve();
+          };
+
+          abortController.signal.addEventListener('abort', handleAbort, { once: true });
+
+          socket.onopen = () => {
+            attempt = 0;
+          };
+
+          socket.onmessage = (messageEvent) => {
+            let frame: MessageStreamWsFrame | null = null;
+            try {
+              frame = JSON.parse(String(messageEvent.data)) as MessageStreamWsFrame;
+            } catch (error) {
+              console.warn('[OpencodeClient] Failed to parse global WS frame:', error);
+              return;
+            }
+
+            if (!frame || typeof frame.type !== 'string') {
+              return;
+            }
+
+            if (frame.type === 'ready') {
+              opened = true;
+              this.globalSseIsConnected = true;
+              this.notifyGlobalSseOpen();
+              return;
+            }
+
+            if (frame.type === 'error') {
+              const error = new Error(frame.message || 'Global message stream WebSocket error');
+              this.notifyGlobalSseError(error);
+              if (!opened && this.globalMessageStreamTransport === 'auto') {
+                this.globalWsFallbackUntil = Date.now() + 60_000;
+              }
+              cleanup();
+              try {
+                socket.close();
+              } catch {
+                void 0;
+              }
+              reject(error);
+              return;
+            }
+
+            if (frame.type !== 'event') {
+              return;
+            }
+
+            if (typeof frame.eventId === 'string' && frame.eventId.length > 0) {
+              lastEventId = frame.eventId;
+            }
+
+            const routed = this.normalizeRoutedSsePayload({
+              directory: frame.directory,
+              payload: frame.payload,
+            });
+            if (!routed) {
+              return;
+            }
+
+            this.emitGlobalSseEvent(routed);
+          };
+
+          socket.onerror = () => {
+            void 0;
+          };
+
+          socket.onclose = () => {
+            cleanup();
+            abortController.signal.removeEventListener('abort', handleAbort);
+
+            if (abortController.signal.aborted) {
+              resolve();
+              return;
+            }
+
+            this.globalSseIsConnected = false;
+
+            if (!opened && this.globalMessageStreamTransport === 'auto') {
+              this.globalWsFallbackUntil = Date.now() + 60_000;
+              resolve();
+              return;
+            }
+
+            reject(new Error('Global message stream WebSocket closed'));
+          };
+        });
+      } catch (error: unknown) {
+        this.globalSseIsConnected = false;
+        if ((error as Error)?.name === 'AbortError' || abortController.signal.aborted) {
+          return;
+        }
+
+        if (!opened && this.globalMessageStreamTransport === 'auto' && this.resolveGlobalEventTransport() === 'sse') {
+          await this.runGlobalSseLoop(abortController);
+          return;
+        }
+
+        console.error('[OpencodeClient] Global WS stream error (will retry):', error);
+        this.notifyGlobalSseError(error);
+      }
+
+      if (abortController.signal.aborted) {
+        break;
+      }
+
+      attempt += 1;
+      await wait(Math.min(RECONNECT_DELAY_MS * Math.max(attempt, 1), 2000));
+    }
+  }
+
   private async runGlobalSseLoop(abortController: AbortController): Promise<void> {
     let attempt = 0;
     const RECONNECT_DELAY_MS = 250;
@@ -1575,8 +1762,9 @@ class OpencodeService {
     onEvent: (event: RoutedOpencodeEvent) => void,
     onError?: (error: unknown) => void,
     onOpen?: () => void,
-    options?: { directory?: string | null }
+    options?: { directory?: string | null; transport?: MessageStreamTransportPreference }
   ): () => void {
+    this.globalMessageStreamTransport = options?.transport ?? this.globalMessageStreamTransport;
     const directoryFilter = this.normalizeCandidatePath(options?.directory ?? null);
     const listener = (event: RoutedOpencodeEvent) => {
       if (directoryFilter && event.directory !== directoryFilter) {
@@ -1626,7 +1814,7 @@ class OpencodeService {
     onError?: (error: unknown) => void,
     onOpen?: () => void,
     directoryOverride?: string | null,
-    options?: { scope?: 'global' | 'directory'; key?: string }
+    options?: { scope?: 'global' | 'directory'; key?: string; transport?: MessageStreamTransportPreference }
   ): () => void {
     const subscriptionKey = options?.key ?? 'default';
     const scope = options?.scope ?? 'directory';
@@ -1706,6 +1894,7 @@ class OpencodeService {
               }
             }
           : undefined,
+        { transport: options?.transport }
       );
 
       return () => {

@@ -258,7 +258,7 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
     removeSessionFromStore
   } = useSessionStore();
 
-  const { checkConnection } = useConfigStore();
+  const { checkConnection, settingsMessageStreamTransport } = useConfigStore();
   const fallbackDirectory = useDirectoryStore((state) => state.currentDirectory);
 
   const activeSessionDirectory = React.useMemo(() => {
@@ -2302,8 +2302,9 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
       };
 
     if (streamDebugEnabled()) {
-      console.info('[useEventStream] Connecting to event source (SDK SSE only):', {
+      console.info('[useEventStream] Connecting to event stream:', {
         effectiveDirectory,
+        transport: settingsMessageStreamTransport,
         isCleaningUp: isCleaningUpRef.current,
       });
     }
@@ -2337,6 +2338,7 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
         },
         onError,
         onOpen,
+        { transport: settingsMessageStreamTransport }
       );
 
 
@@ -2367,6 +2369,7 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
     stableBootstrapState,
     repairSessionDerivedState,
     effectiveDirectory,
+    settingsMessageStreamTransport,
     debugConnectionState,
   ]);
 
