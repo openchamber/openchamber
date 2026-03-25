@@ -138,6 +138,7 @@ export const TerminalView: React.FC = () => {
 
     const [connectionError, setConnectionError] = React.useState<string | null>(null);
     const [isFatalError, setIsFatalError] = React.useState(false);
+    const [isReconnectPending, setIsReconnectPending] = React.useState(false);
     const [activeModifier, setActiveModifier] = React.useState<Modifier | null>(null);
     const [isRestarting, setIsRestarting] = React.useState(false);
     const [viewportLayoutVersion, setViewportLayoutVersion] = React.useState(0);
@@ -235,6 +236,7 @@ export const TerminalView: React.FC = () => {
         streamCleanupRef.current?.();
         streamCleanupRef.current = null;
         activeTerminalIdRef.current = null;
+        setIsReconnectPending(false);
     }, []);
 
     React.useEffect(
@@ -274,6 +276,7 @@ export const TerminalView: React.FC = () => {
                                 setConnecting(directory, tabId, false);
                                 setConnectionError(null);
                                 setIsFatalError(false);
+                                setIsReconnectPending(false);
                                 focusTerminalWhenWindowActive();
 
                                 // After a reload, buffer is empty and a reused PTY can look "stuck"
@@ -287,10 +290,10 @@ export const TerminalView: React.FC = () => {
                                 break;
                             }
                             case 'reconnecting': {
-                                const attempt = event.attempt ?? 0;
-                                const maxAttempts = event.maxAttempts ?? 3;
-                                setConnectionError(`Reconnecting (${attempt}/${maxAttempts})...`);
+                                void event;
+                                setConnectionError(null);
                                 setIsFatalError(false);
+                                setIsReconnectPending(true);
                                 break;
                             }
                             case 'data': {
@@ -319,6 +322,7 @@ export const TerminalView: React.FC = () => {
                                 setConnecting(directory, tabId, false);
                                 setConnectionError(isActionTab ? null : 'Terminal session ended');
                                 setIsFatalError(false);
+                                setIsReconnectPending(false);
                                 disconnectStream();
                                 break;
                             }
@@ -329,19 +333,19 @@ export const TerminalView: React.FC = () => {
                             return;
                         }
 
-                        const errorMsg = fatal
-                            ? `Connection failed: ${error.message}`
-                            : error.message || 'Terminal stream connection error';
-
-                        setConnectionError(errorMsg);
-                        setIsFatalError(!!fatal);
-
-                        if (fatal) {
-                            setConnecting(directory, tabId, false);
-                            setTabLifecycle(directory, tabId, 'exited');
-                            setTabSessionId(directory, tabId, null);
-                            disconnectStream();
+                        if (!fatal) {
+                            setConnectionError(null);
+                            setIsFatalError(false);
+                            return;
                         }
+
+                        setIsReconnectPending(false);
+                        setConnectionError(`Connection failed: ${error.message}`);
+                        setIsFatalError(true);
+                        setConnecting(directory, tabId, false);
+                        setTabLifecycle(directory, tabId, 'exited');
+                        setTabSessionId(directory, tabId, null);
+                        disconnectStream();
                     },
                 },
                 streamOptions
@@ -418,6 +422,7 @@ export const TerminalView: React.FC = () => {
 
                 setConnectionError(null);
                 setIsFatalError(false);
+                setIsReconnectPending(false);
                 setConnecting(directory, tabId, true);
                 try {
                     const size = lastViewportSizeRef.current;
@@ -449,6 +454,7 @@ export const TerminalView: React.FC = () => {
                                 : 'Failed to start terminal session'
                         );
                         setIsFatalError(true);
+                        setIsReconnectPending(false);
                         setConnecting(directory, tabId, false);
                     }
                     return;
@@ -531,6 +537,7 @@ export const TerminalView: React.FC = () => {
         setIsRestarting(true);
         setConnectionError(null);
         setIsFatalError(false);
+        setIsReconnectPending(false);
 
         disconnectStream();
 
@@ -539,6 +546,7 @@ export const TerminalView: React.FC = () => {
         } catch (error) {
             setConnectionError(error instanceof Error ? error.message : 'Failed to restart terminal');
             setIsFatalError(true);
+            setIsReconnectPending(false);
         } finally {
             setIsRestarting(false);
         }
@@ -555,6 +563,7 @@ export const TerminalView: React.FC = () => {
         setActiveTab(effectiveDirectory, tabId);
         setConnectionError(null);
         setIsFatalError(false);
+        setIsReconnectPending(false);
         disconnectStream();
     }, [createTab, disconnectStream, effectiveDirectory, setActiveTab]);
 
@@ -564,6 +573,7 @@ export const TerminalView: React.FC = () => {
             setActiveTab(effectiveDirectory, tabId);
             setConnectionError(null);
             setIsFatalError(false);
+            setIsReconnectPending(false);
             disconnectStream();
         },
         [disconnectStream, effectiveDirectory, setActiveTab]
@@ -579,6 +589,7 @@ export const TerminalView: React.FC = () => {
 
             setConnectionError(null);
             setIsFatalError(false);
+            setIsReconnectPending(false);
             void closeTab(effectiveDirectory, tabId);
         },
         [activeTabId, closeTab, disconnectStream, effectiveDirectory]
@@ -587,7 +598,7 @@ export const TerminalView: React.FC = () => {
 
     const handleViewportInput = React.useCallback(
         (data: string) => {
-            if (!data) {
+            if (!data || isReconnectPending) {
                 return;
             }
 
@@ -613,7 +624,9 @@ export const TerminalView: React.FC = () => {
             if (!terminalId) return;
 
             void terminal.sendInput(terminalId, payload).catch((error) => {
-                setConnectionError(error instanceof Error ? error.message : 'Failed to send input');
+                if (!isReconnectPending) {
+                    setConnectionError(error instanceof Error ? error.message : 'Failed to send input');
+                }
             });
 
             if (modifierConsumed) {
@@ -621,7 +634,7 @@ export const TerminalView: React.FC = () => {
                 terminalControllerRef.current?.focus();
             }
         },
-        [activeModifier, setActiveModifier, terminal]
+        [activeModifier, isReconnectPending, setActiveModifier, terminal]
     );
 
     const handleViewportResize = React.useCallback(
@@ -866,7 +879,7 @@ export const TerminalView: React.FC = () => {
         );
     }
 
-    const quickKeysDisabled = !terminalSessionId || isConnecting || isRestarting;
+    const quickKeysDisabled = !terminalSessionId || isConnecting || isRestarting || isReconnectPending;
     const shouldRenderViewport = isMobile ? isTerminalVisible : hasOpenedTerminalViewport;
     const quickKeysControls = (
         <>
@@ -1086,7 +1099,7 @@ export const TerminalView: React.FC = () => {
                         />
                     ) : null}
                 </div>
-                {connectionError && (
+                {!isReconnectPending && connectionError && (
                     <div className="absolute inset-x-0 bottom-0 bg-[var(--status-error-background)] px-3 py-2 text-xs text-[var(--status-error-foreground)] flex items-center justify-between gap-2">
                         <span>{connectionError}</span>
                         {isFatalError && isMobile && (
