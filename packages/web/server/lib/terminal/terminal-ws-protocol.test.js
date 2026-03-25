@@ -1,86 +1,93 @@
 import { describe, expect, it } from 'bun:test';
 
 import {
-  TERMINAL_INPUT_WS_CONTROL_TAG_JSON,
-  TERMINAL_INPUT_WS_PATH,
-  createTerminalInputWsControlFrame,
+  TERMINAL_WS_PATH,
+  TERMINAL_WS_CONTROL_TAG_JSON,
+  createTerminalWsControlFrame,
+  isTerminalWsPathname,
   isRebindRateLimited,
-  normalizeTerminalInputWsMessageToBuffer,
-  normalizeTerminalInputWsMessageToText,
+  normalizeTerminalWsMessageToBuffer,
+  normalizeTerminalWsMessageToText,
   parseRequestPathname,
   pruneRebindTimestamps,
-  readTerminalInputWsControlFrame,
-} from './input-ws-protocol.js';
+  readTerminalWsControlFrame,
+} from './terminal-ws-protocol.js';
 
-describe('terminal input websocket protocol', () => {
-  it('uses fixed websocket path', () => {
-    expect(TERMINAL_INPUT_WS_PATH).toBe('/api/terminal/input-ws');
+describe('terminal websocket protocol', () => {
+  it('uses fixed websocket paths', () => {
+    expect(TERMINAL_WS_PATH).toBe('/api/terminal/ws');
+  });
+
+  it('matches supported websocket pathnames', () => {
+    expect(isTerminalWsPathname('/api/terminal/ws')).toBe(true);
+    expect(isTerminalWsPathname('/api/terminal/input-ws')).toBe(false);
+    expect(isTerminalWsPathname('/api/terminal/other')).toBe(false);
   });
 
   it('encodes control frames with control tag prefix', () => {
-    const frame = createTerminalInputWsControlFrame({ t: 'ok', v: 1 });
-    expect(frame[0]).toBe(TERMINAL_INPUT_WS_CONTROL_TAG_JSON);
+    const frame = createTerminalWsControlFrame({ t: 'ok', v: 1 });
+    expect(frame[0]).toBe(TERMINAL_WS_CONTROL_TAG_JSON);
   });
 
   it('roundtrips control frame payload', () => {
     const payload = { t: 'b', s: 'abc123', v: 1 };
-    const frame = createTerminalInputWsControlFrame(payload);
-    expect(readTerminalInputWsControlFrame(frame)).toEqual(payload);
+    const frame = createTerminalWsControlFrame(payload);
+    expect(readTerminalWsControlFrame(frame)).toEqual(payload);
   });
 
   it('rejects control frame without protocol tag', () => {
     const frame = Buffer.from(JSON.stringify({ t: 'b', s: 'abc123' }), 'utf8');
-    expect(readTerminalInputWsControlFrame(frame)).toBeNull();
+    expect(readTerminalWsControlFrame(frame)).toBeNull();
   });
 
   it('rejects malformed control json', () => {
     const frame = Buffer.concat([
-      Buffer.from([TERMINAL_INPUT_WS_CONTROL_TAG_JSON]),
+      Buffer.from([TERMINAL_WS_CONTROL_TAG_JSON]),
       Buffer.from('{not json', 'utf8'),
     ]);
-    expect(readTerminalInputWsControlFrame(frame)).toBeNull();
+    expect(readTerminalWsControlFrame(frame)).toBeNull();
   });
 
   it('rejects empty control payloads', () => {
-    expect(readTerminalInputWsControlFrame(null)).toBeNull();
-    expect(readTerminalInputWsControlFrame(undefined)).toBeNull();
-    expect(readTerminalInputWsControlFrame(Buffer.alloc(0))).toBeNull();
+    expect(readTerminalWsControlFrame(null)).toBeNull();
+    expect(readTerminalWsControlFrame(undefined)).toBeNull();
+    expect(readTerminalWsControlFrame(Buffer.alloc(0))).toBeNull();
   });
 
   it('rejects control json that is not object', () => {
     const frame = Buffer.concat([
-      Buffer.from([TERMINAL_INPUT_WS_CONTROL_TAG_JSON]),
+      Buffer.from([TERMINAL_WS_CONTROL_TAG_JSON]),
       Buffer.from('"str"', 'utf8'),
     ]);
-    expect(readTerminalInputWsControlFrame(frame)).toBeNull();
+    expect(readTerminalWsControlFrame(frame)).toBeNull();
   });
 
   it('parses control frame from chunk arrays', () => {
-    const frame = createTerminalInputWsControlFrame({ t: 'bok', v: 1 });
+    const frame = createTerminalWsControlFrame({ t: 'bok', v: 1 });
     const chunks = [frame.subarray(0, 2), frame.subarray(2)];
-    expect(readTerminalInputWsControlFrame(chunks)).toEqual({ t: 'bok', v: 1 });
+    expect(readTerminalWsControlFrame(chunks)).toEqual({ t: 'bok', v: 1 });
   });
 
   it('normalizes buffer passthrough', () => {
     const raw = Buffer.from('abc', 'utf8');
-    const normalized = normalizeTerminalInputWsMessageToBuffer(raw);
+    const normalized = normalizeTerminalWsMessageToBuffer(raw);
     expect(normalized).toBe(raw);
     expect(normalized.toString('utf8')).toBe('abc');
   });
 
   it('normalizes uint8 arrays', () => {
-    const normalized = normalizeTerminalInputWsMessageToBuffer(new Uint8Array([97, 98, 99]));
+    const normalized = normalizeTerminalWsMessageToBuffer(new Uint8Array([97, 98, 99]));
     expect(normalized.toString('utf8')).toBe('abc');
   });
 
   it('normalizes array buffer payloads', () => {
     const source = new Uint8Array([97, 98, 99]).buffer;
-    const normalized = normalizeTerminalInputWsMessageToBuffer(source);
+    const normalized = normalizeTerminalWsMessageToBuffer(source);
     expect(normalized.toString('utf8')).toBe('abc');
   });
 
   it('normalizes chunk array payloads', () => {
-    const normalized = normalizeTerminalInputWsMessageToBuffer([
+    const normalized = normalizeTerminalWsMessageToBuffer([
       Buffer.from('ab', 'utf8'),
       Buffer.from('c', 'utf8'),
     ]);
@@ -88,19 +95,19 @@ describe('terminal input websocket protocol', () => {
   });
 
   it('normalizes text payload from string', () => {
-    expect(normalizeTerminalInputWsMessageToText('\u001b[A')).toBe('\u001b[A');
+    expect(normalizeTerminalWsMessageToText('\u001b[A')).toBe('\u001b[A');
   });
 
   it('normalizes text payload from binary data', () => {
-    expect(normalizeTerminalInputWsMessageToText(Buffer.from('\r', 'utf8'))).toBe('\r');
+    expect(normalizeTerminalWsMessageToText(Buffer.from('\r', 'utf8'))).toBe('\r');
   });
 
   it('parses relative request pathname', () => {
-    expect(parseRequestPathname('/api/terminal/input-ws?x=1')).toBe('/api/terminal/input-ws');
+    expect(parseRequestPathname('/api/terminal/ws?x=1')).toBe('/api/terminal/ws');
   });
 
   it('parses absolute request pathname', () => {
-    expect(parseRequestPathname('http://localhost:3000/api/terminal/input-ws')).toBe('/api/terminal/input-ws');
+    expect(parseRequestPathname('http://localhost:3000/api/terminal/ws')).toBe('/api/terminal/ws');
   });
 
   it('returns empty pathname for non-string request url', () => {

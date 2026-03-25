@@ -30,14 +30,19 @@ import {
 } from './lib/tunnels/types.js';
 import { prepareNotificationLastMessage } from './lib/notifications/index.js';
 import {
-  TERMINAL_INPUT_WS_MAX_PAYLOAD_BYTES,
-  TERMINAL_INPUT_WS_PATH,
-  createTerminalInputWsControlFrame,
+  TERMINAL_WS_MAX_PAYLOAD_BYTES,
+  TERMINAL_OUTPUT_REPLAY_MAX_BYTES,
+  TERMINAL_WS_PATH,
+  appendTerminalOutputReplayChunk,
+  createTerminalWsControlFrame,
+  createTerminalOutputReplayBuffer,
+  isTerminalWsPathname,
   isRebindRateLimited,
-  normalizeTerminalInputWsMessageToText,
+  listTerminalOutputReplayChunksSince,
+  normalizeTerminalWsMessageToText,
   parseRequestPathname,
   pruneRebindTimestamps,
-  readTerminalInputWsControlFrame,
+  readTerminalWsControlFrame,
 } from './lib/terminal/index.js';
 import webPush from 'web-push';
 
@@ -2899,9 +2904,13 @@ const getUiSessionTokenFromRequest = (req) => {
   return null;
 };
 
-const TERMINAL_INPUT_WS_MAX_REBINDS_PER_WINDOW = 128;
-const TERMINAL_INPUT_WS_REBIND_WINDOW_MS = 60 * 1000;
-const TERMINAL_INPUT_WS_HEARTBEAT_INTERVAL_MS = 15 * 1000;
+const LEGACY_TERMINAL_INPUT_WS_PATH = '/api/terminal/input-ws';
+const TERMINAL_WS_MAX_REBINDS_PER_WINDOW = 128;
+const TERMINAL_WS_REBIND_WINDOW_MS = 60 * 1000;
+const TERMINAL_WS_HEARTBEAT_INTERVAL_MS = 15 * 1000;
+const TERMINAL_WS_BUFFER_HIGH_WATERMARK_BYTES = 512 * 1024;
+const TERMINAL_WS_BUFFER_LOW_WATERMARK_BYTES = 128 * 1024;
+const TERMINAL_WS_BACKPRESSURE_POLL_INTERVAL_MS = 50;
 
 const rejectWebSocketUpgrade = (socket, statusCode, reason) => {
   if (!socket || socket.destroyed) {
@@ -3636,7 +3645,7 @@ tunnelProviderRegistry.seal();
 const tunnelAuthController = createTunnelAuth();
 let runtimeManagedRemoteTunnelToken = '';
 let runtimeManagedRemoteTunnelHostname = '';
-let terminalInputWsServer = null;
+let terminalWsServer = null;
 const userProvidedOpenCodePassword =
   typeof hmrState.userProvidedOpenCodePassword === 'string' && hmrState.userProvidedOpenCodePassword.length > 0
     ? hmrState.userProvidedOpenCodePassword
@@ -7044,9 +7053,9 @@ async function gracefulShutdown(options = {}) {
     clearInterval(healthCheckInterval);
   }
 
-  if (terminalInputWsServer) {
+  if (terminalWsServer) {
     try {
-      for (const client of terminalInputWsServer.clients) {
+      for (const client of terminalWsServer.clients) {
         try {
           client.terminate();
         } catch {
@@ -7054,11 +7063,11 @@ async function gracefulShutdown(options = {}) {
       }
 
       await new Promise((resolve) => {
-        terminalInputWsServer.close(() => resolve());
+        terminalWsServer.close(() => resolve());
       });
     } catch {
     } finally {
-      terminalInputWsServer = null;
+      terminalWsServer = null;
     }
   }
 
@@ -13502,43 +13511,276 @@ async function main(options = {}) {
     delete next.ENV;
     return next;
   };
-  const terminalInputCapabilities = {
+  const getTerminalRuntimeDescriptor = () => ({
+    runtime: typeof globalThis.Bun === 'undefined' ? 'node' : 'bun',
+  });
+  const terminalTransportCapabilities = {
     input: {
       preferred: 'ws',
       transports: ['http', 'ws'],
       ws: {
-        path: TERMINAL_INPUT_WS_PATH,
-        v: 1,
+        path: TERMINAL_WS_PATH,
+        v: 2,
+        enc: 'text+json-bin-control',
+      },
+    },
+    stream: {
+      preferred: 'ws',
+      transports: ['ws', 'sse'],
+      ws: {
+        path: TERMINAL_WS_PATH,
+        v: 2,
         enc: 'text+json-bin-control',
       },
     },
   };
 
-  const sendTerminalInputWsControl = (socket, payload) => {
+  const sendTerminalWsControl = (socket, payload) => {
     if (!socket || socket.readyState !== 1) {
       return;
     }
 
     try {
-      socket.send(createTerminalInputWsControlFrame(payload), { binary: true });
+      socket.send(createTerminalWsControlFrame(payload), { binary: true });
     } catch {
     }
   };
 
-  terminalInputWsServer = new WebSocketServer({
+  const cleanupTerminalWsBinding = (connectionState) => {
+    const boundSessionId = connectionState.boundSessionId;
+    if (!boundSessionId) {
+      connectionState.boundSessionId = null;
+      return null;
+    }
+
+    const session = terminalSessions.get(boundSessionId);
+    if (session) {
+      session.wsConnections.delete(connectionState);
+    }
+
+    connectionState.boundSessionId = null;
+    return session ?? null;
+  };
+
+  const ensureTerminalWsBackpressureMonitor = (session) => {
+    if (session.wsBackpressureInterval) {
+      return;
+    }
+
+    session.wsBackpressureInterval = setInterval(() => {
+      if (!session.wsBackpressurePaused) {
+        clearInterval(session.wsBackpressureInterval);
+        session.wsBackpressureInterval = null;
+        return;
+      }
+
+      const activeSockets = Array.from(session.wsConnections)
+        .map((connectionState) => connectionState.socket)
+        .filter((socket) => socket && socket.readyState === 1);
+
+      if (activeSockets.length === 0) {
+        session.wsBackpressurePaused = false;
+      } else {
+        session.wsBackpressurePaused = activeSockets.some(
+          (socket) => socket.bufferedAmount >= TERMINAL_WS_BUFFER_LOW_WATERMARK_BYTES
+        );
+      }
+
+      if (!session.wsBackpressurePaused) {
+        clearInterval(session.wsBackpressureInterval);
+        session.wsBackpressureInterval = null;
+        if (session.ptyProcess && typeof session.ptyProcess.resume === 'function') {
+          session.ptyProcess.resume();
+        }
+      }
+    }, TERMINAL_WS_BACKPRESSURE_POLL_INTERVAL_MS);
+  };
+
+  const pauseTerminalWsForBackpressure = (session) => {
+    if (session.wsBackpressurePaused) {
+      return;
+    }
+
+    session.wsBackpressurePaused = true;
+    if (session.ptyProcess && typeof session.ptyProcess.pause === 'function') {
+      session.ptyProcess.pause();
+    }
+    ensureTerminalWsBackpressureMonitor(session);
+  };
+
+  const sendTerminalWsExit = (sessionId, session, exitCode, signal) => {
+    for (const connectionState of Array.from(session.wsConnections)) {
+      sendTerminalWsControl(connectionState.socket, {
+        t: 'x',
+        s: sessionId,
+        exitCode,
+        signal,
+      });
+      connectionState.boundSessionId = null;
+      connectionState.outputReplayCursorBySession.delete(sessionId);
+      session.wsConnections.delete(connectionState);
+    }
+  };
+
+  const getTerminalOutputReplayCursor = (connectionState, sessionId) =>
+    connectionState.outputReplayCursorBySession.get(sessionId) ?? 0;
+
+  const setTerminalOutputReplayCursor = (connectionState, sessionId, chunkId) => {
+    if (!chunkId) {
+      return;
+    }
+
+    connectionState.outputReplayCursorBySession.set(sessionId, chunkId);
+  };
+
+  const sendTerminalOutputChunkToWs = (sessionId, session, connectionState, chunk) => {
+    const { socket } = connectionState;
+    if (!socket || socket.readyState !== 1) {
+      session.wsConnections.delete(connectionState);
+      connectionState.boundSessionId = null;
+      return false;
+    }
+
+    try {
+      socket.send(chunk.data);
+      connectionState.lastActivityAt = Date.now();
+      setTerminalOutputReplayCursor(connectionState, sessionId, chunk.id);
+      if (socket.bufferedAmount >= TERMINAL_WS_BUFFER_HIGH_WATERMARK_BYTES) {
+        pauseTerminalWsForBackpressure(session);
+      }
+      return true;
+    } catch {
+      session.wsConnections.delete(connectionState);
+      connectionState.boundSessionId = null;
+      return false;
+    }
+  };
+
+  const replayTerminalOutputToWs = (sessionId, session, connectionState) => {
+    const replayChunks = listTerminalOutputReplayChunksSince(
+      session.outputReplay,
+      getTerminalOutputReplayCursor(connectionState, sessionId)
+    );
+
+    for (const chunk of replayChunks) {
+      if (!sendTerminalOutputChunkToWs(sessionId, session, connectionState, chunk)) {
+        return false;
+      }
+    }
+
+    if (replayChunks.length > 0) {
+      session.lastActivity = Date.now();
+      session.hasDeliveredInitialOutputReplay = true;
+    }
+
+    return true;
+  };
+
+  const writeTerminalOutputToSse = (session, res, data) => {
+    const ok = res.write(`data: ${JSON.stringify({ type: 'data', data })}\n\n`);
+    if (!ok && session.ptyProcess && typeof session.ptyProcess.pause === 'function') {
+      session.ptyProcess.pause();
+      res.once('drain', () => {
+        if (session.ptyProcess && typeof session.ptyProcess.resume === 'function') {
+          session.ptyProcess.resume();
+        }
+      });
+    }
+  };
+
+  const replayInitialTerminalOutputToSse = (session, res) => {
+    if (session.hasDeliveredInitialOutputReplay) {
+      return;
+    }
+
+    const replayChunks = listTerminalOutputReplayChunksSince(session.outputReplay, 0);
+    if (replayChunks.length === 0) {
+      return;
+    }
+
+    for (const chunk of replayChunks) {
+      writeTerminalOutputToSse(session, res, chunk.data);
+    }
+
+    session.hasDeliveredInitialOutputReplay = true;
+    session.lastActivity = Date.now();
+  };
+
+  const attachTerminalWsSessionStreams = (sessionId, session) => {
+    session.wsDataDisposable = session.ptyProcess.onData((data) => {
+      session.lastActivity = Date.now();
+      const replayChunk = appendTerminalOutputReplayChunk(
+        session.outputReplay,
+        data,
+        TERMINAL_OUTPUT_REPLAY_MAX_BYTES
+      );
+
+      for (const connectionState of Array.from(session.wsConnections)) {
+        if (!replayChunk) {
+          continue;
+        }
+
+        sendTerminalOutputChunkToWs(sessionId, session, connectionState, replayChunk);
+      }
+    });
+
+    session.wsExitDisposable = session.ptyProcess.onExit(({ exitCode, signal }) => {
+      if (session.wsBackpressureInterval) {
+        clearInterval(session.wsBackpressureInterval);
+        session.wsBackpressureInterval = null;
+      }
+      session.wsBackpressurePaused = false;
+      sendTerminalWsExit(sessionId, session, exitCode, signal);
+    });
+  };
+
+  const createTerminalSessionRecord = (sessionId, session) => {
+    const normalizedSession = {
+      ...session,
+      clients: new Set(),
+      wsConnections: new Set(),
+      wsBackpressureInterval: null,
+      wsBackpressurePaused: false,
+      wsDataDisposable: null,
+      wsExitDisposable: null,
+      outputReplay: createTerminalOutputReplayBuffer(),
+      hasDeliveredInitialOutputReplay: false,
+    };
+
+    attachTerminalWsSessionStreams(sessionId, normalizedSession);
+    terminalSessions.set(sessionId, normalizedSession);
+    return normalizedSession;
+  };
+
+  const bindTerminalWsSession = (connectionState, sessionId) => {
+    cleanupTerminalWsBinding(connectionState);
+    const session = terminalSessions.get(sessionId);
+    if (!session) {
+      return null;
+    }
+
+    session.wsConnections.add(connectionState);
+    connectionState.boundSessionId = sessionId;
+    session.lastActivity = Date.now();
+    return session;
+  };
+
+  terminalWsServer = new WebSocketServer({
     noServer: true,
-    maxPayload: TERMINAL_INPUT_WS_MAX_PAYLOAD_BYTES,
+    maxPayload: TERMINAL_WS_MAX_PAYLOAD_BYTES,
   });
 
-  terminalInputWsServer.on('connection', (socket) => {
+  terminalWsServer.on('connection', (socket) => {
     const connectionState = {
+      socket,
       boundSessionId: null,
       invalidFrames: 0,
       rebindTimestamps: [],
       lastActivityAt: Date.now(),
+      outputReplayCursorBySession: new Map(),
     };
 
-    sendTerminalInputWsControl(socket, { t: 'ok', v: 1 });
+    sendTerminalWsControl(socket, { t: 'ok', v: 2 });
 
     const heartbeatInterval = setInterval(() => {
       if (socket.readyState !== 1) {
@@ -13549,7 +13791,7 @@ async function main(options = {}) {
         socket.ping();
       } catch {
       }
-    }, TERMINAL_INPUT_WS_HEARTBEAT_INTERVAL_MS);
+    }, TERMINAL_WS_HEARTBEAT_INTERVAL_MS);
 
     socket.on('pong', () => {
       connectionState.lastActivityAt = Date.now();
@@ -13559,10 +13801,10 @@ async function main(options = {}) {
       connectionState.lastActivityAt = Date.now();
 
       if (isBinary) {
-        const controlMessage = readTerminalInputWsControlFrame(message);
+        const controlMessage = readTerminalWsControlFrame(message);
         if (!controlMessage || typeof controlMessage.t !== 'string') {
           connectionState.invalidFrames += 1;
-          sendTerminalInputWsControl(socket, {
+          sendTerminalWsControl(socket, {
             t: 'e',
             c: 'BAD_FRAME',
             f: connectionState.invalidFrames >= 10,
@@ -13574,13 +13816,13 @@ async function main(options = {}) {
         }
 
         if (controlMessage.t === 'p') {
-          sendTerminalInputWsControl(socket, { t: 'po', v: 1 });
+          sendTerminalWsControl(socket, { t: 'po', v: 2 });
           return;
         }
 
         if (controlMessage.t !== 'b' || typeof controlMessage.s !== 'string') {
           connectionState.invalidFrames += 1;
-          sendTerminalInputWsControl(socket, {
+          sendTerminalWsControl(socket, {
             t: 'e',
             c: 'BAD_FRAME',
             f: connectionState.invalidFrames >= 10,
@@ -13595,42 +13837,47 @@ async function main(options = {}) {
         connectionState.rebindTimestamps = pruneRebindTimestamps(
           connectionState.rebindTimestamps,
           now,
-          TERMINAL_INPUT_WS_REBIND_WINDOW_MS
+          TERMINAL_WS_REBIND_WINDOW_MS
         );
 
-        if (isRebindRateLimited(connectionState.rebindTimestamps, TERMINAL_INPUT_WS_MAX_REBINDS_PER_WINDOW)) {
-          sendTerminalInputWsControl(socket, { t: 'e', c: 'RATE_LIMIT', f: false });
+        if (isRebindRateLimited(connectionState.rebindTimestamps, TERMINAL_WS_MAX_REBINDS_PER_WINDOW)) {
+          sendTerminalWsControl(socket, { t: 'e', c: 'RATE_LIMIT', f: false });
           return;
         }
 
         const nextSessionId = controlMessage.s.trim();
-        const targetSession = terminalSessions.get(nextSessionId);
+        const targetSession = bindTerminalWsSession(connectionState, nextSessionId);
         if (!targetSession) {
-          connectionState.boundSessionId = null;
-          sendTerminalInputWsControl(socket, { t: 'e', c: 'SESSION_NOT_FOUND', f: false });
+          sendTerminalWsControl(socket, { t: 'e', c: 'SESSION_NOT_FOUND', f: false });
           return;
         }
 
         connectionState.rebindTimestamps.push(now);
-        connectionState.boundSessionId = nextSessionId;
-        sendTerminalInputWsControl(socket, { t: 'bok', v: 1 });
+        sendTerminalWsControl(socket, {
+          t: 'bok',
+          s: nextSessionId,
+          v: 2,
+          ...getTerminalRuntimeDescriptor(),
+          ptyBackend: targetSession.ptyBackend || 'unknown',
+        });
+        replayTerminalOutputToWs(nextSessionId, targetSession, connectionState);
         return;
       }
 
-      const payload = normalizeTerminalInputWsMessageToText(message);
+      const payload = normalizeTerminalWsMessageToText(message);
       if (payload.length === 0) {
         return;
       }
 
       if (!connectionState.boundSessionId) {
-        sendTerminalInputWsControl(socket, { t: 'e', c: 'NOT_BOUND', f: false });
+        sendTerminalWsControl(socket, { t: 'e', c: 'NOT_BOUND', f: false });
         return;
       }
 
       const session = terminalSessions.get(connectionState.boundSessionId);
       if (!session) {
         connectionState.boundSessionId = null;
-        sendTerminalInputWsControl(socket, { t: 'e', c: 'SESSION_NOT_FOUND', f: false });
+        sendTerminalWsControl(socket, { t: 'e', c: 'SESSION_NOT_FOUND', f: false });
         return;
       }
 
@@ -13638,12 +13885,13 @@ async function main(options = {}) {
         session.ptyProcess.write(payload);
         session.lastActivity = Date.now();
       } catch {
-        sendTerminalInputWsControl(socket, { t: 'e', c: 'WRITE_FAIL', f: false });
+        sendTerminalWsControl(socket, { t: 'e', c: 'WRITE_FAIL', f: false });
       }
     });
 
     socket.on('close', () => {
       clearInterval(heartbeatInterval);
+      cleanupTerminalWsBinding(connectionState);
     });
 
     socket.on('error', (error) => {
@@ -13653,7 +13901,12 @@ async function main(options = {}) {
 
   server.on('upgrade', (req, socket, head) => {
     const pathname = parseRequestPathname(req.url);
-    if (pathname !== TERMINAL_INPUT_WS_PATH) {
+    if (pathname === LEGACY_TERMINAL_INPUT_WS_PATH) {
+      rejectWebSocketUpgrade(socket, 404, 'Terminal websocket path not found');
+      return;
+    }
+
+    if (!isTerminalWsPathname(pathname)) {
       return;
     }
 
@@ -13674,13 +13927,13 @@ async function main(options = {}) {
           }
         }
 
-        if (!terminalInputWsServer) {
+        if (!terminalWsServer) {
           rejectWebSocketUpgrade(socket, 500, 'Terminal WebSocket unavailable');
           return;
         }
 
-        terminalInputWsServer.handleUpgrade(req, socket, head, (ws) => {
-          terminalInputWsServer.emit('connection', ws, req);
+        terminalWsServer.handleUpgrade(req, socket, head, (ws) => {
+          terminalWsServer.emit('connection', ws, req);
         });
       } catch {
         rejectWebSocketUpgrade(socket, 500, 'Upgrade failed');
@@ -13736,15 +13989,12 @@ async function main(options = {}) {
         env: resolvedEnv,
       });
 
-      const session = {
+      const session = createTerminalSessionRecord(sessionId, {
         ptyProcess,
         ptyBackend: pty.backend,
         cwd,
         lastActivity: Date.now(),
-        clients: new Set(),
-      };
-
-      terminalSessions.set(sessionId, session);
+      });
 
       ptyProcess.onExit(({ exitCode, signal }) => {
         console.log(`Terminal session ${sessionId} exited with code ${exitCode}, signal ${signal}`);
@@ -13752,7 +14002,7 @@ async function main(options = {}) {
       });
 
       console.log(`Created terminal session: ${sessionId} in ${cwd} using shell ${shell}`);
-      res.json({ sessionId, cols: cols || 80, rows: rows || 24, capabilities: terminalInputCapabilities });
+      res.json({ sessionId, cols: cols || 80, rows: rows || 24, capabilities: terminalTransportCapabilities });
     } catch (error) {
       console.error('Failed to create terminal session:', error);
       res.status(500).json({ error: error.message || 'Failed to create terminal session' });
@@ -13776,9 +14026,10 @@ async function main(options = {}) {
     session.clients.add(clientId);
     session.lastActivity = Date.now();
 
-    const runtime = typeof globalThis.Bun === 'undefined' ? 'node' : 'bun';
+    const runtime = getTerminalRuntimeDescriptor().runtime;
     const ptyBackend = session.ptyBackend || 'unknown';
     res.write(`data: ${JSON.stringify({ type: 'connected', runtime, ptyBackend })}\n\n`);
+    replayInitialTerminalOutputToSse(session, res);
 
     const heartbeatInterval = setInterval(() => {
       try {
@@ -13793,15 +14044,7 @@ async function main(options = {}) {
     const dataHandler = (data) => {
       try {
         session.lastActivity = Date.now();
-        const ok = res.write(`data: ${JSON.stringify({ type: 'data', data })}\n\n`);
-        if (!ok && session.ptyProcess && typeof session.ptyProcess.pause === 'function') {
-          session.ptyProcess.pause();
-          res.once('drain', () => {
-            if (session.ptyProcess && typeof session.ptyProcess.resume === 'function') {
-              session.ptyProcess.resume();
-            }
-          });
-        }
+        writeTerminalOutputToSse(session, res, data);
       } catch (error) {
         console.error(`Error sending data to client ${clientId}:`, error);
         cleanup();
@@ -13950,15 +14193,12 @@ async function main(options = {}) {
         env: resolvedEnv,
       });
 
-      const session = {
+      const session = createTerminalSessionRecord(newSessionId, {
         ptyProcess,
         ptyBackend: pty.backend,
         cwd,
         lastActivity: Date.now(),
-        clients: new Set(),
-      };
-
-      terminalSessions.set(newSessionId, session);
+      });
 
       ptyProcess.onExit(({ exitCode, signal }) => {
         console.log(`Terminal session ${newSessionId} exited with code ${exitCode}, signal ${signal}`);
@@ -13966,7 +14206,7 @@ async function main(options = {}) {
       });
 
       console.log(`Restarted terminal session: ${sessionId} -> ${newSessionId} in ${cwd} using shell ${shell}`);
-      res.json({ sessionId: newSessionId, cols: cols || 80, rows: rows || 24, capabilities: terminalInputCapabilities });
+      res.json({ sessionId: newSessionId, cols: cols || 80, rows: rows || 24, capabilities: terminalTransportCapabilities });
     } catch (error) {
       console.error('Failed to restart terminal session:', error);
       res.status(500).json({ error: error.message || 'Failed to restart terminal session' });

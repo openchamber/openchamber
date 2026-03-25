@@ -29,20 +29,23 @@ export interface RetryPolicy {
   maxDelayMs: number;
 }
 
+export interface TerminalTransportCapability {
+  preferred?: 'ws' | 'http' | 'sse';
+  transports?: Array<'ws' | 'http' | 'sse'>;
+  ws?: {
+    path: string;
+    v?: number;
+    enc?: string;
+  };
+}
+
 export interface TerminalSession {
   sessionId: string;
   cols: number;
   rows: number;
   capabilities?: {
-    input?: {
-      preferred?: 'ws' | 'http';
-      transports?: Array<'ws' | 'http'>;
-      ws?: {
-        path: string;
-        v?: number;
-        enc?: string;
-      };
-    };
+    input?: TerminalTransportCapability;
+    stream?: TerminalTransportCapability;
   };
 }
 
