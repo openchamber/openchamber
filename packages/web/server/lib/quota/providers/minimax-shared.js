@@ -61,25 +61,25 @@ export const createMiniMaxCodingPlanProvider = ({ providerId, providerName, alia
         });
       }
 
-      const firstModel = payload?.model_remains?.[0];
-      if (!firstModel) {
+      const targetModel = payload?.model_remains?.find((item) => item?.model_name === 'MiniMax-M*');
+      if (!targetModel) {
         return buildResult({
           providerId,
           providerName,
           ok: false,
           configured: true,
-          error: 'No model quota data available',
+          error: 'No MiniMax-M* quota data available',
         });
       }
 
-      const intervalTotal = toNumber(firstModel.current_interval_total_count);
-      const intervalUsage = toNumber(firstModel.current_interval_usage_count);
-      const intervalStartAt = toTimestamp(firstModel.start_time);
-      const intervalResetAt = toTimestamp(firstModel.end_time);
-      const weeklyTotal = toNumber(firstModel.current_weekly_total_count);
-      const weeklyUsage = toNumber(firstModel.current_weekly_usage_count);
-      const weeklyStartAt = toTimestamp(firstModel.weekly_start_time);
-      const weeklyResetAt = toTimestamp(firstModel.weekly_end_time);
+      const intervalTotal = toNumber(targetModel.current_interval_total_count);
+      const intervalUsage = toNumber(targetModel.current_interval_usage_count);
+      const intervalStartAt = toTimestamp(targetModel.start_time);
+      const intervalResetAt = toTimestamp(targetModel.end_time);
+      const weeklyTotal = toNumber(targetModel.current_weekly_total_count);
+      const weeklyUsage = toNumber(targetModel.current_weekly_usage_count);
+      const weeklyStartAt = toTimestamp(targetModel.weekly_start_time);
+      const weeklyResetAt = toTimestamp(targetModel.weekly_end_time);
       const intervalUsed = intervalTotal - intervalUsage;
       const weeklyUsed = weeklyTotal - weeklyUsage;
       const intervalUsedPercent =
