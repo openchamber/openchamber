@@ -12,9 +12,11 @@ import { createTunnelAuth } from './lib/opencode/tunnel-auth.js';
 import {
   printTunnelWarning,
 } from './lib/cloudflare-tunnel.js';
+import { createManagedTunnelConfigRuntime } from './lib/tunnels/managed-config.js';
 import { createTunnelService } from './lib/tunnels/index.js';
 import { createTunnelProviderRegistry } from './lib/tunnels/registry.js';
 import { createCloudflareTunnelProvider } from './lib/tunnels/providers/cloudflare.js';
+import { createRequestSecurityRuntime } from './lib/security/request-security.js';
 import {
   TUNNEL_MODE_MANAGED_LOCAL,
   TUNNEL_MODE_MANAGED_REMOTE,
@@ -40,10 +42,13 @@ import { createOpenCodeEnvRuntime } from './lib/opencode/env-runtime.js';
 import { createOpenCodeNetworkRuntime } from './lib/opencode/network-runtime.js';
 import { registerOpenCodeProxy } from './lib/opencode/proxy.js';
 import { registerOpenCodeRoutes } from './lib/opencode/routes.js';
+import { createSettingsRuntime } from './lib/opencode/settings-runtime.js';
 import { createSessionRuntime } from './lib/opencode/session-runtime.js';
 import { createOpenCodeWatcherRuntime } from './lib/opencode/watcher.js';
 import { registerNotificationRoutes } from './lib/notifications/routes.js';
 import { createNotificationTriggerRuntime } from './lib/notifications/runtime.js';
+import { createPushRuntime } from './lib/notifications/push-runtime.js';
+import { createNotificationTemplateRuntime } from './lib/notifications/template-runtime.js';
 import webPush from 'web-push';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -78,9 +83,6 @@ const OPENCHAMBER_VERSION = (() => {
   return 'unknown';
 })();
 const fsPromises = fs.promises;
-
-// Lock to prevent race conditions in persistSettings
-let persistSettingsLock = Promise.resolve();
 
 const normalizeDirectoryPath = (value) => {
   if (typeof value !== 'string') {
@@ -446,494 +448,22 @@ const readCustomThemesFromDisk = async () => {
   }
 };
 
-const createTimeoutSignal = (timeoutMs) => {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  return {
-    signal: controller.signal,
-    cleanup: () => clearTimeout(timer),
-  };
-};
+let notificationTemplateRuntime = null;
 
-/** Humanize a project label: replace dashes/underscores with spaces, title-case each word. Mirrors the UI's formatProjectLabel. */
-const formatProjectLabel = (label) => {
-  if (!label || typeof label !== 'string') return '';
-  return label
-    .replace(/[-_]/g, ' ')
-    .replace(/\b\w/g, (char) => char.toUpperCase());
-};
-
-const resolveNotificationTemplate = (template, variables) => {
-  if (!template || typeof template !== 'string') return '';
-  return template.replace(/\{(\w+)\}/g, (_match, key) => {
-    const value = variables[key];
-    if (value === undefined || value === null) return '';
-    return String(value);
-  });
-};
-
-const shouldApplyResolvedTemplateMessage = (template, resolved, variables) => {
-  if (!resolved) {
-    return false;
-  }
-
-  if (typeof template !== 'string') {
-    return true;
-  }
-
-  if (template.includes('{last_message}')) {
-    return typeof variables?.last_message === 'string' && variables.last_message.trim().length > 0;
-  }
-
-  return true;
-};
-
-const ZEN_DEFAULT_MODEL = 'gpt-5-nano';
-
-/**
- * Validated fallback zen model determined at startup by checking available free
- * models from the zen API. When `null`, startup validation hasn't run yet (or
- * failed), so `resolveZenModel` falls back to `ZEN_DEFAULT_MODEL`.
- */
-let validatedZenFallback = null;
-
-/** Cached free zen models response and timestamp (shared by startup + endpoint). */
-let cachedZenModels = null;
-let cachedZenModelsTimestamp = 0;
-const ZEN_MODELS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
-
-/**
- * Fetch free models from the zen API with caching. Returns an array of
- * `{ id, owned_by }` objects (may be empty on failure). Results are cached
- * for `ZEN_MODELS_CACHE_TTL` ms.
- */
-const fetchFreeZenModels = async () => {
-  const now = Date.now();
-  if (cachedZenModels && now - cachedZenModelsTimestamp < ZEN_MODELS_CACHE_TTL) {
-    return cachedZenModels.models;
-  }
-
-  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-  const timeout = controller ? setTimeout(() => controller.abort(), 8000) : null;
-  try {
-    const response = await fetch('https://opencode.ai/zen/v1/models', {
-      signal: controller?.signal,
-      headers: { Accept: 'application/json' },
-    });
-    if (!response.ok) {
-      throw new Error(`zen/v1/models responded with status ${response.status}`);
-    }
-    const data = await response.json();
-    const allModels = Array.isArray(data?.data) ? data.data : [];
-    const freeModels = allModels
-      .filter((m) => typeof m?.id === 'string' && m.id.endsWith('-free'))
-      .map((m) => ({ id: m.id, owned_by: m.owned_by }));
-
-    cachedZenModels = { models: freeModels };
-    cachedZenModelsTimestamp = Date.now();
-    return freeModels;
-  } finally {
-    if (timeout) clearTimeout(timeout);
-  }
-};
-
-/**
- * Resolve the zen model to use. Checks the provided override first,
- * then falls back to the stored zenModel setting, then to the validated
- * startup fallback, then to the hardcoded default.
- */
-const resolveZenModel = async (override) => {
-  if (typeof override === 'string' && override.trim().length > 0) {
-    return override.trim();
-  }
-  try {
-    const settings = await readSettingsFromDisk();
-    if (typeof settings?.zenModel === 'string' && settings.zenModel.trim().length > 0) {
-      return settings.zenModel.trim();
-    }
-  } catch {
-    // ignore
-  }
-  return validatedZenFallback || ZEN_DEFAULT_MODEL;
-};
-
-const validateZenModelAtStartup = async () => {
-  try {
-    const freeModels = await fetchFreeZenModels();
-    const freeModelIds = freeModels.map((m) => m.id);
-
-    if (freeModelIds.length > 0) {
-      validatedZenFallback = freeModelIds[0];
-
-      const settings = await readSettingsFromDisk();
-      const storedModel = typeof settings?.zenModel === 'string' ? settings.zenModel.trim() : '';
-
-      if (!storedModel || !freeModelIds.includes(storedModel)) {
-        const fallback = freeModelIds[0];
-        console.log(
-          storedModel
-            ? `[zen] Stored model "${storedModel}" not found in free models, falling back to "${fallback}"`
-            : `[zen] No model configured, setting default to "${fallback}"`
-        );
-        await persistSettings({ zenModel: fallback });
-      } else {
-        console.log(`[zen] Stored model "${storedModel}" verified as available`);
-      }
-    } else {
-      console.warn('[zen] No free models returned from API, skipping validation');
-    }
-  } catch (error) {
-    console.warn('[zen] Startup model validation failed (non-blocking):', error?.message || error);
-  }
-};
-
-
-const summarizeText = async (text, targetLength, zenModel) => {
-  if (!text || typeof text !== 'string' || text.trim().length === 0) return text;
-
-  try {
-    const prompt = `Summarize the following text in approximately ${targetLength} characters. Be concise and capture the key point. Output ONLY the summary text, nothing else.\n\nText:\n${text}`;
-
-    const completionTimeout = createTimeoutSignal(15000);
-    let response;
-    try {
-      response = await fetch('https://opencode.ai/zen/v1/responses', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: zenModel || ZEN_DEFAULT_MODEL,
-          input: [{ role: 'user', content: prompt }],
-          max_output_tokens: 1000,
-          stream: false,
-          reasoning: { effort: 'low' },
-        }),
-        signal: completionTimeout.signal,
-      });
-    } finally {
-      completionTimeout.cleanup();
-    }
-
-    if (!response.ok) return text;
-
-    const data = await response.json();
-    const summary = data?.output?.find((item) => item?.type === 'message')
-      ?.content?.find((item) => item?.type === 'output_text')?.text?.trim();
-
-    return summary || text;
-  } catch {
-    return text;
-  }
-};
-
-const NOTIFICATION_BODY_MAX_CHARS = 1000;
-
-/**
- * Extract text from parts array (used when parts are available inline or fetched from API).
- */
-const extractTextFromParts = (parts, maxLength = NOTIFICATION_BODY_MAX_CHARS) => {
-  if (!Array.isArray(parts) || parts.length === 0) return '';
-
-  const textParts = parts
-    .filter((p) => p && (p.type === 'text' || typeof p.text === 'string' || typeof p.content === 'string'))
-    .map((p) => p.text || p.content || '')
-    .filter(Boolean);
-
-  let text = textParts.length > 0 ? textParts.join('\n').trim() : '';
-
-  // Truncate to prevent oversized notification payloads
-  if (maxLength > 0 && text.length > maxLength) {
-    text = text.slice(0, maxLength);
-  }
-
-  return text;
-};
-
-/**
- * Try to extract message text from the payload itself (fast path).
- * Note: message.updated events from the OpenCode SSE stream typically do NOT include
- * parts inline — parts are sent via separate message.part.updated events. This function
- * is a fast path for the rare case where parts are included.
- */
-const extractLastMessageText = (payload, maxLength = NOTIFICATION_BODY_MAX_CHARS) => {
-  const info = payload?.properties?.info;
-  if (!info) return '';
-
-  // Try inline parts on info or on properties
-  const parts = info.parts || payload?.properties?.parts;
-  const text = extractTextFromParts(parts, maxLength);
-  if (text) return text;
-
-  // Fallback: try content array (legacy)
-  const content = info.content;
-  if (Array.isArray(content)) {
-    const textContent = content
-      .filter((c) => c && (c.type === 'text' || typeof c.text === 'string'))
-      .map((c) => c.text || '')
-      .filter(Boolean);
-    if (textContent.length > 0) {
-      let result = textContent.join('\n').trim();
-      if (maxLength > 0 && result.length > maxLength) {
-        result = result.slice(0, maxLength);
-      }
-      return result;
-    }
-  }
-
-  return '';
-};
-
-/**
- * Fetch the last assistant message text from the OpenCode API.
- * This is needed because message.updated events don't include parts;
- * we must fetch them separately via the session messages endpoint.
- */
-const fetchLastAssistantMessageText = async (sessionId, messageId, maxLength = NOTIFICATION_BODY_MAX_CHARS) => {
-  if (!sessionId) return '';
-
-  try {
-    // Fetch last few messages to find the one that triggered the notification
-    const url = buildOpenCodeUrl(`/session/${encodeURIComponent(sessionId)}/message`, '');
-    const response = await fetch(`${url}?limit=5`, {
-      method: 'GET',
-      headers: {
-        Accept: 'application/json',
-        ...getOpenCodeAuthHeaders(),
-      },
-      signal: AbortSignal.timeout(3000),
-    });
-
-    if (!response.ok) return '';
-
-    const messages = await response.json().catch(() => null);
-    if (!Array.isArray(messages)) return '';
-
-    // Find the specific message by ID, or fall back to the last assistant message
-    let target = null;
-    if (messageId) {
-      target = messages.find((m) => m?.info?.id === messageId && m?.info?.role === 'assistant');
-    }
-    if (!target) {
-      // Find the last assistant message with finish === 'stop'
-      for (let i = messages.length - 1; i >= 0; i--) {
-        const m = messages[i];
-        if (m?.info?.role === 'assistant' && m?.info?.finish === 'stop') {
-          target = m;
-          break;
-        }
-      }
-    }
-
-    if (!target || !Array.isArray(target.parts)) return '';
-
-    return extractTextFromParts(target.parts, maxLength);
-  } catch {
-    return '';
-  }
-};
-
-/**
- * In-memory cache of session titles populated from SSE session.updated / session.created events.
- * This is the preferred source for session titles since it is populated passively and doesn't
- * require a separate API call.
- */
-const sessionTitleCache = new Map();
-
-const cacheSessionTitle = (sessionId, title) => {
-  if (typeof sessionId === 'string' && sessionId.length > 0 &&
-      typeof title === 'string' && title.length > 0) {
-    sessionTitleCache.set(sessionId, title);
-  }
-};
-
-const getCachedSessionTitle = (sessionId) => {
-  return sessionTitleCache.get(sessionId) ?? null;
-};
-
-/**
- * Extract and cache session title from session.updated / session.created SSE events.
- * Called by the global event watcher to passively maintain the title cache.
- */
-const maybeCacheSessionInfoFromEvent = (payload) => {
-  if (!payload || typeof payload !== 'object') return;
-  const type = payload.type;
-  if (type !== 'session.updated' && type !== 'session.created') return;
-  const info = payload.properties?.info;
-  if (!info || typeof info !== 'object') return;
-  const sessionId = info.id;
-  const title = info.title;
-  cacheSessionTitle(sessionId, title);
-  // Also cache parentID from session events to ensure subtask detection works correctly
-  const parentID = info.parentID;
-  if (sessionId && parentID !== undefined) {
-    setCachedSessionParentId(sessionId, parentID);
-  }
-};
-
-/**
- * Fetch session metadata (title, directory) from the OpenCode API.
- * Cached for 60s per session to avoid repeated API calls.
- */
-const sessionInfoCache = new Map();
-const SESSION_INFO_CACHE_TTL_MS = 60 * 1000;
-
-const fetchSessionInfo = async (sessionId) => {
-  if (!sessionId) return null;
-
-  const cached = sessionInfoCache.get(sessionId);
-  if (cached && Date.now() - cached.at < SESSION_INFO_CACHE_TTL_MS) {
-    return cached.data;
-  }
-
-  try {
-    const url = buildOpenCodeUrl(`/session/${encodeURIComponent(sessionId)}`, '');
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: { Accept: 'application/json' },
-      signal: AbortSignal.timeout(2000),
-    });
-    if (!response.ok) {
-      console.warn(`[Notification] fetchSessionInfo: ${response.status} for session ${sessionId}`);
-      return null;
-    }
-    const data = await response.json().catch(() => null);
-    if (data && typeof data === 'object') {
-      sessionInfoCache.set(sessionId, { data, at: Date.now() });
-      return data;
-    }
-    return null;
-  } catch (err) {
-    console.warn(`[Notification] fetchSessionInfo failed for ${sessionId}:`, err?.message || err);
-    return null;
-  }
-};
-
-const buildTemplateVariables = async (payload, sessionId) => {
-  const info = payload?.properties?.info || {};
-
-  // Session title — try inline payload, then SSE cache, then API fetch
-  let sessionTitle = payload?.properties?.sessionTitle ||
-    payload?.properties?.session?.title ||
-    (typeof info.sessionTitle === 'string' ? info.sessionTitle : '') ||
-    '';
-
-  // Try the SSE-populated session title cache (filled from session.updated / session.created events)
-  if (!sessionTitle && sessionId) {
-    const cached = getCachedSessionTitle(sessionId);
-    if (cached) {
-      sessionTitle = cached;
-    }
-  }
-
-  // Last resort: fetch session info from the API
-  let sessionInfo = null;
-  if (!sessionTitle && sessionId) {
-    sessionInfo = await fetchSessionInfo(sessionId);
-    if (sessionInfo && typeof sessionInfo.title === 'string') {
-      sessionTitle = sessionInfo.title;
-      // Populate the SSE cache so future notifications don't need an API call
-      cacheSessionTitle(sessionId, sessionTitle);
-    }
-  }
-
-  // Agent name from mode or agent field (v2 has both mode and agent)
-  const agentName = (() => {
-    const mode = typeof info.agent === 'string' && info.agent.trim().length > 0
-      ? info.agent.trim()
-      : (typeof info.mode === 'string' ? info.mode.trim() : '');
-    if (!mode) return 'Agent';
-    return mode.split(/[-_\s]+/).filter(Boolean)
-      .map((t) => t.charAt(0).toUpperCase() + t.slice(1)).join(' ');
-  })();
-
-  // Model name — v2 has modelID directly on info, v1 user messages nest it under info.model.modelID
-  const modelName = (() => {
-    const raw = typeof info.modelID === 'string' ? info.modelID.trim()
-      : (typeof info.model?.modelID === 'string' ? info.model.modelID.trim() : '');
-    if (!raw) return 'Assistant';
-    return raw.split(/[-_]+/).filter(Boolean)
-      .map((p) => p.charAt(0).toUpperCase() + p.slice(1)).join(' ');
-  })();
-
-  // Project name, branch, worktree — derived from multiple sources with fallbacks
-  let projectName = '';
-  let branch = '';
-  let worktreeDir = '';
-
-  // 1. Primary source: the message payload's path (always accurate for the session)
-  const infoPath = info.path;
-  if (typeof infoPath?.root === 'string' && infoPath.root.length > 0) {
-    worktreeDir = infoPath.root;
-  } else if (typeof infoPath?.cwd === 'string' && infoPath.cwd.length > 0) {
-    worktreeDir = infoPath.cwd;
-  }
-
-  // 2. Look up the user-facing project label from stored settings
-  try {
-    const settings = await readSettingsFromDisk();
-    const projects = Array.isArray(settings.projects) ? settings.projects : [];
-
-    if (worktreeDir) {
-      // Match the session directory against stored projects to find the label
-      const normalizedDir = worktreeDir.replace(/\/+$/, '');
-      const matchedProject = projects.find((p) => {
-        if (!p || typeof p.path !== 'string') return false;
-        return p.path.replace(/\/+$/, '') === normalizedDir;
-      });
-      if (matchedProject && typeof matchedProject.label === 'string' && matchedProject.label.trim().length > 0) {
-        projectName = matchedProject.label.trim();
-      } else {
-        // No label stored — derive from directory name
-        projectName = normalizedDir.split('/').filter(Boolean).pop() || '';
-      }
-    } else {
-      // No directory from payload — fall back to active project
-      const activeId = typeof settings.activeProjectId === 'string' ? settings.activeProjectId : '';
-      const activeProject = activeId ? projects.find((p) => p && p.id === activeId) : projects[0];
-      if (activeProject) {
-        projectName = typeof activeProject.label === 'string' && activeProject.label.trim().length > 0
-          ? activeProject.label.trim()
-          : typeof activeProject.path === 'string'
-            ? activeProject.path.split('/').pop() || ''
-            : '';
-        worktreeDir = typeof activeProject.path === 'string' ? activeProject.path : '';
-      }
-    }
-  } catch {
-    // Settings read failed — derive from directory if available
-    if (worktreeDir && !projectName) {
-      projectName = worktreeDir.split('/').filter(Boolean).pop() || '';
-    }
-  }
-
-  // 3. Get branch from git
-  if (worktreeDir) {
-    try {
-      const { simpleGit } = await import('simple-git');
-      const git = simpleGit({
-        baseDir: worktreeDir,
-        spawnOptions: { windowsHide: true },
-        binary: resolveGitBinaryForSpawn(),
-      });
-      branch = await Promise.race([
-        git.revparse(['--abbrev-ref', 'HEAD']),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('git timeout')), 3000)),
-      ]).catch(() => '');
-    } catch {
-      // ignore — git may not be available
-    }
-  }
-
-  return {
-    project_name: formatProjectLabel(projectName),
-    worktree: worktreeDir,
-    branch: typeof branch === 'string' ? branch.trim() : '',
-    session_name: sessionTitle,
-    agent_name: agentName,
-    model_name: modelName,
-    last_message: '', // Populated by caller
-    session_id: sessionId || '',
-  };
-};
+const createTimeoutSignal = (...args) => notificationTemplateRuntime.createTimeoutSignal(...args);
+const formatProjectLabel = (...args) => notificationTemplateRuntime.formatProjectLabel(...args);
+const resolveNotificationTemplate = (...args) => notificationTemplateRuntime.resolveNotificationTemplate(...args);
+const shouldApplyResolvedTemplateMessage = (...args) => notificationTemplateRuntime.shouldApplyResolvedTemplateMessage(...args);
+const fetchFreeZenModels = (...args) => notificationTemplateRuntime.fetchFreeZenModels(...args);
+const resolveZenModel = (...args) => notificationTemplateRuntime.resolveZenModel(...args);
+const validateZenModelAtStartup = (...args) => notificationTemplateRuntime.validateZenModelAtStartup(...args);
+const summarizeText = (...args) => notificationTemplateRuntime.summarizeText(...args);
+const extractTextFromParts = (...args) => notificationTemplateRuntime.extractTextFromParts(...args);
+const extractLastMessageText = (...args) => notificationTemplateRuntime.extractLastMessageText(...args);
+const fetchLastAssistantMessageText = (...args) => notificationTemplateRuntime.fetchLastAssistantMessageText(...args);
+const maybeCacheSessionInfoFromEvent = (...args) => notificationTemplateRuntime.maybeCacheSessionInfoFromEvent(...args);
+const buildTemplateVariables = (...args) => notificationTemplateRuntime.buildTemplateVariables(...args);
+const getCachedZenModels = (...args) => notificationTemplateRuntime.getCachedZenModels(...args);
 
 const OPENCHAMBER_DATA_DIR = process.env.OPENCHAMBER_DATA_DIR
   ? path.resolve(process.env.OPENCHAMBER_DATA_DIR)
@@ -1100,263 +630,22 @@ const findProjectById = (settings, projectId) => {
   return { projects, index, project: projects[index] };
 };
 
-const readSettingsFromDisk = async () => {
-  try {
-    const raw = await fsPromises.readFile(SETTINGS_FILE_PATH, 'utf8');
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === 'object') {
-      return parsed;
-    }
-    return {};
-  } catch (error) {
-    if (error && typeof error === 'object' && error.code === 'ENOENT') {
-      return {};
-    }
-    console.warn('Failed to read settings file:', error);
-    return {};
-  }
-};
+const managedTunnelConfigRuntime = createManagedTunnelConfigRuntime({
+  fsPromises,
+  path,
+  normalizeManagedRemoteTunnelHostname,
+  normalizeManagedRemoteTunnelPresets,
+  constants: {
+    CLOUDFLARE_MANAGED_REMOTE_TUNNELS_FILE_PATH,
+    CLOUDFLARE_LEGACY_NAMED_TUNNELS_FILE_PATH,
+    CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION,
+  },
+});
 
-const writeSettingsToDisk = async (settings) => {
-  try {
-    await fsPromises.mkdir(path.dirname(SETTINGS_FILE_PATH), { recursive: true });
-    await fsPromises.writeFile(SETTINGS_FILE_PATH, JSON.stringify(settings, null, 2), 'utf8');
-  } catch (error) {
-    console.warn('Failed to write settings file:', error);
-    throw error;
-  }
-};
-
-const PUSH_SUBSCRIPTIONS_VERSION = 1;
-let persistPushSubscriptionsLock = Promise.resolve();
-let persistManagedRemoteTunnelConfigLock = Promise.resolve();
-
-const readPushSubscriptionsFromDisk = async () => {
-  try {
-    const raw = await fsPromises.readFile(PUSH_SUBSCRIPTIONS_FILE_PATH, 'utf8');
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') {
-      return { version: PUSH_SUBSCRIPTIONS_VERSION, subscriptionsBySession: {} };
-    }
-    if (typeof parsed.version !== 'number' || parsed.version !== PUSH_SUBSCRIPTIONS_VERSION) {
-      return { version: PUSH_SUBSCRIPTIONS_VERSION, subscriptionsBySession: {} };
-    }
-
-    const subscriptionsBySession =
-      parsed.subscriptionsBySession && typeof parsed.subscriptionsBySession === 'object'
-        ? parsed.subscriptionsBySession
-        : {};
-
-    return { version: PUSH_SUBSCRIPTIONS_VERSION, subscriptionsBySession };
-  } catch (error) {
-    if (error && typeof error === 'object' && error.code === 'ENOENT') {
-      return { version: PUSH_SUBSCRIPTIONS_VERSION, subscriptionsBySession: {} };
-    }
-    console.warn('Failed to read push subscriptions file:', error);
-    return { version: PUSH_SUBSCRIPTIONS_VERSION, subscriptionsBySession: {} };
-  }
-};
-
-const writePushSubscriptionsToDisk = async (data) => {
-  await fsPromises.mkdir(path.dirname(PUSH_SUBSCRIPTIONS_FILE_PATH), { recursive: true });
-  await fsPromises.writeFile(PUSH_SUBSCRIPTIONS_FILE_PATH, JSON.stringify(data, null, 2), 'utf8');
-};
-
-const persistPushSubscriptionUpdate = async (mutate) => {
-  persistPushSubscriptionsLock = persistPushSubscriptionsLock.then(async () => {
-    await fsPromises.mkdir(path.dirname(PUSH_SUBSCRIPTIONS_FILE_PATH), { recursive: true });
-    const current = await readPushSubscriptionsFromDisk();
-    const next = mutate({
-      version: PUSH_SUBSCRIPTIONS_VERSION,
-      subscriptionsBySession: current.subscriptionsBySession || {},
-    });
-    await writePushSubscriptionsToDisk(next);
-    return next;
-  });
-
-  return persistPushSubscriptionsLock;
-};
-
-const sanitizeManagedRemoteTunnelConfigEntries = (value) => {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  const result = [];
-  const seenIds = new Set();
-  const seenHostnames = new Set();
-  for (const entry of value) {
-    if (!entry || typeof entry !== 'object') {
-      continue;
-    }
-
-    const id = typeof entry.id === 'string' ? entry.id.trim() : '';
-    const name = typeof entry.name === 'string' ? entry.name.trim() : '';
-    const hostname = normalizeManagedRemoteTunnelHostname(entry.hostname);
-    const token = typeof entry.token === 'string' ? entry.token.trim() : '';
-    const updatedAt = Number.isFinite(entry.updatedAt) ? entry.updatedAt : Date.now();
-
-    if (!id || !name || !hostname || !token) {
-      continue;
-    }
-    if (seenIds.has(id) || seenHostnames.has(hostname)) {
-      continue;
-    }
-
-    seenIds.add(id);
-    seenHostnames.add(hostname);
-    result.push({ id, name, hostname, token, updatedAt });
-  }
-
-  return result;
-};
-
-const migrateManagedRemoteTunnelConfigFromLegacyFile = async () => {
-  try {
-    const legacyRaw = await fsPromises.readFile(CLOUDFLARE_LEGACY_NAMED_TUNNELS_FILE_PATH, 'utf8');
-    const parsed = JSON.parse(legacyRaw);
-    const tunnels = sanitizeManagedRemoteTunnelConfigEntries(parsed?.tunnels);
-    const migrated = {
-      version: CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION,
-      tunnels,
-    };
-    await writeManagedRemoteTunnelConfigToDisk(migrated);
-    return migrated;
-  } catch (error) {
-    if (error && typeof error === 'object' && error.code === 'ENOENT') {
-      return { version: CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION, tunnels: [] };
-    }
-    console.warn('Failed to migrate legacy named tunnel config file:', error);
-    return { version: CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION, tunnels: [] };
-  }
-};
-
-const readManagedRemoteTunnelConfigFromDisk = async () => {
-  try {
-    const raw = await fsPromises.readFile(CLOUDFLARE_MANAGED_REMOTE_TUNNELS_FILE_PATH, 'utf8');
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') {
-      return { version: CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION, tunnels: [] };
-    }
-
-    const version = parsed.version === CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION
-      ? CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION
-      : CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION;
-
-    return {
-      version,
-      tunnels: sanitizeManagedRemoteTunnelConfigEntries(parsed.tunnels),
-    };
-  } catch (error) {
-    if (error && typeof error === 'object' && error.code === 'ENOENT') {
-      return migrateManagedRemoteTunnelConfigFromLegacyFile();
-    }
-    console.warn('Failed to read managed remote tunnel config file:', error);
-    return { version: CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION, tunnels: [] };
-  }
-};
-
-const writeManagedRemoteTunnelConfigToDisk = async (data) => {
-  await fsPromises.mkdir(path.dirname(CLOUDFLARE_MANAGED_REMOTE_TUNNELS_FILE_PATH), { recursive: true });
-  await fsPromises.writeFile(CLOUDFLARE_MANAGED_REMOTE_TUNNELS_FILE_PATH, JSON.stringify(data, null, 2), { encoding: 'utf8', mode: 0o600 });
-};
-
-const updateManagedRemoteTunnelConfig = async (mutate) => {
-  persistManagedRemoteTunnelConfigLock = persistManagedRemoteTunnelConfigLock.then(async () => {
-    const current = await readManagedRemoteTunnelConfigFromDisk();
-    const next = mutate({
-      version: CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION,
-      tunnels: sanitizeManagedRemoteTunnelConfigEntries(current.tunnels),
-    });
-
-    await writeManagedRemoteTunnelConfigToDisk({
-      version: CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION,
-      tunnels: sanitizeManagedRemoteTunnelConfigEntries(next?.tunnels),
-    });
-  });
-
-  return persistManagedRemoteTunnelConfigLock;
-};
-
-const syncManagedRemoteTunnelConfigWithPresets = async (presets) => {
-  const sanitizedPresets = normalizeManagedRemoteTunnelPresets(presets) || [];
-
-  await updateManagedRemoteTunnelConfig((current) => {
-    const byId = new Map(current.tunnels.map((entry) => [entry.id, entry]));
-    const byHostname = new Map(current.tunnels.map((entry) => [entry.hostname, entry]));
-
-    const nextTunnels = [];
-    for (const preset of sanitizedPresets) {
-      const existing = byId.get(preset.id) || byHostname.get(preset.hostname) || null;
-      if (!existing) {
-        continue;
-      }
-
-      nextTunnels.push({
-        ...existing,
-        id: preset.id,
-        name: preset.name,
-        hostname: preset.hostname,
-      });
-    }
-
-    return {
-      version: CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION,
-      tunnels: nextTunnels,
-    };
-  });
-};
-
-const upsertManagedRemoteTunnelToken = async ({ id, name, hostname, token }) => {
-  if (typeof id !== 'string' || typeof name !== 'string' || typeof hostname !== 'string' || typeof token !== 'string') {
-    return;
-  }
-  const normalizedId = id.trim();
-  const normalizedName = name.trim();
-  const normalizedHostname = normalizeManagedRemoteTunnelHostname(hostname);
-  const normalizedToken = token.trim();
-  if (!normalizedId || !normalizedName || !normalizedHostname || !normalizedToken) {
-    return;
-  }
-
-  await updateManagedRemoteTunnelConfig((current) => {
-    const withoutConflicts = current.tunnels.filter((entry) => entry.id !== normalizedId && entry.hostname !== normalizedHostname);
-    withoutConflicts.push({
-      id: normalizedId,
-      name: normalizedName,
-      hostname: normalizedHostname,
-      token: normalizedToken,
-      updatedAt: Date.now(),
-    });
-
-    return {
-      version: CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION,
-      tunnels: withoutConflicts,
-    };
-  });
-};
-
-const resolveManagedRemoteTunnelToken = async ({ presetId, hostname }) => {
-  const normalizedPresetId = typeof presetId === 'string' ? presetId.trim() : '';
-  const normalizedHostname = normalizeManagedRemoteTunnelHostname(hostname);
-  const config = await readManagedRemoteTunnelConfigFromDisk();
-
-  if (normalizedPresetId) {
-    const byId = config.tunnels.find((entry) => entry.id === normalizedPresetId);
-    if (byId?.token) {
-      return byId.token;
-    }
-  }
-
-  if (normalizedHostname) {
-    const byHostname = config.tunnels.find((entry) => entry.hostname === normalizedHostname);
-    if (byHostname?.token) {
-      return byHostname.token;
-    }
-  }
-
-  return '';
-};
+const readManagedRemoteTunnelConfigFromDisk = (...args) => managedTunnelConfigRuntime.readManagedRemoteTunnelConfigFromDisk(...args);
+const syncManagedRemoteTunnelConfigWithPresets = (...args) => managedTunnelConfigRuntime.syncManagedRemoteTunnelConfigWithPresets(...args);
+const upsertManagedRemoteTunnelToken = (...args) => managedTunnelConfigRuntime.upsertManagedRemoteTunnelToken(...args);
+const resolveManagedRemoteTunnelToken = (...args) => managedTunnelConfigRuntime.resolveManagedRemoteTunnelToken(...args);
 
 const resolveDirectoryCandidate = (value) => {
   if (typeof value !== 'string') {
@@ -2217,739 +1506,68 @@ const formatSettingsResponse = (settings) => {
   };
 };
 
-const validateProjectEntries = async (projects) => {
-  console.log(`[validateProjectEntries] Starting validation for ${projects.length} projects`);
+const settingsRuntime = createSettingsRuntime({
+  fsPromises,
+  path,
+  crypto,
+  SETTINGS_FILE_PATH,
+  sanitizeProjects,
+  sanitizeSettingsUpdate,
+  mergePersistedSettings,
+  normalizeSettingsPaths,
+  normalizeStringArray,
+  formatSettingsResponse,
+  resolveDirectoryCandidate,
+  normalizeManagedRemoteTunnelHostname,
+  normalizeManagedRemoteTunnelPresets,
+  normalizeManagedRemoteTunnelPresetTokens,
+  syncManagedRemoteTunnelConfigWithPresets,
+  upsertManagedRemoteTunnelToken,
+});
 
-  if (!Array.isArray(projects)) {
-    console.warn(`[validateProjectEntries] Input is not an array, returning empty`);
-    return [];
-  }
+const readSettingsFromDiskMigrated = (...args) => settingsRuntime.readSettingsFromDiskMigrated(...args);
+const readSettingsFromDisk = (...args) => settingsRuntime.readSettingsFromDisk(...args);
+const writeSettingsToDisk = (...args) => settingsRuntime.writeSettingsToDisk(...args);
+const persistSettings = (...args) => settingsRuntime.persistSettings(...args);
 
-  const validations = projects.map(async (project) => {
-    if (!project || typeof project.path !== 'string' || project.path.length === 0) {
-      console.error(`[validateProjectEntries] Invalid project entry: missing or empty path`, project);
-      return null;
-    }
-    try {
-      const stats = await fsPromises.stat(project.path);
-      if (!stats.isDirectory()) {
-        console.error(`[validateProjectEntries] Project path is not a directory: ${project.path}`);
-        return null;
-      }
-      return project;
-    } catch (error) {
-      const err = error;
-      console.error(`[validateProjectEntries] Failed to validate project "${project.path}": ${err.code || err.message || err}`);
-      if (err && typeof err === 'object' && err.code === 'ENOENT') {
-        console.log(`[validateProjectEntries] Removing project with ENOENT: ${project.path}`);
-        return null;
-      }
-      console.log(`[validateProjectEntries] Keeping project despite non-ENOENT error: ${project.path}`);
-      return project;
-    }
-  });
+const requestSecurityRuntime = createRequestSecurityRuntime({
+  readSettingsFromDiskMigrated,
+});
 
-  const results = (await Promise.all(validations)).filter((p) => p !== null);
+const getUiSessionTokenFromRequest = (...args) => requestSecurityRuntime.getUiSessionTokenFromRequest(...args);
 
-  console.log(`[validateProjectEntries] Validation complete: ${results.length}/${projects.length} projects valid`);
-  return results;
-};
+const pushRuntime = createPushRuntime({
+  fsPromises,
+  path,
+  webPush,
+  PUSH_SUBSCRIPTIONS_FILE_PATH,
+  readSettingsFromDiskMigrated,
+  writeSettingsToDisk,
+});
 
-const migrateSettingsFromLegacyLastDirectory = async (current) => {
-  const settings = current && typeof current === 'object' ? current : {};
-  const now = Date.now();
-
-  const sanitizedProjects = sanitizeProjects(settings.projects) || [];
-  let nextProjects = sanitizedProjects;
-  let nextActiveProjectId =
-    typeof settings.activeProjectId === 'string' ? settings.activeProjectId : undefined;
-
-  let changed = false;
-
-  if (nextProjects.length === 0) {
-    const legacy = typeof settings.lastDirectory === 'string' ? settings.lastDirectory.trim() : '';
-    const candidate = legacy ? resolveDirectoryCandidate(legacy) : null;
-
-    if (candidate) {
-      try {
-        const stats = await fsPromises.stat(candidate);
-        if (stats.isDirectory()) {
-          const id = crypto.randomUUID();
-          nextProjects = [
-            {
-              id,
-              path: candidate,
-              addedAt: now,
-              lastOpenedAt: now,
-            },
-          ];
-          nextActiveProjectId = id;
-          changed = true;
-        }
-      } catch {
-        // ignore invalid lastDirectory
-      }
-    }
-  }
-
-  if (nextProjects.length > 0) {
-    const active = nextProjects.find((project) => project.id === nextActiveProjectId) || null;
-    if (!active) {
-      nextActiveProjectId = nextProjects[0].id;
-      changed = true;
-    }
-  } else if (nextActiveProjectId) {
-    nextActiveProjectId = undefined;
-    changed = true;
-  }
-
-  if (!changed) {
-    return { settings, changed: false };
-  }
-
-  const merged = mergePersistedSettings(settings, {
-    ...settings,
-    projects: nextProjects,
-    ...(nextActiveProjectId ? { activeProjectId: nextActiveProjectId } : { activeProjectId: undefined }),
-  });
-
-  return { settings: merged, changed: true };
-};
-
-const migrateSettingsFromLegacyThemePreferences = async (current) => {
-  const settings = current && typeof current === 'object' ? current : {};
-
-  const themeId = typeof settings.themeId === 'string' ? settings.themeId.trim() : '';
-  const themeVariant = typeof settings.themeVariant === 'string' ? settings.themeVariant.trim() : '';
-
-  const hasLight = typeof settings.lightThemeId === 'string' && settings.lightThemeId.trim().length > 0;
-  const hasDark = typeof settings.darkThemeId === 'string' && settings.darkThemeId.trim().length > 0;
-
-  if (hasLight && hasDark) {
-    return { settings, changed: false };
-  }
-
-  const defaultLight = 'flexoki-light';
-  const defaultDark = 'flexoki-dark';
-
-  let nextLightThemeId = hasLight ? settings.lightThemeId : undefined;
-  let nextDarkThemeId = hasDark ? settings.darkThemeId : undefined;
-
-  if (!hasLight) {
-    if (themeId && themeVariant === 'light') {
-      nextLightThemeId = themeId;
-    } else {
-      nextLightThemeId = defaultLight;
-    }
-  }
-
-  if (!hasDark) {
-    if (themeId && themeVariant === 'dark') {
-      nextDarkThemeId = themeId;
-    } else {
-      nextDarkThemeId = defaultDark;
-    }
-  }
-
-  const merged = mergePersistedSettings(settings, {
-    ...settings,
-    ...(nextLightThemeId ? { lightThemeId: nextLightThemeId } : {}),
-    ...(nextDarkThemeId ? { darkThemeId: nextDarkThemeId } : {}),
-  });
-
-  return { settings: merged, changed: true };
-};
-
-const migrateSettingsFromLegacyCollapsedProjects = async (current) => {
-  const settings = current && typeof current === 'object' ? current : {};
-  const collapsed = Array.isArray(settings.collapsedProjects)
-    ? normalizeStringArray(settings.collapsedProjects)
-    : [];
-
-  if (collapsed.length === 0 || !Array.isArray(settings.projects)) {
-    if (collapsed.length === 0) {
-      return { settings, changed: false };
-    }
-    // Nothing to apply to; drop legacy key.
-    const next = { ...settings };
-    delete next.collapsedProjects;
-    return { settings: next, changed: true };
-  }
-
-  const set = new Set(collapsed);
-  const projects = sanitizeProjects(settings.projects) || [];
-  let changed = false;
-
-  const nextProjects = projects.map((project) => {
-    const shouldCollapse = set.has(project.id);
-    if (project.sidebarCollapsed !== shouldCollapse) {
-      changed = true;
-      return { ...project, sidebarCollapsed: shouldCollapse };
-    }
-    return project;
-  });
-
-  if (!changed) {
-    // Still drop legacy key if present.
-    if (Object.prototype.hasOwnProperty.call(settings, 'collapsedProjects')) {
-      const next = { ...settings };
-      delete next.collapsedProjects;
-      return { settings: next, changed: true };
-    }
-    return { settings, changed: false };
-  }
-
-  const next = { ...settings, projects: nextProjects };
-  delete next.collapsedProjects;
-  return { settings: next, changed: true };
-};
-
-const DEFAULT_NOTIFICATION_TEMPLATES = {
-  completion: { title: '{agent_name} is ready', message: '{model_name} completed the task' },
-  error: { title: 'Tool error', message: '{last_message}' },
-  question: { title: 'Input needed', message: '{last_message}' },
-  subtask: { title: '{agent_name} is ready', message: '{model_name} completed the task' },
-};
-
-const ensureNotificationTemplateShape = (templates) => {
-  const input = templates && typeof templates === 'object' ? templates : {};
-  let changed = false;
-  const next = {};
-
-  for (const event of Object.keys(DEFAULT_NOTIFICATION_TEMPLATES)) {
-    const currentEntry = input[event];
-    const base = DEFAULT_NOTIFICATION_TEMPLATES[event];
-    const currentTitle = typeof currentEntry?.title === 'string' ? currentEntry.title : base.title;
-    const currentMessage = typeof currentEntry?.message === 'string' ? currentEntry.message : base.message;
-    if (!currentEntry || typeof currentEntry.title !== 'string' || typeof currentEntry.message !== 'string') {
-      changed = true;
-    }
-    next[event] = { title: currentTitle, message: currentMessage };
-  }
-
-  return { templates: next, changed };
-};
-
-const migrateSettingsNotificationDefaults = async (current) => {
-  const settings = current && typeof current === 'object' ? current : {};
-  let changed = false;
-  const next = { ...settings };
-
-  if (typeof settings.notifyOnSubtasks !== 'boolean') {
-    next.notifyOnSubtasks = true;
-    changed = true;
-  }
-  if (typeof settings.notifyOnCompletion !== 'boolean') {
-    next.notifyOnCompletion = true;
-    changed = true;
-  }
-  if (typeof settings.notifyOnError !== 'boolean') {
-    next.notifyOnError = true;
-    changed = true;
-  }
-  if (typeof settings.notifyOnQuestion !== 'boolean') {
-    next.notifyOnQuestion = true;
-    changed = true;
-  }
-
-  const { templates, changed: templatesChanged } = ensureNotificationTemplateShape(settings.notificationTemplates);
-  if (templatesChanged || !settings.notificationTemplates || typeof settings.notificationTemplates !== 'object') {
-    next.notificationTemplates = templates;
-    changed = true;
-  }
-
-  return { settings: changed ? next : settings, changed };
-};
-
-const migrateSettingsFromLegacyNamedTunnelKeys = async (current) => {
-  const settings = current && typeof current === 'object' ? current : {};
-  const next = { ...settings };
-  let changed = false;
-
-  if (!Object.prototype.hasOwnProperty.call(next, 'managedRemoteTunnelHostname')
-    && Object.prototype.hasOwnProperty.call(next, 'namedTunnelHostname')) {
-    next.managedRemoteTunnelHostname = normalizeManagedRemoteTunnelHostname(next.namedTunnelHostname);
-    changed = true;
-  }
-
-  if (!Object.prototype.hasOwnProperty.call(next, 'managedRemoteTunnelToken')
-    && Object.prototype.hasOwnProperty.call(next, 'namedTunnelToken')) {
-    if (next.namedTunnelToken === null) {
-      next.managedRemoteTunnelToken = null;
-    } else if (typeof next.namedTunnelToken === 'string') {
-      next.managedRemoteTunnelToken = next.namedTunnelToken.trim();
-    }
-    changed = true;
-  }
-
-  if (!Object.prototype.hasOwnProperty.call(next, 'managedRemoteTunnelPresets')
-    && Object.prototype.hasOwnProperty.call(next, 'namedTunnelPresets')) {
-    next.managedRemoteTunnelPresets = normalizeManagedRemoteTunnelPresets(next.namedTunnelPresets);
-    changed = true;
-  }
-
-  if (!Object.prototype.hasOwnProperty.call(next, 'managedRemoteTunnelPresetTokens')
-    && Object.prototype.hasOwnProperty.call(next, 'namedTunnelPresetTokens')) {
-    next.managedRemoteTunnelPresetTokens = normalizeManagedRemoteTunnelPresetTokens(next.namedTunnelPresetTokens);
-    changed = true;
-  }
-
-  if (!Object.prototype.hasOwnProperty.call(next, 'managedRemoteTunnelSelectedPresetId')
-    && Object.prototype.hasOwnProperty.call(next, 'namedTunnelSelectedPresetId')) {
-    const selectedPresetId = typeof next.namedTunnelSelectedPresetId === 'string'
-      ? next.namedTunnelSelectedPresetId.trim()
-      : '';
-    if (selectedPresetId) {
-      next.managedRemoteTunnelSelectedPresetId = selectedPresetId;
-    }
-    changed = true;
-  }
-
-  const legacyKeys = [
-    'namedTunnelHostname',
-    'namedTunnelToken',
-    'namedTunnelPresets',
-    'namedTunnelPresetTokens',
-    'namedTunnelSelectedPresetId',
-  ];
-  for (const key of legacyKeys) {
-    if (Object.prototype.hasOwnProperty.call(next, key)) {
-      delete next[key];
-      changed = true;
-    }
-  }
-
-  return { settings: changed ? next : settings, changed };
-};
-
-const readSettingsFromDiskMigrated = async () => {
-  const current = await readSettingsFromDisk();
-  const migration1 = await migrateSettingsFromLegacyLastDirectory(current);
-  const migration2 = await migrateSettingsFromLegacyThemePreferences(migration1.settings);
-  const migration3 = await migrateSettingsFromLegacyCollapsedProjects(migration2.settings);
-  const migration4 = await migrateSettingsNotificationDefaults(migration3.settings);
-  const migration5 = await migrateSettingsFromLegacyNamedTunnelKeys(migration4.settings);
-  const migration6 = normalizeSettingsPaths(migration5.settings);
-  if (migration1.changed || migration2.changed || migration3.changed || migration4.changed || migration5.changed || migration6.changed) {
-    await writeSettingsToDisk(migration6.settings);
-  }
-  return migration6.settings;
-};
-
-const getOrCreateVapidKeys = async () => {
-  const settings = await readSettingsFromDiskMigrated();
-  const existing = settings?.vapidKeys;
-  if (existing && typeof existing.publicKey === 'string' && typeof existing.privateKey === 'string') {
-    return { publicKey: existing.publicKey, privateKey: existing.privateKey };
-  }
-
-  const generated = webPush.generateVAPIDKeys();
-  const next = {
-    ...settings,
-    vapidKeys: {
-      publicKey: generated.publicKey,
-      privateKey: generated.privateKey,
-    },
-  };
-
-  await writeSettingsToDisk(next);
-  return { publicKey: generated.publicKey, privateKey: generated.privateKey };
-};
-
-const getUiSessionTokenFromRequest = (req) => {
-  const cookieHeader = req?.headers?.cookie;
-  if (!cookieHeader || typeof cookieHeader !== 'string') {
-    return null;
-  }
-  const segments = cookieHeader.split(';');
-  for (const segment of segments) {
-    const [rawName, ...rest] = segment.split('=');
-    const name = rawName?.trim();
-    if (!name) continue;
-    if (name !== 'oc_ui_session') continue;
-    const value = rest.join('=').trim();
-    try {
-      return decodeURIComponent(value || '');
-    } catch {
-      return value || null;
-    }
-  }
-  return null;
-};
+const getOrCreateVapidKeys = (...args) => pushRuntime.getOrCreateVapidKeys(...args);
+const addOrUpdatePushSubscription = (...args) => pushRuntime.addOrUpdatePushSubscription(...args);
+const removePushSubscription = (...args) => pushRuntime.removePushSubscription(...args);
+const sendPushToAllUiSessions = (...args) => pushRuntime.sendPushToAllUiSessions(...args);
+const updateUiVisibility = (...args) => pushRuntime.updateUiVisibility(...args);
+const isAnyUiVisible = (...args) => pushRuntime.isAnyUiVisible(...args);
+const isUiVisible = (...args) => pushRuntime.isUiVisible(...args);
+const ensurePushInitialized = (...args) => pushRuntime.ensurePushInitialized(...args);
+const setPushInitialized = (...args) => pushRuntime.setPushInitialized(...args);
 
 const TERMINAL_INPUT_WS_MAX_REBINDS_PER_WINDOW = 128;
 const TERMINAL_INPUT_WS_REBIND_WINDOW_MS = 60 * 1000;
 const TERMINAL_INPUT_WS_HEARTBEAT_INTERVAL_MS = 15 * 1000;
 
-const rejectWebSocketUpgrade = (socket, statusCode, reason) => {
-  if (!socket || socket.destroyed) {
-    return;
-  }
-
-  const message = typeof reason === 'string' && reason.trim().length > 0 ? reason.trim() : 'Bad Request';
-  const body = Buffer.from(message, 'utf8');
-  const statusText = {
-    400: 'Bad Request',
-    401: 'Unauthorized',
-    403: 'Forbidden',
-    404: 'Not Found',
-    500: 'Internal Server Error',
-  }[statusCode] || 'Bad Request';
-
-  try {
-    socket.write(
-      `HTTP/1.1 ${statusCode} ${statusText}\r\n` +
-      'Connection: close\r\n' +
-      'Content-Type: text/plain; charset=utf-8\r\n' +
-      `Content-Length: ${body.length}\r\n\r\n`
-    );
-    socket.write(body);
-  } catch {
-  }
-
-  try {
-    socket.destroy();
-  } catch {
-  }
-};
+const rejectWebSocketUpgrade = (...args) => requestSecurityRuntime.rejectWebSocketUpgrade(...args);
 
 
-const getRequestOriginCandidates = async (req) => {
-  const origins = new Set();
-  const forwardedProto = typeof req.headers['x-forwarded-proto'] === 'string'
-    ? req.headers['x-forwarded-proto'].split(',')[0].trim().toLowerCase()
-    : '';
-  const protocol = forwardedProto || (req.socket?.encrypted ? 'https' : 'http');
-
-  const forwardedHost = typeof req.headers['x-forwarded-host'] === 'string'
-    ? req.headers['x-forwarded-host'].split(',')[0].trim()
-    : '';
-  const host = forwardedHost || (typeof req.headers.host === 'string' ? req.headers.host.trim() : '');
-
-  if (host) {
-    origins.add(`${protocol}://${host}`);
-    const [hostname, port] = host.split(':');
-    const normalizedHost = typeof hostname === 'string' ? hostname.toLowerCase() : '';
-    const portSuffix = typeof port === 'string' && port.length > 0 ? `:${port}` : '';
-    if (normalizedHost === 'localhost') {
-      origins.add(`${protocol}://127.0.0.1${portSuffix}`);
-      origins.add(`${protocol}://[::1]${portSuffix}`);
-    } else if (normalizedHost === '127.0.0.1' || normalizedHost === '[::1]') {
-      origins.add(`${protocol}://localhost${portSuffix}`);
-    }
-  }
-
-  try {
-    const settings = await readSettingsFromDiskMigrated();
-    if (typeof settings?.publicOrigin === 'string' && settings.publicOrigin.trim().length > 0) {
-      origins.add(new URL(settings.publicOrigin.trim()).origin);
-    }
-  } catch {
-  }
-
-  return origins;
-};
-
-const isRequestOriginAllowed = async (req) => {
-  const originHeader = typeof req.headers.origin === 'string' ? req.headers.origin.trim() : '';
-  if (!originHeader) {
-    return false;
-  }
-
-  let normalizedOrigin = '';
-  try {
-    normalizedOrigin = new URL(originHeader).origin;
-  } catch {
-    return false;
-  }
-
-  const allowedOrigins = await getRequestOriginCandidates(req);
-  return allowedOrigins.has(normalizedOrigin);
-};
-
-const normalizePushSubscriptions = (record) => {
-  if (!Array.isArray(record)) return [];
-  return record
-    .map((entry) => {
-      if (!entry || typeof entry !== 'object') return null;
-      const endpoint = entry.endpoint;
-      const p256dh = entry.p256dh;
-      const auth = entry.auth;
-      if (typeof endpoint !== 'string' || typeof p256dh !== 'string' || typeof auth !== 'string') {
-        return null;
-      }
-      return {
-        endpoint,
-        p256dh,
-        auth,
-        createdAt: typeof entry.createdAt === 'number' ? entry.createdAt : null,
-      };
-    })
-    .filter(Boolean);
-};
-
-const getPushSubscriptionsForUiSession = async (uiSessionToken) => {
-  if (!uiSessionToken) return [];
-  const store = await readPushSubscriptionsFromDisk();
-  const record = store.subscriptionsBySession?.[uiSessionToken];
-  return normalizePushSubscriptions(record);
-};
-
-const addOrUpdatePushSubscription = async (uiSessionToken, subscription, userAgent) => {
-  if (!uiSessionToken) {
-    return;
-  }
-
-  await ensurePushInitialized();
-
-  const now = Date.now();
-
-  await persistPushSubscriptionUpdate((current) => {
-    const subsBySession = { ...(current.subscriptionsBySession || {}) };
-    const existing = Array.isArray(subsBySession[uiSessionToken]) ? subsBySession[uiSessionToken] : [];
-
-    const filtered = existing.filter((entry) => entry && typeof entry.endpoint === 'string' && entry.endpoint !== subscription.endpoint);
-
-    filtered.unshift({
-      endpoint: subscription.endpoint,
-      p256dh: subscription.p256dh,
-      auth: subscription.auth,
-      createdAt: now,
-      lastSeenAt: now,
-      userAgent: typeof userAgent === 'string' && userAgent.length > 0 ? userAgent : undefined,
-    });
-
-    subsBySession[uiSessionToken] = filtered.slice(0, 10);
-
-    return { version: PUSH_SUBSCRIPTIONS_VERSION, subscriptionsBySession: subsBySession };
-  });
-};
-
-const removePushSubscription = async (uiSessionToken, endpoint) => {
-  if (!uiSessionToken || !endpoint) return;
-
-  await ensurePushInitialized();
-
-  await persistPushSubscriptionUpdate((current) => {
-    const subsBySession = { ...(current.subscriptionsBySession || {}) };
-    const existing = Array.isArray(subsBySession[uiSessionToken]) ? subsBySession[uiSessionToken] : [];
-    const filtered = existing.filter((entry) => entry && typeof entry.endpoint === 'string' && entry.endpoint !== endpoint);
-    if (filtered.length === 0) {
-      delete subsBySession[uiSessionToken];
-    } else {
-      subsBySession[uiSessionToken] = filtered;
-    }
-    return { version: PUSH_SUBSCRIPTIONS_VERSION, subscriptionsBySession: subsBySession };
-  });
-};
-
-const removePushSubscriptionFromAllSessions = async (endpoint) => {
-  if (!endpoint) return;
-
-  await ensurePushInitialized();
-
-  await persistPushSubscriptionUpdate((current) => {
-    const subsBySession = { ...(current.subscriptionsBySession || {}) };
-    for (const [token, entries] of Object.entries(subsBySession)) {
-      if (!Array.isArray(entries)) continue;
-      const filtered = entries.filter((entry) => entry && typeof entry.endpoint === 'string' && entry.endpoint !== endpoint);
-      if (filtered.length === 0) {
-        delete subsBySession[token];
-      } else {
-        subsBySession[token] = filtered;
-      }
-    }
-    return { version: PUSH_SUBSCRIPTIONS_VERSION, subscriptionsBySession: subsBySession };
-  });
-};
-
-const sendPushToSubscription = async (sub, payload) => {
-  await ensurePushInitialized();
-  const body = JSON.stringify(payload);
-
-  const pushSubscription = {
-    endpoint: sub.endpoint,
-    keys: {
-      p256dh: sub.p256dh,
-      auth: sub.auth,
-    }
-  };
-
-  try {
-    await webPush.sendNotification(pushSubscription, body);
-  } catch (error) {
-    const statusCode = typeof error?.statusCode === 'number' ? error.statusCode : null;
-    if (statusCode === 410 || statusCode === 404) {
-      await removePushSubscriptionFromAllSessions(sub.endpoint);
-      return;
-    }
-    console.warn('[Push] Failed to send notification:', error);
-  }
-};
-
-const sendPushToAllUiSessions = async (payload, options = {}) => {
-  const requireNoSse = options.requireNoSse === true;
-  const store = await readPushSubscriptionsFromDisk();
-  const sessions = store.subscriptionsBySession || {};
-  const subscriptionsByEndpoint = new Map();
-
-  for (const [token, record] of Object.entries(sessions)) {
-    const subscriptions = normalizePushSubscriptions(record);
-    if (subscriptions.length === 0) continue;
-
-    for (const sub of subscriptions) {
-      if (!subscriptionsByEndpoint.has(sub.endpoint)) {
-        subscriptionsByEndpoint.set(sub.endpoint, sub);
-      }
-    }
-  }
-
-  await Promise.all(Array.from(subscriptionsByEndpoint.entries()).map(async ([endpoint, sub]) => {
-    if (requireNoSse && isAnyUiVisible()) {
-      return;
-    }
-    await sendPushToSubscription(sub, payload);
-  }));
-};
-
-let pushInitialized = false;
-
-
-
-const uiVisibilityByToken = new Map();
-let globalVisibilityState = false;
-
-const updateUiVisibility = (token, visible) => {
-  if (!token) return;
-  const now = Date.now();
-  const nextVisible = Boolean(visible);
-  uiVisibilityByToken.set(token, { visible: nextVisible, updatedAt: now });
-  globalVisibilityState = nextVisible;
-
-};
-
-const isAnyUiVisible = () => globalVisibilityState === true;
-
-const isUiVisible = (token) => uiVisibilityByToken.get(token)?.visible === true;
+const isRequestOriginAllowed = (...args) => requestSecurityRuntime.isRequestOriginAllowed(...args);
 
 const sessionRuntime = createSessionRuntime({
   writeSseEvent,
   getNotificationClients: () => uiNotificationClients,
 });
-
-const resolveVapidSubject = async () => {
-  const configured = process.env.OPENCHAMBER_VAPID_SUBJECT;
-  if (typeof configured === 'string' && configured.trim().length > 0) {
-    return configured.trim();
-  }
-
-  const originEnv = process.env.OPENCHAMBER_PUBLIC_ORIGIN;
-  if (typeof originEnv === 'string' && originEnv.trim().length > 0) {
-    const trimmed = originEnv.trim();
-    // Convert http://localhost to mailto for VAPID compatibility
-    if (trimmed.startsWith('http://localhost')) {
-      return 'mailto:openchamber@localhost';
-    }
-    return trimmed;
-  }
-
-  try {
-    const settings = await readSettingsFromDiskMigrated();
-    const stored = settings?.publicOrigin;
-    if (typeof stored === 'string' && stored.trim().length > 0) {
-      const trimmed = stored.trim();
-      // Convert http://localhost to mailto for VAPID compatibility
-      if (trimmed.startsWith('http://localhost')) {
-        return 'mailto:openchamber@localhost';
-      }
-      return trimmed;
-    }
-  } catch {
-    // ignore
-  }
-
-  return 'mailto:openchamber@localhost';
-};
-
-const ensurePushInitialized = async () => {
-  if (pushInitialized) return;
-  const keys = await getOrCreateVapidKeys();
-  const subject = await resolveVapidSubject();
-
-  if (subject === 'mailto:openchamber@localhost') {
-    console.warn('[Push] No public origin configured for VAPID; set OPENCHAMBER_VAPID_SUBJECT or enable push once from a real origin.');
-  }
-
-  webPush.setVapidDetails(subject, keys.publicKey, keys.privateKey);
-  pushInitialized = true;
-};
-
-const persistSettings = async (changes) => {
-  // Serialize concurrent calls using lock
-  persistSettingsLock = persistSettingsLock.then(async () => {
-    console.log(`[persistSettings] Called with changes:`, JSON.stringify(changes, null, 2));
-    const current = await readSettingsFromDisk();
-    console.log(`[persistSettings] Current projects count:`, Array.isArray(current.projects) ? current.projects.length : 'N/A');
-    const sanitized = sanitizeSettingsUpdate(changes);
-    let next = mergePersistedSettings(current, sanitized);
-
-    const normalizedState = normalizeSettingsPaths(next);
-    if (normalizedState.changed) {
-      next = normalizedState.settings;
-    }
-
-    if (Array.isArray(next.projects)) {
-      console.log(`[persistSettings] Validating ${next.projects.length} projects...`);
-      const validated = await validateProjectEntries(next.projects);
-      console.log(`[persistSettings] After validation: ${validated.length} projects remain`);
-      next = { ...next, projects: validated };
-    }
-
-    if (Array.isArray(next.projects) && next.projects.length > 0) {
-      const activeId = typeof next.activeProjectId === 'string' ? next.activeProjectId : '';
-      const active = next.projects.find((project) => project.id === activeId) || null;
-      if (!active) {
-        console.log(`[persistSettings] Active project ID ${activeId} not found, switching to ${next.projects[0].id}`);
-        next = { ...next, activeProjectId: next.projects[0].id };
-      }
-    } else if (next.activeProjectId) {
-      console.log(`[persistSettings] No projects found, clearing activeProjectId ${next.activeProjectId}`);
-      next = { ...next, activeProjectId: undefined };
-    }
-
-    if (Object.prototype.hasOwnProperty.call(sanitized, 'managedRemoteTunnelPresets')) {
-      await syncManagedRemoteTunnelConfigWithPresets(next.managedRemoteTunnelPresets);
-    }
-
-    if (Object.prototype.hasOwnProperty.call(sanitized, 'managedRemoteTunnelPresetTokens') && sanitized.managedRemoteTunnelPresetTokens) {
-      const presetsById = new Map((next.managedRemoteTunnelPresets || []).map((entry) => [entry.id, entry]));
-      const updates = Object.entries(sanitized.managedRemoteTunnelPresetTokens)
-        .map(([presetId, token]) => {
-          const preset = presetsById.get(presetId);
-          if (!preset || typeof token !== 'string' || token.trim().length === 0) {
-            return null;
-          }
-          return {
-            id: preset.id,
-            name: preset.name,
-            hostname: preset.hostname,
-            token: token.trim(),
-          };
-        })
-        .filter(Boolean);
-
-      for (const update of updates) {
-        await upsertManagedRemoteTunnelToken(update);
-      }
-    }
-
-    await writeSettingsToDisk(next);
-    console.log(`[persistSettings] Successfully saved ${next.projects?.length || 0} projects to disk`);
-    return formatSettingsResponse(next);
-  });
-
-  return persistSettingsLock;
-};
 
 // HMR-persistent state via globalThis
 // These values survive Vite HMR reloads to prevent zombie OpenCode processes
@@ -3281,6 +1899,14 @@ const opencodeShimInterpreter = (...args) => openCodeEnvRuntime.opencodeShimInte
 const clearResolvedOpenCodeBinary = (...args) => openCodeEnvRuntime.clearResolvedOpenCodeBinary(...args);
 
 applyLoginShellEnvSnapshot();
+
+notificationTemplateRuntime = createNotificationTemplateRuntime({
+  readSettingsFromDisk,
+  persistSettings,
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+  resolveGitBinaryForSpawn,
+});
 
 const notificationTriggerRuntime = createNotificationTriggerRuntime({
   readSettingsFromDisk,
@@ -4057,9 +2683,7 @@ async function main(options = {}) {
     markSessionViewed: sessionRuntime.markSessionViewed,
     markSessionUnviewed: sessionRuntime.markSessionUnviewed,
     markUserMessageSent: sessionRuntime.markUserMessageSent,
-    setPushInitialized: (value) => {
-      pushInitialized = value === true;
-    },
+    setPushInitialized,
   });
 
   app.get('/api/openchamber/update-check', async (req, res) => {
@@ -4338,6 +2962,7 @@ async function main(options = {}) {
     } catch (error) {
       console.warn('Failed to fetch zen models:', error);
       // Serve stale cache if available
+      const cachedZenModels = getCachedZenModels();
       if (cachedZenModels) {
         res.setHeader('Cache-Control', 'public, max-age=60');
         res.json(cachedZenModels);

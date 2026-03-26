@@ -6,7 +6,9 @@ This module provides notification message preparation utilities for the web serv
 ## Entrypoints and structure
 - `packages/web/server/lib/notifications/index.js`: public entrypoint imported by `packages/web/server/index.js`.
 - `packages/web/server/lib/notifications/routes.js`: route registration for push, visibility, and session status/attention endpoints.
+- `packages/web/server/lib/notifications/push-runtime.js`: push subscription persistence, VAPID initialization, and UI visibility runtime.
 - `packages/web/server/lib/notifications/runtime.js`: trigger runtime for OpenCode event-driven notification fanout.
+- `packages/web/server/lib/notifications/template-runtime.js`: notification template variables, zen-model helpers, and session text/title enrichment runtime.
 - `packages/web/server/lib/notifications/message.js`: helper implementation module.
 - `packages/web/server/lib/notifications/message.test.js`: unit tests for notification message helpers.
 
@@ -42,6 +44,34 @@ This module provides notification message preparation utilities for the web serv
   - session parent cache for subtask suppression
   - template resolution and fallback behavior
   - native notification fanout and web push payload fanout
+
+### Push runtime API (push-runtime.js)
+- `createPushRuntime(dependencies)`: creates runtime for web push and UI visibility state.
+- Returned API:
+  - `getOrCreateVapidKeys()`
+  - `ensurePushInitialized()`
+  - `setPushInitialized(value)`
+  - `addOrUpdatePushSubscription(uiSessionToken, subscription, userAgent)`
+  - `removePushSubscription(uiSessionToken, endpoint)`
+  - `sendPushToAllUiSessions(payload, options?)`
+  - `updateUiVisibility(token, visible)`
+  - `isAnyUiVisible()`
+  - `isUiVisible(token)`
+
+### Template runtime API (template-runtime.js)
+- `createNotificationTemplateRuntime(dependencies)`: creates shared notification/template + zen helper runtime.
+- Returned API:
+  - `resolveNotificationTemplate(template, variables)`
+  - `shouldApplyResolvedTemplateMessage(template, resolved, variables)`
+  - `fetchFreeZenModels()`
+  - `resolveZenModel(override)`
+  - `validateZenModelAtStartup()`
+  - `summarizeText(text, targetLength, zenModel)`
+  - `extractLastMessageText(payload, maxLength?)`
+  - `fetchLastAssistantMessageText(sessionId, messageId, maxLength?)`
+  - `maybeCacheSessionInfoFromEvent(payload)`
+  - `buildTemplateVariables(payload, sessionId)`
+  - `getCachedZenModels()`
 
 ## Constants
 
