@@ -40,6 +40,10 @@
   },
   "bundle": {
     "active": true,
+    "targets": [
+      "deb",
+      "rpm"
+    ],
     "externalBin": [
       "sidecars/openchamber-server"
     ],
@@ -70,8 +74,7 @@
           "height": 400
         }
       }
-    },
-    "createUpdaterArtifacts": true
+    }
   },
   "plugins": {
     "updater": {
