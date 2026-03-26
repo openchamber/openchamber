@@ -610,6 +610,13 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     });
   }, [updateStore]);
 
+  const handleOpenSettings = React.useCallback(() => {
+    if (mobileVariant) {
+      setSessionSwitcherOpen(false);
+    }
+    setSettingsDialogOpen(true);
+  }, [mobileVariant, setSessionSwitcherOpen, setSettingsDialogOpen]);
+
   const showSidebarUpdateButton =
     updateStore.available &&
     (updateStore.runtimeType === 'desktop' || updateStore.runtimeType === 'web');
@@ -1437,7 +1444,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       />
 
       <SidebarFooter
-        onOpenSettings={() => setSettingsDialogOpen(true)}
+        onOpenSettings={handleOpenSettings}
         onOpenShortcuts={toggleHelpDialog}
         onOpenAbout={() => setAboutDialogOpen(true)}
         onOpenUpdate={handleOpenUpdateDialog}
