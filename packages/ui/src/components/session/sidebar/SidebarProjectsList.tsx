@@ -138,89 +138,91 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
       : orderedGroups;
 
     return (
-      <SortableProjectItem
-        key={projectKey}
-        id={projectKey}
-        projectLabel={projectLabel}
-        projectDescription={projectDescription}
-        projectIcon={project.icon}
-        projectColor={project.color}
-        projectIconImage={project.iconImage}
-        projectIconBackground={project.iconBackground}
-        isCollapsed={isCollapsed}
-        isActiveProject={isActiveProject}
-        isHovered={isHovered}
-        isRepo={Boolean(isRepo)}
-        isDesktopShell={props.isDesktopShellRuntime}
-        isStuck={props.stuckProjectHeaders.has(projectKey)}
-        hideDirectoryControls={props.hideDirectoryControls}
-        mobileVariant={props.mobileVariant}
-        onToggle={() => props.toggleProject(projectKey)}
-        onHoverChange={(hovered) => props.setHoveredProjectId(hovered ? projectKey : null)}
-        onNewSession={() => {
-          if (projectKey !== props.activeProjectId) props.setActiveProjectIdOnly(projectKey);
-          props.setActiveMainTab('chat');
-          if (props.mobileVariant) props.setSessionSwitcherOpen(false);
-          props.openNewSessionDraft({ directoryOverride: project.normalizedPath });
-        }}
-        onNewWorktreeSession={() => {
-          if (projectKey !== props.activeProjectId) props.setActiveProjectIdOnly(projectKey);
-          props.setActiveMainTab('chat');
-          if (props.mobileVariant) props.setSessionSwitcherOpen(false);
-          props.openNewWorktreeDialog();
-        }}
-        onOpenMultiRunLauncher={() => {
-          if (projectKey !== props.activeProjectId) props.setActiveProjectIdOnly(projectKey);
-          props.openMultiRunLauncher();
-        }}
-        onRenameStart={() => props.openProjectEditDialog(projectKey)}
-        onClose={() => props.removeProject(projectKey)}
-        sentinelRef={(el) => { props.projectHeaderSentinelRefs.current.set(projectKey, el); }}
-        showCreateButtons
-        openSidebarMenuKey={props.openSidebarMenuKey}
-        setOpenSidebarMenuKey={props.setOpenSidebarMenuKey}
-      >
-        {!isCollapsed ? (
-          <div className={cn('space-y-0 pt-0 pb-0.5', indent)}>
-            {section.groups.length > 0 ? (
-              <DndContext
-                sensors={groupSensors}
-                collisionDetection={closestCenter}
-                onDragEnd={(event) => {
-                  if (props.isInlineEditing) return;
-                  const { active, over } = event;
-                  if (!over || active.id === over.id) return;
-                  const oldIndex = nestedGroups.findIndex((item) => item.id === active.id);
-                  const newIndex = nestedGroups.findIndex((item) => item.id === over.id);
-                  if (oldIndex === -1 || newIndex === -1 || oldIndex === newIndex) return;
-                  const nextNested = arrayMove(nestedGroups, oldIndex, newIndex).map((item) => item.id);
-                  const next = rootGroup ? [rootGroup.id, ...nextNested] : nextNested;
-                  props.setGroupOrderByProject((prev) => {
-                    const map = new Map(prev);
-                    map.set(projectKey, next);
-                    return map;
-                  });
-                }}
-              >
-                {rootGroup ? props.renderGroupSessions(rootGroup, `${projectKey}:${rootGroup.id}`, projectKey, true) : null}
-                <SortableContext items={nestedGroups.map((group) => group.id)} strategy={verticalListSortingStrategy}>
-                  {nestedGroups.map((group) => {
-                    const groupKey = `${projectKey}:${group.id}`;
-                    return (
-                      <SortableGroupItem key={group.id} id={group.id} disabled={props.isInlineEditing}>
-                        {(dragHandleProps) => props.renderGroupSessions(group, groupKey, projectKey, false, dragHandleProps)}
-                      </SortableGroupItem>
-                    );
-                  })}
-                </SortableContext>
-                <DragOverlay dropAnimation={null} />
-              </DndContext>
-            ) : (
-              <div className="py-1 text-left typography-micro text-muted-foreground">No sessions yet.</div>
-            )}
-          </div>
-        ) : null}
-      </SortableProjectItem>
+      <div className={indent}>
+        <SortableProjectItem
+          key={projectKey}
+          id={projectKey}
+          projectLabel={projectLabel}
+          projectDescription={projectDescription}
+          projectIcon={project.icon}
+          projectColor={project.color}
+          projectIconImage={project.iconImage}
+          projectIconBackground={project.iconBackground}
+          isCollapsed={isCollapsed}
+          isActiveProject={isActiveProject}
+          isHovered={isHovered}
+          isRepo={Boolean(isRepo)}
+          isDesktopShell={props.isDesktopShellRuntime}
+          isStuck={props.stuckProjectHeaders.has(projectKey)}
+          hideDirectoryControls={props.hideDirectoryControls}
+          mobileVariant={props.mobileVariant}
+          onToggle={() => props.toggleProject(projectKey)}
+          onHoverChange={(hovered) => props.setHoveredProjectId(hovered ? projectKey : null)}
+          onNewSession={() => {
+            if (projectKey !== props.activeProjectId) props.setActiveProjectIdOnly(projectKey);
+            props.setActiveMainTab('chat');
+            if (props.mobileVariant) props.setSessionSwitcherOpen(false);
+            props.openNewSessionDraft({ directoryOverride: project.normalizedPath });
+          }}
+          onNewWorktreeSession={() => {
+            if (projectKey !== props.activeProjectId) props.setActiveProjectIdOnly(projectKey);
+            props.setActiveMainTab('chat');
+            if (props.mobileVariant) props.setSessionSwitcherOpen(false);
+            props.openNewWorktreeDialog();
+          }}
+          onOpenMultiRunLauncher={() => {
+            if (projectKey !== props.activeProjectId) props.setActiveProjectIdOnly(projectKey);
+            props.openMultiRunLauncher();
+          }}
+          onRenameStart={() => props.openProjectEditDialog(projectKey)}
+          onClose={() => props.removeProject(projectKey)}
+          sentinelRef={(el) => { props.projectHeaderSentinelRefs.current.set(projectKey, el); }}
+          showCreateButtons
+          openSidebarMenuKey={props.openSidebarMenuKey}
+          setOpenSidebarMenuKey={props.setOpenSidebarMenuKey}
+        >
+          {!isCollapsed ? (
+            <div className="space-y-0 pt-0 pb-0.5">
+              {section.groups.length > 0 ? (
+                <DndContext
+                  sensors={groupSensors}
+                  collisionDetection={closestCenter}
+                  onDragEnd={(event) => {
+                    if (props.isInlineEditing) return;
+                    const { active, over } = event;
+                    if (!over || active.id === over.id) return;
+                    const oldIndex = nestedGroups.findIndex((item) => item.id === active.id);
+                    const newIndex = nestedGroups.findIndex((item) => item.id === over.id);
+                    if (oldIndex === -1 || newIndex === -1 || oldIndex === newIndex) return;
+                    const nextNested = arrayMove(nestedGroups, oldIndex, newIndex).map((item) => item.id);
+                    const next = rootGroup ? [rootGroup.id, ...nextNested] : nextNested;
+                    props.setGroupOrderByProject((prev) => {
+                      const map = new Map(prev);
+                      map.set(projectKey, next);
+                      return map;
+                    });
+                  }}
+                >
+                  {rootGroup ? props.renderGroupSessions(rootGroup, `${projectKey}:${rootGroup.id}`, projectKey, true) : null}
+                  <SortableContext items={nestedGroups.map((group) => group.id)} strategy={verticalListSortingStrategy}>
+                    {nestedGroups.map((group) => {
+                      const groupKey = `${projectKey}:${group.id}`;
+                      return (
+                        <SortableGroupItem key={group.id} id={group.id} disabled={props.isInlineEditing}>
+                          {(dragHandleProps) => props.renderGroupSessions(group, groupKey, projectKey, false, dragHandleProps)}
+                        </SortableGroupItem>
+                      );
+                    })}
+                  </SortableContext>
+                  <DragOverlay dropAnimation={null} />
+                </DndContext>
+              ) : (
+                <div className="py-1 text-left typography-micro text-muted-foreground">No sessions yet.</div>
+              )}
+            </div>
+          ) : null}
+        </SortableProjectItem>
+      </div>
     );
   };
 
@@ -327,13 +329,13 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
           
           {/* Unfiled projects section */}
           {unfiledProjectIds.length > 0 && (
-            <div>
+            <div className="pl-3">
               <div className="flex items-center gap-1 rounded-md px-0.5 py-0.5 opacity-60">
                 <RiFolderLine className="h-3.5 w-3.5 text-muted-foreground" />
                 <span className="text-[12px] font-normal text-muted-foreground">Unfiled</span>
                 <span className="text-[11px] text-muted-foreground/60">({unfiledProjectIds.length})</span>
               </div>
-              <div className="space-y-0.5">
+              <div className="space-y-0.5 pl-3">
                 {unfiledProjectIds.map((projectId) => renderProjectItem(projectId))}
               </div>
             </div>
