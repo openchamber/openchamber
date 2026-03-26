@@ -346,6 +346,10 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
     props.sectionsForRender.forEach((s) => map.set(s.project.id, s));
     return map;
   }, [props.sectionsForRender]);
+  
+  // Keep folders ref up to date to avoid stale closure in drag handlers
+  const foldersRef = React.useRef(folders);
+  foldersRef.current = folders;
 
   // Sensors for session reordering (defined before conditional returns so hooks are always called same number of times)
   const groupSensors = useSensors(
@@ -369,24 +373,50 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
     if (!over) return;
     
     const activeProjectId = active.id as string;
-    const overId = over.id as string;
+    const overData = over.data.current;
     
-    // Determine target folder
+    // Determine target folder based on drop data
     let targetFolderId: string | null = null;
-    if (overId.startsWith('folder-')) {
-      targetFolderId = overId.replace('folder-', '');
-    } else if (overId === 'unfiled') {
+    
+    if (overData?.type === 'folder') {
+      // Dropped directly on folder area
+      targetFolderId = overData.folderId;
+    } else if (overData?.type === 'unfiled') {
+      // Dropped on unfiled area
       targetFolderId = null;
-    } else {
+    } else if (overData?.type === 'project') {
       // Dropped on another project - find which folder that project is in
-      const targetProjectFolder = folders.find((f) => f.projectIds.includes(overId));
+      const targetProjectId = overData.projectId as string;
+      const targetProjectFolder = foldersRef.current.find((f) => f.projectIds.includes(targetProjectId));
       if (targetProjectFolder) {
         targetFolderId = targetProjectFolder.id;
       }
+    } else {
+      // Fallback: check by id string pattern
+      const overId = over.id as string;
+      if (overId.startsWith('folder-')) {
+        targetFolderId = overId.replace('folder-', '');
+      } else if (overId === 'unfiled') {
+        targetFolderId = null;
+      } else {
+        // Try finding by project id in any folder
+        const fallbackFolder = foldersRef.current.find((f) => f.projectIds.includes(overId));
+        if (fallbackFolder) {
+          targetFolderId = fallbackFolder.id;
+        }
+      }
     }
     
-    // Call the callback to move the project
-    props.onMoveProjectToFolder(activeProjectId, targetFolderId);
+    // Only move if target is different from current location
+    if (targetFolderId !== undefined) {
+      const currentFolder = foldersRef.current.find((f) => f.projectIds.includes(activeProjectId));
+      const currentFolderId = currentFolder?.id ?? null;
+      
+      // Don't move if already in target folder
+      if (targetFolderId !== currentFolderId) {
+        props.onMoveProjectToFolder(activeProjectId, targetFolderId);
+      }
+    }
   };
 
   // Render folder with drag-drop support
@@ -489,14 +519,19 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
         setActiveDragProjectId(event.active.id as string);
       }}
       onDragOver={(event) => {
-        const overId = event.over?.id as string | undefined;
-        if (overId?.startsWith('folder-')) {
-          setOverFolderId(overId.replace('folder-', ''));
-        } else if (overId === 'unfiled') {
+        const overData = event.over?.data.current;
+        if (overData?.type === 'folder') {
+          setOverFolderId(overData.folderId);
+        } else if (overData?.type === 'unfiled') {
           setOverFolderId('unfiled');
-        } else {
-          setOverFolderId(null);
-        }
+    } else if (overData?.type === 'project') {
+      // Find folder containing this project
+      const projectId = overData.projectId as string;
+      const folder = foldersRef.current.find((f) => f.projectIds.includes(projectId));
+      setOverFolderId(folder?.id ?? null);
+    } else {
+      setOverFolderId(null);
+    }
       }}
       onDragEnd={handleFolderDragEnd}
       onDragCancel={() => {
