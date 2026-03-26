@@ -202,6 +202,10 @@ const resolveSessionDirectory = (
     return normalizePath(target.directory ?? null);
 };
 
+const activateConfigForDirectory = async (directory: string | null | undefined): Promise<void> => {
+    await useConfigStore.getState().activateDirectory(normalizePath(directory));
+};
+
 export const useSessionStore = create<SessionStore>()(
     devtools(
         (set, get) => ({
@@ -354,31 +358,7 @@ export const useSessionStore = create<SessionStore>()(
                         // Set pending input text if initialPrompt is provided
                         ...(options?.initialPrompt ? { pendingInputText: options.initialPrompt, pendingInputMode: 'replace' as const } : {}),
                     });
-
-                    try {
-                        const configState = useConfigStore.getState();
-                        const visibleAgents = configState.getVisibleAgents();
-
-                        // Priority: settingsDefaultAgent → build → first visible
-                        let agentName: string | undefined;
-                        if (configState.settingsDefaultAgent) {
-                            const settingsAgent = visibleAgents.find((a) => a.name === configState.settingsDefaultAgent);
-                            if (settingsAgent) {
-                                agentName = settingsAgent.name;
-                            }
-                        }
-                        if (!agentName) {
-                            agentName =
-                                visibleAgents.find((agent) => agent.name === 'build')?.name ||
-                                visibleAgents[0]?.name;
-                        }
-
-                        if (agentName) {
-                            configState.setAgent(agentName);
-                        }
-                    } catch {
-                        // ignored
-                    }
+                    void activateConfigForDirectory(directory);
                 },
 
                 overrideNewSessionDraftTarget: (options) => {
@@ -424,6 +404,8 @@ export const useSessionStore = create<SessionStore>()(
                             ...(options?.initialPrompt ? { pendingInputText: options.initialPrompt, pendingInputMode: 'replace' as const } : {}),
                         };
                     });
+
+                    void activateConfigForDirectory(nextDirectory);
                 },
 
                 setNewSessionDraftTarget: ({ projectId, directoryOverride }, options) => {
@@ -469,6 +451,7 @@ export const useSessionStore = create<SessionStore>()(
                             projectId: project?.id ?? null,
                             directory: nextDirectory,
                         });
+                        void activateConfigForDirectory(nextDirectory);
                     }
                 },
 
@@ -727,6 +710,14 @@ export const useSessionStore = create<SessionStore>()(
                             directory: normalizePath(draftDirectoryOverride ?? created.directory ?? null),
                         });
 
+                        // Capture synthetic parts before clearing draft
+                        const draftSyntheticParts = draft.syntheticParts;
+
+                        await activateConfigForDirectory(draftDirectoryOverride ?? created.directory ?? null);
+
+                        get().closeNewSessionDraft();
+                        await get().setCurrentSession(created.id);
+
                         const configState = useConfigStore.getState();
                         const draftAgentName = configState.currentAgentName;
                         const effectiveDraftAgent = trimmedAgent ?? draftAgentName;
@@ -748,23 +739,23 @@ export const useSessionStore = create<SessionStore>()(
                                 // ignored
                             }
 
-                                if (draftProviderId && draftModelId) {
-                                    try {
-                                        useContextStore
-                                            .getState()
-                                            .saveAgentModelForSession(created.id, effectiveDraftAgent, draftProviderId, draftModelId);
-                                    } catch {
-                                        // ignored
-                                    }
-
-                                    try {
-                                        useContextStore
-                                            .getState()
-                                            .saveAgentModelVariantForSession(created.id, effectiveDraftAgent, draftProviderId, draftModelId, variant);
-                                    } catch {
-                                        // ignored
-                                    }
+                            if (draftProviderId && draftModelId) {
+                                try {
+                                    useContextStore
+                                        .getState()
+                                        .saveAgentModelForSession(created.id, effectiveDraftAgent, draftProviderId, draftModelId);
+                                } catch {
+                                    // ignored
                                 }
+
+                                try {
+                                    useContextStore
+                                        .getState()
+                                        .saveAgentModelVariantForSession(created.id, effectiveDraftAgent, draftProviderId, draftModelId, variant);
+                                } catch {
+                                    // ignored
+                                }
+                            }
                         }
 
                         try {
@@ -774,12 +765,6 @@ export const useSessionStore = create<SessionStore>()(
                         } catch {
                             // ignored
                         }
-
-                        // Capture synthetic parts before clearing draft
-                        const draftSyntheticParts = draft.syntheticParts;
-
-                        get().closeNewSessionDraft();
-                        await get().setCurrentSession(created.id);
 
                         // Assign to target folder if session was created from folder's + button
                         if (draftTargetFolderId) {
