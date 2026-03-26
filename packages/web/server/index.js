@@ -213,6 +213,185 @@ const MAX_THEME_JSON_BYTES = 512 * 1024;
 
 const isNonEmptyString = (value) => typeof value === 'string' && value.trim().length > 0;
 
+const SUPPORTED_RESPONSE_LOCALES = new Set(['en', 'zh-CN']);
+
+const RESPONSE_MESSAGES = {
+  openCodeRestarting: {
+    en: 'OpenCode is restarting',
+    'zh-CN': 'OpenCode 正在重启',
+  },
+  internalServerError: {
+    en: 'Internal server error',
+    'zh-CN': '服务器内部错误',
+  },
+  passwordLoginDisabledTunnelScope: {
+    en: 'Password login is disabled for tunnel scope',
+    'zh-CN': '隧道访问范围不支持密码登录',
+  },
+  tooManyAttemptsTryLater: {
+    en: 'Too many attempts. Please try again later.',
+    'zh-CN': '尝试次数过多，请稍后再试。',
+  },
+  connectionLinkInvalidOrExpired: {
+    en: 'Connection link is invalid or expired.',
+    'zh-CN': '连接链接无效或已过期。',
+  },
+  failedToProcessConnectRequest: {
+    en: 'Failed to process connect request.',
+    'zh-CN': '处理连接请求失败。',
+  },
+  failedToLoadPushKey: {
+    en: 'Failed to load push key',
+    'zh-CN': '加载推送密钥失败',
+  },
+  uiSessionMissing: {
+    en: 'UI session missing',
+    'zh-CN': '缺少 UI 会话',
+  },
+  invalidBody: {
+    en: 'Invalid body',
+    'zh-CN': '请求体无效',
+  },
+  openAiVoiceServiceNotConfigured: {
+    en: 'OpenAI voice service not configured. Set OPENAI_API_KEY environment variable.',
+    'zh-CN': '未配置 OpenAI 语音服务。请设置 OPENAI_API_KEY 环境变量。',
+  },
+  openAiTtsAvailable: {
+    en: 'OpenAI TTS is available',
+    'zh-CN': 'OpenAI TTS 可用',
+  },
+  ttsServiceNotAvailable: {
+    en: 'TTS service not available. Please configure OpenAI in OpenCode or provide an API key in settings.',
+    'zh-CN': 'TTS 服务不可用。请在 OpenCode 中配置 OpenAI，或在设置中提供 API Key。',
+  },
+  textRequired: {
+    en: 'Text is required',
+    'zh-CN': 'Text 为必填项',
+  },
+  macosSayNotAvailable: {
+    en: 'macOS say command not available on this platform',
+    'zh-CN': '当前平台不支持 macOS say 命令',
+  },
+  sessionStateNotFound: {
+    en: 'Session not found or no state available',
+    'zh-CN': '未找到会话或无可用状态',
+  },
+  notificationAgentReadyTitle: {
+    en: '{agent_name} is ready',
+    'zh-CN': '{agent_name} 已就绪',
+  },
+  notificationTaskCompletedMessage: {
+    en: '{model_name} completed the task',
+    'zh-CN': '{model_name} 已完成任务',
+  },
+  notificationToolErrorTitle: {
+    en: 'Tool error',
+    'zh-CN': '工具错误',
+  },
+  notificationInputNeededTitle: {
+    en: 'Input needed',
+    'zh-CN': '需要输入',
+  },
+  notificationPermissionRequiredTitle: {
+    en: 'Permission required',
+    'zh-CN': '需要权限',
+  },
+};
+
+const normalizeResponseLocale = (value) => {
+  if (typeof value !== 'string') {
+    return 'en';
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return 'en';
+  }
+  const normalized = trimmed.toLowerCase();
+  if (
+    normalized === 'zh'
+    || normalized === 'zh-cn'
+    || normalized.startsWith('zh-cn')
+    || normalized === 'zh-hans'
+    || normalized.startsWith('zh-hans-')
+  ) {
+    return 'zh-CN';
+  }
+  if (normalized === 'en' || normalized.startsWith('en-')) {
+    return 'en';
+  }
+  return 'en';
+};
+
+const extractAcceptLanguageLocale = (acceptLanguageHeader) => {
+  if (typeof acceptLanguageHeader !== 'string' || acceptLanguageHeader.trim().length === 0) {
+    return null;
+  }
+
+  const candidates = acceptLanguageHeader
+    .split(',')
+    .map((entry) => {
+      const [tagRaw, ...params] = String(entry).split(';');
+      const tag = tagRaw.trim();
+      if (!tag) {
+        return null;
+      }
+      let q = 1;
+      for (const param of params) {
+        const [keyRaw, valueRaw] = param.split('=');
+        if (typeof keyRaw === 'string' && keyRaw.trim().toLowerCase() === 'q') {
+          const parsedQ = Number.parseFloat((valueRaw || '').trim());
+          if (Number.isFinite(parsedQ)) {
+            q = parsedQ;
+          }
+        }
+      }
+      return { locale: normalizeResponseLocale(tag), q };
+    })
+    .filter((entry) => entry && SUPPORTED_RESPONSE_LOCALES.has(entry.locale))
+    .sort((a, b) => b.q - a.q);
+
+  return candidates.length > 0 ? candidates[0].locale : null;
+};
+
+const getRequestLocale = (req) => {
+  const queryLocaleRaw = Array.isArray(req?.query?.locale)
+    ? req.query.locale[0]
+    : req?.query?.locale;
+  const queryLangRaw = Array.isArray(req?.query?.lang)
+    ? req.query.lang[0]
+    : req?.query?.lang;
+  const bodyLocaleRaw = req?.body?.locale;
+  const bodyLangRaw = req?.body?.lang;
+  const explicitLocale = normalizeResponseLocale(
+    typeof queryLocaleRaw === 'string'
+      ? queryLocaleRaw
+      : (typeof queryLangRaw === 'string'
+        ? queryLangRaw
+        : (typeof bodyLocaleRaw === 'string'
+          ? bodyLocaleRaw
+          : (typeof bodyLangRaw === 'string' ? bodyLangRaw : '')))
+  );
+
+  const hasExplicitLocale = [queryLocaleRaw, queryLangRaw, bodyLocaleRaw, bodyLangRaw]
+    .some((value) => typeof value === 'string' && value.trim().length > 0);
+  if (hasExplicitLocale) {
+    return explicitLocale;
+  }
+
+  const acceptLanguage = req?.headers?.['accept-language'];
+  const acceptLanguageValue = Array.isArray(acceptLanguage) ? acceptLanguage[0] : acceptLanguage;
+  return extractAcceptLanguageLocale(acceptLanguageValue) || 'en';
+};
+
+const getMessage = (reqOrLocale, key) => {
+  const locale = typeof reqOrLocale === 'string' ? normalizeResponseLocale(reqOrLocale) : getRequestLocale(reqOrLocale);
+  const entry = RESPONSE_MESSAGES[key];
+  if (!entry) {
+    return '';
+  }
+  return entry[locale] || entry.en;
+};
+
 const clampNumber = (value, min, max) => Math.max(min, Math.min(max, value));
 
 const normalizeTunnelBootstrapTtlMs = (value) => {
@@ -2727,10 +2906,16 @@ const migrateSettingsFromLegacyCollapsedProjects = async (current) => {
 };
 
 const DEFAULT_NOTIFICATION_TEMPLATES = {
-  completion: { title: '{agent_name} is ready', message: '{model_name} completed the task' },
-  error: { title: 'Tool error', message: '{last_message}' },
-  question: { title: 'Input needed', message: '{last_message}' },
-  subtask: { title: '{agent_name} is ready', message: '{model_name} completed the task' },
+  completion: {
+    title: getMessage('en', 'notificationAgentReadyTitle'),
+    message: getMessage('en', 'notificationTaskCompletedMessage')
+  },
+  error: { title: getMessage('en', 'notificationToolErrorTitle'), message: '{last_message}' },
+  question: { title: getMessage('en', 'notificationInputNeededTitle'), message: '{last_message}' },
+  subtask: {
+    title: getMessage('en', 'notificationAgentReadyTitle'),
+    message: getMessage('en', 'notificationTaskCompletedMessage')
+  },
 };
 
 const ensureNotificationTemplateShape = (templates) => {
@@ -6602,7 +6787,7 @@ function setupProxy(app) {
 
     if (stillWaiting) {
       return res.status(503).json({
-        error: 'OpenCode is restarting',
+        error: getMessage(req, 'openCodeRestarting'),
         restarting: true,
       });
     }
@@ -7283,13 +7468,13 @@ async function main(options = {}) {
     try {
       await uiAuthController.handleSessionStatus(req, res);
     } catch (err) {
-      res.status(500).json({ error: 'Internal server error' });
+      res.status(500).json({ error: getMessage(req, 'internalServerError') });
     }
   });
   app.post('/auth/session', (req, res) => {
     const requestScope = tunnelAuthController.classifyRequestScope(req);
     if (requestScope === 'tunnel' || requestScope === 'unknown-public') {
-      return res.status(403).json({ error: 'Password login is disabled for tunnel scope', tunnelLocked: true });
+      return res.status(403).json({ error: getMessage(req, 'passwordLoginDisabledTunnelScope'), tunnelLocked: true });
     }
     return uiAuthController.handleSessionCreate(req, res);
   });
@@ -7312,14 +7497,14 @@ async function main(options = {}) {
       if (!exchange.ok) {
         if (exchange.reason === 'rate-limited') {
           res.setHeader('Retry-After', String(exchange.retryAfter || 60));
-          return res.status(429).type('text/plain').send('Too many attempts. Please try again later.');
+          return res.status(429).type('text/plain').send(getMessage(req, 'tooManyAttemptsTryLater'));
         }
-        return res.status(401).type('text/plain').send('Connection link is invalid or expired.');
+        return res.status(401).type('text/plain').send(getMessage(req, 'connectionLinkInvalidOrExpired'));
       }
 
       return res.redirect(302, '/');
     } catch (error) {
-      return res.status(500).type('text/plain').send('Failed to process connect request.');
+      return res.status(500).type('text/plain').send(getMessage(req, 'failedToProcessConnectRequest'));
     }
   });
 
@@ -7366,7 +7551,7 @@ async function main(options = {}) {
       res.json({ publicKey: keys.publicKey });
     } catch (error) {
       console.warn('[Push] Failed to load VAPID key:', error);
-      res.status(500).json({ error: 'Failed to load push key' });
+      res.status(500).json({ error: getMessage(req, 'failedToLoadPushKey') });
     }
   });
 
@@ -7377,12 +7562,12 @@ async function main(options = {}) {
       ? await uiAuthController.ensureSessionToken(req, res)
       : getUiSessionTokenFromRequest(req);
     if (!uiToken) {
-      return res.status(401).json({ error: 'UI session missing' });
+      return res.status(401).json({ error: getMessage(req, 'uiSessionMissing') });
     }
 
     const parsed = parsePushSubscribeBody(req.body);
     if (!parsed) {
-      return res.status(400).json({ error: 'Invalid body' });
+      return res.status(400).json({ error: getMessage(req, 'invalidBody') });
     }
 
     const { endpoint, keys } = parsed;
@@ -7425,12 +7610,12 @@ async function main(options = {}) {
       ? await uiAuthController.ensureSessionToken(req, res)
       : getUiSessionTokenFromRequest(req);
     if (!uiToken) {
-      return res.status(401).json({ error: 'UI session missing' });
+      return res.status(401).json({ error: getMessage(req, 'uiSessionMissing') });
     }
 
     const parsed = parsePushUnsubscribeBody(req.body);
     if (!parsed) {
-      return res.status(400).json({ error: 'Invalid body' });
+      return res.status(400).json({ error: getMessage(req, 'invalidBody') });
     }
 
     await removePushSubscription(uiToken, parsed.endpoint);
@@ -7442,7 +7627,7 @@ async function main(options = {}) {
       ? await uiAuthController.ensureSessionToken(req, res)
       : getUiSessionTokenFromRequest(req);
     if (!uiToken) {
-      return res.status(401).json({ error: 'UI session missing' });
+      return res.status(401).json({ error: getMessage(req, 'uiSessionMissing') });
     }
 
     const visible = req.body && typeof req.body === 'object' ? req.body.visible : null;
@@ -7453,7 +7638,7 @@ async function main(options = {}) {
   app.get('/api/push/visibility', (req, res) => {
     const uiToken = getUiSessionTokenFromRequest(req);
     if (!uiToken) {
-      return res.status(401).json({ error: 'UI session missing' });
+      return res.status(401).json({ error: getMessage(req, 'uiSessionMissing') });
     }
 
     res.json({
@@ -7480,7 +7665,7 @@ async function main(options = {}) {
       if (!openaiApiKey) {
         return res.status(503).json({
           allowed: false,
-          error: 'OpenAI voice service not configured. Set OPENAI_API_KEY environment variable.'
+          error: getMessage(req, 'openAiVoiceServiceNotConfigured')
         });
       }
 
@@ -7488,7 +7673,7 @@ async function main(options = {}) {
       res.json({
         allowed: true,
         provider: 'openai',
-        message: 'OpenAI TTS is available'
+        message: getMessage(req, 'openAiTtsAvailable')
       });
     } catch (error) {
       console.error('[Voice] Token generation error:', error);
@@ -7507,7 +7692,7 @@ async function main(options = {}) {
       console.log('[TTS] Request received:', { voice, model, speed, textLength: text?.length, hasApiKey: !!apiKey });
 
       if (!text || typeof text !== 'string' || !text.trim()) {
-        return res.status(400).json({ error: 'Text is required' });
+        return res.status(400).json({ error: getMessage(req, 'textRequired') });
       }
 
       // Dynamically import the TTS service (ESM)
@@ -7519,7 +7704,7 @@ async function main(options = {}) {
       
       if (!hasServerKey && !hasClientKey) {
         return res.status(503).json({ 
-          error: 'TTS service not available. Please configure OpenAI in OpenCode or provide an API key in settings.' 
+          error: getMessage(req, 'ttsServiceNotAvailable') 
         });
       }
 
@@ -7595,7 +7780,7 @@ async function main(options = {}) {
       const { text, threshold = 200, maxLength = 500 } = req.body || {};
 
       if (!text || typeof text !== 'string' || !text.trim()) {
-        return res.status(400).json({ error: 'Text is required' });
+        return res.status(400).json({ error: getMessage(req, 'textRequired') });
       }
 
       const sumZenModel = await resolveZenModel(typeof req.body?.zenModel === 'string' ? req.body.zenModel : undefined);
@@ -7637,12 +7822,12 @@ async function main(options = {}) {
       const { text, voice = 'Samantha', rate = 200 } = req.body || {};
       
       if (!text || typeof text !== 'string' || !text.trim()) {
-        return res.status(400).json({ error: 'Text is required' });
+        return res.status(400).json({ error: getMessage(req, 'textRequired') });
       }
       
       // Check if we're on macOS
       if (process.platform !== 'darwin') {
-        return res.status(503).json({ error: 'macOS say command not available on this platform' });
+        return res.status(503).json({ error: getMessage(req, 'macosSayNotAvailable') });
       }
       
       const { exec } = await import('child_process');
@@ -7714,7 +7899,7 @@ async function main(options = {}) {
 
     if (!state) {
       return res.status(404).json({
-        error: 'Session not found or no state available',
+        error: getMessage(req, 'sessionStateNotFound'),
         sessionId
       });
     }

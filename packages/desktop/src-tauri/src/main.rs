@@ -152,6 +152,153 @@ const GITHUB_FEATURE_REQUEST_URL: &str =
 const DISCORD_INVITE_URL: &str = "https://discord.gg/ZYRSdnwwKA";
 
 #[cfg(target_os = "macos")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum MenuLocale {
+    En,
+    ZhCn,
+}
+
+#[cfg(target_os = "macos")]
+fn normalize_startup_locale(raw: &str) -> MenuLocale {
+    let normalized = raw.trim().replace('_', "-").to_ascii_lowercase();
+
+    if normalized == "zh"
+        || normalized == "zh-cn"
+        || normalized.starts_with("zh-cn-")
+        || normalized == "zh-hans"
+        || normalized.starts_with("zh-hans-")
+    {
+        return MenuLocale::ZhCn;
+    }
+
+    MenuLocale::En
+}
+
+#[cfg(target_os = "macos")]
+fn read_macos_global_default(key: &str) -> Option<String> {
+    let output = Command::new("defaults")
+        .args(["read", "-g", key])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let value = stdout.trim();
+
+    if value.is_empty() {
+        return None;
+    }
+
+    Some(value.to_string())
+}
+
+#[cfg(target_os = "macos")]
+fn detect_startup_menu_locale() -> MenuLocale {
+    if let Some(apple_languages) = read_macos_global_default("AppleLanguages") {
+        for candidate in apple_languages
+            .lines()
+            .map(str::trim)
+            .map(|line| line.trim_matches(|ch| matches!(ch, '(' | ')' | ',' | '"' | ';' | ' ')))
+            .filter(|line| !line.is_empty())
+        {
+            let locale = normalize_startup_locale(candidate);
+            if locale == MenuLocale::ZhCn {
+                return locale;
+            }
+        }
+    }
+
+    if let Some(apple_locale) = read_macos_global_default("AppleLocale") {
+        return normalize_startup_locale(&apple_locale);
+    }
+
+    MenuLocale::En
+}
+
+#[cfg(target_os = "macos")]
+fn localized_menu_label(locale: MenuLocale, key: &str, app_name: &str) -> String {
+    match (locale, key) {
+        (MenuLocale::ZhCn, "about") => format!("关于 {app_name}"),
+        (MenuLocale::ZhCn, "check_for_updates") => "检查更新".to_string(),
+        (MenuLocale::ZhCn, "settings") => "设置".to_string(),
+        (MenuLocale::ZhCn, "command_palette") => "命令面板".to_string(),
+        (MenuLocale::ZhCn, "new_window") => "新建窗口".to_string(),
+        (MenuLocale::ZhCn, "new_session") => "新建会话".to_string(),
+        (MenuLocale::ZhCn, "new_worktree") => "新建工作树".to_string(),
+        (MenuLocale::ZhCn, "add_workspace") => "添加工作区".to_string(),
+        (MenuLocale::ZhCn, "git") => "Git".to_string(),
+        (MenuLocale::ZhCn, "diff") => "Diff".to_string(),
+        (MenuLocale::ZhCn, "files") => "文件".to_string(),
+        (MenuLocale::ZhCn, "terminal") => "终端".to_string(),
+        (MenuLocale::ZhCn, "copy") => "复制".to_string(),
+        (MenuLocale::ZhCn, "light_theme") => "浅色主题".to_string(),
+        (MenuLocale::ZhCn, "dark_theme") => "深色主题".to_string(),
+        (MenuLocale::ZhCn, "system_theme") => "跟随系统".to_string(),
+        (MenuLocale::ZhCn, "toggle_session_sidebar") => "切换会话侧边栏".to_string(),
+        (MenuLocale::ZhCn, "toggle_memory_debug") => "切换内存调试".to_string(),
+        (MenuLocale::ZhCn, "keyboard_shortcuts") => "键盘快捷键".to_string(),
+        (MenuLocale::ZhCn, "show_diagnostics") => "显示诊断信息".to_string(),
+        (MenuLocale::ZhCn, "report_a_bug") => "报告问题".to_string(),
+        (MenuLocale::ZhCn, "request_a_feature") => "请求新功能".to_string(),
+        (MenuLocale::ZhCn, "join_discord") => "加入 Discord".to_string(),
+        (MenuLocale::ZhCn, "clear_cache") => "清除缓存".to_string(),
+        (MenuLocale::ZhCn, "theme") => "主题".to_string(),
+        (MenuLocale::ZhCn, "window") => "窗口".to_string(),
+        (MenuLocale::ZhCn, "help") => "帮助".to_string(),
+        (MenuLocale::ZhCn, "file") => "文件".to_string(),
+        (MenuLocale::ZhCn, "edit") => "编辑".to_string(),
+        (MenuLocale::ZhCn, "view") => "视图".to_string(),
+        (_, "about") => format!("About {app_name}"),
+        (_, "check_for_updates") => "Check for Updates".to_string(),
+        (_, "settings") => "Settings".to_string(),
+        (_, "command_palette") => "Command Palette".to_string(),
+        (_, "new_window") => "New Window".to_string(),
+        (_, "new_session") => "New Session".to_string(),
+        (_, "new_worktree") => "New Worktree".to_string(),
+        (_, "add_workspace") => "Add Workspace".to_string(),
+        (_, "git") => "Git".to_string(),
+        (_, "diff") => "Diff".to_string(),
+        (_, "files") => "Files".to_string(),
+        (_, "terminal") => "Terminal".to_string(),
+        (_, "copy") => "Copy".to_string(),
+        (_, "light_theme") => "Light Theme".to_string(),
+        (_, "dark_theme") => "Dark Theme".to_string(),
+        (_, "system_theme") => "System Theme".to_string(),
+        (_, "toggle_session_sidebar") => "Toggle Session Sidebar".to_string(),
+        (_, "toggle_memory_debug") => "Toggle Memory Debug".to_string(),
+        (_, "keyboard_shortcuts") => "Keyboard Shortcuts".to_string(),
+        (_, "show_diagnostics") => "Show Diagnostics".to_string(),
+        (_, "report_a_bug") => "Report a Bug".to_string(),
+        (_, "request_a_feature") => "Request a Feature".to_string(),
+        (_, "join_discord") => "Join Discord".to_string(),
+        (_, "clear_cache") => "Clear Cache".to_string(),
+        (_, "theme") => "Theme".to_string(),
+        (_, "window") => "Window".to_string(),
+        (_, "help") => "Help".to_string(),
+        (_, "file") => "File".to_string(),
+        (_, "edit") => "Edit".to_string(),
+        (_, "view") => "View".to_string(),
+        _ => key.to_string(),
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn menu_locale_code(locale: MenuLocale) -> &'static str {
+    match locale {
+        MenuLocale::En => "en",
+        MenuLocale::ZhCn => "zh-CN",
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn menu_locale_code(_locale: ()) -> &'static str {
+    "en"
+}
+
+#[cfg(target_os = "macos")]
 fn build_macos_menu<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
 ) -> tauri::Result<tauri::menu::Menu<R>> {
@@ -160,6 +307,8 @@ fn build_macos_menu<R: tauri::Runtime>(
     };
 
     let pkg_info = app.package_info();
+    let locale = detect_startup_menu_locale();
+    let app_name = &pkg_info.name;
 
     let new_session_shortcut = "Cmd+N";
     let new_worktree_shortcut = "Cmd+Shift+N";
@@ -167,7 +316,7 @@ fn build_macos_menu<R: tauri::Runtime>(
     let about = MenuItem::with_id(
         app,
         MENU_ITEM_ABOUT_ID,
-        format!("About {}", pkg_info.name),
+        localized_menu_label(locale, "about", app_name),
         true,
         None::<&str>,
     )?;
@@ -175,17 +324,23 @@ fn build_macos_menu<R: tauri::Runtime>(
     let check_for_updates = MenuItem::with_id(
         app,
         MENU_ITEM_CHECK_FOR_UPDATES_ID,
-        "Check for Updates",
+        localized_menu_label(locale, "check_for_updates", app_name),
         true,
         None::<&str>,
     )?;
 
-    let settings = MenuItem::with_id(app, MENU_ITEM_SETTINGS_ID, "Settings", true, Some("Cmd+,"))?;
+    let settings = MenuItem::with_id(
+        app,
+        MENU_ITEM_SETTINGS_ID,
+        localized_menu_label(locale, "settings", app_name),
+        true,
+        Some("Cmd+,"),
+    )?;
 
     let command_palette = MenuItem::with_id(
         app,
         MENU_ITEM_COMMAND_PALETTE_ID,
-        "Command Palette",
+        localized_menu_label(locale, "command_palette", app_name),
         true,
         Some("Cmd+K"),
     )?;
@@ -193,7 +348,7 @@ fn build_macos_menu<R: tauri::Runtime>(
     let new_window = MenuItem::with_id(
         app,
         MENU_ITEM_NEW_WINDOW_ID,
-        "New Window",
+        localized_menu_label(locale, "new_window", app_name),
         true,
         Some("Cmd+Shift+Alt+N"),
     )?;
@@ -201,7 +356,7 @@ fn build_macos_menu<R: tauri::Runtime>(
     let new_session = MenuItem::with_id(
         app,
         MENU_ITEM_NEW_SESSION_ID,
-        "New Session",
+        localized_menu_label(locale, "new_session", app_name),
         true,
         Some(new_session_shortcut),
     )?;
@@ -209,7 +364,7 @@ fn build_macos_menu<R: tauri::Runtime>(
     let worktree_creator = MenuItem::with_id(
         app,
         MENU_ITEM_WORKTREE_CREATOR_ID,
-        "New Worktree",
+        localized_menu_label(locale, "new_worktree", app_name),
         true,
         Some(new_worktree_shortcut),
     )?;
@@ -217,49 +372,65 @@ fn build_macos_menu<R: tauri::Runtime>(
     let change_workspace = MenuItem::with_id(
         app,
         MENU_ITEM_CHANGE_WORKSPACE_ID,
-        "Add Workspace",
+        localized_menu_label(locale, "add_workspace", app_name),
         true,
         None::<&str>,
     )?;
 
-    let open_git_tab =
-        MenuItem::with_id(app, MENU_ITEM_OPEN_GIT_TAB_ID, "Git", true, Some("Cmd+G"))?;
-    let open_diff_tab =
-        MenuItem::with_id(app, MENU_ITEM_OPEN_DIFF_TAB_ID, "Diff", true, Some("Cmd+E"))?;
+    let open_git_tab = MenuItem::with_id(
+        app,
+        MENU_ITEM_OPEN_GIT_TAB_ID,
+        localized_menu_label(locale, "git", app_name),
+        true,
+        Some("Cmd+G"),
+    )?;
+    let open_diff_tab = MenuItem::with_id(
+        app,
+        MENU_ITEM_OPEN_DIFF_TAB_ID,
+        localized_menu_label(locale, "diff", app_name),
+        true,
+        Some("Cmd+E"),
+    )?;
     let open_files_tab = MenuItem::with_id(
         app,
         MENU_ITEM_OPEN_FILES_TAB_ID,
-        "Files",
+        localized_menu_label(locale, "files", app_name),
         true,
         None::<&str>,
     )?;
     let open_terminal_tab = MenuItem::with_id(
         app,
         MENU_ITEM_OPEN_TERMINAL_TAB_ID,
-        "Terminal",
+        localized_menu_label(locale, "terminal", app_name),
         true,
         Some("Cmd+T"),
     )?;
-    let copy = MenuItem::with_id(app, MENU_ITEM_COPY_ID, "Copy", true, Some("Cmd+C"))?;
+    let copy = MenuItem::with_id(
+        app,
+        MENU_ITEM_COPY_ID,
+        localized_menu_label(locale, "copy", app_name),
+        true,
+        Some("Cmd+C"),
+    )?;
 
     let theme_light = MenuItem::with_id(
         app,
         MENU_ITEM_THEME_LIGHT_ID,
-        "Light Theme",
+        localized_menu_label(locale, "light_theme", app_name),
         true,
         None::<&str>,
     )?;
     let theme_dark = MenuItem::with_id(
         app,
         MENU_ITEM_THEME_DARK_ID,
-        "Dark Theme",
+        localized_menu_label(locale, "dark_theme", app_name),
         true,
         None::<&str>,
     )?;
     let theme_system = MenuItem::with_id(
         app,
         MENU_ITEM_THEME_SYSTEM_ID,
-        "System Theme",
+        localized_menu_label(locale, "system_theme", app_name),
         true,
         None::<&str>,
     )?;
@@ -267,7 +438,7 @@ fn build_macos_menu<R: tauri::Runtime>(
     let toggle_sidebar = MenuItem::with_id(
         app,
         MENU_ITEM_TOGGLE_SIDEBAR_ID,
-        "Toggle Session Sidebar",
+        localized_menu_label(locale, "toggle_session_sidebar", app_name),
         true,
         Some("Cmd+L"),
     )?;
@@ -275,7 +446,7 @@ fn build_macos_menu<R: tauri::Runtime>(
     let toggle_memory_debug = MenuItem::with_id(
         app,
         MENU_ITEM_TOGGLE_MEMORY_DEBUG_ID,
-        "Toggle Memory Debug",
+        localized_menu_label(locale, "toggle_memory_debug", app_name),
         true,
         Some("Cmd+Shift+D"),
     )?;
@@ -283,7 +454,7 @@ fn build_macos_menu<R: tauri::Runtime>(
     let help_dialog = MenuItem::with_id(
         app,
         MENU_ITEM_HELP_DIALOG_ID,
-        "Keyboard Shortcuts",
+        localized_menu_label(locale, "keyboard_shortcuts", app_name),
         true,
         Some("Cmd+."),
     )?;
@@ -291,7 +462,7 @@ fn build_macos_menu<R: tauri::Runtime>(
     let download_logs = MenuItem::with_id(
         app,
         MENU_ITEM_DOWNLOAD_LOGS_ID,
-        "Show Diagnostics",
+        localized_menu_label(locale, "show_diagnostics", app_name),
         true,
         Some("Cmd+Shift+L"),
     )?;
@@ -299,21 +470,21 @@ fn build_macos_menu<R: tauri::Runtime>(
     let report_bug = MenuItem::with_id(
         app,
         MENU_ITEM_REPORT_BUG_ID,
-        "Report a Bug",
+        localized_menu_label(locale, "report_a_bug", app_name),
         true,
         None::<&str>,
     )?;
     let request_feature = MenuItem::with_id(
         app,
         MENU_ITEM_REQUEST_FEATURE_ID,
-        "Request a Feature",
+        localized_menu_label(locale, "request_a_feature", app_name),
         true,
         None::<&str>,
     )?;
     let join_discord = MenuItem::with_id(
         app,
         MENU_ITEM_JOIN_DISCORD_ID,
-        "Join Discord",
+        localized_menu_label(locale, "join_discord", app_name),
         true,
         None::<&str>,
     )?;
@@ -321,14 +492,14 @@ fn build_macos_menu<R: tauri::Runtime>(
     let clear_cache = MenuItem::with_id(
         app,
         MENU_ITEM_CLEAR_CACHE_ID,
-        "Clear Cache",
+        localized_menu_label(locale, "clear_cache", app_name),
         true,
         None::<&str>,
     )?;
 
     let theme_submenu = Submenu::with_items(
         app,
-        "Theme",
+        localized_menu_label(locale, "theme", app_name),
         true,
         &[&theme_light, &theme_dark, &theme_system],
     )?;
@@ -336,7 +507,7 @@ fn build_macos_menu<R: tauri::Runtime>(
     let window_menu = Submenu::with_id_and_items(
         app,
         WINDOW_SUBMENU_ID,
-        "Window",
+        localized_menu_label(locale, "window", app_name),
         true,
         &[
             &PredefinedMenuItem::minimize(app, None)?,
@@ -349,7 +520,7 @@ fn build_macos_menu<R: tauri::Runtime>(
     let help_menu = Submenu::with_id_and_items(
         app,
         HELP_SUBMENU_ID,
-        "Help",
+        localized_menu_label(locale, "help", app_name),
         true,
         &[
             &help_dialog,
@@ -388,7 +559,7 @@ fn build_macos_menu<R: tauri::Runtime>(
             )?,
             &Submenu::with_items(
                 app,
-                "File",
+                localized_menu_label(locale, "file", app_name),
                 true,
                 &[
                     &new_window,
@@ -403,7 +574,7 @@ fn build_macos_menu<R: tauri::Runtime>(
             )?,
             &Submenu::with_items(
                 app,
-                "Edit",
+                localized_menu_label(locale, "edit", app_name),
                 true,
                 &[
                     &PredefinedMenuItem::undo(app, None)?,
@@ -417,7 +588,7 @@ fn build_macos_menu<R: tauri::Runtime>(
             )?,
             &Submenu::with_items(
                 app,
-                "View",
+                localized_menu_label(locale, "view", app_name),
                 true,
                 &[
                     &open_git_tab,
@@ -2393,12 +2564,17 @@ fn build_init_script(local_origin: &str) -> String {
     let home =
         std::env::var(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).unwrap_or_default();
     let macos_major = macos_major_version().unwrap_or(0);
+    #[cfg(target_os = "macos")]
+    let locale_code = menu_locale_code(detect_startup_menu_locale());
+    #[cfg(not(target_os = "macos"))]
+    let locale_code = "en";
 
     let home_json = serde_json::to_string(&home).unwrap_or_else(|_| "\"\"".into());
     let local_json = serde_json::to_string(local_origin).unwrap_or_else(|_| "\"\"".into());
+    let locale_json = serde_json::to_string(locale_code).unwrap_or_else(|_| "\"en\"".into());
 
     let mut init_script = format!(
-        "(function(){{try{{window.__OPENCHAMBER_HOME__={home_json};window.__OPENCHAMBER_MACOS_MAJOR__={macos_major};window.__OPENCHAMBER_LOCAL_ORIGIN__={local_json};}}catch(_e){{}}}})();"
+        "(function(){{try{{window.__OPENCHAMBER_HOME__={home_json};window.__OPENCHAMBER_MACOS_MAJOR__={macos_major};window.__OPENCHAMBER_LOCAL_ORIGIN__={local_json};window.__OPENCHAMBER_BOOTSTRAP__=Object.assign({{}},window.__OPENCHAMBER_BOOTSTRAP__||{{}},{locale:{locale_json}});}}catch(_e){{}}}})();"
     );
 
     // Cleanup: older builds injected a native-ish Instance switcher button into pages.
