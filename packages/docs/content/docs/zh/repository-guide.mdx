@@ -1,0 +1,349 @@
+---
+title: OpenChamber 仓库指南（简体中文）
+description: OpenChamber 的中文仓库总览，包含平台介绍、功能说明、快速开始与部署方式。
+---
+
+# OpenChamber 仓库指南（简体中文）
+
+> 根 `README.md` 保持英文主入口；本页提供对应的简体中文版本说明。
+
+## **OpenCode，无处不在。** 桌面端、浏览器、手机端。
+
+### 一个面向 [OpenCode](https://opencode.ai) 的强大图形界面。你可以审查 diff、管理 agents、运行开发服务，并在 AI 编码时始终保持全局视野。
+
+## 为什么使用 OpenChamber？
+
+- **跨设备连续性**：在 TUI 开始，在平板/手机继续，再回到终端——同一个会话不中断
+- **远程访问**：通过浏览器随时随地使用 OpenCode
+- **熟悉感**：为更偏好 GUI 工作流的开发者提供一个可视化替代方案
+
+## 功能特性
+
+### 核心功能（所有应用版本通用）
+
+- 可分叉的聊天时间线，支持 `/undo`、`/redo`，并可从任意历史轮次一键分叉
+- 面向 diff、文件操作、权限请求和长任务进度的智能工具 UI
+- 语音模式，支持语音输入与回复朗读，实现免手操作
+- 一次提示并行运行多个 agent，并使用隔离 worktree 安全对比结果
+- 应用内 Git 工作流：身份管理、提交、PR 创建、检查与合并操作
+- 原生 GitHub 工作流：从 issue 和 pull request 直接启动会话，自动附带上下文
+- Plan/Build 模式，带专用计划视图，用于起草和迭代实现步骤
+- 可在 diff、文件与计划中撰写行内评论草稿，并直接发送回 agent
+- 上下文可视化工具（token/成本明细、原始消息检查、活动摘要）
+- 内置终端，支持按目录维持会话，并在大输出场景下保持稳定性能
+- 内置技能目录与本地技能管理，便于复用自动化工作流
+
+### Web / PWA
+
+- 感知 provider 的 tunnel 访问模型，支持 Cloudflare `quick`、`managed-remote` 与 `managed-local`
+- 一扫即用的引导体验：通过 tunnel 二维码与带密码 URL 快速接入
+- 移动优先体验：优化聊天控件、键盘安全布局、以及便于添加附件的交互
+- 后台通知与可靠的跨标签页会话活动跟踪
+- 内置自更新与重启流程，同时保留你的 server 配置
+
+### Desktop（macOS）
+
+- 原生 macOS 菜单集成，带更完善的应用操作与 deep link 处理
+- 多窗口支持，方便并行项目/会话工作流
+- “Open In” 快捷操作，可在 Finder、Terminal 或你偏好的编辑器中打开
+- 在本地实例与远程实例之间快速切换
+- 以工作区优先的启动流程，带目录选择器和更稳定的窗口恢复行为
+
+### VS Code 扩展
+
+- 编辑器原生工作流：直接从工具输出打开文件，让会话常驻在代码旁边
+- Agent Manager，可从一条提示并行运行多模型
+- 右键操作：添加上下文、解释选中内容、原地改进代码
+- 扩展内设置、响应式布局，以及与编辑器主题一致的映射体验
+- 更稳健的运行时生命周期与健康检查，带来更快启动和更少卡住的重连状态
+
+### 自定义主题
+
+- **随处使用**：借助 Cloudflare tunnel 和二维码引导，从沙发上扫码、连接、编码
+- **可分叉聊天时间线**：撤销、重做、从任意轮次分叉，不丢失上下文地探索不同方案
+- **原生 GitHub 工作流**：从 issues 和 PRs 直接开会话，自动附加上下文；检查、审阅、合并都可在应用内完成
+- **Project Actions**：运行开发服务、配置 SSH 端口转发、本地打开远程 URL。你的项目命令，一键直达
+- **连接远程机器**：桌面应用可通过 SSH 连接远程 OpenChamber 实例，并提供专门的生命周期与 UX 流程
+
+## 快速开始
+
+> **前置条件：** 已安装 [OpenCode CLI](https://opencode.ai)。
+
+### **Desktop（macOS）**
+从 [Releases](https://github.com/btriapitsyn/openchamber/releases) 下载。
+
+### **VS Code**
+从 [Marketplace](https://marketplace.visualstudio.com/items?itemName=fedaykindev.openchamber) 安装，或在扩展市场中搜索 “OpenChamber”。
+
+### **CLI（Web + PWA）**
+_需要 Node.js 20+_
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/btriapitsyn/openchamber/main/scripts/install.sh | bash
+openchamber --ui-password be-creative-here
+```
+
+### 高级 CLI 选项
+
+```bash
+openchamber --port 8080              # 自定义端口
+openchamber --ui-password secret     # 为 UI 设置访问密码
+openchamber tunnel help              # 查看 tunnel 生命周期命令
+openchamber tunnel providers         # 查看 provider 能力
+openchamber tunnel profile add --provider cloudflare --mode managed-remote --name prod-main --hostname app.example.com --token <token>
+openchamber tunnel start --profile prod-main
+openchamber tunnel start --provider cloudflare --mode quick --qr
+openchamber tunnel start --provider cloudflare --mode managed-local --config ~/.cloudflared/config.yml
+openchamber tunnel status --all      # 查看所有实例的 tunnel 状态
+openchamber tunnel stop --port 3000  # 仅停止 tunnel（server 继续运行）
+openchamber logs                     # 跟踪最新实例日志
+OPENCODE_PORT=4096 OPENCODE_SKIP_START=true openchamber                    # 连接到外部 OpenCode server
+OPENCODE_HOST=https://myhost:4096 OPENCODE_SKIP_START=true openchamber  # 通过自定义 host/HTTPS 连接
+openchamber stop                     # 停止 server
+openchamber update                   # 更新到最新版本
+```
+
+连接到一个现有的 OpenCode server：
+
+```bash
+OPENCODE_PORT=4096 OPENCODE_SKIP_START=true openchamber
+OPENCODE_HOST=https://myhost:4096 OPENCODE_SKIP_START=true openchamber
+```
+
+将托管的 OpenCode server 绑定到所有网卡接口（仅在可信网络中使用）：
+
+```bash
+OPENCHAMBER_OPENCODE_HOSTNAME=0.0.0.0 openchamber --port 3000
+```
+
+## systemd 服务（VPN / 局域网访问）
+
+将 OpenChamber 和 OpenCode 作为两个独立的常驻服务运行——当你想通过 VPN（例如 Tailscale）或局域网访问开发机，而不想依赖 Cloudflare tunnel 时，这种方式很适合。
+
+**工作原理：**
+
+- OpenCode 作为独立服务运行，仅绑定到 `localhost`
+- OpenChamber 通过 `OPENCODE_HOST` 连接到它，而 `--host 0.0.0.0` 会让它在 VPN IP 上可访问
+- `--foreground` 会让 CLI 进程保持前台运行，方便 systemd 追踪与自动重启
+
+**`~/.config/systemd/user/opencode.service`**
+
+```ini
+[Unit]
+Description=OpenCode Server
+
+[Service]
+Type=simple
+ExecStart=opencode serve --port 4095
+Environment="PATH=/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/home/YOU/.local/bin:/home/YOU/.npm-global/bin:/usr/local/bin:/usr/bin:/bin"
+Environment=SSH_AUTH_SOCK=%t/ssh-agent.socket
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+```
+
+> **为什么要设置 `PATH` 和 `SSH_AUTH_SOCK`？**
+> systemd 用户服务启动时环境非常精简——不会加载 shell profile。
+> 如果没有显式 `PATH`，OpenCode 将找不到通过 Homebrew、npm 或 `~/.local/bin` 安装的工具。
+> 如果没有 `SSH_AUTH_SOCK`，通过 SSH 执行 git push/pull/clone 会失败，因为 agent socket 不会自动继承。
+> 请按你的实际工具安装路径调整 `PATH`。
+> `%t` 会展开为 `$XDG_RUNTIME_DIR`（例如 `/run/user/1000`），大多数 SSH agent 会把 socket 写在这里。
+
+**`~/.config/systemd/user/openchamber.service`**
+
+```ini
+[Unit]
+Description=OpenChamber Web Server
+After=opencode.service
+
+[Service]
+Type=simple
+ExecStart=openchamber serve --port 3000 --host 0.0.0.0 --ui-password your-password --foreground
+Environment="OPENCODE_HOST=http://localhost:4095"
+Environment="OPENCODE_SKIP_START=true"
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+```
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now opencode openchamber
+```
+
+之后你就可以从 VPN 中的任意设备，通过 `http://<your-vpn-hostname>:3000` 访问 OpenChamber。
+
+> **注意：** `--host 0.0.0.0` 是监听所有网卡所必需的。默认绑定地址是 `127.0.0.1`（仅 localhost）。如果你只想绑定特定网卡，请使用 `--host <ip>` 或 `OPENCHAMBER_HOST=<ip>`。
+
+## Docker
+
+```bash
+docker compose up -d
+```
+
+服务地址：`http://localhost:3000`。
+
+**UI 密码：**
+
+```yaml
+environment:
+  UI_PASSWORD: your_secure_password
+```
+
+**Cloudflare Tunnel（可选）：**
+
+```yaml
+environment:
+  OPENCHAMBER_TUNNEL_MODE: quick # quick | managed-remote | managed-local
+  OPENCHAMBER_TUNNEL_PROVIDER: cloudflare
+```
+
+如果使用 `managed-remote` 模式，需要提供：
+
+```yaml
+environment:
+  OPENCHAMBER_TUNNEL_MODE: managed-remote
+  OPENCHAMBER_TUNNEL_HOSTNAME: app.example.com
+  OPENCHAMBER_TUNNEL_TOKEN: <token>
+```
+
+如果使用 `managed-local` 模式，可选提供：
+
+```yaml
+environment:
+  OPENCHAMBER_TUNNEL_MODE: managed-local
+  OPENCHAMBER_TUNNEL_CONFIG: /home/openchamber/.cloudflared/config.yml
+```
+
+Managed-local 路径说明：`OPENCHAMBER_TUNNEL_CONFIG` 必须指向容器用户主目录内的路径（`/home/openchamber/...`）。如果你的 Cloudflare 配置还引用了 credentials JSON 文件，那么该文件路径也必须在容器内可访问（可通过 `volumes` 挂载）。
+
+### Tunnel 行为说明
+
+- OpenChamber 的每个运行实例（端口）只支持一个活动 tunnel
+- 在同一实例上使用不同 mode/provider 启动 tunnel，会替换当前 tunnel
+- 替换或停止 tunnel 会撤销现有 connect link，并使该实例上的远程 tunnel 会话失效
+- Connect link 是一次性 token；生成新的 link 会撤销上一个尚未使用的 link
+
+**数据目录权限说明：** `data/` 目录会挂载进容器中，用于持久化存储（配置、会话、SSH 密钥、工作区）。运行前请确保目录存在并具备正确权限：
+
+```bash
+mkdir -p data/openchamber data/opencode/share data/opencode/config data/ssh
+chown -R 1000:1000 data/
+```
+
+**SSH/Git：** 如果 git push/pull 失败，请在终端里运行 `ssh -T git@github.com` 检查。
+
+## 功能明细
+
+### 聊天与交互
+
+- 可分叉的聊天时间线，支持 `/undo`、`/redo`，并能从任意轮次一键分叉
+- 一条提示并行运行多个 agent，并使用隔离 worktree 安全进行并排比较
+- 语音模式，支持语音输入和回复朗读，实现免手操作
+- Plan/Build 模式，带专门的计划视图，可反复起草与调整步骤
+- 可在 diff、文件和计划中撰写行内评论草稿，并回发给 agent
+- 通过前缀 `!` 进入 shell 模式，并直接查看内联输出
+- 将消息分享为图片
+- Mermaid 图表内联渲染，并支持复制/下载操作
+- 针对 diff、文件操作、权限请求和任务进度的智能工具 UI
+
+### Git 与 GitHub
+
+- 完整 Git 侧边栏：暂存、提交、push/pull、分支管理、rebase/merge 流程一应俱全
+- 支持 AI 生成描述的 PR 创建、状态检查与合并操作
+- 从 GitHub issue 和 PR 直接启动会话，并自动附带上下文
+- 多远端 push 与感知 fork 的 PR 创建流程
+- Worktree 集成：每个分支可独立开会话，并支持冲突处理后合并回主线
+- Git 身份管理、gitmoji 支持，以及多账户 GitHub 认证
+
+### 文件、Diff 与终端
+
+- 工作区文件浏览器，支持内联编辑、语法高亮和 Markdown 预览
+- 精美 diff 查看器，支持 stacked/inline 模式，并对大变更集做懒加载
+- 内置终端，支持按目录维持会话、标签页界面和稳定的大输出性能
+- 消息中的文件路径可点击，直接跳转到精确行号
+- 各视图统一使用文件类型图标，更方便快速识别
+
+### Web / PWA
+
+- Cloudflare tunnel，支持 quick、managed-remote、managed-local 模式，并提供安全的一次性 connect link 与二维码引导
+- 移动优先：优化聊天控件、键盘安全布局，以及可拖拽排序项目
+- 后台通知与跨标签页会话跟踪
+- 自更新 + 重启流程，并保留你的 server 配置
+- 可安装为 PWA，并支持按项目感知命名
+
+### Desktop（macOS）
+
+- 通过 SSH 连接远程 OpenChamber 实例，并提供专门的生命周期流程
+- Project Actions：运行开发服务、SSH 端口转发、本地打开远程 URL
+- 多窗口支持，方便并行处理多个项目
+- “Open In” 快捷打开 Finder、Terminal 和你偏好的编辑器
+- 在本地和远程实例之间快速切换
+- 原生 macOS 菜单、deep-link 处理和更精致的启动体验
+
+### VS Code 扩展
+
+- 编辑器原生体验：从工具输出直接打开文件，让会话始终贴着代码
+- Agent Manager，可从单条提示并行运行多个模型
+- 右键操作：添加上下文、解释选区、原位改进代码
+- 会话编辑器面板、响应式布局，以及与编辑器主题一致的映射
+- Edit 风格的工具结果可直接在聚焦 diff 视图中打开
+
+### 自定义能力
+
+- 18+ 内置主题，并带明暗两套变体
+- 通过 `~/.config/openchamber/themes/` 下的 JSON 文件定义自定义主题，热重载、无需重启
+- 可配置聊天、面板和服务的键盘快捷键
+- 可调整字号、间距、圆角半径和布局参数
+- 可上传或自动发现 favicon 以自定义项目图标
+- 技能目录与本地技能管理，便于复用自动化流程
+
+### 上下文与生产力
+
+- Token 用量、成本明细和原始消息检查面板
+- 多 provider 配额跟踪，并带 pace / prediction 指标
+- 通过键盘快捷键轮换收藏模型
+- 会话文件夹与子文件夹，支持拖拽排序
+- 每个项目持久化保存项目笔记和待办事项
+- 每个会话持久保存草稿，并支持更大的专注输入模式
+
+## 路线图
+
+项目仍在持续开发中。当前正在进行或计划中的方向包括：
+
+- Windows 和 Linux 桌面应用
+- 支持远程实例与笔记本联动的移动应用
+- 更多内置 tunneling 选项
+- 用于多 agent 管理的看板视图，让人始终在环并保持控制权
+- 内置自定义 OpenCode 插件/工具目录
+- Linear 集成
+- 内置浏览器，用于运行开发应用并与 agent 集成
+
+## 致谢
+
+这是一个独立项目，与 OpenCode 团队无官方隶属关系。
+
+**特别感谢：**
+
+- [OpenCode](https://opencode.ai) —— 提供了优秀的 API 与可扩展架构。
+- [Flexoki](https://github.com/kepano/flexoki) —— [Steph Ango](https://stephango.com/flexoki) 设计的优雅配色方案。
+- [Pierre](https://pierrejs-docs.vercel.app/) —— 快速而美观的 diff 查看器，支持语法高亮。
+- [Tauri](https://github.com/tauri-apps/tauri) —— 桌面应用框架。
+- [Ghostty-web](https://github.com/coder/ghostty-web) —— 出色的 Ghostty Web 渲染实现。
+- [David Hill](https://x.com/iamdavidhill) —— 他鼓励我不要一直[想太多](https://x.com/iamdavidhill/status/1993648326450020746)，而是直接发布。
+- [My wife](https://github.com/yulia-ivashko) —— 她几乎没有 AI 背景，却第一次上手就做出了每次 push 成功时播放的烟花庆祝效果。
+- 每一位通过 PR、想法和细节打磨塑造这个项目的贡献者。
+
+## 开发与贡献
+
+开发环境与贡献说明请查看根目录的 [`CONTRIBUTING.md`](../../../../../CONTRIBUTING.md)。
+
+docs 包说明请参考 [`packages/docs/README.md`](../../../README.md)。
+
+## 说明
+
+本页是根仓库 README 的中文版本，内容尽量与英文入口保持一致；命令、路径、环境变量和产品名称仍保留英文原样，以避免与实际仓库结构产生偏差。

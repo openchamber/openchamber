@@ -4,7 +4,7 @@ This package is the source-of-truth for OpenChamber public docs content.
 
 ## Layout
 
-- `content/docs/*.mdx` - English docs pages
+- `content/docs/**/*.mdx` - docs pages, including localized content when present
 - `sidebar.config.json` - docs navigation structure for Starlight sidebar
 - `CONTRIBUTING.md` - authoring guide for adding pages and sections
 - `DEPLOYMENT.md` - release/manual packaging and sync trigger model
