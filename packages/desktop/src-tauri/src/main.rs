@@ -2574,7 +2574,7 @@ fn build_init_script(local_origin: &str) -> String {
     let locale_json = serde_json::to_string(locale_code).unwrap_or_else(|_| "\"en\"".into());
 
     let mut init_script = format!(
-        "(function(){{try{{window.__OPENCHAMBER_HOME__={home_json};window.__OPENCHAMBER_MACOS_MAJOR__={macos_major};window.__OPENCHAMBER_LOCAL_ORIGIN__={local_json};window.__OPENCHAMBER_BOOTSTRAP__=Object.assign({{}},window.__OPENCHAMBER_BOOTSTRAP__||{{}},{locale:{locale_json}});}}catch(_e){{}}}})();"
+        "(function(){{try{{window.__OPENCHAMBER_HOME__={home_json};window.__OPENCHAMBER_MACOS_MAJOR__={macos_major};window.__OPENCHAMBER_LOCAL_ORIGIN__={local_json};window.__OPENCHAMBER_BOOTSTRAP__=Object.assign({{}},window.__OPENCHAMBER_BOOTSTRAP__||{{}},{{locale:{locale_json}}});}}catch(_e){{}}}})();"
     );
 
     // Cleanup: older builds injected a native-ish Instance switcher button into pages.
