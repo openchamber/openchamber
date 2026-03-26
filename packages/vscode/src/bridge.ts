@@ -1489,7 +1489,7 @@ const tryHandleLocalFsProxy = async (method: string, requestPath: string): Promi
     return buildProxyJsonError(400, 'Invalid request path');
   }
 
-  if (parsed.pathname !== '/api/fs/read' && parsed.pathname !== '/api/fs/raw') {
+  if (parsed.pathname !== '/api/fs/stat' && parsed.pathname !== '/api/fs/read' && parsed.pathname !== '/api/fs/raw') {
     return null;
   }
 
@@ -1507,6 +1507,21 @@ const tryHandleLocalFsProxy = async (method: string, requestPath: string): Promi
     const stats = await fs.promises.stat(resolution.resolvedPath);
     if (!stats.isFile()) {
       return buildProxyJsonError(400, 'Specified path is not a file');
+    }
+
+    if (parsed.pathname === '/api/fs/stat') {
+      return {
+        status: 200,
+        headers: {
+          'content-type': 'application/json',
+          'cache-control': 'no-store',
+        },
+        bodyBase64: base64EncodeUtf8(JSON.stringify({
+          path: normalizeFsPath(resolution.resolvedPath),
+          isFile: true,
+          size: stats.size,
+        })),
+      };
     }
 
     if (parsed.pathname === '/api/fs/read') {
@@ -1791,6 +1806,39 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
           return { id, type, success: true, data: { content, path: normalizeFsPath(resolution.resolvedPath) } };
         } catch (error) {
           const message = error instanceof Error ? error.message : 'Failed to read file';
+          return { id, type, success: false, error: message };
+        }
+      }
+
+      case 'api:fs:stat': {
+        const target = (payload as { path: string })?.path;
+        if (!target) {
+          return { id, type, success: false, error: 'Path is required' };
+        }
+
+        const resolution = await resolveFileReadPath(target);
+        if (!resolution.ok) {
+          return { id, type, success: false, error: resolution.error };
+        }
+
+        try {
+          const stats = await fs.promises.stat(resolution.resolvedPath);
+          if (!stats.isFile()) {
+            return { id, type, success: false, error: 'Specified path is not a file' };
+          }
+
+          return {
+            id,
+            type,
+            success: true,
+            data: {
+              path: normalizeFsPath(resolution.resolvedPath),
+              isFile: true,
+              size: stats.size,
+            },
+          };
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Failed to stat file';
           return { id, type, success: false, error: message };
         }
       }

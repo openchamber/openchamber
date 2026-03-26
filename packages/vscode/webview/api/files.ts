@@ -71,6 +71,16 @@ export const createVSCodeFilesAPI = (): FilesAPI => ({
     };
   },
 
+  async statFile(path: string): Promise<{ path: string; isFile: boolean; size: number }> {
+    const target = normalizePath(path);
+    const data = await sendBridgeMessage<{ path?: string; isFile?: boolean; size?: number }>('api:fs:stat', { path: target });
+    return {
+      path: typeof data?.path === 'string' ? normalizePath(data.path) : target,
+      isFile: Boolean(data?.isFile),
+      size: typeof data?.size === 'number' ? data.size : 0,
+    };
+  },
+
   async delete(path: string): Promise<{ success: boolean }> {
     const target = normalizePath(path);
     const data = await sendBridgeMessage<{ success: boolean }>('api:fs:delete', { path: target });

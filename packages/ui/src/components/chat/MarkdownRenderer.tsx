@@ -1022,14 +1022,14 @@ const getContextDirectory = (effectiveDirectory: string, resolvedPath: string): 
 const useFileReferenceInteractions = ({
   containerRef,
   effectiveDirectory,
-  readFile,
+  statFile,
   editor,
   preferRuntimeEditor,
   deferValidationUntilIdle = false,
 }: {
   containerRef: React.RefObject<HTMLDivElement | null>;
   effectiveDirectory: string;
-  readFile?: (path: string) => Promise<{ content: string; path: string }>;
+  statFile?: (path: string) => Promise<{ path: string; isFile: boolean; size: number }>;
   editor?: EditorAPI;
   preferRuntimeEditor?: boolean;
   deferValidationUntilIdle?: boolean;
@@ -1061,10 +1061,14 @@ const useFileReferenceInteractions = ({
 
       const checkPromise = (async () => {
         try {
-          if (!readFile) {
+          if (!statFile) {
             return false;
           }
-          await readFile(resolvedPath);
+          const stat = await statFile(resolvedPath);
+          if (!stat.isFile) {
+            cache.set(resolvedPath, false);
+            return false;
+          }
           cache.set(resolvedPath, true);
           return true;
         } catch {
@@ -1289,7 +1293,7 @@ const useFileReferenceInteractions = ({
       container.removeEventListener('click', handleClick);
       container.removeEventListener('keydown', handleKeyDown);
     };
-  }, [containerRef, deferValidationUntilIdle, editor, effectiveDirectory, preferRuntimeEditor, readFile]);
+  }, [containerRef, deferValidationUntilIdle, editor, effectiveDirectory, preferRuntimeEditor, statFile]);
 };
 
 const useMermaidInlineInteractions = ({
@@ -1405,7 +1409,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
   useFileReferenceInteractions({
     containerRef: streamdownContainerRef,
     effectiveDirectory,
-    readFile: files.readFile,
+    statFile: files.statFile,
     editor,
     preferRuntimeEditor: runtime.isVSCode,
     deferValidationUntilIdle: isStreaming,
@@ -1491,7 +1495,7 @@ export const SimpleMarkdownRenderer: React.FC<{
   useFileReferenceInteractions({
     containerRef: streamdownContainerRef,
     effectiveDirectory,
-    readFile: files.readFile,
+    statFile: files.statFile,
     editor,
     preferRuntimeEditor: runtime.isVSCode,
   });
