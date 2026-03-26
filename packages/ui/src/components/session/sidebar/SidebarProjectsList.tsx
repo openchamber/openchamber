@@ -101,7 +101,7 @@ function DraggableProjectItem(props: {
   } = props;
 
   // Always call useDraggable before any conditional returns (hooks rules)
-  const { setNodeRef, transform } = useDraggable({
+  const { attributes, listeners, setNodeRef, transform } = useDraggable({
     id: projectId,
     data: { type: 'project', projectId },
   });
@@ -127,7 +127,7 @@ function DraggableProjectItem(props: {
     : undefined;
 
   return (
-    <div ref={setNodeRef} style={style} className={cn(indent, isDragging && 'opacity-50')}>
+    <div ref={setNodeRef} style={style} className={cn(indent, isDragging && 'opacity-50')} {...listeners} {...attributes}>
       <SortableProjectItem
         key={projectKey}
         id={projectKey}
