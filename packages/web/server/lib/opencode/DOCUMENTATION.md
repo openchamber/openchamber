@@ -10,6 +10,10 @@ This module provides OpenCode server integration utilities for the web server ru
 - `packages/web/server/lib/opencode/lifecycle.js`: OpenCode process lifecycle runtime (startup, restart, readiness, health monitoring).
 - `packages/web/server/lib/opencode/env-runtime.js`: OpenCode CLI/binary resolution and shell environment runtime.
 - `packages/web/server/lib/opencode/network-runtime.js`: OpenCode URL construction, health-probe readiness checks, and API prefix runtime.
+- `packages/web/server/lib/opencode/project-directory-runtime.js`: request-scoped and settings-backed project directory resolution/validation runtime.
+- `packages/web/server/lib/opencode/config-entity-routes.js`: route registration for agent/command/MCP config orchestration and reload semantics.
+- `packages/web/server/lib/opencode/project-icon-routes.js`: project icon upload/read/discovery route registration and icon storage orchestration.
+- `packages/web/server/lib/opencode/skill-routes.js`: route registration for skill config CRUD, supporting files, and skills catalog scan/install flows.
 - `packages/web/server/lib/opencode/settings-runtime.js`: Settings persistence runtime (disk IO, migrations, normalization, project validation, and persisted update serialization).
 - `packages/web/server/lib/opencode/proxy.js`: OpenCode API/SSE forwarding and readiness-gate route registration.
 - `packages/web/server/lib/opencode/session-runtime.js`: session status/attention/activity runtime for OpenCode SSE events.
@@ -122,6 +126,33 @@ This module provides OpenCode server integration utilities for the web server ru
   - `readSettingsFromDiskMigrated()`
   - `writeSettingsToDisk(settings)`
   - `persistSettings(changes)`
+
+## Public exports (project-directory-runtime.js)
+- `createProjectDirectoryRuntime(dependencies)`: creates runtime for request/project directory candidate normalization and validation.
+- Returned API:
+  - `resolveDirectoryCandidate(value)`
+  - `validateDirectoryPath(candidate)`
+  - `resolveProjectDirectory(req)`
+  - `resolveOptionalProjectDirectory(req)`
+
+## Public exports (config-entity-routes.js)
+- `registerConfigEntityRoutes(app, dependencies)`: registers configuration entity routes:
+  - Agents: `/api/config/agents/:name` and `/api/config/agents/:name/config`
+  - Commands: `/api/config/commands/:name`
+  - MCP servers: `/api/config/mcp` and `/api/config/mcp/:name`
+
+## Public exports (project-icon-routes.js)
+- `registerProjectIconRoutes(app, dependencies)`: registers project icon routes and owns icon storage/discovery flow:
+  - `GET /api/projects/:projectId/icon`
+  - `PUT /api/projects/:projectId/icon`
+  - `DELETE /api/projects/:projectId/icon`
+  - `POST /api/projects/:projectId/icon/discover`
+
+## Public exports (skill-routes.js)
+- `registerSkillRoutes(app, dependencies)`: registers skills-related routes:
+  - Skills config CRUD and metadata under `/api/config/skills*`
+  - Skills catalog listing/source pagination, scan, and install routes
+  - Supporting skill file read/write/delete routes
 
 ## Public exports (proxy.js)
 - `registerOpenCodeProxy(app, dependencies)`: registers OpenCode proxy routes and middleware.
