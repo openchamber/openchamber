@@ -7,6 +7,8 @@ import {
   type VSCodeThemeKind,
   type VSCodeThemePayload,
 } from '@openchamber/ui/lib/theme/vscode/adapter';
+import { normalizeLocale } from '@openchamber/ui/lib/i18n/locale';
+import { getVSCodeRuntimeCopy, resolveVSCodeLocale } from '../src/i18n';
 
 type ConnectionStatus = 'connecting' | 'connected' | 'error' | 'disconnected';
 type PanelType = 'chat' | 'agentManager';
@@ -21,10 +23,14 @@ declare global {
       workspaceFolder: string;
       theme: string;
       connectionStatus: string;
+      locale?: string;
       cliAvailable?: boolean;
       panelType?: PanelType;
       viewMode?: 'sidebar' | 'editor';
       initialSessionId?: string | null;
+    };
+    __OPENCHAMBER_BOOTSTRAP__?: {
+      locale?: string;
     };
     __OPENCHAMBER_VSCODE_THEME__?: VSCodeThemePayload['theme'];
     __OPENCHAMBER_VSCODE_SHIKI_THEMES__?: { light?: Record<string, unknown>; dark?: Record<string, unknown> } | null;
@@ -46,6 +52,11 @@ try {
 }
 
 window.__OPENCHAMBER_RUNTIME_APIS__ = createVSCodeAPIs();
+window.__OPENCHAMBER_BOOTSTRAP__ = {
+  locale: normalizeLocale(window.__VSCODE_CONFIG__?.locale ?? navigator.language),
+};
+
+const webviewCopy = getVSCodeRuntimeCopy(resolveVSCodeLocale(window.__VSCODE_CONFIG__?.locale ?? navigator.language)).webview;
 
 const bootstrapConnectionStatus = () => {
   const initialStatus = (window.__VSCODE_CONFIG__?.connectionStatus as ConnectionStatus | undefined) || 'connecting';
@@ -153,7 +164,7 @@ const maybeHideLoadingOverlay = () => {
 
   if (connectionStatus === 'connected') {
     if (bootstrapFailed) {
-      setLoadingStatusText('OpenCode connected, but initial data load failed.', 'error');
+      setLoadingStatusText(webviewCopy.initialDataFailed, 'error');
       fadeOutLoadingScreen();
       return;
     }
@@ -163,26 +174,26 @@ const maybeHideLoadingOverlay = () => {
       return;
     }
 
-    const providersText = bootstrapProvidersReady ? '✓ Providers' : '… Providers';
-    const agentsText = bootstrapAgentsReady ? '✓ Agents' : '… Agents';
-    setLoadingStatusText(`Loading data (${providersText}, ${agentsText})…`);
+    const providersText = bootstrapProvidersReady ? webviewCopy.providersReady : webviewCopy.providersPending;
+    const agentsText = bootstrapAgentsReady ? webviewCopy.agentsReady : webviewCopy.agentsPending;
+    setLoadingStatusText(webviewCopy.loadingData(providersText, agentsText));
     return;
   }
 
   if (connectionStatus === 'error') {
     const error = window.__OPENCHAMBER_CONNECTION__?.error;
-    setLoadingStatusText(error || 'Connection error', 'error');
+    setLoadingStatusText(error || webviewCopy.connectionError, 'error');
     fadeOutLoadingScreen();
     return;
   }
 
   if (connectionStatus === 'disconnected') {
-    setLoadingStatusText('Disconnected', 'error');
+    setLoadingStatusText(webviewCopy.disconnected, 'error');
     fadeOutLoadingScreen();
     return;
   }
 
-  setLoadingStatusText('Starting OpenCode API…');
+  setLoadingStatusText(webviewCopy.startingApi);
 };
 
 const applyInitialTheme = (theme: { metadata?: { variant?: string }; colors?: { surface?: { background?: string; foreground?: string } } }) => {

@@ -4,6 +4,7 @@ import { AgentManagerPanelProvider } from './AgentManagerPanelProvider';
 import { SessionEditorPanelProvider } from './SessionEditorPanelProvider';
 import { createOpenCodeManager, type OpenCodeManager } from './opencode';
 import { startGlobalEventWatcher, stopGlobalEventWatcher, setChatViewProvider } from './sessionActivityWatcher';
+import { buildVSCodeCodeBlockPrompt, getVSCodeRuntimeCopy, resolveVSCodeLocale } from './i18n';
 
 let chatViewProvider: ChatViewProvider | undefined;
 let agentManagerProvider: AgentManagerPanelProvider | undefined;
@@ -15,6 +16,18 @@ let activeSessionId: string | null = null;
 let activeSessionTitle: string | null = null;
 
 const SETTINGS_KEY = 'openchamber.settings';
+
+const getExtensionMessages = () => {
+  const locale = resolveVSCodeLocale(vscode.env.language);
+  const host = getVSCodeRuntimeCopy(locale).host;
+  return {
+    ...host,
+    explainPromptWithSelection: (filePath: string, lineRange: string, languageId: string, selectedText: string) =>
+      buildVSCodeCodeBlockPrompt(host.explainPromptPrefix, filePath, lineRange, languageId, selectedText),
+    improvePrompt: (filePath: string, lineRange: string, languageId: string, selectedText: string) =>
+      buildVSCodeCodeBlockPrompt(host.improvePromptPrefix, filePath, lineRange, languageId, selectedText),
+  };
+};
 
 const formatIso = (value: number | null | undefined) => {
   if (typeof value !== 'number' || !Number.isFinite(value)) return '(none)';
@@ -32,6 +45,7 @@ const formatDurationMs = (value: number | null | undefined) => {
 };
 
 export async function activate(context: vscode.ExtensionContext) {
+  const i18n = getExtensionMessages();
   outputChannel = vscode.window.createOutputChannel('OpenChamber');
 
   let moveToRightSidebarScheduled = false;
@@ -144,7 +158,7 @@ export async function activate(context: vscode.ExtensionContext) {
         await vscode.commands.executeCommand('openchamber.chatView.focus');
       } catch (e) {
         outputChannel?.appendLine(`[OpenChamber] openchamber.chatView.focus failed: ${e}`);
-        vscode.window.showErrorMessage(`OpenChamber: Failed to open sidebar - ${e}`);
+        vscode.window.showErrorMessage(i18n.failedToOpenSidebar(e));
       }
     })
   );
@@ -190,7 +204,7 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand('openchamber.openActiveSessionInEditor', () => {
       if (!activeSessionId) {
-        vscode.window.showInformationMessage('OpenChamber: No active session');
+        vscode.window.showInformationMessage(i18n.noActiveSession);
         return;
       }
       sessionEditorProvider?.createOrShow(activeSessionId, activeSessionTitle ?? undefined);
@@ -226,9 +240,9 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('openchamber.restartApi', async () => {
       try {
         await openCodeManager?.restart();
-        vscode.window.showInformationMessage('OpenChamber: API connection restarted');
+        vscode.window.showInformationMessage(i18n.apiRestarted);
       } catch (e) {
-        vscode.window.showErrorMessage(`OpenChamber: Failed to restart API - ${e}`);
+        vscode.window.showErrorMessage(i18n.failedToRestartApi(e));
       }
     })
   );
@@ -237,7 +251,7 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('openchamber.addToContext', async () => {
       const editor = vscode.window.activeTextEditor;
       if (!editor) {
-        vscode.window.showWarningMessage('OpenChamber [Add to Context]:No active editor');
+        vscode.window.showWarningMessage(i18n.addToContextNoActiveEditor);
         return;
       }
 
@@ -245,7 +259,7 @@ export async function activate(context: vscode.ExtensionContext) {
       const selectedText = editor.document.getText(selection);
 
       if (!selectedText) {
-        vscode.window.showWarningMessage('OpenChamber [Add to Context]: No text selected');
+        vscode.window.showWarningMessage(i18n.addToContextNoSelection);
         return;
       }
 
@@ -315,7 +329,7 @@ export async function activate(context: vscode.ExtensionContext) {
       }
 
       if (mentionPaths.length === 0) {
-        vscode.window.showWarningMessage('OpenChamber: No file selected to mention');
+        vscode.window.showWarningMessage(i18n.noFileSelectedToMention);
         return;
       }
 
@@ -324,7 +338,7 @@ export async function activate(context: vscode.ExtensionContext) {
       chatViewProvider?.addFileMentions(mentionPaths);
 
       if (skippedEntries.length > 0) {
-        vscode.window.showInformationMessage('OpenChamber: Some selected entries were skipped (folders or unsupported resources)');
+          vscode.window.showInformationMessage(i18n.skippedEntries);
       }
     })
   );
@@ -333,7 +347,7 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('openchamber.explain', async () => {
       const editor = vscode.window.activeTextEditor;
       if (!editor) {
-        vscode.window.showWarningMessage('OpenChamber [Explain]: No active editor');
+        vscode.window.showWarningMessage(i18n.explainNoActiveEditor);
         return;
       }
 
@@ -349,10 +363,10 @@ export async function activate(context: vscode.ExtensionContext) {
         const startLine = selection.start.line + 1;
         const endLine = selection.end.line + 1;
         const lineRange = startLine === endLine ? `${startLine}` : `${startLine}-${endLine}`;
-        prompt = `Explain the following Code / Text:\n\n${filePath}:${lineRange}\n\`\`\`${languageId}\n${selectedText}\n\`\`\``;
+        prompt = i18n.explainPromptWithSelection(filePath, lineRange, languageId, selectedText);
       } else {
         // No selection - explain the entire file
-        prompt = `Explain the following Code / Text:\n\n${filePath}`;
+        prompt = i18n.explainPromptWithoutSelection(filePath);
       }
 
       // Create new session and send the prompt
@@ -365,7 +379,7 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('openchamber.improveCode', async () => {
       const editor = vscode.window.activeTextEditor;
       if (!editor) {
-        vscode.window.showWarningMessage('OpenChamber [Improve Code]: No active editor');
+        vscode.window.showWarningMessage(i18n.improveNoActiveEditor);
         return;
       }
 
@@ -373,7 +387,7 @@ export async function activate(context: vscode.ExtensionContext) {
       const selectedText = editor.document.getText(selection);
 
       if (!selectedText) {
-        vscode.window.showWarningMessage('OpenChamber [Improve Code]: No text selected');
+        vscode.window.showWarningMessage(i18n.improveNoSelection);
         return;
       }
 
@@ -383,7 +397,7 @@ export async function activate(context: vscode.ExtensionContext) {
       const endLine = selection.end.line + 1;
       const lineRange = startLine === endLine ? `${startLine}` : `${startLine}-${endLine}`;
 
-      const prompt = `Improve the following Code:\n\n${filePath}:${lineRange}\n\`\`\`${languageId}\n${selectedText}\n\`\`\``;
+      const prompt = i18n.improvePrompt(filePath, lineRange, languageId, selectedText);
 
       // Create new session and send the prompt
       chatViewProvider?.createNewSessionWithPrompt(prompt);

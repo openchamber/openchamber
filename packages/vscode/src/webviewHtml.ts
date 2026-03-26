@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { getThemeKindName } from './theme';
 import type { ConnectionStatus } from './opencode';
+import { getVSCodeRuntimeCopy, resolveVSCodeLocale } from './i18n';
 
 export type PanelType = 'chat' | 'agentManager';
 
@@ -14,6 +15,7 @@ export interface WebviewHtmlOptions {
   initialSessionId?: string;
   viewMode?: 'sidebar' | 'editor';
   devServerUrl?: string | null;
+  locale?: string;
 }
 
 const asCspToken = (value: string | null | undefined): string | null => {
@@ -50,10 +52,13 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
     initialSessionId,
     viewMode = 'sidebar',
     devServerUrl,
+    locale = 'en',
   } = options;
 
   const scriptPath = vscode.Uri.joinPath(extensionUri, 'dist', 'webview', 'assets', 'index.js');
   const scriptUri = webview.asWebviewUri(scriptPath);
+  const normalizedLocale = resolveVSCodeLocale(locale);
+  const copy = getVSCodeRuntimeCopy(normalizedLocale).webview;
   const normalizedDevServerUrl = asCspToken(devServerUrl)?.replace(/\/$/, '') ?? null;
   const devServerOrigin = toOrigin(normalizedDevServerUrl);
   const styleSrc = uniqueTokens([webview.cspSource, "'unsafe-inline'", devServerOrigin]);
@@ -73,7 +78,7 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
   // bottomLeft=(8.432, 74), bottomRight=(91.568, 74), bottom=(50, 98)
   // topFaceCenterY = (2 + 26 + 50 + 26) / 4 = 26
   return `<!DOCTYPE html>
-<html lang="en">
+<html lang="${normalizedLocale}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -159,9 +164,9 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
       </g>
     </svg>
     <div class="status-text" id="loading-status">
-      ${initialStatus === 'connecting' ? 'Starting OpenCode API…' : initialStatus === 'connected' ? 'Initializing…' : 'Connecting…'}
+      ${initialStatus === 'connecting' ? copy.startingApi : initialStatus === 'connected' ? copy.initializing : copy.connecting}
     </div>
-    ${!cliAvailable ? `<div class="error-text">OpenCode CLI not found. Please install it first.</div>` : ''}
+    ${!cliAvailable ? `<div class="error-text">${copy.cliMissing}</div>` : ''}
   </div>
   
   <div id="root"></div>
@@ -173,6 +178,7 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
       workspaceFolder: "${workspaceFolder.replace(/\\/g, '\\\\')}",
       theme: "${themeKind}",
       connectionStatus: "${initialStatus}",
+      locale: ${JSON.stringify(locale)},
       cliAvailable: ${cliAvailable},
       panelType: "${panelType}",
       viewMode: "${viewMode}",
@@ -187,16 +193,16 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
         var statusEl = document.getElementById('loading-status');
         if (statusEl) {
           if (msg.status === 'connecting') {
-            statusEl.textContent = 'Starting OpenCode API…';
+            statusEl.textContent = ${JSON.stringify(copy.startingApi)};
             statusEl.classList.remove('error-text');
           } else if (msg.status === 'connected') {
-            statusEl.textContent = 'Connected!';
+            statusEl.textContent = ${JSON.stringify(copy.connected)};
             statusEl.classList.remove('error-text');
           } else if (msg.status === 'error') {
-            statusEl.textContent = msg.error || 'Connection error';
+            statusEl.textContent = msg.error || ${JSON.stringify(copy.connectionError)};
             statusEl.classList.add('error-text');
           } else {
-            statusEl.textContent = 'Reconnecting…';
+            statusEl.textContent = ${JSON.stringify(copy.reconnecting)};
             statusEl.classList.remove('error-text');
           }
         }
@@ -268,7 +274,7 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
           }
         })();
 
-        setStatus('Starting webview dev server (' + hostLabel + ')...');
+        setStatus(${JSON.stringify(copy.startingDevServer('__HOST__'))}.replace('__HOST__', hostLabel));
 
         Promise.resolve()
           .then(() => import(viteClientUrl))
@@ -292,7 +298,7 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
           .catch((error) => {
             attempt += 1;
             console.warn('[OpenChamber] VS Code webview dev bundle unavailable, retrying...', error);
-            setStatus('Waiting for webview dev server (' + hostLabel + ')... attempt ' + attempt);
+            setStatus(${JSON.stringify(copy.waitingDevServer('__HOST__', 99999))}.replace('__HOST__', hostLabel).replace('99999', String(attempt)));
             window.setTimeout(() => {
               tryLoadDevBundle();
             }, retryDelayMs);

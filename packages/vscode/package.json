@@ -1,7 +1,7 @@
 {
   "name": "openchamber",
-  "displayName": "OpenChamber",
-  "description": "AI coding assistant powered by OpenCode",
+  "displayName": "%extension.displayName%",
+  "description": "%extension.description%",
   "version": "1.9.1",
   "publisher": "fedaykindev",
   "private": true,
@@ -43,7 +43,7 @@
       "activitybar": [
         {
           "id": "openchamber",
-          "title": "OpenChamber",
+          "title": "%viewsContainer.openchamber.title%",
           "icon": "assets/icon.svg"
         }
       ]
@@ -53,15 +53,15 @@
         {
           "type": "webview",
           "id": "openchamber.chatView",
-          "name": "Chat"
+          "name": "%view.openchamber.chat.name%"
         }
       ]
     },
     "commands": [
       {
         "command": "openchamber.openSidebar",
-        "category": "OpenChamber",
-        "title": "Open Sidebar",
+        "category": "%command.category%",
+        "title": "%command.openSidebar.title%",
         "icon": {
           "light": "assets/icon.svg",
           "dark": "assets/icon-titlebar.svg"
@@ -69,35 +69,35 @@
       },
       {
         "command": "openchamber.focusChat",
-        "category": "OpenChamber",
-        "title": "Focus Chat"
+        "category": "%command.category%",
+        "title": "%command.focusChat.title%"
       },
       {
         "command": "openchamber.restartApi",
-        "category": "OpenChamber",
-        "title": "Restart API Connection"
+        "category": "%command.category%",
+        "title": "%command.restartApi.title%"
       },
       {
         "command": "openchamber.showOpenCodeStatus",
-        "category": "OpenChamber",
-        "title": "Show OpenCode Status"
+        "category": "%command.category%",
+        "title": "%command.showOpenCodeStatus.title%"
       },
       {
         "command": "openchamber.openAgentManager",
-        "category": "OpenChamber",
-        "title": "Open Agent Manager",
+        "category": "%command.category%",
+        "title": "%command.openAgentManager.title%",
         "icon": "$(circuit-board)"
       },
       {
         "command": "openchamber.openActiveSessionInEditor",
-        "category": "OpenChamber",
-        "title": "Open Active Session in Editor",
+        "category": "%command.category%",
+        "title": "%command.openActiveSessionInEditor.title%",
         "icon": "$(link-external)"
       },
       {
         "command": "openchamber.openNewSessionInEditor",
-        "category": "OpenChamber",
-        "title": "Open New Session in Editor",
+        "category": "%command.category%",
+        "title": "%command.openNewSessionInEditor.title%",
         "icon": {
           "light": "assets/icon.svg",
           "dark": "assets/icon-titlebar.svg"
@@ -105,47 +105,47 @@
       },
       {
         "command": "openchamber.openCurrentOrNewSessionInEditor",
-        "category": "OpenChamber",
-        "title": "Open Session in Editor",
+        "category": "%command.category%",
+        "title": "%command.openCurrentOrNewSessionInEditor.title%",
         "icon": "$(link-external)"
       },
       {
         "command": "openchamber.addToContext",
-        "category": "OpenChamber",
-        "title": "Add to Context"
+        "category": "%command.category%",
+        "title": "%command.addToContext.title%"
       },
       {
         "command": "openchamber.explain",
-        "category": "OpenChamber",
-        "title": "Explain"
+        "category": "%command.category%",
+        "title": "%command.explain.title%"
       },
       {
         "command": "openchamber.improveCode",
-        "category": "OpenChamber",
-        "title": "Improve Code"
+        "category": "%command.category%",
+        "title": "%command.improveCode.title%"
       },
       {
         "command": "openchamber.newSession",
-        "category": "OpenChamber",
-        "title": "New Session",
+        "category": "%command.category%",
+        "title": "%command.newSession.title%",
         "icon": "$(add)"
       },
       {
         "command": "openchamber.showSettings",
-        "category": "OpenChamber",
-        "title": "Settings",
+        "category": "%command.category%",
+        "title": "%command.showSettings.title%",
         "icon": "$(settings-gear)"
       },
       {
         "command": "openchamber.attachExplorerToChat",
-        "category": "OpenChamber",
-        "title": "Attach to OpenChamber Chat"
+        "category": "%command.category%",
+        "title": "%command.attachExplorerToChat.title%"
       }
     ],
     "submenus": [
       {
         "id": "openchamber.submenu",
-        "label": "OpenChamber"
+        "label": "%submenu.openchamber.label%"
       }
     ],
     "menus": {
@@ -203,17 +203,17 @@
       ]
     },
     "configuration": {
-      "title": "OpenChamber",
+      "title": "%configuration.title%",
       "properties": {
         "openchamber.apiUrl": {
           "type": "string",
           "default": "",
-          "description": "URL of an external OpenCode API server. Leave empty to auto-start a local instance."
+          "description": "%configuration.apiUrl.description%"
         },
         "openchamber.opencodeBinary": {
           "type": "string",
           "default": "",
-          "description": "Optional absolute path to the opencode CLI binary. Useful if PATH lookup fails. Requires window reload or API restart to apply."
+          "description": "%configuration.opencodeBinary.description%"
         }
       }
     }

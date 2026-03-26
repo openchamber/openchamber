@@ -6,6 +6,14 @@ import { getWebviewShikiThemes } from './shikiThemes';
 import { getWebviewHtml } from './webviewHtml';
 import { openSseProxy } from './sseProxy';
 import { resolveWebviewDevServerUrl } from './webviewDevServer';
+import { getVSCodeRuntimeCopy, resolveVSCodeLocale } from './i18n';
+
+const resolveDisplayLanguage = (): string => {
+  const language = vscode.env.language;
+  return typeof language === 'string' && language.trim().length > 0 ? language : 'en';
+};
+
+const getAgentManagerTitle = (): string => getVSCodeRuntimeCopy(resolveVSCodeLocale(resolveDisplayLanguage())).host.agentManagerTitle;
 
 export class AgentManagerPanelProvider {
   public static readonly viewType = 'openchamber.agentManager';
@@ -39,7 +47,7 @@ export class AgentManagerPanelProvider {
     // Create new panel
     this._panel = vscode.window.createWebviewPanel(
       AgentManagerPanelProvider.viewType,
-      'Agent Manager',
+      getAgentManagerTitle(),
       vscode.ViewColumn.One,
       {
         enableScripts: true,
@@ -231,6 +239,7 @@ export class AgentManagerPanelProvider {
       initialStatus: this._cachedStatus,
       cliAvailable,
       panelType: 'agentManager',
+      locale: resolveDisplayLanguage(),
       devServerUrl: this._webviewDevServerUrl,
     });
   }

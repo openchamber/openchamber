@@ -7,6 +7,7 @@ import { execSync } from 'child_process';
 import { spawnSync } from 'child_process';
 import { spawn } from 'child_process';
 import { randomBytes } from 'crypto';
+import { getVSCodeRuntimeCopy, resolveVSCodeLocale } from './i18n';
 
 const READY_CHECK_TIMEOUT_MS = 30000;
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
@@ -732,6 +733,7 @@ export function createOpenCodeManager(_context: vscode.ExtensionContext): OpenCo
     workdir?: string,
     options: { rotateManaged?: boolean } = {}
   ): Promise<void> {
+    const hostMessages = getVSCodeRuntimeCopy(resolveVSCodeLocale(vscode.env.language)).host;
     startCount += 1;
     setStatus('connecting');
     lastStartAt = Date.now();
@@ -828,17 +830,17 @@ export function createOpenCodeManager(_context: vscode.ExtensionContext): OpenCo
         if (!cliPath) {
           cliPath = resolveOpencodeCliPath();
         }
-        setStatus('error', 'OpenCode CLI not found. Install it and ensure it\'s in PATH.');
+        setStatus('error', hostMessages.cliNotFoundStatus);
         vscode.window.showErrorMessage(
-          'OpenCode CLI not found. Please install it and ensure it\'s in PATH.',
-          'More Info'
+          hostMessages.cliNotFoundMessage,
+          hostMessages.moreInfo
         ).then(selection => {
-          if (selection === 'More Info') {
+          if (selection === hostMessages.moreInfo) {
             vscode.env.openExternal(vscode.Uri.parse('https://github.com/anomalyco/opencode'));
           }
         });
       } else {
-        setStatus('error', `Failed to start OpenCode: ${message}`);
+        setStatus('error', `${hostMessages.failedToStartPrefix}: ${message}`);
       }
     }
   }

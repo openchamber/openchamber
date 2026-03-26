@@ -7,6 +7,11 @@ import { getWebviewHtml } from './webviewHtml';
 import { openSseProxy } from './sseProxy';
 import { resolveWebviewDevServerUrl } from './webviewDevServer';
 
+const resolveDisplayLanguage = (): string => {
+  const language = vscode.env.language;
+  return typeof language === 'string' && language.trim().length > 0 ? language : 'en';
+};
+
 export class ChatViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'openchamber.chatView';
 
@@ -302,6 +307,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       workspaceFolder,
       initialStatus,
       cliAvailable,
+      locale: resolveDisplayLanguage(),
       devServerUrl: this._webviewDevServerUrl,
     });
   }

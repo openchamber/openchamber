@@ -6,6 +6,16 @@ import { getWebviewShikiThemes } from './shikiThemes';
 import { getWebviewHtml } from './webviewHtml';
 import { openSseProxy } from './sseProxy';
 import { resolveWebviewDevServerUrl } from './webviewDevServer';
+import { getVSCodeRuntimeCopy, resolveVSCodeLocale } from './i18n';
+
+const resolveDisplayLanguage = (): string => {
+  const language = vscode.env.language;
+  return typeof language === 'string' && language.trim().length > 0 ? language : 'en';
+};
+
+const getSessionEditorFallbackTitles = () => {
+  return getVSCodeRuntimeCopy(resolveVSCodeLocale(resolveDisplayLanguage())).host;
+};
 
 type SessionPanelState = {
   panel: vscode.WebviewPanel;
@@ -32,7 +42,7 @@ export class SessionEditorPanelProvider {
   public createOrShowNewSession(): void {
     // Generate unique panel ID for new session drafts
     const panelId = `new_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-    this._createPanel(panelId, 'New Session', null);
+    this._createPanel(panelId, getSessionEditorFallbackTitles().newSessionTitle, null);
   }
 
   public createOrShow(sessionId: string, title?: string): void {
@@ -40,7 +50,7 @@ export class SessionEditorPanelProvider {
       return;
     }
 
-    const sessionTitle = title && title.trim().length > 0 ? title.trim() : 'Session';
+    const sessionTitle = title && title.trim().length > 0 ? title.trim() : getSessionEditorFallbackTitles().sessionTitle;
 
     const existing = this._panels.get(sessionId);
     if (existing) {
@@ -268,6 +278,7 @@ export class SessionEditorPanelProvider {
       initialStatus,
       cliAvailable,
       panelType: 'chat',
+      locale: resolveDisplayLanguage(),
       initialSessionId: sessionId ?? undefined,
       viewMode: 'editor',
       devServerUrl: this._webviewDevServerUrl,
