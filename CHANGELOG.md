@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Docs/README: restored the root README as the English source and added a Chinese repository guide under `packages/docs`, making language-specific navigation clearer without replacing the primary project entrypoint.
+
 ## [1.9.1] - 2026-03-20
 
 - Sessions/UI: restored Project Notes access in the sidebar, polished notes/todo editing, and fixed project action overlap so project controls stay reachable for non-git directories.
