@@ -6,6 +6,8 @@ This module provides OpenCode server integration utilities for the web server ru
 ## Entrypoints and structure
 - `packages/web/server/lib/opencode/index.js`: public entrypoint (currently baseline placeholder).
 - `packages/web/server/lib/opencode/auth.js`: provider authentication file operations.
+- `packages/web/server/lib/opencode/message-payload.js`: helper utilities for removing oversized diff snapshot fields before forwarding message/session payloads to the UI.
+- `packages/web/server/lib/opencode/message-payload.test.js`: unit tests for message payload sanitization helpers.
 - `packages/web/server/lib/opencode/shared.js`: shared utilities for config, markdown, skills, and git helpers.
 - `packages/web/server/lib/opencode/ui-auth.js`: UI session authentication with rate limiting.
 
@@ -53,6 +55,7 @@ This module provides OpenCode server integration utilities for the web server ru
 ## Notes for contributors
 - This module serves as foundation for OpenCode-related server utilities.
 - Index.js is currently a baseline placeholder; direct imports use submodule paths.
+- Message payload sanitization is server-side compatibility logic for UI performance; remove diff snapshot `before`/`after` contents without changing the remaining payload shape.
 - All file writes include automatic backup before modification.
 - Config merging follows priority: custom > project > user.
 - UI auth uses scrypt for password hashing with constant-time comparison.

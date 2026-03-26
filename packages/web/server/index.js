@@ -8,6 +8,10 @@ import { WebSocketServer } from 'ws';
 import { fileURLToPath } from 'url';
 import os from 'os';
 import crypto from 'crypto';
+import {
+  rewriteJsonSseBlock,
+  sanitizeMessagePayload,
+} from './lib/opencode/message-payload.js';
 import { createUiAuth } from './lib/opencode/ui-auth.js';
 import { createTunnelAuth } from './lib/opencode/tunnel-auth.js';
 import {
@@ -5103,6 +5107,10 @@ function parseSseDataPayload(block) {
   }
 }
 
+function maybeSanitizeMessagePayload(value) {
+  return sanitizeMessagePayload(value);
+}
+
 function extractSessionStatusUpdate(payload) {
   if (!payload || typeof payload !== 'object' || payload.type !== 'session.status') {
     return null;
@@ -6717,6 +6725,8 @@ function setupProxy(app) {
       }, 30 * 1000);
 
       const reader = upstreamResponse.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
       try {
         while (true) {
           const { done, value } = await reader.read();
@@ -6728,9 +6738,25 @@ function setupProxy(app) {
             break;
           }
           if (value && value.length > 0) {
-            res.write(Buffer.from(value));
-            resetIdleTimeout();
+            buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n');
+
+            let separatorIndex = buffer.indexOf('\n\n');
+            while (separatorIndex !== -1) {
+              const block = buffer.slice(0, separatorIndex);
+              buffer = buffer.slice(separatorIndex + 2);
+              const rewritten = rewriteJsonSseBlock(block, maybeSanitizeMessagePayload);
+              res.write(`${rewritten.block}\n\n`);
+              resetIdleTimeout();
+              separatorIndex = buffer.indexOf('\n\n');
+            }
           }
+        }
+
+        const trailing = buffer.trim();
+        if (trailing.length > 0) {
+          const rewritten = rewriteJsonSseBlock(trailing, maybeSanitizeMessagePayload);
+          res.write(`${rewritten.block}\n\n`);
+          resetIdleTimeout();
         }
       } finally {
         try {
@@ -6871,6 +6897,24 @@ function setupProxy(app) {
           continue;
         }
         res.setHeader(key, value);
+      }
+
+      const isSessionMessageHistoryRequest = req.method === 'GET' && /\/session\/[^/]+\/message$/.test(req.path || '');
+      const upstreamContentType = (upstreamResponse.headers.get('content-type') || '').toLowerCase();
+
+      if (isSessionMessageHistoryRequest && upstreamContentType.includes('application/json')) {
+        const upstreamText = await upstreamResponse.text();
+        let payload;
+        try {
+          payload = JSON.parse(upstreamText);
+        } catch {
+          res.status(upstreamResponse.status).send(upstreamText);
+          return;
+        }
+
+        const nextPayload = maybeSanitizeMessagePayload(payload);
+        res.status(upstreamResponse.status).json(nextPayload);
+        return;
       }
 
       const upstreamBody = Buffer.from(await upstreamResponse.arrayBuffer());
@@ -8732,9 +8776,10 @@ async function main(options = {}) {
 
     const forwardBlock = (block) => {
       if (!block) return;
-      const payload = parseSseDataPayload(block);
+      const rewritten = rewriteJsonSseBlock(block, maybeSanitizeMessagePayload);
+      const payload = rewritten.parsedPayload ?? parseSseDataPayload(rewritten.block);
 
-      res.write(`${block}
+      res.write(`${rewritten.block}
 
 `);
       // Cache session titles from session.updated/session.created events (global stream)
@@ -8875,9 +8920,10 @@ async function main(options = {}) {
 
     const forwardBlock = (block) => {
       if (!block) return;
-      const payload = parseSseDataPayload(block);
+      const rewritten = rewriteJsonSseBlock(block, maybeSanitizeMessagePayload);
+      const payload = rewritten.parsedPayload ?? parseSseDataPayload(rewritten.block);
 
-      res.write(`${block}
+      res.write(`${rewritten.block}
 
 `);
       // Cache session titles from session.updated/session.created events (per-session stream)
