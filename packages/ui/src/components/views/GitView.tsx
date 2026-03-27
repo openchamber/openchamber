@@ -45,6 +45,7 @@ import {
 
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useUIStore } from '@/stores/useUIStore';
+import { useDetectedWorktreeMetadata } from '@/hooks/useDetectedWorktreeRoot';
 import { IntegrateCommitsSection } from './git/IntegrateCommitsSection';
 
 import { GitHeader } from './git/GitHeader';
@@ -253,7 +254,7 @@ export const GitView: React.FC = () => {
 
     return undefined;
   }, [availableWorktrees, normalizedCurrentDirectory, worktreeMap]);
-  const worktreeMetadata = React.useMemo(() => {
+  const storeWorktreeMetadata = React.useMemo(() => {
     if (currentSessionId) {
       return worktreeMap.get(currentSessionId) ?? inferredWorktreeMetadata;
     }
@@ -264,6 +265,8 @@ export const GitView: React.FC = () => {
 
     return undefined;
   }, [currentSessionId, inferredWorktreeMetadata, newSessionDraft?.open, worktreeMap]);
+
+  const worktreeMetadata = useDetectedWorktreeMetadata(currentDirectory, storeWorktreeMetadata);
 
 
   const { profiles, globalIdentity, defaultGitIdentityId, loadProfiles, loadGlobalIdentity, loadDefaultGitIdentityId } =
