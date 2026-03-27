@@ -83,6 +83,11 @@ export const useSessionActions = (args: Args) => {
 
       if (sessionId === args.currentSessionId) {
         if (args.allowReselect) {
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent<string>('openchamber:session-reselected', {
+              detail: sessionId,
+            }));
+          }
           args.onSessionSelected?.(sessionId);
         }
         resetSessionSearch();

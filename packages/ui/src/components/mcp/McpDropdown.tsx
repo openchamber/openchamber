@@ -94,12 +94,12 @@ export const McpDropdownContent: React.FC<McpDropdownContentProps> = ({ active, 
 
   return (
     <div className={cn('w-full', className)}>
-      <div className="sticky top-0 z-20 bg-[var(--surface-elevated)] border-b border-[var(--interactive-border)]">
-        <div className="flex items-center justify-between gap-3 px-2 py-2.5">
-          <div className="min-w-0 flex items-center gap-2">
+      <div className="border-b border-[var(--interactive-border)]">
+        <div className="flex items-center justify-between gap-3 px-4 py-2.5">
+          <div className="min-w-0 flex items-baseline gap-2">
             <div className="typography-ui-header font-semibold text-foreground">MCP Servers</div>
             {directory && (
-              <div className="truncate typography-ui-label text-muted-foreground">
+              <div className="truncate typography-micro text-muted-foreground">
                 {directory.split('/').pop() || directory}
               </div>
             )}
@@ -116,7 +116,7 @@ export const McpDropdownContent: React.FC<McpDropdownContentProps> = ({ active, 
         </div>
       </div>
 
-      <div className="max-h-64 overflow-y-auto py-1">
+      <div className="max-h-64 overflow-y-auto py-2">
         {sortedNames.map((serverName) => {
           const serverStatus = status[serverName];
           const tone = statusTone(serverStatus);
@@ -127,7 +127,7 @@ export const McpDropdownContent: React.FC<McpDropdownContentProps> = ({ active, 
           return (
             <div
               key={serverName}
-              className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg hover:bg-interactive-hover/50"
+              className="flex items-center justify-between gap-2 px-4 py-1.5 rounded-lg hover:bg-interactive-hover/50"
             >
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2 min-w-0">
@@ -174,7 +174,7 @@ export const McpDropdownContent: React.FC<McpDropdownContentProps> = ({ active, 
         })}
 
         {sortedNames.length === 0 && (
-          <div className="px-2 py-3 typography-ui-label text-muted-foreground text-center">
+          <div className="px-4 py-5 typography-ui-label text-muted-foreground text-center">
             Configure MCP servers in Opencode config.
           </div>
         )}

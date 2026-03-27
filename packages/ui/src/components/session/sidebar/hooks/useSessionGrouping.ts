@@ -16,7 +16,10 @@ type Args = {
   worktreeMetadata: Map<string, WorktreeMetadata>;
   pinnedSessionIds: Set<string>;
   gitDirectories: Map<string, { status?: { current?: string | null } | null }>;
+  isVSCode: boolean;
 };
+
+const isArchivedSession = (session: Session): boolean => Boolean(session.time?.archived);
 
 export const useSessionGrouping = (args: Args) => {
   const buildGroupSearchText = React.useCallback((group: SessionGroup): string => {
@@ -69,6 +72,10 @@ export const useSessionGrouping = (args: Args) => {
       sortedProjectSessions.forEach((session) => {
         const parentID = (session as Session & { parentID?: string | null }).parentID;
         if (!parentID) return;
+        const parentSession = sessionMap.get(parentID);
+        if (!parentSession || isArchivedSession(parentSession) !== isArchivedSession(session)) {
+          return;
+        }
         const collection = childrenMap.get(parentID) ?? [];
         collection.push(session);
         childrenMap.set(parentID, collection);
@@ -104,7 +111,9 @@ export const useSessionGrouping = (args: Args) => {
       const roots = sortedProjectSessions.filter((session) => {
         const parentID = (session as Session & { parentID?: string | null }).parentID;
         if (!parentID) return true;
-        return !sessionMap.has(parentID);
+        const parentSession = sessionMap.get(parentID);
+        if (!parentSession) return true;
+        return isArchivedSession(parentSession) !== isArchivedSession(session);
       });
 
       const groupedNodes = new Map<string, SessionNode[]>();
@@ -219,13 +228,13 @@ export const useSessionGrouping = (args: Args) => {
         isArchivedBucket: true,
         worktree: null,
         directory: null,
-        folderScopeKey: normalizedProjectRoot ? getArchivedScopeKey(normalizedProjectRoot) : null,
+        folderScopeKey: !args.isVSCode && normalizedProjectRoot ? getArchivedScopeKey(normalizedProjectRoot) : null,
         sessions: groupedNodes.get(archivedKey) ?? [],
       });
 
       return groups;
     },
-    [args.homeDirectory, args.worktreeMetadata, args.pinnedSessionIds, args.gitDirectories],
+    [args.homeDirectory, args.worktreeMetadata, args.pinnedSessionIds, args.gitDirectories, args.isVSCode],
   );
 
   return {

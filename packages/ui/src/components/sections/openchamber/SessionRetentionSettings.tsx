@@ -3,7 +3,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { RiInformationLine, RiRestartLine } from '@remixicon/react';
 import { toast } from '@/components/ui';
 import { NumberInput } from '@/components/ui/number-input';
-import { ButtonSmall } from '@/components/ui/button-small';
+import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionAutoCleanup } from '@/hooks/useSessionAutoCleanup';
@@ -90,7 +90,7 @@ export const SessionRetentionSettings: React.FC = () => {
               className="w-20 tabular-nums"
             />
             <span className="typography-ui-label text-muted-foreground">days</span>
-            <ButtonSmall
+            <Button size="sm"
               type="button"
               variant="ghost"
               onClick={() => setAutoDeleteAfterDays(DEFAULT_RETENTION_DAYS)}
@@ -100,7 +100,7 @@ export const SessionRetentionSettings: React.FC = () => {
               title="Reset"
             >
               <RiRestartLine className="h-3.5 w-3.5" />
-            </ButtonSmall>
+            </Button>
           </div>
         </div>
       </section>
@@ -111,7 +111,7 @@ export const SessionRetentionSettings: React.FC = () => {
             <p className="typography-meta text-foreground font-medium">Manual Cleanup</p>
           </div>
           <div className="flex items-center gap-2 sm:w-fit">
-            <ButtonSmall
+            <Button
               type="button"
               variant="outline"
               size="xs"
@@ -120,7 +120,7 @@ export const SessionRetentionSettings: React.FC = () => {
               className="!font-normal"
             >
               {isRunning ? 'Cleaning up...' : 'Run cleanup now'}
-            </ButtonSmall>
+            </Button>
           </div>
         </div>
         <p className="typography-meta text-muted-foreground">

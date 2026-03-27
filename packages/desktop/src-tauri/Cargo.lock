@@ -2670,7 +2670,7 @@ dependencies = [
 
 [[package]]
 name = "openchamber-desktop"
-version = "1.8.5"
+version = "1.9.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -2687,6 +2687,7 @@ dependencies = [
  "tauri-plugin-updater",
  "tokio",
  "url",
+ "window-vibrancy 0.7.1",
 ]
 
 [[package]]
@@ -4269,7 +4270,7 @@ dependencies = [
  "url",
  "webkit2gtk",
  "webview2-com",
- "window-vibrancy",
+ "window-vibrancy 0.6.0",
  "windows",
 ]
 
@@ -5458,6 +5459,21 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "raw-window-handle",
  "windows-sys 0.59.0",
+ "windows-version",
+]
+
+[[package]]
+name = "window-vibrancy"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "010797bd7c40396fbc59d3105089fed0885fe267a0ef4a0a4646df54e28647f6"
+dependencies = [
+ "objc2 0.6.3",
+ "objc2-app-kit",
+ "objc2-core-foundation",
+ "objc2-foundation 0.3.2",
+ "raw-window-handle",
+ "windows-sys 0.60.2",
  "windows-version",
 ]
 

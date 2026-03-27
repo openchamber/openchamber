@@ -198,6 +198,9 @@
 
       const manifestLink = document.createElement('link');
       manifestLink.rel = 'manifest';
+      // Required so the browser sends auth cookies when fetching the manifest,
+      // enabling PWA installation behind authentication proxies (e.g. Cloudflare Access).
+      manifestLink.crossOrigin = 'use-credentials';
       document.head.appendChild(manifestLink);
 
       let activeManifestBlobUrl = null;

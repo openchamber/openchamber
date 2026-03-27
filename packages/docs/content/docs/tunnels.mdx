@@ -1,0 +1,77 @@
+---
+title: Tunnels
+description: Expose OpenChamber safely for remote and mobile access.
+---
+
+# Tunnels
+
+Use `openchamber tunnel` to expose a running OpenChamber instance.
+
+## Quick start (Cloudflare quick mode)
+
+1. Start OpenChamber:
+
+```bash
+openchamber
+```
+
+2. Start a tunnel:
+
+```bash
+openchamber tunnel start --provider cloudflare --mode quick
+```
+
+3. Check status:
+
+```bash
+openchamber tunnel status
+```
+
+By default, OpenChamber prints a QR code in interactive TTY sessions. Use `--qr` to force QR output, or `--no-qr` to disable it.
+
+## Managed modes
+
+### Managed remote
+
+Use a token + hostname managed by Cloudflare:
+
+```bash
+openchamber tunnel start --provider cloudflare --mode managed-remote --token-file ~/.secrets/cf-token --hostname app.example.com
+```
+
+### Managed local
+
+Use a local `cloudflared` config:
+
+```bash
+openchamber tunnel start --provider cloudflare --mode managed-local --config ~/.cloudflared/config.yml
+```
+
+## Profiles (managed-remote)
+
+Save a reusable profile:
+
+```bash
+openchamber tunnel profile add --provider cloudflare --mode managed-remote --name prod-main --hostname app.example.com --token-file ~/.secrets/cf-token
+```
+
+Start using the saved profile:
+
+```bash
+openchamber tunnel start --profile prod-main
+```
+
+## Useful commands
+
+```bash
+openchamber tunnel providers
+openchamber tunnel ready --provider cloudflare
+openchamber tunnel doctor --provider cloudflare
+openchamber tunnel stop --port 3000
+```
+
+## Behavior notes
+
+- one active tunnel per OpenChamber instance (port)
+- starting a new mode/provider on same instance replaces previous tunnel
+- generating a new connect link revokes previous unused one

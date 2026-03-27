@@ -261,7 +261,7 @@ Important:
               <Button variant="ghost" size="sm" onClick={handleContinueLater} className="flex-1">
                 Continue Later
               </Button>
-              <Button variant="ghost" size="sm" onClick={handleAbort} className="flex-1 text-[var(--status-error)]">
+              <Button variant="destructive" size="sm" onClick={handleAbort} className="flex-1">
                 Abort {operationLabel}
               </Button>
             </div>

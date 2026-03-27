@@ -48,7 +48,7 @@ export const BottomTerminalDock: React.FC<BottomTerminalDockProps> = ({ isOpen, 
       if (!parentHeight || parentHeight <= 0) {
         return;
       }
-      const next = Math.round(parentHeight);
+      const next = Math.max(0, Math.round(parentHeight));
       setFullscreenHeight((prev) => (prev === next ? prev : next));
     };
 
@@ -103,7 +103,7 @@ export const BottomTerminalDock: React.FC<BottomTerminalDockProps> = ({ isOpen, 
   }
 
   const appliedHeight = isOpen
-    ? (isFullscreen ? Math.max(standardHeight, fullscreenHeight ?? standardHeight) : standardHeight)
+    ? (isFullscreen ? Math.max(0, fullscreenHeight ?? standardHeight) : standardHeight)
     : 0;
 
   const handlePointerDown = (event: React.PointerEvent) => {
@@ -146,8 +146,8 @@ export const BottomTerminalDock: React.FC<BottomTerminalDockProps> = ({ isOpen, 
       {isOpen && !isFullscreen && (
         <div
           className={cn(
-            'absolute left-0 top-0 z-20 h-[4px] w-full cursor-row-resize hover:bg-primary/50 transition-colors',
-            isResizing && 'bg-primary'
+            'absolute left-0 top-0 z-20 h-[3px] w-full cursor-row-resize hover:bg-[var(--interactive-border)]/80 transition-colors',
+            isResizing && 'bg-[var(--interactive-border)]'
           )}
           onPointerDown={handlePointerDown}
           role="separator"

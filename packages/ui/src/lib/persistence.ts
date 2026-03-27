@@ -216,12 +216,12 @@ const sanitizeProjects = (value: unknown): DesktopSettings['projects'] | undefin
   return result.length > 0 ? result : undefined;
 };
 
-const sanitizeNamedTunnelPresets = (value: unknown): DesktopSettings['namedTunnelPresets'] | undefined => {
+const sanitizeManagedRemoteTunnelPresets = (value: unknown): DesktopSettings['managedRemoteTunnelPresets'] | undefined => {
   if (!Array.isArray(value)) {
     return undefined;
   }
 
-  const result: NonNullable<DesktopSettings['namedTunnelPresets']> = [];
+  const result: NonNullable<DesktopSettings['managedRemoteTunnelPresets']> = [];
   const seenIds = new Set<string>();
   const seenHostnames = new Set<string>();
 
@@ -244,7 +244,7 @@ const sanitizeNamedTunnelPresets = (value: unknown): DesktopSettings['namedTunne
   return result;
 };
 
-const sanitizeNamedTunnelPresetTokens = (value: unknown): DesktopSettings['namedTunnelPresetTokens'] | undefined => {
+const sanitizeManagedRemoteTunnelPresetTokens = (value: unknown): DesktopSettings['managedRemoteTunnelPresetTokens'] | undefined => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return undefined;
   }
@@ -312,21 +312,10 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
     }
   }
 
-  // Apply server-persisted message limit. Ignore stale legacy values.
-  const STALE_LIMITS = new Set([90, 120, 180, 220]);
-  if (typeof settings.messageLimit === 'number' && Number.isFinite(settings.messageLimit)) {
-    if (!STALE_LIMITS.has(settings.messageLimit)) {
-      store.setMessageLimit(settings.messageLimit);
-    }
-  }
-
   if (typeof settings.queueModeEnabled === 'boolean' && settings.queueModeEnabled !== queueStore.queueModeEnabled) {
     queueStore.setQueueMode(settings.queueModeEnabled);
   }
 
-  if (typeof settings.showTextJustificationActivity === 'boolean' && settings.showTextJustificationActivity !== store.showTextJustificationActivity) {
-    store.setShowTextJustificationActivity(settings.showTextJustificationActivity);
-  }
   if (typeof settings.showDeletionDialog === 'boolean' && settings.showDeletionDialog !== store.showDeletionDialog) {
     store.setShowDeletionDialog(settings.showDeletionDialog);
   }
@@ -365,17 +354,35 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   if (typeof settings.maxLastMessageLength === 'number' && Number.isFinite(settings.maxLastMessageLength)) {
     store.setMaxLastMessageLength(settings.maxLastMessageLength);
   }
-  if (typeof settings.toolCallExpansion === 'string'
-    && (settings.toolCallExpansion === 'collapsed'
-      || settings.toolCallExpansion === 'activity'
-      || settings.toolCallExpansion === 'detailed'
-      || settings.toolCallExpansion === 'changes')) {
-    if (settings.toolCallExpansion !== store.toolCallExpansion) {
-      store.setToolCallExpansion(settings.toolCallExpansion);
-    }
-  }
   if (typeof settings.inputSpellcheckEnabled === 'boolean' && settings.inputSpellcheckEnabled !== store.inputSpellcheckEnabled) {
     store.setInputSpellcheckEnabled(settings.inputSpellcheckEnabled);
+  }
+  if (typeof settings.showToolFileIcons === 'boolean' && settings.showToolFileIcons !== store.showToolFileIcons) {
+    store.setShowToolFileIcons(settings.showToolFileIcons);
+  }
+  if (typeof settings.showExpandedBashTools === 'boolean' && settings.showExpandedBashTools !== store.showExpandedBashTools) {
+    store.setShowExpandedBashTools(settings.showExpandedBashTools);
+  }
+  if (typeof settings.showExpandedEditTools === 'boolean' && settings.showExpandedEditTools !== store.showExpandedEditTools) {
+    store.setShowExpandedEditTools(settings.showExpandedEditTools);
+  }
+  if (typeof settings.chatRenderMode === 'string'
+    && (settings.chatRenderMode === 'sorted' || settings.chatRenderMode === 'live')) {
+    if (settings.chatRenderMode !== store.chatRenderMode) {
+      store.setChatRenderMode(settings.chatRenderMode);
+    }
+  }
+  if (typeof settings.activityRenderMode === 'string'
+    && (settings.activityRenderMode === 'collapsed' || settings.activityRenderMode === 'summary')) {
+    if (settings.activityRenderMode !== store.activityRenderMode) {
+      store.setActivityRenderMode(settings.activityRenderMode);
+    }
+  }
+  if (typeof settings.mermaidRenderingMode === 'string'
+    && (settings.mermaidRenderingMode === 'svg' || settings.mermaidRenderingMode === 'ascii')) {
+    if (settings.mermaidRenderingMode !== store.mermaidRenderingMode) {
+      store.setMermaidRenderingMode(settings.mermaidRenderingMode);
+    }
   }
   if (typeof settings.userMessageRenderingMode === 'string'
     && (settings.userMessageRenderingMode === 'markdown' || settings.userMessageRenderingMode === 'plain')) {
@@ -385,6 +392,9 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   }
   if (typeof settings.stickyUserHeader === 'boolean' && settings.stickyUserHeader !== store.stickyUserHeader) {
     store.setStickyUserHeader(settings.stickyUserHeader);
+  }
+  if (typeof settings.reportUsage === 'boolean' && settings.reportUsage !== store.reportUsage) {
+    store.setReportUsage(settings.reportUsage);
   }
   if (typeof settings.fontSize === 'number' && Number.isFinite(settings.fontSize) && settings.fontSize !== store.fontSize) {
     store.setFontSize(settings.fontSize);
@@ -512,9 +522,15 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.autoDeleteAfterDays === 'number' && Number.isFinite(candidate.autoDeleteAfterDays)) {
     result.autoDeleteAfterDays = candidate.autoDeleteAfterDays;
   }
+  if (typeof candidate.tunnelProvider === 'string') {
+    const provider = candidate.tunnelProvider.trim().toLowerCase();
+    if (provider.length > 0) {
+      result.tunnelProvider = provider;
+    }
+  }
   if (typeof candidate.tunnelMode === 'string') {
     const mode = candidate.tunnelMode.trim().toLowerCase();
-    if (mode === 'quick' || mode === 'named') {
+    if (mode === 'quick' || mode === 'managed-remote' || mode === 'managed-local') {
       result.tunnelMode = mode;
     }
   }
@@ -526,25 +542,31 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.tunnelSessionTtlMs === 'number' && Number.isFinite(candidate.tunnelSessionTtlMs)) {
     result.tunnelSessionTtlMs = candidate.tunnelSessionTtlMs;
   }
-  if (typeof candidate.namedTunnelHostname === 'string') {
-    result.namedTunnelHostname = candidate.namedTunnelHostname.trim();
+  if (candidate.managedLocalTunnelConfigPath === null) {
+    result.managedLocalTunnelConfigPath = null;
+  } else if (typeof candidate.managedLocalTunnelConfigPath === 'string') {
+    const trimmed = candidate.managedLocalTunnelConfigPath.trim();
+    result.managedLocalTunnelConfigPath = trimmed.length > 0 ? trimmed : null;
   }
-  if (candidate.namedTunnelToken === null) {
-    result.namedTunnelToken = null;
-  } else if (typeof candidate.namedTunnelToken === 'string') {
-    result.namedTunnelToken = candidate.namedTunnelToken.trim();
+  if (typeof candidate.managedRemoteTunnelHostname === 'string') {
+    result.managedRemoteTunnelHostname = candidate.managedRemoteTunnelHostname.trim();
   }
-  const namedTunnelPresets = sanitizeNamedTunnelPresets(candidate.namedTunnelPresets);
-  if (namedTunnelPresets) {
-    result.namedTunnelPresets = namedTunnelPresets;
+  if (candidate.managedRemoteTunnelToken === null) {
+    result.managedRemoteTunnelToken = null;
+  } else if (typeof candidate.managedRemoteTunnelToken === 'string') {
+    result.managedRemoteTunnelToken = candidate.managedRemoteTunnelToken.trim();
   }
-  if (typeof candidate.namedTunnelSelectedPresetId === 'string') {
-    const trimmed = candidate.namedTunnelSelectedPresetId.trim();
-    result.namedTunnelSelectedPresetId = trimmed.length > 0 ? trimmed : undefined;
+  const managedRemoteTunnelPresets = sanitizeManagedRemoteTunnelPresets(candidate.managedRemoteTunnelPresets);
+  if (managedRemoteTunnelPresets) {
+    result.managedRemoteTunnelPresets = managedRemoteTunnelPresets;
   }
-  const namedTunnelPresetTokens = sanitizeNamedTunnelPresetTokens(candidate.namedTunnelPresetTokens);
-  if (namedTunnelPresetTokens) {
-    result.namedTunnelPresetTokens = namedTunnelPresetTokens;
+  if (typeof candidate.managedRemoteTunnelSelectedPresetId === 'string') {
+    const trimmed = candidate.managedRemoteTunnelSelectedPresetId.trim();
+    result.managedRemoteTunnelSelectedPresetId = trimmed.length > 0 ? trimmed : undefined;
+  }
+  const managedRemoteTunnelPresetTokens = sanitizeManagedRemoteTunnelPresetTokens(candidate.managedRemoteTunnelPresetTokens);
+  if (managedRemoteTunnelPresetTokens) {
+    result.managedRemoteTunnelPresetTokens = managedRemoteTunnelPresetTokens;
   }
   if (typeof candidate.defaultModel === 'string' && candidate.defaultModel.length > 0) {
     result.defaultModel = candidate.defaultModel;
@@ -563,9 +585,6 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (typeof candidate.queueModeEnabled === 'boolean') {
     result.queueModeEnabled = candidate.queueModeEnabled;
-  }
-  if (typeof candidate.showTextJustificationActivity === 'boolean') {
-    result.showTextJustificationActivity = candidate.showTextJustificationActivity;
   }
   if (typeof candidate.showDeletionDialog === 'boolean') {
     result.showDeletionDialog = candidate.showDeletionDialog;
@@ -735,17 +754,29 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
     }
   }
 
-  if (
-    typeof candidate.toolCallExpansion === 'string'
-    && (candidate.toolCallExpansion === 'collapsed'
-      || candidate.toolCallExpansion === 'activity'
-      || candidate.toolCallExpansion === 'detailed'
-      || candidate.toolCallExpansion === 'changes')
-  ) {
-    result.toolCallExpansion = candidate.toolCallExpansion;
-  }
   if (typeof candidate.inputSpellcheckEnabled === 'boolean') {
     result.inputSpellcheckEnabled = candidate.inputSpellcheckEnabled;
+  }
+  if (typeof candidate.showToolFileIcons === 'boolean') {
+    result.showToolFileIcons = candidate.showToolFileIcons;
+  }
+  if (typeof candidate.showExpandedBashTools === 'boolean') {
+    result.showExpandedBashTools = candidate.showExpandedBashTools;
+  }
+  if (typeof candidate.showExpandedEditTools === 'boolean') {
+    result.showExpandedEditTools = candidate.showExpandedEditTools;
+  }
+  if (typeof candidate.chatRenderMode === 'string'
+    && (candidate.chatRenderMode === 'sorted' || candidate.chatRenderMode === 'live')) {
+    result.chatRenderMode = candidate.chatRenderMode;
+  }
+  if (typeof candidate.activityRenderMode === 'string'
+    && (candidate.activityRenderMode === 'collapsed' || candidate.activityRenderMode === 'summary')) {
+    result.activityRenderMode = candidate.activityRenderMode;
+  }
+  if (typeof candidate.mermaidRenderingMode === 'string'
+    && (candidate.mermaidRenderingMode === 'svg' || candidate.mermaidRenderingMode === 'ascii')) {
+    result.mermaidRenderingMode = candidate.mermaidRenderingMode;
   }
   if (typeof candidate.userMessageRenderingMode === 'string'
     && (candidate.userMessageRenderingMode === 'markdown' || candidate.userMessageRenderingMode === 'plain')) {
@@ -807,13 +838,13 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
     result.pwaAppName = normalized.length > 0 ? normalized : '';
   }
 
-  if (typeof candidate.messageLimit === 'number' && Number.isFinite(candidate.messageLimit)) {
-    result.messageLimit = candidate.messageLimit;
-  }
-
   const skillCatalogs = sanitizeSkillCatalogs(candidate.skillCatalogs);
   if (skillCatalogs) {
     result.skillCatalogs = skillCatalogs;
+  }
+
+  if (typeof candidate.reportUsage === 'boolean') {
+    result.reportUsage = candidate.reportUsage;
   }
 
   return result;

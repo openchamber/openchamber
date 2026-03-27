@@ -3,10 +3,11 @@ import type { ComponentType } from 'react';
 import type { Part } from '@opencode-ai/sdk/v2';
 import { RiArrowDownSLine, RiArrowRightSLine, RiBrainAi3Line, RiChatAi3Line } from '@remixicon/react';
 import { cn } from '@/lib/utils';
-import { formatTimestampForDisplay } from '../timeFormat';
 import type { ContentChangeReason } from '@/hooks/useChatScrollManager';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { useUIStore } from '@/stores/useUIStore';
+import { useDurationTickerNow } from './useDurationTicker';
+import { MarkdownRenderer } from '../../MarkdownRenderer';
 
 type PartWithText = Part & { text?: string; content?: string; time?: { start?: number; end?: number } };
 
@@ -66,19 +67,7 @@ const formatDuration = (start: number, end?: number, now: number = Date.now()): 
 };
 
 const LiveDuration: React.FC<{ start: number; end?: number; active: boolean }> = ({ start, end, active }) => {
-    const [now, setNow] = React.useState(() => Date.now());
-
-    React.useEffect(() => {
-        if (!active) {
-            return;
-        }
-
-        const timer = window.setInterval(() => {
-            setNow(Date.now());
-        }, 100);
-
-        return () => window.clearInterval(timer);
-    }, [active]);
+    const now = useDurationTickerNow(active, 250);
 
     return <>{formatDuration(start, end, now)}</>;
 };
@@ -89,6 +78,8 @@ type ReasoningTimelineBlockProps = {
     onContentChange?: (reason?: ContentChangeReason) => void;
     blockId: string;
     time?: { start?: number; end?: number };
+    showDuration?: boolean;
+    isStreaming?: boolean;
 };
 
 export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
@@ -97,23 +88,15 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
     onContentChange,
     blockId,
     time,
+    showDuration = true,
+    isStreaming = false,
 }) => {
     const [isExpanded, setIsExpanded] = React.useState(false);
-    const isMobile = useUIStore((state) => state.isMobile);
-    const showActivityHeaderTimestamps = useUIStore((state) => state.showActivityHeaderTimestamps);
 
     const summary = React.useMemo(() => getReasoningSummary(text), [text]);
     const { label, Icon } = variantConfig[variant];
     const timeStart = typeof time?.start === 'number' && Number.isFinite(time.start) ? time.start : undefined;
     const timeEnd = typeof time?.end === 'number' && Number.isFinite(time.end) ? time.end : undefined;
-    const endedTimestampText = React.useMemo(() => {
-        if (typeof timeEnd !== 'number') {
-            return null;
-        }
-
-        const formatted = formatTimestampForDisplay(timeEnd);
-        return formatted.length > 0 ? formatted : null;
-    }, [timeEnd]);
 
     React.useEffect(() => {
         if (text.trim().length === 0) {
@@ -158,38 +141,18 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
                     <span className="typography-meta font-medium">{label}</span>
                 </div>
 
-                {(summary || typeof timeStart === 'number' || endedTimestampText) ? (
+                {(summary || (showDuration && typeof timeStart === 'number')) ? (
                     <div className="flex items-center gap-1 flex-1 min-w-0 typography-meta text-muted-foreground/70">
-                        {summary ? <span className="flex-1 min-w-0 truncate italic">{summary}</span> : null}
-                        {typeof timeStart === 'number' ? (
+                        {summary ? <span className="flex-1 min-w-0 truncate">{summary}</span> : null}
+                        {showDuration && typeof timeStart === 'number' ? (
                             <span className="relative flex-shrink-0 tabular-nums text-right">
-                                <span
-                                        className={cn(
-                                            'text-muted-foreground/80 transition-opacity duration-150',
-                                            !isMobile && endedTimestampText && showActivityHeaderTimestamps && 'group-hover/tool:opacity-0'
-                                        )}
-                                    >
+                                <span className="text-muted-foreground/80 transition-opacity duration-150">
                                     <LiveDuration
                                         start={timeStart}
                                         end={timeEnd}
                                         active={typeof timeEnd !== 'number'}
                                     />
                                 </span>
-                                {!isMobile && endedTimestampText && showActivityHeaderTimestamps ? (
-                                    <span
-                                        className={cn(
-                                            'pointer-events-none absolute right-0 top-0 z-10 whitespace-nowrap rounded-sm bg-[var(--surface-background)] px-1 text-muted-foreground/70 transition-opacity duration-150',
-                                            'opacity-0 group-hover/tool:opacity-100'
-                                        )}
-                                    >
-                                        {endedTimestampText}
-                                    </span>
-                                ) : null}
-                            </span>
-                        ) : null}
-                        {typeof timeStart !== 'number' && !isMobile && endedTimestampText && showActivityHeaderTimestamps ? (
-                            <span className="text-muted-foreground/70 flex-shrink-0 tabular-nums">
-                                {endedTimestampText}
                             </span>
                         ) : null}
                     </div>
@@ -199,17 +162,21 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
             {isExpanded && (
                 <div
                     className={cn(
-                        'relative pr-2 pb-2 pt-2 pl-[1.4375rem]',
-                        'before:absolute before:left-[0.4375rem] before:w-px before:bg-border/80 before:content-[""]',
-                        'before:top-[-0.25rem] before:bottom-0'
+                        'relative pr-2 pb-2 pt-2 pl-4'
                     )}
                 >
                     <ScrollableOverlay
-                        as="blockquote"
+                        as="div"
                         outerClassName="max-h-80"
-                        className="whitespace-pre-wrap break-words typography-meta italic text-muted-foreground/70 p-0"
+                        className="p-0"
                     >
-                        {text}
+                        <MarkdownRenderer
+                            content={text}
+                            messageId={blockId}
+                            isAnimated={false}
+                            isStreaming={isStreaming}
+                            variant="reasoning"
+                        />
                     </ScrollableOverlay>
                 </div>
             )}
@@ -228,10 +195,12 @@ const ReasoningPart: React.FC<ReasoningPartProps> = ({
     onContentChange,
     messageId,
 }) => {
+    const chatRenderMode = useUIStore((state) => state.chatRenderMode);
     const partWithText = part as PartWithText;
     const rawText = partWithText.text || partWithText.content || '';
     const textContent = React.useMemo(() => cleanReasoningText(rawText), [rawText]);
     const time = partWithText.time;
+    const isStreaming = chatRenderMode === 'live' && typeof time?.end !== 'number';
 
     // Show reasoning even if time.end isn't set yet (during streaming)
     // Only hide if there's no text content
@@ -246,6 +215,8 @@ const ReasoningPart: React.FC<ReasoningPartProps> = ({
             onContentChange={onContentChange}
             blockId={part.id || `${messageId}-reasoning`}
             time={time}
+            showDuration={chatRenderMode !== 'sorted'}
+            isStreaming={isStreaming}
         />
     );
 };

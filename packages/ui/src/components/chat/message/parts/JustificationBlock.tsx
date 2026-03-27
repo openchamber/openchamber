@@ -1,6 +1,7 @@
 import React from 'react';
 import type { Part } from '@opencode-ai/sdk/v2';
 import type { ContentChangeReason } from '@/hooks/useChatScrollManager';
+import { useUIStore } from '@/stores/useUIStore';
 import { ReasoningTimelineBlock } from './ReasoningPart';
 
 type PartWithText = Part & { text?: string; content?: string; time?: { start?: number; end?: number } };
@@ -29,6 +30,7 @@ const JustificationBlock: React.FC<JustificationBlockProps> = ({
     messageId,
     onContentChange,
 }) => {
+    const chatRenderMode = useUIStore((state) => state.chatRenderMode);
     const partWithText = part as PartWithText;
     const rawText = partWithText.text || partWithText.content || '';
     const textContent = React.useMemo(() => cleanJustificationText(rawText), [rawText]);
@@ -46,6 +48,7 @@ const JustificationBlock: React.FC<JustificationBlockProps> = ({
             onContentChange={onContentChange}
             blockId={part.id || `${messageId}-justification`}
             time={time}
+            showDuration={chatRenderMode !== 'sorted'}
         />
     );
 };

@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
+import { randomUUID } from 'crypto';
 import { spawn, execFile } from 'child_process';
 import { promisify } from 'util';
 import { type OpenCodeManager } from './opencode';
@@ -112,6 +113,51 @@ const execFileAsync = promisify(execFile);
 const gpgconfCandidates = ['gpgconf', '/opt/homebrew/bin/gpgconf', '/usr/local/bin/gpgconf'];
 
 const OPENCHAMBER_SHARED_SETTINGS_PATH = path.join(os.homedir(), '.config', 'openchamber', 'settings.json');
+const UPDATE_CHECK_URL = process.env.OPENCHAMBER_UPDATE_API_URL || 'https://api.openchamber.dev/v1/update/check';
+
+const getOpenChamberConfigDir = (): string => {
+  if (process.platform === 'win32') {
+    const appData = process.env.APPDATA;
+    if (appData) return path.join(appData, 'openchamber');
+  }
+  return path.join(os.homedir(), '.config', 'openchamber');
+};
+
+const sanitizeInstallScope = (scope: string): 'desktop-tauri' | 'vscode' | 'web' => {
+  if (scope === 'desktop-tauri' || scope === 'vscode' || scope === 'web') return scope;
+  return 'web';
+};
+
+const getOrCreateInstallId = (scope: string): string => {
+  const configDir = getOpenChamberConfigDir();
+  const normalizedScope = sanitizeInstallScope(scope);
+  const idPath = path.join(configDir, `install-id-${normalizedScope}`);
+
+  try {
+    const existing = fs.readFileSync(idPath, 'utf8').trim();
+    if (existing) return existing;
+  } catch {
+    // Generate new id.
+  }
+
+  const installId = randomUUID();
+  fs.mkdirSync(configDir, { recursive: true });
+  fs.writeFileSync(idPath, `${installId}\n`, { encoding: 'utf8', mode: 0o600 });
+  return installId;
+};
+
+const mapNodePlatformToApiPlatform = (value: string): 'macos' | 'windows' | 'linux' | 'web' => {
+  if (value === 'darwin') return 'macos';
+  if (value === 'win32') return 'windows';
+  if (value === 'linux') return 'linux';
+  return 'web';
+};
+
+const mapNodeArchToApiArch = (value: string): 'arm64' | 'x64' | 'unknown' => {
+  if (value === 'arm64' || value === 'aarch64') return 'arm64';
+  if (value === 'x64' || value === 'amd64') return 'x64';
+  return 'unknown';
+};
 
 const guessMimeTypeFromExtension = (ext: string) => {
   switch (ext) {
@@ -135,6 +181,50 @@ const guessMimeTypeFromExtension = (ext: string) => {
     default:
       return 'application/octet-stream';
   }
+};
+
+const hasUriScheme = (value: string): boolean => /^[A-Za-z][A-Za-z\d+.-]*:/.test(value);
+
+const parseDroppedFileReference = (rawReference: string):
+  | { uri: vscode.Uri }
+  | { skipped: { name: string; reason: string } } => {
+  const trimmed = rawReference.trim().replace(/^['"]+|['"]+$/g, '');
+  if (!trimmed) {
+    return { skipped: { name: rawReference, reason: 'Empty drop reference' } };
+  }
+
+  if (hasUriScheme(trimmed)) {
+    try {
+      const parsed = vscode.Uri.parse(trimmed, true);
+      if (parsed.scheme !== 'file') {
+        return {
+          skipped: {
+            name: trimmed,
+            reason: `Unsupported URI scheme: ${parsed.scheme || 'unknown'}`,
+          },
+        };
+      }
+      return { uri: parsed };
+    } catch (error) {
+      return {
+        skipped: {
+          name: trimmed,
+          reason: error instanceof Error ? error.message : 'Invalid URI',
+        },
+      };
+    }
+  }
+
+  if (!path.isAbsolute(trimmed)) {
+    return {
+      skipped: {
+        name: trimmed,
+        reason: 'Drop reference is not an absolute file path',
+      },
+    };
+  }
+
+  return { uri: vscode.Uri.file(trimmed) };
 };
 
 const readUriAsAttachment = async (
@@ -214,7 +304,8 @@ const createVirtualOriginalDiffUri = (modifiedPath: string, content: string): vs
   const fileName = path.basename(modifiedPath) || 'file';
   return vscode.Uri.from({
     scheme: VIRTUAL_DIFF_SCHEME,
-    path: `/${fileName} (before)`,
+    // Keep real filename (incl extension) so VS Code can infer language for syntax highlighting.
+    path: `/${fileName}`,
     query: `key=${encodeURIComponent(key)}`,
   });
 };
@@ -870,6 +961,7 @@ const execGit = async (args: string[], cwd: string): Promise<{ stdout: string; s
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
       env,
+      windowsHide: true,
     });
 
     let stdout = '';
@@ -1886,24 +1978,13 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
         const dedupedUris = Array.from(new Set(uris.map((value) => value.trim())));
 
         for (const rawUri of dedupedUris) {
-          let uri: vscode.Uri;
-          try {
-            uri = vscode.Uri.parse(rawUri, true);
-          } catch (error) {
-            skipped.push({
-              name: rawUri,
-              reason: error instanceof Error ? error.message : 'Invalid URI',
-            });
+          const parsed = parseDroppedFileReference(rawUri);
+          if ('skipped' in parsed) {
+            skipped.push(parsed.skipped);
             continue;
           }
 
-          if (uri.scheme !== 'file') {
-            skipped.push({
-              name: rawUri,
-              reason: `Unsupported URI scheme: ${uri.scheme}`,
-            });
-            continue;
-          }
+          const uri = parsed.uri;
 
           const name = path.basename(uri.fsPath || uri.path || rawUri);
 
@@ -2889,6 +2970,62 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
         }
       }
 
+      case 'api:openchamber:update-check': {
+        try {
+          const body = (payload && typeof payload === 'object' ? payload : {}) as Record<string, unknown>;
+          const currentVersion = typeof body.currentVersion === 'string' && body.currentVersion.trim().length > 0
+            ? body.currentVersion.trim()
+            : 'unknown';
+          const instanceMode = typeof body.instanceMode === 'string' && body.instanceMode.trim().length > 0
+            ? body.instanceMode.trim()
+            : 'local';
+          const deviceClass = typeof body.deviceClass === 'string' && body.deviceClass.trim().length > 0
+            ? body.deviceClass.trim()
+            : 'desktop';
+          const platformRaw = typeof body.platform === 'string' && body.platform.trim().length > 0
+            ? body.platform.trim()
+            : os.platform();
+          const archRaw = typeof body.arch === 'string' && body.arch.trim().length > 0
+            ? body.arch.trim()
+            : os.arch();
+          const reportUsage = body.reportUsage !== false;
+
+          const installId = getOrCreateInstallId('vscode');
+          const requestBody = {
+            appType: 'vscode',
+            deviceClass,
+            platform: mapNodePlatformToApiPlatform(platformRaw),
+            arch: mapNodeArchToApiArch(archRaw),
+            channel: 'stable',
+            currentVersion,
+            installId,
+            instanceMode,
+            reportUsage,
+          };
+
+          const response = await fetch(UPDATE_CHECK_URL, {
+            method: 'POST',
+            headers: {
+              Accept: 'application/json',
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(requestBody),
+            signal: AbortSignal.timeout(10_000),
+          });
+
+          if (!response.ok) {
+            const text = await response.text().catch(() => 'update check failed');
+            return { id, type, success: false, error: text || `Update check failed with ${response.status}` };
+          }
+
+          const data = await response.json();
+          return { id, type, success: true, data };
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          return { id, type, success: false, error: errorMessage };
+        }
+      }
+
       case 'editor:openFile': {
         const { path: filePath, line, column } = payload as { path: string; line?: number; column?: number };
         try {
@@ -3049,6 +3186,21 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
         try {
           const result = await vscode.commands.executeCommand(command, ...(args || []));
           return { id, type, success: true, data: { result } };
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          return { id, type, success: false, error: errorMessage };
+        }
+      }
+
+      case 'vscode:openExternalUrl': {
+        const { url } = (payload || {}) as { url?: string };
+        const target = typeof url === 'string' ? url.trim() : '';
+        if (!target) {
+          return { id, type, success: false, error: 'URL is required' };
+        }
+        try {
+          await vscode.env.openExternal(vscode.Uri.parse(target));
+          return { id, type, success: true, data: { opened: true } };
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
           return { id, type, success: false, error: errorMessage };
@@ -3224,6 +3376,24 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
         return { id, type, success: true, data: result };
       }
 
+      case 'api:git/worktrees/bootstrap-status': {
+        const { directory } = (payload || {}) as { directory?: string };
+        if (!directory) {
+          return { id, type, success: false, error: 'Directory is required' };
+        }
+        const result = await gitService.getWorktreeBootstrapStatus(directory);
+        return { id, type, success: true, data: result };
+      }
+
+      case 'api:git/worktrees/preview': {
+        const { directory } = (payload || {}) as { directory?: string };
+        if (!directory) {
+          return { id, type, success: false, error: 'Directory is required' };
+        }
+        const result = await gitService.previewWorktreeCreate(directory, (payload || {}) as gitService.CreateGitWorktreePayload);
+        return { id, type, success: true, data: result };
+      }
+
       case 'api:git/diff': {
         const { directory, path: filePath, staged, contextLines } = (payload || {}) as { 
           directory?: string; 
@@ -3315,12 +3485,30 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
       }
 
       case 'api:git/remotes': {
-        const { directory } = (payload || {}) as { directory?: string };
+        const { directory, method, remote } = (payload || {}) as {
+          directory?: string;
+          method?: string;
+          remote?: string;
+        };
         if (!directory) {
           return { id, type, success: false, error: 'Directory is required' };
         }
-        const result = await gitService.getRemotes(directory);
-        return { id, type, success: true, data: result };
+
+        const normalizedMethod = typeof method === 'string' ? method.toUpperCase() : 'GET';
+        if (normalizedMethod === 'GET') {
+          const result = await gitService.getRemotes(directory);
+          return { id, type, success: true, data: result };
+        }
+
+        if (normalizedMethod === 'DELETE') {
+          if (!remote) {
+            return { id, type, success: false, error: 'Remote name is required' };
+          }
+          const result = await gitService.removeRemote(directory, remote);
+          return { id, type, success: true, data: result };
+        }
+
+        return { id, type, success: false, error: `Unsupported method: ${normalizedMethod}` };
       }
 
       case 'api:git/rebase': {

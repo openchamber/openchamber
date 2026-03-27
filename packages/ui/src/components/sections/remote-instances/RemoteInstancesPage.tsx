@@ -1,5 +1,5 @@
 import React from 'react';
-import { ButtonSmall } from '@/components/ui/button-small';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { NumberInput } from '@/components/ui/number-input';
 import { Switch } from '@/components/ui/switch';
@@ -40,6 +40,7 @@ import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
+import { openExternalUrl } from '@/lib/url';
 import {
   desktopSshLogsClear,
   desktopSshLogs,
@@ -196,37 +197,6 @@ const formatLogLine = (line: string): string => {
   const level = (match[2] || 'INFO').toUpperCase();
   const message = match[3] || '';
   return `[${iso}] [${level}] ${message}`;
-};
-
-type TauriShell = {
-  shell?: {
-    open?: (url: string) => Promise<unknown>;
-  };
-};
-
-const openExternalUrl = async (url: string): Promise<boolean> => {
-  const target = url.trim();
-  if (!target || typeof window === 'undefined') {
-    return false;
-  }
-
-  const tauri = (window as unknown as { __TAURI__?: TauriShell }).__TAURI__;
-  if (tauri?.shell?.open) {
-    const openedWithTauri = await tauri.shell
-      .open(target)
-      .then(() => true)
-      .catch(() => false);
-    if (openedWithTauri) {
-      return true;
-    }
-  }
-
-  try {
-    window.open(target, '_blank', 'noopener,noreferrer');
-    return true;
-  } catch {
-    return false;
-  }
 };
 
 const navigateToUrl = (rawUrl: string): void => {
@@ -701,7 +671,7 @@ export const RemoteInstancesPage: React.FC = () => {
                     </div>
                     <div className="typography-micro text-muted-foreground">{candidate.source} config</div>
                   </div>
-                  <ButtonSmall
+                  <Button
                     type="button"
                     variant="outline"
                     size="xs"
@@ -709,7 +679,7 @@ export const RemoteInstancesPage: React.FC = () => {
                     onClick={() => void handleImportCandidate(candidate.host, candidate.pattern)}
                   >
                     Create
-                  </ButtonSmall>
+                  </Button>
                 </div>
               ))}
             </div>
@@ -746,12 +716,12 @@ export const RemoteInstancesPage: React.FC = () => {
                 autoFocus
               />
               <div className="flex items-center justify-end gap-2">
-                <ButtonSmall type="button" variant="outline" size="xs" className="!font-normal" onClick={closePatternDialog} disabled={patternCreating}>
+                <Button type="button" variant="outline" size="xs" className="!font-normal" onClick={closePatternDialog} disabled={patternCreating}>
                   Cancel
-                </ButtonSmall>
-                <ButtonSmall type="submit" size="xs" className="!font-normal" disabled={patternCreating}>
+                </Button>
+                <Button type="submit" size="xs" className="!font-normal" disabled={patternCreating}>
                   Create
-                </ButtonSmall>
+                </Button>
               </div>
             </form>
           </DialogContent>
@@ -782,7 +752,7 @@ export const RemoteInstancesPage: React.FC = () => {
         </div>
         <section className="px-2 pb-2 pt-0 space-y-3">
           <div className="flex flex-wrap items-center gap-2">
-            <ButtonSmall
+            <Button
               type="button"
               variant={canDisconnect ? 'outline' : 'default'}
               size="xs"
@@ -792,8 +762,8 @@ export const RemoteInstancesPage: React.FC = () => {
             >
               {canDisconnect ? <RiStopLine className="h-3.5 w-3.5" /> : <RiPlug2Line className="h-3.5 w-3.5" />}
               {primaryButtonLabel}
-            </ButtonSmall>
-            <ButtonSmall
+            </Button>
+            <Button
               type="button"
               variant="outline"
               size="xs"
@@ -803,8 +773,8 @@ export const RemoteInstancesPage: React.FC = () => {
             >
               <RiRefreshLine className={`h-3.5 w-3.5 ${isConnecting || (isReconnecting && !reconnectAppearsStuck) ? 'animate-spin' : ''}`} />
               {retryButtonLabel}
-            </ButtonSmall>
-            <ButtonSmall
+            </Button>
+            <Button
               type="button"
               variant="outline"
               size="xs"
@@ -815,8 +785,8 @@ export const RemoteInstancesPage: React.FC = () => {
             >
               <RiTerminalWindowLine className="h-3.5 w-3.5" />
               Logs
-            </ButtonSmall>
-            <ButtonSmall
+            </Button>
+            <Button
               type="button"
               variant="outline"
               size="xs"
@@ -838,7 +808,7 @@ export const RemoteInstancesPage: React.FC = () => {
             >
               <RiDeleteBinLine className="h-3.5 w-3.5" />
               Remove
-            </ButtonSmall>
+            </Button>
           </div>
           {status?.localUrl ? (
             <div className="flex flex-wrap items-center gap-2 typography-meta text-muted-foreground">
@@ -1114,7 +1084,7 @@ export const RemoteInstancesPage: React.FC = () => {
                 }}
                 emptyLabel="Auto"
               />
-              <ButtonSmall
+              <Button
                 type="button"
                 variant="outline"
                 size="xs"
@@ -1131,7 +1101,7 @@ export const RemoteInstancesPage: React.FC = () => {
                 }
               >
                 <RiShuffleLine className="h-3.5 w-3.5" />
-              </ButtonSmall>
+              </Button>
             </div>
           </div>
         </section>
@@ -1254,7 +1224,7 @@ export const RemoteInstancesPage: React.FC = () => {
                   </div>
                   <div className="flex items-center gap-2">
                     <Switch checked={forward.enabled} onCheckedChange={(checked) => updateForward((item) => ({ ...item, enabled: checked }))} aria-label="Enable forward" />
-                    <ButtonSmall
+                    <Button
                       type="button"
                       variant="ghost"
                       size="xs"
@@ -1267,7 +1237,7 @@ export const RemoteInstancesPage: React.FC = () => {
                       }
                     >
                       <RiDeleteBinLine className="h-3.5 w-3.5" />
-                    </ButtonSmall>
+                    </Button>
                   </div>
                 </div>
                 <CollapsibleContent className="pt-2">
@@ -1416,7 +1386,7 @@ export const RemoteInstancesPage: React.FC = () => {
                       </div>
 
                       {canOpenLocalEndpoint ? (
-                        <ButtonSmall
+                        <Button
                           type="button"
                           variant="outline"
                           size="xs"
@@ -1431,7 +1401,7 @@ export const RemoteInstancesPage: React.FC = () => {
                         >
                           <RiExternalLinkLine className="h-3.5 w-3.5" />
                           Open local
-                        </ButtonSmall>
+                        </Button>
                       ) : null}
                     </div>
                   </div>
@@ -1440,7 +1410,7 @@ export const RemoteInstancesPage: React.FC = () => {
             );
           })}
 
-          <ButtonSmall
+          <Button
             type="button"
             variant="outline"
             size="xs"
@@ -1459,7 +1429,7 @@ export const RemoteInstancesPage: React.FC = () => {
           >
             <RiAddLine className="h-3.5 w-3.5" />
             Add forward
-          </ButtonSmall>
+          </Button>
         </section>
       </div>
 
@@ -1486,7 +1456,7 @@ export const RemoteInstancesPage: React.FC = () => {
                   </div>
                   <div className="typography-micro text-muted-foreground truncate">{candidate.sshCommand}</div>
                 </div>
-                <ButtonSmall
+                <Button
                   type="button"
                   variant="outline"
                   size="xs"
@@ -1494,7 +1464,7 @@ export const RemoteInstancesPage: React.FC = () => {
                   onClick={() => void handleImportCandidate(candidate.host, candidate.pattern)}
                 >
                   Import
-                </ButtonSmall>
+                </Button>
               </div>
             ))}
           </div>
@@ -1504,12 +1474,12 @@ export const RemoteInstancesPage: React.FC = () => {
 
       <div className="sticky bottom-0 z-10 -mx-3 sm:-mx-6 bg-[var(--surface-background)] border-t border-[var(--interactive-border)] px-3 sm:px-6 py-3">
         <div className="flex items-center gap-2">
-          <ButtonSmall type="button" size="xs" className="!font-normal" onClick={() => void handleSave()} disabled={!hasChanges || isSaving}>
+          <Button type="button" size="xs" className="!font-normal" onClick={() => void handleSave()} disabled={!hasChanges || isSaving}>
             Save changes
-          </ButtonSmall>
+          </Button>
           {status?.localUrl ? (
             <>
-              <ButtonSmall
+              <Button
                 type="button"
                 variant="outline"
                 size="xs"
@@ -1524,8 +1494,8 @@ export const RemoteInstancesPage: React.FC = () => {
               >
                 <RiFileCopyLine className="h-3.5 w-3.5" />
                 Copy local URL
-              </ButtonSmall>
-              <ButtonSmall
+              </Button>
+              <Button
                 type="button"
                 variant="outline"
                 size="xs"
@@ -1536,7 +1506,7 @@ export const RemoteInstancesPage: React.FC = () => {
               >
                 <RiExternalLinkLine className="h-3.5 w-3.5" />
                 Open
-              </ButtonSmall>
+              </Button>
             </>
           ) : null}
           {error ? <div className="ml-auto typography-meta text-[var(--status-error)]">{error}</div> : null}
@@ -1552,14 +1522,14 @@ export const RemoteInstancesPage: React.FC = () => {
             </DialogDescription>
           </DialogHeader>
           <div className="flex items-center justify-end gap-2">
-            <ButtonSmall type="button" variant="outline" size="xs" className="!font-normal" onClick={handleCopyAllLogs} disabled={logDialogLoading || !logLinesText.trim()}>
+            <Button type="button" variant="outline" size="xs" className="!font-normal" onClick={handleCopyAllLogs} disabled={logDialogLoading || !logLinesText.trim()}>
               <RiFileCopyLine className="h-3.5 w-3.5" />
               Copy all
-            </ButtonSmall>
-            <ButtonSmall type="button" variant="outline" size="xs" className="!font-normal" onClick={() => void handleClearLogs()} disabled={logDialogLoading}>
+            </Button>
+            <Button type="button" variant="outline" size="xs" className="!font-normal" onClick={() => void handleClearLogs()} disabled={logDialogLoading}>
               <RiDeleteBinLine className="h-3.5 w-3.5" />
               Clear
-            </ButtonSmall>
+            </Button>
           </div>
           {logDialogLoading ? (
             <div className="typography-meta text-muted-foreground">Loading logs...</div>
@@ -1602,12 +1572,12 @@ export const RemoteInstancesPage: React.FC = () => {
               autoFocus
             />
             <div className="flex items-center justify-end gap-2">
-              <ButtonSmall type="button" variant="outline" size="xs" className="!font-normal" onClick={closePatternDialog} disabled={patternCreating}>
+              <Button type="button" variant="outline" size="xs" className="!font-normal" onClick={closePatternDialog} disabled={patternCreating}>
                 Cancel
-              </ButtonSmall>
-              <ButtonSmall type="submit" size="xs" className="!font-normal" disabled={patternCreating}>
+              </Button>
+              <Button type="submit" size="xs" className="!font-normal" disabled={patternCreating}>
                 Create
-              </ButtonSmall>
+              </Button>
             </div>
           </form>
         </DialogContent>

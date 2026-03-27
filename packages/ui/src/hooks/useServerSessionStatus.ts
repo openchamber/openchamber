@@ -28,6 +28,8 @@ interface ServerSnapshotResponse {
 
 const IMMEDIATE_POLL_DELAY_MS = 150;
 const FOLLOW_UP_POLL_DELAY_MS = 1100;
+const MIN_IMMEDIATE_POLL_GAP_MS = 1200;
+const FOLLOW_UP_REARM_COOLDOWN_MS = 5000;
 
 // Ref to be accessed from outside (e.g., useEventStream) for triggering immediate poll
 let triggerImmediatePollRef: (() => void) | null = null;
@@ -50,12 +52,17 @@ export function useServerSessionStatus(options?: { enabled?: boolean }) {
   const isSyncingRef = React.useRef(false);
   const hasPendingImmediateSyncRef = React.useRef(false);
   const lastSyncAtRef = React.useRef(0);
+  const lastImmediatePollRequestAtRef = React.useRef(0);
+  const lastFollowUpPollRequestAtRef = React.useRef(0);
   const timeoutRef = React.useRef<NodeJS.Timeout | null>(null);
   const followUpTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
 
   const fetchSessionStatus = React.useCallback(async (immediate = false) => {
     const now = Date.now();
     if (!immediate && now - lastSyncAtRef.current < 1000) {
+      return;
+    }
+    if (immediate && now - lastSyncAtRef.current < 600) {
       return;
     }
 
@@ -239,24 +246,31 @@ export function useServerSessionStatus(options?: { enabled?: boolean }) {
 
   // Function to trigger immediate snapshot sync from external modules
   const triggerImmediatePoll = React.useCallback(() => {
-    // Clear any pending timeout
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-    }
-    if (followUpTimeoutRef.current) {
-      clearTimeout(followUpTimeoutRef.current);
-    }
+    const now = Date.now();
+    const elapsed = now - lastImmediatePollRequestAtRef.current;
+    lastImmediatePollRequestAtRef.current = now;
 
-    // Schedule immediate sync with small delay to batch rapid calls
-    timeoutRef.current = setTimeout(() => {
-      void fetchSessionStatus(true);
-    }, IMMEDIATE_POLL_DELAY_MS);
+    if (!timeoutRef.current) {
+      const minGapDelay = elapsed >= MIN_IMMEDIATE_POLL_GAP_MS
+        ? IMMEDIATE_POLL_DELAY_MS
+        : Math.max(IMMEDIATE_POLL_DELAY_MS, MIN_IMMEDIATE_POLL_GAP_MS - elapsed);
+
+      timeoutRef.current = setTimeout(() => {
+        timeoutRef.current = null;
+        void fetchSessionStatus(true);
+      }, minGapDelay);
+    }
 
     // Run one follow-up sync after short settle period to catch delayed
     // server status transitions that happen right after reconnect/restore.
-    followUpTimeoutRef.current = setTimeout(() => {
-      void fetchSessionStatus(true);
-    }, FOLLOW_UP_POLL_DELAY_MS);
+    // Re-arm at most once per cooldown window to avoid stacked follow-ups.
+    if (!followUpTimeoutRef.current && now - lastFollowUpPollRequestAtRef.current >= FOLLOW_UP_REARM_COOLDOWN_MS) {
+      lastFollowUpPollRequestAtRef.current = now;
+      followUpTimeoutRef.current = setTimeout(() => {
+        followUpTimeoutRef.current = null;
+        void fetchSessionStatus(true);
+      }, FOLLOW_UP_POLL_DELAY_MS);
+    }
   }, [fetchSessionStatus]);
 
   // Initial snapshot sync on mount

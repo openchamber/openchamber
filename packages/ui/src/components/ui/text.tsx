@@ -11,6 +11,14 @@ type Variant = {
 
 const variants = [
   {
+    variant: "static",
+    component: ({ children, className, ...props }) => (
+      <span {...props} className={className}>
+        {children}
+      </span>
+    ),
+  },
+  {
     variant: "shine",
     component: ({ children, className, ...props }) => (
         <motion.span
@@ -35,36 +43,48 @@ const variants = [
   {
     variant: "generate-effect",
     component: ({ children, className, ...props }) => {
-      if (typeof children !== "string") return null;
+      if (children === null || typeof children === "undefined") return null;
+
+      const textContent =
+        typeof children === "string"
+          ? children
+          : typeof children === "number"
+            ? String(children)
+            : Array.isArray(children)
+              ? children
+                  .map((item) =>
+                    typeof item === "string" || typeof item === "number"
+                      ? String(item)
+                      : ""
+                  )
+                  .join("")
+              : "";
+
+      if (!textContent) return null;
 
       return (
-        <div className="inline-block whitespace-pre">
-          {children.split("").map((char, index) => (
+        <span className={cn("inline-block align-baseline", className)}>
+          {textContent.split("").map((char, index) => (
             <motion.span
               {...props}
               key={char + String(index)}
               className={cn(
-                "inline-block whitespace-pre text-primary-foreground",
-                className
+                "inline-block whitespace-pre align-baseline"
               )}
-              initial={{ opacity: 0, filter: "blur(4px)", rotateX: 90, y: 5 }}
-              whileInView={{
+              initial={{ opacity: 0 }}
+              animate={{
                 opacity: 1,
-                filter: "blur(0px)",
-                rotateX: 0,
-                y: 0,
               }}
               transition={{
                 ease: "easeOut",
-                duration: 0.3,
-                delay: index * 0.015,
+                duration: 0.14,
+                delay: Math.min(index * 0.0045, 0.14),
               }}
-              viewport={{ once: true }}
             >
               {char}
             </motion.span>
           ))}
-        </div>
+        </span>
       );
     },
   },
@@ -197,7 +217,7 @@ export type TextProps = {
   Partial<MotionProps>;
 
 export function Text({ variant = "shine", className, ...props }: TextProps) {
-  const FALLBACK_INDEX = 0;
+  const FALLBACK_INDEX = 1;
 
   const variantComponent = variants.find((v) => v.variant === variant)?.component;
 

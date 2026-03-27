@@ -138,6 +138,10 @@ export async function executeVSCodeCommand(command: string, args?: unknown[]): P
   return sendBridgeMessage<{ result?: unknown }>('vscode:command', { command, args });
 }
 
+export async function openVSCodeExternalUrl(url: string): Promise<void> {
+  await sendBridgeMessage('vscode:openExternalUrl', { url });
+}
+
 type CommandHandler = (payload: unknown) => void;
 const commandHandlers = new Map<string, CommandHandler>();
 

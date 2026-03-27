@@ -34,10 +34,18 @@ export function useMessageTTS(): UseMessageTTSReturn {
         openaiVoice,
         summarizeMessageTTS,
         summarizeCharacterThreshold,
+        showMessageTTSButtons,
     } = useConfigStore();
-    
-    const { speak: speakServerTTS, stop: stopServerTTS, isAvailable: isServerTTSAvailable } = useServerTTS();
-    const { speak: speakSayTTS, stop: stopSayTTS, isAvailable: isSayTTSAvailable } = useSayTTS();
+
+    const shouldCheckOpenAIAvailability = showMessageTTSButtons && voiceProvider === 'openai';
+    const shouldCheckSayAvailability = showMessageTTSButtons && voiceProvider === 'say';
+
+    const { speak: speakServerTTS, stop: stopServerTTS, isAvailable: isServerTTSAvailable } = useServerTTS({
+        enabled: shouldCheckOpenAIAvailability,
+    });
+    const { speak: speakSayTTS, stop: stopSayTTS, isAvailable: isSayTTSAvailable } = useSayTTS({
+        enabled: shouldCheckSayAvailability,
+    });
     
     const stop = useCallback(() => {
         setIsPlaying(false);

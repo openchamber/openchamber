@@ -17,12 +17,13 @@ fi
 
 if [ ! -f "${SSH_PRIVATE_KEY_PATH}" ] || [ ! -f "${SSH_PUBLIC_KEY_PATH}" ]; then
   if [ ! -w "${SSH_DIR}" ]; then
-    echo "[entrypoint] error: ssh key missing and ${SSH_DIR} is not writable" >&2
-    exit 1
+    echo "[entrypoint] warning: ssh key missing and ${SSH_DIR} is not writable, continuing without SSH key" >&2
+  else
+    echo "[entrypoint] generating SSH key..."
+    if ! ssh-keygen -t ed25519 -N "" -f "${SSH_PRIVATE_KEY_PATH}" >/dev/null 2>&1; then
+      echo "[entrypoint] warning: failed to generate SSH key, continuing without SSH key" >&2
+    fi
   fi
-
-  echo "[entrypoint] generating SSH key..."
-  ssh-keygen -t ed25519 -N "" -f "${SSH_PRIVATE_KEY_PATH}" >/dev/null
 fi
 
 if ! chmod 600 "${SSH_PRIVATE_KEY_PATH}" 2>/dev/null; then
@@ -33,33 +34,14 @@ if ! chmod 644 "${SSH_PUBLIC_KEY_PATH}" 2>/dev/null; then
   echo "[entrypoint] warning: cannot chmod ${SSH_PUBLIC_KEY_PATH}, continuing"
 fi
 
-echo "[entrypoint] SSH public key:"
-cat "${SSH_PUBLIC_KEY_PATH}"
-
-# Handle UI_PASSWORD environment variable
-OPENCHAMBER_ARGS=""
-
-if [ -n "${UI_PASSWORD:-}" ]; then
-  echo "[entrypoint] UI password set, enabling authentication"
-  OPENCHAMBER_ARGS="${OPENCHAMBER_ARGS} --ui-password ${UI_PASSWORD}"
+if [ -f "${SSH_PUBLIC_KEY_PATH}" ]; then
+  echo "[entrypoint] SSH public key:"
+  cat "${SSH_PUBLIC_KEY_PATH}"
 fi
 
-# Handle Cloudflare Tunnel (CF_TUNNEL: true/qr/password/full)
-if [ -n "${CF_TUNNEL:-}" ] && [ "${CF_TUNNEL:-false}" != "false" ]; then
-  echo "[entrypoint] Cloudflare Tunnel enabled (${CF_TUNNEL})"
-  OPENCHAMBER_ARGS="${OPENCHAMBER_ARGS} --try-cf-tunnel"
-
-  case "${CF_TUNNEL}" in
-  "qr")
-    OPENCHAMBER_ARGS="${OPENCHAMBER_ARGS} --tunnel-qr"
-    ;;
-  esac
-
-  case "${CF_TUNNEL}" in
-  "password")
-    OPENCHAMBER_ARGS="${OPENCHAMBER_ARGS} --tunnel-password-url"
-    ;;
-  esac
+# Handle UI password environment variable
+if [ -n "${UI_PASSWORD:-}" ]; then
+  echo "[entrypoint] UI password set, enabling authentication"
 fi
 
 if [ "${OH_MY_OPENCODE:-false}" = "true" ]; then
@@ -76,10 +58,20 @@ if [ "${OH_MY_OPENCODE:-false}" = "true" ]; then
   fi
 fi
 
+# Docker containers need to listen on all interfaces for port mapping to work.
+OPENCHAMBER_HOST="${OPENCHAMBER_HOST:-0.0.0.0}"
+export OPENCHAMBER_HOST
+
 echo "[entrypoint] starting..."
 
 if [ "$#" -gt 0 ]; then
   exec "$@"
 fi
 
-exec bun packages/web/bin/cli.js ${OPENCHAMBER_ARGS}
+set -- bun packages/web/bin/cli.js
+if [ -n "${UI_PASSWORD:-}" ]; then
+  set -- "$@" --ui-password "$UI_PASSWORD"
+fi
+"$@"
+
+exec bun packages/web/bin/cli.js logs

@@ -36,6 +36,27 @@ export const isCommandBuiltIn = (command: Command): boolean => {
 
 const CONFIG_EVENT_SOURCE = "useCommandsStore";
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const COMMANDS_LOAD_CACHE_TTL_MS = 5000;
+const DEFAULT_COMMANDS_CACHE_KEY = '__default__';
+const commandsLastLoadedAt = new Map<string, number>();
+const commandsLoadInFlight = new Map<string, Promise<boolean>>();
+
+const getCommandsCacheKey = (directory: string | null): string => {
+  return directory?.trim() || DEFAULT_COMMANDS_CACHE_KEY;
+};
+
+const buildCommandsSignature = (commands: Command[]): string => {
+  return commands
+    .map((command) => [
+      command.name,
+      command.scope ?? '',
+      command.description ?? '',
+      command.agent ?? '',
+      command.model ?? '',
+      String(command.isBuiltIn === true),
+    ].join('|'))
+    .join('||');
+};
 
 const getRequestDirectory = (): string | null => {
   try {
@@ -116,77 +137,103 @@ export const useCommandsStore = create<CommandsStore>()(
         },
 
         loadCommands: async () => {
-          set({ isLoading: true });
-          const previousCommands = get().commands;
-          let lastError: unknown = null;
+          const directory = getRequestDirectory();
+          const cacheKey = getCommandsCacheKey(directory);
+          const now = Date.now();
+          const loadedAt = commandsLastLoadedAt.get(cacheKey) ?? 0;
+          const hasCachedCommands = get().commands.length > 0;
 
-          for (let attempt = 0; attempt < 3; attempt++) {
-            try {
-              const directory = getRequestDirectory();
-              const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
-              
-              // Ensure the list is scoped to the same directory we use for config source detection.
-              const commands = await opencodeClient.withDirectory(
-                directory,
-                () => opencodeClient.listCommandsWithDetails()
-              );
-              
-              const commandsWithScope = await Promise.all(
-                commands.map(async (cmd) => {
-                  try {
-                    // Force no-cache
-                    const response = await fetch(`/api/config/commands/${encodeURIComponent(cmd.name)}${queryParams}`, {
-                      headers: {
-                        'Cache-Control': 'no-cache',
-                        ...(directory ? { 'x-opencode-directory': directory } : {}),
-                      }
-                    });
-                    
-                    if (response.ok) {
-                      const data = await response.json();
-                      
-                      // Prioritize explicit scope
-                      let scope = data.scope;
-                      
-                      // Fallback to deducing from sources
-                      if (!scope && data.sources) {
-                        const sources = data.sources;
-                        scope = (sources.md?.exists ? sources.md.scope : undefined)
-                          ?? (sources.json?.exists ? sources.json.scope : undefined)
-                          ?? sources.md?.scope
-                          ?? sources.json?.scope;
-                      }
-
-                      if (scope === 'project' || scope === 'user') {
-                        return { ...cmd, scope: scope as CommandScope };
-                      }
-                      
-                      // Explicitly set null scope if not found
-                      return { ...cmd, scope: undefined };
-                    }
-                  } catch (err) {
-                    console.warn(`[CommandsStore] Failed to fetch config for command ${cmd.name}:`, err);
-                  }
-                  return cmd;
-                })
-              );
-              
-              if (JSON.stringify(previousCommands) !== JSON.stringify(commandsWithScope)) {
-                set({ commands: commandsWithScope, isLoading: false });
-              } else {
-                set({ isLoading: false });
-              }
-              return true;
-            } catch (error) {
-              lastError = error;
-              const waitMs = 200 * (attempt + 1);
-              await new Promise((resolve) => setTimeout(resolve, waitMs));
-            }
+          if (hasCachedCommands && now - loadedAt < COMMANDS_LOAD_CACHE_TTL_MS) {
+            return true;
           }
 
-          console.error("Failed to load commands:", lastError);
-          set({ commands: previousCommands, isLoading: false });
-          return false;
+          const inFlight = commandsLoadInFlight.get(cacheKey);
+          if (inFlight) {
+            return inFlight;
+          }
+
+          const request = (async () => {
+            set({ isLoading: true });
+            const previousCommands = get().commands;
+            const previousSignature = buildCommandsSignature(previousCommands);
+            let lastError: unknown = null;
+
+            for (let attempt = 0; attempt < 3; attempt++) {
+              try {
+                const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
+
+                // Ensure the list is scoped to the same directory we use for config source detection.
+                const commands = await opencodeClient.withDirectory(
+                  directory,
+                  () => opencodeClient.listCommandsWithDetails()
+                );
+
+                const commandsWithScope = await Promise.all(
+                  commands.map(async (cmd) => {
+                    try {
+                      // Force no-cache
+                      const response = await fetch(`/api/config/commands/${encodeURIComponent(cmd.name)}${queryParams}`, {
+                        headers: {
+                          'Cache-Control': 'no-cache',
+                          ...(directory ? { 'x-opencode-directory': directory } : {}),
+                        }
+                      });
+
+                      if (response.ok) {
+                        const data = await response.json();
+
+                        // Prioritize explicit scope
+                        let scope = data.scope;
+
+                        // Fallback to deducing from sources
+                        if (!scope && data.sources) {
+                          const sources = data.sources;
+                          scope = (sources.md?.exists ? sources.md.scope : undefined)
+                            ?? (sources.json?.exists ? sources.json.scope : undefined)
+                            ?? sources.md?.scope
+                            ?? sources.json?.scope;
+                        }
+
+                        if (scope === 'project' || scope === 'user') {
+                          return { ...cmd, scope: scope as CommandScope };
+                        }
+
+                        // Explicitly set null scope if not found
+                        return { ...cmd, scope: undefined };
+                      }
+                    } catch (err) {
+                      console.warn(`[CommandsStore] Failed to fetch config for command ${cmd.name}:`, err);
+                    }
+                    return cmd;
+                  })
+                );
+
+                const nextSignature = buildCommandsSignature(commandsWithScope);
+                if (previousSignature !== nextSignature) {
+                  set({ commands: commandsWithScope, isLoading: false });
+                } else {
+                  set({ isLoading: false });
+                }
+                commandsLastLoadedAt.set(cacheKey, Date.now());
+                return true;
+              } catch (error) {
+                lastError = error;
+                const waitMs = 200 * (attempt + 1);
+                await new Promise((resolve) => setTimeout(resolve, waitMs));
+              }
+            }
+
+            console.error("Failed to load commands:", lastError);
+            set({ commands: previousCommands, isLoading: false });
+            return false;
+          })();
+
+          commandsLoadInFlight.set(cacheKey, request);
+          try {
+            return await request;
+          } finally {
+            commandsLoadInFlight.delete(cacheKey);
+          }
         },
 
         createCommand: async (config: CommandConfig) => {

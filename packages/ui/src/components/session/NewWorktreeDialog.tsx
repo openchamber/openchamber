@@ -868,15 +868,11 @@ Nice-to-have:
       }
       
       toast.success('Worktree created', {
-        description: `${metadata.branch || metadata.name}${sourceLabel ? ` from ${sourceLabel}` : ''}`,
+        description: `${metadata.branch || metadata.name}${sourceLabel ? ` from ${sourceLabel}` : ''} - bootstrapping in background`,
       });
 
-      try {
-        await loadSessions();
-      } catch {
-        // best effort
-      }
-      
+      void loadSessions().catch(() => undefined);
+
       onOpenChange(false);
 
       if (createdSessionId) {

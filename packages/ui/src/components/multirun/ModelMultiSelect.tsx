@@ -97,6 +97,8 @@ export interface ModelMultiSelectProps {
   showChips?: boolean;
   /** Maximum models allowed */
   maxModels?: number;
+  /** Optional className for add model trigger button */
+  addButtonClassName?: string;
 }
 
 /**
@@ -111,6 +113,7 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
   addButtonLabel = 'Add model',
   showChips = true,
   maxModels,
+  addButtonClassName,
 }) => {
   const { providers, modelsMetadata } = useConfigStore();
   const { favoriteModelsList, recentModelsList } = useModelLists();
@@ -201,15 +204,29 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
 
   const hasResults = filteredFavorites.length > 0 || filteredRecents.length > 0 || filteredProviders.length > 0;
 
-  // Calculate available height when dropdown opens
+  // Calculate available height: space above trigger within visible area
   React.useEffect(() => {
-    if (isOpen && triggerRef.current) {
-      const rect = triggerRef.current.getBoundingClientRect();
-      // Space above trigger minus padding from top edge
-      const spaceAbove = rect.top - 100;
-      // Cap at 400px max, minimum 150px
-      setAvailableHeight(Math.max(150, Math.min(400, spaceAbove)));
+    if (!isOpen || !triggerRef.current) return;
+
+    const triggerRect = triggerRef.current.getBoundingClientRect();
+
+    // Find the nearest dialog or overflow ancestor to constrain within
+    let container: HTMLElement | null = triggerRef.current.parentElement;
+    while (container) {
+      if (container.getAttribute('role') === 'dialog' || container.hasAttribute('data-scroll-shadow')) {
+        break;
+      }
+      const style = getComputedStyle(container);
+      if (style.overflow === 'auto' || style.overflow === 'hidden' || style.overflowY === 'auto' || style.overflowY === 'hidden') {
+        break;
+      }
+      container = container.parentElement;
     }
+
+    const topBound = container ? container.getBoundingClientRect().top : 0;
+    const spaceAbove = triggerRect.top - topBound - 16;
+    // Cap: min 150, max 300
+    setAvailableHeight(Math.max(150, Math.min(300, spaceAbove)));
   }, [isOpen]);
 
   // Focus search input when opened
@@ -308,7 +325,15 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
             type="button"
             variant="outline"
             size="sm"
-            className={CHIP_HEIGHT_CLASS}
+            className={cn(
+              CHIP_HEIGHT_CLASS,
+              '!border-border/80 !bg-[var(--surface-subtle)]/95 !backdrop-blur-sm hover:!bg-[var(--interactive-hover)]/70',
+              addButtonClassName,
+            )}
+            style={{
+              backdropFilter: 'blur(10px)',
+              WebkitBackdropFilter: 'blur(10px)',
+            }}
             onClick={() => setIsOpen(!isOpen)}
           >
             <RiAddLine className="h-3.5 w-3.5 mr-1" />
@@ -379,7 +404,12 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
             let currentFlatIndex = 0;
 
             return (
-              <div style={{ backgroundColor: 'var(--surface-elevated)' }} className="absolute bottom-full left-0 mb-1 z-50 border border-border/30 rounded-xl overflow-hidden shadow-none w-[min(380px,calc(100vw-2rem))] flex flex-col">
+              <div
+                className="absolute bottom-full left-0 mb-1 z-50 w-[min(380px,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] flex flex-col overflow-hidden rounded-xl border border-border/50 shadow-lg"
+                style={{
+                  background: 'linear-gradient(var(--surface-elevated),var(--surface-elevated)),linear-gradient(var(--surface-background),var(--surface-background))',
+                }}
+              >
                 {/* Search input */}
                 <div className="p-2 border-b border-border/40">
                   <div className="relative">
@@ -411,10 +441,7 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
                     {/* Favorites Section */}
                     {filteredFavorites.length > 0 && (
                       <>
-                        <div
-                          style={{ backgroundColor: 'var(--surface-elevated)' }}
-                          className="typography-micro font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2 -mx-1 px-3 py-1.5 sticky top-0 z-10 border-b border-border/30"
-                        >
+                        <div className="typography-micro font-semibold text-muted-foreground uppercase tracking-wider sticky top-0 z-10 -mx-1 flex items-center gap-2 border-b border-border/30 px-3 py-1.5 [background:linear-gradient(var(--surface-elevated),var(--surface-elevated)),linear-gradient(var(--surface-background),var(--surface-background))]">
                           <RiStarFill className="h-4 w-4 text-primary" />
                           Favorites
                         </div>
@@ -429,10 +456,7 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
                     {filteredRecents.length > 0 && (
                       <>
                         {filteredFavorites.length > 0 && <div className="h-px bg-border/40 my-1" />}
-                        <div
-                          style={{ backgroundColor: 'var(--surface-elevated)' }}
-                          className="typography-micro font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2 -mx-1 px-3 py-1.5 sticky top-0 z-10 border-b border-border/30"
-                        >
+                        <div className="typography-micro font-semibold text-muted-foreground uppercase tracking-wider sticky top-0 z-10 -mx-1 flex items-center gap-2 border-b border-border/30 px-3 py-1.5 [background:linear-gradient(var(--surface-elevated),var(--surface-elevated)),linear-gradient(var(--surface-background),var(--surface-background))]">
                           <RiTimeLine className="h-4 w-4" />
                           Recent
                         </div>
@@ -452,7 +476,7 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
                     {filteredProviders.map((provider, index) => (
                       <React.Fragment key={provider.id}>
                         {index > 0 && <div className="h-px bg-border/40 my-1" />}
-                        <div style={{ backgroundColor: 'var(--surface-elevated)' }} className="typography-micro font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2 -mx-1 px-3 py-1.5 sticky top-0 z-10 border-b border-border/30">
+                        <div className="typography-micro font-semibold text-muted-foreground uppercase tracking-wider sticky top-0 z-10 -mx-1 flex items-center gap-2 border-b border-border/30 px-3 py-1.5 [background:linear-gradient(var(--surface-elevated),var(--surface-elevated)),linear-gradient(var(--surface-background),var(--surface-background))]">
                           <ProviderLogo
                             providerId={provider.id}
                             className="h-4 w-4 flex-shrink-0"
@@ -513,7 +537,14 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
                         onUpdate(index, { ...model, variant: nextVariant });
                       }}
                     >
-                      <SelectTrigger size="chip" className="px-2 gap-1.5 rounded-md bg-interactive-selection/20 border-border/30 hover:bg-interactive-hover/30 typography-meta font-medium text-foreground">
+                      <SelectTrigger
+                        size="chip"
+                        className="px-2 gap-1.5 rounded-md !border-border/80 !bg-[var(--surface-subtle)]/95 !backdrop-blur-sm hover:!bg-[var(--interactive-hover)]/70 typography-meta font-medium text-foreground"
+                        style={{
+                          backdropFilter: 'blur(10px)',
+                          WebkitBackdropFilter: 'blur(10px)',
+                        }}
+                      >
                         <RiBrainAi3Line
                           className={cn(
                             'h-3.5 w-3.5 flex-shrink-0',

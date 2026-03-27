@@ -51,6 +51,7 @@ The following functions are exported and used by the web server:
 - `pull(directory, options)`: Pull changes from remote.
 - `push(directory, options)`: Push changes to remote (auto-sets upstream if needed).
 - `fetch(directory, options)`: Fetch changes from remote.
+- `removeRemote(directory, options)`: Remove a configured remote (except `origin`).
 - `deleteRemoteBranch(directory, options)`: Delete a remote branch.
 
 ### Log Operations

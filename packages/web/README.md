@@ -21,25 +21,30 @@ Or install manually: `bun add -g @openchamber/web` (or npm, pnpm, yarn).
 ## Usage
 
 ```bash
-openchamber                    # Start on port 3000
-openchamber --port 8080        # Custom port
-openchamber --ui-password secret   # Password-protect
-openchamber stop               # Stop server
-openchamber update             # Update to latest
+openchamber                          # Start on port 3000
+openchamber --port 8080              # Custom port
+openchamber --ui-password secret     # Password-protect UI
+openchamber tunnel help              # Tunnel lifecycle commands
+openchamber tunnel providers         # Show provider capabilities
+openchamber tunnel profile add --provider cloudflare --mode managed-remote --name prod-main --hostname app.example.com --token <token>
+openchamber tunnel start --profile prod-main
+openchamber tunnel start --provider cloudflare --mode quick --qr
+openchamber tunnel start --provider cloudflare --mode managed-local --config ~/.cloudflared/config.yml
+openchamber tunnel status --all      # Show tunnel state across instances
+openchamber tunnel stop --port 3000  # Stop tunnel only (server stays running)
+openchamber logs                     # Follow latest instance logs
+OPENCODE_PORT=4096 OPENCODE_SKIP_START=true openchamber                    # Connect to external OpenCode server
+OPENCODE_HOST=https://myhost:4096 OPENCODE_SKIP_START=true openchamber  # Connect via custom host/HTTPS
+openchamber stop                     # Stop server
+openchamber update                   # Update to latest version
 ```
 
-<details>
-<summary>Remote access & tunnels</summary>
+### Tunnel behavior notes
 
-```bash
-openchamber --try-cf-tunnel                          # Cloudflare Quick Tunnel
-openchamber --try-cf-tunnel --tunnel-qr              # + QR code for mobile
-openchamber --try-cf-tunnel --tunnel-password-url     # + password in URL
-```
-
-Named Tunnel mode is configured in-app at **Settings > OpenChamber > Tunnel**. Requires [cloudflared](https://github.com/cloudflare/cloudflared/releases).
-
-</details>
+- One active tunnel per running OpenChamber instance (port).
+- Starting a different tunnel mode/provider on the same instance replaces the active tunnel.
+- Replacing or stopping a tunnel revokes existing connect links and invalidates remote tunnel sessions.
+- Connect links are one-time tokens; generating a new link revokes the previous unused link.
 
 <details>
 <summary>Connect to external OpenCode server</summary>
@@ -54,22 +59,47 @@ OPENCODE_HOST=https://myhost:4096 OPENCODE_SKIP_START=true openchamber
 | `OPENCODE_HOST` | Full base URL of external server (overrides `OPENCODE_PORT`) |
 | `OPENCODE_PORT` | Port of external server |
 | `OPENCODE_SKIP_START` | Skip starting embedded OpenCode server |
+| `OPENCHAMBER_OPENCODE_HOSTNAME` | Bind hostname for managed OpenCode server (default: `127.0.0.1`, use `0.0.0.0` for LAN/remote access — trusted networks only) |
 
 </details>
 
 <details>
-<summary>Docker</summary>
+<summary>Bind managed OpenCode to LAN / Tailscale</summary>
 
 ```bash
-docker compose up -d    # Available at http://localhost:3000
+OPENCHAMBER_OPENCODE_HOSTNAME=0.0.0.0 openchamber --port 3000
 ```
+
+**Security note:** binding to `0.0.0.0` exposes the server on all network interfaces — use only on trusted networks and protect with firewall rules or `--ui-password`.
+
+</details>
 
 **Optional env vars:**
 ```yaml
 environment:
   UI_PASSWORD: your_secure_password
-  CF_TUNNEL: "true"   # Options: true, qr, password
+  OPENCHAMBER_TUNNEL_MODE: quick # quick | managed-remote | managed-local
+  OPENCHAMBER_TUNNEL_PROVIDER: cloudflare
 ```
+
+For `managed-remote` mode, also set:
+
+```yaml
+environment:
+  OPENCHAMBER_TUNNEL_MODE: managed-remote
+  OPENCHAMBER_TUNNEL_HOSTNAME: app.example.com
+  OPENCHAMBER_TUNNEL_TOKEN: <token>
+```
+
+For `managed-local` mode, you can set:
+
+```yaml
+environment:
+  OPENCHAMBER_TUNNEL_MODE: managed-local
+  OPENCHAMBER_TUNNEL_CONFIG: /home/openchamber/.cloudflared/config.yml
+```
+
+Managed-local path note: `OPENCHAMBER_TUNNEL_CONFIG` must use a container path under `/home/openchamber/...`. If the config file references `credentials-file`, ensure that JSON path is also mounted and reachable inside the container.
 
 **Data directory:** mount `data/` for persistent storage. Ensure permissions:
 ```bash
@@ -83,9 +113,64 @@ chown -R 1000:1000 data/
 <summary>Background & daemon mode</summary>
 
 ```bash
-openchamber --daemon    # Run in background
+openchamber             # Runs in background by default
 openchamber stop        # Stop background server
 ```
+
+</details>
+
+<details>
+<summary>systemd service (VPN / LAN access)</summary>
+
+Use `--foreground` to keep the CLI process alive so systemd (or any other process manager) can track and restart it. Combine with `OPENCODE_HOST` to connect to an OpenCode instance running as a separate service.
+
+**`~/.config/systemd/user/opencode.service`**
+```ini
+[Unit]
+Description=OpenCode Server
+
+[Service]
+Type=simple
+ExecStart=opencode serve --port 4095
+Environment="PATH=/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/home/YOU/.local/bin:/home/YOU/.npm-global/bin:/usr/local/bin:/usr/bin:/bin"
+Environment=SSH_AUTH_SOCK=%t/ssh-agent.socket
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+```
+
+> **Why set `PATH` and `SSH_AUTH_SOCK`?**
+> systemd user services start with a minimal environment — no shell profile is sourced.
+> Without an explicit `PATH`, OpenCode won't find tools installed via Homebrew, npm, or `~/.local/bin`.
+> Without `SSH_AUTH_SOCK`, git operations over SSH (push, pull, clone) will fail.
+> `%t` expands to `$XDG_RUNTIME_DIR` (e.g. `/run/user/1000`), where most SSH agents write their socket.
+
+**`~/.config/systemd/user/openchamber.service`**
+```ini
+[Unit]
+Description=OpenChamber Web Server
+After=opencode.service
+
+[Service]
+Type=simple
+ExecStart=openchamber serve --port 3000 --host 0.0.0.0 --ui-password your-password --foreground
+Environment="OPENCODE_HOST=http://localhost:4095"
+Environment="OPENCODE_SKIP_START=true"
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+```
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now opencode openchamber
+```
+
+`--host 0.0.0.0` is required to listen on all interfaces (the default is `127.0.0.1`). Use `--host <ip>` or `OPENCHAMBER_HOST=<ip>` to bind to a specific interface instead.
 
 </details>
 
@@ -97,7 +182,11 @@ openchamber stop        # Stop background server
 - **Self-update** - update and restart from the UI, server settings stay intact
 - **Cross-tab tracking** - session activity stays in sync across browser tabs
 
-Plus everything from the shared OpenChamber UI: branchable timeline, Git sidebar, terminal, voice mode, and more.
+- Cloudflare tunnel access with quick, managed-remote, and managed-local modes
+- One-scan onboarding with tunnel QR + password URL helpers
+- Mobile-first experience: optimized chat controls, keyboard-safe layouts, and attachment-friendly UI
+- Background notifications plus reliable cross-tab session activity tracking
+- Built-in self-update + restart flow that keeps your server settings intact
 
 ## License
 

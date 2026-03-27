@@ -2,6 +2,7 @@ import React from 'react';
 import { cn } from '@/lib/utils';
 import { ErrorBoundary } from '../ui/ErrorBoundary';
 import { useUIStore } from '@/stores/useUIStore';
+import { isDesktopShell } from '@/lib/desktop';
 
 export const SIDEBAR_CONTENT_WIDTH = 250;
 const SIDEBAR_MIN_WIDTH = 250;
@@ -11,10 +12,12 @@ interface SidebarProps {
     isOpen: boolean;
     isMobile: boolean;
     children: React.ReactNode;
+    className?: string;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, className }) => {
     const { sidebarWidth, setSidebarWidth } = useUIStore();
+    const isDesktopApp = React.useMemo(() => isDesktopShell(), []);
     const [isResizing, setIsResizing] = React.useState(false);
     const startXRef = React.useRef(0);
     const startWidthRef = React.useRef(sidebarWidth || SIDEBAR_CONTENT_WIDTH);
@@ -115,9 +118,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children }) 
             ref={sidebarRef}
             className={cn(
                 'relative flex h-full overflow-hidden border-r border-border/40',
-                'bg-sidebar/50',
+                isDesktopApp
+                    ? 'bg-[color:var(--sidebar-overlay-strong)] backdrop-blur supports-[backdrop-filter]:bg-[color:var(--sidebar-overlay-soft)]'
+                    : 'bg-sidebar',
                 isResizing ? 'transition-none' : 'transition-[width] duration-300 ease-in-out',
-                !isOpen && 'border-r-0'
+                !isOpen && 'border-r-0',
+                className,
             )}
             style={{
                 width: 'var(--oc-left-sidebar-width)',
@@ -131,8 +137,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children }) 
             {isOpen && (
                 <div
                     className={cn(
-                        'absolute right-0 top-0 z-20 h-full w-[4px] cursor-col-resize hover:bg-primary/50 transition-colors',
-                        isResizing && 'bg-primary'
+                        'absolute right-0 top-0 z-20 h-full w-[3px] cursor-col-resize hover:bg-[var(--interactive-border)]/80 transition-colors',
+                        isResizing && 'bg-[var(--interactive-border)]'
                     )}
                     onPointerDown={handlePointerDown}
                     onPointerMove={handlePointerMove}

@@ -695,9 +695,6 @@ const getJsonWriteTarget = (
   if (preferredScope === AGENT_SCOPE.PROJECT && paths.projectPath) {
     return { config: projectConfig, path: paths.projectPath };
   }
-  if (paths.projectPath) {
-    return { config: projectConfig, path: paths.projectPath };
-  }
   return { config: userConfig, path: paths.userPath };
 };
 

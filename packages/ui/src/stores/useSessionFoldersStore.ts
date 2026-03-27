@@ -3,6 +3,7 @@ import { devtools } from 'zustand/middleware';
 import { getSafeStorage } from './utils/safeStorage';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { useDirectoryStore } from './useDirectoryStore';
+import { isVSCodeRuntime } from '@/lib/desktop';
 
 // --- Types ---
 
@@ -48,6 +49,22 @@ const safeStorage = getSafeStorage();
 let diskWriteTimer: ReturnType<typeof setTimeout> | null = null;
 let diskHydrated = false;
 let diskHydrationInFlight = false;
+let persistFoldersTimer: ReturnType<typeof setTimeout> | undefined;
+let persistCollapsedTimer: ReturnType<typeof setTimeout> | undefined;
+let pendingFoldersMap: SessionFoldersMap | null = null;
+let pendingCollapsedIds: Set<string> | null = null;
+
+const isVSCodeWebview = (): boolean => {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  if (isVSCodeRuntime()) {
+    return true;
+  }
+
+  return (window as { __VSCODE_CONFIG__?: unknown }).__VSCODE_CONFIG__ !== undefined;
+};
 
 const getSessionsDirectoriesPath = (): string | null => {
   const directoryState = useDirectoryStore.getState();
@@ -72,6 +89,10 @@ const getParentDirectory = (path: string): string | null => {
 
 const schedulePersistToDisk = (foldersMap: SessionFoldersMap, collapsedFolderIds: Set<string>): void => {
   if (typeof window === 'undefined') {
+    return;
+  }
+
+  if (isVSCodeWebview()) {
     return;
   }
 
@@ -168,20 +189,49 @@ const readPersistedCollapsed = (): Set<string> => {
 };
 
 const persistFolders = (foldersMap: SessionFoldersMap): void => {
-  try {
-    safeStorage.setItem(FOLDERS_STORAGE_KEY, JSON.stringify(foldersMap));
-  } catch {
-    // ignored
-  }
+  pendingFoldersMap = foldersMap;
+  clearTimeout(persistFoldersTimer);
+  persistFoldersTimer = setTimeout(() => {
+    try {
+      safeStorage.setItem(FOLDERS_STORAGE_KEY, JSON.stringify(foldersMap));
+      pendingFoldersMap = null;
+    } catch {
+      // ignored
+    }
+  }, 300);
 };
 
 const persistCollapsed = (collapsedFolderIds: Set<string>): void => {
-  try {
-    safeStorage.setItem(COLLAPSED_STORAGE_KEY, JSON.stringify(Array.from(collapsedFolderIds)));
-  } catch {
-    // ignored
-  }
+  pendingCollapsedIds = collapsedFolderIds;
+  clearTimeout(persistCollapsedTimer);
+  persistCollapsedTimer = setTimeout(() => {
+    try {
+      safeStorage.setItem(COLLAPSED_STORAGE_KEY, JSON.stringify(Array.from(collapsedFolderIds)));
+      pendingCollapsedIds = null;
+    } catch {
+      // ignored
+    }
+  }, 300);
 };
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', () => {
+    if (pendingFoldersMap !== null) {
+      clearTimeout(persistFoldersTimer);
+      try {
+        safeStorage.setItem(FOLDERS_STORAGE_KEY, JSON.stringify(pendingFoldersMap));
+      } catch { /* ignored */ }
+      pendingFoldersMap = null;
+    }
+    if (pendingCollapsedIds !== null) {
+      clearTimeout(persistCollapsedTimer);
+      try {
+        safeStorage.setItem(COLLAPSED_STORAGE_KEY, JSON.stringify(Array.from(pendingCollapsedIds)));
+      } catch { /* ignored */ }
+      pendingCollapsedIds = null;
+    }
+  });
+}
 
 const persistState = (foldersMap: SessionFoldersMap, collapsedFolderIds: Set<string>): void => {
   persistFolders(foldersMap);
@@ -418,6 +468,11 @@ export const useSessionFoldersStore = create<SessionFoldersStore>()(
 
 const hydrateSessionFoldersFromDisk = async (): Promise<void> => {
   if (diskHydrated || diskHydrationInFlight || typeof window === 'undefined') {
+    return;
+  }
+
+  if (isVSCodeWebview()) {
+    diskHydrated = true;
     return;
   }
 

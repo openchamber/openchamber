@@ -1,0 +1,86 @@
+name: Docs Source
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "packages/docs/**"
+      - "scripts/docs/**"
+      - "package.json"
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Optional existing tag to upload docs source archive"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  validate-and-package:
+    runs-on: ubuntu-latest
+    outputs:
+      archive_name: ${{ steps.archive.outputs.archive_name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Validate docs source
+        run: bun run docs:validate
+
+      - name: Build docs source archive
+        id: archive
+        run: |
+          mkdir -p artifacts
+          ARCHIVE_NAME="openchamber-docs-source-${GITHUB_SHA::8}.tar.gz"
+          tar -czf "artifacts/${ARCHIVE_NAME}" -C packages/docs .
+          echo "archive_name=${ARCHIVE_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs-source
+          path: artifacts/${{ steps.archive.outputs.archive_name }}
+          retention-days: 14
+
+      - name: Upload archive to release tag
+        if: ${{ github.event_name == 'release' || github.event.inputs.release_tag != '' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event_name == 'release' && github.event.release.tag_name || github.event.inputs.release_tag }}
+          files: artifacts/${{ steps.archive.outputs.archive_name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Trigger openchamber-website docs sync (optional)
+        if: ${{ github.event_name == 'release' || github.event_name == 'workflow_dispatch' }}
+        env:
+          WEBSITE_REPO: openchamber/openchamber-website
+          WEBSITE_TOKEN: ${{ secrets.OPENCHAMBER_WEBSITE_REPO_TOKEN }}
+          SOURCE_REF: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref_name }}
+        run: |
+          if [ -z "$WEBSITE_TOKEN" ]; then
+            echo "OPENCHAMBER_WEBSITE_REPO_TOKEN not set; skip dispatch."
+            exit 0
+          fi
+
+          curl -sS -X POST \
+            -H "Authorization: Bearer $WEBSITE_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/$WEBSITE_REPO/dispatches \
+            -d @- <<JSON
+          {
+            "event_type": "docs_source_updated",
+            "client_payload": {
+              "source_repo": "${{ github.repository }}",
+              "source_ref": "$SOURCE_REF",
+              "archive_name": "${{ steps.archive.outputs.archive_name }}"
+            }
+          }
+          JSON

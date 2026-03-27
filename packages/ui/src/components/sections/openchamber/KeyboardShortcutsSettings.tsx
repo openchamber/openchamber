@@ -1,5 +1,5 @@
 import React from 'react';
-import { ButtonSmall } from '@/components/ui/button-small';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { RiInformationLine } from '@remixicon/react';
@@ -132,7 +132,7 @@ export const KeyboardShortcutsSettings: React.FC = () => {
       <div className="mb-1 px-1">
         <div className="flex items-center gap-2">
           <h3 className="typography-ui-header font-medium text-foreground">Keyboard Shortcuts</h3>
-          <ButtonSmall
+          <Button
             type="button"
             variant="outline"
             size="xs"
@@ -146,7 +146,7 @@ export const KeyboardShortcutsSettings: React.FC = () => {
             }}
           >
             Reset All
-          </ButtonSmall>
+          </Button>
           <Tooltip delayDuration={1000}>
             <TooltipTrigger asChild>
               <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
@@ -166,8 +166,8 @@ export const KeyboardShortcutsSettings: React.FC = () => {
                 This combo is already used by another shortcut. Overwrite and clear that other mapping?
               </span>
               <div className="flex gap-2 shrink-0">
-                <ButtonSmall type="button" size="xs" className="!font-normal" onClick={confirmOverwrite}>Overwrite</ButtonSmall>
-                <ButtonSmall type="button" size="xs" className="!font-normal" variant="ghost" onClick={() => setPendingOverwrite(null)}>Cancel</ButtonSmall>
+                <Button type="button" size="xs" className="!font-normal" onClick={confirmOverwrite}>Overwrite</Button>
+                <Button type="button" size="xs" className="!font-normal" variant="ghost" onClick={() => setPendingOverwrite(null)}>Cancel</Button>
               </div>
             </div>
           )}
@@ -233,7 +233,7 @@ export const KeyboardShortcutsSettings: React.FC = () => {
                   }}
                   className="h-7 w-40 min-w-0 typography-ui-label text-center"
                 />
-                <ButtonSmall
+                <Button
                   type="button"
                   variant="secondary"
                   size="xs"
@@ -249,10 +249,10 @@ export const KeyboardShortcutsSettings: React.FC = () => {
                   disabled={!hasDraft}
                 >
                   Save
-                </ButtonSmall>
-                <ButtonSmall type="button" size="xs" className="!font-normal" variant="ghost" onClick={() => resetOne(action.id)}>
+                </Button>
+                <Button type="button" size="xs" className="!font-normal" variant="ghost" onClick={() => resetOne(action.id)}>
                   Reset
-                </ButtonSmall>
+                </Button>
               </div>
             </div>
           );

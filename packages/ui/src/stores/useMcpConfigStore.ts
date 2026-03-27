@@ -72,6 +72,14 @@ export const envArrayToRecord = (arr: Array<{ key: string; value: string }>): Re
 };
 
 const CLIENT_RELOAD_DELAY_MS = 800;
+const MCP_LOAD_CACHE_TTL_MS = 5000;
+const DEFAULT_MCP_CACHE_KEY = '__default__';
+const mcpLastLoadedAt = new Map<string, number>();
+const mcpLoadInFlight = new Map<string, Promise<boolean>>();
+
+const getMcpCacheKey = (directory: string | null): string => {
+  return directory?.trim() || DEFAULT_MCP_CACHE_KEY;
+};
 
 // ============== STORE ==============
 
@@ -104,23 +112,47 @@ export const useMcpConfigStore = create<McpConfigStore>()(
         setMcpDraft: (draft) => set({ mcpDraft: draft }),
 
         loadMcpConfigs: async () => {
-          set({ isLoading: true });
-          try {
-            const configDirectory = getConfigDirectory();
-            const queryParams = configDirectory ? `?directory=${encodeURIComponent(configDirectory)}` : '';
-            const response = await fetch(`/api/config/mcp${queryParams}`, {
-              headers: configDirectory ? { 'x-opencode-directory': configDirectory } : undefined,
-            });
-            if (!response.ok) {
-              throw new Error('Failed to load MCP configs');
-            }
-            const data: McpServerWithScope[] = await response.json();
-            set({ mcpServers: data, isLoading: false });
+          const configDirectory = getConfigDirectory();
+          const cacheKey = getMcpCacheKey(configDirectory);
+          const now = Date.now();
+          const loadedAt = mcpLastLoadedAt.get(cacheKey) ?? 0;
+          const hasCachedConfigs = get().mcpServers.length > 0;
+
+          if (hasCachedConfigs && now - loadedAt < MCP_LOAD_CACHE_TTL_MS) {
             return true;
-          } catch (error) {
-            console.error('[McpConfigStore] Failed to load MCP configs:', error);
-            set({ isLoading: false });
-            return false;
+          }
+
+          const inFlight = mcpLoadInFlight.get(cacheKey);
+          if (inFlight) {
+            return inFlight;
+          }
+
+          const request = (async () => {
+            set({ isLoading: true });
+            try {
+              const queryParams = configDirectory ? `?directory=${encodeURIComponent(configDirectory)}` : '';
+              const response = await fetch(`/api/config/mcp${queryParams}`, {
+                headers: configDirectory ? { 'x-opencode-directory': configDirectory } : undefined,
+              });
+              if (!response.ok) {
+                throw new Error('Failed to load MCP configs');
+              }
+              const data: McpServerWithScope[] = await response.json();
+              set({ mcpServers: data, isLoading: false });
+              mcpLastLoadedAt.set(cacheKey, Date.now());
+              return true;
+            } catch (error) {
+              console.error('[McpConfigStore] Failed to load MCP configs:', error);
+              set({ isLoading: false });
+              return false;
+            }
+          })();
+
+          mcpLoadInFlight.set(cacheKey, request);
+          try {
+            return await request;
+          } finally {
+            mcpLoadInFlight.delete(cacheKey);
           }
         },
 

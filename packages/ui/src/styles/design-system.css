@@ -135,6 +135,12 @@
     overscroll-behavior-y: none;
   }
 
+  :root.desktop-runtime body,
+  :root.desktop-runtime #root {
+    background: transparent !important;
+    background-color: transparent !important;
+  }
+
   .font-sans {
     font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif) !important;
   }

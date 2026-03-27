@@ -24,6 +24,10 @@ use std::{
 };
 use tauri::utils::config::BackgroundThrottlingPolicy;
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
+#[cfg(target_os = "macos")]
+use window_vibrancy::{
+    apply_vibrancy, clear_vibrancy, NSVisualEffectMaterial,
+};
 
 /// Global counter for generating unique window labels.
 static WINDOW_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -1795,7 +1799,57 @@ fn build_local_url(port: u16) -> String {
     format!("http://127.0.0.1:{port}")
 }
 
+/// Kills any stale openchamber-server processes that may be lingering from
+/// previous app sessions or incomplete shutdowns. This ensures a clean
+/// startup and prevents port conflicts.
+fn kill_stale_sidecar_processes() {
+    let process_name = if cfg!(windows) {
+        "openchamber-server.exe"
+    } else {
+        "openchamber-server"
+    };
+
+    let result = if cfg!(target_os = "macos") {
+        // macOS: use pkill to terminate by process name
+        std::process::Command::new("pkill")
+            .arg("-x") // exact match
+            .arg(process_name)
+            .output()
+    } else if cfg!(target_os = "linux") {
+        // Linux: use pkill
+        std::process::Command::new("pkill")
+            .arg("-x")
+            .arg(process_name)
+            .output()
+    } else if cfg!(windows) {
+        // Windows: use taskkill
+        std::process::Command::new("taskkill")
+            .arg("/F")
+            .arg("/IM")
+            .arg(process_name)
+            .output()
+    } else {
+        return;
+    };
+
+    // Log result for debugging (pkill returns 1 if no processes found, which is fine)
+    if let Ok(output) = result {
+        log::debug!(
+            "[sidecar] cleanup result: exit_code={:?}, stdout={}, stderr={}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stdout).trim(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+
+    // Brief pause to let the OS clean up the processes
+    std::thread::sleep(Duration::from_millis(100));
+}
+
 async fn spawn_local_server(app: &tauri::AppHandle) -> Result<String> {
+    // Clean up any stale sidecar processes from previous sessions
+    kill_stale_sidecar_processes();
+
     let stored_port = read_desktop_local_port_from_disk();
     let mut candidates: Vec<Option<u16>> = Vec::new();
     if let Some(port) = stored_port {
@@ -2352,10 +2406,82 @@ fn build_init_script(local_origin: &str) -> String {
     init_script.push_str("\ntry{var old=document.getElementById('__oc-instance-switcher');if(old)old.remove();}catch(_e){}");
 
     if !cfg!(debug_assertions) {
-        init_script.push_str("\ntry{document.addEventListener('contextmenu',function(e){var t=e&&e.target;if(!t||typeof t.closest!=='function'){e.preventDefault();return;}if(t.closest('.terminal-viewport-container,[data-oc-allow-native-contextmenu],input,textarea,[contenteditable=\"true\"]')){return;}e.preventDefault();},true);}catch(_e){}");
+        init_script.push_str("\ntry{document.addEventListener('contextmenu',function(e){var t=e&&e.target;if(!t||typeof t.closest!=='function'){e.preventDefault();return;}if(t.closest('.terminal-viewport-container,[data-oc-allow-native-contextmenu],a,input,textarea,[contenteditable=\"true\"]')){return;}e.preventDefault();},true);}catch(_e){}");
     }
 
     init_script
+}
+
+fn parse_theme_override(theme_mode: Option<&str>, theme_variant: Option<&str>) -> Option<tauri::Theme> {
+    match theme_mode.map(str::trim) {
+        Some("system") => None,
+        Some("dark") => Some(tauri::Theme::Dark),
+        Some("light") => Some(tauri::Theme::Light),
+        _ => match theme_variant.map(str::trim) {
+            Some("dark") => Some(tauri::Theme::Dark),
+            Some("light") => Some(tauri::Theme::Light),
+            _ => None,
+        },
+    }
+}
+
+fn read_desktop_theme_override() -> Option<tauri::Theme> {
+    let settings = fs::read_to_string(settings_file_path())
+        .ok()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok());
+
+    let use_system_theme = settings
+        .as_ref()
+        .and_then(|value| value.get("useSystemTheme"))
+        .and_then(|value| value.as_bool());
+
+    if matches!(use_system_theme, Some(true)) {
+        return None;
+    }
+
+    let theme_mode = settings
+        .as_ref()
+        .and_then(|value| value.get("themeMode"))
+        .and_then(|value| value.as_str());
+
+    let theme_variant = settings
+        .as_ref()
+        .and_then(|value| value.get("themeVariant"))
+        .and_then(|value| value.as_str());
+
+    parse_theme_override(theme_mode, theme_variant)
+}
+
+#[cfg(target_os = "macos")]
+fn apply_macos_window_vibrancy(window: &tauri::WebviewWindow) {
+    let _ = clear_vibrancy(window);
+
+    if let Err(error) = apply_vibrancy(
+        window,
+        NSVisualEffectMaterial::Sidebar,
+        None,
+        None,
+    ) {
+        log::warn!("[desktop:vibrancy] Failed to apply macOS vibrancy: {error}");
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn apply_macos_window_vibrancy(_window: &tauri::WebviewWindow) {}
+
+#[tauri::command]
+fn desktop_set_window_theme(
+    window: tauri::WebviewWindow,
+    theme_mode: Option<String>,
+    theme_variant: Option<String>,
+) -> Result<(), String> {
+    let override_theme = parse_theme_override(theme_mode.as_deref(), theme_variant.as_deref());
+
+    window
+        .set_theme(override_theme)
+        .map_err(|error| format!("failed to set window theme: {error}"))?;
+
+    Ok(())
 }
 
 fn is_window_state_visible(app: &tauri::AppHandle, state: &DesktopWindowState) -> bool {
@@ -2523,6 +2649,7 @@ fn create_window(
     #[cfg(target_os = "macos")]
     {
         builder = builder
+            .transparent(true)
             .hidden_title(true)
             .title_bar_style(tauri::TitleBarStyle::Overlay)
             .traffic_light_position(tauri::Position::Logical(tauri::LogicalPosition {
@@ -2532,6 +2659,8 @@ fn create_window(
     }
 
     let window = builder.build()?;
+    let _ = window.set_theme(read_desktop_theme_override());
+    apply_macos_window_vibrancy(&window);
 
     if let Some(state) = restored_state.as_ref().filter(|_| apply_restored_state) {
         if state.maximized || state.fullscreen {
@@ -2583,6 +2712,7 @@ fn create_startup_window(app: &tauri::AppHandle, restore_geometry: bool) -> Resu
     #[cfg(target_os = "macos")]
     {
         builder = builder
+            .transparent(true)
             .hidden_title(true)
             .title_bar_style(tauri::TitleBarStyle::Overlay)
             .traffic_light_position(tauri::Position::Logical(tauri::LogicalPosition {
@@ -2592,6 +2722,8 @@ fn create_startup_window(app: &tauri::AppHandle, restore_geometry: bool) -> Resu
     }
 
     let window = builder.build()?;
+    let _ = window.set_theme(read_desktop_theme_override());
+    apply_macos_window_vibrancy(&window);
 
     if let Some(state) = restored_state.as_ref().filter(|_| apply_restored_state) {
         if state.maximized || state.fullscreen {
@@ -3025,6 +3157,7 @@ fn main() {
             desktop_hosts_get,
             desktop_hosts_set,
             desktop_host_probe,
+            desktop_set_window_theme,
             remote_ssh::desktop_ssh_instances_get,
             remote_ssh::desktop_ssh_instances_set,
             remote_ssh::desktop_ssh_import_hosts,

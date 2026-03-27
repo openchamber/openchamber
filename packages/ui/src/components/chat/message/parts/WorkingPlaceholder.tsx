@@ -1,5 +1,7 @@
 import React from 'react';
 import { Text } from '@/components/ui/text';
+// import { SessionActiveSpinner } from './SessionActiveSpinner';
+import { GenericStatusSpinner } from './GenericStatusSpinner';
 
 interface WorkingPlaceholderProps {
   isWorking: boolean;
@@ -7,6 +9,7 @@ interface WorkingPlaceholderProps {
   isGenericStatus?: boolean;
   isWaitingForPermission?: boolean;
   retryInfo?: { attempt?: number; next?: number } | null;
+  agentName?: string;
 }
 
 const STATUS_DISPLAY_TIME_MS = 1200;
@@ -191,12 +194,13 @@ export function WorkingPlaceholder({
 
     return (
       <div
-        className="flex h-full items-center text-muted-foreground pl-[2ch]"
+        className="flex h-full items-center text-muted-foreground pl-0.5"
         role="status"
         aria-live="polite"
         aria-label={retryText}
       >
-        <span className="flex items-center gap-1.5">
+        <span className="flex items-center gap-1">
+          <GenericStatusSpinner className="size-[15px] shrink-0" />
           <Text variant="shine" className="typography-ui-header">
             {retryText}
           </Text>
@@ -215,14 +219,15 @@ export function WorkingPlaceholder({
   return (
     <div
       className={
-        'flex h-full items-center text-muted-foreground pl-[2ch]'
+        'flex h-full items-center text-muted-foreground pl-0.5'
       }
       role="status"
       aria-live={displayedPermission ? 'assertive' : 'polite'}
       aria-label={label}
       data-waiting={displayedPermission ? 'true' : undefined}
     >
-      <span className="flex items-center gap-1.5">
+      <span className="flex items-center gap-1">
+        <GenericStatusSpinner className="size-[15px] shrink-0" />
         <Text variant="shine" className="typography-ui-header">
           {displayText}
         </Text>

@@ -18,3 +18,9 @@ yarn-error.log*
 pnpm-debug.log*
 .env
 .env.*
+.opencode
+data
+workspaces
+packages/desktop/src-tauri
+packages/desktop/target
+packages/intellij

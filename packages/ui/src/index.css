@@ -397,6 +397,32 @@ svg.animate-spin {
   }
 }
 
+/* Starfield twinkle — dots fade through varying brightness like stars */
+@keyframes star-twinkle {
+  0%, 100% { opacity: 0.15; }
+  50% { opacity: 0.7; }
+}
+
+@keyframes pulse-opacity {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes pulse-opacity-dim {
+  0%,
+  100% {
+    opacity: 0;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
 .app-region-drag {
   -webkit-app-region: drag;
 }
@@ -757,6 +783,21 @@ html:not(.dark) .chat-scroll {
 /* Tool markdown should render at code size to match tool card typography. */
 .streamdown-content.streamdown-tool {
   font-size: var(--text-code) !important;
+}
+
+/* Reasoning markdown renders at meta size, dimmed. */
+.streamdown-content.streamdown-reasoning {
+  font-size: var(--text-meta);
+  color: var(--muted-foreground);
+}
+
+.streamdown-content.streamdown-reasoning strong,
+.streamdown-content.streamdown-reasoning b,
+.streamdown-content.streamdown-reasoning [data-streamdown="strong"],
+.streamdown-content.streamdown-reasoning [data-streamdown="bold"] {
+  font-weight: inherit !important;
+  color: inherit !important;
+  font-style: inherit !important;
 }
 
 .streamdown-content.streamdown-tool code,
@@ -1338,7 +1379,7 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
   .animate-grid-pulse,
   .animate-attention-diamond-pulse {
     animation: none;
-}
+  }
 
 
 }

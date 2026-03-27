@@ -1,6 +1,5 @@
 import React, { useMemo } from 'react';
-import { ButtonSmall } from '@/components/ui/button-small';
-import { ButtonLarge } from '@/components/ui/button-large';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui';
 import { isMobileDeviceViaCSS } from '@/lib/device';
@@ -207,13 +206,13 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
         <SettingsProjectSelector className="mb-3" />
         <div className="flex items-center justify-between gap-2">
           <span className="typography-meta text-muted-foreground">Total {skills.length}</span>
-          <ButtonSmall
+          <Button size="sm"
             variant="ghost"
             className="h-7 w-7 px-0 -my-1 text-muted-foreground"
             onClick={handleCreateNew}
           >
             <RiAddLine className="h-3.5 w-3.5" />
-          </ButtonSmall>
+          </Button>
         </div>
       </div>
 
@@ -347,17 +346,18 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <ButtonLarge
+            <Button
+              size="sm"
+              className="text-foreground hover:bg-interactive-hover hover:text-foreground"
               variant="ghost"
               onClick={() => setDeleteDialogSkill(null)}
               disabled={isDeletePending}
-              className="text-foreground hover:bg-interactive-hover hover:text-foreground"
             >
               Cancel
-            </ButtonLarge>
-            <ButtonLarge onClick={handleConfirmDeleteSkill} disabled={isDeletePending}>
+            </Button>
+            <Button size="sm" onClick={handleConfirmDeleteSkill} disabled={isDeletePending}>
               Delete
-            </ButtonLarge>
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -383,16 +383,17 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
             }}
           />
           <DialogFooter>
-            <ButtonLarge
+            <Button
+              size="sm"
+              className="text-foreground hover:bg-interactive-hover hover:text-foreground"
               variant="ghost"
               onClick={() => setRenameDialogSkill(null)}
-              className="text-foreground hover:bg-interactive-hover hover:text-foreground"
             >
               Cancel
-            </ButtonLarge>
-            <ButtonLarge onClick={handleRenameSkill}>
+            </Button>
+            <Button size="sm" onClick={handleRenameSkill}>
               Rename
-            </ButtonLarge>
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -461,12 +462,12 @@ const SkillListItem: React.FC<SkillListItemProps> = ({
 
         <DropdownMenu open={isMenuOpen} onOpenChange={onMenuOpenChange}>
           <DropdownMenuTrigger asChild>
-            <ButtonSmall
+            <Button size="sm"
               variant="ghost"
               className="h-6 w-6 px-0 flex-shrink-0 -mr-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100"
             >
               <RiMore2Line className="h-3.5 w-3.5" />
-            </ButtonSmall>
+            </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-fit min-w-20">
             <DropdownMenuItem

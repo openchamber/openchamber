@@ -113,6 +113,7 @@ function App({ apis }: AppProps) {
   const [isVSCodeRuntime, setIsVSCodeRuntime] = React.useState<boolean>(() => apis.runtime.isVSCode);
   const [showCliOnboarding, setShowCliOnboarding] = React.useState(false);
   const [isEmbeddedVisible, setIsEmbeddedVisible] = React.useState(true);
+  const isDesktopRuntime = React.useMemo(() => isDesktopShell(), []);
   const appReadyDispatchedRef = React.useRef(false);
   const embeddedSessionChat = React.useMemo<EmbeddedSessionChatConfig | null>(() => readEmbeddedSessionChatConfig(), []);
   const embeddedBackgroundWorkEnabled = !embeddedSessionChat || isEmbeddedVisible;
@@ -534,7 +535,7 @@ function App({ apis }: AppProps) {
           <FireworksProvider>
             <VoiceProvider>
               <TooltipProvider delayDuration={700} skipDelayDuration={150}>
-                <div className="h-full text-foreground bg-background">
+                <div className={isDesktopRuntime ? 'h-full text-foreground bg-transparent' : 'h-full text-foreground bg-background'}>
                   <MainLayout />
                   <Toaster />
                   <ConfigUpdateOverlay />

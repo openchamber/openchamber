@@ -1,6 +1,6 @@
 import React from 'react';
 import { RiAddLine, RiCloseLine, RiDeleteBinLine, RiInformationLine } from '@remixicon/react';
-import { ButtonSmall } from '@/components/ui/button-small';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -306,7 +306,7 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
                 </button>
               </div>
             ))}
-            <ButtonSmall
+            <Button
               type="button"
               variant="ghost"
               size="xs"
@@ -315,7 +315,7 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
             >
               <RiAddLine className="h-3.5 w-3.5" />
               Add command
-            </ButtonSmall>
+            </Button>
           </div>
         )}
       </div>

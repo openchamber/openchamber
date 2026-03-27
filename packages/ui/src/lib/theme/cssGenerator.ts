@@ -125,8 +125,8 @@ export class CSSVariableGenerator {
     vars.push(`  --sidebar-ring: ${theme.colors.interactive.focusRing} !important;`);
 
     const isDark = theme.metadata.variant === 'dark';
-    const strongAlpha = isDark ? 0.8 : 0.95;
-    const softAlpha = isDark ? 0.7 : 0.9;
+    const strongAlpha = isDark ? 0.35 : 0.75;
+    const softAlpha = isDark ? 0.2 : 0.6;
 
     if (sidebarBaseRgb) {
       vars.push(

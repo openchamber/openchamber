@@ -2,7 +2,6 @@ import React from 'react';
 import { OpenChamberVisualSettings } from './OpenChamberVisualSettings';
 import { AboutSettings } from './AboutSettings';
 import { SessionRetentionSettings } from './SessionRetentionSettings';
-import { MemoryLimitsSettings } from './MemoryLimitsSettings';
 import { DefaultsSettings } from './DefaultsSettings';
 import { GitSettings } from './GitSettings';
 import { NotificationSettings } from './NotificationSettings';
@@ -100,7 +99,7 @@ const ShortcutsSectionContent: React.FC = () => {
     return <KeyboardShortcutsSettings />;
 };
 
-// Visual section: Theme Mode, Font Size, Spacing, Corner Radius, Input Bar Offset (mobile), Nav Rail
+// Visual section: Theme Mode, Font Size, Spacing, Input Bar Offset (mobile), Nav Rail
 const VisualSectionContent: React.FC = () => {
     const isVSCode = isVSCodeRuntime();
     return <OpenChamberVisualSettings visibleSettings={[
@@ -109,18 +108,18 @@ const VisualSectionContent: React.FC = () => {
         'fontSize',
         'terminalFontSize',
         'spacing',
-        'cornerRadius',
         'inputBarOffset',
-        ...(!isVSCode ? ['terminalQuickKeys' as const, 'navRail' as const] : []),
+        ...(!isVSCode ? ['terminalQuickKeys' as const] : []),
+        'reportUsage',
     ]} />;
 };
 
-// Chat section: Default Tool Output, User message rendering, Diff layout, Mobile status bar, Show reasoning traces, Justification activity, Activity header timestamps, Queue mode, Persist draft
+// Chat section: User message rendering, Diff layout, Mobile status bar, Show reasoning traces, Queue mode, Persist draft
 const ChatSectionContent: React.FC = () => {
-    return <OpenChamberVisualSettings visibleSettings={['toolOutput', 'mermaidRendering', 'userMessageRendering', 'stickyUserHeader', 'diffLayout', 'mobileStatusBar', 'dotfiles', 'reasoning', 'textJustificationActivity', 'activityHeaderTimestamps', 'queueMode', 'persistDraft', 'inputSpellcheck']} />;
+    return <OpenChamberVisualSettings visibleSettings={['chatRenderMode', 'activityRenderMode', 'userMessageRendering', 'mermaidRendering', 'reasoning', 'showToolFileIcons', 'expandedTools', 'stickyUserHeader', 'diffLayout', 'mobileStatusBar', 'dotfiles', 'queueMode', 'persistDraft', 'inputSpellcheck']} />;
 };
 
-// Sessions section: Default model & agent, Session retention, Memory limits
+// Sessions section: Default model & agent, Session retention
 const SessionsSectionContent: React.FC = () => {
     const isVSCode = isVSCodeRuntime();
     return (
@@ -133,9 +132,6 @@ const SessionsSectionContent: React.FC = () => {
             )}
             <div className="border-t border-border/40 pt-6">
                 <SessionRetentionSettings />
-            </div>
-            <div className="border-t border-border/40 pt-6">
-                <MemoryLimitsSettings />
             </div>
         </div>
     );

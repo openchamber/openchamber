@@ -3,7 +3,7 @@ import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { ButtonSmall } from '@/components/ui/button-small';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
   DropdownMenu,
@@ -17,6 +17,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
 import { cn } from '@/lib/utils';
 import { copyTextToClipboard } from '@/lib/clipboard';
+import { openExternalUrl } from '@/lib/url';
 import type { ModelMetadata } from '@/types';
 
 const COMPACT_NUMBER_FORMATTER = new Intl.NumberFormat('en-US', {
@@ -406,7 +407,7 @@ export const ProvidersPage: React.FC = () => {
       }));
 
       if (urlCandidate) {
-        window.open(urlCandidate, '_blank', 'noopener,noreferrer');
+        void openExternalUrl(urlCandidate);
       }
       setPendingOAuth({ providerId, methodIndex });
       toast.message('Complete the OAuth flow in your browser');
@@ -653,14 +654,14 @@ export const ProvidersPage: React.FC = () => {
                         placeholder="sk-..."
                         className="flex-1 font-mono text-xs"
                       />
-                      <ButtonSmall
+                      <Button
                         size="xs"
                         className="!font-normal shrink-0"
                         onClick={() => handleSaveApiKey(candidateProviderId)}
                         disabled={authBusyKey === `api:${candidateProviderId}`}
                       >
                         {authBusyKey === `api:${candidateProviderId}` ? 'Saving...' : 'Save Key'}
-                      </ButtonSmall>
+                      </Button>
                     </div>
                   </div>
 
@@ -693,7 +694,7 @@ export const ProvidersPage: React.FC = () => {
                                     </div>
                                   )}
                                 </div>
-                                <ButtonSmall
+                                <Button
                                   variant="outline"
                                   size="xs"
                                   className="!font-normal"
@@ -701,7 +702,7 @@ export const ProvidersPage: React.FC = () => {
                                   disabled={authBusyKey === `oauth:${candidateProviderId}:${index}`}
                                 >
                                   Connect
-                                </ButtonSmall>
+                                </Button>
                               </div>
 
                               {oauthDetails[codeKey]?.instructions && (
@@ -713,7 +714,7 @@ export const ProvidersPage: React.FC = () => {
                               {oauthDetails[codeKey]?.userCode && (
                                 <div className="flex items-center gap-2 mt-2">
                                   <Input value={oauthDetails[codeKey]?.userCode} readOnly className="font-mono text-center tracking-widest" />
-                                  <ButtonSmall variant="outline" size="xs" className="!font-normal" onClick={() => handleCopyOAuthCode(oauthDetails[codeKey]?.userCode ?? '')}>Copy Code</ButtonSmall>
+                                  <Button variant="outline" size="xs" className="!font-normal" onClick={() => handleCopyOAuthCode(oauthDetails[codeKey]?.userCode ?? '')}>Copy Code</Button>
                                 </div>
                               )}
 
@@ -721,8 +722,8 @@ export const ProvidersPage: React.FC = () => {
                                 <div className="flex items-center gap-2 mt-2">
                                   <Input value={oauthDetails[codeKey]?.url} readOnly className="text-xs text-muted-foreground" />
                                   <div className="flex gap-1 shrink-0">
-                                    <ButtonSmall variant="outline" size="xs" className="!font-normal" onClick={() => window.open(oauthDetails[codeKey]?.url, '_blank', 'noopener,noreferrer')}>Open</ButtonSmall>
-                                    <ButtonSmall variant="outline" size="xs" className="!font-normal" onClick={() => handleCopyOAuthLink(oauthDetails[codeKey]?.url ?? '')}>Copy</ButtonSmall>
+                                    <Button variant="outline" size="xs" className="!font-normal" onClick={() => openExternalUrl(oauthDetails[codeKey]?.url ?? '')}>Open</Button>
+                                    <Button variant="outline" size="xs" className="!font-normal" onClick={() => handleCopyOAuthLink(oauthDetails[codeKey]?.url ?? '')}>Copy</Button>
                                   </div>
                                 </div>
                               )}
@@ -740,14 +741,14 @@ export const ProvidersPage: React.FC = () => {
                                     placeholder="Paste authorization code"
                                     className="font-mono text-xs"
                                   />
-                                  <ButtonSmall
+                                  <Button
                                     size="xs"
                                     className="!font-normal"
                                     onClick={() => handleOAuthComplete(candidateProviderId, index)}
                                     disabled={authBusyKey === `oauth-complete:${candidateProviderId}:${index}`}
                                   >
                                     {authBusyKey === `oauth-complete:${candidateProviderId}:${index}` ? 'Saving...' : 'Complete'}
-                                  </ButtonSmall>
+                                  </Button>
                                 </div>
                               )}
                             </div>
@@ -810,14 +811,14 @@ export const ProvidersPage: React.FC = () => {
         <div className="mb-8">
           <div className="mb-1 px-1 flex items-center justify-between gap-2">
             <h3 className="typography-ui-header font-medium text-foreground">Authentication</h3>
-            <ButtonSmall
+            <Button
               variant="outline"
               size="xs"
               className="!font-normal"
               onClick={() => setShowAuthPanel((prev) => !prev)}
             >
               {showAuthPanel ? 'Hide' : 'Reconnect'}
-            </ButtonSmall>
+            </Button>
           </div>
 
           <section className="px-2 pb-2 pt-0">
@@ -856,14 +857,14 @@ export const ProvidersPage: React.FC = () => {
                       placeholder="sk-..."
                       className="flex-1 font-mono text-xs"
                     />
-                    <ButtonSmall
+                    <Button
                       size="xs"
                       className="!font-normal shrink-0"
                       onClick={() => handleSaveApiKey(selectedProvider.id)}
                       disabled={authBusyKey === `api:${selectedProvider.id}`}
                     >
                       {authBusyKey === `api:${selectedProvider.id}` ? 'Saving...' : 'Save Key'}
-                    </ButtonSmall>
+                    </Button>
                   </div>
                 </div>
 
@@ -886,7 +887,7 @@ export const ProvidersPage: React.FC = () => {
                                 </div>
                               )}
                             </div>
-                            <ButtonSmall
+                            <Button
                               variant="outline"
                               size="xs"
                               className="!font-normal"
@@ -894,7 +895,7 @@ export const ProvidersPage: React.FC = () => {
                               disabled={authBusyKey === `oauth:${selectedProvider.id}:${index}`}
                             >
                               Connect
-                            </ButtonSmall>
+                            </Button>
                           </div>
 
                           {oauthDetails[codeKey]?.instructions && (
@@ -906,7 +907,7 @@ export const ProvidersPage: React.FC = () => {
                           {oauthDetails[codeKey]?.userCode && (
                             <div className="flex items-center gap-2 mt-2">
                               <Input value={oauthDetails[codeKey]?.userCode} readOnly className="font-mono text-center tracking-widest" />
-                              <ButtonSmall variant="outline" size="xs" className="!font-normal" onClick={() => handleCopyOAuthCode(oauthDetails[codeKey]?.userCode ?? '')}>Copy Code</ButtonSmall>
+                              <Button variant="outline" size="xs" className="!font-normal" onClick={() => handleCopyOAuthCode(oauthDetails[codeKey]?.userCode ?? '')}>Copy Code</Button>
                             </div>
                           )}
 
@@ -914,8 +915,8 @@ export const ProvidersPage: React.FC = () => {
                             <div className="flex items-center gap-2 mt-2">
                               <Input value={oauthDetails[codeKey]?.url} readOnly className="text-xs text-muted-foreground" />
                               <div className="flex gap-1 shrink-0">
-                                <ButtonSmall variant="outline" size="xs" className="!font-normal" onClick={() => window.open(oauthDetails[codeKey]?.url, '_blank', 'noopener,noreferrer')}>Open</ButtonSmall>
-                                <ButtonSmall variant="outline" size="xs" className="!font-normal" onClick={() => handleCopyOAuthLink(oauthDetails[codeKey]?.url ?? '')}>Copy</ButtonSmall>
+                                <Button variant="outline" size="xs" className="!font-normal" onClick={() => openExternalUrl(oauthDetails[codeKey]?.url ?? '')}>Open</Button>
+                                <Button variant="outline" size="xs" className="!font-normal" onClick={() => handleCopyOAuthLink(oauthDetails[codeKey]?.url ?? '')}>Copy</Button>
                               </div>
                             </div>
                           )}
@@ -933,14 +934,14 @@ export const ProvidersPage: React.FC = () => {
                                 placeholder="Paste authorization code"
                                 className="font-mono text-xs"
                               />
-                              <ButtonSmall
+                              <Button
                                 size="xs"
                                 className="!font-normal"
                                 onClick={() => handleOAuthComplete(selectedProvider.id, index)}
                                 disabled={authBusyKey === `oauth-complete:${selectedProvider.id}:${index}`}
                               >
                                 {authBusyKey === `oauth-complete:${selectedProvider.id}:${index}` ? 'Saving...' : 'Complete'}
-                              </ButtonSmall>
+                              </Button>
                             </div>
                           )}
                         </div>
@@ -976,7 +977,7 @@ export const ProvidersPage: React.FC = () => {
                 )}
               </div>
 
-              <ButtonSmall
+              <Button
                 variant="ghost"
                 size="xs"
                 className="!font-normal text-[var(--status-error)] hover:text-[var(--status-error)]"
@@ -984,7 +985,7 @@ export const ProvidersPage: React.FC = () => {
                 disabled={authBusyKey === `disconnect:${selectedProvider.id}`}
               >
                 {authBusyKey === `disconnect:${selectedProvider.id}` ? 'Disconnecting...' : 'Disconnect'}
-              </ButtonSmall>
+              </Button>
             </div>
           </section>
         </div>
@@ -1001,7 +1002,7 @@ export const ProvidersPage: React.FC = () => {
               )}
             </h3>
             <div className="flex items-center gap-1">
-              <ButtonSmall
+              <Button
                 variant="outline"
                 size="xs"
                 className="!font-normal"
@@ -1013,15 +1014,15 @@ export const ProvidersPage: React.FC = () => {
                 }}
               >
                 Hide all
-              </ButtonSmall>
-              <ButtonSmall
+              </Button>
+              <Button
                 variant="outline"
                 size="xs"
                 className="!font-normal"
                 onClick={() => showAllModels(selectedProvider.id)}
               >
                 Show all
-              </ButtonSmall>
+              </Button>
             </div>
           </div>
 

@@ -1,12 +1,12 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
-import { ButtonSmall } from '@/components/ui/button-small';
 import { toast } from '@/components/ui';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import type { GitHubAuthStatus } from '@/lib/api/types';
 import { useDeviceInfo } from '@/lib/device';
 import { cn } from '@/lib/utils';
+import { openExternalUrl } from '@/lib/url';
 import { RiGithubFill, RiInformationLine } from '@remixicon/react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
@@ -42,26 +42,7 @@ export const GitHubSettings: React.FC = () => {
   const setStatus = useGitHubAuthStore((state) => state.setStatus);
 
   const openExternal = React.useCallback(async (url: string) => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    type TauriShell = { shell?: { open?: (url: string) => Promise<unknown> } };
-    const tauri = (window as unknown as { __TAURI__?: TauriShell }).__TAURI__;
-    if (tauri?.shell?.open) {
-      try {
-        await tauri.shell.open(url);
-        return;
-      } catch {
-        // fall through
-      }
-    }
-
-    try {
-      window.open(url, '_blank', 'noopener,noreferrer');
-    } catch {
-      // ignore
-    }
+    await openExternalUrl(url);
   }, []);
 
   const [isBusy, setIsBusy] = React.useState(false);
@@ -304,18 +285,18 @@ export const GitHubSettings: React.FC = () => {
               </div>
             </div>
 
-            <ButtonSmall variant="outline" onClick={disconnect} disabled={isBusy} className={cn("text-[var(--status-error)] hover:text-[var(--status-error)]", isMobile ? "w-full" : undefined)}>
+            <Button size="sm" variant="outline" onClick={disconnect} disabled={isBusy} className={cn("text-[var(--status-error)] hover:text-[var(--status-error)]", isMobile ? "w-full" : undefined)}>
               Disconnect
-            </ButtonSmall>
+            </Button>
           </div>
         ) : (
           <div className="flex items-center justify-between gap-4 px-4 py-4">
             <div className="flex min-w-0 flex-col">
               <span className="typography-ui-label text-foreground">Not Connected</span>
             </div>
-            <ButtonSmall variant="default" onClick={startConnect} disabled={isBusy}>
+            <Button size="sm" variant="default" onClick={startConnect} disabled={isBusy}>
               Connect GitHub
-            </ButtonSmall>
+            </Button>
           </div>
         )}
 
@@ -359,13 +340,13 @@ export const GitHubSettings: React.FC = () => {
                     {isCurrent ? (
                       <span className="typography-micro text-[var(--primary-base)] bg-[var(--primary-base)]/10 px-1.5 py-0.5 rounded">Active</span>
                     ) : (
-                      <ButtonSmall
+                      <Button size="sm"
                         variant="ghost"
                         onClick={() => activateAccount(account.id)}
                         disabled={isBusy}
                       >
                         Switch to
-                      </ButtonSmall>
+                      </Button>
                     )}
                   </div>
                 );
@@ -378,14 +359,14 @@ export const GitHubSettings: React.FC = () => {
 
       {connected && (
         <div className="mt-2 px-2 pb-2">
-          <ButtonSmall
+          <Button size="sm"
             variant="outline"
             onClick={startConnect}
             disabled={isBusy}
             className={cn(isMobile ? 'w-full' : undefined)}
           >
             Add Account
-          </ButtonSmall>
+          </Button>
         </div>
       )}
 
@@ -413,12 +394,12 @@ export const GitHubSettings: React.FC = () => {
             <span className="typography-micro text-muted-foreground animate-pulse">
               Waiting for approval… (auto-refresh)
             </span>
-            <ButtonSmall variant="ghost" disabled={isBusy} onClick={() => {
+            <Button size="sm" variant="ghost" disabled={isBusy} onClick={() => {
               stopPolling();
               setFlow(null);
             }}>
               Cancel
-            </ButtonSmall>
+            </Button>
           </div>
         </div>
       )}

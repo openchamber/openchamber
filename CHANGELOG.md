@@ -4,6 +4,57 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.9.1] - 2026-03-20
+
+- Sessions/UI: restored Project Notes access in the sidebar, polished notes/todo editing, and fixed project action overlap so project controls stay reachable for non-git directories.
+- Chat/GitHub: linked issues and pull requests now appear as user-message attachments and open more reliably across runtimes.
+- Settings/MCP: adding MCP servers now consistently respects user vs project scope, preventing user-scope entries from being written into project config files.
+- VSCode/Reliability: managed server startup now imports login-shell environment values and normalizes Windows workspace paths, reducing missing session/model state and proxy-related connection issues.
+- Sessions: sidebar lists now keep sessions visible in both Recent and Project sections for easier discovery (thanks to @nguyenngothuong).
+- Files: file trees now refresh incrementally after create/rename/delete actions, so changes appear faster without full reloads (thanks to @nguyenngothuong).
+- Sessions/Worktrees: draft sessions now resolve the correct project when opened from worktree paths (thanks to @yulia-ivashko).
+- Desktop: improved stale server-process cleanup on startup and fixed external link opening behavior for more predictable app interactions (thanks to @jwcrystal).
+- Usage: added MiniMax Weekly quota provider support for broader usage tracking coverage (thanks to @nzlov).
+
+
+## [1.9.0] - 2026-03-20
+
+- UI/Navigation: delivered a major sidebar redesign with clearer hierarchy, unified action patterns, and improved session organization for better navigation through multiple projects (thanks to @yulia-ivashko).
+- Chat: reduced streaming CPU usage and background churn with steadier turn rendering, debounced updates, and less storage thrash during long runs.
+- Chat: fixed scroll-to-latest and timeline tracking behavior, so active responses stay anchored more reliably while streaming.
+- Chat/Permissions: added a session-based permission auto-accept toggle and polished permission-shield visuals for quicker, clearer approval workflows.
+- Git: refreshed history visuals and added clearer branch-boundary markers, improving commit review and branch context while browsing history (thanks to @yulia-ivashko).
+- Git: added remote removal from sync workflows and stabilized polling to reduce noisy background refreshes (thanks to @yulia-ivashko).
+- Settings/UI: fixed settings scrolling on mobile, made outside-click closing immediate, and reduced settings load churn/CPU spikes.
+- Panels/UI: softened panel resize affordances and tightened service dropdown/layout spacing for a cleaner, less distracting workspace.
+- Files: added debounced editor auto-save so edits persist more reliably without interrupting writing flow (thanks to @nguyenngothuong).
+- Files: reworked search UI for searching in files.
+- Reliability/Platform: improved Windows path/process behavior and restored macOS PTY/microphone compatibility, reducing startup/runtime friction across environments (thanks to @zerone0x, @fangfei0110).
+- Desktop/macOS: lowered the minimum supported macOS version to Ventura (13.0), expanding compatibility on older systems (thanks to @craigharman).
+- Updates/Reliability: unified update-check behavior across runtimes for more consistent update availability checks.
+
+
+## [1.8.7] - 2026-03-13
+
+- CLI: fixed a startup regression in global npm/bun installs where wrapper or symlinked `openchamber` entrypoints could exit without output on commands like `--version` or `status`.
+- CLI: hardened entrypoint detection across direct, symlinked, and shim-based launches to keep startup behavior consistent across package managers (thanks to @shekohex).
+- Windows/Web: daemon startup and Git operations no longer flash extra console windows, making background workflows less distracting (thanks to @SergioChan).
+- Deployment/Docker: improved `docker run` startup behavior and entrypoint handling so containerized installs start more reliably (thanks to @nzlov).
+
+
+
+## [1.8.6] - 2026-03-13
+
+- Tunnel/CLI: rebuilt tunnel workflows around clearer managed modes and provider-aware lifecycle commands, with safer startup checks, improved diagnostics, and cleaner CLI output for everyday remote access (thanks to @yulia-ivashko).
+- Chat: completed a turn-based rendering pipeline that keeps streaming, activity rows, and tool progress more stable in long runs, with smoother auto-follow and fewer jumpy updates.
+- Chat/Settings: added richer chat render controls, including sorted/live behavior, compact live Activity previews, and options to keep Bash/Edit outputs open by default.
+- Sessions/GitHub: overhauled sidebar session loading and GitHub PR tracking, and added a new minimal sidebar sessions mode on Desktop/Web, so lists stay easier to scan while PR badges and state refreshes remain accurate across active branches and remotes.
+- Sessions: worktrees with active sessions now surface earlier in the sidebar, making it faster to jump back into in-progress work (thanks to @GhostFlying).
+- Chat: fixed narrow-layout send behavior for modified Enter shortcuts, so keyboard sending is more reliable in compact views (thanks to @eengad).
+- Chat: fixed queue-button behavior and focus-mode composer sizing, keeping input controls reachable in long prompts (thanks to @shekohex).
+- Projects/Desktop: project action inputs now submit with Enter, and Desktop settings now include a spell-check toggle for writing comfort (thanks to @DocterZed).
+- Mobile/PWA: install metadata now honors orientation lock more consistently, improving expected behavior on rotation-restricted devices (thanks to @atgehrhardt).
+
 ## [1.8.5] - 2026-03-04
 
 - Desktop: startup now opens the app shell much earlier while background services continue loading, so the app feels ready faster after launch.

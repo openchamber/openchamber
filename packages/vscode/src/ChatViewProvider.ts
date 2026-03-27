@@ -4,6 +4,8 @@ import { getThemeKindName } from './theme';
 import type { OpenCodeManager, ConnectionStatus } from './opencode';
 import { getWebviewShikiThemes } from './shikiThemes';
 import { getWebviewHtml } from './webviewHtml';
+import { openSseProxy } from './sseProxy';
+import { resolveWebviewDevServerUrl } from './webviewDevServer';
 
 export class ChatViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'openchamber.chatView';
@@ -19,13 +21,15 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private _cachedError?: string;
   private _sseCounter = 0;
   private _sseStreams = new Map<string, AbortController>();
-  private _sseHeartbeats = new Map<string, ReturnType<typeof setInterval>>();
+  private readonly _webviewDevServerUrl: string | null;
 
   constructor(
     private readonly _context: vscode.ExtensionContext,
     private readonly _extensionUri: vscode.Uri,
     private readonly _openCodeManager?: OpenCodeManager
-  ) {}
+  ) {
+    this._webviewDevServerUrl = resolveWebviewDevServerUrl(this._context);
+  }
 
   public resolveWebviewView(
     webviewView: vscode.WebviewView
@@ -69,6 +73,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         context: this._context,
       });
       webviewView.webview.postMessage(response);
+
+      if (message.type === 'api:config/settings:save' && response.success) {
+        void vscode.commands.executeCommand('openchamber.internal.settingsSynced', response.data);
+      }
     });
   }
 
@@ -104,6 +112,27 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         payload: { text }
       });
     }
+  }
+
+  public addFileMentions(paths: string[]) {
+    if (!this._view) {
+      return;
+    }
+
+    const cleanedPaths = paths
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0);
+
+    if (cleanedPaths.length === 0) {
+      return;
+    }
+
+    this._view.show(true);
+    this._view.webview.postMessage({
+      type: 'command',
+      command: 'addFileMentions',
+      payload: { paths: cleanedPaths },
+    });
   }
 
   public createNewSessionWithPrompt(prompt: string) {
@@ -149,6 +178,18 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  public notifySettingsSynced(settings: unknown): void {
+    if (!this._view) {
+      return;
+    }
+
+    this._view.webview.postMessage({
+      type: 'command',
+      command: 'settingsSynced',
+      payload: settings,
+    });
+  }
+
   private _sendCachedState() {
     if (!this._view) {
       return;
@@ -170,28 +211,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     };
   }
 
-  private _collectHeaders(headers: Headers): Record<string, string> {
-    const result: Record<string, string> = {};
-    headers.forEach((value, key) => {
-      result[key] = value;
-    });
-    return result;
-  }
-
   private async _startSseProxy(message: BridgeRequest): Promise<BridgeResponse> {
     const { id, type, payload } = message;
-    const apiBaseUrl = this._openCodeManager?.getApiUrl();
 
     const { path, headers } = (payload || {}) as { path?: string; headers?: Record<string, string> };
     const normalizedPath = typeof path === 'string' && path.trim().length > 0 ? path.trim() : '/event';
-    const normalizedPathname = (() => {
-      const rawPathname = normalizedPath.split('?')[0];
-      if (rawPathname === '/') return '/';
-      return rawPathname.replace(/\/+$/, '');
-    })();
-    const shouldInjectActivity = normalizedPathname === '/event' || normalizedPathname === '/global/event';
 
-    if (!apiBaseUrl) {
+    if (!this._openCodeManager) {
       return {
         id,
         type,
@@ -203,37 +229,43 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     const streamId = `sse_${++this._sseCounter}_${Date.now()}`;
     const controller = new AbortController();
 
-    const base = `${apiBaseUrl.replace(/\/+$/, '')}/`;
-    const targetUrl = new URL(normalizedPath.replace(/^\/+/, ''), base).toString();
-
-    let response: Response;
-    let wrapAsGlobal = false;
-
-    const requestHeaders = this._buildSseHeaders({
-      ...(headers || {}),
-      ...(this._openCodeManager?.getOpenCodeAuthHeaders() || {}),
-    });
-
     try {
-      response = await fetch(targetUrl, {
-        method: 'GET',
-        headers: requestHeaders,
+      const start = await openSseProxy({
+        manager: this._openCodeManager,
+        path: normalizedPath,
+        headers: this._buildSseHeaders(headers),
         signal: controller.signal,
+        onChunk: (chunk) => {
+          this._view?.webview.postMessage({ type: 'api:sse:chunk', streamId, chunk });
+        },
       });
 
-      // Fallback: OpenCode versions without /global/event.
-      // VS Code is single-workspace, so we can wrap /event into { directory, payload }.
-      if ((!response.ok || !response.body) && normalizedPathname === '/global/event') {
-        const fallbackUrl = new URL('event', base).toString();
-        response = await fetch(fallbackUrl, {
-          method: 'GET',
-          headers: requestHeaders,
-          signal: controller.signal,
+      this._sseStreams.set(streamId, controller);
+
+      start.run
+        .then(() => {
+          this._view?.webview.postMessage({ type: 'api:sse:end', streamId });
+        })
+        .catch((error) => {
+          if (!controller.signal.aborted) {
+            const messageText = error instanceof Error ? error.message : String(error);
+            this._view?.webview.postMessage({ type: 'api:sse:end', streamId, error: messageText });
+          }
+        })
+        .finally(() => {
+          this._sseStreams.delete(streamId);
         });
-        if (response.ok && response.body) {
-          wrapAsGlobal = true;
-        }
-      }
+
+      return {
+        id,
+        type,
+        success: true,
+        data: {
+          status: 200,
+          headers: start.headers,
+          streamId,
+        },
+      };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return {
@@ -243,122 +275,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         data: { status: 502, headers: { 'content-type': 'application/json' }, streamId: null, error: message },
       };
     }
-
-    const responseHeaders = this._collectHeaders(response.headers);
-    const responseBody = response.body;
-    if (!response.ok || !responseBody) {
-      return {
-        id,
-        type,
-        success: true,
-        data: {
-          status: response.status,
-          headers: responseHeaders,
-          streamId: null,
-          error: `SSE failed: ${response.status}`,
-        },
-      };
-    }
-
-    this._sseStreams.set(streamId, controller);
-
-    const fallbackDirectory = this._openCodeManager?.getWorkingDirectory()
-      || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
-      || 'global';
-
-    if (shouldInjectActivity) {
-      const heartbeatTimer = setInterval(() => {
-        if (controller.signal.aborted) {
-          return;
-        }
-        const heartbeatChunk = `${buildHeartbeatEventBlock()}\n\n`;
-        this._view?.webview.postMessage({ type: 'api:sse:chunk', streamId, chunk: heartbeatChunk });
-      }, 30000);
-      this._sseHeartbeats.set(streamId, heartbeatTimer);
-    }
-
-    (async () => {
-      try {
-        const reader = responseBody.getReader();
-        const decoder = new TextDecoder();
-        let sseBuffer = '';
-
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            if (controller.signal.aborted) break;
-            if (value && value.length > 0) {
-              const chunk = decoder.decode(value, { stream: true });
-              if (!chunk) continue;
-
-              // Reduce webview message pressure by forwarding complete SSE blocks.
-              // The SDK SSE parser is block-based (\n\n delimited) and can consume
-              // partial chunks, but VS Code's postMessage channel can be a bottleneck.
-              sseBuffer += chunk.replace(/\r\n/g, '\n');
-              const blocks = sseBuffer.split('\n\n');
-              sseBuffer = blocks.pop() ?? '';
-              if (blocks.length > 0) {
-                const routedBlocks = wrapAsGlobal
-                  ? wrapSseBlocksAsGlobal(blocks, fallbackDirectory)
-                  : blocks;
-                const outboundBlocks = shouldInjectActivity ? expandSseBlocksWithActivity(routedBlocks) : routedBlocks;
-                const joined = outboundBlocks.map((block: string) => `${block}\n\n`).join('');
-                this._view?.webview.postMessage({ type: 'api:sse:chunk', streamId, chunk: joined });
-              }
-            }
-          }
-
-          const tail = decoder.decode();
-          if (tail) {
-            sseBuffer += tail.replace(/\r\n/g, '\n');
-          }
-          if (sseBuffer) {
-            if (shouldInjectActivity) {
-              const baseBlocks = wrapAsGlobal
-                ? wrapSseBlocksAsGlobal([sseBuffer], fallbackDirectory)
-                : [sseBuffer];
-              const outboundBlocks = expandSseBlocksWithActivity(baseBlocks);
-              const joined = outboundBlocks.map((block: string) => `${block}\n\n`).join('');
-              this._view?.webview.postMessage({ type: 'api:sse:chunk', streamId, chunk: joined });
-            } else {
-              this._view?.webview.postMessage({ type: 'api:sse:chunk', streamId, chunk: sseBuffer });
-            }
-          }
-        } finally {
-          try {
-            reader.releaseLock();
-          } catch {
-            // ignore
-          }
-        }
-
-        this._view?.webview.postMessage({ type: 'api:sse:end', streamId });
-      } catch (error) {
-        if (!controller.signal.aborted) {
-          const message = error instanceof Error ? error.message : String(error);
-          this._view?.webview.postMessage({ type: 'api:sse:end', streamId, error: message });
-        }
-      } finally {
-        this._sseStreams.delete(streamId);
-        const heartbeat = this._sseHeartbeats.get(streamId);
-        if (heartbeat) {
-          clearInterval(heartbeat);
-          this._sseHeartbeats.delete(streamId);
-        }
-      }
-    })();
-
-    return {
-      id,
-      type,
-      success: true,
-      data: {
-        status: response.status,
-        headers: responseHeaders,
-        streamId,
-      },
-    };
   }
 
   private async _stopSseProxy(message: BridgeRequest): Promise<BridgeResponse> {
@@ -369,12 +285,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       if (controller) {
         controller.abort();
         this._sseStreams.delete(streamId);
-      }
-
-      const heartbeat = this._sseHeartbeats.get(streamId);
-      if (heartbeat) {
-        clearInterval(heartbeat);
-        this._sseHeartbeats.delete(streamId);
       }
     }
     return { id, type, success: true, data: { stopped: true } };
@@ -392,193 +302,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       workspaceFolder,
       initialStatus,
       cliAvailable,
+      devServerUrl: this._webviewDevServerUrl,
     });
   }
 }
-
-type SessionActivityPhase = 'idle' | 'busy' | 'cooldown';
-
-type SessionActivity = {
-  sessionId: string;
-  phase: SessionActivityPhase;
-};
-
-const parseSseDataPayload = (block: string): Record<string, unknown> | null => {
-  if (!block) {
-    return null;
-  }
-
-  const dataLines = block
-    .split('\n')
-    .filter((line) => line.startsWith('data:'))
-    .map((line) => line.slice(5).replace(/^\s/, ''));
-
-  if (dataLines.length === 0) {
-    return null;
-  }
-
-  const payloadText = dataLines.join('\n').trim();
-  if (!payloadText) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(payloadText) as unknown;
-    if (parsed && typeof parsed === 'object') {
-      const record = parsed as Record<string, unknown>;
-      const nestedPayload = record.payload;
-      if (nestedPayload && typeof nestedPayload === 'object') {
-        return nestedPayload as Record<string, unknown>;
-      }
-      return record;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-};
-
-const deriveSessionActivity = (payload: Record<string, unknown> | null): SessionActivity | null => {
-  if (!payload || typeof payload !== 'object') {
-    return null;
-  }
-
-  const type = payload.type;
-  const properties = payload.properties as Record<string, unknown> | undefined;
-
-  if (type === 'session.status') {
-    const status = properties?.status as Record<string, unknown> | undefined;
-    const sessionId = properties?.sessionID ?? properties?.sessionId;
-    const statusType = status?.type;
-
-    if (typeof sessionId === 'string' && sessionId.length > 0 && typeof statusType === 'string') {
-      const phase: SessionActivityPhase = statusType === 'busy' || statusType === 'retry' ? 'busy' : 'idle';
-      return { sessionId, phase };
-    }
-  }
-
-  if (type === 'message.updated') {
-    const info = properties?.info as Record<string, unknown> | undefined;
-    const sessionId = info?.sessionID ?? info?.sessionId ?? properties?.sessionID ?? properties?.sessionId;
-    const role = info?.role;
-    const finish = info?.finish;
-    if (typeof sessionId === 'string' && sessionId.length > 0 && role === 'assistant' && finish === 'stop') {
-      return { sessionId, phase: 'cooldown' };
-    }
-  }
-
-  if (type === 'message.part.updated' || type === 'message.part.delta') {
-    const info = properties?.info as Record<string, unknown> | undefined;
-    const sessionId = info?.sessionID ?? info?.sessionId ?? properties?.sessionID ?? properties?.sessionId;
-    const role = info?.role;
-    const finish = info?.finish;
-    if (typeof sessionId === 'string' && sessionId.length > 0 && role === 'assistant' && finish === 'stop') {
-      return { sessionId, phase: 'cooldown' };
-    }
-  }
-
-  if (type === 'session.idle') {
-    const sessionId = properties?.sessionID ?? properties?.sessionId;
-    if (typeof sessionId === 'string' && sessionId.length > 0) {
-      return { sessionId, phase: 'idle' };
-    }
-  }
-
-  return null;
-};
-
-const buildActivityEventBlock = (activity: SessionActivity): string => {
-  return `data: ${JSON.stringify({
-    type: 'openchamber:session-activity',
-    properties: {
-      sessionId: activity.sessionId,
-      phase: activity.phase,
-    },
-  })}`;
-};
-
-const buildHeartbeatEventBlock = (): string => {
-  return `data: ${JSON.stringify({ type: 'openchamber:heartbeat', timestamp: Date.now() })}`;
-};
-
-const parseSseBlockForGlobalWrap = (block: string): { id?: string; payload: Record<string, unknown> } | null => {
-  if (!block) {
-    return null;
-  }
-
-  const lines = block.split('\n');
-  const dataLines: string[] = [];
-  let eventId: string | undefined;
-
-  for (const line of lines) {
-    if (line.startsWith('data:')) {
-      dataLines.push(line.slice(5).replace(/^\s/, ''));
-      continue;
-    }
-    if (line.startsWith('id:')) {
-      const candidate = line.slice(3).trim();
-      if (candidate) {
-        eventId = candidate;
-      }
-    }
-  }
-
-  if (dataLines.length === 0) {
-    return null;
-  }
-
-  const payloadText = dataLines.join('\n').trim();
-  if (!payloadText) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(payloadText) as unknown;
-    if (!parsed || typeof parsed !== 'object') {
-      return null;
-    }
-
-    const record = parsed as Record<string, unknown>;
-    const nestedPayload = record.payload;
-    const payload = nestedPayload && typeof nestedPayload === 'object'
-      ? (nestedPayload as Record<string, unknown>)
-      : record;
-
-    return eventId ? { id: eventId, payload } : { payload };
-  } catch {
-    return null;
-  }
-};
-
-const wrapSseBlocksAsGlobal = (blocks: string[], directory: string): string[] => {
-  const normalizedDirectory = typeof directory === 'string' && directory.trim().length > 0
-    ? directory.trim().replace(/\\/g, '/')
-    : 'global';
-
-  return blocks.map((block) => {
-    const parsed = parseSseBlockForGlobalWrap(block);
-    if (!parsed) {
-      return block;
-    }
-
-    const envelope = {
-      directory: normalizedDirectory,
-      payload: parsed.payload,
-    };
-
-    const idPrefix = parsed.id ? `id: ${parsed.id}\n` : '';
-    return `${idPrefix}data: ${JSON.stringify(envelope)}`;
-  });
-};
-
-const expandSseBlocksWithActivity = (blocks: string[]): string[] => {
-  const expanded: string[] = [];
-  for (const block of blocks) {
-    expanded.push(block);
-    const activity = deriveSessionActivity(parseSseDataPayload(block));
-    if (activity) {
-      expanded.push(buildActivityEventBlock(activity));
-    }
-  }
-  return expanded;
-};

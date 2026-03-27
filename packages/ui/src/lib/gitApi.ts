@@ -29,6 +29,7 @@ export type {
   GitWorktreeValidationResult,
   GitDeleteBranchPayload,
   GitDeleteRemoteBranchPayload,
+  GitRemoveRemotePayload,
   DiscoveredGitCredential,
   GitRemote,
   GitMergeResult,
@@ -452,6 +453,33 @@ export async function validateGitWorktree(
   return gitHttp.validateGitWorktree(directory, payload);
 }
 
+export async function getGitWorktreeBootstrapStatus(
+  directory: string,
+): Promise<import('./api/types').GitWorktreeBootstrapStatus> {
+  const runtime = getRuntimeGit();
+  if (runtime?.worktree?.bootstrapStatus) {
+    return runtime.worktree.bootstrapStatus(directory);
+  }
+  if (runtime?.getGitWorktreeBootstrapStatus) {
+    return runtime.getGitWorktreeBootstrapStatus(directory);
+  }
+  return gitHttp.getGitWorktreeBootstrapStatus(directory);
+}
+
+export async function previewGitWorktree(
+  directory: string,
+  payload: import('./api/types').CreateGitWorktreePayload
+): Promise<import('./api/types').GitWorktreeCreateResult> {
+  const runtime = getRuntimeGit();
+  if (runtime?.worktree?.preview) {
+    return runtime.worktree.preview(directory, payload);
+  }
+  if (runtime?.previewGitWorktree) {
+    return runtime.previewGitWorktree(directory, payload);
+  }
+  return gitHttp.previewGitWorktree(directory, payload);
+}
+
 export async function createGitWorktree(
   directory: string,
   payload: import('./api/types').CreateGitWorktreePayload
@@ -637,6 +665,15 @@ export async function getRemotes(directory: string): Promise<import('./api/types
   const runtime = getRuntimeGit();
   if (runtime) return runtime.getRemotes(directory);
   return gitHttp.getRemotes(directory);
+}
+
+export async function removeRemote(
+  directory: string,
+  payload: import('./api/types').GitRemoveRemotePayload
+): Promise<{ success: boolean }> {
+  const runtime = getRuntimeGit();
+  if (runtime) return runtime.removeRemote(directory, payload);
+  return gitHttp.removeRemote(directory, payload);
 }
 
 export async function rebase(

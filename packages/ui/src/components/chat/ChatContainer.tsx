@@ -1,5 +1,5 @@
 import React from 'react';
-import { RiArrowDownLine, RiArrowLeftLine } from '@remixicon/react';
+import { RiArrowLeftLine } from '@remixicon/react';
 import { useShallow } from 'zustand/react/shallow';
 import type { Message, Part } from '@opencode-ai/sdk/v2';
 
@@ -9,87 +9,84 @@ import { useUIStore } from '@/stores/useUIStore';
 import { Skeleton } from '@/components/ui/skeleton';
 import ChatEmptyState from './ChatEmptyState';
 import MessageList, { type MessageListHandle } from './MessageList';
+import ScrollToBottomButton from './components/ScrollToBottomButton';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { useChatScrollManager } from '@/hooks/useChatScrollManager';
+import { useChatTimelineController } from './hooks/useChatTimelineController';
+import { useChatTurnNavigation } from './hooks/useChatTurnNavigation';
 import { useDeviceInfo } from '@/lib/device';
-import { getMemoryLimits } from '@/stores/types/sessionTypes';
 import { Button } from '@/components/ui/button';
-import { ButtonSmall } from '@/components/ui/button-small';
 import { OverlayScrollbar } from '@/components/ui/OverlayScrollbar';
 import { TimelineDialog } from './TimelineDialog';
 import type { PermissionRequest } from '@/types/permission';
 import type { QuestionRequest } from '@/types/question';
 import { cn } from '@/lib/utils';
+import {
+    collectVisibleSessionIdsForBlockingRequests,
+    flattenBlockingRequests,
+} from './lib/blockingRequests';
 
 const EMPTY_MESSAGES: Array<{ info: Message; parts: Part[] }> = [];
 const EMPTY_PERMISSIONS: PermissionRequest[] = [];
 const EMPTY_QUESTIONS: QuestionRequest[] = [];
 const IDLE_SESSION_STATUS = { type: 'idle' as const };
+const SESSION_RESELECTED_EVENT = 'openchamber:session-reselected';
 
-const collectVisibleSessionIdsForBlockingRequests = (
-    sessions: Array<{ id: string; parentID?: string }> | undefined,
-    currentSessionId: string | null
-): string[] => {
-    if (!currentSessionId) return [];
-    if (!Array.isArray(sessions) || sessions.length === 0) return [currentSessionId];
-
-    const current = sessions.find((session) => session.id === currentSessionId);
-    if (!current) return [currentSessionId];
-
-    // Opencode parity: when viewing a child session, permission/question prompts are handled in parent thread.
-    if (current.parentID) {
-        return [];
-    }
-
-    const childIds = sessions
-        .filter((session) => session.parentID === currentSessionId)
-        .map((session) => session.id);
-
-    return [currentSessionId, ...childIds];
+type HydratingToolSkeletonRow = {
+    id: string;
+    titleWidth: string;
+    detailWidth: string;
 };
 
-const flattenBlockingRequests = <T extends { id: string }>(
-    source: Map<string, T[]>,
-    sessionIds: string[]
-): T[] => {
-    if (sessionIds.length === 0) return [];
-    const seen = new Set<string>();
-    const result: T[] = [];
-
-    for (const sessionId of sessionIds) {
-        const entries = source.get(sessionId);
-        if (!entries || entries.length === 0) continue;
-        for (const entry of entries) {
-            if (seen.has(entry.id)) continue;
-            seen.add(entry.id);
-            result.push(entry);
-        }
-    }
-
-    return result;
-};
+const HYDRATING_SKELETON_ITEMS: Array<{
+    id: number;
+    toolRows: HydratingToolSkeletonRow[];
+    textWidths: [string, string, string];
+}> = [
+    {
+        id: 1,
+        toolRows: [
+            { id: 'search', titleWidth: 'w-24', detailWidth: 'w-52' },
+            { id: 'read', titleWidth: 'w-20', detailWidth: 'w-36' },
+            { id: 'edit', titleWidth: 'w-24', detailWidth: 'w-64' },
+        ],
+        textWidths: ['w-24', 'w-[92%]', 'w-[78%]'],
+    },
+    {
+        id: 2,
+        toolRows: [
+            { id: 'read', titleWidth: 'w-20', detailWidth: 'w-40' },
+            { id: 'search', titleWidth: 'w-24', detailWidth: 'w-48' },
+        ],
+        textWidths: ['w-20', 'w-[88%]', 'w-[70%]'],
+    },
+    {
+        id: 3,
+        toolRows: [
+            { id: 'shell', titleWidth: 'w-28', detailWidth: 'w-44' },
+            { id: 'edit', titleWidth: 'w-24', detailWidth: 'w-56' },
+        ],
+        textWidths: ['w-24', 'w-[84%]', 'w-[64%]'],
+    },
+];
 
 export const ChatContainer: React.FC = () => {
     const {
         currentSessionId,
-        isLoading,
         loadMessages,
         loadMoreMessages,
         updateViewportAnchor,
         openNewSessionDraft,
         setCurrentSession,
-        trimToViewportWindow,
         newSessionDraft,
     } = useSessionStore(
         useShallow((state) => ({
             currentSessionId: state.currentSessionId,
-            isLoading: state.isLoading,
             loadMessages: state.loadMessages,
             loadMoreMessages: state.loadMoreMessages,
             updateViewportAnchor: state.updateViewportAnchor,
             openNewSessionDraft: state.openNewSessionDraft,
             setCurrentSession: state.setCurrentSession,
-            trimToViewportWindow: state.trimToViewportWindow,
             newSessionDraft: state.newSessionDraft,
         }))
     );
@@ -107,6 +104,7 @@ export const ChatContainer: React.FC = () => {
         setTimelineDialogOpen,
         isExpandedInput,
         stickyUserHeader,
+        chatRenderMode,
     } = useUIStore();
 
     const sessionMessages = useSessionStore(
@@ -144,9 +142,9 @@ export const ChatContainer: React.FC = () => {
         return flattenBlockingRequests(blockingRequestState.questions, scopedSessionIds);
     }, [blockingRequestState.questions, scopedSessionIds]);
 
-    const memoryState = useSessionStore(
+    const historyMeta = useSessionStore(
         React.useCallback(
-            (state) => (currentSessionId ? state.sessionMemoryState.get(currentSessionId) ?? null : null),
+            (state) => (currentSessionId ? state.sessionHistoryMeta.get(currentSessionId) ?? null : null),
             [currentSessionId]
         )
     );
@@ -196,7 +194,7 @@ export const ChatContainer: React.FC = () => {
     }, [parentSession, setCurrentSession]);
 
     const returnToParentButton = parentSession ? (
-        <ButtonSmall
+        <Button
             type="button"
             variant="outline"
             size="xs"
@@ -207,7 +205,7 @@ export const ChatContainer: React.FC = () => {
         >
             <RiArrowLeftLine className="h-4 w-4" />
             Parent
-        </ButtonSmall>
+        </Button>
     ) : null;
 
     React.useEffect(() => {
@@ -216,116 +214,82 @@ export const ChatContainer: React.FC = () => {
         }
     }, [currentSessionId, draftOpen, openNewSessionDraft]);
 
-    const [turnStart, setTurnStart] = React.useState(0);
-    const turnHandleRef = React.useRef<number | null>(null);
-    const turnIdleRef = React.useRef(false);
-    const initializedTurnStartSessionRef = React.useRef<string | null>(null);
-    const TURN_INIT = 5;
-    const TURN_BATCH = 8;
-
-    const userTurnIndexes = React.useMemo(() => {
-        const indexes: number[] = [];
-        for (let i = 0; i < sessionMessages.length; i += 1) {
-            const message = sessionMessages[i];
-            const role = (message.info as { clientRole?: string | null | undefined }).clientRole ?? message.info.role;
-            if (role === 'user') {
-                indexes.push(i);
-            }
-        }
-        return indexes;
-    }, [sessionMessages]);
-
-    const cancelTurnBackfill = React.useCallback(() => {
-        const handle = turnHandleRef.current;
-        if (handle === null) {
-            return;
-        }
-        turnHandleRef.current = null;
-        if (turnIdleRef.current && typeof window !== 'undefined' && typeof window.cancelIdleCallback === 'function') {
-            window.cancelIdleCallback(handle);
-            return;
-        }
-        if (typeof window !== 'undefined') {
-            window.clearTimeout(handle);
-        }
-    }, []);
-
-    const renderedSessionMessages = React.useMemo(() => {
-        if (turnStart <= 0 || userTurnIndexes.length === 0) {
-            return sessionMessages;
-        }
-        const startIndex = userTurnIndexes[turnStart] ?? 0;
-        return sessionMessages.slice(startIndex);
-    }, [sessionMessages, turnStart, userTurnIndexes]);
-
-    const backfillTurns = React.useCallback(() => {
-        if (turnStart <= 0) {
-            return;
-        }
-
-        const container = typeof document !== 'undefined'
-            ? (document.querySelector('[data-scrollbar="chat"]') as HTMLDivElement | null)
-            : null;
-        const beforeTop = container?.scrollTop ?? null;
-        const beforeHeight = container?.scrollHeight ?? null;
-
-        setTurnStart((prev) => (prev - TURN_BATCH > 0 ? prev - TURN_BATCH : 0));
-
-        if (container && beforeTop !== null && beforeHeight !== null) {
-            window.requestAnimationFrame(() => {
-                const delta = container.scrollHeight - beforeHeight;
-                if (delta !== 0) {
-                    container.scrollTop = beforeTop + delta;
-                }
-            });
-        }
-    }, [turnStart]);
-
-    const scheduleTurnBackfill = React.useCallback(() => {
-        if (turnHandleRef.current !== null || turnStart <= 0) {
-            return;
-        }
-
-        if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
-            turnIdleRef.current = true;
-            turnHandleRef.current = window.requestIdleCallback(() => {
-                turnHandleRef.current = null;
-                backfillTurns();
-            });
-            return;
-        }
-
-        turnIdleRef.current = false;
-        turnHandleRef.current = window.setTimeout(() => {
-            turnHandleRef.current = null;
-            backfillTurns();
-        }, 0);
-    }, [backfillTurns, turnStart]);
-
     const sessionBlockingCards = React.useMemo(() => {
         return [...sessionPermissions, ...sessionQuestions];
     }, [sessionPermissions, sessionQuestions]);
+
+    const activeTurnChangeRef = React.useRef<(turnId: string | null) => void>(() => {});
 
     const {
         scrollRef,
         handleMessageContentChange,
         getAnimationHandlers,
-        showScrollButton,
         scrollToBottom,
-        scrollToPosition,
+        releasePinnedScroll,
         isPinned,
+        isOverflowing,
+        isProgrammaticFollowActive,
     } = useChatScrollManager({
         currentSessionId,
-        sessionMessages: renderedSessionMessages,
+        sessionMessages,
         streamingMessageId,
         sessionMemoryState: sessionMemoryStateMap,
         updateViewportAnchor,
         isSyncing,
         isMobile,
+        chatRenderMode,
         messageStreamStates,
         sessionPermissions: sessionBlockingCards,
-        trimToViewportWindow,
+        onActiveTurnChange: (turnId) => {
+            activeTurnChangeRef.current(turnId);
+        },
     });
+
+    const timelineController = useChatTimelineController({
+        sessionId: currentSessionId,
+        messages: sessionMessages,
+        historyMeta,
+        scrollRef,
+        messageListRef,
+        loadMoreMessages,
+        scrollToBottom,
+        isPinned,
+        isOverflowing,
+    });
+    const { resumeToBottomInstant } = timelineController;
+
+    React.useEffect(() => {
+        activeTurnChangeRef.current = timelineController.handleActiveTurnChange;
+    }, [timelineController.handleActiveTurnChange]);
+
+    const navigation = useChatTurnNavigation({
+        sessionId: currentSessionId,
+        turnIds: timelineController.turnIds,
+        activeTurnId: timelineController.activeTurnId,
+        scrollToTurn: timelineController.scrollToTurn,
+        scrollToMessage: timelineController.scrollToMessage,
+        resumeToBottom: timelineController.resumeToBottom,
+    });
+
+    React.useEffect(() => {
+        if (typeof window === 'undefined' || !currentSessionId) {
+            return;
+        }
+
+        const handleSessionReselected = (event: Event) => {
+            const customEvent = event as CustomEvent<string>;
+            if (customEvent.detail !== currentSessionId) {
+                return;
+            }
+
+            resumeToBottomInstant();
+        };
+
+        window.addEventListener(SESSION_RESELECTED_EVENT, handleSessionReselected as EventListener);
+        return () => {
+            window.removeEventListener(SESSION_RESELECTED_EVENT, handleSessionReselected as EventListener);
+        };
+    }, [currentSessionId, resumeToBottomInstant]);
 
     React.useLayoutEffect(() => {
         const container = scrollRef.current;
@@ -339,146 +303,39 @@ export const ChatContainer: React.FC = () => {
 
         updateChatScrollHeight();
 
+        let rafId = 0;
+        const scheduleUpdate = () => {
+            if (rafId) return;
+            rafId = requestAnimationFrame(() => {
+                rafId = 0;
+                updateChatScrollHeight();
+            });
+        };
+
         if (typeof ResizeObserver === 'undefined') {
-            window.addEventListener('resize', updateChatScrollHeight);
+            window.addEventListener('resize', scheduleUpdate);
             return () => {
-                window.removeEventListener('resize', updateChatScrollHeight);
+                if (rafId) cancelAnimationFrame(rafId);
+                window.removeEventListener('resize', scheduleUpdate);
             };
         }
 
-        const resizeObserver = new ResizeObserver(updateChatScrollHeight);
+        const resizeObserver = new ResizeObserver(scheduleUpdate);
         resizeObserver.observe(container);
 
         return () => {
+            if (rafId) cancelAnimationFrame(rafId);
             resizeObserver.disconnect();
         };
     }, [currentSessionId, isDesktopExpandedInput, scrollRef]);
 
-    React.useEffect(() => {
-        cancelTurnBackfill();
-        if (!currentSessionId) {
-            initializedTurnStartSessionRef.current = null;
-            setTurnStart(0);
-            return;
-        }
-
-        if (initializedTurnStartSessionRef.current === currentSessionId) {
-            return;
-        }
-
-        if (sessionMessages.length === 0) {
-            setTurnStart(0);
-            return;
-        }
-
-        const turnCount = userTurnIndexes.length;
-        const start = turnCount > TURN_INIT ? turnCount - TURN_INIT : 0;
-        setTurnStart(start);
-        initializedTurnStartSessionRef.current = currentSessionId;
-    }, [cancelTurnBackfill, currentSessionId, sessionMessages.length, userTurnIndexes.length]);
-
-    const isSessionActive = sessionStatusForCurrent.type === 'busy' || sessionStatusForCurrent.type === 'retry';
-
-    React.useEffect(() => {
-        if (isSessionActive) {
-            cancelTurnBackfill();
-            return;
-        }
-        scheduleTurnBackfill();
-        return () => {
-            cancelTurnBackfill();
-        };
-    }, [cancelTurnBackfill, isSessionActive, scheduleTurnBackfill, turnStart]);
-
-    const hasMoreAbove = React.useMemo(() => {
-        if (!memoryState) {
-            return sessionMessages.length >= getMemoryLimits().HISTORICAL_MESSAGES;
-        }
-        if (memoryState.historyComplete === true) {
-            return false;
-        }
-        if (memoryState.hasMoreAbove) {
-            return true;
-        }
-        if (memoryState.historyComplete === false) {
-            return true;
-        }
-
-        // Backward compatibility: older persisted sessions may miss history flags.
-        if (memoryState.hasMoreAbove === undefined && memoryState.historyComplete === undefined) {
-            return sessionMessages.length >= getMemoryLimits().HISTORICAL_MESSAGES;
-        }
-
-        return false;
-    }, [memoryState, sessionMessages.length]);
-
     const hasHistoryMetadata = React.useMemo(() => {
-        if (!memoryState) {
-            return false;
-        }
-        return memoryState.hasMoreAbove !== undefined || memoryState.historyComplete !== undefined;
-    }, [memoryState]);
-    const [isLoadingOlder, setIsLoadingOlder] = React.useState(false);
-    React.useEffect(() => {
-        setIsLoadingOlder(false);
-    }, [currentSessionId]);
+        return Boolean(historyMeta);
+    }, [historyMeta]);
 
-    const handleLoadOlder = React.useCallback(async () => {
-        if (!currentSessionId || isLoadingOlder) {
-            return;
-        }
-
-        cancelTurnBackfill();
-        setTurnStart(0);
-
-        const container = scrollRef.current;
-        const anchor = messageListRef.current?.captureViewportAnchor() ?? null;
-        const prevHeight = container?.scrollHeight ?? null;
-        const prevTop = container?.scrollTop ?? null;
-
-        setIsLoadingOlder(true);
-        void loadMoreMessages(currentSessionId, 'up')
-            .then(() => {
-                const restored = anchor ? (messageListRef.current?.restoreViewportAnchor(anchor) ?? false) : false;
-                if (!restored && container && prevHeight !== null && prevTop !== null) {
-                    const heightDiff = container.scrollHeight - prevHeight;
-                    scrollToPosition(prevTop + heightDiff, { instant: true });
-                }
-            })
-            .finally(() => {
-                setIsLoadingOlder(false);
-            });
-    }, [cancelTurnBackfill, currentSessionId, isLoadingOlder, loadMoreMessages, scrollRef, scrollToPosition]);
-
-    const handleRenderEarlier = React.useCallback(() => {
-        cancelTurnBackfill();
-        setTurnStart(0);
-    }, [cancelTurnBackfill]);
-
-    // Scroll to a specific message by ID (for timeline dialog)
-    const scrollToMessage = React.useCallback((messageId: string) => {
-        if (messageListRef.current?.scrollToMessageId(messageId, { behavior: 'smooth' })) {
-            return;
-        }
-
-        const container = scrollRef.current;
-        if (!container) return;
-
-        // Find the message element by looking for data-message-id attribute
-        const messageElement = container.querySelector(`[data-message-id="${messageId}"]`) as HTMLElement;
-        if (messageElement) {
-            // Scroll to the message with some padding (50px from top)
-            const containerRect = container.getBoundingClientRect();
-            const messageRect = messageElement.getBoundingClientRect();
-            const offset = 50;
-
-            const scrollTop = messageRect.top - containerRect.top + container.scrollTop - offset;
-            container.scrollTo({
-                top: scrollTop,
-                behavior: 'smooth'
-            });
-        }
-    }, [scrollRef]);
+    const isSessionHydrating =
+        Boolean(currentSessionId)
+        && (!hasSessionMessagesEntry || !hasHistoryMetadata || historyMeta?.loading === true);
 
     React.useEffect(() => {
         if (!currentSessionId) {
@@ -494,7 +351,8 @@ export const ChatContainer: React.FC = () => {
             await loadMessages(currentSessionId).finally(() => {
                 const statusType = sessionStatusForCurrent.type ?? 'idle';
                 const isActivePhase = statusType === 'busy' || statusType === 'retry';
-                const shouldSkipScroll = isActivePhase && isPinned;
+                const hasHashTarget = typeof window !== 'undefined' && window.location.hash.length > 0;
+                const shouldSkipScroll = (isActivePhase && isPinned) || hasHashTarget;
 
                 if (!shouldSkipScroll) {
                     if (typeof window === 'undefined') {
@@ -530,7 +388,7 @@ export const ChatContainer: React.FC = () => {
             >
                 {!isDesktopExpandedInput ? (
                 <div className="flex-1 flex items-center justify-center">
-                    <ChatEmptyState showDraftContext />
+                    <ChatEmptyState />
                 </div>
                 ) : null}
                 <div
@@ -538,7 +396,7 @@ export const ChatContainer: React.FC = () => {
                         'relative z-10',
                         isDesktopExpandedInput
                             ? 'flex-1 min-h-0 bg-background'
-                            : 'bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80'
+                            : 'bg-background/95 supports-[backdrop-filter]:bg-background/80'
                     )}
                 >
                     <ChatInput scrollToBottom={scrollToBottom} />
@@ -551,32 +409,63 @@ export const ChatContainer: React.FC = () => {
         return null;
     }
 
-    if (isLoading && sessionMessages.length === 0 && !streamingMessageId) {
-        const hasMessagesEntry = hasSessionMessagesEntry;
-        if (!hasMessagesEntry) {
-            return (
+    if (isSessionHydrating && sessionMessages.length === 0 && !streamingMessageId) {
+        return (
+            <div
+                className="relative flex flex-col h-full bg-background"
+                style={isMobile ? { paddingBottom: 'var(--oc-keyboard-inset, 0px)' } : undefined}
+            >
+                {returnToParentButton}
                 <div
-                    className="relative flex flex-col h-full bg-background gap-0"
-                    style={isMobile ? { paddingBottom: 'var(--oc-keyboard-inset, 0px)' } : undefined}
+                    className={cn(
+                        'relative min-h-0',
+                        isDesktopExpandedInput
+                            ? 'absolute inset-0 opacity-0 pointer-events-none'
+                            : 'flex-1'
+                    )}
+                    aria-hidden={isDesktopExpandedInput}
                 >
-                    {returnToParentButton}
-                    <div className="flex-1 overflow-y-auto p-4 bg-background">
-                        <div className="chat-message-column space-y-4">
-                            {[1, 2, 3].map((i) => (
-                                <div key={i} className="flex gap-3 p-4">
-                                    <Skeleton className="h-8 w-8 rounded-full" />
-                                    <div className="flex-1 space-y-2">
-                                        <Skeleton className="h-4 w-24" />
-                                        <Skeleton className="h-20 w-full" />
+                    <div className="absolute inset-0 overflow-y-auto overflow-x-hidden bg-background pt-6">
+                        <div className="space-y-4">
+                            {HYDRATING_SKELETON_ITEMS.map((item) => (
+                                <div key={item.id} className="group w-full">
+                                    <div className="chat-message-column">
+                                        <div className="space-y-2.5 px-4 py-3">
+                                            <div className="space-y-1.5">
+                                                {item.toolRows.map((row) => {
+                                                    return (
+                                                        <div key={`${item.id}-${row.id}`} className="flex items-center gap-2">
+                                                            <Skeleton className="h-3.5 w-3.5 rounded-full flex-shrink-0" />
+                                                            <Skeleton className={cn('h-4 rounded-md', row.titleWidth)} />
+                                                            <Skeleton className={cn('h-4 rounded-md', row.detailWidth)} />
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                            <div className="space-y-1.5 pt-1">
+                                                <Skeleton className={cn('h-4 rounded-md', item.textWidths[0])} />
+                                                <Skeleton className={cn('h-4 rounded-md', item.textWidths[1])} />
+                                                <Skeleton className={cn('h-4 rounded-md', item.textWidths[2])} />
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             ))}
                         </div>
                     </div>
+                </div>
+                <div
+                    className={cn(
+                        'relative z-10',
+                        isDesktopExpandedInput
+                            ? 'flex-1 min-h-0 bg-background'
+                            : 'bg-background/95 supports-[backdrop-filter]:bg-background/80'
+                    )}
+                >
                     <ChatInput scrollToBottom={scrollToBottom} />
                 </div>
-            );
-        }
+            </div>
+        );
     }
 
     if (sessionMessages.length === 0 && !streamingMessageId) {
@@ -586,17 +475,27 @@ export const ChatContainer: React.FC = () => {
                 style={isMobile ? { paddingBottom: 'var(--oc-keyboard-inset, 0px)' } : undefined}
             >
                 {returnToParentButton}
-                {!isDesktopExpandedInput ? (
-                <div className="flex-1 flex items-center justify-center">
-                    <ChatEmptyState />
+                <div
+                    className={cn(
+                        'relative min-h-0',
+                        isDesktopExpandedInput
+                            ? 'absolute inset-0 opacity-0 pointer-events-none'
+                            : 'flex-1'
+                    )}
+                    aria-hidden={isDesktopExpandedInput}
+                >
+                    {!isDesktopExpandedInput ? (
+                        <div className="absolute inset-0 flex items-center justify-center">
+                            <ChatEmptyState />
+                        </div>
+                    ) : null}
                 </div>
-                ) : null}
                 <div
                     className={cn(
                         'relative z-10',
                         isDesktopExpandedInput
                             ? 'flex-1 min-h-0 bg-background'
-                            : 'bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80'
+                            : 'bg-background/95 supports-[backdrop-filter]:bg-background/80'
                     )}
                 >
                     <ChatInput scrollToBottom={scrollToBottom} />
@@ -632,22 +531,25 @@ export const ChatContainer: React.FC = () => {
                         <div className="relative z-0 min-h-full">
                             <MessageList
                                 ref={messageListRef}
-                                messages={renderedSessionMessages}
+                                sessionKey={currentSessionId}
+                                turnStart={timelineController.turnStart}
+                                disableStaging={timelineController.pendingRevealWork}
+                                messages={timelineController.renderedMessages}
                                 permissions={sessionPermissions}
                                 questions={sessionQuestions}
                                 onMessageContentChange={handleMessageContentChange}
                                 getAnimationHandlers={getAnimationHandlers}
-                                hasMoreAbove={hasMoreAbove}
-                                isLoadingOlder={isLoadingOlder}
-                                onLoadOlder={handleLoadOlder}
-                                hasRenderEarlier={turnStart > 0}
-                                onRenderEarlier={handleRenderEarlier}
+                                hasMoreAbove={timelineController.historySignals.hasMoreAboveTurns}
+                                isLoadingOlder={timelineController.isLoadingOlder}
+                                onLoadOlder={() => {
+                                    void timelineController.loadEarlier();
+                                }}
                                 scrollToBottom={scrollToBottom}
                                 scrollRef={scrollRef}
                             />
                         </div>
                     </ScrollShadow>
-                    <OverlayScrollbar containerRef={scrollRef} />
+                    <OverlayScrollbar containerRef={scrollRef} suppressVisibility={isProgrammaticFollowActive} userIntentOnly />
                 </div>
             </div>
 
@@ -656,22 +558,14 @@ export const ChatContainer: React.FC = () => {
                     'relative z-10',
                     isDesktopExpandedInput
                         ? 'flex-1 min-h-0 bg-background'
-                        : 'bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80'
+                        : 'bg-background/95 supports-[backdrop-filter]:bg-background/80'
                 )}
             >
-                {!isDesktopExpandedInput && showScrollButton && sessionMessages.length > 0 && (
-                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2">
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => scrollToBottom({ force: true })}
-                                  className="rounded-full h-8 w-8 p-0 shadow-none bg-background/95 hover:bg-interactive-hover"
-                                  aria-label="Scroll to bottom"
-                                >
-
-                            <RiArrowDownLine className="h-4 w-4" />
-                        </Button>
-                    </div>
+                {!isDesktopExpandedInput && sessionMessages.length > 0 && (
+                    <ScrollToBottomButton
+                        visible={timelineController.showScrollToBottom}
+                        onClick={navigation.resumeToLatest}
+                    />
                 )}
                 <ChatInput scrollToBottom={scrollToBottom} />
             </div>
@@ -679,7 +573,15 @@ export const ChatContainer: React.FC = () => {
             <TimelineDialog
                 open={isTimelineDialogOpen}
                 onOpenChange={setTimelineDialogOpen}
-                onScrollToMessage={scrollToMessage}
+                onScrollToMessage={(messageId) => {
+                    releasePinnedScroll();
+                    return navigation.scrollToMessageId(messageId, { behavior: 'smooth', updateHash: false });
+                }}
+                onScrollByTurnOffset={(offset) => {
+                    releasePinnedScroll();
+                    void navigation.scrollByTurnOffset(offset);
+                }}
+                onResumeToLatest={navigation.resumeToLatest}
             />
         </div>
     );

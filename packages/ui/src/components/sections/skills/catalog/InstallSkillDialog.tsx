@@ -9,7 +9,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { ButtonLarge } from '@/components/ui/button-large';
+import { Button } from '@/components/ui/button';
 import {
   Select,
   SelectContent,
@@ -231,13 +231,15 @@ export const InstallSkillDialog: React.FC<InstallSkillDialogProps> = ({ open, on
           </div>
 
           <DialogFooter>
-            <ButtonLarge
+            <Button
+              size="sm"
               variant="ghost"
               onClick={() => onOpenChange(false)}
             >
               Cancel
-            </ButtonLarge>
-            <ButtonLarge
+            </Button>
+            <Button
+              size="sm"
               disabled={isInstalling || !item.installable || (scope === 'project' && !directoryOverride)}
               onClick={() =>
                 void doInstall({
@@ -251,7 +253,7 @@ export const InstallSkillDialog: React.FC<InstallSkillDialogProps> = ({ open, on
               }
             >
               {isInstalling ? 'Installing...' : 'Install'}
-            </ButtonLarge>
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

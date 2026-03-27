@@ -7,10 +7,13 @@ import type {
   GitIdentitySummary,
 } from '@/lib/api/types';
 
-const GIT_POLL_BASE_INTERVAL = 5000;
-const GIT_POLL_MAX_INTERVAL = 10000;
+const GIT_POLL_BASE_INTERVAL = 10000;
+const GIT_POLL_MAX_INTERVAL = 30000;
+const GIT_POLL_BUSY_BASE_INTERVAL = 15000;
+const GIT_POLL_BUSY_MAX_INTERVAL = 40000;
 const GIT_POLL_BACKOFF_STEP = 5000;
 const LOG_STALE_THRESHOLD = 10000;
+const REPO_CHECK_STALE_THRESHOLD = 60_000;
 const DIFF_PREFETCH_MAX_FILES = 25;
 const DIFF_PREFETCH_FOCUS_MAX_FILES = 40;
 const DIFF_PREFETCH_CONCURRENCY = 4;
@@ -28,6 +31,7 @@ interface DirectoryGitState {
   log: GitLogResponse | null;
   identity: GitIdentitySummary | null;
   diffCache: Map<string, { original: string; modified: string; fetchedAt: number; isBinary?: boolean }>;
+  lastRepoCheckAt: number;
   lastStatusFetch: number;
   lastStatusChange: number;
   lastLogFetch: number;
@@ -48,6 +52,7 @@ interface GitStore {
 
   pollIntervalId: ReturnType<typeof setTimeout> | null;
   currentPollInterval: number;
+  pollingMode: 'normal' | 'busy';
 
   setActiveDirectory: (directory: string | null) => void;
   getDirectoryState: (directory: string) => DirectoryGitState | null;
@@ -67,6 +72,7 @@ interface GitStore {
   setLogMaxCount: (directory: string, maxCount: number) => void;
 
   startPolling: (git: GitAPI) => void;
+  setPollingMode: (mode: 'normal' | 'busy') => void;
   stopPolling: () => void;
 
   refresh: (git: GitAPI, options?: { force?: boolean }) => Promise<void>;
@@ -90,6 +96,7 @@ interface GitAPI {
 
 const inFlightDiffFetchesByDirectory = new Map<string, Set<string>>();
 const diffFetchGenerationByDirectory = new Map<string, number>();
+const inFlightStatusFetchesByDirectory = new Map<string, Promise<boolean>>();
 
 const getDiffFetchGeneration = (directory: string): number =>
   diffFetchGenerationByDirectory.get(directory) ?? 0;
@@ -117,6 +124,7 @@ const createEmptyDirectoryState = (): DirectoryGitState => ({
   log: null,
   identity: null,
   diffCache: new Map(),
+  lastRepoCheckAt: 0,
   lastStatusFetch: 0,
   lastStatusChange: 0,
   lastLogFetch: 0,
@@ -262,6 +270,20 @@ const getChangedFilePaths = (oldStatus: GitStatus | null, newStatus: GitStatus |
   return changed;
 };
 
+const getPollingBounds = (mode: 'normal' | 'busy') => {
+  if (mode === 'busy') {
+    return {
+      base: GIT_POLL_BUSY_BASE_INTERVAL,
+      max: GIT_POLL_BUSY_MAX_INTERVAL,
+    };
+  }
+
+  return {
+    base: GIT_POLL_BASE_INTERVAL,
+    max: GIT_POLL_MAX_INTERVAL,
+  };
+};
+
 export const useGitStore = create<GitStore>()(
   devtools(
     (set, get) => ({
@@ -274,6 +296,7 @@ export const useGitStore = create<GitStore>()(
       isLoadingIdentity: false,
       pollIntervalId: null,
       currentPollInterval: GIT_POLL_BASE_INTERVAL,
+      pollingMode: 'normal',
 
       setActiveDirectory: (directory) => {
         const { activeDirectory, directories, recentDirectories } = get();
@@ -304,96 +327,124 @@ export const useGitStore = create<GitStore>()(
       },
 
       fetchStatus: async (directory, git, options = {}) => {
-        const { silent = false } = options;
-        const { directories } = get();
-        let dirState = directories.get(directory);
-
-        if (!dirState) {
-          dirState = createEmptyDirectoryState();
+        const existing = inFlightStatusFetchesByDirectory.get(directory);
+        if (existing) {
+          return existing;
         }
 
-        if (!silent) {
-          set({ isLoadingStatus: true });
-        }
+        const fetchPromise = (async () => {
+          const { silent = false } = options;
+          const { directories } = get();
+          let dirState = directories.get(directory);
 
-        let statusChanged = false;
+          if (!dirState) {
+            dirState = createEmptyDirectoryState();
+          }
+
+          if (!silent) {
+            set({ isLoadingStatus: true });
+          }
+
+          let statusChanged = false;
+
+          try {
+            const now = Date.now();
+            const shouldProbeRepository =
+              dirState.isGitRepo !== true ||
+              now - (dirState.lastRepoCheckAt || 0) > REPO_CHECK_STALE_THRESHOLD;
+
+            let isRepo = dirState.isGitRepo === true;
+            if (shouldProbeRepository) {
+              isRepo = await git.checkIsGitRepository(directory);
+            }
+
+            if (!isRepo) {
+              const newDirectories = new Map(directories);
+              newDirectories.set(directory, {
+                ...dirState,
+                isGitRepo: false,
+                status: null,
+                lastRepoCheckAt: now,
+                lastStatusFetch: now,
+              });
+              set({ directories: newDirectories, isLoadingStatus: false });
+              return false;
+            }
+
+            const newStatus = await git.getGitStatus(directory);
+
+            if (hasStatusChanged(dirState.status, newStatus)) {
+              statusChanged = true;
+              const newDirectories = new Map(get().directories);
+              const currentDirState = newDirectories.get(directory) ?? createEmptyDirectoryState();
+
+              const changedPaths = getChangedFilePaths(currentDirState.status, newStatus);
+
+              const oldPaths = new Set((currentDirState.status?.files ?? []).map((f) => f.path));
+              const newPaths = new Set((newStatus.files ?? []).map((f) => f.path));
+
+              const nextDiffCache = new Map(currentDirState.diffCache);
+
+              // Drop cache for removed files
+              for (const oldPath of oldPaths) {
+                if (!newPaths.has(oldPath)) {
+                  nextDiffCache.delete(oldPath);
+                }
+              }
+
+              // Drop cache for files whose state/content changed
+              for (const filePath of changedPaths) {
+                nextDiffCache.delete(filePath);
+              }
+
+              const hasFileContentChange = changedPaths.size > 0;
+              if (hasFileContentChange) {
+                bumpDiffFetchGeneration(directory);
+              }
+
+              newDirectories.set(directory, {
+                ...currentDirState,
+                isGitRepo: true,
+                status: newStatus,
+                diffCache: nextDiffCache,
+                lastRepoCheckAt: shouldProbeRepository ? now : currentDirState.lastRepoCheckAt,
+                lastStatusFetch: Date.now(),
+                lastStatusChange: hasFileContentChange ? Date.now() : currentDirState.lastStatusChange,
+              });
+              set({ directories: newDirectories });
+            } else {
+
+              const newDirectories = new Map(get().directories);
+              const currentDirState = newDirectories.get(directory) ?? createEmptyDirectoryState();
+              newDirectories.set(directory, {
+                ...currentDirState,
+                isGitRepo: true,
+                lastRepoCheckAt: shouldProbeRepository ? now : currentDirState.lastRepoCheckAt,
+                lastStatusFetch: Date.now(),
+                lastStatusChange: currentDirState.lastStatusChange,
+              });
+              set({ directories: newDirectories });
+            }
+          } catch (error) {
+            console.error('Failed to fetch git status:', error);
+          } finally {
+            if (!silent) {
+              set({ isLoadingStatus: false });
+            }
+          }
+
+          return statusChanged;
+        })();
+
+        inFlightStatusFetchesByDirectory.set(directory, fetchPromise);
 
         try {
-          const isRepo = await git.checkIsGitRepository(directory);
-
-          if (!isRepo) {
-            const newDirectories = new Map(directories);
-            newDirectories.set(directory, {
-              ...dirState,
-              isGitRepo: false,
-              status: null,
-              lastStatusFetch: Date.now(),
-            });
-            set({ directories: newDirectories, isLoadingStatus: false });
-            return false;
-          }
-
-          const newStatus = await git.getGitStatus(directory);
-
-          if (hasStatusChanged(dirState.status, newStatus)) {
-            statusChanged = true;
-            const newDirectories = new Map(get().directories);
-            const currentDirState = newDirectories.get(directory) ?? createEmptyDirectoryState();
-
-            const changedPaths = getChangedFilePaths(currentDirState.status, newStatus);
-
-            const oldPaths = new Set((currentDirState.status?.files ?? []).map((f) => f.path));
-            const newPaths = new Set((newStatus.files ?? []).map((f) => f.path));
-
-            const nextDiffCache = new Map(currentDirState.diffCache);
-
-            // Drop cache for removed files
-            for (const oldPath of oldPaths) {
-              if (!newPaths.has(oldPath)) {
-                nextDiffCache.delete(oldPath);
-              }
-            }
-
-            // Drop cache for files whose state/content changed
-            for (const filePath of changedPaths) {
-              nextDiffCache.delete(filePath);
-            }
-
-            const hasFileContentChange = changedPaths.size > 0;
-            if (hasFileContentChange) {
-              bumpDiffFetchGeneration(directory);
-            }
-
-            newDirectories.set(directory, {
-              ...currentDirState,
-              isGitRepo: true,
-              status: newStatus,
-              diffCache: nextDiffCache,
-              lastStatusFetch: Date.now(),
-              lastStatusChange: hasFileContentChange ? Date.now() : currentDirState.lastStatusChange,
-            });
-            set({ directories: newDirectories });
-          } else {
-
-            const newDirectories = new Map(get().directories);
-            const currentDirState = newDirectories.get(directory) ?? createEmptyDirectoryState();
-            newDirectories.set(directory, {
-              ...currentDirState,
-              isGitRepo: true,
-              lastStatusFetch: Date.now(),
-              lastStatusChange: currentDirState.lastStatusChange,
-            });
-            set({ directories: newDirectories });
-          }
-        } catch (error) {
-          console.error('Failed to fetch git status:', error);
+          return await fetchPromise;
         } finally {
-          if (!silent) {
-            set({ isLoadingStatus: false });
+          if (inFlightStatusFetchesByDirectory.get(directory) === fetchPromise) {
+            inFlightStatusFetchesByDirectory.delete(directory);
           }
         }
-
-        return statusChanged;
       },
 
       fetchBranches: async (directory, git) => {
@@ -637,6 +688,21 @@ export const useGitStore = create<GitStore>()(
         set({ directories: newDirectories });
       },
 
+      setPollingMode: (mode) => {
+        const { pollingMode, currentPollInterval } = get();
+        if (pollingMode === mode) {
+          return;
+        }
+
+        const bounds = getPollingBounds(mode);
+        const nextInterval = Math.min(Math.max(currentPollInterval, bounds.base), bounds.max);
+
+        set({
+          pollingMode: mode,
+          currentPollInterval: nextInterval,
+        });
+      },
+
       startPolling: (git) => {
         const { pollIntervalId } = get();
         if (pollIntervalId) return;
@@ -677,14 +743,15 @@ export const useGitStore = create<GitStore>()(
               }
             }
 
+            const bounds = getPollingBounds(get().pollingMode);
             if (anyStatusChanged) {
               // Reset to base interval on changes
-              set({ currentPollInterval: GIT_POLL_BASE_INTERVAL });
+              set({ currentPollInterval: bounds.base });
             } else {
               // Backoff when no changes
               const newInterval = Math.min(
                 currentPollInterval + GIT_POLL_BACKOFF_STEP,
-                GIT_POLL_MAX_INTERVAL
+                bounds.max
               );
               set({ currentPollInterval: newInterval });
             }
@@ -699,14 +766,15 @@ export const useGitStore = create<GitStore>()(
           return timeoutId;
         };
 
-        set({ pollIntervalId: schedulePoll(), currentPollInterval: GIT_POLL_BASE_INTERVAL });
+        const bounds = getPollingBounds(get().pollingMode);
+        set({ pollIntervalId: schedulePoll(), currentPollInterval: bounds.base });
       },
 
       stopPolling: () => {
         const { pollIntervalId } = get();
         if (pollIntervalId) {
           clearTimeout(pollIntervalId);
-          set({ pollIntervalId: null, currentPollInterval: GIT_POLL_BASE_INTERVAL });
+          set({ pollIntervalId: null, currentPollInterval: GIT_POLL_BASE_INTERVAL, pollingMode: 'normal' });
         }
       },
 

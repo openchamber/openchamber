@@ -1,6 +1,6 @@
 import React from 'react';
 import { Input } from '@/components/ui/input';
-import { ButtonSmall } from '@/components/ui/button-small';
+import { Button } from '@/components/ui/button';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { toast } from '@/components/ui';
 import { cn } from '@/lib/utils';
@@ -399,7 +399,7 @@ export const ProjectsPage: React.FC = () => {
                     placeholder="#000000"
                     className="h-7 w-[8rem]"
                   />
-                  <ButtonSmall
+                  <Button
                     type="button"
                     size="xs"
                     variant="outline"
@@ -410,21 +410,21 @@ export const ProjectsPage: React.FC = () => {
                     disabled={!iconBackground}
                   >
                     <RiCloseLine className="h-3.5 w-3.5" />
-                  </ButtonSmall>
+                  </Button>
                 </div>
               )}
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 {!hasCustomIcon && (
                   <>
-                    <ButtonSmall
+                    <Button
                       size="xs"
                       className="h-6 !font-normal"
                       onClick={() => fileInputRef.current?.click()}
                       disabled={isUploadingIcon}
                     >
                       {isUploadingIcon ? 'Uploading...' : 'Upload Icon'}
-                    </ButtonSmall>
-                    <ButtonSmall
+                    </Button>
+                    <Button
                       size="xs"
                       className="h-6 !font-normal"
                       variant="outline"
@@ -432,11 +432,11 @@ export const ProjectsPage: React.FC = () => {
                       disabled={isDiscoveringIcon}
                     >
                       {isDiscoveringIcon ? 'Discovering...' : 'Discover Favicon'}
-                    </ButtonSmall>
+                    </Button>
                   </>
                 )}
                 {hasRemovableImageIcon && (
-                  <ButtonSmall
+                  <Button
                     size="xs"
                     className="!font-normal"
                     variant="outline"
@@ -444,10 +444,10 @@ export const ProjectsPage: React.FC = () => {
                     disabled={isRemovingCustomIcon}
                   >
                     {isRemovingCustomIcon ? 'Removing...' : 'Remove Project Icon'}
-                  </ButtonSmall>
+                  </Button>
                 )}
                 {pendingRemoveImageIcon && (
-                  <ButtonSmall
+                  <Button
                     size="xs"
                     className="!font-normal"
                     variant="outline"
@@ -455,7 +455,7 @@ export const ProjectsPage: React.FC = () => {
                     disabled={isRemovingCustomIcon}
                   >
                     Undo Remove
-                  </ButtonSmall>
+                  </Button>
                 )}
               </div>
             </div>
@@ -463,14 +463,14 @@ export const ProjectsPage: React.FC = () => {
           </section>
           
           <div className="mt-0.5 px-2 py-1">
-            <ButtonSmall
+            <Button
               onClick={handleSave}
               disabled={!hasChanges || name.trim().length === 0 || isUploadingIcon || isRemovingCustomIcon}
               size="xs"
               className="!font-normal"
             >
               Save Changes
-            </ButtonSmall>
+            </Button>
           </div>
         </div>
 

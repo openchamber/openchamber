@@ -42,7 +42,7 @@ const buildLogoCandidates = (providerId: string | null | undefined) => {
 
     const compact = normalized.replace(/[^a-z0-9_\-./:]/g, '');
     const primary = compact.split(/[/:]/)[0] || compact;
-    const candidates = [compact, primary, LOGO_ALIAS.get(compact), LOGO_ALIAS.get(primary)]
+    const candidates = [LOGO_ALIAS.get(compact), LOGO_ALIAS.get(primary), compact, primary]
         .filter((value): value is string => Boolean(value && value.length > 0));
 
     return [...new Set(candidates)];

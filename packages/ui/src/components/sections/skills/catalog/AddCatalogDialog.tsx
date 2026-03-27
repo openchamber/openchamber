@@ -9,7 +9,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { ButtonLarge } from '@/components/ui/button-large';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
   Select,
@@ -311,24 +311,26 @@ export const AddCatalogDialog: React.FC<AddCatalogDialogProps> = ({ open, onOpen
         </div>
 
         <DialogFooter>
-          <ButtonLarge variant="ghost" onClick={() => onOpenChange(false)}>
+          <Button size="sm" variant="ghost" onClick={() => onOpenChange(false)}>
             Cancel
-          </ButtonLarge>
-          <ButtonLarge
+          </Button>
+          <Button
+            size="sm"
+            className="gap-2"
             variant="ghost"
             onClick={() => void handleScan()}
             disabled={isScanning || !source.trim()}
-            className="gap-2"
           >
             <RiGitRepositoryLine className="h-4 w-4" />
             {isScanning ? 'Scanning...' : 'Scan'}
-          </ButtonLarge>
-          <ButtonLarge
+          </Button>
+          <Button
+            size="sm"
             onClick={() => void handleAdd()}
             disabled={!scanOk || isDuplicate || !label.trim() || !source.trim()}
           >
             Add catalog
-          </ButtonLarge>
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

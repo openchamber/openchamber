@@ -1,11 +1,14 @@
 import { create } from 'zustand';
 import type { UpdateInfo, UpdateProgress } from '@/lib/desktop';
+import { getDeviceInfo } from '@/lib/device';
+import { useUIStore } from './useUIStore';
 import {
   checkForDesktopUpdates,
   downloadDesktopUpdate,
   restartToApplyUpdate,
   isDesktopLocalOriginActive,
   isTauriShell,
+  isVSCodeRuntime,
   isWebRuntime,
 } from '@/lib/desktop';
 
@@ -19,19 +22,80 @@ export type UpdateState = {
   error: string | null;
   runtimeType: 'desktop' | 'web' | 'vscode' | null;
   lastChecked: number | null;
+  nextCheckInSec: number | null;
 };
 
 interface UpdateStore extends UpdateState {
-  checkForUpdates: () => Promise<void>;
+  checkForUpdates: () => Promise<number | null>;
   downloadUpdate: () => Promise<void>;
   restartToUpdate: () => Promise<void>;
   dismiss: () => void;
   reset: () => void;
 }
 
-async function checkForWebUpdates(): Promise<UpdateInfo | null> {
+type ClientRuntime = 'desktop' | 'web' | 'vscode';
+
+function detectDeviceClass(): 'mobile' | 'tablet' | 'desktop' | 'unknown' {
+  if (typeof window === 'undefined') return 'unknown';
   try {
-    const response = await fetch('/api/openchamber/update-check', {
+    const { deviceType } = getDeviceInfo();
+    return deviceType;
+  } catch {
+    return 'unknown';
+  }
+}
+
+function detectArch(): 'arm64' | 'x64' | 'unknown' {
+  const nav = typeof navigator !== 'undefined' ? (navigator as Navigator & { userAgentData?: { architecture?: string } }).userAgentData : undefined;
+  const fromUAData = nav?.architecture?.toLowerCase?.();
+  if (fromUAData === 'arm' || fromUAData === 'arm64' || fromUAData === 'aarch64') return 'arm64';
+  if (fromUAData === 'x86' || fromUAData === 'x64' || fromUAData === 'amd64') return 'x64';
+
+  const ua = typeof navigator !== 'undefined' ? navigator.userAgent.toLowerCase() : '';
+  if (ua.includes('aarch64') || ua.includes('arm64') || ua.includes('armv')) return 'arm64';
+  if (ua.includes('x86_64') || ua.includes('x64') || ua.includes('amd64') || ua.includes('win64')) return 'x64';
+  return 'unknown';
+}
+
+function detectPlatform(): 'macos' | 'windows' | 'linux' | 'web' {
+  if (typeof navigator === 'undefined') return 'web';
+  const platform = (navigator.platform || '').toLowerCase();
+  if (platform.includes('mac')) return 'macos';
+  if (platform.includes('win')) return 'windows';
+  if (platform.includes('linux')) return 'linux';
+  return 'web';
+}
+
+function mapRuntimeParams(runtime: ClientRuntime): URLSearchParams {
+  // Check if user has opted out of usage reporting (default: true/enabled from UI store)
+  const shouldReportUsage = useUIStore.getState().reportUsage;
+  
+  const params = new URLSearchParams({ reportUsage: shouldReportUsage ? 'true' : 'false' });
+  params.set('deviceClass', detectDeviceClass());
+  params.set('arch', detectArch());
+  params.set('platform', detectPlatform());
+  if (runtime === 'desktop') {
+    params.set('appType', 'desktop-tauri');
+    params.set('instanceMode', isDesktopLocalOriginActive() ? 'local' : 'remote');
+    return params;
+  }
+
+  if (runtime === 'vscode') {
+    params.set('appType', 'vscode');
+    params.set('instanceMode', 'local');
+    return params;
+  }
+
+  params.set('appType', 'web');
+  params.set('instanceMode', 'unknown');
+  return params;
+}
+
+async function checkForWebUpdates(runtime: ClientRuntime, currentVersion?: string): Promise<UpdateInfo | null> {
+  try {
+    const params = mapRuntimeParams(runtime);
+    if (currentVersion) params.set('currentVersion', currentVersion);
+    const response = await fetch(`/api/openchamber/update-check?${params.toString()}`, {
       method: 'GET',
       headers: { Accept: 'application/json' },
     });
@@ -46,11 +110,15 @@ async function checkForWebUpdates(): Promise<UpdateInfo | null> {
       version: data.version,
       currentVersion: data.currentVersion ?? 'unknown',
       body: data.body,
+      nextSuggestedCheckInSec:
+        typeof data.nextSuggestedCheckInSec === 'number' && Number.isFinite(data.nextSuggestedCheckInSec)
+          ? data.nextSuggestedCheckInSec
+          : undefined,
       packageManager: data.packageManager,
       updateCommand: data.updateCommand,
     };
   } catch (error) {
-    console.warn('Failed to check for web updates:', error);
+    console.warn('Failed to check for updates:', error);
     return null;
   }
 }
@@ -61,6 +129,7 @@ function detectRuntimeType(): 'desktop' | 'web' | 'vscode' | null {
     // When viewing a remote host inside the desktop shell, treat update as web update.
     return isDesktopLocalOriginActive() ? 'desktop' : 'web';
   }
+  if (isVSCodeRuntime()) return 'vscode';
   if (isWebRuntime()) return 'web';
   return null;
 }
@@ -75,6 +144,7 @@ const initialState: UpdateState = {
   error: null,
   runtimeType: null,
   lastChecked: null,
+  nextCheckInSec: null,
 };
 
 export const useUpdateStore = create<UpdateStore>()((set, get) => ({
@@ -82,30 +152,74 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
 
   checkForUpdates: async () => {
     const runtime = detectRuntimeType();
-    if (!runtime) return;
+    if (!runtime) return null;
 
     set({ checking: true, error: null, runtimeType: runtime });
 
     try {
       let info: UpdateInfo | null = null;
+      let suggestedSec: number | null = null;
 
       if (runtime === 'desktop') {
-        info = await checkForDesktopUpdates();
+        let desktopInfo = await checkForDesktopUpdates();
+        set({
+          checking: false,
+          available: desktopInfo?.available ?? false,
+          info: desktopInfo,
+          lastChecked: Date.now(),
+          nextCheckInSec: null,
+        });
+
+        const sidecarInfo = await checkForWebUpdates('desktop', desktopInfo?.currentVersion);
+        suggestedSec = sidecarInfo?.nextSuggestedCheckInSec ?? null;
+
+        if (sidecarInfo?.available && !desktopInfo?.available) {
+          const forcedDesktopInfo = await checkForDesktopUpdates();
+          if (forcedDesktopInfo) {
+            desktopInfo = forcedDesktopInfo;
+          }
+        }
+
+        if (sidecarInfo) {
+          const mergedInfo: UpdateInfo = {
+            ...(desktopInfo ?? { available: false, currentVersion: sidecarInfo.currentVersion ?? 'unknown' }),
+            ...sidecarInfo,
+            currentVersion: desktopInfo?.currentVersion ?? sidecarInfo.currentVersion ?? 'unknown',
+            available: sidecarInfo.available,
+          };
+
+          set({
+            available: mergedInfo.available,
+            info: mergedInfo,
+            nextCheckInSec: suggestedSec,
+          });
+        } else {
+          set({ nextCheckInSec: suggestedSec });
+        }
+
+        return suggestedSec;
       } else if (runtime === 'web') {
-        info = await checkForWebUpdates();
+        info = await checkForWebUpdates('web');
+        suggestedSec = info?.nextSuggestedCheckInSec ?? null;
+      } else if (runtime === 'vscode') {
+        const vscodeInfo = await checkForWebUpdates('vscode');
+        suggestedSec = vscodeInfo?.nextSuggestedCheckInSec ?? null;
       }
 
       set({
         checking: false,
-        available: info?.available ?? false,
-        info,
+        available: runtime === 'vscode' ? false : (info?.available ?? false),
+        info: runtime === 'vscode' ? null : info,
         lastChecked: Date.now(),
+        nextCheckInSec: suggestedSec,
       });
+      return suggestedSec;
     } catch (error) {
       set({
         checking: false,
         error: error instanceof Error ? error.message : 'Failed to check for updates',
       });
+      return null;
     }
   },
 
@@ -120,6 +234,21 @@ export const useUpdateStore = create<UpdateStore>()((set, get) => ({
     set({ downloading: true, error: null, progress: null });
 
     try {
+      const desktopInfo = await checkForDesktopUpdates();
+      if (!desktopInfo?.available) {
+        throw new Error('Update detected, but desktop package is not ready yet. Retry in a moment.');
+      }
+
+      set((state) => ({
+        info: state.info
+          ? {
+            ...state.info,
+            ...desktopInfo,
+            available: state.info.available,
+          }
+          : desktopInfo,
+      }));
+
       const ok = await downloadDesktopUpdate((progress) => {
         set({ progress });
       });

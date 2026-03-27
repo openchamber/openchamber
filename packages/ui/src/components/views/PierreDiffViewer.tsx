@@ -546,7 +546,17 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
     const instance = diffInstanceRef.current;
     if (!instance) return;
 
-    instance.setLineAnnotations(lineAnnotations);
+    try {
+      instance.setLineAnnotations(lineAnnotations);
+    } catch (error) {
+      console.error('Failed to apply diff line annotations', error);
+      try {
+        instance.setLineAnnotations([]);
+      } catch {
+        // ignored
+      }
+    }
+
     requestAnimationFrame(() => {
       if (diffInstanceRef.current !== instance) return;
       try {

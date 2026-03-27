@@ -184,12 +184,12 @@
 
   /* Fix header positioning */
   :root.device-mobile:not(.desktop-runtime) .header-safe-area {
-    position: fixed;
-    top: var(--oc-visual-viewport-offset-top, 0px);
-    left: 0;
-    right: 0;
+    position: relative;
+    top: auto;
+    left: auto;
+    right: auto;
     width: 100%;
-    z-index: 50;
+    z-index: 10;
   }
 
   /* Fix main content area */

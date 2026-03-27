@@ -1,6 +1,7 @@
 import React from "react";
 
-export type ScrollShadowProps = React.HTMLAttributes<HTMLDivElement> & {
+export type ScrollShadowProps = React.HTMLAttributes<HTMLElement> & {
+  as?: React.ElementType;
   orientation?: "vertical" | "horizontal";
   offset?: number;
   size?: number;
@@ -23,9 +24,10 @@ function mergeRefs<T>(...refs: Array<React.Ref<T>>): React.RefCallback<T> {
   };
 }
 
-export const ScrollShadow = React.forwardRef<HTMLDivElement, ScrollShadowProps>(
+export const ScrollShadow = React.forwardRef<HTMLElement, ScrollShadowProps>(
       (
       {
+        as: Component = "div",
         orientation = "vertical",
         offset = 0,
         size = 48,
@@ -41,7 +43,7 @@ export const ScrollShadow = React.forwardRef<HTMLDivElement, ScrollShadowProps>(
     },
     ref,
   ) => {
-    const internalRef = React.useRef<HTMLDivElement>(null);
+    const internalRef = React.useRef<HTMLElement>(null);
     const visibleRef = React.useRef<"both" | "none" | "top" | "bottom" | "left" | "right">("none");
 
     const dataScrollShadow = (rest as Record<string, unknown>)["data-scroll-shadow"];
@@ -147,7 +149,7 @@ export const ScrollShadow = React.forwardRef<HTMLDivElement, ScrollShadowProps>(
     }, [checkOverflow, observeMutations]);
 
     return (
-      <div
+      <Component
         {...rest}
         ref={mergeRefs(internalRef, ref)}
         className={className}
@@ -156,7 +158,7 @@ export const ScrollShadow = React.forwardRef<HTMLDivElement, ScrollShadowProps>(
         style={mergedStyle}
       >
         {children}
-      </div>
+      </Component>
     );
   },
 );

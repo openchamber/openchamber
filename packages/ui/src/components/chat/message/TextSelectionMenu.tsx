@@ -16,17 +16,184 @@ interface MenuPosition {
   show: boolean;
 }
 
+interface SelectionPayload {
+  plainText: string;
+  markdownText: string;
+  rect: DOMRect;
+}
+
 const DESKTOP_MENU_SIDE_MARGIN_PX = 8;
 const DESKTOP_MENU_FALLBACK_WIDTH_PX = 280;
+const BLOCK_TAGS = new Set([
+  'address', 'article', 'aside', 'blockquote', 'dd', 'div', 'dl', 'dt',
+  'fieldset', 'figcaption', 'figure', 'footer', 'form', 'h1', 'h2', 'h3',
+  'h4', 'h5', 'h6', 'header', 'hr', 'li', 'main', 'nav', 'ol', 'p', 'pre',
+  'section', 'table', 'ul',
+]);
+
+const normalizeLineBreaks = (value: string): string => value.replace(/\r\n?/g, '\n');
+
+const trimSelectionValue = (value: string): string => normalizeLineBreaks(value).trim();
+
+const textToMarkdownInline = (value: string): string => value.replace(/\s+/g, ' ').trim();
+
+const renderInlineMarkdownNode = (node: Node): string => {
+  if (node.nodeType === Node.TEXT_NODE) {
+    return textToMarkdownInline(node.textContent || '');
+  }
+
+  if (node.nodeType !== Node.ELEMENT_NODE) {
+    return '';
+  }
+
+  const element = node as HTMLElement;
+  const tag = element.tagName.toLowerCase();
+  const childText = Array.from(element.childNodes)
+    .map((child) => renderInlineMarkdownNode(child))
+    .join('')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!childText && tag !== 'br') {
+    return '';
+  }
+
+  if (tag === 'br') return '\n';
+  if (tag === 'strong' || tag === 'b') return `**${childText}**`;
+  if (tag === 'em' || tag === 'i') return `*${childText}*`;
+  if (tag === 'code') return `\`${childText.replace(/`/g, '\\`')}\``;
+  if (tag === 'a') {
+    const href = element.getAttribute('href');
+    return href ? `[${childText}](${href})` : childText;
+  }
+
+  return childText;
+};
+
+const renderListMarkdown = (list: HTMLElement, ordered: boolean): string => {
+  const items = Array.from(list.children).filter(
+    (child): child is HTMLElement => child instanceof HTMLElement && child.tagName.toLowerCase() === 'li'
+  );
+
+  return items
+    .map((item, index) => {
+      const prefix = ordered ? `${index + 1}. ` : '- ';
+      const body = Array.from(item.childNodes)
+        .map((child) => renderInlineMarkdownNode(child))
+        .join('')
+        .replace(/\s+/g, ' ')
+        .trim();
+      return body ? `${prefix}${body}` : '';
+    })
+    .filter(Boolean)
+    .join('\n');
+};
+
+const renderBlockMarkdownNode = (node: Node): string => {
+  if (node.nodeType === Node.TEXT_NODE) {
+    return trimSelectionValue(node.textContent || '');
+  }
+
+  if (node.nodeType !== Node.ELEMENT_NODE) {
+    return '';
+  }
+
+  const element = node as HTMLElement;
+  const tag = element.tagName.toLowerCase();
+
+  if (tag === 'pre') {
+    const codeElement = element.querySelector('code');
+    const languageClass = codeElement?.className || '';
+    const language = (languageClass.match(/language-([\w-]+)/)?.[1] || '').trim();
+    const code = normalizeLineBreaks(codeElement?.textContent || element.textContent || '').replace(/\n$/, '');
+    return `\`\`\`${language}\n${code}\n\`\`\``;
+  }
+
+  if (tag === 'code') {
+    const code = normalizeLineBreaks(element.textContent || '').trim();
+    return code ? `\`${code.replace(/`/g, '\\`')}\`` : '';
+  }
+
+  if (tag === 'ul') return renderListMarkdown(element, false);
+  if (tag === 'ol') return renderListMarkdown(element, true);
+
+  if (tag === 'blockquote') {
+    const content = trimSelectionValue(
+      Array.from(element.childNodes).map((child) => renderBlockMarkdownNode(child)).join('\n')
+    );
+    return content
+      .split('\n')
+      .filter((line) => line.length > 0)
+      .map((line) => `> ${line}`)
+      .join('\n');
+  }
+
+  if (/^h[1-6]$/.test(tag)) {
+    const level = Number.parseInt(tag[1], 10);
+    const text = trimSelectionValue(Array.from(element.childNodes).map((child) => renderInlineMarkdownNode(child)).join(''));
+    return text ? `${'#'.repeat(level)} ${text}` : '';
+  }
+
+  if (tag === 'p' || tag === 'div' || tag === 'li') {
+    return trimSelectionValue(Array.from(element.childNodes).map((child) => renderInlineMarkdownNode(child)).join(''));
+  }
+
+  const blockChildren = Array.from(element.childNodes)
+    .map((child) => renderBlockMarkdownNode(child))
+    .filter((child) => child.length > 0);
+  if (blockChildren.length > 0) {
+    return blockChildren.join('\n\n');
+  }
+
+  return trimSelectionValue(Array.from(element.childNodes).map((child) => renderInlineMarkdownNode(child)).join(''));
+};
+
+const isInlineSelectionFragment = (fragment: DocumentFragment): boolean => {
+  return Array.from(fragment.childNodes).every((node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      return true;
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) {
+      return true;
+    }
+
+    const element = node as HTMLElement;
+    return !BLOCK_TAGS.has(element.tagName.toLowerCase());
+  });
+};
+
+const rangeToMarkdown = (range: Range, plainText: string): string => {
+  const fragment = range.cloneContents();
+
+  if (isInlineSelectionFragment(fragment)) {
+    const inlineMarkdown = trimSelectionValue(
+      Array.from(fragment.childNodes)
+        .map((node) => renderInlineMarkdownNode(node))
+        .join('')
+    );
+    if (inlineMarkdown) {
+      return inlineMarkdown;
+    }
+  }
+
+  const markdown = Array.from(fragment.childNodes)
+    .map((node) => renderBlockMarkdownNode(node))
+    .filter((value) => value.length > 0)
+    .join('\n\n')
+    .trim();
+
+  return markdown || trimSelectionValue(plainText);
+};
 
 export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerRef }) => {
   const [position, setPosition] = React.useState<MenuPosition>({ x: 0, y: 0, show: false });
   const [selectedText, setSelectedText] = React.useState('');
+  const [selectedTextMarkdown, setSelectedTextMarkdown] = React.useState('');
   const [isDragging, setIsDragging] = React.useState(false);
   const [isOpening, setIsOpening] = React.useState(false);
   const menuRef = React.useRef<HTMLDivElement>(null);
   const menuWidthRef = React.useRef(DESKTOP_MENU_FALLBACK_WIDTH_PX);
-  const pendingSelectionRef = React.useRef<{ text: string; rect: DOMRect } | null>(null);
+  const pendingSelectionRef = React.useRef<SelectionPayload | null>(null);
   const openRafRef = React.useRef<number | null>(null);
   const isMenuVisibleRef = React.useRef(false);
   const createSession = useSessionStore((state) => state.createSession);
@@ -61,6 +228,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
 
     setPosition((prev) => ({ ...prev, show: false }));
     setSelectedText('');
+    setSelectedTextMarkdown('');
     isMenuVisibleRef.current = false;
   }, []);
 
@@ -85,7 +253,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
   const showMenu = React.useCallback(() => {
     if (!pendingSelectionRef.current) return;
 
-    const { text, rect } = pendingSelectionRef.current;
+    const { plainText, markdownText, rect } = pendingSelectionRef.current;
     const shouldAnimateIn = !position.show;
 
     // Position menu above the selection
@@ -94,7 +262,8 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
       : getDesktopClampedX(rect.left + rect.width / 2);
     const menuY = rect.top - 10;
 
-    setSelectedText(text);
+    setSelectedText(plainText);
+    setSelectedTextMarkdown(markdownText);
     setPosition({
       x: menuX,
       y: menuY,
@@ -160,7 +329,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
       return;
     }
 
-    const text = selection.toString().trim();
+    const text = trimSelectionValue(selection.toString());
 
     // Only show if we have text and the selection is within our container
     if (!text) {
@@ -184,7 +353,11 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
     const rect = range.getBoundingClientRect();
 
     // Store the selection but don't show menu yet if dragging
-    pendingSelectionRef.current = { text, rect };
+    pendingSelectionRef.current = {
+      plainText: text,
+      markdownText: rangeToMarkdown(range, text),
+      rect,
+    };
 
     // Only show menu if we're not currently dragging
     if (!isDragging) {
@@ -247,15 +420,16 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
   }, [containerRef, handleSelectionChange, hideMenu, showMenu]);
 
   const handleAddToChat = React.useCallback(() => {
-    if (!selectedText) return;
+    if (!selectedTextMarkdown) return;
 
-    setPendingInputText(selectedText, 'append');
+    const markdownBlock = `\`\`\`md\n${selectedTextMarkdown}\n\`\`\``;
+    setPendingInputText(markdownBlock, 'append');
     
     hideMenu();
     
     // Clear selection
     window.getSelection()?.removeAllRanges();
-  }, [selectedText, setPendingInputText, hideMenu]);
+  }, [selectedTextMarkdown, setPendingInputText, hideMenu]);
 
   const handleCreateNewSession = React.useCallback(async () => {
     if (!selectedText) return;
@@ -299,6 +473,8 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
         )}
         style={{
           paddingBottom: 'calc(0.5rem + env(safe-area-inset-bottom, 0px))',
+          backdropFilter: 'blur(28px)',
+          WebkitBackdropFilter: 'blur(28px)',
         }}
       >
         <button
@@ -370,6 +546,10 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
           'transition-[opacity,transform] duration-200 ease-out will-change-[opacity,transform]',
           isOpening ? 'opacity-0 translate-y-[4px]' : 'opacity-100 translate-y-0'
         )}
+        style={{
+          backdropFilter: 'blur(28px)',
+          WebkitBackdropFilter: 'blur(28px)',
+        }}
       >
         <button
           onClick={handleAddToChat}

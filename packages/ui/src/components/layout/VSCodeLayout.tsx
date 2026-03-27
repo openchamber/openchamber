@@ -43,6 +43,8 @@ const MOBILE_WIDTH_THRESHOLD = 550;
 const EXPANDED_LAYOUT_THRESHOLD = 1400;
 // Sessions sidebar width in expanded layout
 const SESSIONS_SIDEBAR_WIDTH = 280;
+const SESSIONS_SIDEBAR_MIN_WIDTH = Math.round(SESSIONS_SIDEBAR_WIDTH * 0.7);
+const SESSIONS_SIDEBAR_MAX_WIDTH = 520;
 
 type VSCodeView = 'sessions' | 'chat' | 'settings';
 
@@ -80,7 +82,12 @@ export const VSCodeLayout: React.FC = () => {
 
   const [currentView, setCurrentView] = React.useState<VSCodeView>(() => (bootDraftOpen ? 'chat' : 'sessions'));
   const [containerWidth, setContainerWidth] = React.useState<number>(0);
+  const [expandedSidebarWidth, setExpandedSidebarWidth] = React.useState<number>(SESSIONS_SIDEBAR_WIDTH);
+  const [isResizingExpandedSidebar, setIsResizingExpandedSidebar] = React.useState(false);
   const containerRef = React.useRef<HTMLDivElement>(null);
+  const expandedSidebarResizeStartXRef = React.useRef(0);
+  const expandedSidebarResizeStartWidthRef = React.useRef(SESSIONS_SIDEBAR_WIDTH);
+  const expandedSidebarResizePointerIdRef = React.useRef<number | null>(null);
   const currentSessionId = useSessionStore((state) => state.currentSessionId);
   const sessions = useSessionStore((state) => state.sessions);
 
@@ -357,6 +364,45 @@ export const VSCodeLayout: React.FC = () => {
   const usesMobileLayout = containerWidth > 0 && containerWidth < MOBILE_WIDTH_THRESHOLD;
   const usesExpandedLayout = containerWidth >= EXPANDED_LAYOUT_THRESHOLD;
 
+  const clampExpandedSidebarWidth = React.useCallback((value: number) => {
+    return Math.min(SESSIONS_SIDEBAR_MAX_WIDTH, Math.max(SESSIONS_SIDEBAR_MIN_WIDTH, value));
+  }, []);
+
+  const handleExpandedSidebarResizeStart = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // ignore
+    }
+    expandedSidebarResizePointerIdRef.current = event.pointerId;
+    expandedSidebarResizeStartXRef.current = event.clientX;
+    expandedSidebarResizeStartWidthRef.current = expandedSidebarWidth;
+    setIsResizingExpandedSidebar(true);
+    event.preventDefault();
+  }, [expandedSidebarWidth]);
+
+  const handleExpandedSidebarResizeMove = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (expandedSidebarResizePointerIdRef.current !== event.pointerId) {
+      return;
+    }
+    const delta = event.clientX - expandedSidebarResizeStartXRef.current;
+    const nextWidth = clampExpandedSidebarWidth(expandedSidebarResizeStartWidthRef.current + delta);
+    setExpandedSidebarWidth((current) => (current === nextWidth ? current : nextWidth));
+  }, [clampExpandedSidebarWidth]);
+
+  const handleExpandedSidebarResizeEnd = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (expandedSidebarResizePointerIdRef.current !== event.pointerId) {
+      return;
+    }
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {
+      // ignore
+    }
+    expandedSidebarResizePointerIdRef.current = null;
+    setIsResizingExpandedSidebar(false);
+  }, []);
+
   // In expanded layout, always show chat (with sidebar alongside)
   // Navigate to chat automatically when expanded layout is enabled and we're on sessions view
   React.useEffect(() => {
@@ -392,14 +438,27 @@ export const VSCodeLayout: React.FC = () => {
         <div className="flex h-full">
           {/* Sessions sidebar */}
           <div
-            className="h-full border-r border-border overflow-hidden flex-shrink-0"
-            style={{ width: SESSIONS_SIDEBAR_WIDTH }}
+            className={cn('relative h-full border-r border-border overflow-hidden flex-shrink-0', isResizingExpandedSidebar && 'select-none')}
+            style={{ width: expandedSidebarWidth, minWidth: expandedSidebarWidth, maxWidth: expandedSidebarWidth }}
           >
             <SessionSidebar
               mobileVariant
               allowReselect
               hideDirectoryControls
               showOnlyMainWorkspace
+            />
+            <div
+              className={cn(
+                'absolute right-0 top-0 z-20 h-full w-[3px] cursor-col-resize transition-colors hover:bg-[var(--interactive-border)]/80',
+                isResizingExpandedSidebar && 'bg-[var(--interactive-border)]'
+              )}
+              onPointerDown={handleExpandedSidebarResizeStart}
+              onPointerMove={handleExpandedSidebarResizeMove}
+              onPointerUp={handleExpandedSidebarResizeEnd}
+              onPointerCancel={handleExpandedSidebarResizeEnd}
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize sessions sidebar"
             />
           </div>
           {/* Chat content */}
@@ -533,7 +592,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
   }, [setQuotaDisplayMode]);
 
   return (
-    <div className="flex items-center gap-1.5 pl-1 pr-2 py-1 border-b border-border bg-background shrink-0">
+    <div className="flex items-center gap-1.5 pl-3 pr-2 py-1 border-b border-border bg-background shrink-0">
       {showBack && onBack && (
         <button
           onClick={onBack}

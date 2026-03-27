@@ -35,6 +35,15 @@ const FALLBACK_SOURCES: SkillsCatalogSource[] = [
   },
 ];
 
+const SKILLS_CATALOG_LOAD_CACHE_TTL_MS = 5000;
+const DEFAULT_SKILLS_CATALOG_CACHE_KEY = '__default__';
+const skillsCatalogLastLoadedAt = new Map<string, number>();
+const skillsCatalogLoadInFlight = new Map<string, Promise<boolean>>();
+
+const getSkillsCatalogCacheKey = (directory: string | null): string => {
+  return directory?.trim() || DEFAULT_SKILLS_CATALOG_CACHE_KEY;
+};
+
 const getCurrentDirectory = (): string | null => {
   const opencodeDirectory = opencodeClient.getDirectory();
   if (typeof opencodeDirectory === 'string' && opencodeDirectory.trim().length > 0) {
@@ -108,75 +117,99 @@ export const useSkillsCatalogStore = create<SkillsCatalogState>()(
       setSelectedSource: (id) => set({ selectedSourceId: id }),
 
       loadCatalog: async (options) => {
-        set({ isLoadingCatalog: true, lastCatalogError: null });
+        const currentDirectory = getCurrentDirectory();
+        const cacheKey = getSkillsCatalogCacheKey(currentDirectory);
+        const now = Date.now();
+        const loadedAt = skillsCatalogLastLoadedAt.get(cacheKey) ?? 0;
+        const hasCachedCatalog = get().sources.length > 0;
+        if (!options?.refresh && hasCachedCatalog && now - loadedAt < SKILLS_CATALOG_LOAD_CACHE_TTL_MS) {
+          return true;
+        }
 
-        const previous = {
-          sources: get().sources,
-          itemsBySource: get().itemsBySource,
-          pageInfoBySource: get().pageInfoBySource,
-          loadedSourceIds: get().loadedSourceIds,
-          clawdhubHasMoreBySource: get().clawdhubHasMoreBySource,
-        };
+        const inFlight = skillsCatalogLoadInFlight.get(cacheKey);
+        if (!options?.refresh && inFlight) {
+          return inFlight;
+        }
 
-        let lastError: SkillsCatalogResponse['error'] | null = null;
+        const request = (async () => {
+          set({ isLoadingCatalog: true, lastCatalogError: null });
 
-        try {
-          const refresh = options?.refresh ? '?refresh=true' : '';
-          const controller = new AbortController();
-          const timeoutId = window.setTimeout(() => controller.abort(), 3000);
+          const previous = {
+            sources: get().sources,
+            itemsBySource: get().itemsBySource,
+            pageInfoBySource: get().pageInfoBySource,
+            loadedSourceIds: get().loadedSourceIds,
+            clawdhubHasMoreBySource: get().clawdhubHasMoreBySource,
+          };
+
+          let lastError: SkillsCatalogResponse['error'] | null = null;
 
           try {
-            const response = await fetch(`/api/config/skills/catalog${refresh}`, {
-              method: 'GET',
-              headers: { Accept: 'application/json' },
-              signal: controller.signal,
-            });
+            const refresh = options?.refresh ? '?refresh=true' : '';
+            const controller = new AbortController();
+            const timeoutId = window.setTimeout(() => controller.abort(), 3000);
 
-            const payload = (await response.json().catch(() => null)) as SkillsCatalogResponse | null;
-            if (!response.ok || !payload?.ok) {
-              lastError = payload?.error || { kind: 'unknown', message: `Failed to load catalog (${response.status})` };
-              throw new Error(lastError.message);
+            try {
+              const response = await fetch(`/api/config/skills/catalog${refresh}`, {
+                method: 'GET',
+                headers: { Accept: 'application/json' },
+                signal: controller.signal,
+              });
+
+              const payload = (await response.json().catch(() => null)) as SkillsCatalogResponse | null;
+              if (!response.ok || !payload?.ok) {
+                lastError = payload?.error || { kind: 'unknown', message: `Failed to load catalog (${response.status})` };
+                throw new Error(lastError.message);
+              }
+
+              const sources = (payload.sources && payload.sources.length > 0) ? payload.sources : previous.sources;
+              const itemsBySource = options?.refresh ? {} : (get().itemsBySource || {});
+              const pageInfoBySource = options?.refresh ? {} : (get().pageInfoBySource || {});
+              const loadedSourceIds = options?.refresh ? {} : (get().loadedSourceIds || {});
+              const clawdhubHasMoreBySource = options?.refresh ? {} : (get().clawdhubHasMoreBySource || {});
+              const currentSelected = get().selectedSourceId;
+              const selectedSourceId =
+                (currentSelected && sources.some((s) => s.id === currentSelected))
+                  ? currentSelected
+                  : (sources[0]?.id ?? null);
+
+              set({
+                sources,
+                itemsBySource,
+                pageInfoBySource,
+                loadedSourceIds,
+                clawdhubHasMoreBySource,
+                selectedSourceId,
+              });
+
+              skillsCatalogLastLoadedAt.set(cacheKey, Date.now());
+              return true;
+            } finally {
+              window.clearTimeout(timeoutId);
             }
-
-            const sources = (payload.sources && payload.sources.length > 0) ? payload.sources : previous.sources;
-            const itemsBySource = options?.refresh ? {} : (get().itemsBySource || {});
-            const pageInfoBySource = options?.refresh ? {} : (get().pageInfoBySource || {});
-            const loadedSourceIds = options?.refresh ? {} : (get().loadedSourceIds || {});
-            const clawdhubHasMoreBySource = options?.refresh ? {} : (get().clawdhubHasMoreBySource || {});
-            const currentSelected = get().selectedSourceId;
-            const selectedSourceId =
-              (currentSelected && sources.some((s) => s.id === currentSelected))
-                ? currentSelected
-                : (sources[0]?.id ?? null);
+          } catch (error) {
+            lastError = lastError || { kind: 'unknown', message: error instanceof Error ? error.message : String(error) };
 
             set({
-              sources,
-              itemsBySource,
-              pageInfoBySource,
-              loadedSourceIds,
-              clawdhubHasMoreBySource,
-              selectedSourceId,
+              sources: previous.sources,
+              itemsBySource: previous.itemsBySource,
+              pageInfoBySource: previous.pageInfoBySource,
+              loadedSourceIds: previous.loadedSourceIds,
+              clawdhubHasMoreBySource: previous.clawdhubHasMoreBySource,
+              lastCatalogError: lastError || { kind: 'unknown', message: 'Failed to load catalog' },
             });
 
-            return true;
+            return false;
           } finally {
-            window.clearTimeout(timeoutId);
+            set({ isLoadingCatalog: false });
           }
-        } catch (error) {
-          lastError = lastError || { kind: 'unknown', message: error instanceof Error ? error.message : String(error) };
-        
-          set({
-            sources: previous.sources,
-            itemsBySource: previous.itemsBySource,
-            pageInfoBySource: previous.pageInfoBySource,
-            loadedSourceIds: previous.loadedSourceIds,
-            clawdhubHasMoreBySource: previous.clawdhubHasMoreBySource,
-            lastCatalogError: lastError || { kind: 'unknown', message: 'Failed to load catalog' },
-          });
+        })();
 
-          return false;
+        skillsCatalogLoadInFlight.set(cacheKey, request);
+        try {
+          return await request;
         } finally {
-          set({ isLoadingCatalog: false });
+          skillsCatalogLoadInFlight.delete(cacheKey);
         }
       },
 

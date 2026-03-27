@@ -1,7 +1,5 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
-import { ButtonLarge } from '@/components/ui/button-large';
-import { ButtonSmall } from '@/components/ui/button-small';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -110,7 +108,7 @@ const CommandTextarea: React.FC<CommandTextareaProps> = ({ value, onChange }) =>
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-end gap-2">
-        <ButtonSmall
+        <Button
           variant="ghost"
           size="xs"
           className="!font-normal gap-1 text-muted-foreground"
@@ -120,7 +118,7 @@ const CommandTextarea: React.FC<CommandTextareaProps> = ({ value, onChange }) =>
         >
           <RiClipboardLine className="h-3 w-3" />
           Paste command
-        </ButtonSmall>
+        </Button>
       </div>
 
       <Textarea
@@ -252,7 +250,7 @@ const EnvEditor: React.FC<EnvEditorProps> = ({ value, onChange }) => {
           <span className="typography-micro text-muted-foreground w-32 shrink-0">Key</span>
           <span className="typography-micro text-muted-foreground">Value</span>
         </div>
-        <ButtonSmall
+        <Button
           variant="ghost"
           size="xs"
           className="!font-normal gap-1 text-muted-foreground"
@@ -262,7 +260,7 @@ const EnvEditor: React.FC<EnvEditorProps> = ({ value, onChange }) => {
         >
           <RiClipboardLine className="h-3 w-3" />
           Paste .env
-        </ButtonSmall>
+        </Button>
       </div>
 
       {/* Rows */}
@@ -299,18 +297,18 @@ const EnvEditor: React.FC<EnvEditorProps> = ({ value, onChange }) => {
               </button>
             </div>
             {/* Remove */}
-            <ButtonSmall
+            <Button size="sm"
               variant="ghost"
               className="h-7 w-7 px-0 shrink-0 text-muted-foreground hover:text-[var(--status-error)]"
               onClick={() => removeRow(idx)}
             >
               <RiDeleteBinLine className="h-3.5 w-3.5" />
-            </ButtonSmall>
+            </Button>
           </div>
         ))}
       </div>
 
-      <ButtonSmall
+      <Button
         variant="outline"
         size="xs"
         className="!font-normal gap-1.5"
@@ -319,7 +317,7 @@ const EnvEditor: React.FC<EnvEditorProps> = ({ value, onChange }) => {
       >
         <RiAddLine className="h-3.5 w-3.5" />
         Add variable
-      </ButtonSmall>
+      </Button>
 
       {hasSensitiveValues && (
         <p className="typography-micro text-muted-foreground/60">
@@ -535,7 +533,7 @@ export const McpPage: React.FC = () => {
                 {isNewServer ? 'Configure a new MCP server' : `${mcpType === 'local' ? 'Local · stdio' : 'Remote · SSE'} transport`}
               </p>
               {!isNewServer && (
-                <ButtonSmall
+                <Button
                   variant={isConnected ? 'outline' : 'default'}
                   size="xs"
                   className="!font-normal"
@@ -543,7 +541,7 @@ export const McpPage: React.FC = () => {
                   disabled={isConnecting || !enabled}
                 >
                   {isConnecting ? 'Working...' : isConnected ? 'Disconnect' : 'Connect'}
-                </ButtonSmall>
+                </Button>
               )}
             </div>
           </div>
@@ -618,7 +616,7 @@ export const McpPage: React.FC = () => {
               <div className="flex min-w-0 flex-col gap-1.5">
                 <span className="typography-ui-label text-foreground">Transport Mode</span>
                 <div className="flex flex-wrap items-center gap-1">
-                  <ButtonSmall
+                  <Button
                     variant="outline"
                     size="xs"
                     onClick={() => setMcpType('local')}
@@ -630,8 +628,8 @@ export const McpPage: React.FC = () => {
                     )}
                   >
                     Local · stdio
-                  </ButtonSmall>
-                  <ButtonSmall
+                  </Button>
+                  <Button
                     variant="outline"
                     size="xs"
                     onClick={() => setMcpType('remote')}
@@ -643,7 +641,7 @@ export const McpPage: React.FC = () => {
                     )}
                   >
                     Remote · SSE
-                  </ButtonSmall>
+                  </Button>
                 </div>
               </div>
             </div>
@@ -693,23 +691,23 @@ export const McpPage: React.FC = () => {
 
         {/* Actions */}
         <div className="flex items-center gap-2 px-2 py-1">
-          <ButtonSmall
+          <Button
             onClick={handleSave}
             disabled={isSaving || (!isDirty && !isNewServer)}
             size="xs"
             className="!font-normal"
           >
             {isSaving ? 'Saving...' : isNewServer ? 'Create' : 'Save Changes'}
-          </ButtonSmall>
+          </Button>
           {!isNewServer && (
-            <ButtonSmall
+            <Button
               variant="ghost"
               size="xs"
               className="!font-normal text-[var(--status-error)] hover:text-[var(--status-error)]"
               onClick={() => setShowDeleteConfirm(true)}
             >
               Delete
-            </ButtonSmall>
+            </Button>
           )}
         </div>
       </div>
@@ -736,9 +734,9 @@ export const McpPage: React.FC = () => {
             >
               Cancel
             </Button>
-            <ButtonLarge onClick={handleDelete} disabled={isDeleting}>
+            <Button size="sm" onClick={handleDelete} disabled={isDeleting}>
               {isDeleting ? 'Deleting…' : 'Delete'}
-            </ButtonLarge>
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -10,6 +10,8 @@ export type RightSidebarTab = 'git' | 'files';
 export type ContextPanelMode = 'diff' | 'file' | 'context' | 'plan' | 'chat';
 export type MermaidRenderingMode = 'svg' | 'ascii';
 export type UserMessageRenderingMode = 'markdown' | 'plain';
+export type ChatRenderMode = 'sorted' | 'live';
+export type ActivityRenderMode = 'collapsed' | 'summary';
 
 type ContextPanelTab = {
   id: string;
@@ -469,7 +471,6 @@ interface UIStore {
   isBottomTerminalExpanded: boolean;
   bottomTerminalHeight: number;
   hasManuallyResizedBottomTerminal: boolean;
-  isNavRailExpanded: boolean;
   isSessionSwitcherOpen: boolean;
   activeMainTab: MainTab;
   mainTabGuard: MainTabGuard | null;
@@ -497,15 +498,13 @@ interface UIStore {
   eventStreamStatus: EventStreamStatus;
   eventStreamHint: string | null;
   showReasoningTraces: boolean;
-  showTextJustificationActivity: boolean;
-  showActivityHeaderTimestamps: boolean;
+  chatRenderMode: ChatRenderMode;
+  activityRenderMode: ActivityRenderMode;
   showDeletionDialog: boolean;
   autoDeleteEnabled: boolean;
   autoDeleteAfterDays: number;
   autoDeleteLastRunAt: number | null;
   messageLimit: number;
-
-  toolCallExpansion: 'collapsed' | 'activity' | 'detailed' | 'changes';
   fontSize: number;
   terminalFontSize: number;
   padding: number;
@@ -551,15 +550,16 @@ interface UIStore {
   showTerminalQuickKeysOnDesktop: boolean;
   persistChatDraft: boolean;
   inputSpellcheckEnabled: boolean;
+  showToolFileIcons: boolean;
+  showExpandedBashTools: boolean;
+  showExpandedEditTools: boolean;
   mermaidRenderingMode: MermaidRenderingMode;
   userMessageRenderingMode: UserMessageRenderingMode;
   stickyUserHeader: boolean;
   showMobileSessionStatusBar: boolean;
   isMobileSessionStatusBarCollapsed: boolean;
-  viewPagerPage: 'left' | 'center' | 'right';
-
   isExpandedInput: boolean;
-
+  reportUsage: boolean;
   shortcutOverrides: Record<string, ShortcutCombo>;
 
   setTheme: (theme: 'light' | 'dark' | 'system') => void;
@@ -586,8 +586,6 @@ interface UIStore {
   setBottomTerminalOpen: (open: boolean) => void;
   setBottomTerminalExpanded: (expanded: boolean) => void;
   setBottomTerminalHeight: (height: number) => void;
-  setNavRailExpanded: (expanded: boolean) => void;
-  toggleNavRail: () => void;
   setSessionSwitcherOpen: (open: boolean) => void;
   setActiveMainTab: (tab: MainTab) => void;
   setMainTabGuard: (guard: MainTabGuard | null) => void;
@@ -614,14 +612,13 @@ interface UIStore {
   setSettingsRemoteInstancesSelectedId: (instanceId: string | null) => void;
   setEventStreamStatus: (status: EventStreamStatus, hint?: string | null) => void;
   setShowReasoningTraces: (value: boolean) => void;
-  setShowTextJustificationActivity: (value: boolean) => void;
-  setShowActivityHeaderTimestamps: (value: boolean) => void;
+  setChatRenderMode: (value: ChatRenderMode) => void;
+  setActivityRenderMode: (value: ActivityRenderMode) => void;
   setShowDeletionDialog: (value: boolean) => void;
   setAutoDeleteEnabled: (value: boolean) => void;
   setAutoDeleteAfterDays: (days: number) => void;
   setAutoDeleteLastRunAt: (timestamp: number | null) => void;
   setMessageLimit: (value: number) => void;
-  setToolCallExpansion: (value: 'collapsed' | 'activity' | 'detailed' | 'changes') => void;
   setFontSize: (size: number) => void;
   setTerminalFontSize: (size: number) => void;
   setPadding: (size: number) => void;
@@ -662,16 +659,21 @@ interface UIStore {
   setMaxLastMessageLength: (value: number) => void;
   setPersistChatDraft: (value: boolean) => void;
   setInputSpellcheckEnabled: (value: boolean) => void;
+  setShowToolFileIcons: (value: boolean) => void;
+  setShowExpandedBashTools: (value: boolean) => void;
+  setShowExpandedEditTools: (value: boolean) => void;
   setMermaidRenderingMode: (value: MermaidRenderingMode) => void;
   setUserMessageRenderingMode: (value: UserMessageRenderingMode) => void;
   setStickyUserHeader: (value: boolean) => void;
   setShowMobileSessionStatusBar: (value: boolean) => void;
   setIsMobileSessionStatusBarCollapsed: (value: boolean) => void;
+  viewPagerPage: 'left' | 'center' | 'right';
   setViewPagerPage: (page: 'left' | 'center' | 'right') => void;
   toggleExpandedInput: () => void;
   setExpandedInput: (value: boolean) => void;
   openMultiRunLauncher: () => void;
   openMultiRunLauncherWithPrompt: (prompt: string) => void;
+  setReportUsage: (value: boolean) => void;
   setShortcutOverride: (actionId: string, combo: ShortcutCombo) => void;
   clearShortcutOverride: (actionId: string) => void;
   resetAllShortcutOverrides: () => void;
@@ -698,7 +700,6 @@ export const useUIStore = create<UIStore>()(
         isBottomTerminalExpanded: false,
         bottomTerminalHeight: 300,
         hasManuallyResizedBottomTerminal: false,
-        isNavRailExpanded: false,
         isSessionSwitcherOpen: false,
         activeMainTab: 'chat',
         mainTabGuard: null,
@@ -724,18 +725,17 @@ export const useUIStore = create<UIStore>()(
         eventStreamStatus: 'idle',
         eventStreamHint: null,
         showReasoningTraces: true,
-        showTextJustificationActivity: false,
-        showActivityHeaderTimestamps: false,
+        chatRenderMode: 'sorted',
+        activityRenderMode: 'summary',
         showDeletionDialog: true,
         autoDeleteEnabled: false,
         autoDeleteAfterDays: 30,
         autoDeleteLastRunAt: null,
         messageLimit: 200,
-        toolCallExpansion: 'collapsed',
         fontSize: 100,
         terminalFontSize: 13,
         padding: 100,
-        cornerRadius: 12,
+        cornerRadius: 18,
         inputBarOffset: 0,
         favoriteModels: [],
         hiddenModels: [],
@@ -773,12 +773,16 @@ export const useUIStore = create<UIStore>()(
         showTerminalQuickKeysOnDesktop: false,
         persistChatDraft: true,
         inputSpellcheckEnabled: false,
+        showToolFileIcons: true,
+        showExpandedBashTools: false,
+        showExpandedEditTools: false,
         mermaidRenderingMode: 'svg',
         userMessageRenderingMode: 'markdown',
         stickyUserHeader: true,
         showMobileSessionStatusBar: true,
         isMobileSessionStatusBarCollapsed: false,
         isExpandedInput: false,
+        reportUsage: true,
         shortcutOverrides: {},
 
         setTheme: (theme) => {
@@ -1162,13 +1166,6 @@ export const useUIStore = create<UIStore>()(
           set({ bottomTerminalHeight: height, hasManuallyResizedBottomTerminal: true });
         },
 
-        setNavRailExpanded: (expanded) => {
-          set({ isNavRailExpanded: expanded });
-        },
-        toggleNavRail: () => {
-          set({ isNavRailExpanded: !get().isNavRailExpanded });
-        },
-
         setSessionSwitcherOpen: (open) => {
           set({ isSessionSwitcherOpen: open });
         },
@@ -1295,12 +1292,12 @@ export const useUIStore = create<UIStore>()(
           set({ showReasoningTraces: value });
         },
 
-        setShowTextJustificationActivity: (value) => {
-          set({ showTextJustificationActivity: value });
+        setChatRenderMode: (value) => {
+          set({ chatRenderMode: value });
         },
 
-        setShowActivityHeaderTimestamps: (value) => {
-          set({ showActivityHeaderTimestamps: value });
+        setActivityRenderMode: (value) => {
+          set({ activityRenderMode: value });
         },
 
         setShowDeletionDialog: (value) => {
@@ -1323,10 +1320,6 @@ export const useUIStore = create<UIStore>()(
         setMessageLimit: (value) => {
           const clamped = Math.max(10, Math.min(500, Math.round(value)));
           set({ messageLimit: clamped });
-        },
-
-        setToolCallExpansion: (value) => {
-          set({ toolCallExpansion: value });
         },
 
         setFontSize: (size) => {
@@ -1674,6 +1667,15 @@ export const useUIStore = create<UIStore>()(
         setInputSpellcheckEnabled: (value) => {
           set({ inputSpellcheckEnabled: value });
         },
+        setShowToolFileIcons: (value) => {
+          set({ showToolFileIcons: value });
+        },
+        setShowExpandedBashTools: (value) => {
+          set({ showExpandedBashTools: value });
+        },
+        setShowExpandedEditTools: (value) => {
+          set({ showExpandedEditTools: value });
+        },
         setMermaidRenderingMode: (value) => {
           set({ mermaidRenderingMode: value });
         },
@@ -1688,6 +1690,9 @@ export const useUIStore = create<UIStore>()(
         },
         setIsMobileSessionStatusBarCollapsed: (value) => {
           set({ isMobileSessionStatusBarCollapsed: value });
+        },
+        setReportUsage: (value) => {
+          set({ reportUsage: value });
         },
         viewPagerPage: 'center',
         setViewPagerPage: (page: 'left' | 'center' | 'right') => {
@@ -1815,7 +1820,6 @@ export const useUIStore = create<UIStore>()(
           isBottomTerminalOpen: state.isBottomTerminalOpen,
           isBottomTerminalExpanded: state.isBottomTerminalExpanded,
           bottomTerminalHeight: state.bottomTerminalHeight,
-          isNavRailExpanded: state.isNavRailExpanded,
           isSessionSwitcherOpen: state.isSessionSwitcherOpen,
           activeMainTab: state.activeMainTab,
           sidebarSection: state.sidebarSection,
@@ -1826,14 +1830,13 @@ export const useUIStore = create<UIStore>()(
           isSessionCreateDialogOpen: state.isSessionCreateDialogOpen,
           // Note: isSettingsDialogOpen intentionally NOT persisted
           showReasoningTraces: state.showReasoningTraces,
-          showTextJustificationActivity: state.showTextJustificationActivity,
-          showActivityHeaderTimestamps: state.showActivityHeaderTimestamps,
+          chatRenderMode: state.chatRenderMode,
+          activityRenderMode: state.activityRenderMode,
           showDeletionDialog: state.showDeletionDialog,
           autoDeleteEnabled: state.autoDeleteEnabled,
           autoDeleteAfterDays: state.autoDeleteAfterDays,
           autoDeleteLastRunAt: state.autoDeleteLastRunAt,
           messageLimit: state.messageLimit,
-          toolCallExpansion: state.toolCallExpansion,
           fontSize: state.fontSize,
           terminalFontSize: state.terminalFontSize,
           padding: state.padding,
@@ -1861,6 +1864,9 @@ export const useUIStore = create<UIStore>()(
           maxLastMessageLength: state.maxLastMessageLength,
           persistChatDraft: state.persistChatDraft,
           inputSpellcheckEnabled: state.inputSpellcheckEnabled,
+          showToolFileIcons: state.showToolFileIcons,
+          showExpandedBashTools: state.showExpandedBashTools,
+          showExpandedEditTools: state.showExpandedEditTools,
           mermaidRenderingMode: state.mermaidRenderingMode,
           userMessageRenderingMode: state.userMessageRenderingMode,
           stickyUserHeader: state.stickyUserHeader,

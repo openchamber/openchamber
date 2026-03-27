@@ -5,10 +5,41 @@ import { Compartment, EditorState, RangeSetBuilder, StateField } from '@codemirr
 import { Decoration, type DecorationSet, EditorView, type KeyBinding, ViewPlugin, WidgetType, gutters, keymap, lineNumbers } from '@codemirror/view';
 import { defaultKeymap, indentWithTab, history, historyKeymap } from '@codemirror/commands';
 import { forceParsing, indentUnit } from '@codemirror/language';
-import { search, searchKeymap, openSearchPanel, closeSearchPanel } from '@codemirror/search';
+import { search, searchKeymap, openSearchPanel, closeSearchPanel, searchPanelOpen } from '@codemirror/search';
 import { createPortal } from 'react-dom';
 
 import { cn } from '@/lib/utils';
+
+/** Patches `title` attributes onto CodeMirror search-panel controls for icon-only tooltips. */
+const buttonTooltips: Record<string, string> = {
+  next: 'Next match',
+  prev: 'Previous match',
+  select: 'Select all matches',
+  replace: 'Replace',
+  replaceAll: 'Replace all',
+  close: 'Close',
+};
+const checkboxTooltips: Record<string, string> = {
+  case: 'Match case',
+  re: 'Regular expression',
+  word: 'Match whole word',
+};
+
+function patchSearchTooltips(root: HTMLElement) {
+  const panel = root.querySelector('.cm-search');
+  if (!panel) return;
+  for (const [name, title] of Object.entries(buttonTooltips)) {
+    const btn = panel.querySelector(`button[name="${name}"]`) as HTMLElement | null;
+    if (btn && !btn.title) btn.title = title;
+  }
+  for (const [name, title] of Object.entries(checkboxTooltips)) {
+    const input = panel.querySelector(`input[name="${name}"]`) as HTMLElement | null;
+    const label = input?.parentElement;
+    if (label && !label.title) label.title = title;
+  }
+}
+
+
 
 export type BlockWidgetDef = {
   afterLine: number;
@@ -153,6 +184,7 @@ export function CodeMirrorEditor({
   blockWidgets,
   enableSearch,
   searchOpen,
+  onSearchOpenChange,
 }: CodeMirrorEditorProps) {
   const hostRef = React.useRef<HTMLDivElement | null>(null);
   const viewRef = React.useRef<EditorView | null>(null);
@@ -160,6 +192,7 @@ export function CodeMirrorEditor({
   const onChangeRef = React.useRef(onChange);
   const onViewReadyRef = React.useRef(onViewReady);
   const onViewDestroyRef = React.useRef(onViewDestroy);
+  const onSearchOpenChangeRef = React.useRef(onSearchOpenChange);
   const blockWidgetsRef = React.useRef(blockWidgets);
   
   // Scoped map for widget containers to avoid global collisions and memory leaks
@@ -225,6 +258,10 @@ export function CodeMirrorEditor({
   }, [onViewReady, onViewDestroy]);
 
   React.useEffect(() => {
+    onSearchOpenChangeRef.current = onSearchOpenChange;
+  }, [onSearchOpenChange]);
+
+  React.useEffect(() => {
     blockWidgetsRef.current = blockWidgets;
     syncPortalWidgets(blockWidgets);
   }, [blockWidgets, syncPortalWidgets]);
@@ -255,6 +292,12 @@ export function CodeMirrorEditor({
           syncEditorCssVars(update.view);
           if (update.viewportChanged || update.geometryChanged) {
             syncPortalWidgets(blockWidgetsRef.current);
+          }
+          // Detect search panel open/close and sync back to React state
+          const wasOpen = searchPanelOpen(update.startState);
+          const isOpen = searchPanelOpen(update.state);
+          if (wasOpen !== isOpen) {
+            onSearchOpenChangeRef.current?.(isOpen);
           }
           if (!update.docChanged) {
             return;
@@ -329,6 +372,10 @@ export function CodeMirrorEditor({
     }
     if (searchOpen) {
       openSearchPanelCompat(view);
+      // Patch tooltips after panel DOM is mounted
+      requestAnimationFrame(() => {
+        patchSearchTooltips(view.dom);
+      });
     } else {
       closeSearchPanelCompat(view);
     }

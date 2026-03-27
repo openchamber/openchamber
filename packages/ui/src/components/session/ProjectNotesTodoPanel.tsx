@@ -20,11 +20,12 @@ import {
 } from '@/lib/openchamberConfig';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionStore } from '@/stores/useSessionStore';
-import { createWorktreeOnly } from '@/lib/worktreeSessionCreator';
+import { createWorktreeDraft } from '@/lib/worktreeSessionCreator';
 import { cn } from '@/lib/utils';
 
 interface ProjectNotesTodoPanelProps {
   projectRef: ProjectRef | null;
+  projectLabel?: string | null;
   canCreateWorktree?: boolean;
   onActionComplete?: () => void;
   className?: string;
@@ -39,6 +40,7 @@ const createTodoId = (): string => {
 
 export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
   projectRef,
+  projectLabel,
   canCreateWorktree = false,
   onActionComplete,
   className,
@@ -48,6 +50,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
   const [todos, setTodos] = React.useState<OpenChamberProjectTodoItem[]>([]);
   const [newTodoText, setNewTodoText] = React.useState('');
   const [sendingTodoId, setSendingTodoId] = React.useState<string | null>(null);
+  const [expandedTodoIds, setExpandedTodoIds] = React.useState<Set<string>>(() => new Set());
 
   const currentSessionId = useSessionStore((state) => state.currentSessionId);
   const openNewSessionDraft = useSessionStore((state) => state.openNewSessionDraft);
@@ -77,6 +80,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
       setNotes('');
       setTodos([]);
       setNewTodoText('');
+      setExpandedTodoIds(new Set());
       return;
     }
 
@@ -92,6 +96,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
         setNotes(data.notes);
         setTodos(data.todos);
         setNewTodoText('');
+        setExpandedTodoIds(new Set());
       } catch {
         if (!cancelled) {
           toast.error('Failed to load project notes');
@@ -133,6 +138,18 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
     setNewTodoText('');
     void persistProjectData(notes, nextTodos);
   }, [newTodoText, notes, persistProjectData, todos]);
+
+  const handleToggleTodoExpanded = React.useCallback((id: string) => {
+    setExpandedTodoIds((previous) => {
+      const next = new Set(previous);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }, []);
 
   const handleToggleTodo = React.useCallback(
     (id: string, completed: boolean) => {
@@ -192,7 +209,8 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
         return;
       }
       routeToChat();
-      setPendingInputText(todoText, 'append');
+      const fenced = `\`\`\`md\n${todoText}\n\`\`\``;
+      setPendingInputText(fenced, 'append');
       toast.success('Todo sent to current session');
       onActionComplete?.();
     },
@@ -210,22 +228,18 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
       }
       setSendingTodoId(todoId);
       try {
-        const newWorktreePath = await createWorktreeOnly();
+        routeToChat();
+        const newWorktreePath = await createWorktreeDraft({ initialPrompt: todoText });
         if (!newWorktreePath) {
           return;
         }
-        routeToChat();
-        openNewSessionDraft({
-          directoryOverride: newWorktreePath,
-          initialPrompt: todoText,
-        });
         toast.success('Todo sent to new worktree session');
         onActionComplete?.();
       } finally {
         setSendingTodoId(null);
       }
     },
-    [canCreateWorktree, onActionComplete, openNewSessionDraft, projectRef, routeToChat]
+    [canCreateWorktree, onActionComplete, projectRef, routeToChat]
   );
 
   if (!projectRef) {
@@ -240,7 +254,9 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
     <div className={cn('w-full min-w-0 space-y-3 p-3', className)}>
       <div className="space-y-1">
         <div className="flex items-center justify-between gap-2">
-          <h3 className="typography-ui-label font-semibold text-foreground">Quick notes</h3>
+          <h3 className="min-w-0 truncate typography-ui-label font-semibold text-foreground" title={projectRef.path}>
+            Quick notes - {projectLabel?.trim() || projectRef.path.split('/').filter(Boolean).pop() || projectRef.path}
+          </h3>
           <span className="typography-meta text-muted-foreground">{notes.length}/{OPENCHAMBER_PROJECT_NOTES_MAX_LENGTH}</span>
         </div>
         <Textarea
@@ -248,15 +264,17 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
           onChange={(event) => setNotes(event.target.value.slice(0, OPENCHAMBER_PROJECT_NOTES_MAX_LENGTH))}
           onBlur={handleNotesBlur}
           placeholder="Capture context, reminders, or links"
-          className="min-h-24 resize-none"
+          className="min-h-28 max-h-80 resize-none"
+          useScrollShadow
+          scrollShadowSize={56}
           disabled={isLoading}
         />
       </div>
 
       <div className="space-y-2">
         <div className="flex items-center justify-between gap-2">
-          <h3 className="typography-ui-label font-semibold text-foreground">Todo</h3>
           <div className="flex items-center gap-2">
+            <h3 className="typography-ui-label font-semibold text-foreground">Todo</h3>
             <span className="typography-meta text-muted-foreground">{todos.length} item{todos.length === 1 ? '' : 's'}</span>
             <button
               type="button"
@@ -267,6 +285,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
               Clear completed
             </button>
           </div>
+          <span className="typography-meta text-muted-foreground">{todoInputValue.length}/{OPENCHAMBER_PROJECT_TODO_TEXT_MAX_LENGTH}</span>
         </div>
 
         <div className="flex items-center gap-1.5">
@@ -299,58 +318,69 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
             <p className="px-3 py-3 typography-meta text-muted-foreground">No todos yet. Add a small checklist for this project.</p>
           ) : (
             <ul className="divide-y divide-border/50">
-              {todos.map((todo) => (
-                <li key={todo.id} className="flex items-center gap-1.5 px-2.5 py-1.5">
+              {todos.map((todo) => {
+                const isExpandedTodo = expandedTodoIds.has(todo.id);
+                return (
+                <li key={todo.id} className="flex items-start gap-1.5 px-2.5 py-1.5">
                   <Checkbox
                     checked={todo.completed}
                     onChange={(checked) => handleToggleTodo(todo.id, checked)}
                     ariaLabel={`Mark "${todo.text}" complete`}
+                    className="mt-[3px] self-start"
                   />
-                  <span
-                    className={cn(
-                      'min-w-0 flex-1 typography-ui-label text-foreground',
-                      todo.completed && 'text-muted-foreground line-through'
-                    )}
-                    title={todo.text}
-                  >
-                    {todo.text}
-                  </span>
                   <button
                     type="button"
-                    onClick={() => handleDeleteTodo(todo.id)}
-                    className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-                    aria-label={`Delete "${todo.text}"`}
+                    onClick={() => handleToggleTodoExpanded(todo.id)}
+                    className={cn(
+                      'mt-[3px] min-w-0 flex-1 self-start bg-transparent p-0 text-left typography-ui-label text-foreground',
+                      isExpandedTodo ? 'whitespace-normal break-words' : 'truncate',
+                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
+                      todo.completed && 'text-muted-foreground line-through'
+                    )}
+                    title={isExpandedTodo ? undefined : todo.text}
+                    aria-label={isExpandedTodo ? `Collapse todo "${todo.text}"` : `Expand todo "${todo.text}"`}
                   >
-                    <RiDeleteBinLine className="h-3.5 w-3.5" />
+                    {todo.text}
                   </button>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <button
-                        type="button"
-                        disabled={sendingTodoId === todo.id}
-                        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed disabled:opacity-50"
-                        aria-label={`Send "${todo.text}"`}
-                      >
-                        <RiSendPlaneLine className="h-3.5 w-3.5" />
-                      </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-56">
-                      <DropdownMenuItem onClick={() => handleSendToCurrentSession(todo.text)}>
-                        Send to current session
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => handleSendToNewSession(todo.text)}>
-                        Send to new session
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={() => void handleSendToNewWorktreeSession(todo.id, todo.text)}
-                        disabled={!canCreateWorktree}
-                      >
-                        Send to new worktree session
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                  <div className="mt-0.5 flex self-start items-center gap-0.5">
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteTodo(todo.id)}
+                      className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                      aria-label={`Delete "${todo.text}"`}
+                    >
+                      <RiDeleteBinLine className="h-3.5 w-3.5" />
+                    </button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <button
+                          type="button"
+                          disabled={sendingTodoId === todo.id}
+                          className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed disabled:opacity-50"
+                          aria-label={`Send "${todo.text}"`}
+                        >
+                          <RiSendPlaneLine className="h-3.5 w-3.5" />
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-56">
+                        <DropdownMenuItem onClick={() => handleSendToCurrentSession(todo.text)}>
+                          Send to current session
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleSendToNewSession(todo.text)}>
+                          Send to new session
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => void handleSendToNewWorktreeSession(todo.id, todo.text)}
+                          disabled={!canCreateWorktree}
+                        >
+                          Send to new worktree session
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
                 </li>
-              ))}
+                );
+              })}
             </ul>
           )}
         </div>

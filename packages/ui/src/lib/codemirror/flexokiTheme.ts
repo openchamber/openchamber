@@ -19,6 +19,7 @@ export function createFlexokiCodeMirrorTheme(theme: Theme): Extension {
       color: theme.colors.syntax.base.foreground,
       fontSize: 'var(--text-code)',
       lineHeight: '1.5rem',
+      position: 'relative' as const,
     },
     '.cm-scroller': {
       fontFamily: monoFont,
@@ -122,70 +123,350 @@ export function createFlexokiCodeMirrorTheme(theme: Theme): Extension {
     '.cm-activeLine': {
       backgroundColor: theme.colors.surface.overlay,
     },
+    /* ── Floating search: panels container ── */
     '.cm-panels': {
-      backgroundColor: theme.colors.surface.elevated,
+      backgroundColor: 'transparent',
       color: theme.colors.surface.foreground,
+      position: 'absolute' as const,
+      top: '0',
+      right: '0',
+      left: 'auto',
+      width: 'auto',
+      zIndex: 10,
+      pointerEvents: 'none',
     },
     '.cm-panels-top': {
-      borderBottom: `1px solid ${theme.colors.interactive.border}`,
-      boxShadow: `0 1px 0 ${theme.colors.surface.subtle}`,
+      borderBottom: 'none',
+      position: 'absolute' as const,
+      top: '6px',
+      right: '14px',
+      left: 'auto',
+      width: 'auto',
     },
+
+    /* ── Floating search panel ── */
     '.cm-panel.cm-search': {
-      padding: '0.625rem 0.75rem',
-      backgroundColor: theme.colors.surface.elevated,
+      pointerEvents: 'auto',
+      padding: '4px',
+      backgroundColor: `color-mix(in srgb, ${theme.colors.surface.elevated} 85%, transparent)`,
+      backdropFilter: 'blur(12px)',
+      WebkitBackdropFilter: 'blur(12px)',
+      border: `1px solid ${theme.colors.interactive.border}`,
+      borderRadius: '10px',
+      boxShadow: `0 2px 8px color-mix(in srgb, ${theme.colors.surface.background} 60%, transparent)`,
+      width: 'auto',
+      minWidth: '360px',
+      maxWidth: '480px',
     },
+
+    /* ── Search inner layout: flexbox rows ── */
     '.cm-search': {
       display: 'flex',
       flexWrap: 'wrap',
       alignItems: 'center',
-      gap: '0.5rem',
+      gap: '0',
+      width: '100%',
       color: theme.colors.surface.foreground,
-      fontSize: '0.8125rem',
+      fontFamily: 'inherit',
+      fontSize: '13px',
+      lineHeight: '1',
     },
+
+    /* ── Hide <br>; we force row break via replace input's flex-basis ── */
+    '.cm-search br': {
+      display: 'none',
+    },
+
+    /* ──────────────────────────────────────────────────
+       ROW 1: [Find input] [Aa] [ab] [.*] [match count] [↑] [↓] [≡] [×]
+       ────────────────────────────────────────────────── */
+
+    /* ── Text input base: border-radius matches action buttons (4px) ── */
     '.cm-search .cm-textfield': {
-      minHeight: '2rem',
-      padding: '0.375rem 0.625rem',
-      borderRadius: '0.5rem',
+      appearance: 'none',
+      height: '26px',
+      margin: 0,
+      padding: '0 8px',
+      borderRadius: '6px !important',
       border: `1px solid ${theme.colors.interactive.border}`,
       backgroundColor: theme.colors.surface.background,
       color: theme.colors.surface.foreground,
+      fontFamily: 'inherit',
+      fontSize: '12px',
+      lineHeight: '1',
       outline: 'none',
-      transition: 'border-color 120ms ease, box-shadow 120ms ease',
+      transition: 'border-color 150ms ease',
     },
-    '.cm-search .cm-textfield:hover': {
-      borderColor: theme.colors.interactive.borderHover,
+    '.cm-search .cm-textfield::placeholder': {
+      color: theme.colors.surface.mutedForeground,
+      opacity: 1,
     },
-    '.cm-search .cm-textfield:focus, .cm-search .cm-textfield:focus-visible': {
-      borderColor: theme.colors.interactive.borderFocus,
-      boxShadow: `0 0 0 2px ${theme.colors.interactive.focusRing}`,
+    '.cm-search .cm-textfield:focus': {
+      borderColor: theme.colors.primary.base,
     },
-    '.cm-search .cm-button': {
-      minHeight: '2rem',
-      padding: '0.375rem 0.625rem',
-      borderRadius: '0.5rem',
-      border: `1px solid ${theme.colors.interactive.border}`,
-      backgroundColor: theme.colors.surface.background,
-      color: theme.colors.surface.foreground,
+
+    /* Find input: row 1, max-width matches replace input for alignment */
+    '.cm-search .cm-textfield[name="search"]': {
+      order: 1,
+      flex: '1 1 120px',
+      maxWidth: 'calc(100% - 142px)',
+      minWidth: '100px',
+    },
+
+    /* Replace input is styled below in the row-2 section */
+
+    /* ────────────────────────────────────────────────────
+       ICON-ONLY TOGGLE BUTTONS (checkbox labels → icon toggles)
+       Labels contain: [checkbox] "match case" / "regexp" / "by word"
+       We hide text, hide the checkbox, and show icon via label::after
+       ──────────────────────────────────────────────────── */
+    '.cm-search label': {
+      order: 2,
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      width: '26px',
+      height: '26px',
+      minWidth: '26px',
+      flexShrink: '0',
+      margin: 0,
+      marginLeft: '1px',
+      padding: 0,
+      borderRadius: '4px',
+      border: `1px solid transparent`,
+      backgroundColor: 'transparent',
+      color: 'transparent', /* hide label text */
       cursor: 'pointer',
-      transition: 'background-color 120ms ease, border-color 120ms ease, color 120ms ease',
+      userSelect: 'none' as const,
+      fontSize: '1px', /* near-zero to collapse text nodes */
+      lineHeight: '0',
+      overflow: 'hidden',
+      position: 'relative' as const,
+      transition: 'background-color 120ms ease, border-color 120ms ease',
+    },
+    '.cm-search label:hover': {
+      backgroundColor: theme.colors.interactive.hover,
+    },
+    '.cm-search label:has(input[type="checkbox"]:checked)': {
+      backgroundColor: theme.colors.interactive.hover,
+      borderColor: theme.colors.interactive.border,
+    },
+
+    /* Hide the actual checkbox input inside labels */
+    '.cm-search [type="checkbox"]': {
+      appearance: 'none',
+      WebkitAppearance: 'none',
+      width: '0',
+      height: '0',
+      margin: '0',
+      padding: '0',
+      border: 'none',
+      position: 'absolute' as const,
+      opacity: '0',
+      pointerEvents: 'none' as const,
+    },
+
+    /* Icon via ::after on each label - absolutely positioned so text-hiding doesn't affect it */
+    '.cm-search label::after': {
+      position: 'absolute' as const,
+      top: '50%',
+      left: '50%',
+      transform: 'translate(-50%, -50%)',
+      fontSize: '13px',
+      fontWeight: '600',
+      lineHeight: '1',
+      fontFamily: 'inherit',
+      color: theme.colors.surface.mutedForeground,
+      pointerEvents: 'none' as const,
+    },
+    '.cm-search label:hover::after': {
+      color: theme.colors.surface.foreground,
+    },
+    '.cm-search label:has(input[type="checkbox"]:checked)::after': {
+      color: theme.colors.surface.foreground,
+    },
+
+    /* Case sensitive: "Aa" */
+    '.cm-search label:has(input[name="case"])::after': {
+      content: '"Aa"',
+      fontSize: '12px',
+      letterSpacing: '-0.5px',
+    },
+    /* Regex: ".*" */
+    '.cm-search label:has(input[name="re"])::after': {
+      content: '".*"',
+      fontSize: '13px',
+      fontFamily: 'monospace',
+    },
+    /* Whole word: "ab" with underline */
+    '.cm-search label:has(input[name="word"])::after': {
+      content: '"ab"',
+      fontSize: '12px',
+      textDecoration: 'underline',
+      textUnderlineOffset: '2px',
+    },
+
+    /* ────────────────────────────────────────────────────
+       MATCH COUNT (search message - "X of Y")
+       ──────────────────────────────────────────────────── */
+    '.cm-search .cm-search-message': {
+      order: 3,
+      color: theme.colors.surface.mutedForeground,
+      backgroundColor: 'transparent',
+      border: 'none',
+      borderRadius: '0',
+      padding: '0 6px',
+      fontSize: '11px',
+      whiteSpace: 'nowrap' as const,
+      lineHeight: '26px',
+    },
+
+    /* ────────────────────────────────────────────────────
+       ICON-ONLY ACTION BUTTONS
+       Hide button text with font-size:0, show icon via ::after
+       ──────────────────────────────────────────────────── */
+    '.cm-search .cm-button': {
+      appearance: 'none',
+      WebkitAppearance: 'none',
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      width: '26px',
+      height: '26px',
+      minWidth: '26px',
+      flexShrink: '0',
+      margin: 0,
+      marginLeft: '1px',
+      padding: 0,
+      borderRadius: '4px',
+      border: 'none',
+      backgroundColor: 'transparent',
+      backgroundImage: 'none',
+      color: 'transparent', /* hide button text */
+      cursor: 'pointer',
+      fontSize: '1px', /* near-zero to collapse text */
+      fontWeight: '400',
+      lineHeight: '0',
+      overflow: 'hidden',
+      position: 'relative' as const,
+      boxShadow: 'none',
+      transition: 'background-color 120ms ease',
+    },
+    '.cm-search .cm-button::after': {
+      position: 'absolute' as const,
+      top: '50%',
+      left: '50%',
+      transform: 'translate(-50%, -50%)',
+      fontSize: '15px',
+      lineHeight: '1',
+      color: theme.colors.surface.mutedForeground,
+      pointerEvents: 'none' as const,
     },
     '.cm-search .cm-button:hover': {
       backgroundColor: theme.colors.interactive.hover,
-      borderColor: theme.colors.interactive.borderHover,
+    },
+    '.cm-search .cm-button:hover::after': {
+      color: theme.colors.surface.foreground,
     },
     '.cm-search .cm-button:active': {
       backgroundColor: theme.colors.interactive.active,
-      borderColor: theme.colors.interactive.borderFocus,
     },
-    '.cm-search .cm-button:focus, .cm-search .cm-button:focus-visible': {
+    '.cm-search .cm-button:focus-visible': {
       outline: 'none',
-      boxShadow: `0 0 0 2px ${theme.colors.interactive.focusRing}`,
+      boxShadow: `0 0 0 1px ${theme.colors.interactive.focusRing}`,
     },
     '.cm-search .cm-button:disabled': {
-      opacity: 0.55,
-      cursor: 'not-allowed',
-      backgroundColor: theme.colors.surface.muted,
+      opacity: 0.4,
+      cursor: 'default',
+      pointerEvents: 'none' as const,
+    },
+
+    /* prev → ↑ arrow (row 2) */
+    '.cm-search .cm-button[name="prev"]': {
+      order: 21,
+      marginTop: '2px',
+    },
+    '.cm-search .cm-button[name="prev"]::after': {
+      content: '"↑"',
+    },
+    /* next → ↓ arrow (row 2) */
+    '.cm-search .cm-button[name="next"]': {
+      order: 22,
+      marginTop: '2px',
+    },
+    '.cm-search .cm-button[name="next"]::after': {
+      content: '"↓"',
+    },
+    /* select all → ≡ (row 2) */
+    '.cm-search .cm-button[name="select"]': {
+      order: 23,
+      marginTop: '2px',
+    },
+    '.cm-search .cm-button[name="select"]::after': {
+      content: '"≡"',
+      fontSize: '17px',
+    },
+
+    /* ── Close button (×) - not a .cm-button, separate selector ── */
+    '.cm-panel.cm-search button[name="close"]': {
+      order: 5,
+      appearance: 'none',
+      WebkitAppearance: 'none',
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      width: '26px',
+      height: '26px',
+      minWidth: '26px',
+      flexShrink: '0',
+      margin: '0 0 0 auto',
+      padding: '0',
+      borderRadius: '4px',
+      border: 'none',
+      backgroundColor: 'transparent',
+      backgroundImage: 'none',
       color: theme.colors.surface.mutedForeground,
+      cursor: 'pointer',
+      fontSize: '16px',
+      lineHeight: '1',
+      boxShadow: 'none',
+      position: 'relative' as const,
+      overflow: 'visible',
+      transition: 'background-color 120ms ease, color 120ms ease',
+    },
+    '.cm-panel.cm-search button[name="close"]:hover': {
+      backgroundColor: theme.colors.interactive.hover,
+      color: theme.colors.surface.foreground,
+    },
+
+    /* ──────────────────────────────────────────────────
+       ROW 2: [Replace input] [replace icon] [replace-all icon]
+       ────────────────────────────────────────────────── */
+
+    /* replace → swap icon (row 2) */
+    '.cm-search .cm-button[name="replace"]': {
+      order: 24,
+      marginTop: '2px',
+    },
+    '.cm-search .cm-button[name="replace"]::after': {
+      content: '"⇄"',
+    },
+    /* replace all → double arrow icon (row 2) */
+    '.cm-search .cm-button[name="replaceAll"], .cm-search .cm-button[name="replace-all"]': {
+      order: 25,
+      marginTop: '2px',
+    },
+    '.cm-search .cm-button[name="replaceAll"]::after, .cm-search .cm-button[name="replace-all"]::after': {
+      content: '"⇉"',
+    },
+
+    /* ── Replace input: forces wrap to row 2, same width as find input ── */
+    '.cm-search .cm-textfield[name="replace"]': {
+      order: 20,
+      flex: '1 1 100%',
+      maxWidth: 'calc(100% - 142px)', /* room for ↑↓≡⇄⇉ (5 × 27px + gaps) */
+      minWidth: '80px',
+      marginTop: '2px',
     },
     '.cm-searchMatch': {
       backgroundColor: theme.colors.status.infoBackground,

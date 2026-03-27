@@ -427,7 +427,7 @@ export const ContextPanel: React.FC = () => {
   const isFileTabActive = activeTab?.mode === 'file';
 
   const header = (
-    <header className="flex h-8 items-stretch border-b border-border/40">
+    <header className="flex h-10 items-stretch border-b border-transparent">
       <SortableTabsStrip
         items={tabItems}
         activeId={activeTab?.id ?? null}
@@ -450,8 +450,11 @@ export const ContextPanel: React.FC = () => {
           reorderContextPanelTabs(directoryKey, activeTabID, overTabID);
         }}
         layoutMode="scrollable"
+        variant="active-pill"
+        activePillLowercase={false}
+        activePillInsetClassName="gap-0.5 pt-0.5 pb-1.5"
       />
-      <div className="flex items-center gap-1 px-1.5">
+      <div className="flex items-end gap-1 px-1.5 pb-1.5">
         <Button
           type="button"
           variant="ghost"
@@ -515,8 +518,8 @@ export const ContextPanel: React.FC = () => {
       {!isExpanded && (
         <div
           className={cn(
-            'absolute left-0 top-0 z-20 h-full w-[4px] cursor-col-resize transition-colors hover:bg-primary/50',
-            isResizing && 'bg-primary'
+            'absolute left-0 top-0 z-20 h-full w-[3px] cursor-col-resize transition-colors hover:bg-[var(--interactive-border)]/80',
+            isResizing && 'bg-[var(--interactive-border)]'
           )}
           onPointerDown={handleResizeStart}
           onPointerMove={handleResizeMove}

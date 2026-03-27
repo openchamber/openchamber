@@ -1,3 +1,36 @@
+## [1.9.1] - 2026-03-20
+
+- Sessions: sidebar lists now keep sessions visible in both Recent and Project sections for easier session discovery (thanks to @nguyenngothuong).
+- Chat/GitHub: linked issues and pull requests now show as user-message attachments and open more reliably through extension-safe external link handling.
+- Settings/MCP: adding MCP servers now correctly respects user scope so user entries are not written into project config files.
+- Reliability: managed server startup now imports login-shell environment values and normalizes Windows paths to reduce session-loading mismatches and proxy-related connection issues.
+- Usage: added MiniMax Weekly quota provider support for broader quota tracking coverage (thanks to @nzlov).
+
+## [1.9.0] - 2026-03-20
+
+- Navigation/UI: refreshed the extension shell with a redesigned sidebar, clearer hierarchy, and cleaner session grouping so active work is easier to navigate.
+- Sessions: improved sidebar organization and interaction stability, including fixes for drag/rename edge cases during quick session management.
+- Chat/Performance: reduced streaming overhead and update churn for smoother long responses, steadier activity rendering, and fewer UI stalls in heavy sessions.
+- Chat: improved follow-to-latest behavior and timeline stability so ongoing responses remain easier to track.
+- Chat/Permissions: added per-session permission auto-accept controls to reduce repetitive approval prompts in iterative workflows.
+- Reliability/Windows: normalized workspace drive-letter handling and hid background process windows to reduce startup/session mismatches (thanks to @zerone0x).
+
+## [1.8.7] - 2026-03-13
+
+- No notable changes.
+
+## [1.8.6] - 2026-03-13
+
+- Chat: completed a turn-based render pipeline with steadier streaming, smoother auto-follow, and more stable activity/tool progress behavior during long responses.
+- Chat/Settings: added richer render controls with sorted/live modes, compact Activity previews, and default-open Bash/Edit options for faster review.
+- Reliability: switched extension event streaming to an SDK-based SSE proxy path, improving consistency for live updates and session activity signals across chat surfaces.
+- Settings: chat display changes now sync across sidebar and session editor views right away, so preferences stay consistent in every open panel.
+- Sessions: worktrees with active chats are now prioritized in the sidebar, so in-progress work is easier to resume (thanks to @GhostFlying).
+- Sessions: archived-session behavior in the extension is now scoped to the active workspace with cleaner sidebar presentation.
+- Chat: fixed modified Enter send shortcuts in narrow layouts, so Ctrl/Cmd+Enter send works more consistently when the panel is compact (thanks to @eengad).
+- Chat: fixed queue button behavior and focus-mode composer sizing so input actions stay visible during longer prompts (thanks to @shekohex).
+- Diff: edit result comparisons now preserve original file extensions in virtual "before" files, improving syntax highlighting while reviewing changes.
+
 ## [1.8.5] - 2026-03-04
 
 - Chat/Files: edit-style tool results now open in a VS Code diff editor with focus on the first changed line, making review and follow-up edits much faster.

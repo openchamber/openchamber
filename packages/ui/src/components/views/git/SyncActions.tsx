@@ -3,6 +3,7 @@ import {
   RiRefreshLine,
   RiArrowDownLine,
   RiArrowUpLine,
+  RiCloseLine,
   RiLoader4Line,
 } from '@remixicon/react';
 import { Button } from '@/components/ui/button';
@@ -23,7 +24,9 @@ interface SyncActionsProps {
   onFetch: (remote: GitRemote) => void;
   onPull: (remote: GitRemote) => void;
   onPush: () => void;
+  onRemoveRemote?: (remote: GitRemote) => void;
   disabled: boolean;
+  removingRemoteName?: string | null;
   iconOnly?: boolean;
   tooltipDelayMs?: number;
   aheadCount?: number;
@@ -36,14 +39,18 @@ export const SyncActions: React.FC<SyncActionsProps> = ({
   onFetch,
   onPull,
   onPush,
+  onRemoveRemote,
   disabled,
+  removingRemoteName = null,
   iconOnly = false,
   tooltipDelayMs = 1000,
   aheadCount = 0,
   behindCount = 0,
 }) => {
+  const skipRemoteSelectRef = React.useRef(false);
   const hasNoRemotes = remotes.length === 0;
-  const isDisabled = disabled || syncAction !== null || hasNoRemotes;
+  const isRemovingRemote = Boolean(removingRemoteName);
+  const isDisabled = disabled || syncAction !== null || isRemovingRemote || hasNoRemotes;
   const hasMultipleRemotes = remotes.length > 1;
 
   const handleFetch = () => {
@@ -145,14 +152,56 @@ export const SyncActions: React.FC<SyncActionsProps> = ({
         </Tooltip>
         <DropdownMenuContent align="start" className="min-w-[200px]">
           {remotes.map((remote) => (
-            <DropdownMenuItem key={remote.name} onSelect={() => onSelect(remote)}>
-              <div className="flex flex-col">
-                <span className="typography-ui-label text-foreground">
-                  {remote.name}
-                </span>
-                <span className="typography-meta text-muted-foreground truncate">
-                  {remote.fetchUrl}
-                </span>
+            <DropdownMenuItem
+              key={remote.name}
+              onSelect={(event) => {
+                if (skipRemoteSelectRef.current) {
+                  event.preventDefault();
+                  skipRemoteSelectRef.current = false;
+                  return;
+                }
+                onSelect(remote);
+              }}
+            >
+              <div className="flex w-full items-center gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-col">
+                    <span className="typography-ui-label text-foreground">
+                      {remote.name}
+                    </span>
+                    <span className="typography-meta text-muted-foreground truncate">
+                      {remote.fetchUrl}
+                    </span>
+                  </div>
+                </div>
+                {onRemoveRemote ? (
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    size="xs"
+                    className="h-6 w-6 px-0"
+                    disabled={syncAction !== null || isRemovingRemote}
+                    onPointerDown={(event) => {
+                      skipRemoteSelectRef.current = true;
+                      event.preventDefault();
+                      event.stopPropagation();
+                    }}
+                    onClick={(event) => {
+                      skipRemoteSelectRef.current = true;
+                      event.preventDefault();
+                      event.stopPropagation();
+                      onRemoveRemote(remote);
+                    }}
+                    aria-label={`Remove ${remote.name} remote`}
+                    title={`Remove ${remote.name}`}
+                  >
+                    {removingRemoteName === remote.name ? (
+                      <RiLoader4Line className="size-3.5 animate-spin" />
+                    ) : (
+                      <RiCloseLine className="size-3.5" />
+                    )}
+                  </Button>
+                ) : null}
               </div>
             </DropdownMenuItem>
           ))}

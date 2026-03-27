@@ -62,6 +62,20 @@ Select code in the editor, right-click, and find the **OpenChamber** submenu:
 
 ```bash
 bun install
+bun run vscode:dev
+```
+
+`bun run vscode:dev` now starts watchers + opens an Extension Development Host automatically. Webview UI changes use Vite HMR automatically.
+
+Optional overrides:
+
+- `OPENCHAMBER_VSCODE_BIN=cursor bun run vscode:dev`
+- `OPENCHAMBER_VSCODE_DEV_WORKSPACE=/path/to/workspace bun run vscode:dev`
+- `bun run vscode:dev /path/to/workspace`
+
+To package manually:
+
+```bash
 bun run --cwd packages/vscode build
 cd packages/vscode && bunx vsce package --no-dependencies
 ```

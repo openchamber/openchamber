@@ -10,6 +10,7 @@ import { RiCheckLine, RiClipboardLine, RiDownloadCloudLine, RiDownloadLine, RiEx
 import { cn } from '@/lib/utils';
 import type { UpdateInfo, UpdateProgress } from '@/lib/desktop';
 import { copyTextToClipboard } from '@/lib/clipboard';
+import { openExternalUrl } from '@/lib/url';
 
 type WebUpdateState = 'idle' | 'updating' | 'restarting' | 'reconnecting' | 'error';
 
@@ -230,25 +231,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
   };
 
   const handleOpenExternal = useCallback(async (url: string) => {
-    if (typeof window === 'undefined') return;
-
-    // Try Tauri backend
-    type TauriShell = { shell?: { open?: (url: string) => Promise<unknown> } };
-    const tauri = (window as unknown as { __TAURI__?: TauriShell }).__TAURI__;
-    if (tauri?.shell?.open) {
-      try {
-        await tauri.shell.open(url);
-        return;
-      } catch {
-        // fall through to window.open
-      }
-    }
-
-    try {
-      window.open(url, '_blank', 'noopener,noreferrer');
-    } catch {
-      // ignore
-    }
+    await openExternalUrl(url);
   }, []);
   const handleWebUpdate = useCallback(async () => {
     setWebUpdateState('updating');

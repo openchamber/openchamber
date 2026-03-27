@@ -33,6 +33,43 @@ OpenChamber uses a JSON-based theme system. Themes are defined in `packages/ui/s
 - Status colors = **ONLY for actual feedback** (errors, warnings, success)
 - Input footers = `bg-transparent` on elevated background
 
+## Button Rules (MANDATORY)
+
+Use only the shared `Button` component from `packages/ui/src/components/ui/button.tsx`.
+
+- Do not create wrapper button components (for example `ButtonLarge`, `ButtonSmall`).
+- Do not hardcode button height/padding classes when a `size` variant exists.
+- Use semantic button variants consistently; avoid ad-hoc one-off button styling.
+
+### Allowed Button Variants
+
+| Variant | Use for | Token direction |
+|-------|-------|-------|
+| `default` | Primary action in a local section/dialog | `primary.*` |
+| `outline` | Secondary visible action | `surface.elevated` + `interactive.*` |
+| `secondary` | Soft secondary action | `interactive.hover` / `interactive.active` |
+| `ghost` | Low-emphasis row/toolbar action | transparent + `interactive.hover` |
+| `destructive` | Destructive actions (`Delete`, `Revert all`) | `status.error*` |
+| `link` | Rare inline text action only | text-link style |
+
+### Allowed Button Sizes
+
+| Size | Use for |
+|------|---------|
+| `xs` | Dense controls in rows/lists |
+| `sm` | Default compact action buttons |
+| `default` | Standard form/page actions |
+| `lg` | Prominent large actions |
+| `icon` | Icon-only square button |
+
+### Button Selection Quick Guide
+
+1. Main CTA in section/dialog -> `default`
+2. Side action next to CTA -> `outline`
+3. Quiet auxiliary action -> `ghost`
+4. Dangerous action -> `destructive`
+5. Tiny row action -> keep same variant, set `size="xs"`
+
 ### Never Use
 
 - Hardcoded hex colors (`#FF0000`)

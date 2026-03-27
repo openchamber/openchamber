@@ -9,6 +9,7 @@ import type {
   GitBranch,
   GitDeleteBranchPayload,
   GitDeleteRemoteBranchPayload,
+  GitRemoveRemotePayload,
   GeneratedCommitMessage,
   GitWorktreeInfo,
   CreateGitWorktreePayload,
@@ -51,6 +52,15 @@ const resolveBaseOrigin = (): string => {
 };
 
 const API_BASE = '/api/git';
+const GIT_STATUS_CACHE_TTL_MS = 1200;
+const GIT_REPO_CHECK_CACHE_TTL_MS = 5000;
+
+const gitStatusCache = new Map<string, { value: GitStatus; expiresAt: number }>();
+const gitStatusInFlight = new Map<string, Promise<GitStatus>>();
+const gitRepoCache = new Map<string, { value: boolean; expiresAt: number }>();
+const gitRepoInFlight = new Map<string, Promise<boolean>>();
+
+const normalizeDirectoryKey = (directory: string): string => directory.trim();
 
 function buildUrl(
   path: string,
@@ -73,20 +83,76 @@ function buildUrl(
 }
 
 export async function checkIsGitRepository(directory: string): Promise<boolean> {
-  const response = await fetch(buildUrl(`${API_BASE}/check`, directory));
-  if (!response.ok) {
-    throw new Error(`Failed to check git repository: ${response.statusText}`);
+  const key = normalizeDirectoryKey(directory);
+  const now = Date.now();
+  const cached = gitRepoCache.get(key);
+  if (cached && cached.expiresAt > now) {
+    return cached.value;
   }
-  const data = await response.json();
-  return data.isGitRepository;
+
+  const inFlight = gitRepoInFlight.get(key);
+  if (inFlight) {
+    return inFlight;
+  }
+
+  const task = (async () => {
+    const response = await fetch(buildUrl(`${API_BASE}/check`, directory));
+    if (!response.ok) {
+      throw new Error(`Failed to check git repository: ${response.statusText}`);
+    }
+    const data = await response.json();
+    const isGitRepository = Boolean(data.isGitRepository);
+    gitRepoCache.set(key, {
+      value: isGitRepository,
+      expiresAt: Date.now() + GIT_REPO_CHECK_CACHE_TTL_MS,
+    });
+    return isGitRepository;
+  })();
+
+  gitRepoInFlight.set(key, task);
+  try {
+    return await task;
+  } finally {
+    if (gitRepoInFlight.get(key) === task) {
+      gitRepoInFlight.delete(key);
+    }
+  }
 }
 
 export async function getGitStatus(directory: string): Promise<GitStatus> {
-  const response = await fetch(buildUrl(`${API_BASE}/status`, directory));
-  if (!response.ok) {
-    throw new Error(`Failed to get git status: ${response.statusText}`);
+  const key = normalizeDirectoryKey(directory);
+  const now = Date.now();
+  const cached = gitStatusCache.get(key);
+  if (cached && cached.expiresAt > now) {
+    return cached.value;
   }
-  return response.json();
+
+  const inFlight = gitStatusInFlight.get(key);
+  if (inFlight) {
+    return inFlight;
+  }
+
+  const task = (async () => {
+    const response = await fetch(buildUrl(`${API_BASE}/status`, directory));
+    if (!response.ok) {
+      throw new Error(`Failed to get git status: ${response.statusText}`);
+    }
+    const payload = await response.json() as GitStatus;
+    gitStatusCache.set(key, {
+      value: payload,
+      expiresAt: Date.now() + GIT_STATUS_CACHE_TTL_MS,
+    });
+    return payload;
+  })();
+
+  gitStatusInFlight.set(key, task);
+  try {
+    return await task;
+  } finally {
+    if (gitStatusInFlight.get(key) === task) {
+      gitStatusInFlight.delete(key);
+    }
+  }
 }
 
 export async function getGitDiff(directory: string, options: GetGitDiffOptions): Promise<GitDiffResponse> {
@@ -202,6 +268,26 @@ export async function deleteRemoteBranch(directory: string, payload: GitDeleteRe
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(error.error || 'Failed to delete remote branch');
+  }
+
+  return response.json();
+}
+
+export async function removeRemote(directory: string, payload: GitRemoveRemotePayload): Promise<{ success: boolean }> {
+  const remote = payload?.remote?.trim();
+  if (!remote) {
+    throw new Error('remote is required to remove a remote');
+  }
+
+  const response = await fetch(buildUrl(`${API_BASE}/remotes`, directory), {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ remote }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(error.error || 'Failed to remove remote');
   }
 
   return response.json();
@@ -333,6 +419,30 @@ export async function validateGitWorktree(directory: string, payload: CreateGitW
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: response.statusText }));
     throw new Error(error.error || 'Failed to validate worktree');
+  }
+
+  return response.json();
+}
+
+export async function getGitWorktreeBootstrapStatus(directory: string): Promise<import('./api/types').GitWorktreeBootstrapStatus> {
+  const response = await fetch(buildUrl(`${API_BASE}/worktrees/bootstrap-status`, directory));
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(error.error || 'Failed to get worktree bootstrap status');
+  }
+  return response.json();
+}
+
+export async function previewGitWorktree(directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeCreateResult> {
+  const response = await fetch(buildUrl(`${API_BASE}/worktrees/preview`, directory), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload ?? {}),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(error.error || 'Failed to preview worktree');
   }
 
   return response.json();

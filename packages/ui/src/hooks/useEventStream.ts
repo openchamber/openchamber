@@ -176,48 +176,32 @@ declare global {
   }
 }
 
-const TEXT_SHRINK_TOLERANCE = 50;
-const RESYNC_DEBOUNCE_MS = 750;
-const QUESTION_RECONCILE_COOLDOWN_MS = 1500;
-const PERMISSION_RECONCILE_COOLDOWN_MS = 1500;
+const RESYNC_DEBOUNCE_MS = 1800;
+const QUESTION_RECONCILE_COOLDOWN_MS = 3000;
+const PERMISSION_RECONCILE_COOLDOWN_MS = 3000;
+const DERIVED_STATE_REFRESH_COOLDOWN_MS = 2500;
+const GIT_REFRESH_HINT_DEDUP_WINDOW_MS = 5000;
+const GIT_REFRESH_HINT_TOOL_NAMES = new Set([
+  'edit',
+  'multiedit',
+  'apply_patch',
+  'write',
+  'file_write',
+  'create',
+  'bash',
+]);
+const GIT_REFRESH_HINT_COMPLETED_STATES = new Set([
+  'completed',
+  'complete',
+  'failed',
+  'error',
+  'cancelled',
+  'canceled',
+]);
 
-const textLengthCache = new WeakMap<Part[], number>();
-const computeTextLength = (parts: Part[] | undefined | null): number => {
-  if (!parts || !Array.isArray(parts)) return 0;
-
-  const cached = textLengthCache.get(parts);
-  if (cached !== undefined) return cached;
-
-  let length = 0;
-  for (let i = 0; i < parts.length; i++) {
-    const part = parts[i];
-    if (part?.type === 'text') {
-      const text = (part as { text?: string; content?: string }).text ?? (part as { text?: string; content?: string }).content;
-      if (typeof text === 'string') length += text.length;
-    }
-  }
-
-  textLengthCache.set(parts, length);
-  return length;
-};
-
-const MIN_SORTABLE_LENGTH = 10;
-const extractSortableId = (id: unknown): string | null => {
-  if (typeof id !== 'string') return null;
-  const trimmed = id.trim();
-  if (!trimmed) return null;
-  const underscoreIndex = trimmed.indexOf('_');
-  const candidate = underscoreIndex >= 0 ? trimmed.slice(underscoreIndex + 1) : trimmed;
-  if (!candidate || candidate.length < MIN_SORTABLE_LENGTH) return null;
-  return candidate;
-};
-
-const isIdNewer = (id: string, referenceId: string): boolean => {
-  const currentSortable = extractSortableId(id);
-  const referenceSortable = extractSortableId(referenceId);
-  if (!currentSortable || !referenceSortable) return true;
-  if (currentSortable.length !== referenceSortable.length) return true;
-  return currentSortable > referenceSortable;
+const readEventDirectory = (props: Record<string, unknown>): string => {
+  const directory = readStringProp(props, ['directory']);
+  return directory ?? 'global';
 };
 
 const MAX_MESSAGE_CACHE_SIZE = 500;
@@ -247,10 +231,17 @@ const getMessageFromStore = (sessionId: string, messageId: string): { info: Mess
   return message;
 };
 
+const getLatestMessageFromStore = (sessionId: string, messageId: string): { info: Message; parts: Part[] } | null => {
+  const storeState = useSessionStore.getState();
+  const sessionMessages = storeState.messages.get(sessionId) || [];
+  return sessionMessages.find((message) => message.info.id === messageId) || null;
+};
+
 export const useEventStream = (options?: { enabled?: boolean }) => {
   const enabled = options?.enabled ?? true;
   const {
     addStreamingPart,
+    applyPartDelta,
     completeStreamingMessage,
     updateMessageInfo,
     updateSessionCompaction,
@@ -557,11 +548,29 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
   const lastMessageEventBySessionRef = React.useRef<Map<string, number>>(new Map());
   const pendingMessageStallTimersRef = React.useRef<Map<string, NodeJS.Timeout>>(new Map());
   const lastMessageStallRecoveryBySessionRef = React.useRef<Map<string, number>>(new Map());
-
+  const partTypeHintsByKeyRef = React.useRef<Map<string, string>>(new Map());
+  const sessionCooldownTimersRef = React.useRef<Map<string, NodeJS.Timeout>>(new Map());
+  const sessionActivityPhaseRef = React.useRef<Map<string, 'idle' | 'busy' | 'cooldown'>>(new Map());
+  const sessionActivityLastRefreshAtRef = React.useRef<number>(0);
+  const sessionActivityRefreshInFlightRef = React.useRef<Promise<void> | null>(null);
+  const lastDerivedActivityRepairAtRef = React.useRef<number>(0);
+  const lastDerivedStatusRepairAtRef = React.useRef<number>(0);
+  const lastGitRefreshHintAtRef = React.useRef<Map<string, number>>(new Map());
   const scheduleSoftResyncRef = React.useRef<
     (sessionId: string, reason: string, limit?: number) => Promise<void>
   >(() => Promise.resolve());
   const scheduleReconnectRef = React.useRef<(hint?: string) => void>(() => {});
+
+  const writePartTypeHint = React.useCallback((key: string, type: string) => {
+    const map = partTypeHintsByKeyRef.current;
+    map.set(key, type);
+    if (map.size > 4000) {
+      const firstKey = map.keys().next().value;
+      if (typeof firstKey === 'string') {
+        map.delete(firstKey);
+      }
+    }
+  }, []);
 
   const isNotificationContextHidden = React.useCallback((isVSCodeRuntime: boolean): boolean => {
     if (visibilityStateRef.current === 'hidden') {
@@ -617,6 +626,44 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
     },
     [bootstrapState]
   );
+
+  const emitGitRefreshHint = React.useCallback((params: {
+    directory: string;
+    sessionId: string;
+    messageId: string;
+    partId?: string | null;
+    toolName: string;
+    toolState: string;
+  }) => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const dedupKey = `${params.sessionId}:${params.messageId}:${params.partId ?? 'unknown'}:${params.toolName}:${params.toolState}`;
+    const now = Date.now();
+    const lastAt = lastGitRefreshHintAtRef.current.get(dedupKey) ?? 0;
+    if (now - lastAt < GIT_REFRESH_HINT_DEDUP_WINDOW_MS) {
+      return;
+    }
+
+    lastGitRefreshHintAtRef.current.set(dedupKey, now);
+    if (lastGitRefreshHintAtRef.current.size > 600) {
+      const firstKey = lastGitRefreshHintAtRef.current.keys().next().value;
+      if (typeof firstKey === 'string') {
+        lastGitRefreshHintAtRef.current.delete(firstKey);
+      }
+    }
+
+    window.dispatchEvent(new CustomEvent('openchamber:git-refresh-hint', {
+      detail: {
+        directory: params.directory,
+        sessionId: params.sessionId,
+        messageId: params.messageId,
+        toolName: params.toolName,
+        toolState: params.toolState,
+      },
+    }));
+  }, []);
 
 
   const currentSessionIdRef = React.useRef<string | null>(currentSessionId);
@@ -789,24 +836,169 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
     useSessionStore.setState({ sessionStatus: next });
   }, []);
 
+  const updateSessionActivityPhase = React.useCallback((
+    sessionId: string,
+    phase: 'idle' | 'busy' | 'cooldown',
+    source: string = 'unknown',
+    options?: { syncStatus?: boolean }
+  ) => {
+    if (!sessionId) return;
+    const syncStatus = options?.syncStatus !== false;
+
+    const current = sessionActivityPhaseRef.current.get(sessionId);
+    if (current === phase) {
+      return;
+    }
+
+    const existingTimer = sessionCooldownTimersRef.current.get(sessionId);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+      sessionCooldownTimersRef.current.delete(sessionId);
+    }
+
+    const next = new Map(sessionActivityPhaseRef.current);
+    next.set(sessionId, phase);
+    sessionActivityPhaseRef.current = next;
+
+    if (!syncStatus) {
+      return;
+    }
+
+    if (phase === 'idle') {
+      updateSessionStatus(sessionId, { type: 'idle' }, `${source}:idle`);
+      return;
+    }
+
+    updateSessionStatus(sessionId, { type: 'busy' }, `${source}:${phase}`);
+
+    if (phase === 'cooldown') {
+      const timer = setTimeout(() => {
+        sessionCooldownTimersRef.current.delete(sessionId);
+        if (sessionActivityPhaseRef.current.get(sessionId) !== 'cooldown') {
+          return;
+        }
+        const latest = new Map(sessionActivityPhaseRef.current);
+        latest.set(sessionId, 'idle');
+        sessionActivityPhaseRef.current = latest;
+        updateSessionStatus(sessionId, { type: 'idle' }, `${source}:cooldown_timeout`);
+      }, 2000);
+      sessionCooldownTimersRef.current.set(sessionId, timer);
+    }
+  }, [updateSessionStatus]);
+
+  const refreshSessionActivityStatus = React.useCallback(async () => {
+    const now = Date.now();
+    if (sessionActivityRefreshInFlightRef.current) {
+      return sessionActivityRefreshInFlightRef.current;
+    }
+    if (now - sessionActivityLastRefreshAtRef.current < 1500) {
+      return;
+    }
+    sessionActivityLastRefreshAtRef.current = now;
+
+    const applyStatusMap = (statusMap: Record<string, { type?: string }>) => {
+      const observed = new Set<string>();
+      const currentSessions = useSessionStore.getState().sessions;
+      const knownSessionIds = new Set(currentSessions.map((session) => session.id));
+
+      for (const [sessionId, raw] of Object.entries(statusMap)) {
+        if (!sessionId || !raw) continue;
+        observed.add(sessionId);
+        const phase: 'idle' | 'busy' | 'cooldown' =
+          raw.type === 'cooldown'
+            ? 'cooldown'
+            : raw.type === 'busy' || raw.type === 'retry'
+              ? 'busy'
+              : 'idle';
+        updateSessionActivityPhase(sessionId, phase, 'snapshot');
+      }
+
+      for (const [sessionId, phase] of sessionActivityPhaseRef.current.entries()) {
+        if (!knownSessionIds.has(sessionId)) continue;
+        if ((phase === 'busy' || phase === 'cooldown') && !observed.has(sessionId)) {
+          updateSessionActivityPhase(sessionId, 'idle', 'snapshot_missing');
+        }
+      }
+    };
+
+    const task = (async (): Promise<void> => {
+      try {
+        const webServerActivity = await opencodeClient.getWebServerSessionActivity();
+        if (webServerActivity && Object.keys(webServerActivity).length > 0) {
+          applyStatusMap(webServerActivity);
+          return;
+        }
+
+        const globalStatusMap = await opencodeClient.getGlobalSessionStatus();
+        if (globalStatusMap && Object.keys(globalStatusMap).length > 0) {
+          applyStatusMap(globalStatusMap);
+        }
+      } catch {
+        // ignored
+      }
+    })().finally(() => {
+      sessionActivityRefreshInFlightRef.current = null;
+    });
+
+    sessionActivityRefreshInFlightRef.current = task;
+    return task;
+  }, [updateSessionActivityPhase]);
+
+  const clearSessionActivityTimers = React.useCallback(() => {
+    const cooldownTimers = sessionCooldownTimersRef.current;
+    for (const timer of cooldownTimers.values()) {
+      clearTimeout(timer);
+    }
+    cooldownTimers.clear();
+    sessionActivityPhaseRef.current.clear();
+  }, []);
+
+  const repairSessionDerivedState = React.useCallback((
+    reason: string,
+    options?: { refreshActivity?: boolean; pollStatus?: boolean; immediate?: boolean }
+  ) => {
+    const refreshActivity = options?.refreshActivity !== false;
+    const pollStatus = options?.pollStatus !== false;
+    const immediate = options?.immediate === true;
+    const now = Date.now();
+
+    if (streamDebugEnabled()) {
+      console.debug('[useEventStream] Repairing derived session state', { reason, refreshActivity, pollStatus, immediate });
+    }
+
+    if (refreshActivity) {
+      if (immediate || now - lastDerivedActivityRepairAtRef.current >= DERIVED_STATE_REFRESH_COOLDOWN_MS) {
+        lastDerivedActivityRepairAtRef.current = now;
+        void refreshSessionActivityStatus();
+      }
+    }
+
+    if (pollStatus) {
+      if (immediate || now - lastDerivedStatusRepairAtRef.current >= DERIVED_STATE_REFRESH_COOLDOWN_MS) {
+        lastDerivedStatusRepairAtRef.current = now;
+        triggerSessionStatusPoll();
+      }
+    }
+  }, [refreshSessionActivityStatus]);
+
   React.useEffect(() => {
     const nextSessionId = currentSessionId ?? null;
     const prevSessionId = previousSessionIdRef.current;
     const nextDirectory = resolveSessionDirectoryForStatus(nextSessionId);
     const prevDirectory = previousSessionDirectoryRef.current;
 
-    if (prevSessionId && nextSessionId && prevSessionId !== nextSessionId) {
-      // Clear the message cache on session switch to free memory
-      messageCache.clear();
+      if (prevSessionId && nextSessionId && prevSessionId !== nextSessionId) {
+        // Clear the message cache on session switch to free memory
+        messageCache.clear();
 
-      if (prevDirectory && nextDirectory && prevDirectory !== nextDirectory) {
-        // Removed: void refreshSessionStatus();
+        if (prevDirectory && nextDirectory && prevDirectory !== nextDirectory) {
+        repairSessionDerivedState('session_switch_directory');
+        }
       }
-    }
 
     previousSessionIdRef.current = nextSessionId;
     previousSessionDirectoryRef.current = nextDirectory;
-  }, [currentSessionId,  resolveSessionDirectoryForStatus]);
+  }, [currentSessionId, repairSessionDerivedState, resolveSessionDirectoryForStatus]);
 
   const handleEvent = React.useCallback((event: EventData) => {
     lastEventTimestampRef.current = Date.now();
@@ -889,7 +1081,8 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
 
           if (sessionId && statusType) {
             if (statusType === 'busy') {
-             updateSessionStatus(sessionId, { type: 'busy' }, 'sse:session.status');
+              updateSessionStatus(sessionId, { type: 'busy' }, 'sse:session.status');
+              updateSessionActivityPhase(sessionId, 'busy', 'sse:session.status', { syncStatus: false });
             } else if (statusType === 'retry') {
               updateSessionStatus(sessionId, {
                 type: 'retry',
@@ -918,9 +1111,23 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
                         ? metadataObj.next
                       : undefined,
               }, 'sse:session.status');
+              updateSessionActivityPhase(sessionId, 'busy', 'sse:session.status', { syncStatus: false });
             } else {
               updateSessionStatus(sessionId, { type: 'idle' }, 'sse:session.status');
+              updateSessionActivityPhase(sessionId, 'idle', 'sse:session.status', { syncStatus: false });
+              repairSessionDerivedState('session.status_idle', { refreshActivity: false });
             }
+            requestSessionMetadataRefresh(sessionId, typeof props.directory === 'string' ? props.directory : null);
+          }
+        }
+        break;
+
+      case 'openchamber:session-activity':
+        {
+          const sessionId = readStringProp(props, ['sessionId', 'sessionID']);
+          const phase = typeof props.phase === 'string' ? props.phase : null;
+          if (sessionId && (phase === 'idle' || phase === 'busy' || phase === 'cooldown')) {
+            updateSessionActivityPhase(sessionId, phase, 'sse:openchamber:session-activity');
             requestSessionMetadataRefresh(sessionId, typeof props.directory === 'string' ? props.directory : null);
           }
         }
@@ -937,6 +1144,7 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
             // Update session status
             if (status === 'busy') {
               updateSessionStatus(sessionId, { type: 'busy' }, 'sse:openchamber:session-status');
+              updateSessionActivityPhase(sessionId, 'busy', 'sse:openchamber:session-status', { syncStatus: false });
             } else if (status === 'retry') {
               const metadata = (typeof props.metadata === 'object' && props.metadata !== null) ? props.metadata as Record<string, unknown> : {};
               updateSessionStatus(sessionId, {
@@ -945,8 +1153,13 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
                 message: typeof metadata.message === 'string' ? metadata.message : undefined,
                 next: typeof metadata.next === 'number' ? metadata.next : undefined,
               }, 'sse:openchamber:session-status');
+              updateSessionActivityPhase(sessionId, 'busy', 'sse:openchamber:session-status', { syncStatus: false });
             } else {
               updateSessionStatus(sessionId, { type: 'idle' }, 'sse:openchamber:session-status');
+              updateSessionActivityPhase(sessionId, 'idle', 'sse:openchamber:session-status', { syncStatus: false });
+              if (needsAttention) {
+                repairSessionDerivedState('openchamber.session-status_attention_idle', { refreshActivity: false });
+              }
             }
 
             // Update attention state in the same update to ensure atomicity
@@ -1008,18 +1221,6 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
           pendingMessageStallTimersRef.current.delete(sessionId);
         }
 
-        const trimmedHeadMaxId = useSessionStore.getState().sessionMemoryState.get(sessionId)?.trimmedHeadMaxId;
-        if (trimmedHeadMaxId && !isIdNewer(messageId, trimmedHeadMaxId)) {
-          if (streamDebugEnabled()) {
-            console.debug('[useEventStream] Skipping message.part.updated for trimmed message', {
-              sessionId,
-              messageId,
-              trimmedHeadMaxId,
-            });
-          }
-          break;
-        }
-
         const shouldKeepSyntheticUserText = (value: unknown): boolean => {
           const text = typeof value === 'string' ? value.trim() : '';
           if (!text) return false;
@@ -1043,10 +1244,14 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
         };
 
         let roleInfo = 'assistant';
+        const existingMessage = getLatestMessageFromStore(sessionId, messageId);
+        const existingPartForType = existingMessage?.parts?.find((item) => item?.id === partExt.id);
+        const existingPartType = typeof (existingPartForType as { type?: unknown } | undefined)?.type === 'string'
+          ? (existingPartForType as { type: string }).type
+          : undefined;
         if (messageInfo && typeof (messageInfo as { role?: unknown }).role === 'string') {
           roleInfo = (messageInfo as { role?: string }).role as string;
         } else {
-          const existingMessage = getMessageFromStore(sessionId, messageId);
           if (existingMessage) {
             const existingRole = (existingMessage.info as Record<string, unknown>).role;
             if (typeof existingRole === 'string') {
@@ -1069,20 +1274,57 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
           }
         }
 
-        const messagePart: Part = {
+        const updatedPartId = readStringProp(partExt, ['id', 'partID', 'partId']);
+        const directory = readEventDirectory(props);
+        const partTypeHintKey = updatedPartId ? `${directory}:${messageId}:${updatedPartId}` : null;
+        const hintedPartType = partTypeHintKey ? partTypeHintsByKeyRef.current.get(partTypeHintKey) : undefined;
+
+        const resolvedPartType =
+          part.type ||
+          existingPartType ||
+          hintedPartType ||
+          'text';
+
+        const messagePartBase: Part = {
           ...part,
-          type: part.type || 'text',
+          type: resolvedPartType,
         } as Part;
+
+        const messagePart: Part = {
+          ...messagePartBase,
+        } as Part;
+
+        if (partTypeHintKey && typeof resolvedPartType === 'string' && resolvedPartType.length > 0) {
+          writePartTypeHint(partTypeHintKey, resolvedPartType);
+        }
 
         if (roleInfo === 'assistant') {
           const partType = (messagePart as { type?: unknown }).type;
           const partTime = (messagePart as { time?: { end?: unknown } }).time;
           const partHasEnded = typeof partTime?.end === 'number';
           const toolState = (messagePart as { state?: { status?: unknown } }).state?.status;
+          const normalizedToolState = typeof toolState === 'string' ? toolState.toLowerCase() : null;
           const toolName = typeof (messagePart as { tool?: unknown }).tool === 'string'
             ? (messagePart as { tool: string }).tool.toLowerCase()
             : null;
           const textContent = (messagePart as { text?: unknown }).text;
+
+          if (
+            partType === 'tool'
+            && toolName
+            && GIT_REFRESH_HINT_TOOL_NAMES.has(toolName)
+            && normalizedToolState
+            && GIT_REFRESH_HINT_COMPLETED_STATES.has(normalizedToolState)
+          ) {
+            emitGitRefreshHint({
+              directory,
+              sessionId,
+              messageId,
+              partId: updatedPartId,
+              toolName,
+              toolState: normalizedToolState,
+            });
+          }
 
           if (partType === 'tool' && toolName === 'question') {
             requestPendingQuestionsRefresh();
@@ -1090,7 +1332,7 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
 
           const isStreamingPart = (() => {
             if (partType === 'tool') {
-              return toolState === 'running' || toolState === 'pending';
+              return normalizedToolState === 'running' || normalizedToolState === 'pending';
             }
             if (partType === 'reasoning') {
               return !partHasEnded;
@@ -1112,10 +1354,9 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
               typeof currentStatus.confirmedAt === 'number' &&
               Date.now() - currentStatus.confirmedAt < 1200;
             if (!currentStatus || currentStatus.type === 'idle') {
-              if (recentlyConfirmedIdle) {
-                break;
+              if (!recentlyConfirmedIdle) {
+                updateSessionStatus(sessionId, { type: 'busy' }, 'sse:message.part.updated');
               }
-              updateSessionStatus(sessionId, { type: 'busy' }, 'sse:message.part.updated');
             }
           }
         }
@@ -1151,35 +1392,42 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
           pendingMessageStallTimersRef.current.delete(sessionId);
         }
 
-        const trimmedHeadMaxId = useSessionStore.getState().sessionMemoryState.get(sessionId)?.trimmedHeadMaxId;
-        if (trimmedHeadMaxId && !isIdNewer(messageId, trimmedHeadMaxId)) {
-          if (streamDebugEnabled()) {
-            console.debug('[useEventStream] Skipping message.part.delta for trimmed message', {
-              sessionId,
-              messageId,
-              trimmedHeadMaxId,
-            });
+        const existingMessage = getLatestMessageFromStore(sessionId, messageId);
+        const existingPart = existingMessage?.parts?.find((item) => item?.id === partId);
+        const existingRole = (existingMessage?.info as Record<string, unknown> | undefined)?.role;
+        const roleInfo = typeof existingRole === 'string' ? existingRole : 'assistant';
+
+        if (!existingPart) {
+          if (field === 'text' || field === 'content' || field === 'value') {
+            const directory = readEventDirectory(props);
+            const deltaPartTypeHint =
+              readStringProp(props, ['partType', 'type', 'part_type']) ||
+              readStringProp(props, ['kind']);
+            const partTypeHintKey = `${directory}:${messageId}:${partId}`;
+            const hintedPartType = partTypeHintsByKeyRef.current.get(partTypeHintKey);
+            const bootstrappedPartType =
+              typeof deltaPartTypeHint === 'string' && deltaPartTypeHint.trim().length > 0
+                ? deltaPartTypeHint
+                : (typeof hintedPartType === 'string' && hintedPartType.trim().length > 0
+                  ? hintedPartType
+                  : 'text');
+
+            const bootstrappedPart = {
+              id: partId,
+              type: bootstrappedPartType,
+              sessionID: sessionId,
+              messageID: messageId,
+              delta,
+              [field]: '',
+            } as unknown as Part;
+
+            if (typeof bootstrappedPartType === 'string' && bootstrappedPartType.length > 0) {
+              writePartTypeHint(partTypeHintKey, bootstrappedPartType);
+            }
+
+            addStreamingPart(sessionId, messageId, bootstrappedPart, roleInfo);
           }
           break;
-        }
-
-        const existingMessage = getMessageFromStore(sessionId, messageId);
-        const existingPart = existingMessage?.parts?.find((item) => item?.id === partId);
-        if (!existingPart) {
-          break;
-        }
-
-        const existingPartRecord = existingPart as Record<string, unknown>;
-        const existingFieldValue = existingPartRecord[field];
-        const updatedPart: Part = {
-          ...existingPart,
-          [field]: `${typeof existingFieldValue === 'string' ? existingFieldValue : ''}${delta}`,
-        } as Part;
-
-        let roleInfo = 'assistant';
-        const existingRole = (existingMessage?.info as Record<string, unknown> | undefined)?.role;
-        if (typeof existingRole === 'string') {
-          roleInfo = existingRole;
         }
 
         if (roleInfo === 'assistant' && delta.length > 0) {
@@ -1196,7 +1444,7 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
         }
 
         trackMessage(messageId, 'part_delta_received', { role: roleInfo, field });
-        addStreamingPart(sessionId, messageId, updatedPart, roleInfo);
+        applyPartDelta(sessionId, messageId, partId, field, delta, roleInfo);
         break;
       }
 
@@ -1230,18 +1478,6 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
         if (pendingTimer) {
           clearTimeout(pendingTimer);
           pendingMessageStallTimersRef.current.delete(sessionId);
-        }
-
-        const trimmedHeadMaxId = useSessionStore.getState().sessionMemoryState.get(sessionId)?.trimmedHeadMaxId;
-        if (trimmedHeadMaxId && !isIdNewer(messageId, trimmedHeadMaxId)) {
-          if (streamDebugEnabled()) {
-            console.debug('[useEventStream] Skipping message.updated for trimmed message', {
-              sessionId,
-              messageId,
-              trimmedHeadMaxId,
-            });
-          }
-          break;
         }
 
         if (streamDebugEnabled()) {
@@ -1310,6 +1546,17 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
             // Mode switches are server-injected synthetic user messages; always accept.
             if (isSyntheticOnly && (agentCandidate === 'plan' || agentCandidate === 'build')) {
               return true;
+            }
+
+            if (currentSessionIdRef.current === sessionId) {
+              const explicitSelection = useContextStore.getState().getSessionAgentSelection(sessionId);
+              if (explicitSelection && explicitSelection !== agentCandidate) {
+                const status = useSessionStore.getState().sessionStatus?.get(sessionId);
+                const isBusy = status?.type === 'busy' || status?.type === 'retry';
+                if (isBusy) {
+                  return false;
+                }
+              }
             }
 
             const last = lastUserAgentSelectionRef.current.get(sessionId);
@@ -1404,7 +1651,7 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
             if (!missingMessageHydrationRef.current.has(hydrateKey)) {
               missingMessageHydrationRef.current.add(hydrateKey);
               void opencodeClient
-                .getSessionMessages(sessionId, 50)
+                .getSessionMessages(sessionId)
                 .then((messages) => {
                   useSessionStore.getState().syncMessages(sessionId, messages);
                 })
@@ -1415,6 +1662,7 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
           }
 
           if (partsArray.length > 0) {
+            const directory = readEventDirectory(props);
             for (let i = 0; i < partsArray.length; i++) {
               const serverPart = partsArray[i];
               const isSynthetic = (serverPart as Record<string, unknown>).synthetic === true;
@@ -1434,6 +1682,9 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
                 sessionID: (serverPart as { sessionID?: string })?.sessionID || sessionId,
                 messageID: (serverPart as { messageID?: string })?.messageID || messageId,
               } as Part;
+              if (typeof enrichedPart.id === 'string' && typeof enrichedPart.type === 'string') {
+                writePartTypeHint(`${directory}:${messageId}:${enrichedPart.id}`, enrichedPart.type);
+              }
               addStreamingPart(sessionId, messageId, enrichedPart, 'user');
             }
           }
@@ -1443,7 +1694,6 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
         }
 
         const existingMessage = getMessageFromStore(sessionId, messageId);
-        const existingLen = computeTextLength(existingMessage?.parts || []);
         const existingStopMarker = (existingMessage?.info as { finish?: string } | undefined)?.finish === 'stop';
 
         const serverParts = (props as { parts?: unknown }).parts || (messageExt as { parts?: unknown }).parts;
@@ -1461,26 +1711,10 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
 
         if (!hasParts && !completedFromServer && !hasCompletedStatus && !eventHasStopFinish && !eventHasErrorFinish) break;
 
-        if ((messageExt as { role?: unknown }).role === 'assistant' && hasParts) {
-          const hasQuestionTool = partsArray.some((part) => (
-            part?.type === 'tool'
-            && typeof (part as { tool?: unknown }).tool === 'string'
-            && (part as { tool: string }).tool.toLowerCase() === 'question'
-          ));
-          if (hasQuestionTool) {
-            requestPendingQuestionsRefresh();
-          }
+        const messageInfoOnly = { ...messageExt } as Record<string, unknown>;
+        delete messageInfoOnly.parts;
 
-          const incomingLen = computeTextLength(partsArray);
-          const wouldShrink = existingLen > 0 && incomingLen + TEXT_SHRINK_TOLERANCE < existingLen;
-
-          if (wouldShrink && !eventHasStopFinish) {
-            trackMessage(messageId, 'skipped_shrinking_update', { incomingLen, existingLen });
-            break;
-          }
-        }
-
-        updateMessageInfo(sessionId, messageId, message as unknown as Message);
+        updateMessageInfo(sessionId, messageId, messageInfoOnly as unknown as Message);
 
         const messageRole = typeof (message as { role?: unknown }).role === 'string'
           ? (message as { role: string }).role
@@ -1517,33 +1751,6 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
                 tag: `error-${sessionId}`,
               });
             }
-          }
-        }
-
-        if (hasParts && (messageExt as { role?: unknown }).role !== 'user') {
-          const storeState = useSessionStore.getState();
-          const existingMessages = storeState.messages.get(sessionId) || [];
-          const existingMessageForSession = existingMessages.find((m) => m.info.id === messageId);
-          const needsInjection = !existingMessageForSession || existingMessageForSession.parts.length === 0;
-
-          trackMessage(
-            messageId,
-            needsInjection ? 'server_parts_injected' : 'server_parts_refreshed',
-            { count: partsArray.length }
-          );
-
-          const partsToInject = partsArray;
-
-          for (let i = 0; i < partsToInject.length; i++) {
-            const serverPart = partsToInject[i];
-            const enrichedPart: Part = {
-              ...serverPart,
-              type: serverPart?.type || 'text',
-              sessionID: serverPart?.sessionID || sessionId,
-              messageID: serverPart?.messageID || messageId,
-            } as Part;
-            addStreamingPart(sessionId, messageId, enrichedPart, (messageExt as { role?: string }).role as string);
-            trackMessage(messageId, `server_part_${i}`);
           }
         }
 
@@ -1593,7 +1800,7 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
           void saveSessionCursor(sessionId, messageId, timeCompleted);
 
 	          completeStreamingMessage(sessionId, messageId);
-	          // Removed: void refreshSessionStatus();
+	          repairSessionDerivedState('assistant_message_completed');
 
 	          const rawMessageSessionId = (message as { sessionID?: string }).sessionID;
           const messageSessionId: string =
@@ -1938,6 +2145,7 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
   }, [
     currentSessionId,
     addStreamingPart,
+    applyPartDelta,
     completeStreamingMessage,
     updateMessageInfo,
     addPermission,
@@ -1957,7 +2165,11 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
     bootstrapState,
     effectiveDirectory,
     updateSessionStatus,
+    updateSessionActivityPhase,
+    repairSessionDerivedState,
     dispatchRuntimeNotification,
+    emitGitRefreshHint,
+    writePartTypeHint,
   ]);
 
   // --- Stable callback refs (Part A) ---
@@ -2029,7 +2241,6 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
       }
     }
 
-
     isCleaningUpRef.current = false;
   }, []);
 
@@ -2070,7 +2281,7 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
       lastEventTimestampRef.current = Date.now();
       publishStatus('connected', null);
       checkConnection();
-      triggerSessionStatusPoll();
+      repairSessionDerivedState('stream_open');
 
       requestPendingPermissionsRefreshRef.current(shouldRefresh);
 
@@ -2154,6 +2365,7 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
     requestSessionMetadataRefresh,
     stableHandleEvent,
     stableBootstrapState,
+    repairSessionDerivedState,
     effectiveDirectory,
     debugConnectionState,
   ]);
@@ -2231,7 +2443,7 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
 
       clearPauseTimeout();
       maybeBootstrapIfStale('visibility_restore');
-      triggerSessionStatusPoll();
+      repairSessionDerivedState('visibility_restore');
 
       const isStalled = Date.now() - lastEventTimestampRef.current > 45000;
       if (isStalled) {
@@ -2247,9 +2459,7 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
           requestSessionMetadataRefresh(sessionId);
         }
         requestPendingPermissionsRefreshRef.current(false);
-
-        // Removed: void refreshSessionStatus();
-        triggerSessionStatusPoll();
+        repairSessionDerivedState('visibility_restore_resume');
         publishStatus('connecting', 'Resuming stream');
         startStream({ resetAttempts: true });
       }
@@ -2261,7 +2471,7 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
     if (visibilityStateRef.current === 'visible') {
       clearPauseTimeout();
       maybeBootstrapIfStale('window_focus');
-      triggerSessionStatusPoll();
+      repairSessionDerivedState('window_focus');
 
       const isStalled = Date.now() - lastEventTimestampRef.current > 45000;
       if (isStalled) {
@@ -2276,8 +2486,7 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
              scheduleSoftResync(sessionId, 'window_focus', getMessageLimit());
            }
            requestPendingPermissionsRefreshRef.current(false);
-           // Removed: void refreshSessionStatus();
-           triggerSessionStatusPoll();
+           repairSessionDerivedState('window_focus_resume');
 
            publishStatus('connecting', 'Resuming stream');
            startStream({ resetAttempts: true });
@@ -2288,9 +2497,9 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
       const handleOnline = () => {
         onlineStatusRef.current = true;
         maybeBootstrapIfStale('network_restored');
+        repairSessionDerivedState('network_restored');
         requestPendingPermissionsRefreshRef.current(false);
         if (pendingResumeRef.current || !unsubscribeRef.current) {
-          triggerSessionStatusPoll();
           publishStatus('connecting', 'Network restored');
           startStream({ resetAttempts: true });
         }
@@ -2320,8 +2529,7 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
             requestSessionMetadataRefresh(sessionId);
           }
           requestPendingPermissionsRefreshRef.current(false);
-          // Removed: void refreshSessionStatus();
-          triggerSessionStatusPoll();
+          repairSessionDerivedState('page_show');
           startStream({ resetAttempts: true });
         }
       };
@@ -2355,7 +2563,7 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
           );
 
           if (hasBusySessions) {
-            triggerSessionStatusPoll();
+            repairSessionDerivedState('stale_check_busy_sessions');
           }
           if (now - lastEventTimestampRef.current > 45000) {
             Promise.resolve().then(async () => {
@@ -2420,6 +2628,8 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
         staleCheckIntervalRef.current = null;
       }
 
+      clearSessionActivityTimers();
+
       messageCache.clear();
       // eslint-disable-next-line react-hooks/exhaustive-deps -- Intentionally accessing current ref value at cleanup time
       notifiedMessagesRef.current.clear();
@@ -2451,6 +2661,9 @@ export const useEventStream = (options?: { enabled?: boolean }) => {
     scheduleReconnect,
     loadMessages,
     requestSessionMetadataRefresh,
+    refreshSessionActivityStatus,
+    clearSessionActivityTimers,
+    repairSessionDerivedState,
     
     
     shouldHoldConnection,

@@ -5,7 +5,6 @@ import type { Session, Message, Part } from "@opencode-ai/sdk/v2";
 import type { PermissionRequest, PermissionResponse } from "@/types/permission";
 import type { QuestionRequest } from "@/types/question";
 import type { SessionStore, AttachedFile, EditPermissionMode, SyntheticContextPart } from "./types/sessionTypes";
-import { getMessageLimit, getBackgroundTrimLimit } from "./types/sessionTypes";
 
 import { useSessionStore as useSessionManagementStore } from "./sessionStore";
 import { useMessageStore } from "./messageStore";
@@ -18,8 +17,15 @@ import { useDirectoryStore } from "./useDirectoryStore";
 import { useConfigStore } from "./useConfigStore";
 import { useProjectsStore } from "./useProjectsStore";
 import { useSessionFoldersStore } from "./useSessionFoldersStore";
+import { getSafeStorage } from "./utils/safeStorage";
 import { EXECUTION_FORK_META_TEXT } from "@/lib/messages/executionMeta";
+import { markPendingUserSendAnimation } from "@/lib/userSendAnimation";
 import { flattenAssistantTextParts } from "@/lib/messages/messageText";
+import { normalizeMessageRecordsForProjection } from "./utils/messageProjectors";
+import type { ProjectEntry } from "@/lib/api/types";
+import type { WorktreeMetadata } from "@/types/worktree";
+import { waitForWorktreeBootstrap } from "@/lib/worktrees/worktreeBootstrap";
+import { waitForPendingDraftWorktreeRequest } from "@/lib/worktrees/pendingDraftWorktree";
 
 export type { AttachedFile, EditPermissionMode };
 export { MEMORY_LIMITS, ACTIVE_SESSION_WINDOW } from "./types/sessionTypes";
@@ -46,7 +52,125 @@ const normalizePath = (value?: string | null): string | null => {
 };
 
 const sessionChoiceAnalysisSignature = new Map<string, string>();
-const ENABLE_ACTIVE_SESSION_TRIM = false;
+const DRAFT_TARGET_STORAGE_KEY = "oc.chatInput.lastDraftTarget";
+
+type PersistedDraftTarget = {
+    projectId: string | null;
+    directory: string | null;
+};
+
+const safeStorage = getSafeStorage();
+
+const readPersistedDraftTarget = (): PersistedDraftTarget | null => {
+    try {
+        const raw = safeStorage.getItem(DRAFT_TARGET_STORAGE_KEY);
+        if (!raw) {
+            return null;
+        }
+        const parsed = JSON.parse(raw) as { projectId?: unknown; directory?: unknown };
+        return {
+            projectId: typeof parsed?.projectId === "string" ? parsed.projectId : null,
+            directory: normalizePath(typeof parsed?.directory === "string" ? parsed.directory : null),
+        };
+    } catch {
+        return null;
+    }
+};
+
+const persistDraftTarget = (target: PersistedDraftTarget): void => {
+    try {
+        safeStorage.setItem(DRAFT_TARGET_STORAGE_KEY, JSON.stringify(target));
+    } catch {
+        // ignored
+    }
+};
+
+const resolveProjectForDirectory = (projects: ProjectEntry[], directory: string | null): ProjectEntry | null => {
+    const normalizedDirectory = normalizePath(directory);
+    if (!normalizedDirectory) {
+        return null;
+    }
+
+    let bestMatch: ProjectEntry | null = null;
+    for (const project of projects) {
+        const projectPath = normalizePath(project.path);
+        if (!projectPath) {
+            continue;
+        }
+        const isExact = normalizedDirectory === projectPath;
+        const isNested = normalizedDirectory.startsWith(`${projectPath}/`);
+        if (!isExact && !isNested) {
+            continue;
+        }
+        if (!bestMatch || projectPath.length > (normalizePath(bestMatch.path)?.length ?? 0)) {
+            bestMatch = project;
+        }
+    }
+    return bestMatch;
+};
+
+const resolveProjectFromWorktreeDirectory = (
+    projects: ProjectEntry[],
+    availableWorktreesByProject: Map<string, WorktreeMetadata[]>,
+    directory: string | null,
+): ProjectEntry | null => {
+    const normalizedDirectory = normalizePath(directory);
+    if (!normalizedDirectory) {
+        return null;
+    }
+
+    let matchedWorktree: WorktreeMetadata | null = null;
+    let matchedProjectPath: string | null = null;
+    let bestPathLength = -1;
+
+    for (const [projectPath, worktrees] of availableWorktreesByProject.entries()) {
+        for (const worktree of worktrees) {
+            const worktreePath = normalizePath(worktree.path);
+            if (!worktreePath) {
+                continue;
+            }
+            const isExact = normalizedDirectory === worktreePath;
+            const isNested = normalizedDirectory.startsWith(`${worktreePath}/`);
+            if (!isExact && !isNested) {
+                continue;
+            }
+            if (worktreePath.length > bestPathLength) {
+                bestPathLength = worktreePath.length;
+                matchedWorktree = worktree;
+                matchedProjectPath = normalizePath(projectPath);
+            }
+        }
+    }
+
+    if (!matchedWorktree) {
+        return null;
+    }
+
+    const normalizedMetadataProjectPath = normalizePath(matchedWorktree.projectDirectory);
+    const candidates = [normalizedMetadataProjectPath, matchedProjectPath].filter((value): value is string => Boolean(value));
+
+    for (const candidatePath of candidates) {
+        const exact = projects.find((project) => normalizePath(project.path) === candidatePath) ?? null;
+        if (exact) {
+            return exact;
+        }
+        const nested = resolveProjectForDirectory(projects, candidatePath);
+        if (nested) {
+            return nested;
+        }
+    }
+
+    return null;
+};
+
+const resolveDraftProjectForDirectory = (
+    projects: ProjectEntry[],
+    availableWorktreesByProject: Map<string, WorktreeMetadata[]>,
+    directory: string | null,
+): ProjectEntry | null => {
+    return resolveProjectFromWorktreeDirectory(projects, availableWorktreesByProject, directory)
+        ?? resolveProjectForDirectory(projects, directory);
+};
 
 const buildSessionChoiceAnalysisSignature = (messages: Array<{ info: Message; parts: Part[] }>): string => {
     const lastMessage = messages[messages.length - 1];
@@ -89,6 +213,7 @@ export const useSessionStore = create<SessionStore>()(
             lastLoadedDirectory: null,
             messages: new Map(),
             sessionMemoryState: new Map(),
+            sessionHistoryMeta: new Map(),
             messageStreamStates: new Map(),
             sessionCompactionUntil: new Map(),
             sessionAbortFlags: new Map(),
@@ -119,7 +244,7 @@ export const useSessionStore = create<SessionStore>()(
             pendingInputText: null,
             pendingInputMode: 'replace',
             pendingSyntheticParts: null,
-            newSessionDraft: { open: true, directoryOverride: null, parentID: null },
+            newSessionDraft: { open: true, selectedProjectId: null, directoryOverride: null, pendingWorktreeRequestId: null, bootstrapPendingDirectory: null, preserveDirectoryOverride: false, parentID: null },
 
             // Voice state (initialized to disconnected/idle)
             voiceStatus: 'disconnected',
@@ -148,19 +273,76 @@ export const useSessionStore = create<SessionStore>()(
                 loadSessions: () => useSessionManagementStore.getState().loadSessions(),
 
                 openNewSessionDraft: (options) => {
-                    // Use explicit directoryOverride if provided, otherwise use active project path
-                    let directory: string | null = null;
-                    if (options?.directoryOverride !== undefined) {
-                        directory = options.directoryOverride;
-                    } else {
-                        const activeProject = useProjectsStore.getState().getActiveProject();
-                        directory = activeProject?.path ?? null;
-                    }
+                    const projectsState = useProjectsStore.getState();
+                    const projects = projectsState.projects;
+                    const availableWorktreesByProject = get().availableWorktreesByProject;
+                    const activeProject = projectsState.getActiveProject();
+                    const currentDirectory = normalizePath(useDirectoryStore.getState().currentDirectory ?? null);
+                    const persistedTarget = readPersistedDraftTarget();
+
+                    const explicitDirectory = options?.directoryOverride !== undefined
+                        ? normalizePath(options.directoryOverride)
+                        : null;
+                    const explicitProject = options?.projectId
+                        ? projects.find((project) => project.id === options.projectId) ?? null
+                        : null;
+
+                    const inferredProjectFromDirectory = resolveDraftProjectForDirectory(projects, availableWorktreesByProject, explicitDirectory);
+                    const fallbackProject = (() => {
+                        if (activeProject) {
+                            return activeProject;
+                        }
+                        if (projectsState.activeProjectId) {
+                            return projects.find((project) => project.id === projectsState.activeProjectId) ?? null;
+                        }
+                        return projects[0] ?? null;
+                    })();
+
+                    const persistedProjectById = persistedTarget?.projectId
+                        ? projects.find((project) => project.id === persistedTarget.projectId) ?? null
+                        : null;
+                    const persistedProjectByDirectory = resolveDraftProjectForDirectory(projects, availableWorktreesByProject, persistedTarget?.directory ?? null);
+                    const currentDirectoryProject = resolveDraftProjectForDirectory(projects, availableWorktreesByProject, currentDirectory);
+
+                    const selectedProject = (() => {
+                        if (explicitProject || explicitDirectory !== null) {
+                            return explicitProject ?? inferredProjectFromDirectory ?? fallbackProject;
+                        }
+                        if (currentDirectory) {
+                            return currentDirectoryProject ?? fallbackProject;
+                        }
+                        return persistedProjectByDirectory ?? persistedProjectById ?? fallbackProject;
+                    })();
+
+                    const directory = (() => {
+                        if (explicitDirectory !== null) {
+                            return explicitDirectory;
+                        }
+                        if (explicitProject) {
+                            return normalizePath(explicitProject.path ?? null);
+                        }
+                        if (currentDirectory) {
+                            return currentDirectory;
+                        }
+                        if (persistedTarget?.directory) {
+                            return persistedTarget.directory;
+                        }
+                        return normalizePath(selectedProject?.path ?? null);
+                    })();
+
+                    persistDraftTarget({
+                        projectId: selectedProject?.id ?? null,
+                        directory,
+                    });
 
                     set({
                         newSessionDraft: {
                             open: true,
+                            selectedProjectId: selectedProject?.id ?? null,
                             directoryOverride: directory,
+                            pendingWorktreeRequestId: options?.pendingWorktreeRequestId ?? null,
+                            bootstrapPendingDirectory: normalizePath(options?.bootstrapPendingDirectory ?? null),
+                            preserveDirectoryOverride: options?.preserveDirectoryOverride === true,
                             parentID: options?.parentID ?? null,
                             title: options?.title,
                             initialPrompt: options?.initialPrompt,
@@ -199,11 +381,162 @@ export const useSessionStore = create<SessionStore>()(
                     }
                 },
 
+                overrideNewSessionDraftTarget: (options) => {
+                    const projectsState = useProjectsStore.getState();
+                    const projects = projectsState.projects;
+                    const availableWorktreesByProject = get().availableWorktreesByProject;
+                    const explicitDirectory = normalizePath(options?.directoryOverride ?? null);
+                    const explicitProject = options?.projectId
+                        ? projects.find((project) => project.id === options.projectId) ?? null
+                        : null;
+                    const inferredProject = resolveDraftProjectForDirectory(projects, availableWorktreesByProject, explicitDirectory);
+                    const fallbackProject = explicitProject ?? inferredProject ?? projectsState.getActiveProject() ?? projects[0] ?? null;
+                    const selectedProject = explicitProject ?? inferredProject ?? fallbackProject;
+                    const nextDirectory = explicitDirectory ?? normalizePath(selectedProject?.path ?? null);
+
+                    persistDraftTarget({
+                        projectId: selectedProject?.id ?? null,
+                        directory: nextDirectory,
+                    });
+
+                    set((state) => {
+                        const previousDraft = state.newSessionDraft;
+                        const hasPendingWorktreeRequestId = Object.prototype.hasOwnProperty.call(options, 'pendingWorktreeRequestId');
+                        const hasBootstrapPendingDirectory = Object.prototype.hasOwnProperty.call(options, 'bootstrapPendingDirectory');
+                        return {
+                            newSessionDraft: {
+                                ...previousDraft,
+                                open: true,
+                                selectedProjectId: selectedProject?.id ?? null,
+                                directoryOverride: nextDirectory,
+                                pendingWorktreeRequestId: hasPendingWorktreeRequestId
+                                    ? (options.pendingWorktreeRequestId ?? null)
+                                    : (previousDraft.pendingWorktreeRequestId ?? null),
+                                bootstrapPendingDirectory: hasBootstrapPendingDirectory
+                                    ? normalizePath(options.bootstrapPendingDirectory ?? null)
+                                    : (previousDraft.bootstrapPendingDirectory ?? null),
+                                preserveDirectoryOverride: options?.preserveDirectoryOverride === true,
+                                title: options?.title ?? previousDraft.title,
+                                initialPrompt: options?.initialPrompt ?? previousDraft.initialPrompt,
+                            },
+                            currentSessionId: null,
+                            error: null,
+                            ...(options?.initialPrompt ? { pendingInputText: options.initialPrompt, pendingInputMode: 'replace' as const } : {}),
+                        };
+                    });
+                },
+
+                setNewSessionDraftTarget: ({ projectId, directoryOverride }, options) => {
+                    const projects = useProjectsStore.getState().projects;
+                    const project = projectId
+                        ? projects.find((entry) => entry.id === projectId) ?? null
+                        : null;
+                    const normalizedDirectory = normalizePath(directoryOverride);
+                    const normalizedProjectPath = normalizePath(project?.path ?? null);
+                    const nextDirectory = normalizedDirectory ?? normalizedProjectPath ?? null;
+
+                    let didUpdate = false;
+                    set((state) => {
+                        if (!state.newSessionDraft?.open) {
+                            return state;
+                        }
+                        if (
+                            options?.force !== true
+                            && (
+                                state.newSessionDraft.pendingWorktreeRequestId
+                                || state.newSessionDraft.bootstrapPendingDirectory
+                                || state.newSessionDraft.preserveDirectoryOverride
+                            )
+                        ) {
+                            return state;
+                        }
+                        didUpdate = true;
+                        return {
+                            newSessionDraft: {
+                                ...state.newSessionDraft,
+                                selectedProjectId: project?.id ?? null,
+                                directoryOverride: nextDirectory,
+                                pendingWorktreeRequestId: null,
+                                bootstrapPendingDirectory: null,
+                                preserveDirectoryOverride: false,
+                                parentID: null,
+                            },
+                        };
+                    });
+
+                    if (didUpdate) {
+                        persistDraftTarget({
+                            projectId: project?.id ?? null,
+                            directory: nextDirectory,
+                        });
+                    }
+                },
+
                 closeNewSessionDraft: () => {
                     const realCurrentSessionId = useSessionManagementStore.getState().currentSessionId;
                     set({
-                        newSessionDraft: { open: false, directoryOverride: null, parentID: null, title: undefined, initialPrompt: undefined, syntheticParts: undefined, targetFolderId: undefined },
+                        newSessionDraft: { open: false, selectedProjectId: null, directoryOverride: null, pendingWorktreeRequestId: null, bootstrapPendingDirectory: null, preserveDirectoryOverride: false, parentID: null, title: undefined, initialPrompt: undefined, syntheticParts: undefined, targetFolderId: undefined },
                         currentSessionId: realCurrentSessionId,
+                    });
+                },
+
+                setPendingDraftWorktreeRequest: (requestId) => {
+                    set((state) => {
+                        if (!state.newSessionDraft?.open) {
+                            return state;
+                        }
+                        return {
+                            newSessionDraft: {
+                                ...state.newSessionDraft,
+                                pendingWorktreeRequestId: requestId,
+                            },
+                        };
+                    });
+                },
+
+                resolvePendingDraftWorktreeTarget: (requestId, directory, options) => {
+                    set((state) => {
+                        if (!state.newSessionDraft?.open || state.newSessionDraft.pendingWorktreeRequestId !== requestId) {
+                            return state;
+                        }
+                        return {
+                            newSessionDraft: {
+                                ...state.newSessionDraft,
+                                selectedProjectId: options?.projectId ?? state.newSessionDraft.selectedProjectId ?? null,
+                                directoryOverride: normalizePath(directory),
+                                pendingWorktreeRequestId: null,
+                                bootstrapPendingDirectory: normalizePath(options?.bootstrapPendingDirectory ?? state.newSessionDraft.bootstrapPendingDirectory ?? null),
+                                preserveDirectoryOverride: options?.preserveDirectoryOverride ?? true,
+                            },
+                        };
+                    });
+                },
+
+                setDraftBootstrapPendingDirectory: (directory) => {
+                    set((state) => {
+                        if (!state.newSessionDraft?.open) {
+                            return state;
+                        }
+                        return {
+                            newSessionDraft: {
+                                ...state.newSessionDraft,
+                                bootstrapPendingDirectory: normalizePath(directory),
+                            },
+                        };
+                    });
+                },
+
+                setDraftPreserveDirectoryOverride: (value) => {
+                    set((state) => {
+                        if (!state.newSessionDraft?.open) {
+                            return state;
+                        }
+                        return {
+                            newSessionDraft: {
+                                ...state.newSessionDraft,
+                                preserveDirectoryOverride: value,
+                            },
+                        };
                     });
                 },
 
@@ -315,8 +648,6 @@ export const useSessionStore = create<SessionStore>()(
                             if (previousMessages.length > 0) {
                                 get().updateViewportAnchor(previousSessionId, previousMessages.length - 1);
                             }
-
-                            get().trimToViewportWindow(previousSessionId, getBackgroundTrimLimit());
                         }
                     }
 
@@ -325,18 +656,14 @@ export const useSessionStore = create<SessionStore>()(
                     if (id) {
 
                         const existingMessages = get().messages.get(id);
-                        const memoryState = get().sessionMemoryState.get(id);
+                        const historyMeta = get().sessionHistoryMeta.get(id);
                         const needsHistoryBootstrap =
-                            !memoryState ||
-                            memoryState.historyComplete === undefined;
+                            !historyMeta ||
+                            typeof historyMeta.complete !== 'boolean';
 
                         if (!existingMessages || needsHistoryBootstrap) {
 
                             await get().loadMessages(id);
-                        }
-
-                        if (ENABLE_ACTIVE_SESSION_TRIM) {
-                            get().trimToViewportWindow(id, getMessageLimit());
                         }
 
                         // Analyze session messages to extract agent/model/variant choices
@@ -347,7 +674,6 @@ export const useSessionStore = create<SessionStore>()(
                             if (agents.length > 0) {
                                 const analysisSignature = buildSessionChoiceAnalysisSignature(sessionMessages);
                                 if (sessionChoiceAnalysisSignature.get(id) === analysisSignature) {
-                                    get().evictLeastRecentlyUsed();
                                     return;
                                 }
                                 try {
@@ -364,7 +690,6 @@ export const useSessionStore = create<SessionStore>()(
                         }
                     }
 
-                    get().evictLeastRecentlyUsed();
                 },
                 loadMessages: (sessionId: string, limit?: number) => useMessageStore.getState().loadMessages(sessionId, limit),
                 sendMessage: async (content: string, providerID: string, modelID: string, agent?: string, attachments?: AttachedFile[], agentMentionName?: string, additionalParts?: Array<{ text: string; attachments?: AttachedFile[]; synthetic?: boolean }>, variant?: string, inputMode: 'normal' | 'shell' = 'normal') => {
@@ -381,7 +706,13 @@ export const useSessionStore = create<SessionStore>()(
 
                     if (draft?.open) {
                         const draftTargetFolderId = draft.targetFolderId;
-                        const draftDirectoryOverride = draft.directoryOverride ?? null;
+                        let draftDirectoryOverride = draft.bootstrapPendingDirectory ?? draft.directoryOverride ?? null;
+                        const draftProjectId = draft.selectedProjectId ?? null;
+
+                        if (draft.pendingWorktreeRequestId) {
+                            draftDirectoryOverride = await waitForPendingDraftWorktreeRequest(draft.pendingWorktreeRequestId);
+                            get().resolvePendingDraftWorktreeTarget(draft.pendingWorktreeRequestId, draftDirectoryOverride);
+                        }
 
                         const created = await useSessionManagementStore
                             .getState()
@@ -390,6 +721,11 @@ export const useSessionStore = create<SessionStore>()(
                         if (!created?.id) {
                             throw new Error('Failed to create session');
                         }
+
+                        persistDraftTarget({
+                            projectId: draftProjectId,
+                            directory: normalizePath(draftDirectoryOverride ?? created.directory ?? null),
+                        });
 
                         const configState = useConfigStore.getState();
                         const draftAgentName = configState.currentAgentName;
@@ -443,6 +779,7 @@ export const useSessionStore = create<SessionStore>()(
                         const draftSyntheticParts = draft.syntheticParts;
 
                         get().closeNewSessionDraft();
+                        await get().setCurrentSession(created.id);
 
                         // Assign to target folder if session was created from folder's + button
                         if (draftTargetFolderId) {
@@ -459,7 +796,13 @@ export const useSessionStore = create<SessionStore>()(
                             ? [...(additionalParts || []), ...draftSyntheticParts]
                             : additionalParts;
 
+                        const createdDirectory = normalizePath(draftDirectoryOverride ?? created.directory ?? null);
+                        if (createdDirectory) {
+                            await waitForWorktreeBootstrap(createdDirectory);
+                        }
+
                         try {
+                            markPendingUserSendAnimation(created.id);
                             return await useMessageStore
                                 .getState()
                                 .sendMessage(content, providerID, modelID, effectiveDraftAgent, created.id, attachments, agentMentionName, mergedAdditionalParts, variant, inputMode);
@@ -510,6 +853,13 @@ export const useSessionStore = create<SessionStore>()(
                         }
                     }
 
+                    const currentSessionDirectory = currentSessionId
+                        ? normalizePath(useSessionManagementStore.getState().getDirectoryForSession(currentSessionId))
+                        : null;
+                    if (currentSessionDirectory) {
+                        await waitForWorktreeBootstrap(currentSessionDirectory);
+                    }
+
                     // Notify server that user sent a message in this session
                     if (currentSessionId) {
                         fetch(`/api/sessions/${currentSessionId}/message-sent`, { method: 'POST' })
@@ -517,6 +867,9 @@ export const useSessionStore = create<SessionStore>()(
                     }
 
                     try {
+                        if (currentSessionId) {
+                            markPendingUserSendAnimation(currentSessionId);
+                        }
                         return await useMessageStore.getState().sendMessage(content, providerID, modelID, effectiveAgent, currentSessionId || undefined, attachments, agentMentionName, additionalParts, variant, inputMode);
                     } catch (error) {
                         if (currentSessionId) {
@@ -525,9 +878,9 @@ export const useSessionStore = create<SessionStore>()(
                         throw error;
                     }
                 },
-                abortCurrentOperation: () => {
-                    const currentSessionId = useSessionManagementStore.getState().currentSessionId;
-                    return useMessageStore.getState().abortCurrentOperation(currentSessionId || undefined);
+                abortCurrentOperation: (sessionIdOverride?: string) => {
+                    const sessionId = sessionIdOverride || useSessionManagementStore.getState().currentSessionId;
+                    return useMessageStore.getState().abortCurrentOperation(sessionId || undefined);
                 },
                 armAbortPrompt: (durationMs = 3000) => {
                     const sessionId = useSessionManagementStore.getState().currentSessionId;
@@ -553,17 +906,17 @@ export const useSessionStore = create<SessionStore>()(
                     const effectiveCurrent = currentSessionId || sessionId;
                     return useMessageStore.getState().addStreamingPart(sessionId, messageId, part, role, effectiveCurrent);
                 },
+                applyPartDelta: (sessionId: string, messageId: string, partId: string, field: string, delta: string, role?: string) => {
+                    const currentSessionId = useSessionManagementStore.getState().currentSessionId;
+                    const effectiveCurrent = currentSessionId || sessionId;
+                    return useMessageStore.getState().applyPartDelta(sessionId, messageId, partId, field, delta, role, effectiveCurrent);
+                },
                 completeStreamingMessage: (sessionId: string, messageId: string) => useMessageStore.getState().completeStreamingMessage(sessionId, messageId),
                 markMessageStreamSettled: (messageId: string) => useMessageStore.getState().markMessageStreamSettled(messageId),
                 updateMessageInfo: (sessionId: string, messageId: string, messageInfo: Record<string, unknown>) => useMessageStore.getState().updateMessageInfo(sessionId, messageId, messageInfo),
                 updateSessionCompaction: (sessionId: string, compactingTimestamp?: number | null) => useMessageStore.getState().updateSessionCompaction(sessionId, compactingTimestamp ?? null),
                 addPermission: (permission: PermissionRequest) => {
-                    const contextData = {
-                        currentAgentContext: useContextStore.getState().currentAgentContext,
-                        sessionAgentSelections: useContextStore.getState().sessionAgentSelections,
-                        getSessionAgentEditMode: useContextStore.getState().getSessionAgentEditMode,
-                    };
-                    return usePermissionStore.getState().addPermission(permission, contextData);
+                    return usePermissionStore.getState().addPermission(permission);
                 },
                 respondToPermission: (sessionId: string, requestId: string, response: PermissionResponse) => usePermissionStore.getState().respondToPermission(sessionId, requestId, response),
                 dismissPermission: (sessionId: string, requestId: string) => usePermissionStore.getState().dismissPermission(sessionId, requestId),
@@ -578,7 +931,11 @@ export const useSessionStore = create<SessionStore>()(
                 getDirectoryForSession: (sessionId: string) => useSessionManagementStore.getState().getDirectoryForSession(sessionId),
                 getLastMessageModel: (sessionId: string) => useMessageStore.getState().getLastMessageModel(sessionId),
                 getCurrentAgent: (sessionId: string) => useContextStore.getState().getCurrentAgent(sessionId),
-                syncMessages: (sessionId: string, messages: { info: Message; parts: Part[] }[]) => useMessageStore.getState().syncMessages(sessionId, messages),
+                syncMessages: (
+                    sessionId: string,
+                    messages: { info: Message; parts: Part[] }[],
+                    options?: { replace?: boolean }
+                ) => useMessageStore.getState().syncMessages(sessionId, messages, options),
                 applySessionMetadata: (sessionId: string, metadata: Partial<Session>) => useSessionManagementStore.getState().applySessionMetadata(sessionId, metadata),
 
                 addAttachedFile: (file: File) => useFileStore.getState().addAttachedFile(file),
@@ -587,19 +944,6 @@ export const useSessionStore = create<SessionStore>()(
                 clearAttachedFiles: () => useFileStore.getState().clearAttachedFiles(),
 
                 updateViewportAnchor: (sessionId: string, anchor: number) => useMessageStore.getState().updateViewportAnchor(sessionId, anchor),
-                trimToViewportWindow: (sessionId: string, targetSize?: number) => {
-                    const currentSessionId = useSessionManagementStore.getState().currentSessionId;
-                    // Skip trimming while session is working (busy/retry)
-                    const status = get().sessionStatus?.get(sessionId);
-                    if (status?.type === 'busy' || status?.type === 'retry') {
-                        return;
-                    }
-                    return useMessageStore.getState().trimToViewportWindow(sessionId, targetSize, currentSessionId || undefined);
-                },
-                evictLeastRecentlyUsed: () => {
-                    const currentSessionId = useSessionManagementStore.getState().currentSessionId;
-                    return useMessageStore.getState().evictLeastRecentlyUsed(currentSessionId || undefined);
-                },
                 loadMoreMessages: (sessionId: string, direction: "up" | "down") => useMessageStore.getState().loadMoreMessages(sessionId, direction),
 
                 saveSessionModelSelection: (sessionId: string, providerId: string, modelId: string) => useContextStore.getState().saveSessionModelSelection(sessionId, providerId, modelId),
@@ -639,7 +983,9 @@ export const useSessionStore = create<SessionStore>()(
                     return useContextStore.getState().initializeSessionContextUsage(sessionId, contextLimit, outputLimit, messages);
                 },
                 debugSessionMessages: async (sessionId: string) => {
-                    const messages = useMessageStore.getState().messages.get(sessionId) || [];
+                    const messages = normalizeMessageRecordsForProjection(
+                        useMessageStore.getState().messages.get(sessionId) || []
+                    );
                     const session = useSessionManagementStore.getState().sessions.find(s => s.id === sessionId);
                     console.log(`Debug session ${sessionId}:`, {
                         session,
@@ -689,12 +1035,17 @@ export const useSessionStore = create<SessionStore>()(
                     const revertMessageId = updatedSession.revert?.messageID;
 
                     if (revertMessageId) {
-                        // Find the index of the revert message
-                        const revertIndex = currentMessages.findIndex((m) => m.info.id === revertMessageId);
+                        // Keep only messages before the revert point.
+                        // Fallback to the originally clicked message if SDK returns an id
+                        // that is not loaded in the current in-memory window.
+                        let revertIndex = currentMessages.findIndex((m) => m.info.id === revertMessageId);
+                        if (revertIndex === -1) {
+                            revertIndex = currentMessages.findIndex((m) => m.info.id === messageId);
+                        }
+
                         if (revertIndex !== -1) {
-                            // Keep only messages before the revert point
                             const filteredMessages = currentMessages.slice(0, revertIndex);
-                            useMessageStore.getState().syncMessages(sessionId, filteredMessages);
+                            useMessageStore.getState().syncMessages(sessionId, filteredMessages, { replace: true });
                         }
                     }
 
@@ -837,7 +1188,7 @@ export const useSessionStore = create<SessionStore>()(
                     }
                 },
 
-                setPendingInputText: (text: string | null, mode: 'replace' | 'append' = 'replace') => {
+                setPendingInputText: (text: string | null, mode: 'replace' | 'append' | 'append-inline' = 'replace') => {
                     set({ pendingInputText: text, pendingInputMode: mode });
                 },
 
@@ -916,6 +1267,7 @@ useMessageStore.subscribe((state, prevState) => {
     if (
         state.messages === prevState.messages &&
         state.sessionMemoryState === prevState.sessionMemoryState &&
+        state.sessionHistoryMeta === prevState.sessionHistoryMeta &&
         state.messageStreamStates === prevState.messageStreamStates &&
         state.sessionCompactionUntil === prevState.sessionCompactionUntil &&
         state.sessionAbortFlags === prevState.sessionAbortFlags &&
@@ -943,6 +1295,7 @@ useMessageStore.subscribe((state, prevState) => {
         useSessionStore.setState({
             messages: latest.messages,
             sessionMemoryState: latest.sessionMemoryState,
+            sessionHistoryMeta: latest.sessionHistoryMeta,
             messageStreamStates: latest.messageStreamStates,
             sessionCompactionUntil: latest.sessionCompactionUntil,
             sessionAbortFlags: latest.sessionAbortFlags,
@@ -1060,18 +1413,35 @@ useDirectoryStore.subscribe((state, prevState) => {
         return;
     }
 
+    if (draft.pendingWorktreeRequestId || draft.bootstrapPendingDirectory || draft.preserveDirectoryOverride) {
+        return;
+    }
+
     const draftDirectory = normalizePath(draft.directoryOverride);
     if (draftDirectory && draftDirectory !== prevDirectory) {
         return;
     }
 
+    const projects = useProjectsStore.getState().projects;
+    const resolvedProject = resolveDraftProjectForDirectory(
+        projects,
+        useSessionStore.getState().availableWorktreesByProject,
+        nextDirectory,
+    );
+
     useSessionStore.setState((store) => ({
         newSessionDraft: {
             ...store.newSessionDraft,
+            selectedProjectId: resolvedProject?.id ?? store.newSessionDraft.selectedProjectId ?? null,
             directoryOverride: nextDirectory,
             parentID: null,
         },
     }));
+
+    persistDraftTarget({
+        projectId: resolvedProject?.id ?? draft.selectedProjectId ?? null,
+        directory: nextDirectory,
+    });
 });
 
 const bootDraftOpen = useSessionStore.getState().newSessionDraft?.open;
@@ -1088,6 +1458,7 @@ useSessionStore.setState({
     availableWorktreesByProject: useSessionManagementStore.getState().availableWorktreesByProject,
     messages: useMessageStore.getState().messages,
     sessionMemoryState: useMessageStore.getState().sessionMemoryState,
+    sessionHistoryMeta: useMessageStore.getState().sessionHistoryMeta,
     messageStreamStates: useMessageStore.getState().messageStreamStates,
     sessionCompactionUntil: useMessageStore.getState().sessionCompactionUntil,
     sessionAbortFlags: useMessageStore.getState().sessionAbortFlags,

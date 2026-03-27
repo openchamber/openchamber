@@ -38,6 +38,8 @@ interface GitHeaderProps {
   onFetch: (remote: GitRemote) => void;
   onPull: (remote: GitRemote) => void;
   onPush: () => void;
+  onRemoveRemote: (remote: GitRemote) => void;
+  removingRemoteName: string | null;
   onCheckoutBranch: (branch: string) => void;
   onCreateBranch: (name: string, remote?: GitRemote) => Promise<void>;
   onRenameBranch?: (oldName: string, newName: string) => Promise<void>;
@@ -196,6 +198,8 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
   onFetch,
   onPull,
   onPush,
+  onRemoveRemote,
+  removingRemoteName,
   onCheckoutBranch,
   onCreateBranch,
   onRenameBranch,
@@ -241,6 +245,8 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
       onFetch={onFetch}
       onPull={onPull}
       onPush={onPush}
+      onRemoveRemote={onRemoveRemote}
+      removingRemoteName={removingRemoteName}
       disabled={!status}
       iconOnly={true}
       tooltipDelayMs={useTwoRowHeader ? 300 : 1000}

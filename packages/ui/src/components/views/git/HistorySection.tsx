@@ -1,5 +1,5 @@
 import React from 'react';
-import { RiArrowUpSLine, RiArrowDownSLine } from '@remixicon/react';
+import { RiArrowDownSLine, RiArrowUpLine, RiArrowUpSLine } from '@remixicon/react';
 import {
   Collapsible,
   CollapsibleContent,
@@ -33,6 +33,11 @@ interface HistorySectionProps {
   loadingCommitHashes: Set<string>;
   onCopyHash: (hash: string) => void;
   showHeader?: boolean;
+  branchDivider?: {
+    insertBeforeIndex: number;
+    branchName: string;
+    direction: 'up' | 'down';
+  } | null;
 }
 
 export const HistorySection: React.FC<HistorySectionProps> = ({
@@ -46,12 +51,47 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
   loadingCommitHashes,
   onCopyHash,
   showHeader = true,
+  branchDivider = null,
 }) => {
   const [isOpen, setIsOpen] = React.useState(true);
 
   if (!log) {
     return null;
   }
+
+  const hasDivider =
+    branchDivider !== null &&
+    branchDivider.insertBeforeIndex > 0 &&
+    branchDivider.insertBeforeIndex < log.all.length;
+  const hasDividerBelowLoaded = branchDivider !== null && branchDivider.insertBeforeIndex === log.all.length;
+  const hasSplitHistory = hasDivider || hasDividerBelowLoaded;
+
+  const topEntries = hasDivider
+    ? log.all.slice(0, branchDivider.insertBeforeIndex)
+    : hasDividerBelowLoaded
+      ? log.all
+      : [];
+  const bottomEntries = hasDivider ? log.all.slice(branchDivider.insertBeforeIndex) : [];
+
+  const dividerIcon = branchDivider?.direction === 'down'
+    ? <RiArrowDownSLine className="size-3.5" />
+    : <RiArrowUpLine className="size-3.5" />;
+
+  const renderCommitList = (entries: GitLogEntry[]) => (
+    <ul className="divide-y divide-border/60">
+      {entries.map((entry) => (
+        <HistoryCommitRow
+          key={entry.hash}
+          entry={entry}
+          isExpanded={expandedCommitHashes.has(entry.hash)}
+          onToggle={() => onToggleCommit(entry.hash)}
+          files={commitFilesMap.get(entry.hash) ?? []}
+          isLoadingFiles={loadingCommitHashes.has(entry.hash)}
+          onCopyHash={onCopyHash}
+        />
+      ))}
+    </ul>
+  );
 
   const content = (
     <ScrollableOverlay outerClassName="min-h-0 max-h-[50vh]" className="w-full">
@@ -61,25 +101,39 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
             No commits found
           </p>
         </div>
+      ) : hasSplitHistory && branchDivider ? (
+        <div className="flex flex-col gap-0">
+          {topEntries.length > 0 ? (
+            <div className="rounded-xl border border-border/60 bg-background/70 overflow-hidden">
+              {renderCommitList(topEntries)}
+            </div>
+          ) : null}
+
+          <div className="flex items-center gap-2 px-3 py-1.5" aria-hidden>
+            <span className="h-px flex-1 bg-border/60" />
+            <span className="inline-flex max-w-[80%] items-center gap-1 typography-micro text-muted-foreground">
+              <span className="truncate" title={branchDivider.branchName}>{branchDivider.branchName}</span>
+              {dividerIcon}
+            </span>
+            <span className="h-px flex-1 bg-border/60" />
+          </div>
+
+          {bottomEntries.length > 0 ? (
+            <div className="rounded-xl border border-border/60 bg-background/70 overflow-hidden">
+              {renderCommitList(bottomEntries)}
+            </div>
+          ) : null}
+        </div>
       ) : (
-        <ul className="divide-y divide-border/60">
-          {log.all.map((entry) => (
-            <HistoryCommitRow
-              key={entry.hash}
-              entry={entry}
-              isExpanded={expandedCommitHashes.has(entry.hash)}
-              onToggle={() => onToggleCommit(entry.hash)}
-              files={commitFilesMap.get(entry.hash) ?? []}
-              isLoadingFiles={loadingCommitHashes.has(entry.hash)}
-              onCopyHash={onCopyHash}
-            />
-          ))}
-        </ul>
+        renderCommitList(log.all)
       )}
     </ScrollableOverlay>
   );
 
   if (!showHeader) {
+    if (hasSplitHistory) {
+      return <section>{content}</section>;
+    }
     return (
       <section className="rounded-xl border border-border/60 bg-background/70 overflow-hidden">
         {content}

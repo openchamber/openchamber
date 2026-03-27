@@ -306,6 +306,12 @@ export interface GitWorktreeValidationResult {
   };
 }
 
+export interface GitWorktreeBootstrapStatus {
+  status: 'pending' | 'ready' | 'failed';
+  error: string | null;
+  updatedAt: number;
+}
+
 export interface CreateGitWorktreePayload {
   mode?: 'new' | 'existing';
   /** Worktree folder name (falls back to OpenCode name generation when omitted). */
@@ -351,6 +357,10 @@ export interface GitDeleteRemoteBranchPayload {
   remote?: string;
 }
 
+export interface GitRemoveRemotePayload {
+  remote: string;
+}
+
 export interface CreateGitCommitOptions {
   addAll?: boolean;
   files?: string[];
@@ -376,6 +386,8 @@ export interface GeneratedPullRequestDescription {
 export interface GitWorktreeAPI {
   list(directory: string): Promise<GitWorktreeInfo[]>;
   validate?(directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeValidationResult>;
+  bootstrapStatus?(directory: string): Promise<GitWorktreeBootstrapStatus>;
+  preview?(directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeCreateResult>;
   create?(directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeCreateResult>;
   remove?(directory: string, payload: RemoveGitWorktreePayload): Promise<{ success: boolean }>;
 }
@@ -390,6 +402,7 @@ export interface GitAPI {
   getGitBranches(directory: string): Promise<GitBranch>;
   deleteGitBranch(directory: string, payload: GitDeleteBranchPayload): Promise<{ success: boolean }>;
   deleteRemoteBranch(directory: string, payload: GitDeleteRemoteBranchPayload): Promise<{ success: boolean }>;
+  removeRemote(directory: string, payload: GitRemoveRemotePayload): Promise<{ success: boolean }>;
   generateCommitMessage(directory: string, files: string[], options?: { zenModel?: string; providerId?: string; modelId?: string }): Promise<{ message: GeneratedCommitMessage }>;
   generatePullRequestDescription(
     directory: string,
@@ -397,6 +410,8 @@ export interface GitAPI {
   ): Promise<GeneratedPullRequestDescription>;
   listGitWorktrees(directory: string): Promise<GitWorktreeInfo[]>;
   validateGitWorktree?(directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeValidationResult>;
+  getGitWorktreeBootstrapStatus?(directory: string): Promise<GitWorktreeBootstrapStatus>;
+  previewGitWorktree?(directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeCreateResult>;
   createGitWorktree?(directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeCreateResult>;
   deleteGitWorktree?(directory: string, payload: RemoveGitWorktreePayload): Promise<{ success: boolean }>;
   createGitCommit(directory: string, message: string, options?: CreateGitCommitOptions): Promise<GitCommitResult>;
@@ -516,7 +531,6 @@ export interface SettingsPayload {
   securityScopedBookmarks?: string[];
   pinnedDirectories?: string[];
   showReasoningTraces?: boolean;
-  showTextJustificationActivity?: boolean;
   showDeletionDialog?: boolean;
   nativeNotificationsEnabled?: boolean;
   notificationMode?: 'always' | 'hidden-only';
@@ -524,8 +538,13 @@ export interface SettingsPayload {
   autoDeleteAfterDays?: number;
   queueModeEnabled?: boolean;
   gitmojiEnabled?: boolean;
-  toolCallExpansion?: 'collapsed' | 'activity' | 'detailed' | 'changes';
   inputSpellcheckEnabled?: boolean;
+  showToolFileIcons?: boolean;
+  showExpandedBashTools?: boolean;
+  showExpandedEditTools?: boolean;
+  chatRenderMode?: 'sorted' | 'live';
+  activityRenderMode?: 'collapsed' | 'summary';
+  mermaidRenderingMode?: 'svg' | 'ascii';
   fontSize?: number;
   terminalFontSize?: number;
   padding?: number;
@@ -610,6 +629,7 @@ export interface EditorAPI {
 export interface VSCodeAPI {
   executeCommand(command: string, ...args: unknown[]): Promise<unknown>;
   openAgentManager(): Promise<void>;
+  openExternalUrl(url: string): Promise<void>;
 }
 
 export interface PushSubscribePayload {

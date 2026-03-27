@@ -159,13 +159,6 @@ const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
     customizable: true,
   },
   {
-    id: 'toggle_nav_rail',
-    defaultCombo: 'mod+shift+l',
-    label: 'Toggle project rail',
-    description: 'Expand or collapse the project navigation rail',
-    customizable: true,
-  },
-  {
     id: 'toggle_right_sidebar',
     defaultCombo: 'mod+b',
     label: 'Toggle right sidebar',
@@ -203,8 +196,8 @@ const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
   {
     id: 'new_chat_worktree',
     defaultCombo: 'mod+shift+n',
-    label: 'New session with worktree',
-    description: 'Start a new session in a worktree',
+    label: 'New worktree draft',
+    description: 'Create a new worktree and open a draft in it',
     customizable: true,
   },
   {

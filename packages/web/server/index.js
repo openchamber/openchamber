@@ -11,11 +11,23 @@ import crypto from 'crypto';
 import { createUiAuth } from './lib/opencode/ui-auth.js';
 import { createTunnelAuth } from './lib/opencode/tunnel-auth.js';
 import {
-  startCloudflareQuickTunnel,
-  startCloudflareNamedTunnel,
   printTunnelWarning,
-  checkCloudflaredAvailable,
 } from './lib/cloudflare-tunnel.js';
+import { createTunnelService } from './lib/tunnels/index.js';
+import { createTunnelProviderRegistry } from './lib/tunnels/registry.js';
+import { createCloudflareTunnelProvider } from './lib/tunnels/providers/cloudflare.js';
+import {
+  TUNNEL_MODE_MANAGED_LOCAL,
+  TUNNEL_MODE_MANAGED_REMOTE,
+  TUNNEL_MODE_QUICK,
+  TUNNEL_PROVIDER_CLOUDFLARE,
+  TunnelServiceError,
+  isSupportedTunnelMode,
+  normalizeOptionalPath,
+  normalizeTunnelStartRequest,
+  normalizeTunnelMode,
+  normalizeTunnelProvider,
+} from './lib/tunnels/types.js';
 import { prepareNotificationLastMessage } from './lib/notifications/index.js';
 import {
   TERMINAL_INPUT_WS_MAX_PAYLOAD_BYTES,
@@ -48,8 +60,6 @@ const TUNNEL_BOOTSTRAP_TTL_MAX_MS = 24 * 60 * 60 * 1000;
 const TUNNEL_SESSION_TTL_DEFAULT_MS = 8 * 60 * 60 * 1000;
 const TUNNEL_SESSION_TTL_MIN_MS = 5 * 60 * 1000;
 const TUNNEL_SESSION_TTL_MAX_MS = 24 * 60 * 60 * 1000;
-const TUNNEL_MODE_QUICK = 'quick';
-const TUNNEL_MODE_NAMED = 'named';
 const OPENCHAMBER_VERSION = (() => {
   try {
     const packagePath = path.resolve(__dirname, '..', 'package.json');
@@ -101,6 +111,101 @@ const normalizeDirectoryPath = (value) => {
   return trimmed;
 };
 
+const normalizePathForPersistence = (value) => {
+  if (typeof value !== 'string') {
+    return value;
+  }
+
+  const normalized = normalizeDirectoryPath(value);
+  if (typeof normalized !== 'string') {
+    return normalized;
+  }
+
+  const trimmed = normalized.trim();
+  if (!trimmed) {
+    return trimmed;
+  }
+
+  if (process.platform !== 'win32') {
+    return trimmed;
+  }
+
+  return trimmed.replace(/\//g, '\\');
+};
+
+const areStringArraysEqual = (a, b) => {
+  if (!Array.isArray(a) || !Array.isArray(b)) {
+    return false;
+  }
+  if (a.length !== b.length) {
+    return false;
+  }
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) {
+      return false;
+    }
+  }
+  return true;
+};
+
+const normalizeSettingsPaths = (input) => {
+  const settings = input && typeof input === 'object' ? input : {};
+  let next = settings;
+  let changed = false;
+
+  const ensureNext = () => {
+    if (next === settings) {
+      next = { ...settings };
+    }
+  };
+
+  const normalizePathField = (key) => {
+    if (typeof settings[key] !== 'string' || settings[key].length === 0) {
+      return;
+    }
+    const normalized = normalizePathForPersistence(settings[key]);
+    if (normalized !== settings[key]) {
+      ensureNext();
+      next[key] = normalized;
+      changed = true;
+    }
+  };
+
+  const normalizePathArrayField = (key) => {
+    if (!Array.isArray(settings[key])) {
+      return;
+    }
+
+    const normalized = normalizeStringArray(
+      settings[key]
+        .map((entry) => (typeof entry === 'string' ? normalizePathForPersistence(entry) : entry))
+        .filter((entry) => typeof entry === 'string' && entry.length > 0)
+    );
+
+    if (!areStringArraysEqual(normalized, settings[key])) {
+      ensureNext();
+      next[key] = normalized;
+      changed = true;
+    }
+  };
+
+  normalizePathField('lastDirectory');
+  normalizePathField('homeDirectory');
+  normalizePathArrayField('approvedDirectories');
+  normalizePathArrayField('pinnedDirectories');
+
+  if (Array.isArray(settings.projects)) {
+    const normalizedProjects = sanitizeProjects(settings.projects) || [];
+    if (JSON.stringify(normalizedProjects) !== JSON.stringify(settings.projects)) {
+      ensureNext();
+      next.projects = normalizedProjects;
+      changed = true;
+    }
+  }
+
+  return { settings: next, changed };
+};
+
 const OPENCHAMBER_USER_CONFIG_ROOT = path.join(os.homedir(), '.config', 'openchamber');
 const OPENCHAMBER_USER_THEMES_DIR = path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'themes');
 
@@ -127,18 +232,7 @@ const normalizeTunnelSessionTtlMs = (value) => {
   return clampNumber(Math.round(value), TUNNEL_SESSION_TTL_MIN_MS, TUNNEL_SESSION_TTL_MAX_MS);
 };
 
-const normalizeTunnelMode = (value) => {
-  if (typeof value !== 'string') {
-    return TUNNEL_MODE_QUICK;
-  }
-  const mode = value.trim().toLowerCase();
-  if (mode === TUNNEL_MODE_NAMED) {
-    return TUNNEL_MODE_NAMED;
-  }
-  return TUNNEL_MODE_QUICK;
-};
-
-const normalizeNamedTunnelHostname = (value) => {
+const normalizeManagedRemoteTunnelHostname = (value) => {
   if (typeof value !== 'string') {
     return undefined;
   }
@@ -165,7 +259,7 @@ const normalizeNamedTunnelHostname = (value) => {
   return hostname;
 };
 
-const normalizeNamedTunnelPresets = (value) => {
+const normalizeManagedRemoteTunnelPresets = (value) => {
   if (!Array.isArray(value)) {
     return undefined;
   }
@@ -179,7 +273,7 @@ const normalizeNamedTunnelPresets = (value) => {
     const candidate = entry;
     const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
     const name = typeof candidate.name === 'string' ? candidate.name.trim() : '';
-    const hostname = normalizeNamedTunnelHostname(candidate.hostname);
+    const hostname = normalizeManagedRemoteTunnelHostname(candidate.hostname);
     if (!id || !name || !hostname) continue;
     if (seenIds.has(id) || seenHostnames.has(hostname)) continue;
     seenIds.add(id);
@@ -190,7 +284,7 @@ const normalizeNamedTunnelPresets = (value) => {
   return result;
 };
 
-const normalizeNamedTunnelPresetTokens = (value) => {
+const normalizeManagedRemoteTunnelPresetTokens = (value) => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return undefined;
   }
@@ -563,8 +657,9 @@ const searchFilesystemFiles = async (rootPath, options) => {
           }
 
           const result = await new Promise((resolve) => {
-            const child = spawn('git', ['check-ignore', '--', ...pathsToCheck], {
+            const child = spawn(resolveGitBinaryForSpawn(), ['check-ignore', '--', ...pathsToCheck], {
               cwd: dir,
+              windowsHide: true,
               stdio: ['ignore', 'pipe', 'pipe'],
             });
 
@@ -1136,7 +1231,11 @@ const buildTemplateVariables = async (payload, sessionId) => {
   if (worktreeDir) {
     try {
       const { simpleGit } = await import('simple-git');
-      const git = simpleGit(worktreeDir);
+      const git = simpleGit({
+        baseDir: worktreeDir,
+        spawnOptions: { windowsHide: true },
+        binary: resolveGitBinaryForSpawn(),
+      });
       branch = await Promise.race([
         git.revparse(['--abbrev-ref', 'HEAD']),
         new Promise((_, reject) => setTimeout(() => reject(new Error('git timeout')), 3000)),
@@ -1163,8 +1262,9 @@ const OPENCHAMBER_DATA_DIR = process.env.OPENCHAMBER_DATA_DIR
   : path.join(os.homedir(), '.config', 'openchamber');
 const SETTINGS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'settings.json');
 const PUSH_SUBSCRIPTIONS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'push-subscriptions.json');
-const CLOUDFLARE_NAMED_TUNNELS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'cloudflare-named-tunnels.json');
-const CLOUDFLARE_NAMED_TUNNELS_VERSION = 1;
+const CLOUDFLARE_MANAGED_REMOTE_TUNNELS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'cloudflare-managed-remote-tunnels.json');
+const CLOUDFLARE_LEGACY_NAMED_TUNNELS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'cloudflare-named-tunnels.json');
+const CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION = 1;
 const PROJECT_ICONS_DIR_PATH = path.join(OPENCHAMBER_DATA_DIR, 'project-icons');
 const PROJECT_ICON_MIME_TO_EXTENSION = {
   'image/png': 'png',
@@ -1351,7 +1451,7 @@ const writeSettingsToDisk = async (settings) => {
 
 const PUSH_SUBSCRIPTIONS_VERSION = 1;
 let persistPushSubscriptionsLock = Promise.resolve();
-let persistNamedTunnelConfigLock = Promise.resolve();
+let persistManagedRemoteTunnelConfigLock = Promise.resolve();
 
 const readPushSubscriptionsFromDisk = async () => {
   try {
@@ -1399,7 +1499,7 @@ const persistPushSubscriptionUpdate = async (mutate) => {
   return persistPushSubscriptionsLock;
 };
 
-const sanitizeNamedTunnelConfigEntries = (value) => {
+const sanitizeManagedRemoteTunnelConfigEntries = (value) => {
   if (!Array.isArray(value)) {
     return [];
   }
@@ -1414,7 +1514,7 @@ const sanitizeNamedTunnelConfigEntries = (value) => {
 
     const id = typeof entry.id === 'string' ? entry.id.trim() : '';
     const name = typeof entry.name === 'string' ? entry.name.trim() : '';
-    const hostname = normalizeNamedTunnelHostname(entry.hostname);
+    const hostname = normalizeManagedRemoteTunnelHostname(entry.hostname);
     const token = typeof entry.token === 'string' ? entry.token.trim() : '';
     const updatedAt = Number.isFinite(entry.updatedAt) ? entry.updatedAt : Date.now();
 
@@ -1433,57 +1533,77 @@ const sanitizeNamedTunnelConfigEntries = (value) => {
   return result;
 };
 
-const readNamedTunnelConfigFromDisk = async () => {
+const migrateManagedRemoteTunnelConfigFromLegacyFile = async () => {
   try {
-    const raw = await fsPromises.readFile(CLOUDFLARE_NAMED_TUNNELS_FILE_PATH, 'utf8');
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') {
-      return { version: CLOUDFLARE_NAMED_TUNNELS_VERSION, tunnels: [] };
-    }
-
-    const version = parsed.version === CLOUDFLARE_NAMED_TUNNELS_VERSION
-      ? CLOUDFLARE_NAMED_TUNNELS_VERSION
-      : CLOUDFLARE_NAMED_TUNNELS_VERSION;
-
-    return {
-      version,
-      tunnels: sanitizeNamedTunnelConfigEntries(parsed.tunnels),
+    const legacyRaw = await fsPromises.readFile(CLOUDFLARE_LEGACY_NAMED_TUNNELS_FILE_PATH, 'utf8');
+    const parsed = JSON.parse(legacyRaw);
+    const tunnels = sanitizeManagedRemoteTunnelConfigEntries(parsed?.tunnels);
+    const migrated = {
+      version: CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION,
+      tunnels,
     };
+    await writeManagedRemoteTunnelConfigToDisk(migrated);
+    return migrated;
   } catch (error) {
     if (error && typeof error === 'object' && error.code === 'ENOENT') {
-      return { version: CLOUDFLARE_NAMED_TUNNELS_VERSION, tunnels: [] };
+      return { version: CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION, tunnels: [] };
     }
-    console.warn('Failed to read named tunnel config file:', error);
-    return { version: CLOUDFLARE_NAMED_TUNNELS_VERSION, tunnels: [] };
+    console.warn('Failed to migrate legacy named tunnel config file:', error);
+    return { version: CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION, tunnels: [] };
   }
 };
 
-const writeNamedTunnelConfigToDisk = async (data) => {
-  await fsPromises.mkdir(path.dirname(CLOUDFLARE_NAMED_TUNNELS_FILE_PATH), { recursive: true });
-  await fsPromises.writeFile(CLOUDFLARE_NAMED_TUNNELS_FILE_PATH, JSON.stringify(data, null, 2), 'utf8');
+const readManagedRemoteTunnelConfigFromDisk = async () => {
+  try {
+    const raw = await fsPromises.readFile(CLOUDFLARE_MANAGED_REMOTE_TUNNELS_FILE_PATH, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') {
+      return { version: CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION, tunnels: [] };
+    }
+
+    const version = parsed.version === CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION
+      ? CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION
+      : CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION;
+
+    return {
+      version,
+      tunnels: sanitizeManagedRemoteTunnelConfigEntries(parsed.tunnels),
+    };
+  } catch (error) {
+    if (error && typeof error === 'object' && error.code === 'ENOENT') {
+      return migrateManagedRemoteTunnelConfigFromLegacyFile();
+    }
+    console.warn('Failed to read managed remote tunnel config file:', error);
+    return { version: CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION, tunnels: [] };
+  }
 };
 
-const updateNamedTunnelConfig = async (mutate) => {
-  persistNamedTunnelConfigLock = persistNamedTunnelConfigLock.then(async () => {
-    const current = await readNamedTunnelConfigFromDisk();
+const writeManagedRemoteTunnelConfigToDisk = async (data) => {
+  await fsPromises.mkdir(path.dirname(CLOUDFLARE_MANAGED_REMOTE_TUNNELS_FILE_PATH), { recursive: true });
+  await fsPromises.writeFile(CLOUDFLARE_MANAGED_REMOTE_TUNNELS_FILE_PATH, JSON.stringify(data, null, 2), { encoding: 'utf8', mode: 0o600 });
+};
+
+const updateManagedRemoteTunnelConfig = async (mutate) => {
+  persistManagedRemoteTunnelConfigLock = persistManagedRemoteTunnelConfigLock.then(async () => {
+    const current = await readManagedRemoteTunnelConfigFromDisk();
     const next = mutate({
-      version: CLOUDFLARE_NAMED_TUNNELS_VERSION,
-      tunnels: sanitizeNamedTunnelConfigEntries(current.tunnels),
+      version: CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION,
+      tunnels: sanitizeManagedRemoteTunnelConfigEntries(current.tunnels),
     });
 
-    await writeNamedTunnelConfigToDisk({
-      version: CLOUDFLARE_NAMED_TUNNELS_VERSION,
-      tunnels: sanitizeNamedTunnelConfigEntries(next?.tunnels),
+    await writeManagedRemoteTunnelConfigToDisk({
+      version: CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION,
+      tunnels: sanitizeManagedRemoteTunnelConfigEntries(next?.tunnels),
     });
   });
 
-  return persistNamedTunnelConfigLock;
+  return persistManagedRemoteTunnelConfigLock;
 };
 
-const syncNamedTunnelConfigWithPresets = async (presets) => {
-  const sanitizedPresets = normalizeNamedTunnelPresets(presets) || [];
+const syncManagedRemoteTunnelConfigWithPresets = async (presets) => {
+  const sanitizedPresets = normalizeManagedRemoteTunnelPresets(presets) || [];
 
-  await updateNamedTunnelConfig((current) => {
+  await updateManagedRemoteTunnelConfig((current) => {
     const byId = new Map(current.tunnels.map((entry) => [entry.id, entry]));
     const byHostname = new Map(current.tunnels.map((entry) => [entry.hostname, entry]));
 
@@ -1503,25 +1623,25 @@ const syncNamedTunnelConfigWithPresets = async (presets) => {
     }
 
     return {
-      version: CLOUDFLARE_NAMED_TUNNELS_VERSION,
+      version: CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION,
       tunnels: nextTunnels,
     };
   });
 };
 
-const upsertNamedTunnelToken = async ({ id, name, hostname, token }) => {
+const upsertManagedRemoteTunnelToken = async ({ id, name, hostname, token }) => {
   if (typeof id !== 'string' || typeof name !== 'string' || typeof hostname !== 'string' || typeof token !== 'string') {
     return;
   }
   const normalizedId = id.trim();
   const normalizedName = name.trim();
-  const normalizedHostname = normalizeNamedTunnelHostname(hostname);
+  const normalizedHostname = normalizeManagedRemoteTunnelHostname(hostname);
   const normalizedToken = token.trim();
   if (!normalizedId || !normalizedName || !normalizedHostname || !normalizedToken) {
     return;
   }
 
-  await updateNamedTunnelConfig((current) => {
+  await updateManagedRemoteTunnelConfig((current) => {
     const withoutConflicts = current.tunnels.filter((entry) => entry.id !== normalizedId && entry.hostname !== normalizedHostname);
     withoutConflicts.push({
       id: normalizedId,
@@ -1532,16 +1652,16 @@ const upsertNamedTunnelToken = async ({ id, name, hostname, token }) => {
     });
 
     return {
-      version: CLOUDFLARE_NAMED_TUNNELS_VERSION,
+      version: CLOUDFLARE_MANAGED_REMOTE_TUNNELS_VERSION,
       tunnels: withoutConflicts,
     };
   });
 };
 
-const resolveNamedTunnelToken = async ({ presetId, hostname }) => {
+const resolveManagedRemoteTunnelToken = async ({ presetId, hostname }) => {
   const normalizedPresetId = typeof presetId === 'string' ? presetId.trim() : '';
-  const normalizedHostname = normalizeNamedTunnelHostname(hostname);
-  const config = await readNamedTunnelConfigFromDisk();
+  const normalizedHostname = normalizeManagedRemoteTunnelHostname(hostname);
+  const config = await readManagedRemoteTunnelConfigFromDisk();
 
   if (normalizedPresetId) {
     const byId = config.tunnels.find((entry) => entry.id === normalizedPresetId);
@@ -1781,7 +1901,8 @@ const sanitizeProjects = (input) => {
     const candidate = entry;
     const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
     const rawPath = typeof candidate.path === 'string' ? candidate.path.trim() : '';
-    const normalizedPath = rawPath ? path.resolve(normalizeDirectoryPath(rawPath)) : '';
+    const resolvedPath = rawPath ? path.resolve(normalizeDirectoryPath(rawPath)) : '';
+    const normalizedPath = resolvedPath ? normalizePathForPersistence(resolvedPath) : '';
     const label = typeof candidate.label === 'string' ? candidate.label.trim() : '';
     const icon = typeof candidate.icon === 'string' ? candidate.icon.trim() : '';
     const iconImage = candidate.iconImage && typeof candidate.iconImage === 'object'
@@ -1891,10 +2012,16 @@ const sanitizeSettingsUpdate = (payload) => {
     result.splashFgDark = candidate.splashFgDark.trim();
   }
   if (typeof candidate.lastDirectory === 'string' && candidate.lastDirectory.length > 0) {
-    result.lastDirectory = candidate.lastDirectory;
+    const normalized = normalizePathForPersistence(candidate.lastDirectory);
+    if (typeof normalized === 'string' && normalized.length > 0) {
+      result.lastDirectory = normalized;
+    }
   }
   if (typeof candidate.homeDirectory === 'string' && candidate.homeDirectory.length > 0) {
-    result.homeDirectory = candidate.homeDirectory;
+    const normalized = normalizePathForPersistence(candidate.homeDirectory);
+    if (typeof normalized === 'string' && normalized.length > 0) {
+      result.homeDirectory = normalized;
+    }
   }
 
   // Absolute path to the opencode CLI binary (optional override).
@@ -1915,13 +2042,21 @@ const sanitizeSettingsUpdate = (payload) => {
   }
 
   if (Array.isArray(candidate.approvedDirectories)) {
-    result.approvedDirectories = normalizeStringArray(candidate.approvedDirectories);
+    result.approvedDirectories = normalizeStringArray(
+      candidate.approvedDirectories
+        .map((entry) => (typeof entry === 'string' ? normalizePathForPersistence(entry) : entry))
+        .filter((entry) => typeof entry === 'string' && entry.length > 0)
+    );
   }
   if (Array.isArray(candidate.securityScopedBookmarks)) {
     result.securityScopedBookmarks = normalizeStringArray(candidate.securityScopedBookmarks);
   }
   if (Array.isArray(candidate.pinnedDirectories)) {
-    result.pinnedDirectories = normalizeStringArray(candidate.pinnedDirectories);
+    result.pinnedDirectories = normalizeStringArray(
+      candidate.pinnedDirectories
+        .map((entry) => (typeof entry === 'string' ? normalizePathForPersistence(entry) : entry))
+        .filter((entry) => typeof entry === 'string' && entry.length > 0)
+    );
   }
 
 
@@ -2018,29 +2153,41 @@ const sanitizeSettingsUpdate = (payload) => {
   if (typeof candidate.tunnelSessionTtlMs === 'number' && Number.isFinite(candidate.tunnelSessionTtlMs)) {
     result.tunnelSessionTtlMs = normalizeTunnelSessionTtlMs(candidate.tunnelSessionTtlMs);
   }
+  if (typeof candidate.tunnelProvider === 'string') {
+    const provider = normalizeTunnelProvider(candidate.tunnelProvider);
+    if (provider) {
+      result.tunnelProvider = provider;
+    }
+  }
   if (typeof candidate.tunnelMode === 'string') {
     result.tunnelMode = normalizeTunnelMode(candidate.tunnelMode);
   }
-  if (typeof candidate.namedTunnelHostname === 'string') {
-    const hostname = normalizeNamedTunnelHostname(candidate.namedTunnelHostname);
-    result.namedTunnelHostname = hostname;
+  if (candidate.managedLocalTunnelConfigPath === null) {
+    result.managedLocalTunnelConfigPath = null;
+  } else if (typeof candidate.managedLocalTunnelConfigPath === 'string') {
+    const trimmed = candidate.managedLocalTunnelConfigPath.trim();
+    result.managedLocalTunnelConfigPath = trimmed.length > 0 ? normalizeOptionalPath(trimmed) : null;
   }
-  if (candidate.namedTunnelToken === null) {
-    result.namedTunnelToken = null;
-  } else if (typeof candidate.namedTunnelToken === 'string') {
-    result.namedTunnelToken = candidate.namedTunnelToken.trim();
+  if (typeof candidate.managedRemoteTunnelHostname === 'string') {
+    const hostname = normalizeManagedRemoteTunnelHostname(candidate.managedRemoteTunnelHostname);
+    result.managedRemoteTunnelHostname = hostname;
   }
-  const namedTunnelPresets = normalizeNamedTunnelPresets(candidate.namedTunnelPresets);
-  if (namedTunnelPresets) {
-    result.namedTunnelPresets = namedTunnelPresets;
+  if (candidate.managedRemoteTunnelToken === null) {
+    result.managedRemoteTunnelToken = null;
+  } else if (typeof candidate.managedRemoteTunnelToken === 'string') {
+    result.managedRemoteTunnelToken = candidate.managedRemoteTunnelToken.trim();
   }
-  const namedTunnelPresetTokens = normalizeNamedTunnelPresetTokens(candidate.namedTunnelPresetTokens);
-  if (namedTunnelPresetTokens) {
-    result.namedTunnelPresetTokens = namedTunnelPresetTokens;
+  const managedRemoteTunnelPresets = normalizeManagedRemoteTunnelPresets(candidate.managedRemoteTunnelPresets);
+  if (managedRemoteTunnelPresets) {
+    result.managedRemoteTunnelPresets = managedRemoteTunnelPresets;
   }
-  if (typeof candidate.namedTunnelSelectedPresetId === 'string') {
-    const id = candidate.namedTunnelSelectedPresetId.trim();
-    result.namedTunnelSelectedPresetId = id || undefined;
+  const managedRemoteTunnelPresetTokens = normalizeManagedRemoteTunnelPresetTokens(candidate.managedRemoteTunnelPresetTokens);
+  if (managedRemoteTunnelPresetTokens) {
+    result.managedRemoteTunnelPresetTokens = managedRemoteTunnelPresetTokens;
+  }
+  if (typeof candidate.managedRemoteTunnelSelectedPresetId === 'string') {
+    const id = candidate.managedRemoteTunnelSelectedPresetId.trim();
+    result.managedRemoteTunnelSelectedPresetId = id || undefined;
   }
 
   const typography = sanitizeTypographySizesPartial(candidate.typographySizes);
@@ -2096,6 +2243,33 @@ const sanitizeSettingsUpdate = (payload) => {
   }
   if (typeof candidate.inputSpellcheckEnabled === 'boolean') {
     result.inputSpellcheckEnabled = candidate.inputSpellcheckEnabled;
+  }
+  if (typeof candidate.showToolFileIcons === 'boolean') {
+    result.showToolFileIcons = candidate.showToolFileIcons;
+  }
+  if (typeof candidate.showExpandedBashTools === 'boolean') {
+    result.showExpandedBashTools = candidate.showExpandedBashTools;
+  }
+  if (typeof candidate.showExpandedEditTools === 'boolean') {
+    result.showExpandedEditTools = candidate.showExpandedEditTools;
+  }
+  if (typeof candidate.chatRenderMode === 'string') {
+    const mode = candidate.chatRenderMode.trim();
+    if (mode === 'sorted' || mode === 'live') {
+      result.chatRenderMode = mode;
+    }
+  }
+  if (typeof candidate.activityRenderMode === 'string') {
+    const mode = candidate.activityRenderMode.trim();
+    if (mode === 'collapsed' || mode === 'summary') {
+      result.activityRenderMode = mode;
+    }
+  }
+  if (typeof candidate.mermaidRenderingMode === 'string') {
+    const mode = candidate.mermaidRenderingMode.trim();
+    if (mode === 'svg' || mode === 'ascii') {
+      result.mermaidRenderingMode = mode;
+    }
   }
   if (typeof candidate.userMessageRenderingMode === 'string') {
     const mode = candidate.userMessageRenderingMode.trim();
@@ -2274,6 +2448,11 @@ const sanitizeSettingsUpdate = (payload) => {
     }
   }
 
+  // Usage reporting opt-out (default: true/enabled)
+  if (typeof candidate.reportUsage === 'boolean') {
+    result.reportUsage = candidate.reportUsage;
+  }
+
   return result;
 };
 
@@ -2337,15 +2516,15 @@ const mergePersistedSettings = (current, changes) => {
 
 const formatSettingsResponse = (settings) => {
   const sanitized = sanitizeSettingsUpdate(settings);
-  delete sanitized.namedTunnelToken;
+  delete sanitized.managedRemoteTunnelToken;
   const approved = normalizeStringArray(settings.approvedDirectories);
   const bookmarks = normalizeStringArray(settings.securityScopedBookmarks);
-  const hasNamedTunnelToken = typeof settings?.namedTunnelToken === 'string' && settings.namedTunnelToken.trim().length > 0;
+  const hasManagedRemoteTunnelToken = typeof settings?.managedRemoteTunnelToken === 'string' && settings.managedRemoteTunnelToken.trim().length > 0;
   const pwaAppName = normalizePwaAppName(settings?.pwaAppName, '');
 
   return {
     ...sanitized,
-    hasNamedTunnelToken,
+    hasManagedRemoteTunnelToken,
     ...(pwaAppName ? { pwaAppName } : {}),
     approvedDirectories: approved,
     securityScopedBookmarks: bookmarks,
@@ -2604,16 +2783,79 @@ const migrateSettingsNotificationDefaults = async (current) => {
   return { settings: changed ? next : settings, changed };
 };
 
+const migrateSettingsFromLegacyNamedTunnelKeys = async (current) => {
+  const settings = current && typeof current === 'object' ? current : {};
+  const next = { ...settings };
+  let changed = false;
+
+  if (!Object.prototype.hasOwnProperty.call(next, 'managedRemoteTunnelHostname')
+    && Object.prototype.hasOwnProperty.call(next, 'namedTunnelHostname')) {
+    next.managedRemoteTunnelHostname = normalizeManagedRemoteTunnelHostname(next.namedTunnelHostname);
+    changed = true;
+  }
+
+  if (!Object.prototype.hasOwnProperty.call(next, 'managedRemoteTunnelToken')
+    && Object.prototype.hasOwnProperty.call(next, 'namedTunnelToken')) {
+    if (next.namedTunnelToken === null) {
+      next.managedRemoteTunnelToken = null;
+    } else if (typeof next.namedTunnelToken === 'string') {
+      next.managedRemoteTunnelToken = next.namedTunnelToken.trim();
+    }
+    changed = true;
+  }
+
+  if (!Object.prototype.hasOwnProperty.call(next, 'managedRemoteTunnelPresets')
+    && Object.prototype.hasOwnProperty.call(next, 'namedTunnelPresets')) {
+    next.managedRemoteTunnelPresets = normalizeManagedRemoteTunnelPresets(next.namedTunnelPresets);
+    changed = true;
+  }
+
+  if (!Object.prototype.hasOwnProperty.call(next, 'managedRemoteTunnelPresetTokens')
+    && Object.prototype.hasOwnProperty.call(next, 'namedTunnelPresetTokens')) {
+    next.managedRemoteTunnelPresetTokens = normalizeManagedRemoteTunnelPresetTokens(next.namedTunnelPresetTokens);
+    changed = true;
+  }
+
+  if (!Object.prototype.hasOwnProperty.call(next, 'managedRemoteTunnelSelectedPresetId')
+    && Object.prototype.hasOwnProperty.call(next, 'namedTunnelSelectedPresetId')) {
+    const selectedPresetId = typeof next.namedTunnelSelectedPresetId === 'string'
+      ? next.namedTunnelSelectedPresetId.trim()
+      : '';
+    if (selectedPresetId) {
+      next.managedRemoteTunnelSelectedPresetId = selectedPresetId;
+    }
+    changed = true;
+  }
+
+  const legacyKeys = [
+    'namedTunnelHostname',
+    'namedTunnelToken',
+    'namedTunnelPresets',
+    'namedTunnelPresetTokens',
+    'namedTunnelSelectedPresetId',
+  ];
+  for (const key of legacyKeys) {
+    if (Object.prototype.hasOwnProperty.call(next, key)) {
+      delete next[key];
+      changed = true;
+    }
+  }
+
+  return { settings: changed ? next : settings, changed };
+};
+
 const readSettingsFromDiskMigrated = async () => {
   const current = await readSettingsFromDisk();
   const migration1 = await migrateSettingsFromLegacyLastDirectory(current);
   const migration2 = await migrateSettingsFromLegacyThemePreferences(migration1.settings);
   const migration3 = await migrateSettingsFromLegacyCollapsedProjects(migration2.settings);
   const migration4 = await migrateSettingsNotificationDefaults(migration3.settings);
-  if (migration1.changed || migration2.changed || migration3.changed || migration4.changed) {
-    await writeSettingsToDisk(migration4.settings);
+  const migration5 = await migrateSettingsFromLegacyNamedTunnelKeys(migration4.settings);
+  const migration6 = normalizeSettingsPaths(migration5.settings);
+  if (migration1.changed || migration2.changed || migration3.changed || migration4.changed || migration5.changed || migration6.changed) {
+    await writeSettingsToDisk(migration6.settings);
   }
-  return migration4.settings;
+  return migration6.settings;
 };
 
 const getOrCreateVapidKeys = async () => {
@@ -2940,6 +3182,7 @@ const updateSessionState = (sessionId, status, eventId, metadata = {}) => {
 
   const now = Date.now();
   const existing = sessionStates.get(sessionId);
+  const existingAttentionState = sessionAttentionStates.get(sessionId);
 
   // Only update if this is a newer event (simple ordering protection)
   if (existing && existing.lastUpdateAt > now - 5000 && status === existing.status) {
@@ -2956,13 +3199,14 @@ const updateSessionState = (sessionId, status, eventId, metadata = {}) => {
 
   // Update attention tracking state (must be called before broadcasting)
   updateSessionAttentionStatus(sessionId, status, eventId);
+  const attentionState = sessionAttentionStates.get(sessionId);
 
   // Broadcast status change to connected web clients via SSE
   // This enables real-time updates without polling
   // Include needsAttention in the same event to ensure atomic updates
-  if (uiNotificationClients.size > 0 && (!existing || existing.status !== status)) {
+  const attentionChanged = !!attentionState && existingAttentionState?.needsAttention !== attentionState.needsAttention;
+  if (uiNotificationClients.size > 0 && (!existing || existing.status !== status || attentionChanged)) {
     const state = sessionStates.get(sessionId);
-    const attentionState = sessionAttentionStates.get(sessionId);
     for (const res of uiNotificationClients) {
       try {
         writeSseEvent(res, {
@@ -3277,6 +3521,11 @@ const persistSettings = async (changes) => {
     const sanitized = sanitizeSettingsUpdate(changes);
     let next = mergePersistedSettings(current, sanitized);
 
+    const normalizedState = normalizeSettingsPaths(next);
+    if (normalizedState.changed) {
+      next = normalizedState.settings;
+    }
+
     if (Array.isArray(next.projects)) {
       console.log(`[persistSettings] Validating ${next.projects.length} projects...`);
       const validated = await validateProjectEntries(next.projects);
@@ -3296,13 +3545,13 @@ const persistSettings = async (changes) => {
       next = { ...next, activeProjectId: undefined };
     }
 
-    if (Object.prototype.hasOwnProperty.call(sanitized, 'namedTunnelPresets')) {
-      await syncNamedTunnelConfigWithPresets(next.namedTunnelPresets);
+    if (Object.prototype.hasOwnProperty.call(sanitized, 'managedRemoteTunnelPresets')) {
+      await syncManagedRemoteTunnelConfigWithPresets(next.managedRemoteTunnelPresets);
     }
 
-    if (Object.prototype.hasOwnProperty.call(sanitized, 'namedTunnelPresetTokens') && sanitized.namedTunnelPresetTokens) {
-      const presetsById = new Map((next.namedTunnelPresets || []).map((entry) => [entry.id, entry]));
-      const updates = Object.entries(sanitized.namedTunnelPresetTokens)
+    if (Object.prototype.hasOwnProperty.call(sanitized, 'managedRemoteTunnelPresetTokens') && sanitized.managedRemoteTunnelPresetTokens) {
+      const presetsById = new Map((next.managedRemoteTunnelPresets || []).map((entry) => [entry.id, entry]));
+      const updates = Object.entries(sanitized.managedRemoteTunnelPresetTokens)
         .map(([presetId, token]) => {
           const preset = presetsById.get(presetId);
           if (!preset || typeof token !== 'string' || token.trim().length === 0) {
@@ -3318,7 +3567,7 @@ const persistSettings = async (changes) => {
         .filter(Boolean);
 
       for (const update of updates) {
-        await upsertNamedTunnelToken(update);
+        await upsertManagedRemoteTunnelToken(update);
       }
     }
 
@@ -3379,10 +3628,14 @@ let openCodeNotReadySince = 0;
 let isExternalOpenCode = false;
 let exitOnShutdown = true;
 let uiAuthController = null;
-let cloudflareTunnelController = null;
+let activeTunnelController = null;
+const tunnelProviderRegistry = createTunnelProviderRegistry([
+  createCloudflareTunnelProvider(),
+]);
+tunnelProviderRegistry.seal();
 const tunnelAuthController = createTunnelAuth();
-let runtimeNamedTunnelToken = '';
-let runtimeNamedTunnelHostname = '';
+let runtimeManagedRemoteTunnelToken = '';
+let runtimeManagedRemoteTunnelHostname = '';
 let terminalInputWsServer = null;
 const userProvidedOpenCodePassword =
   typeof hmrState.userProvidedOpenCodePassword === 'string' && hmrState.userProvidedOpenCodePassword.length > 0
@@ -3535,6 +3788,21 @@ const ENV_CONFIGURED_OPENCODE_HOST = (() => {
 // OPENCODE_HOST takes precedence over OPENCODE_PORT when both are set
 const ENV_EFFECTIVE_PORT = ENV_CONFIGURED_OPENCODE_HOST?.port ?? ENV_CONFIGURED_OPENCODE_PORT;
 
+const ENV_CONFIGURED_OPENCODE_HOSTNAME = (() => {
+  const raw = process.env.OPENCHAMBER_OPENCODE_HOSTNAME;
+  if (typeof raw !== 'string') {
+    return '127.0.0.1';
+  }
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    console.warn(
+      `[config] Ignoring OPENCHAMBER_OPENCODE_HOSTNAME=${JSON.stringify(raw)}: empty after trimming`,
+    );
+    return '127.0.0.1';
+  }
+  return trimmed;
+})();
+
 const ENV_SKIP_OPENCODE_START = process.env.OPENCODE_SKIP_START === 'true' ||
                                     process.env.OPENCHAMBER_SKIP_OPENCODE_START === 'true';
 const ENV_DESKTOP_NOTIFY = process.env.OPENCHAMBER_DESKTOP_NOTIFY === 'true';
@@ -3667,6 +3935,7 @@ function getLoginShellEnvSnapshot() {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
         maxBuffer: 10 * 1024 * 1024,
+        windowsHide: true,
       });
 
       if (result.status !== 0) {
@@ -3705,6 +3974,7 @@ function getWindowsShellEnvSnapshot() {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
         maxBuffer: 10 * 1024 * 1024,
+        windowsHide: true,
       });
       if (result.status !== 0) {
         continue;
@@ -3724,6 +3994,7 @@ function getWindowsShellEnvSnapshot() {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
       maxBuffer: 10 * 1024 * 1024,
+      windowsHide: true,
     });
     if (result.status === 0 && typeof result.stdout === 'string' && result.stdout.length > 0) {
       return parseNullSeparatedEnvSnapshot(result.stdout.replace(/\r?\n/g, '\0'));
@@ -3793,10 +4064,87 @@ let resolvedOpencodeBinary = null;
 let resolvedOpencodeBinarySource = null;
 let resolvedNodeBinary = null;
 let resolvedBunBinary = null;
+let resolvedGitBinary = null;
 let useWslForOpencode = false;
 let resolvedWslBinary = null;
 let resolvedWslOpencodePath = null;
 let resolvedWslDistro = null;
+
+function resolveGitBinaryForSpawn() {
+  if (process.platform !== 'win32') {
+    return 'git';
+  }
+
+  if (resolvedGitBinary) {
+    return resolvedGitBinary;
+  }
+
+  const explicit = [process.env.GIT_BINARY, process.env.OPENCHAMBER_GIT_BINARY]
+    .map((value) => (typeof value === 'string' ? value.trim() : ''))
+    .filter(Boolean);
+  for (const candidate of explicit) {
+    if (isExecutable(candidate)) {
+      resolvedGitBinary = candidate;
+      return resolvedGitBinary;
+    }
+  }
+
+  const candidates = [];
+  const normalizeGitCandidate = (candidate) => {
+    if (typeof candidate !== 'string') {
+      return '';
+    }
+    const trimmed = candidate.trim();
+    if (!trimmed) {
+      return '';
+    }
+    const ext = path.extname(trimmed).toLowerCase();
+    if (ext === '.cmd' || ext === '.bat' || ext === '.com') {
+      const exeCandidate = trimmed.slice(0, -ext.length) + '.exe';
+      if (isExecutable(exeCandidate)) {
+        return exeCandidate;
+      }
+    }
+    return trimmed;
+  };
+
+  const pathCandidate = normalizeGitCandidate(searchPathFor('git'));
+  if (pathCandidate && isExecutable(pathCandidate)) {
+    candidates.push(pathCandidate);
+  }
+
+  const pathExeCandidate = normalizeGitCandidate(searchPathFor('git.exe'));
+  if (pathExeCandidate && isExecutable(pathExeCandidate)) {
+    candidates.push(pathExeCandidate);
+  }
+
+  const programRoots = [
+    process.env.ProgramFiles,
+    process.env['ProgramFiles(x86)'],
+    process.env.LocalAppData,
+  ]
+    .map((value) => (typeof value === 'string' ? value.trim() : ''))
+    .filter(Boolean);
+  for (const root of programRoots) {
+    const installCandidates = [
+      path.join(root, 'Git', 'cmd', 'git.exe'),
+      path.join(root, 'Git', 'bin', 'git.exe'),
+      path.join(root, 'Git', 'mingw64', 'bin', 'git.exe'),
+      path.join(root, 'Programs', 'Git', 'cmd', 'git.exe'),
+      path.join(root, 'Programs', 'Git', 'bin', 'git.exe'),
+    ];
+    for (const candidate of installCandidates) {
+      const normalized = normalizeGitCandidate(candidate);
+      if (normalized && isExecutable(normalized)) {
+        candidates.push(normalized);
+      }
+    }
+  }
+
+  const preferredExe = candidates.find((candidate) => candidate.toLowerCase().endsWith('.exe'));
+  resolvedGitBinary = preferredExe || candidates[0] || 'git.exe';
+  return resolvedGitBinary;
+}
 
 function isExecutable(filePath) {
   try {
@@ -3868,6 +4216,7 @@ function resolveWslExecutablePath() {
     const result = spawnSync('where', ['wsl'], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
     });
     if (result.status === 0) {
       const lines = (result.stdout || '')
@@ -3919,6 +4268,7 @@ function probeWslForOpencode() {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
         timeout: 6000,
+        windowsHide: true,
       },
     );
 
@@ -4035,6 +4385,7 @@ function resolveOpencodeCliPath() {
       const result = spawnSync('where', ['opencode'], {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
       });
       if (result.status === 0) {
         const lines = (result.stdout || '')
@@ -4070,6 +4421,7 @@ function resolveOpencodeCliPath() {
       const result = spawnSync(shell, ['-lic', 'command -v opencode'], {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
       });
       if (result.status === 0) {
         const found = (result.stdout || '').trim().split(/\s+/).pop() || '';
@@ -4120,6 +4472,7 @@ function resolveNodeCliPath() {
       const result = spawnSync('where', ['node'], {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
       });
       if (result.status === 0) {
         const lines = (result.stdout || '')
@@ -4142,6 +4495,7 @@ function resolveNodeCliPath() {
       const result = spawnSync(shell, ['-lic', 'command -v node'], {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
       });
       if (result.status === 0) {
         const found = (result.stdout || '').trim().split(/\s+/).pop() || '';
@@ -4201,6 +4555,7 @@ function resolveBunCliPath() {
       const result = spawnSync('where', ['bun'], {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
       });
       if (result.status === 0) {
         const lines = (result.stdout || '')
@@ -4223,6 +4578,7 @@ function resolveBunCliPath() {
       const result = spawnSync(shell, ['-lic', 'command -v bun'], {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
       });
       if (result.status === 0) {
         const found = (result.stdout || '').trim().split(/\s+/).pop() || '';
@@ -5436,7 +5792,26 @@ function parseArgs(argv = process.argv.slice(2)) {
     process.env.OPENCODE_UI_PASSWORD ||
     null;
   const envCfTunnel = process.env.OPENCHAMBER_TRY_CF_TUNNEL === 'true';
-  const options = { port: DEFAULT_PORT, uiPassword: envPassword, tryCfTunnel: envCfTunnel };
+  const envTunnelProvider = process.env.OPENCHAMBER_TUNNEL_PROVIDER || undefined;
+  const envTunnelMode = process.env.OPENCHAMBER_TUNNEL_MODE || undefined;
+  const envTunnelConfigRaw = process.env.OPENCHAMBER_TUNNEL_CONFIG;
+  const envTunnelConfig = typeof envTunnelConfigRaw === 'string'
+    ? (envTunnelConfigRaw.trim().length > 0 ? envTunnelConfigRaw.trim() : null)
+    : undefined;
+  const envTunnelToken = process.env.OPENCHAMBER_TUNNEL_TOKEN || undefined;
+  const envTunnelHostname = process.env.OPENCHAMBER_TUNNEL_HOSTNAME || undefined;
+
+  const options = {
+    port: DEFAULT_PORT,
+    host: undefined,
+    uiPassword: envPassword,
+    tryCfTunnel: envCfTunnel,
+    tunnelProvider: envTunnelProvider,
+    tunnelMode: envTunnelMode,
+    tunnelConfigPath: envTunnelConfig,
+    tunnelToken: envTunnelToken,
+    tunnelHostname: envTunnelHostname,
+  };
 
   const consumeValue = (currentIndex, inlineValue) => {
     if (typeof inlineValue === 'string') {
@@ -5467,6 +5842,13 @@ function parseArgs(argv = process.argv.slice(2)) {
       continue;
     }
 
+    if (optionName === 'host') {
+      const { value, nextIndex } = consumeValue(i, inlineValue);
+      i = nextIndex;
+      options.host = typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
+      continue;
+    }
+
     if (optionName === 'ui-password') {
       const { value, nextIndex } = consumeValue(i, inlineValue);
       i = nextIndex;
@@ -5478,6 +5860,50 @@ function parseArgs(argv = process.argv.slice(2)) {
       options.tryCfTunnel = true;
       continue;
     }
+
+    if (optionName === 'tunnel-provider') {
+      const { value, nextIndex } = consumeValue(i, inlineValue);
+      i = nextIndex;
+      options.tunnelProvider = typeof value === 'string' ? value : options.tunnelProvider;
+      continue;
+    }
+
+    if (optionName === 'tunnel-mode') {
+      const { value, nextIndex } = consumeValue(i, inlineValue);
+      i = nextIndex;
+      options.tunnelMode = typeof value === 'string' ? value : options.tunnelMode;
+      continue;
+    }
+
+    if (optionName === 'tunnel-config') {
+      const { value, nextIndex } = consumeValue(i, inlineValue);
+      i = nextIndex;
+      options.tunnelConfigPath = typeof value === 'string' ? value : null;
+      continue;
+    }
+
+    if (optionName === 'tunnel-token') {
+      const { value, nextIndex } = consumeValue(i, inlineValue);
+      i = nextIndex;
+      options.tunnelToken = typeof value === 'string' ? value : options.tunnelToken;
+      continue;
+    }
+
+    if (optionName === 'tunnel-hostname') {
+      const { value, nextIndex } = consumeValue(i, inlineValue);
+      i = nextIndex;
+      options.tunnelHostname = typeof value === 'string' ? value : options.tunnelHostname;
+      continue;
+    }
+
+    if (optionName === 'tunnel') {
+      const { value, nextIndex } = consumeValue(i, inlineValue);
+      i = nextIndex;
+      options.tunnelProvider = TUNNEL_PROVIDER_CLOUDFLARE;
+      options.tunnelMode = TUNNEL_MODE_MANAGED_LOCAL;
+      options.tunnelConfigPath = typeof value === 'string' ? value : null;
+      continue;
+    }
   }
 
   return options;
@@ -5487,7 +5913,7 @@ function killProcessOnPort(port) {
   if (!port) return;
   try {
     // Kill any process listening on our port to clean up orphaned children.
-    const result = spawnSync('lsof', ['-ti', `:${port}`], { encoding: 'utf8', timeout: 5000 });
+    const result = spawnSync('lsof', ['-ti', `:${port}`], { encoding: 'utf8', timeout: 5000, windowsHide: true });
     const output = result.stdout || '';
     const myPid = process.pid;
     for (const pidStr of output.split(/\s+/)) {
@@ -5571,6 +5997,7 @@ async function createManagedOpenCodeServerProcess({
   const child = spawn(binary, args, {
     cwd,
     env,
+    windowsHide: true,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
@@ -5637,7 +6064,7 @@ async function createManagedOpenCodeServerProcess({
   };
 }
 
-async function resolveManagedOpenCodePort(requestedPort) {
+async function resolveManagedOpenCodePort(requestedPort, hostname = '127.0.0.1') {
   if (typeof requestedPort === 'number' && Number.isFinite(requestedPort) && requestedPort > 0) {
     return requestedPort;
   }
@@ -5667,13 +6094,13 @@ async function resolveManagedOpenCodePort(requestedPort) {
       });
     });
 
-    server.listen(0, '127.0.0.1');
+    server.listen(0, hostname);
   });
 }
 
 async function startOpenCode() {
   const desiredPort = ENV_CONFIGURED_OPENCODE_PORT ?? 0;
-  const spawnPort = await resolveManagedOpenCodePort(desiredPort);
+  const spawnPort = await resolveManagedOpenCodePort(desiredPort, ENV_CONFIGURED_OPENCODE_HOSTNAME);
   console.log(
     desiredPort > 0
       ? `Starting OpenCode on requested port ${desiredPort}...`
@@ -5688,7 +6115,7 @@ async function startOpenCode() {
 
   try {
     const serverInstance = await createManagedOpenCodeServerProcess({
-      hostname: '127.0.0.1',
+      hostname: ENV_CONFIGURED_OPENCODE_HOSTNAME,
       port: spawnPort,
       timeout: 30000,
       cwd: openCodeWorkingDirectory,
@@ -6676,10 +7103,10 @@ async function gracefulShutdown(options = {}) {
     uiAuthController = null;
   }
 
-  if (cloudflareTunnelController) {
-    console.log('Stopping Cloudflare tunnel...');
-    cloudflareTunnelController.stop();
-    cloudflareTunnelController = null;
+  if (activeTunnelController) {
+    console.log('Stopping active tunnel...');
+    activeTunnelController.stop();
+    activeTunnelController = null;
     tunnelAuthController.clearActiveTunnel();
   }
 
@@ -6691,7 +7118,31 @@ async function gracefulShutdown(options = {}) {
 
 async function main(options = {}) {
   const port = Number.isFinite(options.port) && options.port >= 0 ? Math.trunc(options.port) : DEFAULT_PORT;
+  const host = typeof options.host === 'string' && options.host.length > 0 ? options.host : undefined;
   const tryCfTunnel = options.tryCfTunnel === true;
+  const shouldUseCanonicalTunnelConfig = typeof options.tunnelMode === 'string'
+    || typeof options.tunnelProvider === 'string'
+    || options.tunnelConfigPath === null
+    || typeof options.tunnelConfigPath === 'string'
+    || typeof options.tunnelToken === 'string'
+    || typeof options.tunnelHostname === 'string';
+  const startupTunnelRequest = shouldUseCanonicalTunnelConfig
+    ? normalizeTunnelStartRequest({
+        provider: normalizeTunnelProvider(options.tunnelProvider),
+        mode: options.tunnelMode,
+        configPath: normalizeOptionalPath(options.tunnelConfigPath),
+        token: typeof options.tunnelToken === 'string' ? options.tunnelToken.trim() : '',
+        hostname: normalizeManagedRemoteTunnelHostname(options.tunnelHostname),
+      })
+    : (tryCfTunnel
+      ? {
+          provider: TUNNEL_PROVIDER_CLOUDFLARE,
+          mode: TUNNEL_MODE_QUICK,
+          configPath: undefined,
+          token: '',
+          hostname: undefined,
+        }
+      : null);
   const attachSignals = options.attachSignals !== false;
   const onTunnelReady = typeof options.onTunnelReady === 'function' ? options.onTunnelReady : null;
   if (typeof options.exitOnShutdown === 'boolean') {
@@ -7343,10 +7794,34 @@ async function main(options = {}) {
     });
   });
 
-  app.get('/api/openchamber/update-check', async (_req, res) => {
+  app.get('/api/openchamber/update-check', async (req, res) => {
     try {
       const { checkForUpdates } = await import('./lib/package-manager.js');
-      const updateInfo = await checkForUpdates();
+      const parseString = (value) => (typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined);
+      const parseReportUsage = (value) => {
+        if (typeof value !== 'string') return true;
+        const normalized = value.trim().toLowerCase();
+        if (normalized === 'false' || normalized === '0' || normalized === 'no') return false;
+        return true;
+      };
+      const inferDeviceClass = (ua) => {
+        const value = (ua || '').toLowerCase();
+        if (!value) return 'unknown';
+        if (value.includes('ipad') || value.includes('tablet')) return 'tablet';
+        if (value.includes('mobi') || value.includes('android') || value.includes('iphone')) return 'mobile';
+        return 'desktop';
+      };
+      const userAgent = typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'] : '';
+
+      const updateInfo = await checkForUpdates({
+        appType: parseString(req.query.appType),
+        deviceClass: parseString(req.query.deviceClass) || inferDeviceClass(userAgent),
+        platform: parseString(req.query.platform),
+        arch: parseString(req.query.arch),
+        instanceMode: parseString(req.query.instanceMode),
+        currentVersion: parseString(req.query.currentVersion),
+        reportUsage: parseReportUsage(parseString(req.query.reportUsage)),
+      });
       res.json(updateInfo);
     } catch (error) {
       console.error('Failed to check for updates:', error);
@@ -7605,41 +8080,343 @@ async function main(options = {}) {
     }
   });
 
-  // ── Cloudflare Tunnel API ──────────────────────────────────────────
+  const tunnelService = createTunnelService({
+    registry: tunnelProviderRegistry,
+    getController: () => activeTunnelController,
+    setController: (controller) => {
+      activeTunnelController = controller;
+    },
+    getActivePort: () => activePort,
+    onQuickTunnelWarning: () => {
+      printTunnelWarning();
+    },
+  });
 
-  app.get('/api/openchamber/tunnel/check', async (_req, res) => {
-    try {
-      const result = await checkCloudflaredAvailable();
-      res.json({ available: result.available, version: result.version || null });
-    } catch (error) {
-      console.warn('Cloudflare tunnel check failed:', error);
-      res.json({ available: false, version: null });
+  const resolveActiveNormalizedTunnelMode = () => {
+    const mode = tunnelService.resolveActiveMode();
+    if (mode === TUNNEL_MODE_MANAGED_LOCAL) {
+      return TUNNEL_MODE_MANAGED_LOCAL;
     }
+    if (mode === TUNNEL_MODE_MANAGED_REMOTE) {
+      return TUNNEL_MODE_MANAGED_REMOTE;
+    }
+    return TUNNEL_MODE_QUICK;
+  };
+
+  const resolveNormalizedTunnelHost = (publicUrl) => {
+    if (typeof publicUrl !== 'string' || publicUrl.trim().length === 0) {
+      return null;
+    }
+    try {
+      return new URL(publicUrl).hostname.toLowerCase();
+    } catch {
+      return null;
+    }
+  };
+
+  const resolvePreferredTunnelProvider = async (reqBody = null) => {
+    if (typeof reqBody?.provider === 'string' && reqBody.provider.trim().length > 0) {
+      return normalizeTunnelProvider(reqBody.provider);
+    }
+    const activeProvider = tunnelService.resolveActiveProvider();
+    if (activeProvider) {
+      return normalizeTunnelProvider(activeProvider);
+    }
+    const settings = await readSettingsFromDiskMigrated();
+    return normalizeTunnelProvider(settings?.tunnelProvider);
+  };
+
+  const startTunnelWithNormalizedRequest = async ({
+    provider,
+    mode,
+    intent,
+    hostname,
+    token,
+    configPath,
+    selectedPresetId,
+    selectedPresetName,
+  }) => {
+    if (provider === TUNNEL_PROVIDER_CLOUDFLARE && mode === TUNNEL_MODE_MANAGED_REMOTE) {
+      runtimeManagedRemoteTunnelHostname = hostname;
+      runtimeManagedRemoteTunnelToken = token;
+
+      if (token && hostname) {
+        await upsertManagedRemoteTunnelToken({
+          id: selectedPresetId || hostname,
+          name: selectedPresetName || hostname,
+          hostname,
+          token,
+        });
+      }
+    }
+
+    const result = await tunnelService.start({
+      provider,
+      mode,
+      intent,
+      configPath,
+      token,
+      hostname,
+    });
+
+    console.log(`Tunnel active (${result.provider}): ${result.publicUrl}`);
+    return {
+      publicUrl: result.publicUrl,
+      mode: result.activeMode,
+      provider: result.provider,
+      providerMetadata: result.providerMetadata,
+    };
+  };
+
+  const createGenericModeChecks = ({ modeKey, requiredFields, doctorRequest, startupReady }) => {
+    const checks = [
+      {
+        id: 'startup_readiness',
+        label: 'Provider startup readiness',
+        status: startupReady ? 'pass' : 'fail',
+        detail: startupReady
+          ? 'Provider dependency checks passed.'
+          : 'Resolve provider checks before starting tunnels.',
+      },
+    ];
+
+    for (const field of requiredFields) {
+      const value = doctorRequest?.[field];
+      const present = typeof value === 'string' ? value.trim().length > 0 : Boolean(value);
+      checks.push({
+        id: `requirement_${field}`,
+        label: `Required: ${field}`,
+        status: present ? 'pass' : 'fail',
+        detail: present
+          ? `${field} is configured.`
+          : `${field} is required for ${modeKey}.`,
+      });
+    }
+
+    const failures = checks.filter((entry) => entry.status === 'fail').length;
+    const warnings = checks.filter((entry) => entry.status === 'warn').length;
+    return {
+      mode: modeKey,
+      checks,
+      summary: {
+        ready: failures === 0,
+        failures,
+        warnings,
+      },
+      ready: failures === 0,
+      blockers: checks
+        .filter((entry) => entry.status === 'fail' && entry.id !== 'startup_readiness')
+        .map((entry) => entry.detail || entry.label || entry.id),
+    };
+  };
+
+  const runTunnelDoctor = async ({ providerId, modeFilter, doctorRequest }) => {
+    const provider = tunnelProviderRegistry.get(providerId);
+    if (!provider) {
+      throw new TunnelServiceError('provider_unsupported', `Unsupported tunnel provider: ${providerId}`);
+    }
+
+    const capabilities = provider.capabilities || {};
+    const modeKeys = Array.isArray(capabilities.modes)
+      ? capabilities.modes.map((entry) => entry?.key).filter((key) => typeof key === 'string' && key.length > 0)
+      : [];
+
+    if (modeFilter && !modeKeys.includes(modeFilter)) {
+      throw new TunnelServiceError('mode_unsupported', `Provider '${providerId}' does not support mode '${modeFilter}'`);
+    }
+
+    if (typeof provider.diagnose === 'function') {
+      const diagnosed = await provider.diagnose({
+        ...doctorRequest,
+        mode: modeFilter || doctorRequest?.mode,
+      }, {
+        capabilities,
+      });
+      const providerChecks = Array.isArray(diagnosed?.providerChecks) ? diagnosed.providerChecks : [];
+      const allModes = Array.isArray(diagnosed?.modes) ? diagnosed.modes : [];
+      const modes = modeFilter ? allModes.filter((entry) => entry?.mode === modeFilter) : allModes;
+      return {
+        ok: true,
+        provider: providerId,
+        providerChecks,
+        modes,
+      };
+    }
+
+    const availability = await tunnelService.checkAvailability(providerId);
+    const dependencyAvailable = Boolean(availability?.available);
+    const providerChecks = [{
+      id: 'dependency',
+      label: 'Provider dependency',
+      status: dependencyAvailable ? 'pass' : 'fail',
+      detail: dependencyAvailable
+        ? (availability?.version || 'available')
+        : (availability?.message || 'Required provider dependency is unavailable.'),
+    }];
+
+    const targetModes = (Array.isArray(capabilities.modes) ? capabilities.modes : [])
+      .filter((entry) => !modeFilter || entry?.key === modeFilter);
+    const modes = targetModes.map((entry) => createGenericModeChecks({
+      modeKey: entry.key,
+      requiredFields: Array.isArray(entry?.requires) ? entry.requires : [],
+      doctorRequest,
+      startupReady: dependencyAvailable,
+    }));
+
+    return {
+      ok: true,
+      provider: providerId,
+      providerChecks,
+      modes,
+    };
+  };
+
+  // ── Tunnel API ─────────────────────────────────────────────────────
+
+  app.get('/api/openchamber/tunnel/check', async (req, res) => {
+    try {
+      const requestedProvider = typeof req?.query?.provider === 'string' && req.query.provider.trim().length > 0
+        ? normalizeTunnelProvider(req.query.provider)
+        : await resolvePreferredTunnelProvider();
+      const result = await tunnelService.checkAvailability(requestedProvider);
+      res.json({
+        available: result.available,
+        provider: requestedProvider,
+        version: result.version || null,
+      });
+    } catch (error) {
+      console.warn('Tunnel dependency check failed:', error);
+      res.json({ available: false, provider: null, version: null });
+    }
+  });
+
+  // Accept both POST (preferred, tokens in body) and GET (backward compat, no tokens in URL).
+  const handleTunnelDoctor = async (req, res) => {
+    try {
+      const params = req.query || {};
+      // Sensitive fields (tokens) are read from the request body only, never from query params.
+      const body = req.body || {};
+
+      const providerId = typeof params.provider === 'string' && params.provider.trim().length > 0
+        ? normalizeTunnelProvider(params.provider)
+        : await resolvePreferredTunnelProvider();
+      const modeFilter = typeof params.mode === 'string' && params.mode.trim().length > 0
+        ? params.mode.trim().toLowerCase()
+        : null;
+
+      const settings = await readSettingsFromDiskMigrated();
+      const selectedPresetId = typeof params.managedRemoteTunnelPresetId === 'string'
+        ? params.managedRemoteTunnelPresetId.trim()
+        : '';
+      const requestConfigPath = normalizeOptionalPath(params.configPath)
+        ?? normalizeOptionalPath(settings?.managedLocalTunnelConfigPath);
+      const requestManagedRemoteHostname = normalizeManagedRemoteTunnelHostname(params.managedRemoteTunnelHostname);
+      const requestTunnelHostname = normalizeManagedRemoteTunnelHostname(params.tunnelHostname);
+      const requestHostname = normalizeManagedRemoteTunnelHostname(params.hostname);
+      const hostnameFromSettings = normalizeManagedRemoteTunnelHostname(settings?.managedRemoteTunnelHostname);
+      const hostname = requestHostname || requestTunnelHostname || requestManagedRemoteHostname || hostnameFromSettings;
+
+      const requestManagedRemoteToken = typeof body.managedRemoteTunnelToken === 'string'
+        ? body.managedRemoteTunnelToken.trim()
+        : '';
+      const requestTunnelToken = typeof body.tunnelToken === 'string'
+        ? body.tunnelToken.trim()
+        : '';
+      const requestToken = typeof body.token === 'string'
+        ? body.token.trim()
+        : '';
+      const requestTokenProvided = body.managedRemoteTunnelTokenProvided === true
+        || body.tunnelTokenProvided === true
+        || body.tokenProvided === true;
+      const requestHostnameProvided = body.managedRemoteTunnelHostnameProvided === true
+        || body.tunnelHostnameProvided === true
+        || body.hostnameProvided === true;
+      const storedManagedRemoteToken = typeof settings?.managedRemoteTunnelToken === 'string'
+        ? settings.managedRemoteTunnelToken.trim()
+        : '';
+      const managedRemoteTunnelConfig = await readManagedRemoteTunnelConfigFromDisk();
+      const serverHasSavedManagedRemoteProfile = managedRemoteTunnelConfig.tunnels.some((entry) => {
+        const savedHostname = normalizeManagedRemoteTunnelHostname(entry?.hostname);
+        const savedToken = typeof entry?.token === 'string' ? entry.token.trim() : '';
+        return Boolean(savedHostname && savedToken);
+      });
+      const cliHasSavedManagedRemoteProfile = params.hasSavedManagedRemoteProfile === '1';
+      const hasSavedManagedRemoteProfile = serverHasSavedManagedRemoteProfile || cliHasSavedManagedRemoteProfile;
+      const configManagedRemoteToken = providerId === TUNNEL_PROVIDER_CLOUDFLARE
+        ? await resolveManagedRemoteTunnelToken({ presetId: selectedPresetId, hostname })
+        : '';
+      const token = requestToken
+        || requestTunnelToken
+        || requestManagedRemoteToken
+        || ((runtimeManagedRemoteTunnelHostname && hostname && runtimeManagedRemoteTunnelHostname === hostname) ? runtimeManagedRemoteTunnelToken : '')
+        || configManagedRemoteToken
+        || storedManagedRemoteToken;
+
+      const doctorRequest = {
+        mode: modeFilter,
+        hostname,
+        token,
+        tokenProvided: requestTokenProvided,
+        hostnameProvided: requestHostnameProvided,
+        configPath: requestConfigPath,
+        hasSavedManagedRemoteProfile,
+      };
+
+      const result = await runTunnelDoctor({
+        providerId,
+        modeFilter,
+        doctorRequest,
+      });
+      return res.json(result);
+    } catch (error) {
+      if (error instanceof TunnelServiceError) {
+        return res.status(400).json({ ok: false, error: error.message, code: error.code });
+      }
+      console.warn('Tunnel doctor failed:', error);
+      return res.status(500).json({ ok: false, error: 'Failed to run tunnel doctor' });
+    }
+  };
+  app.post('/api/openchamber/tunnel/doctor', handleTunnelDoctor);
+  app.get('/api/openchamber/tunnel/doctor', handleTunnelDoctor);
+
+  app.get('/api/openchamber/tunnel/providers', (_req, res) => {
+    const providers = tunnelProviderRegistry.listCapabilities();
+    return res.json({ providers });
   });
 
   app.get('/api/openchamber/tunnel/status', async (_req, res) => {
     try {
       const settings = await readSettingsFromDiskMigrated();
-      const mode = normalizeTunnelMode(settings?.tunnelMode);
-      const namedHostname = normalizeNamedTunnelHostname(settings?.namedTunnelHostname);
-      const namedTunnelConfig = await readNamedTunnelConfigFromDisk();
-      const hasLegacyNamedToken = typeof settings?.namedTunnelToken === 'string' && settings.namedTunnelToken.trim().length > 0;
-      const hasNamedTunnelToken = runtimeNamedTunnelToken.length > 0 || namedTunnelConfig.tunnels.length > 0 || hasLegacyNamedToken;
+      const normalizedMode = normalizeTunnelMode(settings?.tunnelMode);
+      const managedRemoteHostname = normalizeManagedRemoteTunnelHostname(settings?.managedRemoteTunnelHostname);
+      const managedRemoteTunnelConfig = await readManagedRemoteTunnelConfigFromDisk();
+      const managedRemoteTunnelPresetSummaries = managedRemoteTunnelConfig.tunnels.map((entry) => ({
+        id: entry.id,
+        name: entry.name,
+        hostname: entry.hostname,
+      }));
+      const hasStoredManagedRemoteToken = typeof settings?.managedRemoteTunnelToken === 'string' && settings.managedRemoteTunnelToken.trim().length > 0;
+      const hasManagedRemoteTunnelToken = runtimeManagedRemoteTunnelToken.length > 0 || managedRemoteTunnelConfig.tunnels.length > 0 || hasStoredManagedRemoteToken;
       const bootstrapTtlMs = settings?.tunnelBootstrapTtlMs === null
         ? null
         : normalizeTunnelBootstrapTtlMs(settings?.tunnelBootstrapTtlMs);
       const sessionTtlMs = normalizeTunnelSessionTtlMs(settings?.tunnelSessionTtlMs);
       const activeSessions = tunnelAuthController.listTunnelSessions();
+      const activeProvider = tunnelService.resolveActiveProvider();
+      const provider = activeProvider || normalizeTunnelProvider(settings?.tunnelProvider);
 
-      const publicUrl = cloudflareTunnelController?.getPublicUrl?.() ?? null;
+      const publicUrl = tunnelService.getPublicUrl();
       if (!publicUrl) {
         return res.json({
           active: false,
           url: null,
-          mode,
-          hasNamedTunnelToken,
-          namedTunnelHostname: namedHostname || null,
-          namedTunnelTokenPresetIds: namedTunnelConfig.tunnels.map((entry) => entry.id),
+          mode: normalizedMode,
+          provider,
+          providerMetadata: null,
+          hasManagedRemoteTunnelToken,
+          managedRemoteTunnelHostname: managedRemoteHostname || null,
+          managedRemoteTunnelPresets: managedRemoteTunnelPresetSummaries,
+          managedRemoteTunnelTokenPresetIds: managedRemoteTunnelConfig.tunnels.map((entry) => entry.id),
           hasBootstrapToken: false,
           bootstrapExpiresAt: null,
           policy: 'tunnel-gated',
@@ -7653,25 +8430,41 @@ async function main(options = {}) {
         });
       }
 
-      const activeMode = cloudflareTunnelController?.mode === TUNNEL_MODE_NAMED ? TUNNEL_MODE_NAMED : TUNNEL_MODE_QUICK;
-
-      if (!tunnelAuthController.getActiveTunnelId() || !tunnelAuthController.getActiveTunnelHost()) {
-        tunnelAuthController.setActiveTunnel({ tunnelId: crypto.randomUUID(), publicUrl, mode: activeMode });
+      const activeNormalizedMode = resolveActiveNormalizedTunnelMode();
+      const activeTunnelId = tunnelAuthController.getActiveTunnelId();
+      const activeTunnelHost = tunnelAuthController.getActiveTunnelHost();
+      const resolvedTunnelHost = resolveNormalizedTunnelHost(publicUrl);
+      const activeTunnelMode = tunnelAuthController.getActiveTunnelMode();
+      const needsActiveTunnelSync = !activeTunnelId
+        || !activeTunnelHost
+        || !resolvedTunnelHost
+        || activeTunnelHost !== resolvedTunnelHost
+        || activeTunnelMode !== activeNormalizedMode;
+      if (needsActiveTunnelSync) {
+        tunnelAuthController.setActiveTunnel({
+          tunnelId: activeTunnelId || crypto.randomUUID(),
+          publicUrl,
+          mode: activeNormalizedMode,
+        });
       }
 
       const bootstrapStatus = tunnelAuthController.getBootstrapStatus();
+      const providerMetadata = tunnelService.getProviderMetadata();
 
       return res.json({
-        active: true,
-        url: publicUrl,
-        mode: activeMode,
-        hasNamedTunnelToken,
-        namedTunnelHostname: namedHostname || null,
-        namedTunnelTokenPresetIds: namedTunnelConfig.tunnels.map((entry) => entry.id),
+         active: true,
+         url: publicUrl,
+         mode: activeNormalizedMode,
+         provider,
+         providerMetadata,
+         hasManagedRemoteTunnelToken,
+         managedRemoteTunnelHostname: managedRemoteHostname || null,
+         managedRemoteTunnelPresets: managedRemoteTunnelPresetSummaries,
+         managedRemoteTunnelTokenPresetIds: managedRemoteTunnelConfig.tunnels.map((entry) => entry.id),
         hasBootstrapToken: bootstrapStatus.hasBootstrapToken,
         bootstrapExpiresAt: bootstrapStatus.bootstrapExpiresAt,
         policy: 'tunnel-gated',
-        activeTunnelMode: activeMode,
+         activeTunnelMode: activeNormalizedMode,
         activeSessions: tunnelAuthController.listTunnelSessions(),
         localPort: activePort,
         ttlConfig: {
@@ -7684,131 +8477,144 @@ async function main(options = {}) {
     }
   });
 
-  app.put('/api/openchamber/tunnel/named-token', async (req, res) => {
+  app.put('/api/openchamber/tunnel/managed-remote-token', async (req, res) => {
     try {
+      // Token presets are currently Cloudflare-specific.
       const presetId = typeof req?.body?.presetId === 'string' ? req.body.presetId.trim() : '';
       const presetName = typeof req?.body?.presetName === 'string' ? req.body.presetName.trim() : '';
-      const namedTunnelHostname = normalizeNamedTunnelHostname(req?.body?.namedTunnelHostname);
-      const namedTunnelToken = typeof req?.body?.namedTunnelToken === 'string' ? req.body.namedTunnelToken.trim() : '';
+      const managedRemoteTunnelHostname = normalizeManagedRemoteTunnelHostname(req?.body?.managedRemoteTunnelHostname);
+      const managedRemoteTunnelToken = typeof req?.body?.managedRemoteTunnelToken === 'string' ? req.body.managedRemoteTunnelToken.trim() : '';
 
-      if (!presetId || !presetName || !namedTunnelHostname || !namedTunnelToken) {
-        return res.status(400).json({ ok: false, error: 'presetId, presetName, namedTunnelHostname and namedTunnelToken are required' });
+      if (!presetId || !presetName || !managedRemoteTunnelHostname || !managedRemoteTunnelToken) {
+        return res.status(400).json({ ok: false, error: 'presetId, presetName, managedRemoteTunnelHostname and managedRemoteTunnelToken are required' });
       }
 
-      await upsertNamedTunnelToken({
+      await upsertManagedRemoteTunnelToken({
         id: presetId,
         name: presetName,
-        hostname: namedTunnelHostname,
-        token: namedTunnelToken,
+        hostname: managedRemoteTunnelHostname,
+        token: managedRemoteTunnelToken,
       });
 
-      const namedTunnelConfig = await readNamedTunnelConfigFromDisk();
-      return res.json({ ok: true, namedTunnelTokenPresetIds: namedTunnelConfig.tunnels.map((entry) => entry.id) });
+      const managedRemoteTunnelConfig = await readManagedRemoteTunnelConfigFromDisk();
+      return res.json({ ok: true, managedRemoteTunnelTokenPresetIds: managedRemoteTunnelConfig.tunnels.map((entry) => entry.id) });
     } catch (error) {
-      return res.status(500).json({ ok: false, error: 'Failed to save named tunnel token' });
+      return res.status(500).json({ ok: false, error: 'Failed to save managed remote tunnel token' });
     }
   });
 
   app.post('/api/openchamber/tunnel/start', async (_req, res) => {
     try {
       const settings = await readSettingsFromDiskMigrated();
-      const mode = normalizeTunnelMode(_req?.body?.mode ?? settings?.tunnelMode);
-      const selectedPresetId = typeof _req?.body?.namedTunnelPresetId === 'string' ? _req.body.namedTunnelPresetId.trim() : '';
-      const selectedPresetName = typeof _req?.body?.namedTunnelPresetName === 'string' ? _req.body.namedTunnelPresetName.trim() : '';
-      const requestNamedHostname = normalizeNamedTunnelHostname(_req?.body?.namedTunnelHostname);
-      const namedHostname = requestNamedHostname || normalizeNamedTunnelHostname(settings?.namedTunnelHostname);
-      const requestNamedToken = typeof _req?.body?.namedTunnelToken === 'string' ? _req.body.namedTunnelToken.trim() : '';
-      const legacyNamedToken = typeof settings?.namedTunnelToken === 'string' ? settings.namedTunnelToken.trim() : '';
-      const configNamedToken = await resolveNamedTunnelToken({ presetId: selectedPresetId, hostname: namedHostname });
-      const namedToken = requestNamedToken
-        || ((runtimeNamedTunnelHostname && namedHostname && runtimeNamedTunnelHostname === namedHostname) ? runtimeNamedTunnelToken : '')
-        || configNamedToken
-        || legacyNamedToken
-        ;
-      const bootstrapTtlMs = settings?.tunnelBootstrapTtlMs === null
+      // Reject explicitly supplied unknown providers/modes early, before normalization converts them to defaults.
+      if (typeof _req?.body?.provider === 'string' && _req.body.provider.trim().length > 0) {
+        const rawProvider = _req.body.provider.trim().toLowerCase();
+        if (!tunnelProviderRegistry.get(rawProvider)) {
+          return res.status(422).json({ ok: false, error: `Unsupported tunnel provider: ${rawProvider}`, code: 'provider_unsupported' });
+        }
+      }
+      const provider = normalizeTunnelProvider(_req?.body?.provider ?? settings?.tunnelProvider);
+      const modeInput = _req?.body?.mode ?? settings?.tunnelMode;
+      const intent = typeof _req?.body?.intent === 'string' ? _req.body.intent.trim().toLowerCase() : undefined;
+      const mode = typeof modeInput === 'string'
+        ? modeInput.trim().toLowerCase()
+        : normalizeTunnelMode(modeInput);
+      if (typeof _req?.body?.mode === 'string' && _req.body.mode.trim().length > 0 && !isSupportedTunnelMode(mode)) {
+        return res.status(422).json({ ok: false, error: `Unsupported tunnel mode: ${mode}`, code: 'mode_unsupported' });
+      }
+      const selectedPresetId = typeof _req?.body?.managedRemoteTunnelPresetId === 'string' ? _req.body.managedRemoteTunnelPresetId.trim() : '';
+      const selectedPresetName = typeof _req?.body?.managedRemoteTunnelPresetName === 'string' ? _req.body.managedRemoteTunnelPresetName.trim() : '';
+      const requestConfigPath = normalizeOptionalPath(_req?.body?.configPath)
+        ?? normalizeOptionalPath(settings?.managedLocalTunnelConfigPath);
+      const requestManagedRemoteHostname = normalizeManagedRemoteTunnelHostname(_req?.body?.managedRemoteTunnelHostname);
+      const requestTunnelHostname = normalizeManagedRemoteTunnelHostname(_req?.body?.tunnelHostname);
+      const requestHostname = normalizeManagedRemoteTunnelHostname(_req?.body?.hostname);
+      const hostnameFromSettings = normalizeManagedRemoteTunnelHostname(settings?.managedRemoteTunnelHostname);
+      const hostname = requestHostname || requestTunnelHostname || requestManagedRemoteHostname || hostnameFromSettings;
+      const requestManagedRemoteToken = typeof _req?.body?.managedRemoteTunnelToken === 'string' ? _req.body.managedRemoteTunnelToken.trim() : '';
+      const requestTunnelToken = typeof _req?.body?.tunnelToken === 'string' ? _req.body.tunnelToken.trim() : '';
+      const requestToken = typeof _req?.body?.token === 'string' ? _req.body.token.trim() : '';
+      const storedManagedRemoteToken = typeof settings?.managedRemoteTunnelToken === 'string' ? settings.managedRemoteTunnelToken.trim() : '';
+      const configManagedRemoteToken = provider === TUNNEL_PROVIDER_CLOUDFLARE
+        ? await resolveManagedRemoteTunnelToken({ presetId: selectedPresetId, hostname })
+        : '';
+      const token = requestToken
+        || requestTunnelToken
+        || requestManagedRemoteToken
+        || ((runtimeManagedRemoteTunnelHostname && hostname && runtimeManagedRemoteTunnelHostname === hostname) ? runtimeManagedRemoteTunnelToken : '')
+        || configManagedRemoteToken
+        || storedManagedRemoteToken;
+      const requestConnectTtlMs = typeof _req?.body?.connectTtlMs === 'number' && Number.isFinite(_req.body.connectTtlMs)
+        ? normalizeTunnelBootstrapTtlMs(_req.body.connectTtlMs)
+        : undefined;
+      const requestSessionTtlMs = typeof _req?.body?.sessionTtlMs === 'number' && Number.isFinite(_req.body.sessionTtlMs)
+        ? normalizeTunnelSessionTtlMs(_req.body.sessionTtlMs)
+        : undefined;
+      const bootstrapTtlMs = requestConnectTtlMs ?? (settings?.tunnelBootstrapTtlMs === null
         ? null
-        : normalizeTunnelBootstrapTtlMs(settings?.tunnelBootstrapTtlMs);
-      const sessionTtlMs = normalizeTunnelSessionTtlMs(settings?.tunnelSessionTtlMs);
+        : normalizeTunnelBootstrapTtlMs(settings?.tunnelBootstrapTtlMs));
+      const sessionTtlMs = requestSessionTtlMs ?? normalizeTunnelSessionTtlMs(settings?.tunnelSessionTtlMs);
 
-      let publicUrl = cloudflareTunnelController?.getPublicUrl?.() ?? null;
-      const activeMode = cloudflareTunnelController?.mode === TUNNEL_MODE_NAMED ? TUNNEL_MODE_NAMED : TUNNEL_MODE_QUICK;
+      const previousTunnelId = tunnelAuthController.getActiveTunnelId();
+      const previousMode = tunnelAuthController.getActiveTunnelMode();
+      const previousProvider = tunnelService.resolveActiveProvider();
+      const previousUrl = tunnelService.getPublicUrl();
 
-      if (publicUrl && activeMode !== mode) {
-        cloudflareTunnelController.stop();
-        cloudflareTunnelController = null;
-        tunnelAuthController.clearActiveTunnel();
-        publicUrl = null;
+      const { publicUrl, provider: activeProvider, providerMetadata } = await startTunnelWithNormalizedRequest({
+        provider,
+        mode,
+        intent,
+        hostname,
+        token,
+        configPath: requestConfigPath,
+        selectedPresetId,
+        selectedPresetName,
+      });
+
+      const replacedTunnel = Boolean(previousTunnelId) && (
+        previousMode !== mode
+        || previousProvider !== activeProvider
+        || previousUrl !== publicUrl
+      );
+      let revokedBootstrapCount = 0;
+      let invalidatedSessionCount = 0;
+      if (replacedTunnel && previousTunnelId) {
+        const revoked = tunnelAuthController.revokeTunnelArtifacts(previousTunnelId);
+        revokedBootstrapCount = revoked.revokedBootstrapCount;
+        invalidatedSessionCount = revoked.invalidatedSessionCount;
       }
 
-      if (!publicUrl) {
-        const cfCheck = await checkCloudflaredAvailable();
-        if (!cfCheck.available) {
-          return res.status(400).json({
-            ok: false,
-            error: 'cloudflared is not installed. Install it with: brew install cloudflared',
-          });
-        }
-
-        if (mode === TUNNEL_MODE_NAMED) {
-          if (!namedHostname) {
-            return res.status(400).json({ ok: false, error: 'Named tunnel hostname is required' });
-          }
-          if (!namedToken) {
-            return res.status(400).json({ ok: false, error: 'Named tunnel token is required' });
-          }
-
-          runtimeNamedTunnelHostname = namedHostname;
-          runtimeNamedTunnelToken = namedToken;
-
-          if (requestNamedToken && namedHostname) {
-            await upsertNamedTunnelToken({
-              id: selectedPresetId || namedHostname,
-              name: selectedPresetName || namedHostname,
-              hostname: namedHostname,
-              token: requestNamedToken,
-            });
-          }
-
-          cloudflareTunnelController = await startCloudflareNamedTunnel({
-            token: namedToken,
-            hostname: namedHostname,
-          });
-        } else {
-          const originUrl = `http://127.0.0.1:${activePort}`;
-          cloudflareTunnelController = await startCloudflareQuickTunnel({ originUrl, port: activePort });
-        }
-
-        publicUrl = cloudflareTunnelController.getPublicUrl();
-
-        if (!publicUrl) {
-          cloudflareTunnelController.stop();
-          cloudflareTunnelController = null;
-          tunnelAuthController.clearActiveTunnel();
-          return res.status(500).json({ ok: false, error: 'Tunnel started but no public URL was assigned' });
-        }
-
-        if (mode === TUNNEL_MODE_QUICK) {
-          printTunnelWarning();
-        }
-        console.log(`Cloudflare tunnel active: ${publicUrl}`);
-      }
-
-      if (!tunnelAuthController.getActiveTunnelId() || !tunnelAuthController.getActiveTunnelHost()) {
-        tunnelAuthController.setActiveTunnel({ tunnelId: crypto.randomUUID(), publicUrl, mode });
-      }
+      tunnelAuthController.setActiveTunnel({
+        tunnelId: replacedTunnel || !previousTunnelId ? crypto.randomUUID() : previousTunnelId,
+        publicUrl,
+        mode,
+      });
 
       const bootstrapToken = tunnelAuthController.issueBootstrapToken({ ttlMs: bootstrapTtlMs });
       const connectUrl = `${publicUrl.replace(/\/$/, '')}/connect?t=${encodeURIComponent(bootstrapToken.token)}`;
-      const namedTunnelConfig = await readNamedTunnelConfigFromDisk();
+      const managedRemoteTunnelConfig = await readManagedRemoteTunnelConfigFromDisk();
+      const isCloudflareProvider = activeProvider === TUNNEL_PROVIDER_CLOUDFLARE;
 
       return res.json({
         ok: true,
         url: publicUrl,
         mode,
-        namedTunnelHostname: namedHostname || null,
-        namedTunnelTokenPresetIds: namedTunnelConfig.tunnels.map((entry) => entry.id),
+        provider: activeProvider,
+        providerMetadata,
+        managedRemoteTunnelHostname: isCloudflareProvider ? (hostname || null) : null,
+        managedRemoteTunnelTokenPresetIds: isCloudflareProvider ? managedRemoteTunnelConfig.tunnels.map((entry) => entry.id) : [],
         connectUrl,
         bootstrapExpiresAt: bootstrapToken.expiresAt,
+        replacedTunnel,
+        replaced: replacedTunnel
+          ? {
+            mode: previousMode,
+            provider: previousProvider,
+            url: previousUrl,
+          }
+          : null,
+        revokedBootstrapCount,
+        invalidatedSessionCount,
         policy: 'tunnel-gated',
         activeTunnelMode: mode,
         activeSessions: tunnelAuthController.listTunnelSessions(),
@@ -7819,10 +8625,18 @@ async function main(options = {}) {
         },
       });
     } catch (error) {
-      console.error('Failed to start Cloudflare tunnel:', error);
-      cloudflareTunnelController = null;
+      console.error('Failed to start tunnel:', error);
+      activeTunnelController = null;
       tunnelAuthController.clearActiveTunnel();
-      return res.status(500).json({ ok: false, error: error?.message || 'Failed to start tunnel' });
+      if (error instanceof TunnelServiceError) {
+        const status = error.code === 'missing_dependency'
+          ? 400
+          : (error.code === 'validation_error' || error.code === 'provider_unsupported' || error.code === 'mode_unsupported'
+            ? 422
+            : 500);
+        return res.status(status).json({ ok: false, error: error.message, code: error.code });
+      }
+      return res.status(500).json({ ok: false, error: 'Failed to start tunnel', code: 'startup_failed' });
     }
   });
 
@@ -7837,17 +8651,16 @@ async function main(options = {}) {
       invalidatedSessionCount = revoked.invalidatedSessionCount;
     }
 
-    if (cloudflareTunnelController) {
-      console.log('Stopping Cloudflare tunnel (user requested)...');
-      cloudflareTunnelController.stop();
-      cloudflareTunnelController = null;
+    if (activeTunnelController) {
+      console.log('Stopping active tunnel (user requested)...');
+      tunnelService.stop();
     }
 
     tunnelAuthController.clearActiveTunnel();
     res.json({ ok: true, revokedBootstrapCount, invalidatedSessionCount });
   });
 
-  // ── End Cloudflare Tunnel API ─────────────────────────────────────
+  // ── End Tunnel API ────────────────────────────────────────────────
 
   app.get('/api/global/event', async (req, res) => {
     let targetUrl;
@@ -7919,10 +8732,11 @@ async function main(options = {}) {
 
     const forwardBlock = (block) => {
       if (!block) return;
+      const payload = parseSseDataPayload(block);
+
       res.write(`${block}
 
 `);
-      const payload = parseSseDataPayload(block);
       // Cache session titles from session.updated/session.created events (global stream)
       maybeCacheSessionInfoFromEvent(payload);
 
@@ -8061,10 +8875,11 @@ async function main(options = {}) {
 
     const forwardBlock = (block) => {
       if (!block) return;
+      const payload = parseSseDataPayload(block);
+
       res.write(`${block}
 
 `);
-      const payload = parseSseDataPayload(block);
       // Cache session titles from session.updated/session.created events (per-session stream)
       maybeCacheSessionInfoFromEvent(payload);
 
@@ -11206,6 +12021,17 @@ async function main(options = {}) {
 
   app.get('/api/git/status', async (req, res) => {
     const { getStatus, isGitRepository } = await getGitLibraries();
+
+    const extractGitErrorText = (error) => {
+      const message = typeof error?.message === 'string' ? error.message : '';
+      const stderr = typeof error?.stderr === 'string' ? error.stderr : '';
+      const stdout = typeof error?.stdout === 'string' ? error.stdout : '';
+      return [message, stderr, stdout]
+        .map((value) => String(value || '').trim())
+        .filter(Boolean)
+        .join('\n');
+    };
+
     try {
       const directory = req.query.directory;
       if (!directory) {
@@ -11220,6 +12046,10 @@ async function main(options = {}) {
       const status = await getStatus(directory);
       res.json(status);
     } catch (error) {
+      const errorText = extractGitErrorText(error);
+      if (/not a git repository/i.test(errorText)) {
+        return res.json({ isGitRepository: false, files: [], branch: null, ahead: 0, behind: 0 });
+      }
       console.error('Failed to get git status:', error);
       res.status(500).json({ error: error.message || 'Failed to get git status' });
     }
@@ -11368,6 +12198,27 @@ async function main(options = {}) {
     } catch (error) {
       console.error('Failed to get remotes:', error);
       res.status(500).json({ error: error.message || 'Failed to get remotes' });
+    }
+  });
+
+  app.delete('/api/git/remotes', async (req, res) => {
+    const { removeRemote } = await getGitLibraries();
+    try {
+      const directory = req.query.directory;
+      if (!directory) {
+        return res.status(400).json({ error: 'directory parameter is required' });
+      }
+
+      const remote = String(req.body?.remote || '').trim();
+      if (!remote) {
+        return res.status(400).json({ error: 'remote is required' });
+      }
+
+      const result = await removeRemote(directory, { remote });
+      res.json(result);
+    } catch (error) {
+      console.error('Failed to remove remote:', error);
+      res.status(500).json({ error: error.message || 'Failed to remove remote' });
     }
   });
 
@@ -11722,6 +12573,46 @@ async function main(options = {}) {
     }
   });
 
+  app.post('/api/git/worktrees/preview', async (req, res) => {
+    const { previewWorktreeCreate } = await getGitLibraries();
+    if (typeof previewWorktreeCreate !== 'function') {
+      return res.status(501).json({ error: 'Worktree preview is not available' });
+    }
+
+    try {
+      const directory = req.query.directory;
+      if (!directory || typeof directory !== 'string') {
+        return res.status(400).json({ error: 'directory parameter is required' });
+      }
+
+      const preview = await previewWorktreeCreate(directory, req.body || {});
+      res.json(preview);
+    } catch (error) {
+      console.error('Failed to preview worktree:', error);
+      res.status(500).json({ error: error.message || 'Failed to preview worktree' });
+    }
+  });
+
+  app.get('/api/git/worktrees/bootstrap-status', async (req, res) => {
+    const { getWorktreeBootstrapStatus } = await getGitLibraries();
+    if (typeof getWorktreeBootstrapStatus !== 'function') {
+      return res.status(501).json({ error: 'Worktree bootstrap status is not available' });
+    }
+
+    try {
+      const directory = req.query.directory;
+      if (!directory || typeof directory !== 'string') {
+        return res.status(400).json({ error: 'directory parameter is required' });
+      }
+
+      const status = await getWorktreeBootstrapStatus(directory);
+      res.json(status);
+    } catch (error) {
+      console.error('Failed to get worktree bootstrap status:', error);
+      res.status(500).json({ error: error.message || 'Failed to get worktree bootstrap status' });
+    }
+  });
+
   app.delete('/api/git/worktrees', async (req, res) => {
     const { removeWorktree } = await getGitLibraries();
     if (typeof removeWorktree !== 'function') {
@@ -12064,18 +12955,18 @@ async function main(options = {}) {
         // macOS: open -R selects the file in Finder; open opens a folder
         const stat = await fsPromises.stat(resolved);
         if (stat.isDirectory()) {
-          spawn('open', [resolved], { stdio: 'ignore', detached: true }).unref();
+          spawn('open', [resolved], { windowsHide: true, stdio: 'ignore', detached: true }).unref();
         } else {
-          spawn('open', ['-R', resolved], { stdio: 'ignore', detached: true }).unref();
+          spawn('open', ['-R', resolved], { windowsHide: true, stdio: 'ignore', detached: true }).unref();
         }
       } else if (platform === 'win32') {
         // Windows: explorer /select, highlights the file
-        spawn('explorer', ['/select,', resolved], { stdio: 'ignore', detached: true }).unref();
+        spawn('explorer', ['/select,', resolved], { windowsHide: true, stdio: 'ignore', detached: true }).unref();
       } else {
         // Linux: xdg-open opens the parent directory
         const stat = await fsPromises.stat(resolved);
         const dir = stat.isDirectory() ? resolved : path.dirname(resolved);
-        spawn('xdg-open', [dir], { stdio: 'ignore', detached: true }).unref();
+        spawn('xdg-open', [dir], { windowsHide: true, stdio: 'ignore', detached: true }).unref();
       }
 
       res.json({ success: true, path: resolved });
@@ -12126,6 +13017,7 @@ async function main(options = {}) {
       const child = spawn(shell, [shellFlag, command], {
         cwd: resolvedCwd,
         env: execEnv,
+        windowsHide: true,
         stdio: ['ignore', 'pipe', 'pipe'],
       });
 
@@ -12396,8 +13288,9 @@ async function main(options = {}) {
               // Use git check-ignore with paths as arguments
               // Pass paths directly as arguments (works for reasonable directory sizes)
               const result = await new Promise((resolve) => {
-                const child = spawn('git', ['check-ignore', '--', ...pathsToCheck], {
+                const child = spawn(resolveGitBinaryForSpawn(), ['check-ignore', '--', ...pathsToCheck], {
                   cwd: resolvedPath,
+                  windowsHide: true,
                   stdio: ['ignore', 'pipe', 'pipe'],
                 });
 
@@ -13381,9 +14274,10 @@ async function main(options = {}) {
 
   let activePort = port;
 
-  const bindHost = typeof process.env.OPENCHAMBER_HOST === 'string' && process.env.OPENCHAMBER_HOST.trim().length > 0
-    ? process.env.OPENCHAMBER_HOST.trim()
-    : null;
+  const bindHost = host
+    || (typeof process.env.OPENCHAMBER_HOST === 'string' && process.env.OPENCHAMBER_HOST.trim().length > 0
+      ? process.env.OPENCHAMBER_HOST.trim()
+      : '127.0.0.1');
 
   await new Promise((resolve, reject) => {
     const onError = (error) => {
@@ -13402,55 +14296,62 @@ async function main(options = {}) {
         // ignore
       }
 
-      console.log(`OpenChamber server running on port ${activePort}`);
-      console.log(`Health check: http://localhost:${activePort}/health`);
-      console.log(`Web interface: http://localhost:${activePort}`);
+      const displayHost = (bindHost === '0.0.0.0' || bindHost === '::' || bindHost === '[::]')
+        ? 'localhost'
+        : (bindHost.includes(':') ? `[${bindHost}]` : bindHost);
+      console.log(`OpenChamber server listening on ${bindHost}:${activePort}`);
+      console.log(`Health check: http://${displayHost}:${activePort}/health`);
+      console.log(`Web interface: http://${displayHost}:${activePort}`);
 
-      if (tryCfTunnel) {
-        console.log('\nInitializing Cloudflare Quick Tunnel...');
-        const cfCheck = await checkCloudflaredAvailable();
-        if (cfCheck.available) {
-          try {
-            const originUrl = `http://localhost:${activePort}`;
-            cloudflareTunnelController = await startCloudflareQuickTunnel({ originUrl, port: activePort });
-            printTunnelWarning();
-            const tunnelUrl = cloudflareTunnelController.getPublicUrl();
-            if (tunnelUrl) {
-              tunnelAuthController.setActiveTunnel({
-                tunnelId: crypto.randomUUID(),
-                publicUrl: tunnelUrl,
-                mode: TUNNEL_MODE_QUICK,
-              });
-              const settings = await readSettingsFromDiskMigrated();
-              const bootstrapTtlMs = settings?.tunnelBootstrapTtlMs === null
-                ? null
-                : normalizeTunnelBootstrapTtlMs(settings?.tunnelBootstrapTtlMs);
-              const bootstrapToken = tunnelAuthController.issueBootstrapToken({ ttlMs: bootstrapTtlMs });
-              const connectUrl = `${tunnelUrl.replace(/\/$/, '')}/connect?t=${encodeURIComponent(bootstrapToken.token)}`;
-              if (onTunnelReady) {
-                onTunnelReady(tunnelUrl, connectUrl);
-              } else {
-                console.log(`\n🌐 Tunnel URL: ${connectUrl}`);
-                console.log('🔑 One-time connect link (expires after first use)\n');
-              }
-            } else if (onTunnelReady) {
-              onTunnelReady(tunnelUrl, null);
+      if (startupTunnelRequest) {
+        const startupModeLabel = startupTunnelRequest.mode === TUNNEL_MODE_QUICK
+          ? 'Quick Tunnel'
+          : (startupTunnelRequest.mode === TUNNEL_MODE_MANAGED_LOCAL
+            ? 'Managed Local Tunnel'
+            : (startupTunnelRequest.mode === TUNNEL_MODE_MANAGED_REMOTE ? 'Managed Remote Tunnel' : 'Tunnel'));
+        console.log(`\nInitializing ${startupModeLabel} for provider '${startupTunnelRequest.provider}'...`);
+        try {
+          const { publicUrl, mode } = await startTunnelWithNormalizedRequest({
+            provider: startupTunnelRequest.provider,
+            mode: startupTunnelRequest.mode,
+            intent: startupTunnelRequest.intent,
+            hostname: startupTunnelRequest.hostname,
+            token: startupTunnelRequest.token,
+            configPath: startupTunnelRequest.configPath,
+            selectedPresetId: '',
+            selectedPresetName: '',
+          });
+          if (publicUrl) {
+            tunnelAuthController.setActiveTunnel({
+              tunnelId: crypto.randomUUID(),
+              publicUrl,
+              mode,
+            });
+            const settings = await readSettingsFromDiskMigrated();
+            const bootstrapTtlMs = settings?.tunnelBootstrapTtlMs === null
+              ? null
+              : normalizeTunnelBootstrapTtlMs(settings?.tunnelBootstrapTtlMs);
+            const bootstrapToken = tunnelAuthController.issueBootstrapToken({ ttlMs: bootstrapTtlMs });
+            const connectUrl = `${publicUrl.replace(/\/$/, '')}/connect?t=${encodeURIComponent(bootstrapToken.token)}`;
+            if (onTunnelReady) {
+              onTunnelReady(publicUrl, connectUrl);
+            } else {
+              console.log(`\n🌐 Tunnel URL: ${connectUrl}`);
+              console.log('🔑 One-time connect link (expires after first use)\n');
             }
-          } catch (error) {
-            console.error(`Failed to start Cloudflare tunnel: ${error.message}`);
-            console.log('Continuing without tunnel...');
+          } else if (onTunnelReady) {
+            onTunnelReady(publicUrl, null);
           }
+        } catch (error) {
+          console.error(`Failed to start tunnel: ${error.message}`);
+          console.log('Continuing without tunnel...');
         }
       }
 
       resolve();
     };
 
-    if (bindHost) {
-      server.listen(port, bindHost, onListening);
-    } else {
-      server.listen(port, onListening);
-    }
+    server.listen(port, bindHost, onListening);
   });
 
   if (attachSignals && !signalsAttached) {
@@ -13478,7 +14379,7 @@ async function main(options = {}) {
     httpServer: server,
     getPort: () => activePort,
     getOpenCodePort: () => openCodePort,
-    getTunnelUrl: () => cloudflareTunnelController?.getPublicUrl() ?? null,
+    getTunnelUrl: () => tunnelService.getPublicUrl(),
     isReady: () => isOpenCodeReady,
     restartOpenCode: () => restartOpenCode(),
     stop: (shutdownOptions = {}) =>
@@ -13493,7 +14394,13 @@ if (isCliExecution) {
   exitOnShutdown = true;
   main({
     port: cliOptions.port,
+    host: cliOptions.host,
     tryCfTunnel: cliOptions.tryCfTunnel,
+    tunnelProvider: cliOptions.tunnelProvider,
+    tunnelMode: cliOptions.tunnelMode,
+    tunnelConfigPath: cliOptions.tunnelConfigPath,
+    tunnelToken: cliOptions.tunnelToken,
+    tunnelHostname: cliOptions.tunnelHostname,
     attachSignals: true,
     exitOnShutdown: true,
     uiPassword: cliOptions.uiPassword

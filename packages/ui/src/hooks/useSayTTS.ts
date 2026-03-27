@@ -19,6 +19,67 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+interface SayTTSStatusCache {
+  available: boolean;
+  voices: Array<{ name: string; locale: string }>;
+  checkedAt: number;
+}
+
+interface UseSayTTSOptions {
+  enabled?: boolean;
+}
+
+const SAY_TTS_STATUS_TTL_MS = 30000;
+let sayTTSStatusCache: SayTTSStatusCache | null = null;
+let sayTTSStatusRequest: Promise<SayTTSStatusCache> | null = null;
+
+async function getSayTTSStatus(): Promise<SayTTSStatusCache> {
+  const now = Date.now();
+  if (sayTTSStatusCache && now - sayTTSStatusCache.checkedAt < SAY_TTS_STATUS_TTL_MS) {
+    return sayTTSStatusCache;
+  }
+
+  if (sayTTSStatusRequest) {
+    return sayTTSStatusRequest;
+  }
+
+  sayTTSStatusRequest = (async () => {
+    try {
+      const response = await fetch('/api/tts/say/status');
+      if (!response.ok) {
+        const unavailableStatus: SayTTSStatusCache = {
+          available: false,
+          voices: [],
+          checkedAt: Date.now(),
+        };
+        sayTTSStatusCache = unavailableStatus;
+        return unavailableStatus;
+      }
+
+      const data = await response.json();
+      const nextStatus: SayTTSStatusCache = {
+        available: Boolean(data.available),
+        voices: Array.isArray(data.voices) ? data.voices : [],
+        checkedAt: Date.now(),
+      };
+      sayTTSStatusCache = nextStatus;
+      return nextStatus;
+    } catch {
+      const unavailableStatus: SayTTSStatusCache = {
+        available: false,
+        voices: [],
+        checkedAt: Date.now(),
+      };
+      sayTTSStatusCache = unavailableStatus;
+      return unavailableStatus;
+    } finally {
+      sayTTSStatusRequest = null;
+    }
+  })();
+
+  return sayTTSStatusRequest;
+}
+
 export interface UseSayTTSReturn {
   /** Whether TTS is currently playing */
   isPlaying: boolean;
@@ -61,7 +122,8 @@ function getAudioContext(): AudioContext {
   return sharedAudioContext;
 }
 
-export function useSayTTS(): UseSayTTSReturn {
+export function useSayTTS(options: UseSayTTSOptions = {}): UseSayTTSReturn {
+  const enabled = options.enabled ?? true;
   const [isPlaying, setIsPlaying] = useState(false);
   const [isAvailable, setIsAvailable] = useState(false);
   const [voices, setVoices] = useState<Array<{ name: string; locale: string }>>([]);
@@ -97,28 +159,27 @@ export function useSayTTS(): UseSayTTSReturn {
 
   // Check if macOS say is available
   const checkAvailability = useCallback(async (): Promise<boolean> => {
-    try {
-      const response = await fetch('/api/tts/say/status');
-      if (response.ok) {
-        const data = await response.json();
-        setIsAvailable(data.available);
-        if (data.voices) {
-          setVoices(data.voices);
-        }
-        return data.available;
-      }
+    if (!enabled) {
       setIsAvailable(false);
-      return false;
-    } catch (err) {
-      console.error('[useSayTTS] Failed to check availability:', err);
-      setIsAvailable(false);
+      setVoices([]);
       return false;
     }
-  }, []);
+
+    try {
+      const status = await getSayTTSStatus();
+      setIsAvailable(status.available);
+      setVoices(status.voices);
+      return status.available;
+    } catch {
+      setIsAvailable(false);
+      setVoices([]);
+      return false;
+    }
+  }, [enabled]);
 
   // Check availability on mount
   useEffect(() => {
-    checkAvailability();
+    void checkAvailability();
   }, [checkAvailability]);
 
   // Stop current playback

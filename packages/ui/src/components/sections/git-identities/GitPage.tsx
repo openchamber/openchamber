@@ -1,5 +1,4 @@
 import React from 'react';
-import { ButtonSmall } from '@/components/ui/button-small';
 import { toast } from '@/components/ui';
 import {
   Dialog,
@@ -10,7 +9,6 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { ButtonLarge } from '@/components/ui/button-large';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -124,9 +122,9 @@ export const GitPage: React.FC = () => {
               <div className="flex items-center gap-2">
                 <h3 className="typography-ui-header font-semibold text-foreground">Identities</h3>
               </div>
-              <ButtonSmall variant="outline" onClick={() => openEditor('new')}>
+              <Button size="sm" variant="outline" onClick={() => openEditor('new')}>
                 <RiAddLine className="w-3.5 h-3.5 mr-1" /> New
-              </ButtonSmall>
+              </Button>
             </div>
 
             <div className="rounded-lg bg-[var(--surface-elevated)]/70 overflow-hidden flex flex-col">
@@ -213,9 +211,9 @@ export const GitPage: React.FC = () => {
             <Button variant="ghost" onClick={() => setDeleteDialogProfile(null)} disabled={isDeletePending}>
               Cancel
             </Button>
-            <ButtonLarge onClick={() => void handleConfirmDelete()} disabled={isDeletePending} className="bg-[var(--status-error)] hover:bg-[var(--status-error)]/90 text-white border-0">
+            <Button size="sm" variant="destructive" onClick={() => void handleConfirmDelete()} disabled={isDeletePending}>
               Delete
-            </ButtonLarge>
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -340,10 +338,10 @@ const DiscoveredRow: React.FC<DiscoveredRowProps> = ({ credential, onImport, has
           {isRepoSpecific ? credential.host : credential.username}
         </span>
       </div>
-      <ButtonSmall variant="ghost" onClick={onImport} className="gap-1 shrink-0">
+      <Button size="sm" variant="ghost" onClick={onImport} className="gap-1 shrink-0">
         <RiDownloadLine className="h-3 w-3" />
         Import
-      </ButtonSmall>
+      </Button>
     </div>
   );
 };

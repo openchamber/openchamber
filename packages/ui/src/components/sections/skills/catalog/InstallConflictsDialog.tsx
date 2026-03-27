@@ -8,8 +8,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { ButtonLarge } from '@/components/ui/button-large';
-import { ButtonSmall } from '@/components/ui/button-small';
+import { Button } from '@/components/ui/button';
 import {
   Select,
   SelectContent,
@@ -73,8 +72,8 @@ export const InstallConflictsDialog: React.FC<InstallConflictsDialogProps> = ({
           <div className="flex items-center justify-between gap-2">
             <span className="typography-meta text-muted-foreground">{conflicts.length} conflict(s)</span>
             <div className="flex items-center gap-2">
-              <ButtonSmall variant="outline" size="xs" className="!font-normal" onClick={() => setAll('skip')}>Skip all</ButtonSmall>
-              <ButtonSmall variant="outline" size="xs" className="!font-normal" onClick={() => setAll('overwrite')}>Overwrite all</ButtonSmall>
+              <Button variant="outline" size="xs" className="!font-normal" onClick={() => setAll('skip')}>Skip all</Button>
+              <Button variant="outline" size="xs" className="!font-normal" onClick={() => setAll('overwrite')}>Overwrite all</Button>
             </div>
           </div>
 
@@ -113,15 +112,16 @@ export const InstallConflictsDialog: React.FC<InstallConflictsDialogProps> = ({
         </div>
 
         <DialogFooter>
-          <ButtonLarge variant="ghost" onClick={() => onOpenChange(false)}>
+          <Button size="sm" variant="ghost" onClick={() => onOpenChange(false)}>
             Cancel
-          </ButtonLarge>
-          <ButtonLarge
+          </Button>
+          <Button
+            size="sm"
             onClick={() => onConfirm(decisions)}
             disabled={!canConfirm}
           >
             Continue
-          </ButtonLarge>
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

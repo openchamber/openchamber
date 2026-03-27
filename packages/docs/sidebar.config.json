@@ -1,0 +1,25 @@
+{
+  "sections": [
+    {
+      "label": "Start here",
+      "items": [
+        { "label": "Overview", "link": "/" },
+        { "label": "Install", "link": "/install/" },
+        { "label": "Quickstart", "link": "/quickstart/" },
+        { "label": "Tunnels", "link": "/tunnels/" }
+      ]
+    },
+    {
+      "label": "Customize",
+      "items": [
+        { "label": "Themes", "link": "/themes/" }
+      ]
+    },
+    {
+      "label": "Help",
+      "items": [
+        { "label": "Troubleshooting", "link": "/troubleshooting/" }
+      ]
+    }
+  ]
+}

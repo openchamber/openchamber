@@ -7,7 +7,7 @@ import React, {
 import { flushSync } from 'react-dom';
 import type { Theme, ThemeMode } from '@/types/theme';
 import type { DesktopSettings } from '@/lib/desktop';
-import { isDesktopLocalOriginActive, isVSCodeRuntime } from '@/lib/desktop';
+import { isDesktopLocalOriginActive, isTauriShell, isVSCodeRuntime } from '@/lib/desktop';
 import { CSSVariableGenerator } from '@/lib/theme/cssGenerator';
 import { updateDesktopSettings } from '@/lib/persistence';
 import {
@@ -218,6 +218,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
   });
   const isVSCode = useMemo(() => isVSCodeRuntime(), []);
   const isLocalDesktopOrigin = useMemo(() => isDesktopLocalOriginActive(), []);
+  const isDesktopShell = useMemo(() => isTauriShell(), []);
 
   const availableThemes = useMemo(() => {
     const merged: Theme[] = [];
@@ -572,6 +573,33 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
       splashFgDark: darkTheme.colors.surface.foreground,
     });
   }, [currentTheme.metadata.id, currentTheme.metadata.variant, ensureThemeById, preferences.themeMode, preferences.lightThemeId, preferences.darkThemeId]);
+
+  useEffect(() => {
+    if (!isDesktopShell) {
+      return;
+    }
+
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        if (cancelled) {
+          return;
+        }
+        await invoke('desktop_set_window_theme', {
+          themeMode: preferences.themeMode,
+          themeVariant: currentTheme.metadata.variant,
+        });
+      } catch {
+        // noop
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentTheme.metadata.variant, isDesktopShell, preferences.themeMode]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {

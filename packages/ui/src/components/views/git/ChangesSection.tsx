@@ -28,7 +28,6 @@ interface ChangesSectionProps {
   onViewDiff: (path: string) => void;
   onRevertFile: (path: string) => void;
   isRevertingAll?: boolean;
-  variant?: 'framed' | 'plain';
   maxListHeightClassName?: string;
   onVisiblePathsChange?: (paths: string[]) => void;
 }
@@ -48,7 +47,6 @@ export const ChangesSection: React.FC<ChangesSectionProps> = ({
   onViewDiff,
   onRevertFile,
   isRevertingAll = false,
-  variant = 'framed',
   maxListHeightClassName,
   onVisiblePathsChange,
 }) => {
@@ -92,19 +90,10 @@ export const ChangesSection: React.FC<ChangesSectionProps> = ({
     onVisiblePathsChange(virtualRows.map((row) => changeEntries[row.index]?.path).filter((value): value is string => Boolean(value)));
   }, [changeEntries, onVisiblePathsChange, shouldVirtualize, totalCount, virtualRows]);
 
-  const containerClassName =
-    variant === 'framed'
-      ? 'flex flex-col rounded-xl border border-border/60 bg-background/70'
-      : 'flex flex-col flex-1 min-h-0';
-  const headerClassName =
-    variant === 'framed'
-      ? 'flex items-center justify-between gap-2 px-3 py-2 border-b border-border/40'
-      : 'flex items-center justify-between gap-2 px-0 py-3 border-b border-border/40';
-  const scrollOuterClassName =
-    variant === 'framed'
-      ? 'flex-1 min-h-0 max-h-[30vh]'
-      : `flex-1 min-h-0 pr-0 ${maxListHeightClassName ?? ''}`.trim();
-  const rowPaddingClassName = variant === 'plain' ? 'pl-0 pr-2' : 'px-3';
+  const containerClassName = 'flex flex-col flex-1 min-h-0';
+  const headerClassName = 'flex items-center justify-between gap-2 px-0 py-3 border-b border-border/40';
+  const scrollOuterClassName = `flex-1 min-h-0 pr-0 ${maxListHeightClassName ?? ''}`.trim();
+  const rowPaddingClassName = 'pl-0 pr-2';
 
   const handleConfirmRevertAll = React.useCallback(async () => {
     if (!onRevertAll || isRevertingAll || changeEntries.length === 0) {
@@ -144,12 +133,11 @@ export const ChangesSection: React.FC<ChangesSectionProps> = ({
               </button>
             ) : null}
           </div>
-          <div className={cn('flex items-center gap-2', variant === 'plain' && 'pr-1')}>
+          <div className="flex items-center gap-2 pr-1">
             {totalCount > 0 && onRevertAll ? (
               <Button
-                variant="ghost"
-                size="sm"
-                className="h-6 px-2 text-xs text-[var(--status-error)] hover:text-[var(--status-error)]"
+                variant="destructive"
+                size="xs"
                 onClick={() => setConfirmRevertAllOpen(true)}
                 disabled={isRevertingAll}
               >
@@ -237,10 +225,10 @@ export const ChangesSection: React.FC<ChangesSectionProps> = ({
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirmRevertAllOpen(false)} disabled={isRevertingAll}>
+            <Button variant="outline" size="sm" onClick={() => setConfirmRevertAllOpen(false)} disabled={isRevertingAll}>
               Cancel
             </Button>
-            <Button variant="destructive" onClick={() => void handleConfirmRevertAll()} disabled={isRevertingAll}>
+            <Button variant="destructive" size="sm" onClick={() => void handleConfirmRevertAll()} disabled={isRevertingAll}>
               {isRevertingAll ? 'Reverting...' : 'Revert all'}
             </Button>
           </DialogFooter>

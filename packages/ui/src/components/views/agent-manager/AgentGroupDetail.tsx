@@ -228,7 +228,7 @@ export const AgentGroupDetail: React.FC<AgentGroupDetailProps> = ({
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="icon" className="h-10 w-10 flex-shrink-0" aria-label="Worktree actions">
+                <Button variant="outline" size="icon" className="flex-shrink-0" aria-label="Worktree actions">
                   <RiMore2Line className="h-4 w-4" />
                 </Button>
               </DropdownMenuTrigger>

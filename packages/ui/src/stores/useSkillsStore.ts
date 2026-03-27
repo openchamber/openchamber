@@ -155,6 +155,14 @@ declare global {
 
 const CONFIG_EVENT_SOURCE = "useSkillsStore";
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const SKILLS_LOAD_CACHE_TTL_MS = 5000;
+const DEFAULT_SKILLS_CACHE_KEY = '__default__';
+const skillsLastLoadedAt = new Map<string, number>();
+const skillsLoadInFlight = new Map<string, Promise<boolean>>();
+
+const getSkillsCacheKey = (directory: string | null): string => {
+  return directory?.trim() || DEFAULT_SKILLS_CACHE_KEY;
+};
 const MAX_HEALTH_WAIT_MS = 20000;
 const FAST_HEALTH_POLL_INTERVAL_MS = 300;
 const FAST_HEALTH_POLL_ATTEMPTS = 4;
@@ -180,43 +188,67 @@ export const useSkillsStore = create<SkillsStore>()(
         },
 
         loadSkills: async () => {
-          set({ isLoading: true });
-          const previousSkills = get().skills;
-          let lastError: unknown = null;
+          const currentDirectory = getCurrentDirectory();
+          const cacheKey = getSkillsCacheKey(currentDirectory);
+          const now = Date.now();
+          const loadedAt = skillsLastLoadedAt.get(cacheKey) ?? 0;
+          const hasCachedSkills = get().skills.length > 0;
 
-          for (let attempt = 0; attempt < 3; attempt++) {
-            try {
-              const currentDirectory = getCurrentDirectory();
-              const queryParams = currentDirectory ? `?directory=${encodeURIComponent(currentDirectory)}` : '';
-              
-              const response = await fetch(`/api/config/skills${queryParams}`);
-              if (!response.ok) {
-                throw new Error(`Failed to list skills: ${response.status}`);
-              }
-              
-              const data = await response.json();
-              const rawSkills: RawSkillResponse[] = data.skills || [];
-              const skills: DiscoveredSkill[] = rawSkills.map((s) => ({
-                name: s.name,
-                path: s.path,
-                scope: s.scope ?? 'user',
-                source: s.source ?? 'opencode',
-                description: s.sources?.md?.description || '',
-                group: parseSkillGroup(s.path),
-              }));
-              
-              set({ skills, isLoading: false });
-              return true;
-            } catch (error) {
-              lastError = error;
-              const waitMs = 200 * (attempt + 1);
-              await new Promise((resolve) => setTimeout(resolve, waitMs));
-            }
+          if (hasCachedSkills && now - loadedAt < SKILLS_LOAD_CACHE_TTL_MS) {
+            return true;
           }
 
-          console.error("Failed to load skills:", lastError);
-          set({ skills: previousSkills, isLoading: false });
-          return false;
+          const inFlight = skillsLoadInFlight.get(cacheKey);
+          if (inFlight) {
+            return inFlight;
+          }
+
+          const request = (async () => {
+            set({ isLoading: true });
+            const previousSkills = get().skills;
+            let lastError: unknown = null;
+
+            for (let attempt = 0; attempt < 3; attempt++) {
+              try {
+                const queryParams = currentDirectory ? `?directory=${encodeURIComponent(currentDirectory)}` : '';
+
+                const response = await fetch(`/api/config/skills${queryParams}`);
+                if (!response.ok) {
+                  throw new Error(`Failed to list skills: ${response.status}`);
+                }
+
+                const data = await response.json();
+                const rawSkills: RawSkillResponse[] = data.skills || [];
+                const skills: DiscoveredSkill[] = rawSkills.map((s) => ({
+                  name: s.name,
+                  path: s.path,
+                  scope: s.scope ?? 'user',
+                  source: s.source ?? 'opencode',
+                  description: s.sources?.md?.description || '',
+                  group: parseSkillGroup(s.path),
+                }));
+
+                set({ skills, isLoading: false });
+                skillsLastLoadedAt.set(cacheKey, Date.now());
+                return true;
+              } catch (error) {
+                lastError = error;
+                const waitMs = 200 * (attempt + 1);
+                await new Promise((resolve) => setTimeout(resolve, waitMs));
+              }
+            }
+
+            console.error("Failed to load skills:", lastError);
+            set({ skills: previousSkills, isLoading: false });
+            return false;
+          })();
+
+          skillsLoadInFlight.set(cacheKey, request);
+          try {
+            return await request;
+          } finally {
+            skillsLoadInFlight.delete(cacheKey);
+          }
         },
 
         getSkillDetail: async (name: string) => {

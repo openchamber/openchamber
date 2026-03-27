@@ -45,6 +45,7 @@ export async function runGit(args, options = {}) {
     const { stdout, stderr } = await execFileAsync('git', normalizedArgs, {
       cwd,
       env,
+      windowsHide: true,
       timeout: timeoutMs,
       maxBuffer,
     });

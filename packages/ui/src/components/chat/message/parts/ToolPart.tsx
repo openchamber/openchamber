@@ -1,10 +1,9 @@
 
 import React from 'react';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
-import { RiAiAgentLine, RiArrowDownSLine, RiArrowRightSLine, RiBookLine, RiExternalLinkLine, RiFileEditLine, RiFileList2Line, RiFileSearchLine, RiFileTextLine, RiFolder6Line, RiGitBranchLine, RiGlobalLine, RiListCheck2, RiListCheck3, RiMenuSearchLine, RiPencilLine, RiSurveyLine, RiTaskLine, RiTerminalBoxLine, RiToolsLine } from '@remixicon/react';
+import { RiArrowDownSLine, RiArrowRightSLine, RiExternalLinkLine } from '@remixicon/react';
 import { File as PierreFile, PatchDiff } from '@pierre/diffs/react';
 import { cn } from '@/lib/utils';
-import { formatTimestampForDisplay } from '../timeFormat';
 import { SimpleMarkdownRenderer } from '../../MarkdownRenderer';
 import { getToolMetadata, getLanguageFromExtension, isImageFile, getImageMimeType } from '@/lib/toolHelpers';
 import type { ToolPart as ToolPartType, ToolState as ToolStateUnion } from '@opencode-ai/sdk/v2';
@@ -14,26 +13,27 @@ import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSessionStore } from '@/stores/useSessionStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { useSessionActivity } from '@/hooks/useSessionActivity';
 import { opencodeClient } from '@/lib/opencode/client';
-import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { ScrollShadow } from '@/components/ui/ScrollShadow';
+import { Text } from '@/components/ui/text';
+import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import type { ContentChangeReason } from '@/hooks/useChatScrollManager';
 import type { ToolPopupContent } from '../types';
 import { ensurePierreThemeRegistered } from '@/lib/shiki/appThemeRegistry';
 import { getDefaultTheme } from '@/lib/theme/themes';
+import type { MessageRecord } from '@/lib/messageCompletion';
 
 import {
-    renderListOutput,
-    renderGrepOutput,
-    renderGlobOutput,
-    renderTodoOutput,
-    renderWebSearchOutput,
     formatEditOutput,
     detectLanguageFromOutput,
     formatInputForDisplay,
-    parseReadToolOutput,
 } from '../toolRenderers';
 import { DiffViewToggle, type DiffViewMode } from '../DiffViewToggle';
-import { VirtualizedCodeBlock, type CodeLine } from './VirtualizedCodeBlock';
+import { MinDurationShineText } from './MinDurationShineText';
+import { ToolRevealOnMount } from './ToolRevealOnMount';
+import { getToolIcon } from './toolPresentation';
+import { useDurationTickerNow } from './useDurationTicker';
 
 type ToolStateWithMetadata = ToolStateUnion & { metadata?: Record<string, unknown>; input?: Record<string, unknown>; output?: string; error?: string; time?: { start: number; end?: number } };
 
@@ -45,80 +45,118 @@ interface ToolPartProps {
     isMobile: boolean;
     onContentChange?: (reason?: ContentChangeReason) => void;
     onShowPopup?: (content: ToolPopupContent) => void;
-    hasPrevTool?: boolean;
-    hasNextTool?: boolean;
+    animateTailText?: boolean;
 }
 
-// eslint-disable-next-line react-refresh/only-export-components
-export const getToolIcon = (toolName: string) => {
-    const iconClass = 'h-3.5 w-3.5 flex-shrink-0';
-    const tool = toolName.toLowerCase();
+const getMultiFileDescription = (
+    metadata: Record<string, unknown> | undefined,
+    animate = true,
+    showFileIcons = true,
+): React.ReactNode => {
+    const files = Array.isArray(metadata?.files) ? metadata?.files : [];
+    if (files.length <= 1) return null;
 
-    if (tool === 'edit' || tool === 'multiedit' || tool === 'apply_patch' || tool === 'str_replace' || tool === 'str_replace_based_edit_tool') {
-        return <RiPencilLine className={iconClass} />;
+    const parseCount = (value: unknown): number | null => {
+        if (typeof value === 'number' && Number.isFinite(value)) {
+            return Math.max(0, Math.trunc(value));
+        }
+        if (typeof value === 'string') {
+            const parsed = Number.parseInt(value, 10);
+            if (Number.isFinite(parsed)) {
+                return Math.max(0, parsed);
+            }
+        }
+        return null;
+    };
+
+    const combineCounts = (base: number | null, incoming: number | null): number | null => {
+        if (base === null) return incoming;
+        if (incoming === null) return base;
+        return base + incoming;
+    };
+
+    const entriesByPath = new Map<string, { path: string; name: string; added: number | null; removed: number | null }>();
+
+    for (const file of files) {
+        const fileObj = file as { relativePath?: string; filePath?: string; additions?: unknown; deletions?: unknown };
+        const filePath = fileObj.relativePath || fileObj.filePath || '';
+        if (!filePath) continue;
+        const fileName = filePath.split('/').pop() || filePath;
+        const added = parseCount(fileObj.additions);
+        const removed = parseCount(fileObj.deletions);
+
+        const existing = entriesByPath.get(filePath);
+        if (existing) {
+            existing.added = combineCounts(existing.added, added);
+            existing.removed = combineCounts(existing.removed, removed);
+            continue;
+        }
+
+        entriesByPath.set(filePath, { path: filePath, name: fileName, added, removed });
     }
-    if (tool === 'write' || tool === 'create' || tool === 'file_write') {
-        return <RiFileEditLine className={iconClass} />;
-    }
-    if (tool === 'read' || tool === 'view' || tool === 'file_read' || tool === 'cat') {
-        return <RiFileTextLine className={iconClass} />;
-    }
-    if (tool === 'bash' || tool === 'shell' || tool === 'cmd' || tool === 'terminal') {
-        return <RiTerminalBoxLine className={iconClass} />;
-    }
-    if (tool === 'list' || tool === 'ls' || tool === 'dir' || tool === 'list_files') {
-        return <RiFolder6Line className={iconClass} />;
-    }
-    if (tool === 'search' || tool === 'grep' || tool === 'find' || tool === 'ripgrep') {
-        return <RiMenuSearchLine className={iconClass} />;
-    }
-    if (tool === 'glob') {
-        return <RiFileSearchLine className={iconClass} />;
-    }
-    if (tool === 'fetch' || tool === 'curl' || tool === 'wget' || tool === 'webfetch') {
-        return <RiGlobalLine className={iconClass} />;
-    }
-    if (
-        tool === 'web-search' ||
-        tool === 'websearch' ||
-        tool === 'search_web' ||
-        tool === 'codesearch' ||
-        tool === 'google' ||
-        tool === 'bing' ||
-        tool === 'duckduckgo' ||
-        tool === 'perplexity'
-    ) {
-        return <RiGlobalLine className={iconClass} />;
-    }
-    if (tool === 'todowrite' || tool === 'todoread') {
-        return <RiListCheck3 className={iconClass} />;
-    }
-    if (tool === 'structuredoutput' || tool === 'structured_output') {
-        return <RiListCheck2 className={iconClass} />;
-    }
-    if (tool === 'skill') {
-        return <RiBookLine className={iconClass} />;
-    }
-    if (tool === 'task') {
-        return <RiAiAgentLine className={iconClass} />;
-    }
-    if (tool === 'question') {
-        return <RiSurveyLine className={iconClass} />;
-    }
-    if (tool === 'plan_enter') {
-        return <RiFileList2Line className={iconClass} />;
-    }
-    if (tool === 'plan_exit') {
-        return <RiTaskLine className={iconClass} />;
-    }
-    if (tool.startsWith('git')) {
-        return <RiGitBranchLine className={iconClass} />;
-    }
-    return <RiToolsLine className={iconClass} />;
+
+    const entries = Array.from(entriesByPath.values());
+
+    return (
+        <>
+            {entries.map((entry) => {
+                const hasPerFileDiff = entry.added !== null || entry.removed !== null;
+                return (
+                    <span key={entry.path} className="inline-flex min-w-0 max-w-full items-center gap-1 typography-meta leading-5" style={{ color: 'var(--tools-description)' }}>
+                        {showFileIcons ? <FileTypeIcon filePath={entry.path} className="h-3.5 w-3.5" /> : null}
+                        <Text
+                            variant={animate ? 'generate-effect' : 'static'}
+                            className="min-w-0 max-w-full truncate typography-meta leading-5"
+                            style={{ color: 'var(--tools-description)' }}
+                            title={entry.path}
+                        >
+                            {entry.name}
+                        </Text>
+                        {hasPerFileDiff ? (
+                            <span className="flex-shrink-0 inline-flex items-center gap-0 typography-meta" style={{ fontSize: '0.8rem', lineHeight: '1' }}>
+                                <span style={{ color: 'var(--status-success)' }}>+{entry.added ?? 0}</span>
+                                <span style={{ color: 'var(--tools-description)' }}>/</span>
+                                <span style={{ color: 'var(--status-error)' }}>-{entry.removed ?? 0}</span>
+                            </span>
+                        ) : null}
+                    </span>
+                );
+            })}
+        </>
+    );
 };
 
+const normalizeToolName = (toolName: string | undefined | null): string => {
+    if (typeof toolName !== 'string') {
+        return '';
+    }
+
+    const trimmed = toolName.trim().toLowerCase();
+    if (!trimmed) {
+        return '';
+    }
+
+    if (trimmed.includes('.')) {
+        const dotParts = trimmed.split('.').filter(Boolean);
+        const last = dotParts[dotParts.length - 1];
+        if (last) return last;
+    }
+
+    return trimmed;
+};
+
+const MAX_DURATION_MS = 5 * 60 * 1000; // 5 minutes cap
+const TASK_TOOL_POLL_FAST_MS = 1200;
+const TASK_TOOL_POLL_IDLE_MS = 3200;
+const TASK_TOOL_POLL_HIDDEN_MS = 6000;
+const TASK_TOOL_INITIAL_FETCH_LIMIT = 500;
+const TASK_TOOL_ACTIVE_FETCH_LIMIT = 160;
+const TASK_TOOL_IDLE_FETCH_LIMIT = 80;
+const TASK_TOOL_NO_CHANGE_BACKOFF_AFTER_POLLS = 3;
+const TASK_TOOL_SETTLE_GRACE_MS = 2500;
+
 const formatDuration = (start: number, end?: number, now: number = Date.now()) => {
-    const duration = end ? end - start : now - start;
+    const duration = Math.min(Math.max(0, (end ?? now) - start), MAX_DURATION_MS);
     const seconds = duration / 1000;
 
     const displaySeconds = seconds < 0.05 && end !== undefined ? 0.1 : seconds;
@@ -126,17 +164,7 @@ const formatDuration = (start: number, end?: number, now: number = Date.now()) =
 };
 
 const LiveDuration: React.FC<{ start: number; end?: number; active: boolean }> = ({ start, end, active }) => {
-    const [now, setNow] = React.useState(() => Date.now());
-
-    React.useEffect(() => {
-        if (!active) {
-            return;
-        }
-        const timer = window.setInterval(() => {
-            setNow(Date.now());
-        }, 100);
-        return () => window.clearInterval(timer);
-    }, [active]);
+    const now = useDurationTickerNow(active, 250);
 
     return <>{formatDuration(start, end, now)}</>;
 };
@@ -155,6 +183,12 @@ const parseDiffStats = (metadata?: Record<string, unknown>): { added: number; re
 
     if (added === 0 && removed === 0) return null;
     return { added, removed };
+};
+
+const parseWriteLineCount = (input?: Record<string, unknown>): number | null => {
+    if (!input?.content || typeof input.content !== 'string') return null;
+    const lines = input.content.split('\n');
+    return lines.length;
 };
 
 const extractFirstChangedLineFromDiff = (diffText: string): number | undefined => {
@@ -268,14 +302,36 @@ const getPrimaryDiffFromMetadata = (
     return undefined;
 };
 
-const getRelativePath = (absolutePath: string, currentDirectory: string): string => {
-    if (absolutePath.startsWith(currentDirectory)) {
-        const relativePath = absolutePath.substring(currentDirectory.length);
+const normalizeDisplayPath = (value: string): string => {
+    const trimmed = value.trim().replace(/\\/g, '/').replace(/\/{2,}/g, '/');
+    if (!trimmed || trimmed === '/') {
+        return trimmed;
+    }
+    return trimmed.replace(/\/+$/, '');
+};
 
-        return relativePath.startsWith('/') ? relativePath.substring(1) : relativePath;
+const getRelativePath = (absolutePath: string, currentDirectory: string): string => {
+    const normalizedAbsolutePath = normalizeDisplayPath(absolutePath);
+    const normalizedCurrentDirectory = normalizeDisplayPath(currentDirectory);
+
+    if (!normalizedAbsolutePath) {
+        return '';
     }
 
-    return absolutePath;
+    if (!normalizedCurrentDirectory) {
+        return normalizedAbsolutePath;
+    }
+
+    if (normalizedAbsolutePath === normalizedCurrentDirectory) {
+        return '.';
+    }
+
+    const prefix = `${normalizedCurrentDirectory}/`;
+    if (normalizedAbsolutePath.startsWith(prefix)) {
+        return normalizedAbsolutePath.slice(prefix.length);
+    }
+
+    return normalizedAbsolutePath;
 };
 
 const usePierreThemeConfig = () => {
@@ -333,55 +389,6 @@ const parseQuestionOutput = (output: string): Array<{ question: string; answer: 
     return pairs.length > 0 ? pairs : null;
 };
 
-const formatStructuredOutputDescription = (input: Record<string, unknown> | undefined, output: unknown): string => {
-    if (typeof output === 'string' && output.trim().length > 0) {
-        const maxLength = 100;
-        const text = output.trim();
-        return text.length > maxLength ? `${text.substring(0, maxLength)}...` : text;
-    }
-
-    if (!input || typeof input !== 'object') {
-        return 'Result';
-    }
-
-    const rawValue = Object.prototype.hasOwnProperty.call(input, 'result') ? input.result : input;
-
-    const toPreview = (value: unknown): string => {
-        if (typeof value === 'string') {
-            return value;
-        }
-        if (typeof value === 'number' || typeof value === 'boolean') {
-            return String(value);
-        }
-        if (Array.isArray(value)) {
-            const joined = value
-                .map((item) => (typeof item === 'string' ? item : JSON.stringify(item)))
-                .join(', ');
-            return joined;
-        }
-        if (value && typeof value === 'object') {
-            const record = value as Record<string, unknown>;
-            if (typeof record.subject === 'string' && record.subject.trim().length > 0) {
-                return record.subject;
-            }
-            if (typeof record.title === 'string' && record.title.trim().length > 0) {
-                return record.title;
-            }
-            return JSON.stringify(value);
-        }
-        return '';
-    };
-
-    const preview = toPreview(rawValue).trim();
-    if (!preview) {
-        return 'Result';
-    }
-
-    const maxLength = 100;
-    const truncated = preview.length > maxLength ? `${preview.substring(0, maxLength)}...` : preview;
-    return truncated;
-};
-
 const getToolDescriptionPath = (part: ToolPartType, state: ToolStateUnion, currentDirectory: string): string | null => {
     const stateWithData = state as ToolStateWithMetadata;
     const metadata = stateWithData.metadata;
@@ -405,7 +412,14 @@ const getToolDescriptionPath = (part: ToolPartType, state: ToolStateUnion, curre
         }
     }
 
-    if (['write', 'create', 'file_write', 'read', 'view', 'file_read', 'cat'].includes(part.tool) && input) {
+    if (part.tool === 'read' && input) {
+        const filePath = input?.filePath || input?.file_path || input?.path || metadata?.filePath || metadata?.file_path || metadata?.path;
+        if (typeof filePath === 'string') {
+            return getRelativePath(filePath, currentDirectory);
+        }
+    }
+
+    if (['write', 'create', 'file_write'].includes(part.tool) && input) {
         const filePath = input?.filePath || input?.file_path || input?.path;
         if (typeof filePath === 'string') {
             return getRelativePath(filePath, currentDirectory);
@@ -419,11 +433,6 @@ const getToolDescription = (part: ToolPartType, state: ToolStateUnion, currentDi
     const stateWithData = state as ToolStateWithMetadata;
     const metadata = stateWithData.metadata;
     const input = stateWithData.input;
-    const tool = part.tool.toLowerCase();
-
-    if (tool === 'structuredoutput' || tool === 'structured_output') {
-        return formatStructuredOutputDescription(input, stateWithData.output);
-    }
 
     const filePathLabel = getToolDescriptionPath(part, state, currentDirectory);
     if (filePathLabel) {
@@ -435,7 +444,7 @@ const getToolDescription = (part: ToolPartType, state: ToolStateUnion, currentDi
         if (files.length > 1) {
             return `${files.length} files`;
         }
-        return 'Patch';
+        return '';
     }
 
     // Question tool: show "Asked N question(s)"
@@ -451,18 +460,6 @@ const getToolDescription = (part: ToolPartType, state: ToolStateUnion, currentDi
 
     if (part.tool === 'task' && input?.description && typeof input.description === 'string') {
         return input.description.substring(0, 80);
-    }
-
-    if (part.tool === 'skill' && input?.name && typeof input.name === 'string') {
-        return input.name;
-    }
-
-    if (part.tool === 'plan_enter') {
-        return 'Switching to planning';
-    }
-
-    if (part.tool === 'plan_exit') {
-        return 'Switching to building';
     }
 
     const desc = input?.description || metadata?.description || ('title' in state && state.title) || '';
@@ -484,17 +481,84 @@ const ToolScrollableSection: React.FC<ToolScrollableSectionProps> = ({
     outerClassName,
     disableHorizontal = false,
 }) => (
-    <ScrollableOverlay
-        outerClassName={cn('w-full min-w-0 flex-none overflow-hidden', maxHeightClass, outerClassName)}
-        className={cn('tool-output-surface p-2 rounded-xl w-full min-w-0 bg-transparent', className)}
-        style={{ borderWidth: '1px', borderColor: 'var(--tools-border)' }}
-        disableHorizontal={disableHorizontal}
-    >
-        <div className="w-full min-w-0">
-            {children}
-        </div>
-    </ScrollableOverlay>
+    <div className={cn('w-full min-w-0 flex-none overflow-hidden', outerClassName)}>
+        <ScrollShadow
+            className={cn(
+                'tool-output-surface p-2 rounded-xl w-full min-w-0',
+                maxHeightClass,
+                disableHorizontal ? 'overflow-y-auto overflow-x-hidden' : 'overflow-auto',
+                className,
+            )}
+            size={24}
+        >
+            <div className="w-full min-w-0">
+                {children}
+            </div>
+        </ScrollShadow>
+    </div>
 );
+
+const getToolOutputLanguage = (
+    output: string,
+    part: ToolPartType,
+    metadata: Record<string, unknown> | undefined,
+    input: Record<string, unknown> | undefined,
+): string => {
+    if (part.tool === 'bash') {
+        return 'bash';
+    }
+
+    return detectLanguageFromOutput(formatEditOutput(output, part.tool, metadata), part.tool, input);
+};
+
+const getToolOutputText = (
+    output: string,
+    part: ToolPartType,
+    metadata: Record<string, unknown> | undefined,
+): string => {
+    if (part.tool === 'bash') {
+        return output;
+    }
+
+    return formatEditOutput(output, part.tool, metadata);
+};
+
+const ToolScrollableTextOutput: React.FC<{
+    output: string;
+    part: ToolPartType;
+    metadata: Record<string, unknown> | undefined;
+    input: Record<string, unknown> | undefined;
+    syntaxTheme: { [key: string]: React.CSSProperties };
+}> = ({ output, part, metadata, input, syntaxTheme }) => {
+    const renderedOutput = getToolOutputText(output, part, metadata);
+    const outputLanguage = getToolOutputLanguage(output, part, metadata, input);
+
+    return (
+        <div className={part.tool === 'bash' ? 'typography-code text-muted-foreground/90' : undefined}>
+            <SyntaxHighlighter
+                style={syntaxTheme}
+                language={outputLanguage}
+                PreTag="div"
+                customStyle={{
+                    ...toolDisplayStyles.getCollapsedStyles(),
+                    padding: 0,
+                    overflow: 'visible',
+                }}
+                codeTagProps={{
+                    style: {
+                        background: 'transparent',
+                        backgroundColor: 'transparent',
+                    },
+                }}
+                wrapLongLines
+            >
+                {renderedOutput}
+            </SyntaxHighlighter>
+        </div>
+    );
+};
+
+ToolScrollableTextOutput.displayName = 'ToolScrollableTextOutput';
 
 type TaskToolSummaryEntry = {
     id?: string;
@@ -502,25 +566,33 @@ type TaskToolSummaryEntry = {
     state?: {
         status?: string;
         title?: string;
+        input?: Record<string, unknown>;
     };
 };
 
-type SessionMessageWithParts = {
-    info?: {
-        role?: string;
-    };
-    parts?: Array<{
-        id?: string;
-        type?: string;
-        tool?: string;
-        state?: {
-            status?: string;
-            title?: string;
-        };
-    }>;
-};
+type SessionMessageWithParts = MessageRecord;
 
 const EMPTY_SESSION_MESSAGES: SessionMessageWithParts[] = [];
+
+const normalizeSessionIdCandidate = (value: unknown): string | undefined => {
+    if (typeof value !== 'string') {
+        return undefined;
+    }
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+};
+
+const readTaskSessionIdFromRecord = (value: unknown): string | undefined => {
+    if (!value || typeof value !== 'object') {
+        return undefined;
+    }
+
+    const record = value as Record<string, unknown>;
+    return (
+        normalizeSessionIdCandidate(record.sessionID)
+        ?? normalizeSessionIdCandidate(record.sessionId)
+    );
+};
 
 const readTaskSessionIdFromOutput = (output: string | undefined): string | undefined => {
     if (typeof output !== 'string' || output.trim().length === 0) {
@@ -530,9 +602,10 @@ const readTaskSessionIdFromOutput = (output: string | undefined): string | undef
     if (parsedMetadata.sessionId) {
         return parsedMetadata.sessionId;
     }
-    const match = output.match(/task_id:\s*([a-zA-Z0-9_]+)/);
-    const candidate = match?.[1];
-    return typeof candidate === 'string' && candidate.trim().length > 0 ? candidate : undefined;
+    const taskMatch = output.match(/task_id\s*:\s*([^\s<"']+)/i);
+    const sessionMatch = output.match(/session[_\s-]?id\s*:\s*([^\s<"']+)/i);
+    const candidate = taskMatch?.[1] ?? sessionMatch?.[1];
+    return normalizeSessionIdCandidate(candidate);
 };
 
 const buildTaskSummaryEntriesFromSession = (messages: SessionMessageWithParts[]): TaskToolSummaryEntry[] => {
@@ -547,16 +620,20 @@ const buildTaskSummaryEntriesFromSession = (messages: SessionMessageWithParts[])
             if (part?.type !== 'tool') {
                 continue;
             }
-            const toolName = typeof part.tool === 'string' ? part.tool.toLowerCase() : '';
+            const toolName = normalizeToolName(part.tool);
             if (!toolName || toolName === 'task' || toolName === 'todowrite' || toolName === 'todoread') {
                 continue;
             }
+            const partState = part.state as { status?: string; title?: string; input?: unknown } | undefined;
             entries.push({
                 id: part.id,
                 tool: part.tool,
                 state: {
-                    status: part.state?.status,
-                    title: part.state?.title,
+                    status: partState?.status,
+                    title: partState?.title,
+                    input: partState?.input && typeof partState.input === 'object'
+                        ? (partState.input as Record<string, unknown>)
+                        : undefined,
                 },
             });
         }
@@ -565,15 +642,61 @@ const buildTaskSummaryEntriesFromSession = (messages: SessionMessageWithParts[])
     return entries;
 };
 
+const buildTaskSessionMessagesSignature = (messages: SessionMessageWithParts[]): string => {
+    if (!Array.isArray(messages) || messages.length === 0) {
+        return '0';
+    }
+
+    const lastMessage = messages[messages.length - 1];
+    const lastMessageId = typeof lastMessage?.info?.id === 'string' ? lastMessage.info.id : '';
+    const lastMessageUpdated =
+        typeof lastMessage?.info?.time?.completed === 'number'
+            ? lastMessage.info.time.completed
+            : typeof lastMessage?.info?.time?.created === 'number'
+                ? lastMessage.info.time.created
+                : 0;
+    const lastParts = Array.isArray(lastMessage?.parts) ? lastMessage.parts : [];
+    const lastPart = lastParts[lastParts.length - 1] as Record<string, unknown> | undefined;
+    const tailType = typeof lastPart?.type === 'string' ? lastPart.type : '';
+    const tailId = typeof lastPart?.id === 'string' ? lastPart.id : '';
+    const tailTextLength = (() => {
+        const textCandidate = lastPart?.text;
+        if (typeof textCandidate === 'string') {
+            return textCandidate.length;
+        }
+        const stateCandidate = lastPart?.state;
+        if (stateCandidate && typeof stateCandidate === 'object') {
+            const stateStatus = (stateCandidate as Record<string, unknown>).status;
+            if (typeof stateStatus === 'string') {
+                return stateStatus.length;
+            }
+        }
+        return 0;
+    })();
+
+    return `${messages.length}:${lastMessageId}:${lastMessageUpdated}:${lastParts.length}:${tailType}:${tailId}:${tailTextLength}`;
+};
+
 const getTaskSummaryLabel = (entry: TaskToolSummaryEntry): string => {
     const title = entry.state?.title;
     if (typeof title === 'string' && title.trim().length > 0) {
         return title;
     }
-    if (typeof entry.tool === 'string' && entry.tool.trim().length > 0) {
-        return entry.tool;
+
+    const input = entry.state?.input;
+    if (input && typeof input === 'object') {
+        const pathCandidate = input.filePath ?? input.file_path ?? input.path;
+        if (typeof pathCandidate === 'string' && pathCandidate.trim().length > 0) {
+            return pathCandidate.trim();
+        }
+
+        const urlCandidate = input.url;
+        if (typeof urlCandidate === 'string' && urlCandidate.trim().length > 0) {
+            return urlCandidate.trim();
+        }
     }
-    return 'tool';
+
+    return '';
 };
 
 const FILE_PATH_LABEL_TOOLS = new Set([
@@ -599,7 +722,16 @@ const shouldRenderGitPathLabel = (toolName: string, label: string): boolean => {
         return false;
     }
 
-    return trimmed.includes('/') || trimmed.includes('\\');
+    if (trimmed.includes('/') || trimmed.includes('\\')) {
+        return true;
+    }
+
+    const baseName = trimmed.split(/[\\/]/).pop() || trimmed;
+    if (baseName.startsWith('.') || baseName.includes('.')) {
+        return true;
+    }
+
+    return /^[A-Za-z0-9_-]+$/.test(baseName);
 };
 
 const stripTaskMetadataFromOutput = (output: string): string => {
@@ -631,7 +763,7 @@ const normalizeTaskSummaryEntries = (value: unknown): TaskToolSummaryEntry[] => 
             tool?: unknown;
             title?: unknown;
             status?: unknown;
-            state?: { status?: unknown; title?: unknown };
+            state?: { status?: unknown; title?: unknown; input?: unknown };
         };
 
         const stateStatus = typeof record.state?.status === 'string' ? record.state.status : undefined;
@@ -645,6 +777,9 @@ const normalizeTaskSummaryEntries = (value: unknown): TaskToolSummaryEntry[] => 
             state: {
                 status,
                 title,
+                input: record.state?.input && typeof record.state.input === 'object'
+                    ? (record.state.input as Record<string, unknown>)
+                    : undefined,
             },
         });
     }
@@ -702,18 +837,16 @@ const TaskToolSummary: React.FC<{
     entries: TaskToolSummaryEntry[];
     isExpanded: boolean;
     isMobile: boolean;
-    hasPrevTool: boolean;
-    hasNextTool: boolean;
     output?: string;
     sessionId?: string;
     onShowPopup?: (content: ToolPopupContent) => void;
     input?: Record<string, unknown>;
-}> = ({ entries, isExpanded, isMobile, hasPrevTool, hasNextTool, output, sessionId, onShowPopup, input }) => {
+    animateTailText?: boolean;
+    isActive?: boolean;
+}> = ({ entries, isExpanded, isMobile, output, sessionId, onShowPopup, input, animateTailText = true, isActive = false }) => {
     const setCurrentSession = useSessionStore((state) => state.setCurrentSession);
-    const displayEntries = React.useMemo(() => {
-        const nonPending = entries.filter((entry) => entry.state?.status !== 'pending');
-        return nonPending.length > 0 ? nonPending : entries;
-    }, [entries]);
+    const showToolFileIcons = useUIStore((state) => state.showToolFileIcons);
+    const displayEntries = entries;
 
     const trimmedOutput = typeof output === 'string'
         ? stripTaskMetadataFromOutput(output)
@@ -733,7 +866,13 @@ const TaskToolSummary: React.FC<{
         : 'subagent';
 
     if (displayEntries.length === 0 && !hasOutput && !sessionId) {
-        return null;
+        return (
+            <div className="relative pr-2 pb-2 pt-2 space-y-2 pl-[1.4375rem]">
+                <div className="typography-meta text-muted-foreground/70">
+                    {isActive ? 'Waiting for subagent activity...' : 'No subagent session id on task metadata.'}
+                </div>
+            </div>
+        );
     }
 
     const visibleEntries = isExpanded ? displayEntries : displayEntries.slice(-6);
@@ -744,8 +883,7 @@ const TaskToolSummary: React.FC<{
             className={cn(
                 'relative pr-2 pb-2 pt-2 space-y-2 pl-[1.4375rem]',
                 'before:absolute before:left-[0.4375rem] before:w-px before:bg-border/80 before:content-[""]',
-                hasPrevTool ? 'before:top-[-0.45rem]' : 'before:top-[-0.25rem]',
-                hasNextTool ? 'before:bottom-[-0.6rem]' : 'before:bottom-0'
+                'before:top-[-0.25rem] before:bottom-0'
             )}
         >
             {displayEntries.length > 0 ? (
@@ -756,26 +894,53 @@ const TaskToolSummary: React.FC<{
                         ) : null}
 
                         {visibleEntries.map((entry, idx) => {
-                            const toolName = typeof entry.tool === 'string' && entry.tool.trim().length > 0 ? entry.tool : 'tool';
+                            const normalizedToolName = normalizeToolName(entry.tool);
+                            const toolName = normalizedToolName.length > 0 ? normalizedToolName : 'tool';
                             const label = getTaskSummaryLabel(entry);
+                            const hasLabel = label.trim().length > 0;
                             const status = entry.state?.status;
 
                             const displayName = getToolMetadata(toolName).displayName;
 
                             return (
-                                <div key={entry.id ?? `${toolName}-${idx}`} className={cn("flex gap-2 min-w-0 w-full", isMobile ? 'items-start' : 'items-center')}>
-                                    <span className="flex-shrink-0 text-foreground/80">{getToolIcon(toolName)}</span>
-                                    <span className="typography-meta text-foreground/80 flex-shrink-0">{displayName}</span>
-                                    {status !== 'error' && shouldRenderGitPathLabel(toolName, label) ? (
-                                        renderPathLikeGitChanges(label)
-                                    ) : (
-                                        <span className={cn(
-                                            'typography-meta flex-1 min-w-0',
-                                            isMobile ? 'whitespace-normal break-words' : 'truncate',
-                                            status === 'error' ? 'text-[var(--status-error)]' : 'text-muted-foreground/70'
-                                        )}>{label}</span>
-                                    )}
-                                </div>
+                                <ToolRevealOnMount key={entry.id ?? `${toolName}-${idx}`} animate={animateTailText} wipe>
+                                    <div className={cn("flex gap-2 min-w-0 w-full", isMobile ? 'items-start' : 'items-center')}>
+                                        <span className="flex-shrink-0 text-foreground/80">{getToolIcon(toolName)}</span>
+                                        <span
+                                            className="typography-meta text-foreground/80 flex-shrink-0"
+                                            style={{ color: 'var(--tools-title)' }}
+                                            title={displayName}
+                                        >
+                                            {displayName}
+                                        </span>
+                                        {hasLabel ? (
+                                            status !== 'error' && shouldRenderGitPathLabel(toolName, label) ? (
+                                                renderAnimatedPathWithIcon(label, animateTailText, true, showToolFileIcons)
+                                            ) : (
+                                                status === 'error' ? (
+                                                    <span className={cn(
+                                                        'typography-meta flex-1 min-w-0 text-[var(--status-error)]',
+                                                        isMobile ? 'whitespace-normal break-words' : 'truncate'
+                                                    )}>
+                                                        {label}
+                                                    </span>
+                                                ) : (
+                                                    <Text
+                                                        variant={animateTailText ? 'generate-effect' : 'static'}
+                                                        className={cn(
+                                                            'typography-meta flex-1 min-w-0 text-muted-foreground/70',
+                                                            isMobile ? 'whitespace-normal break-words' : 'truncate'
+                                                        )}
+                                                        style={{ color: 'var(--tools-description)' }}
+                                                        title={label}
+                                                    >
+                                                        {label}
+                                                    </Text>
+                                                )
+                                            )
+                                        ) : null}
+                                    </div>
+                                </ToolRevealOnMount>
                             );
                         })}
                     </div>
@@ -872,15 +1037,65 @@ const renderPathLikeGitChanges = (path: string, grow = true) => {
 
     const dir = path.slice(0, lastSlash);
     const name = path.slice(lastSlash + 1);
+    const hasAbsoluteRoot = dir.startsWith('/');
+    const displayDir = hasAbsoluteRoot ? dir.slice(1) : dir;
 
     return (
         <span className={cn('min-w-0 flex items-baseline overflow-hidden typography-ui-label', grow && 'flex-1')} title={path}>
+            {hasAbsoluteRoot ? <span className="flex-shrink-0 text-muted-foreground">/</span> : null}
             <span className="min-w-0 truncate text-muted-foreground" style={{ direction: 'rtl', textAlign: 'left' }}>
-                {dir}
+                {displayDir}
             </span>
             <span className="flex-shrink-0">
                 <span className="text-muted-foreground">/</span>
                 <span className="text-foreground">{name}</span>
+            </span>
+        </span>
+    );
+};
+
+const renderAnimatedPathWithIcon = (path: string, _animate = true, grow = true, showFileIcons = true) => {
+    void _animate;
+    const lastSlash = path.lastIndexOf('/');
+
+    if (lastSlash === -1) {
+        return (
+            <span className={cn('min-w-0 inline-flex items-center gap-1 overflow-hidden', grow && 'flex-1')} title={path}>
+                {showFileIcons ? <FileTypeIcon filePath={path} className="h-3.5 w-3.5 flex-shrink-0" /> : null}
+                <span
+                    className={cn('min-w-0 truncate whitespace-nowrap typography-meta', grow && 'flex-1')}
+                    style={{ color: 'var(--tools-title)' }}
+                >
+                    {path}
+                </span>
+            </span>
+        );
+    }
+
+    const dir = path.slice(0, lastSlash);
+    const name = path.slice(lastSlash + 1);
+    const hasAbsoluteRoot = dir.startsWith('/');
+    const displayDir = hasAbsoluteRoot ? dir.slice(1) : dir;
+
+    return (
+        <span className={cn('min-w-0 inline-flex items-center gap-1 overflow-hidden', grow && 'flex-1')} title={path}>
+            {showFileIcons ? <FileTypeIcon filePath={path} className="h-3.5 w-3.5 flex-shrink-0" /> : null}
+            <span className={cn('min-w-0 inline-flex max-w-full items-baseline overflow-hidden typography-meta', grow && 'flex-1')}>
+                {hasAbsoluteRoot ? <span className="flex-shrink-0" style={{ color: 'var(--tools-description)' }}>/</span> : null}
+                <span
+                    className="min-w-0 shrink truncate whitespace-nowrap"
+                    style={{
+                        color: 'var(--tools-description)',
+                        direction: 'rtl',
+                        textAlign: 'left',
+                    }}
+                >
+                    {displayDir}
+                </span>
+                <span className="flex-shrink-0" style={{ color: 'var(--tools-description)' }}>/</span>
+                <span className="flex-shrink-0" style={{ color: 'var(--tools-title)' }}>
+                    {name}
+                </span>
             </span>
         </span>
     );
@@ -988,7 +1203,7 @@ const WriteInputPreview: React.FC<WriteInputPreviewProps> = React.memo(({
 
     return (
         <div className="w-full min-w-0">
-            <div className="bg-muted/20 px-2 py-1 rounded-lg mb-1 flex items-center gap-2 min-w-0" style={{ borderWidth: '1px', borderColor: 'var(--tools-border)' }}>
+            <div className="bg-muted/20 px-2 py-1 rounded-lg mb-1 flex items-center gap-2 min-w-0">
                 {renderPathLikeGitChanges(displayPath)}
                 <span className="typography-meta text-muted-foreground/80 flex-shrink-0">({headerLineLabel})</span>
             </div>
@@ -1011,96 +1226,6 @@ const WriteInputPreview: React.FC<WriteInputPreviewProps> = React.memo(({
 });
 
 WriteInputPreview.displayName = 'WriteInputPreview';
-
-// ── PERF-007: Read tool output with virtualised highlighting ─────────
-interface ReadToolVirtualizedProps {
-    outputString: string;
-    input?: Record<string, unknown>;
-    syntaxTheme: { [key: string]: React.CSSProperties };
-    toolName: string;
-    currentDirectory: string;
-    pierreTheme: { light: string; dark: string };
-    pierreThemeType: 'light' | 'dark';
-    renderScrollableBlock: (
-        content: React.ReactNode,
-        options?: { maxHeightClass?: string; className?: string; disableHorizontal?: boolean; outerClassName?: string }
-    ) => React.ReactNode;
-}
-
-const ReadToolVirtualized: React.FC<ReadToolVirtualizedProps> = React.memo(({
-    outputString,
-    input,
-    syntaxTheme,
-    toolName,
-    currentDirectory,
-    pierreTheme,
-    pierreThemeType,
-    renderScrollableBlock,
-}) => {
-    const parsedReadOutput = React.useMemo(() => parseReadToolOutput(outputString), [outputString]);
-
-    const language = React.useMemo(() => {
-        const contentForLanguage = parsedReadOutput.lines.map((l) => l.text).join('\n');
-        return detectLanguageFromOutput(contentForLanguage, toolName, input as Record<string, unknown>);
-    }, [parsedReadOutput, toolName, input]);
-
-    const rawFilePath =
-        typeof input?.filePath === 'string'
-            ? input.filePath
-            : typeof input?.file_path === 'string'
-                ? input.file_path
-                : typeof input?.path === 'string'
-                    ? input.path
-                    : 'read-output';
-    const displayPath = getRelativePath(rawFilePath, currentDirectory);
-
-    const codeLines: CodeLine[] = React.useMemo(() => parsedReadOutput.lines.map((line) => ({
-        text: line.text,
-        lineNumber: line.lineNumber,
-        isInfo: line.isInfo,
-    })), [parsedReadOutput]);
-
-    if (parsedReadOutput.type === 'file') {
-        const fileContent = parsedReadOutput.lines.map((line) => line.text).join('\n');
-        const lineCount = Math.max(parsedReadOutput.lines.length, 1);
-        const headerLineLabel = lineCount === 1 ? 'line 1' : `lines 1-${lineCount}`;
-        return renderScrollableBlock(
-            <div className="w-full min-w-0">
-                <div className="bg-muted/20 px-2 py-1 rounded-lg mb-1 flex items-center gap-2 min-w-0" style={{ borderWidth: '1px', borderColor: 'var(--tools-border)' }}>
-                    {renderPathLikeGitChanges(displayPath)}
-                    <span className="typography-meta text-muted-foreground/80 flex-shrink-0">({headerLineLabel})</span>
-                </div>
-                <PierreFile
-                    file={{
-                        name: displayPath,
-                        contents: fileContent,
-                        lang: language || undefined,
-                    }}
-                    options={{
-                        disableFileHeader: true,
-                        overflow: 'wrap',
-                        theme: pierreTheme,
-                        themeType: pierreThemeType,
-                    }}
-                    className="block w-full"
-                />
-            </div>,
-            { className: 'p-1' }
-        ) as React.ReactElement;
-    }
-
-    return renderScrollableBlock(
-        <VirtualizedCodeBlock
-            lines={codeLines}
-            language={language}
-            syntaxTheme={syntaxTheme}
-            maxHeight="55vh"
-        />,
-        { className: 'p-1' }
-    ) as React.ReactElement;
-});
-
-ReadToolVirtualized.displayName = 'ReadToolVirtualized';
 
 interface ImagePreviewProps {
     content: string;
@@ -1127,10 +1252,10 @@ const ImagePreview: React.FC<ImagePreviewProps> = React.memo(({ content, filePat
 
     return (
         <div className="w-full min-w-0">
-            <div className="bg-muted/20 px-2 py-1 rounded-lg mb-2 flex items-center min-w-0" style={{ borderWidth: '1px', borderColor: 'var(--tools-border)' }}>
+            <div className="bg-muted/20 px-2 py-1 rounded-lg mb-2 flex items-center min-w-0">
                 {renderPathLikeGitChanges(displayPath)}
             </div>
-            <div className="flex justify-center p-4 bg-muted/10 rounded-lg" style={{ borderWidth: '1px', borderColor: 'var(--tools-border)' }}>
+            <div className="flex justify-center p-4 bg-muted/10 rounded-lg">
                 <img
                     src={imageSrc}
                     alt={displayPath}
@@ -1148,22 +1273,16 @@ interface ToolExpandedContentProps {
     part: ToolPartType;
     state: ToolStateUnion;
     syntaxTheme: { [key: string]: React.CSSProperties };
-    isMobile: boolean;
     currentDirectory: string;
     onShowPopup?: (content: ToolPopupContent) => void;
-    hasPrevTool: boolean;
-    hasNextTool: boolean;
 }
 
 const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     part,
     state,
     syntaxTheme,
-    isMobile,
     currentDirectory,
     onShowPopup,
-    hasPrevTool,
-    hasNextTool,
 }) => {
     const { pierreTheme, pierreThemeType } = usePierreThemeConfig();
     const [diffViewMode, setDiffViewMode] = React.useState<DiffViewMode>('unified');
@@ -1274,95 +1393,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
             return <div className="typography-meta text-muted-foreground">Awaiting response...</div>;
         }
 
-        if (part.tool === 'todowrite' || part.tool === 'todoread') {
-            if (state.status === 'completed' && hasStringOutput) {
-                const todoContent = renderTodoOutput(outputString, { unstyled: true });
-                return renderScrollableBlock(
-                    todoContent ?? (
-                        <div className="typography-meta text-muted-foreground">Unable to parse todo list</div>
-                    )
-                );
-            }
-
-            if (state.status === 'error' && 'error' in state) {
-                return (
-                    <div>
-                        <div className="typography-meta font-medium text-muted-foreground mb-1">Error:</div>
-                        <div className="typography-meta p-2 rounded-xl border" style={{
-                            backgroundColor: 'var(--status-error-background)',
-                            color: 'var(--status-error)',
-                            borderColor: 'var(--status-error-border)',
-                        }}>
-                            {state.error}
-                        </div>
-                    </div>
-                );
-            }
-
-            return <div className="typography-meta text-muted-foreground">Processing todo list...</div>;
-        }
-
-        if (part.tool === 'list' && hasStringOutput) {
-            const listOutput = renderListOutput(outputString, { unstyled: true });
-            return renderScrollableBlock(
-                listOutput ?? (
-                    <pre className="typography-code font-mono whitespace-pre-wrap break-words w-full min-w-0">
-                        {outputString}
-                    </pre>
-                )
-            );
-        }
-
-        if (part.tool === 'grep' && hasStringOutput) {
-            const grepOutput = renderGrepOutput(outputString, isMobile, { unstyled: true });
-            return renderScrollableBlock(
-                grepOutput ?? (
-                    <pre className="typography-code font-mono whitespace-pre-wrap break-words w-full min-w-0">
-                        {outputString}
-                    </pre>
-                )
-            );
-        }
-
-        if (part.tool === 'glob' && hasStringOutput) {
-            const globOutput = renderGlobOutput(outputString, isMobile, { unstyled: true });
-            return renderScrollableBlock(
-                globOutput ?? (
-                    <pre className="typography-code font-mono whitespace-pre-wrap break-words w-full min-w-0">
-                        {outputString}
-                    </pre>
-                )
-            );
-        }
-
         if (part.tool === 'task' && hasStringOutput) {
-            return renderScrollableBlock(
-                <div className="w-full min-w-0">
-                    <SimpleMarkdownRenderer content={outputString} variant="tool" onShowPopup={onShowPopup} />
-                </div>
-            );
-        }
-
-        if ((part.tool === 'web-search' || part.tool === 'websearch' || part.tool === 'search_web') && hasStringOutput) {
-            const webSearchContent = renderWebSearchOutput(outputString, syntaxTheme, { unstyled: true });
-            return renderScrollableBlock(
-                webSearchContent ?? (
-                    <pre className="typography-code font-mono whitespace-pre-wrap break-words w-full min-w-0">
-                        {outputString}
-                    </pre>
-                )
-            );
-        }
-
-        if (part.tool === 'codesearch' && hasStringOutput) {
-            return renderScrollableBlock(
-                <div className="w-full min-w-0">
-                    <SimpleMarkdownRenderer content={outputString} variant="tool" onShowPopup={onShowPopup} />
-                </div>
-            );
-        }
-
-        if (part.tool === 'skill' && hasStringOutput) {
             return renderScrollableBlock(
                 <div className="w-full min-w-0">
                     <SimpleMarkdownRenderer content={outputString} variant="tool" onShowPopup={onShowPopup} />
@@ -1376,7 +1407,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                     {diffEntries.map((entry) => (
                         <div key={entry.id} className="w-full min-w-0">
                             {diffEntries.length > 1 ? (
-                                <div className="bg-muted/20 px-2 py-1 typography-meta font-medium text-muted-foreground rounded-lg mb-1" style={{ borderWidth: '1px', borderColor: 'var(--tools-border)' }}>
+                                <div className="bg-muted/20 px-2 py-1 typography-meta font-medium text-muted-foreground rounded-lg mb-1">
                                     {renderPathLikeGitChanges(entry.title)}
                                 </div>
                             ) : null}
@@ -1394,40 +1425,18 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         }
 
         if (hasStringOutput && outputString.trim()) {
-            if (part.tool === 'read') {
-                return <ReadToolVirtualized
-                    outputString={outputString}
+            return renderScrollableBlock(
+                <ToolScrollableTextOutput
+                    output={outputString}
+                    part={part}
+                    metadata={metadata}
                     input={input}
                     syntaxTheme={syntaxTheme}
-                    toolName={part.tool}
-                    currentDirectory={currentDirectory}
-                    pierreTheme={pierreTheme}
-                    pierreThemeType={pierreThemeType}
-                    renderScrollableBlock={renderScrollableBlock}
-                />;
-            }
-
-            return renderScrollableBlock(
-                <SyntaxHighlighter
-                    style={syntaxTheme}
-                    language={detectLanguageFromOutput(formatEditOutput(outputString, part.tool, metadata), part.tool, input)}
-                    PreTag="div"
-                    customStyle={{
-                        ...toolDisplayStyles.getCollapsedStyles(),
-                        padding: 0,
-                        overflow: 'visible',
-                    }}
-                    codeTagProps={{
-                        style: {
-                            background: 'transparent',
-                            backgroundColor: 'transparent',
-                        },
-                    }}
-                    wrapLongLines
-                >
-                    {formatEditOutput(outputString, part.tool, metadata)}
-                </SyntaxHighlighter>,
-                { className: 'p-1' }
+                />,
+                {
+                    className: 'p-1',
+                    maxHeightClass: part.tool === 'bash' ? 'max-h-[46vh]' : undefined,
+                }
             );
         }
 
@@ -1440,19 +1449,10 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     return (
         <div
             className={cn(
-                'relative pr-2 pb-2 pt-2 space-y-2 pl-[1.4375rem]'
+                'relative pr-2 pb-2 pt-2 space-y-2 pl-4'
             )}
         >
-            <div 
-                className="absolute left-[0.4375rem] w-px"
-                style={{
-                    backgroundColor: 'var(--tools-border)',
-                    top: hasPrevTool ? '-0.45rem' : '-0.25rem',
-                    bottom: hasNextTool ? '-0.6rem' : '0',
-                    width: '1px'
-                }}
-            ></div>
-            {(part.tool === 'todowrite' || part.tool === 'todoread' || part.tool === 'question') ? (
+            {part.tool === 'question' ? (
                 renderResultContent()
             ) : (
                 <>
@@ -1481,28 +1481,34 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                     ) : hasInputText ? (
                         <div className="my-1">
                             {renderScrollableBlock(
-                                <blockquote className="tool-input-text whitespace-pre-wrap break-words typography-meta italic text-muted-foreground/70">
-                                    {inputTextContent}
-                                </blockquote>,
-                                { maxHeightClass: 'max-h-60', className: 'tool-input-surface' }
+                                part.tool === 'bash' ? (
+                                    <pre className="tool-input-text whitespace-pre-wrap break-words typography-code text-muted-foreground/90 m-0 p-0">
+                                        {inputTextContent}
+                                    </pre>
+                                ) : (
+                                    <blockquote className="tool-input-text whitespace-pre-wrap break-words typography-meta italic text-muted-foreground/70">
+                                        {inputTextContent}
+                                    </blockquote>
+                                ),
+                                {
+                                    maxHeightClass: 'max-h-60',
+                                    className: part.tool === 'bash' ? 'tool-input-surface p-0' : 'tool-input-surface',
+                                }
                             )}
                         </div>
                     ) : null}
 
                     {part.tool !== 'write' && state.status === 'completed' && 'output' in state && (
                         <div>
-                            <div className="mb-1 flex items-center justify-between gap-2">
-                                <div className="typography-meta font-medium text-muted-foreground/80">
-                                    Result:
-                                </div>
-                                {(part.tool === 'edit' || part.tool === 'multiedit' || part.tool === 'apply_patch') && diffContent ? (
+                            {(part.tool === 'edit' || part.tool === 'multiedit' || part.tool === 'apply_patch') && diffContent ? (
+                                <div className="mb-1 flex items-center justify-end gap-2">
                                     <DiffViewToggle
                                         mode={diffViewMode}
                                         onModeChange={setDiffViewMode}
                                         className="h-5 w-5 p-0"
                                     />
-                                ) : null}
-                            </div>
+                                </div>
+                            ) : null}
                             {renderResultContent()}
                         </div>
                     )}
@@ -1535,19 +1541,36 @@ const ToolPart: React.FC<ToolPartProps> = ({
     isMobile,
     onContentChange,
     onShowPopup,
-    hasPrevTool = false,
-    hasNextTool = false,
+    animateTailText = true,
 }) => {
     const state = part.state;
+    const showToolFileIcons = useUIStore((s) => s.showToolFileIcons);
     const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
-    const showActivityHeaderTimestamps = useUIStore((store) => store.showActivityHeaderTimestamps);
 
-    const isTaskTool = part.tool.toLowerCase() === 'task';
+    const normalizedPartTool = normalizeToolName(part.tool);
+    const isTaskTool = normalizedPartTool === 'task';
 
-    const status = state.status as string | undefined;
-    const isFinalized = status === 'completed' || status === 'error';
-    const isActive = status === 'running' || status === 'pending' || status === 'started';
-    const isError = state.status === 'error';
+    const status = state?.status as string | undefined;
+    const isFinalized = status === 'completed' || status === 'error' || status === 'aborted' || status === 'failed' || status === 'timeout' || status === 'cancelled';
+    const isError = status === 'error' || status === 'failed';
+
+    const [activeLatched, setActiveLatched] = React.useState<boolean>(!isFinalized);
+    const previousPartIdRef = React.useRef<string | undefined>(part.id);
+
+    React.useEffect(() => {
+        if (previousPartIdRef.current === part.id) {
+            return;
+        }
+        previousPartIdRef.current = part.id;
+        // Reset latch only when tool identity changes.
+        setActiveLatched(!isFinalized);
+    }, [isFinalized, part.id]);
+
+    React.useEffect(() => {
+        if (!isFinalized) {
+            setActiveLatched(true);
+        }
+    }, [isFinalized]);
 
 
 
@@ -1564,14 +1587,29 @@ const ToolPart: React.FC<ToolPartProps> = ({
 
     const stateWithData = state as ToolStateWithMetadata;
     const metadata = stateWithData.metadata;
+    const partMetadata = (part as unknown as { metadata?: unknown }).metadata;
     const input = stateWithData.input;
     const time = stateWithData.time;
 
     const [pinnedTime, setPinnedTime] = React.useState<{ start?: number; end?: number }>({});
+    const [localStartAt, setLocalStartAt] = React.useState<number | undefined>(undefined);
+    const [localFinalizedAt, setLocalFinalizedAt] = React.useState<number | undefined>(undefined);
 
     React.useEffect(() => {
         setPinnedTime({});
+        setLocalStartAt(undefined);
+        setLocalFinalizedAt(undefined);
     }, [part.id]);
+
+    React.useEffect(() => {
+        if (isFinalized) {
+            return;
+        }
+        if (typeof time?.start === 'number') {
+            return;
+        }
+        setLocalStartAt((prev) => prev ?? Date.now());
+    }, [isFinalized, time?.start]);
 
     React.useEffect(() => {
         setPinnedTime((prev) => {
@@ -1583,7 +1621,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
                 changed = true;
             }
 
-            if (typeof time?.end === 'number' && prev.end !== time.end) {
+            if (typeof time?.end === 'number' && (typeof prev.end !== 'number' || time.end > prev.end)) {
                 next.end = time.end;
                 changed = true;
             }
@@ -1592,17 +1630,20 @@ const ToolPart: React.FC<ToolPartProps> = ({
         });
     }, [time?.end, time?.start]);
 
-    const effectiveTimeStart = pinnedTime.start ?? time?.start;
-    const effectiveTimeEnd = pinnedTime.end ?? time?.end;
-
-    const endedTimestampText = React.useMemo(() => {
-        if (typeof effectiveTimeEnd !== 'number' || !Number.isFinite(effectiveTimeEnd)) {
-            return null;
+    const effectiveTimeStart = React.useMemo(() => {
+        // Once we captured a local start (during pending, before server sends time.start),
+        // always prefer it so the timer never jumps when server start arrives later.
+        if (typeof localStartAt === 'number') {
+            return localStartAt;
         }
-
-        const formatted = formatTimestampForDisplay(effectiveTimeEnd);
-        return formatted.length > 0 ? formatted : null;
-    }, [effectiveTimeEnd]);
+        const candidates = [pinnedTime.start, time?.start].filter(
+            (value): value is number => typeof value === 'number'
+        );
+        if (candidates.length === 0) {
+            return undefined;
+        }
+        return Math.min(...candidates);
+    }, [localStartAt, pinnedTime.start, time?.start]);
 
     const taskOutputString = React.useMemo(() => {
         return typeof stateWithData.output === 'string' ? stateWithData.output : undefined;
@@ -1616,15 +1657,22 @@ const ToolPart: React.FC<ToolPartProps> = ({
         if (!isTaskTool) {
             return undefined;
         }
-        const candidate = metadata as { sessionId?: string } | undefined;
-        if (typeof candidate?.sessionId === 'string' && candidate.sessionId.trim().length > 0) {
-            return candidate.sessionId;
+
+        const metadataSessionId = readTaskSessionIdFromRecord(metadata);
+        if (metadataSessionId) {
+            return metadataSessionId;
         }
+
+        const partLevelSessionId = readTaskSessionIdFromRecord(partMetadata);
+        if (partLevelSessionId) {
+            return partLevelSessionId;
+        }
+
         if (parsedTaskMetadata.sessionId) {
             return parsedTaskMetadata.sessionId;
         }
         return readTaskSessionIdFromOutput(taskOutputString);
-    }, [isTaskTool, metadata, parsedTaskMetadata.sessionId, taskOutputString]);
+    }, [isTaskTool, metadata, parsedTaskMetadata.sessionId, partMetadata, taskOutputString]);
 
     const childSessionMessages = useSessionStore(
         React.useCallback((store) => {
@@ -1661,6 +1709,122 @@ const ToolPart: React.FC<ToolPartProps> = ({
         return buildTaskSummaryEntriesFromSession(childSessionMessages);
     }, [childSessionMessages, isTaskTool, taskSessionId]);
 
+    const childSessionHasInFlightTools = React.useMemo(() => {
+        if (!isTaskTool || !taskSessionId || !Array.isArray(childSessionMessages) || childSessionMessages.length === 0) {
+            return false;
+        }
+
+        for (const message of childSessionMessages) {
+            if (message?.info?.role !== 'assistant') {
+                continue;
+            }
+            const parts = Array.isArray(message.parts) ? message.parts : [];
+            for (const childPart of parts) {
+                if (childPart?.type !== 'tool') {
+                    continue;
+                }
+                const childStatus =
+                    typeof childPart === 'object' && childPart !== null && 'state' in childPart
+                        ? (childPart.state as { status?: string } | undefined)?.status
+                        : undefined;
+                if (childStatus === 'running' || childStatus === 'pending' || childStatus === 'started') {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }, [childSessionMessages, isTaskTool, taskSessionId]);
+
+    const childSessionActivity = useSessionActivity(taskSessionId);
+    const [taskChildSeenActive, setTaskChildSeenActive] = React.useState(false);
+    const [taskChildPollingStopped, setTaskChildPollingStopped] = React.useState(false);
+
+    const taskPollNoChangeCountRef = React.useRef(0);
+    const taskPollLastSignatureRef = React.useRef<string>('');
+
+    React.useEffect(() => {
+        setTaskChildSeenActive(false);
+        setTaskChildPollingStopped(false);
+        taskPollNoChangeCountRef.current = 0;
+        taskPollLastSignatureRef.current = '';
+    }, [taskSessionId]);
+
+    React.useEffect(() => {
+        if (!isTaskTool || !taskSessionId) {
+            return;
+        }
+
+        const childSessionIsActive =
+            childSessionActivity.phase === 'busy'
+            || childSessionActivity.phase === 'retry'
+            || childSessionHasInFlightTools
+            || (!isFinalized && activeLatched);
+
+        if (childSessionIsActive) {
+            if (!taskChildSeenActive) {
+                setTaskChildSeenActive(true);
+            }
+            if (taskChildPollingStopped) {
+                setTaskChildPollingStopped(false);
+            }
+            return;
+        }
+
+        if (!taskChildSeenActive || taskChildPollingStopped || childSessionTaskSummaryEntries.length === 0) {
+            return;
+        }
+
+        if (typeof window === 'undefined') {
+            setTaskChildPollingStopped(true);
+            return;
+        }
+
+        const timer = window.setTimeout(() => {
+            setTaskChildPollingStopped(true);
+        }, TASK_TOOL_SETTLE_GRACE_MS);
+
+        return () => {
+            window.clearTimeout(timer);
+        };
+    }, [
+        childSessionActivity.phase,
+        childSessionHasInFlightTools,
+        childSessionTaskSummaryEntries.length,
+        activeLatched,
+        isFinalized,
+        isTaskTool,
+        taskChildPollingStopped,
+        taskChildSeenActive,
+        taskSessionId,
+    ]);
+
+    React.useEffect(() => {
+        if (typeof time?.end === 'number' || typeof pinnedTime.end === 'number') {
+            setLocalFinalizedAt(undefined);
+            return;
+        }
+
+        if (typeof effectiveTimeStart !== 'number') {
+            return;
+        }
+
+        if (!isFinalized) {
+            return;
+        }
+
+        setLocalFinalizedAt((prev) => prev ?? Date.now());
+    }, [
+        effectiveTimeStart,
+        isFinalized,
+        pinnedTime.end,
+        time?.end,
+    ]);
+
+    const effectiveTimeEnd = isFinalized ? (pinnedTime.end ?? time?.end ?? localFinalizedAt) : undefined;
+    const isActive = !isFinalized && activeLatched;
+    const shouldTreatAsFinalized = isFinalized;
+
     const taskSummaryEntries = React.useMemo<TaskToolSummaryEntry[]>(() => {
         if (childSessionTaskSummaryEntries.length > 0) {
             return childSessionTaskSummaryEntries;
@@ -1668,41 +1832,100 @@ const ToolPart: React.FC<ToolPartProps> = ({
         return metadataTaskSummaryEntries;
     }, [childSessionTaskSummaryEntries, metadataTaskSummaryEntries]);
 
-    const fetchedTaskSessionsRef = React.useRef<Set<string>>(new Set());
     React.useEffect(() => {
         if (!isTaskTool || !taskSessionId) {
             return;
         }
-        if (childSessionTaskSummaryEntries.length > 0) {
-            return;
-        }
-        if (fetchedTaskSessionsRef.current.has(taskSessionId)) {
+
+        const childSessionActive = childSessionActivity.phase === 'busy' || childSessionActivity.phase === 'retry';
+        const shouldPoll =
+            !taskChildPollingStopped
+            && (isActive || childSessionHasInFlightTools || childSessionActive || childSessionTaskSummaryEntries.length === 0);
+        const shouldFetchSnapshot = childSessionTaskSummaryEntries.length === 0 || shouldPoll;
+        if (!shouldFetchSnapshot) {
             return;
         }
 
-        fetchedTaskSessionsRef.current.add(taskSessionId);
         let cancelled = false;
+        let pollTimer: number | undefined;
 
-        void opencodeClient
-            .getSessionMessages(taskSessionId, 500)
-            .then((messages) => {
-                if (cancelled || !Array.isArray(messages)) {
+        const isVisible = () => {
+            if (typeof document === 'undefined') {
+                return true;
+            }
+            return document.visibilityState === 'visible';
+        };
+
+        const resolveFetchLimit = (isInitialFetch: boolean) => {
+            if (isInitialFetch && childSessionTaskSummaryEntries.length === 0) {
+                return TASK_TOOL_INITIAL_FETCH_LIMIT;
+            }
+            if (isActive || childSessionHasInFlightTools || childSessionActive) {
+                return TASK_TOOL_ACTIVE_FETCH_LIMIT;
+            }
+            return TASK_TOOL_IDLE_FETCH_LIMIT;
+        };
+
+        const resolvePollDelay = () => {
+            if (!isVisible()) {
+                return TASK_TOOL_POLL_HIDDEN_MS;
+            }
+            if (taskPollNoChangeCountRef.current >= TASK_TOOL_NO_CHANGE_BACKOFF_AFTER_POLLS) {
+                return TASK_TOOL_POLL_IDLE_MS;
+            }
+            return TASK_TOOL_POLL_FAST_MS;
+        };
+
+        const scheduleNextPoll = () => {
+            if (!shouldPoll || typeof window === 'undefined' || cancelled) {
+                return;
+            }
+            pollTimer = window.setTimeout(() => {
+                pollTimer = undefined;
+                void fetchSessionMessages(false);
+            }, resolvePollDelay());
+        };
+
+        const fetchSessionMessages = async (isInitialFetch: boolean) => {
+            try {
+                const messages = await opencodeClient.getSessionMessages(taskSessionId, resolveFetchLimit(isInitialFetch));
+                if (cancelled || !Array.isArray(messages) || messages.length === 0) {
                     return;
                 }
-                if (messages.length === 0) {
-                    fetchedTaskSessionsRef.current.delete(taskSessionId);
+
+                const nextSignature = buildTaskSessionMessagesSignature(messages as SessionMessageWithParts[]);
+                if (nextSignature === taskPollLastSignatureRef.current) {
+                    taskPollNoChangeCountRef.current += 1;
                     return;
                 }
+
+                taskPollLastSignatureRef.current = nextSignature;
+                taskPollNoChangeCountRef.current = 0;
                 useSessionStore.getState().syncMessages(taskSessionId, messages);
-            })
-            .catch(() => {
-                fetchedTaskSessionsRef.current.delete(taskSessionId);
-            });
+            } catch {
+                // Ignore transient subagent fetch errors.
+            } finally {
+                scheduleNextPoll();
+            }
+        };
+
+        void fetchSessionMessages(true);
 
         return () => {
             cancelled = true;
+            if (typeof pollTimer === 'number') {
+                window.clearTimeout(pollTimer);
+            }
         };
-    }, [childSessionTaskSummaryEntries.length, isTaskTool, taskSessionId]);
+    }, [
+        childSessionActivity.phase,
+        childSessionHasInFlightTools,
+        childSessionTaskSummaryEntries.length,
+        isActive,
+        isTaskTool,
+        taskChildPollingStopped,
+        taskSessionId,
+    ]);
 
 
     const taskSummaryLenRef = React.useRef<number>(taskSummaryEntries.length);
@@ -1717,18 +1940,28 @@ const ToolPart: React.FC<ToolPartProps> = ({
         onContentChange?.('structural');
     }, [isTaskTool, onContentChange, taskSummaryEntries.length]);
 
-    const diffStats = (part.tool === 'edit' || part.tool === 'multiedit' || part.tool === 'apply_patch') ? parseDiffStats(metadata) : null;
-    const descriptionPath = getToolDescriptionPath(part, state, currentDirectory);
-    const description = getToolDescription(part, state, currentDirectory);
-    const displayName = getToolMetadata(part.tool).displayName;
+    const diffStats = (normalizedPartTool === 'edit' || normalizedPartTool === 'multiedit' || normalizedPartTool === 'apply_patch') ? parseDiffStats(metadata) : null;
+    const writeLineCount = normalizedPartTool === 'write' ? parseWriteLineCount(input) : null;
+    const isMultiFileApplyPatch = normalizedPartTool === 'apply_patch' && Array.isArray(metadata?.files) && (metadata?.files as []).length > 1;
+    const normalizedPart = normalizedPartTool !== part.tool ? ({ ...part, tool: normalizedPartTool } as ToolPartType) : part;
+    const descriptionPath = getToolDescriptionPath(normalizedPart, state, currentDirectory);
+    const description = getToolDescription(normalizedPart, state, currentDirectory);
+    const displayName = getToolMetadata(normalizedPartTool || part.tool).displayName;
     
-    // Get justification text (tool title/description) when setting is enabled
-    const showTextJustificationActivity = useUIStore((state) => state.showTextJustificationActivity);
+    // Tool title/description — shown inline as context
     const justificationText = React.useMemo(() => {
-        if (!showTextJustificationActivity) return null;
-        if (part.tool === 'apply_patch') return null;
-        if (part.tool.toLowerCase() === 'structuredoutput' || part.tool.toLowerCase() === 'structured_output') return null;
-        // Get title or description from state - this is the "yapping" text like "Shows system information"
+        if (normalizedPartTool === 'bash') {
+            return null;
+        }
+        if (normalizedPartTool === 'apply_patch') {
+            return null;
+        }
+        if (
+            descriptionPath
+            && (normalizedPartTool === 'apply_patch' || normalizedPartTool === 'edit' || normalizedPartTool === 'multiedit' || normalizedPartTool === 'write')
+        ) {
+            return null;
+        }
         const title = (stateWithData as { title?: string }).title;
         if (typeof title === 'string' && title.trim().length > 0) {
             return title;
@@ -1738,7 +1971,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
             return inputDesc;
         }
         return null;
-    }, [showTextJustificationActivity, part.tool, stateWithData, input]);
+    }, [descriptionPath, normalizedPartTool, stateWithData, input]);
 
     const runtime = React.useContext(RuntimeAPIContext);
 
@@ -1765,7 +1998,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
             if (typeof filePath === 'string') {
                 toolDiff = getPrimaryDiffFromMetadata(part.tool, metadata, filePath);
             }
-        } else if (['write', 'create', 'file_write', 'read', 'view', 'file_read', 'cat'].includes(part.tool)) {
+        } else if (['write', 'create', 'file_write'].includes(part.tool)) {
             filePath = input?.filePath || input?.file_path || input?.path || metadata?.filePath || metadata?.file_path || metadata?.path;
         }
 
@@ -1794,23 +2027,24 @@ const ToolPart: React.FC<ToolPartProps> = ({
         handleMainClick(event);
     };
 
-    if (!isFinalized && !isActive && !isTaskTool) {
+    if (!shouldTreatAsFinalized && !isActive && !isTaskTool) {
         return null;
     }
 
     return (
-        <div className="my-1">
+        <div>
             {}
             <div
                 className={cn(
-                    'group/tool flex items-center gap-2 pr-2 pl-px py-1.5 rounded-xl cursor-pointer'
-                )}
+                'group/tool flex gap-1.5 pr-2 pl-px py-2 rounded-xl cursor-pointer',
+                isMultiFileApplyPatch ? 'flex-wrap items-start' : 'items-center'
+            )}
                 onClick={handleMainClick}
                 onKeyDown={handleMainKeyDown}
                 role="button"
                 tabIndex={0}
             >
-                <div className="flex items-center gap-2 flex-shrink-0">
+                <div className={cn('flex gap-1.5', isMultiFileApplyPatch ? 'w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5' : 'items-center flex-shrink-0')}>
                     {}
                     <div
                         className="relative h-3.5 w-3.5 flex-shrink-0 cursor-pointer"
@@ -1825,7 +2059,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
                             )}
                             style={!isTaskTool && isError ? { color: 'var(--status-error)' } : { color: 'var(--tools-icon)' }}
                         >
-                            {getToolIcon(part.tool)}
+                            {getToolIcon(normalizedPartTool || part.tool)}
                         </div>
                         {}
                         <div
@@ -1838,98 +2072,118 @@ const ToolPart: React.FC<ToolPartProps> = ({
                             {isExpanded ? <RiArrowDownSLine className="h-3.5 w-3.5" /> : <RiArrowRightSLine className="h-3.5 w-3.5" />}
                         </div>
                     </div>
-                    <span
-                        className="typography-meta font-medium"
-                        style={!isTaskTool && isError ? { color: 'var(--status-error)' } : { color: 'var(--tools-title)' }}
-                    >
-                        {displayName}
-                    </span>
-                </div>
-
-                <div className="flex items-center gap-1 flex-1 min-w-0 typography-meta" style={{ color: 'var(--tools-description)' }}>
-                    <div className="flex items-center gap-1 flex-1 min-w-0">
-                        {justificationText && (
-                            <span className="min-w-0 truncate" style={{ color: 'var(--tools-description)', opacity: 0.8 }}>
-                                {justificationText}
-                            </span>
-                        )}
-                        {!justificationText && description && (
-                            descriptionPath && description === descriptionPath ? (
-                                renderPathLikeGitChanges(descriptionPath, false)
-                            ) : (
-                                <span className="min-w-0 truncate">
-                                    {description}
-                                </span>
-                            )
-                        )}
-                        {diffStats && (
-                            <span className="text-muted-foreground/60 flex-shrink-0">
-                                <span style={{ color: 'var(--status-success)' }}>+{diffStats.added}</span>
-                                {' '}
-                                <span style={{ color: 'var(--status-error)' }}>-{diffStats.removed}</span>
-                            </span>
-                        )}
-                    </div>
-                    {typeof effectiveTimeStart === 'number' ? (
-                        <span className="ml-auto relative flex-shrink-0 tabular-nums text-right">
-                            <span
-                                className={cn(
-                                    'text-muted-foreground/80 transition-opacity duration-150',
-                                    !isMobile && endedTimestampText && showActivityHeaderTimestamps && 'group-hover/tool:opacity-0'
-                                )}
+                    {isMultiFileApplyPatch ? (
+                        <>
+                            <MinDurationShineText
+                                active={Boolean(isActive && !isError)}
+                                minDurationMs={300}
+                                className="typography-meta font-medium flex-shrink-0"
+                                style={!isTaskTool && isError ? { color: 'var(--status-error)' } : { color: 'var(--tools-title)' }}
+                                title={displayName}
                             >
-                                <LiveDuration
-                                    start={effectiveTimeStart}
-                                    end={typeof effectiveTimeEnd === 'number' ? effectiveTimeEnd : undefined}
-                                    active={Boolean(isActive && typeof effectiveTimeEnd !== 'number')}
-                                />
-                            </span>
-                            {!isMobile && endedTimestampText && showActivityHeaderTimestamps ? (
-                                <span
-                                    className={cn(
-                                        'pointer-events-none absolute right-0 top-0 z-10 whitespace-nowrap rounded-sm bg-[var(--surface-background)] px-1 text-muted-foreground/70 transition-opacity duration-150',
-                                        'opacity-0 group-hover/tool:opacity-100'
-                                    )}
+                                {displayName}
+                            </MinDurationShineText>
+                            {getMultiFileDescription(metadata, animateTailText, showToolFileIcons)}
+                        </>
+                    ) : (
+                        <>
+                            <div className="flex items-center gap-2 min-w-0 flex-1">
+                                <MinDurationShineText
+                                    active={Boolean(isActive && !isError)}
+                                    minDurationMs={300}
+                                    className="typography-meta font-medium flex-shrink-0"
+                                    style={!isTaskTool && isError ? { color: 'var(--status-error)' } : { color: 'var(--tools-title)' }}
+                                    title={displayName}
                                 >
-                                    {endedTimestampText}
+                                    {displayName}
+                                </MinDurationShineText>
+                            </div>
+                            {normalizedPartTool === 'bash' && typeof effectiveTimeStart === 'number' ? (
+                                <span className="flex-shrink-0 tabular-nums text-muted-foreground/80 typography-meta">
+                                    <LiveDuration
+                                        start={effectiveTimeStart}
+                                        end={typeof effectiveTimeEnd === 'number' ? effectiveTimeEnd : undefined}
+                                        active={Boolean(isActive && typeof effectiveTimeEnd !== 'number')}
+                                    />
                                 </span>
                             ) : null}
-                        </span>
-                    ) : null}
-                    {typeof effectiveTimeStart !== 'number' && !isMobile && endedTimestampText && showActivityHeaderTimestamps ? (
-                        <span className="ml-auto text-muted-foreground/70 flex-shrink-0 tabular-nums">
-                            {endedTimestampText}
-                        </span>
-                    ) : null}
+                        </>
+                    )}
                 </div>
+
+                {!isMultiFileApplyPatch && (
+                    <div className="flex items-center gap-1 flex-1 min-w-0 typography-meta" style={{ color: 'var(--tools-description)' }}>
+                        <div className="flex items-center gap-1 flex-1 min-w-0">
+                            {justificationText && (
+                                <span
+                                    className="min-w-0 truncate typography-meta"
+                                    style={{ color: 'var(--tools-description)', opacity: 0.8 }}
+                                    title={justificationText}
+                                >
+                                    {justificationText}
+                                </span>
+                            )}
+                            {!justificationText && description && (
+                                descriptionPath && description === descriptionPath ? (
+                                    renderAnimatedPathWithIcon(descriptionPath, animateTailText, false, showToolFileIcons)
+                                ) : (
+                                    <Text
+                                        variant={animateTailText ? 'generate-effect' : 'static'}
+                                        className="min-w-0 truncate typography-meta"
+                                        style={{ color: 'var(--tools-description)' }}
+                                        title={description}
+                                    >
+                                        {description}
+                                    </Text>
+                                )
+                            )}
+                            {diffStats && (
+                                <span className="flex-shrink-0 inline-flex items-center gap-0 typography-meta" style={{ fontSize: '0.8rem', lineHeight: '1' }}>
+                                    <span style={{ color: 'var(--status-success)' }}>+{diffStats.added}</span>
+                                    <span style={{ color: 'var(--tools-description)' }}>/</span>
+                                    <span style={{ color: 'var(--status-error)' }}>-{diffStats.removed}</span>
+                                </span>
+                            )}
+                            {writeLineCount && (
+                                <span className="flex-shrink-0 inline-flex items-center gap-0 typography-meta" style={{ fontSize: '0.8rem', lineHeight: '1' }}>
+                                    <span style={{ color: 'var(--status-success)' }}>+{writeLineCount}</span>
+                                </span>
+                            )}
+                        </div>
+                    </div>
+                )}
             </div>
 
             {}
-            {isTaskTool && (taskSummaryEntries.length > 0 || isActive || isFinalized || taskSessionId) ? (
+            {isTaskTool && (taskSummaryEntries.length > 0 || isActive || shouldTreatAsFinalized || taskSessionId) ? (
                 <TaskToolSummary
                     entries={taskSummaryEntries}
                     isExpanded={isExpanded}
                     isMobile={isMobile}
-                    hasPrevTool={hasPrevTool}
-                    hasNextTool={hasNextTool}
                     output={taskOutputString}
                     sessionId={taskSessionId}
                     onShowPopup={onShowPopup}
                     input={input}
+                    animateTailText={animateTailText}
+                    isActive={isActive}
                 />
             ) : null}
 
             {!isTaskTool && isExpanded ? (
-                <ToolExpandedContent
-                    part={part}
-                    state={state}
-                    syntaxTheme={syntaxTheme}
-                    isMobile={isMobile}
-                    currentDirectory={currentDirectory}
-                    onShowPopup={onShowPopup}
-                    hasPrevTool={hasPrevTool}
-                    hasNextTool={hasNextTool}
-                />
+                <div className="relative ml-2 pl-3">
+                    <span
+                        aria-hidden="true"
+                        className="pointer-events-none absolute left-0 top-px bottom-0 w-px"
+                        style={{ backgroundColor: 'var(--tools-border)' }}
+                    />
+                    <ToolExpandedContent
+                        part={part}
+                        state={state}
+                        syntaxTheme={syntaxTheme}
+                        currentDirectory={currentDirectory}
+                        onShowPopup={onShowPopup}
+                    />
+                </div>
             ) : null}
         </div>
     );

@@ -45,9 +45,9 @@ OpenChamber supports user-defined themes. Drop a JSON file into the themes direc
     "surface": {
       "background": "#100F0F",
       "foreground": "#CECDC3",
-      "muted": "#1C1B1A",
+      "muted": "#1C1B1A90",
       "mutedForeground": "#878580",
-      "elevated": "#1C1A19",
+      "elevated": "#1C1A1990",
       "elevatedForeground": "#CECDC3",
       "overlay": "#00000080",
       "subtle": "#1e1d1c"
@@ -194,10 +194,10 @@ OpenChamber supports user-defined themes. Drop a JSON file into the themes direc
     },
     "radius": {
       "none": "0",
-      "sm": "0.125rem",
-      "md": "0.375rem",
-      "lg": "0.5rem",
-      "xl": "0.75rem",
+      "sm": "0.325rem",
+      "md": "0.75rem",
+      "lg": "1.125rem",
+      "xl": "1.5rem",
       "full": "9999px"
     },
     "transitions": {
@@ -208,6 +208,10 @@ OpenChamber supports user-defined themes. Drop a JSON file into the themes direc
   }
 }
 ```
+
+## Surface Alpha Requirement
+
+- `colors.surface.muted` and `colors.surface.elevated` must always use 90 alpha (`...90` in 8-digit hex, e.g. `#1C1B1A90`).
 
 ## Validation
 

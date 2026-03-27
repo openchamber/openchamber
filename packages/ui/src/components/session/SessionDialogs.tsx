@@ -66,6 +66,9 @@ export const SessionDialogs: React.FC = () => {
         archiveSessions,
         loadSessions,
         getWorktreeMetadata,
+        newSessionDraft,
+        setNewSessionDraftTarget,
+        setDraftBootstrapPendingDirectory,
     } = useSessionStore();
     const showDeletionDialog = useUIStore((state) => state.showDeletionDialog);
     const setShowDeletionDialog = useUIStore((state) => state.setShowDeletionDialog);
@@ -381,12 +384,34 @@ export const SessionDialogs: React.FC = () => {
         deleteLocalBranch: boolean
     ): Promise<boolean> => {
         const shouldRemoveRemote = deleteDialogShouldRemoveRemote && canRemoveRemoteBranches;
+        const projectRef = getProjectRefForWorktree(worktree);
+        const normalizedWorktreePath = normalizeProjectDirectory(worktree.path);
+        const normalizedProjectPath = normalizeProjectDirectory(projectRef.path);
         try {
             await removeProjectWorktree(
-                getProjectRefForWorktree(worktree),
+                projectRef,
                 worktree,
                 { deleteRemoteBranch: shouldRemoveRemote, deleteLocalBranch }
             );
+
+            const draftDirectory = normalizeProjectDirectory(newSessionDraft?.directoryOverride);
+            if (
+                newSessionDraft?.open
+                && normalizedWorktreePath
+                && draftDirectory === normalizedWorktreePath
+                && normalizedProjectPath
+            ) {
+                setDraftBootstrapPendingDirectory(null);
+                setNewSessionDraftTarget({
+                    projectId: projectRef.id,
+                    directoryOverride: normalizedProjectPath,
+                }, { force: true });
+            }
+
+            if (normalizeProjectDirectory(currentDirectory) === normalizedWorktreePath && normalizedProjectPath) {
+                useDirectoryStore.getState().setDirectory(normalizedProjectPath, { showOverlay: false });
+            }
+
             return true;
         } catch (error) {
             toast.error('Failed to remove worktree', {
@@ -394,7 +419,7 @@ export const SessionDialogs: React.FC = () => {
             });
             return false;
         }
-    }, [canRemoveRemoteBranches, deleteDialogShouldRemoveRemote, getProjectRefForWorktree]);
+    }, [canRemoveRemoteBranches, currentDirectory, deleteDialogShouldRemoveRemote, getProjectRefForWorktree, newSessionDraft?.directoryOverride, newSessionDraft?.open, setDraftBootstrapPendingDirectory, setNewSessionDraftTarget]);
 
     const handleConfirmDelete = React.useCallback(async () => {
         if (!deleteDialog) {

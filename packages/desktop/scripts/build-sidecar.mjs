@@ -37,6 +37,23 @@ const inferTargetTriple = () => {
 };
 
 const targetTriple = inferTargetTriple();
+
+const bunCompileTargetByTriple = {
+  'aarch64-apple-darwin': 'bun-darwin-arm64',
+  'x86_64-apple-darwin': 'bun-darwin-x64',
+  'aarch64-unknown-linux-gnu': 'bun-linux-arm64',
+  'x86_64-unknown-linux-gnu': 'bun-linux-x64',
+  'x86_64-pc-windows-msvc': 'bun-windows-x64',
+};
+
+const compileTarget = bunCompileTargetByTriple[targetTriple];
+
+if (!compileTarget) {
+  console.warn(
+    `[desktop] unknown target triple '${targetTriple}', falling back to host-arch sidecar build`
+  );
+}
+
 const sidecarBaseName = process.platform === 'win32'
   ? `openchamber-server-${targetTriple}.exe`
   : `openchamber-server-${targetTriple}`;
@@ -96,13 +113,19 @@ await copyDir(webDistDir, resourcesWebDistDir);
 console.log('[desktop] building openchamber-server sidecar...');
 await fs.mkdir(sidecarsDir, { recursive: true });
 
-run(bunExe, [
+const buildArgs = [
   'build',
   '--compile',
   path.join(webDir, 'server', 'index.js'),
   '--outfile',
   sidecarOutPath,
-], repoRoot);
+];
+
+if (compileTarget) {
+  buildArgs.push('--target', compileTarget);
+}
+
+run(bunExe, buildArgs, repoRoot);
 
 if (process.platform !== 'win32') {
   await fs.chmod(sidecarOutPath, 0o755);

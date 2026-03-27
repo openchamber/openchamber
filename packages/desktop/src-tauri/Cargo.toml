@@ -1,6 +1,6 @@
 [package]
 name = "openchamber-desktop"
-version = "1.8.5"
+version = "1.9.1"
 edition = "2021"
 publish = false
 
@@ -30,3 +30,6 @@ url = "2.5"
 
 [build-dependencies]
 tauri-build = { version = "2.5.3", features = [] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+window-vibrancy = "0.7.1"

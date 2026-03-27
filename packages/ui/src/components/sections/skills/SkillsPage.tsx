@@ -1,5 +1,5 @@
 import React from 'react';
-import { ButtonSmall } from '@/components/ui/button-small';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui';
@@ -20,7 +20,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { ButtonLarge } from '@/components/ui/button-large';
 import { SkillsCatalogPage } from './catalog/SkillsCatalogPage';
 import {
   SKILL_LOCATION_OPTIONS,
@@ -459,9 +458,9 @@ const SkillsInstalledPage: React.FC = () => {
             <h3 className="typography-ui-header font-medium text-foreground">
               Supporting Files
             </h3>
-            <ButtonSmall variant="outline" size="xs" className="!font-normal gap-1" onClick={handleAddFile}>
+            <Button variant="outline" size="xs" className="!font-normal gap-1" onClick={handleAddFile}>
               <RiAddLine className="h-3.5 w-3.5" /> Add File
-            </ButtonSmall>
+            </Button>
           </div>
 
           <section className="px-2 pb-2 pt-0">
@@ -491,7 +490,7 @@ const SkillsInstalledPage: React.FC = () => {
                           pending
                         </span>
                       )}
-                      <ButtonSmall
+                      <Button size="sm"
                         variant="ghost"
                         className="h-5 w-5 px-0 flex-shrink-0 text-muted-foreground hover:text-[var(--status-error)] opacity-0 group-hover:opacity-100 transition-opacity"
                         onClick={(e) => {
@@ -500,7 +499,7 @@ const SkillsInstalledPage: React.FC = () => {
                         }}
                       >
                         <RiDeleteBinLine className="h-3 w-3" />
-                      </ButtonSmall>
+                      </Button>
                     </div>
                   ))}
                 </div>
@@ -511,14 +510,14 @@ const SkillsInstalledPage: React.FC = () => {
 
         {/* Save action */}
         <div className="px-2 py-1">
-          <ButtonSmall
+          <Button
             onClick={handleSave}
             disabled={isSaving || !hasSkillChanges}
             size="xs"
             className="!font-normal"
           >
             {isSaving ? 'Saving...' : isNewSkill ? 'Create Skill' : 'Save Changes'}
-          </ButtonSmall>
+          </Button>
         </div>
 
       </div>
@@ -540,16 +539,17 @@ const SkillsInstalledPage: React.FC = () => {
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <ButtonLarge
+            <Button
+              size="sm"
               variant="ghost"
               onClick={() => setDeleteFilePath(null)}
               disabled={isDeletingFile}
             >
               Cancel
-            </ButtonLarge>
-            <ButtonLarge onClick={handleConfirmDeleteFile} disabled={isDeletingFile} className="bg-[var(--status-error)] hover:bg-[var(--status-error)]/90 text-white border-0">
+            </Button>
+            <Button size="sm" variant="destructive" onClick={handleConfirmDeleteFile} disabled={isDeletingFile}>
               Delete
-            </ButtonLarge>
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -603,7 +603,8 @@ const SkillsInstalledPage: React.FC = () => {
             </div>
           )}
           <DialogFooter className="mt-4">
-            <ButtonLarge
+            <Button
+              size="sm"
               variant="ghost"
               onClick={() => {
                 setIsFileDialogOpen(false);
@@ -611,10 +612,10 @@ const SkillsInstalledPage: React.FC = () => {
               }}
             >
               Cancel
-            </ButtonLarge>
-            <ButtonLarge onClick={handleSaveFile} disabled={isLoadingFile || !hasFileChanges}>
+            </Button>
+            <Button size="sm" onClick={handleSaveFile} disabled={isLoadingFile || !hasFileChanges}>
               {editingFilePath ? 'Save Changes' : 'Create File'}
-            </ButtonLarge>
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

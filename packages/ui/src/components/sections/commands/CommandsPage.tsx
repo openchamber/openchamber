@@ -1,5 +1,5 @@
 import React from 'react';
-import { ButtonSmall } from '@/components/ui/button-small';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui';
@@ -321,14 +321,14 @@ export const CommandsPage: React.FC = () => {
 
         {/* Save action */}
         <div className="px-2 py-1">
-          <ButtonSmall
+          <Button
             onClick={handleSave}
             disabled={isSaving || !isDirty}
             size="xs"
             className="!font-normal"
           >
             {isSaving ? 'Saving...' : 'Save Changes'}
-          </ButtonSmall>
+          </Button>
         </div>
 
       </div>

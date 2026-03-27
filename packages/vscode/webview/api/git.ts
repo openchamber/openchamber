@@ -14,6 +14,7 @@ import type {
   GitBranch,
   GitDeleteBranchPayload,
   GitDeleteRemoteBranchPayload,
+  GitRemoveRemotePayload,
   GeneratedCommitMessage,
   GeneratedPullRequestDescription,
   GitWorktreeInfo,
@@ -90,6 +91,14 @@ export const createVSCodeGitAPI = (): GitAPI => ({
     });
   },
 
+  removeRemote: async (directory: string, payload: GitRemoveRemotePayload): Promise<{ success: boolean }> => {
+    return sendBridgeMessage<{ success: boolean }>('api:git/remotes', {
+      directory,
+      method: 'DELETE',
+      remote: payload.remote,
+    });
+  },
+
   generateCommitMessage: async (
     directory: string,
     files: string[],
@@ -129,6 +138,20 @@ export const createVSCodeGitAPI = (): GitAPI => ({
   validateGitWorktree: async (directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeValidationResult> => {
     return sendBridgeMessage<GitWorktreeValidationResult>('api:git/worktrees/validate', {
       directory,
+      ...(payload || {}),
+    });
+  },
+
+  getGitWorktreeBootstrapStatus: async (directory: string): Promise<{ status: 'pending' | 'ready' | 'failed'; error: string | null; updatedAt: number }> => {
+    return sendBridgeMessage<{ status: 'pending' | 'ready' | 'failed'; error: string | null; updatedAt: number }>('api:git/worktrees/bootstrap-status', {
+      directory,
+    });
+  },
+
+  previewGitWorktree: async (directory: string, payload: CreateGitWorktreePayload): Promise<GitWorktreeCreateResult> => {
+    return sendBridgeMessage<GitWorktreeCreateResult>('api:git/worktrees/preview', {
+      directory,
+      method: 'POST',
       ...(payload || {}),
     });
   },

@@ -5,12 +5,7 @@ import {
   RiLoader4Line,
   RiEmotionHappyLine,
 } from '@remixicon/react';
-import {
-  Collapsible,
-  CollapsibleContent,
-} from '@/components/ui/collapsible';
 import { Button } from '@/components/ui/button';
-import { ButtonLarge } from '@/components/ui/button-large';
 import { CommitInput } from './CommitInput';
 import { AIHighlightsBox } from './AIHighlightsBox';
 import { useDeviceInfo } from '@/lib/device';
@@ -33,7 +28,6 @@ interface CommitSectionProps {
   isBusy: boolean;
   gitmojiEnabled: boolean;
   onOpenGitmojiPicker: () => void;
-  variant?: 'framed' | 'plain';
 }
 
 export const CommitSection: React.FC<CommitSectionProps> = ({
@@ -51,167 +45,148 @@ export const CommitSection: React.FC<CommitSectionProps> = ({
   isBusy,
   gitmojiEnabled,
   onOpenGitmojiPicker,
-  variant = 'framed',
 }) => {
   const hasSelectedFiles = selectedCount > 0;
   const canCommit = commitMessage.trim() && hasSelectedFiles && commitAction === null;
   const { isMobile, hasTouchInput } = useDeviceInfo();
 
-  const containerClassName =
-    variant === 'framed'
-      ? 'rounded-xl border border-border/60 bg-background/70 overflow-hidden'
-      : 'border-0 bg-transparent rounded-none';
-  const headerClassName =
-    variant === 'framed'
-      ? 'flex w-full items-center justify-between px-3 py-2'
-      : 'flex w-full items-center justify-between px-0 py-3 border-b border-border/40';
-  const contentClassName =
-    variant === 'framed'
-      ? 'flex flex-col gap-3 p-3 pt-0'
-      : 'flex flex-col gap-3 px-0 py-3';
+  const containerClassName = 'border-0 bg-transparent rounded-none';
+  const headerClassName = 'flex w-full items-center justify-between px-0 pt-2 pb-1';
+  const contentClassName = 'flex flex-col gap-3 px-0 pt-1 pb-3';
 
   return (
-    <Collapsible
-      open={variant === 'plain' ? true : hasSelectedFiles}
-      className={containerClassName}
-      data-keyboard-avoid="true"
-    >
+    <section className={containerClassName} data-keyboard-avoid="true">
       <div className={headerClassName}>
         <h3 className="typography-ui-header font-semibold text-foreground">Commit</h3>
-        <span className="typography-meta text-muted-foreground">
-          {hasSelectedFiles
-            ? `${selectedCount} file${selectedCount === 1 ? '' : 's'} selected`
-            : 'No files selected'}
-        </span>
       </div>
 
-      <CollapsibleContent>
-        <div className={contentClassName}>
-          {!hasSelectedFiles ? (
-            <p className="typography-meta text-muted-foreground">
-              Select files in Changes to enable commit.
-            </p>
-          ) : null}
+      <div className={contentClassName}>
+        {!hasSelectedFiles ? (
+          <p className="typography-meta text-muted-foreground">
+            Select files in Changes to enable commit.
+          </p>
+        ) : null}
 
-          <AIHighlightsBox
-            highlights={generatedHighlights}
-            onInsert={onInsertHighlights}
-            onClear={onClearHighlights}
-          />
+        <AIHighlightsBox
+          highlights={generatedHighlights}
+          onInsert={onInsertHighlights}
+          onClear={onClearHighlights}
+        />
 
-          <CommitInput
-            value={commitMessage}
-            onChange={onCommitMessageChange}
-            placeholder="Commit message"
-            disabled={commitAction !== null}
-            hasTouchInput={hasTouchInput}
-            isMobile={isMobile}
-          />
+        <CommitInput
+          value={commitMessage}
+          onChange={onCommitMessageChange}
+          placeholder="Commit message"
+          disabled={commitAction !== null}
+          hasTouchInput={hasTouchInput}
+          isMobile={isMobile}
+        />
 
-          {gitmojiEnabled && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={onOpenGitmojiPicker}
-              className="w-fit"
-              type="button"
-            >
-              <RiEmotionHappyLine className="size-4" />
-              Add gitmoji
-            </Button>
-          )}
+        {gitmojiEnabled && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onOpenGitmojiPicker}
+            className="w-fit"
+            type="button"
+          >
+            <RiEmotionHappyLine className="size-4" />
+            Add gitmoji
+          </Button>
+        )}
 
-          <div className="@container/commit-actions flex items-center gap-2 min-w-0">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={onGenerateMessage}
-              disabled={
-                isGeneratingMessage ||
-                commitAction !== null ||
-                selectedCount === 0 ||
-                isBusy
-              }
-              type="button"
-              aria-label="Generate"
-              className="commit-actions__btn"
-            >
-              {isGeneratingMessage ? (
+        <div className="@container/commit-actions flex items-center gap-2 min-w-0">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onGenerateMessage}
+            disabled={
+              isGeneratingMessage ||
+              commitAction !== null ||
+              selectedCount === 0 ||
+              isBusy
+            }
+            type="button"
+            aria-label="Generate"
+            className="commit-actions__btn"
+          >
+            {isGeneratingMessage ? (
+              <RiLoader4Line className="size-4 animate-spin" />
+            ) : (
+              <RiAiGenerate2 className="size-4 text-primary" />
+            )}
+            <span className="commit-actions__label">Generate</span>
+          </Button>
+
+          <div className="flex-1" />
+
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onCommit}
+            disabled={!canCommit || isGeneratingMessage}
+            className="commit-actions__btn whitespace-nowrap"
+            aria-label="Commit"
+          >
+            {commitAction === 'commit' ? (
+              <>
                 <RiLoader4Line className="size-4 animate-spin" />
-              ) : (
-                <RiAiGenerate2 className="size-4 text-primary" />
-              )}
-              <span className="commit-actions__label">Generate</span>
-            </Button>
+                <span className="commit-actions__label">Committing...</span>
+              </>
+            ) : (
+              <>
+                <RiGitCommitLine className="size-4" />
+                <span className="commit-actions__label">Commit</span>
+              </>
+            )}
+          </Button>
 
-            <div className="flex-1" />
-
-            <ButtonLarge
-              variant="outline"
-              onClick={onCommit}
+          {isMobile ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="default"
+                  size="sm"
+                  onClick={() => onCommitAndPush()}
+                  disabled={!canCommit || isGeneratingMessage}
+                  className="h-7 w-7 p-0"
+                  aria-label="Push"
+                >
+                  {commitAction === 'commitAndPush' ? (
+                    <RiLoader4Line className="size-4 animate-spin" />
+                  ) : (
+                    <RiArrowUpLine className="size-3.5" />
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                <p>Push</p>
+              </TooltipContent>
+            </Tooltip>
+          ) : (
+            <Button
+              size="sm"
+              variant="default"
+              onClick={() => onCommitAndPush()}
               disabled={!canCommit || isGeneratingMessage}
-              className="commit-actions__btn whitespace-nowrap"
-              aria-label="Commit"
+              className="commit-actions__btn"
+              aria-label="Push"
             >
-              {commitAction === 'commit' ? (
+              {commitAction === 'commitAndPush' ? (
                 <>
                   <RiLoader4Line className="size-4 animate-spin" />
-                  <span className="commit-actions__label">Committing...</span>
+                  <span className="commit-actions__label">Pushing...</span>
                 </>
               ) : (
                 <>
-                  <RiGitCommitLine className="size-4" />
-                  <span className="commit-actions__label">Commit</span>
+                  <RiArrowUpLine className="size-3.5" />
+                  <span className="commit-actions__label">Push</span>
                 </>
               )}
-            </ButtonLarge>
-
-            {isMobile ? (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                    <Button
-                      variant="default"
-                      size="sm"
-                      onClick={() => onCommitAndPush()}
-                      disabled={!canCommit || isGeneratingMessage}
-                      className="h-7 w-7 p-0"
-                      aria-label="Push"
-                    >
-                    {commitAction === 'commitAndPush' ? (
-                      <RiLoader4Line className="size-4 animate-spin" />
-                    ) : (
-                      <RiArrowUpLine className="size-4" />
-                    )}
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="top">
-                  <p>Push</p>
-                </TooltipContent>
-              </Tooltip>
-            ) : (
-              <ButtonLarge
-                variant="default"
-                onClick={() => onCommitAndPush()}
-                disabled={!canCommit || isGeneratingMessage}
-                className="commit-actions__btn"
-                aria-label="Push"
-              >
-                {commitAction === 'commitAndPush' ? (
-                  <>
-                    <RiLoader4Line className="size-4 animate-spin" />
-                    <span className="commit-actions__label">Pushing...</span>
-                  </>
-                ) : (
-                  <>
-                    <RiArrowUpLine className="size-4" />
-                    <span className="commit-actions__label">Push</span>
-                  </>
-                )}
-              </ButtonLarge>
-            )}
-          </div>
+            </Button>
+          )}
         </div>
-      </CollapsibleContent>
-    </Collapsible>
+      </div>
+    </section>
   );
 };

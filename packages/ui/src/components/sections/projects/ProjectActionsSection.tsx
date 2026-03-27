@@ -7,7 +7,7 @@ import {
   RiInformationLine,
   RiPlayLine,
 } from '@remixicon/react';
-import { ButtonSmall } from '@/components/ui/button-small';
+import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   Collapsible,
@@ -198,10 +198,10 @@ export const ProjectActionsSection: React.FC<ProjectActionsSectionProps> = ({ pr
           <h3 className="typography-ui-header font-medium text-foreground">Actions</h3>
           <p className="typography-meta text-muted-foreground">Per-project commands shown in header next to project name.</p>
         </div>
-        <ButtonSmall type="button" variant="outline" size="xs" className="!font-normal" onClick={handleAddAction}>
+        <Button type="button" variant="outline" size="xs" className="!font-normal" onClick={handleAddAction}>
           <RiAddLine className="h-3.5 w-3.5" />
           Add action
-        </ButtonSmall>
+        </Button>
       </div>
 
       <section className="pb-2 pt-0 space-y-2">
@@ -248,7 +248,7 @@ export const ProjectActionsSection: React.FC<ProjectActionsSectionProps> = ({ pr
                       </div>
                     </CollapsibleTrigger>
 
-                    <ButtonSmall
+                    <Button
                       type="button"
                       variant="ghost"
                       size="xs"
@@ -256,7 +256,7 @@ export const ProjectActionsSection: React.FC<ProjectActionsSectionProps> = ({ pr
                       onClick={() => handleRemoveAction(action.id)}
                     >
                       <RiDeleteBinLine className="h-3.5 w-3.5" />
-                    </ButtonSmall>
+                    </Button>
                   </div>
 
                   <CollapsibleContent className="pt-1.5">
@@ -418,7 +418,7 @@ export const ProjectActionsSection: React.FC<ProjectActionsSectionProps> = ({ pr
           {validationError ? (
             <p className="typography-meta mb-2 text-[var(--status-warning)]">{validationError}</p>
           ) : null}
-          <ButtonSmall
+          <Button
             type="button"
             size="xs"
             className="!font-normal"
@@ -426,7 +426,7 @@ export const ProjectActionsSection: React.FC<ProjectActionsSectionProps> = ({ pr
             disabled={!canSave}
           >
             {isSaving ? 'Saving...' : 'Save Actions'}
-          </ButtonSmall>
+          </Button>
         </div>
       </section>
     </div>
