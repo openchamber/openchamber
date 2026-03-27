@@ -355,5 +355,5 @@ export async function continueIntegrate(state: IntegrateInProgress): Promise<Int
 
   await removeTempWorktree(state.repoRoot, state.tempWorktreePath);
   await syncCleanTargetWorktrees(state.repoRoot, state.cleanTargetWorktrees).catch(() => undefined);
-  return { kind: 'success', moved: remaining.length };
+  return { kind: 'success', moved: state.remainingCommits.length };
 }
