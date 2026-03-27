@@ -92,6 +92,7 @@ export const IntegrateCommitsSection: React.FC<{
     if (!conflictStorageKey || typeof window === 'undefined') return;
     const raw = window.localStorage.getItem(conflictStorageKey);
     if (!raw) return;
+    let cancelled = false;
     try {
       const parsed = JSON.parse(raw) as IntegrateInProgress;
       if (!parsed?.tempWorktreePath || parsed.repoRoot !== repoRoot) {
@@ -100,11 +101,13 @@ export const IntegrateCommitsSection: React.FC<{
       }
       void (async () => {
         const ok = await isCherryPickInProgress(parsed.tempWorktreePath).catch(() => false);
+        if (cancelled) return;
         if (!ok) {
           window.localStorage.removeItem(conflictStorageKey);
           return;
         }
         const details = await getIntegrateConflictDetails(parsed.tempWorktreePath).catch(() => null);
+        if (cancelled) return;
         if (!details) {
           return;
         }
@@ -113,6 +116,9 @@ export const IntegrateCommitsSection: React.FC<{
     } catch {
       window.localStorage.removeItem(conflictStorageKey);
     }
+    return () => {
+      cancelled = true;
+    };
   }, [conflictStorageKey, repoRoot]);
 
   React.useEffect(() => {

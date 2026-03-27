@@ -2082,6 +2082,7 @@ export const GitView: React.FC = () => {
                 <div className="space-y-4">
                   {integrateCommitsProps ? (
                     <IntegrateCommitsSection
+                      key={integrateCommitsProps.worktreeMetadata.path}
                       repoRoot={integrateCommitsProps.repoRoot}
                       sourceBranch={integrateCommitsProps.sourceBranch}
                       worktreeMetadata={integrateCommitsProps.worktreeMetadata}
