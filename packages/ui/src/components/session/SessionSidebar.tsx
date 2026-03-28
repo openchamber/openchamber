@@ -3,6 +3,7 @@ import type { Session } from '@opencode-ai/sdk/v2';
 import { RiLayoutLeftLine } from '@remixicon/react';
 import { toast } from '@/components/ui';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { useTranslation } from 'react-i18next';
 import { isDesktopLocalOriginActive, isDesktopShell, isTauriShell } from '@/lib/desktop';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { sessionEvents } from '@/lib/sessionEvents';
@@ -153,6 +154,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   hideDirectoryControls = false,
   showOnlyMainWorkspace = false,
 }) => {
+  const { t } = useTranslation();
   const [isSessionSearchOpen, setIsSessionSearchOpen] = React.useState(false);
   const [sessionSearchQuery, setSessionSearchQuery] = React.useState('');
   const sessionSearchContainerRef = React.useRef<HTMLDivElement | null>(null);
@@ -567,8 +569,8 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
   const emptyState = (
     <div className="py-6 text-center text-muted-foreground">
-      <p className="typography-ui-label font-semibold">No sessions yet</p>
-      <p className="typography-meta mt-1">Create your first session to start coding.</p>
+      <p className="typography-ui-label font-semibold">{t('sessionsSidebar.noSessionsYet')}</p>
+      <p className="typography-meta mt-1">{t('sessionsSidebar.createFirstSession')}</p>
     </div>
   );
 
@@ -599,16 +601,16 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     void updateStore.checkForUpdates().then(() => {
       const { available, error } = useUpdateStore.getState();
       if (error) {
-        toast.error('Failed to check for updates', { description: error });
+        toast.error(t('sessionsSidebar.failedCheckForUpdates'), { description: error });
         return;
       }
       if (!available) {
-        toast.success('You are on the latest version');
+        toast.success(t('sessionsSidebar.latestVersion'));
         return;
       }
       setUpdateDialogOpen(true);
     });
-  }, [updateStore]);
+  }, [t, updateStore]);
 
   const showSidebarUpdateButton =
     updateStore.available &&
@@ -682,21 +684,21 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         if (result.success && result.path) {
           const added = addProject(result.path, { id: result.projectId });
           if (!added) {
-            toast.error('Failed to add project', {
-              description: 'Please select a valid directory.',
+            toast.error(t('sessionsSidebar.failedAddProject'), {
+              description: t('sessionsSidebar.pleaseSelectValidDirectory'),
             });
           }
         } else if (result.error && result.error !== 'Directory selection cancelled') {
-          toast.error('Failed to select directory', {
+          toast.error(t('sessionsSidebar.failedSelectDirectory'), {
             description: result.error,
           });
         }
       })
       .catch((error) => {
         console.error('Desktop: Error selecting directory:', error);
-        toast.error('Failed to select directory');
+        toast.error(t('sessionsSidebar.failedSelectDirectory'));
       });
-  }, [addProject, tauriIpcAvailable]);
+  }, [addProject, t, tauriIpcAvailable]);
 
   const toggleParent = React.useCallback((sessionId: string) => {
     setExpandedParents((prev) => {
@@ -708,7 +710,9 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       }
       try {
         safeStorage.setItem(SESSION_EXPANDED_STORAGE_KEY, JSON.stringify(Array.from(next)));
-      } catch { /* ignored */ }
+      } catch {
+        return next;
+      }
       return next;
     });
   }, [safeStorage]);
@@ -882,7 +886,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
   const searchEmptyState = (
     <div className="py-6 text-center text-muted-foreground">
-      <p className="typography-ui-label font-semibold">No matching sessions</p>
+      <p className="typography-ui-label font-semibold">{t('sessionsSidebar.noMatchingSessions')}</p>
       <p className="typography-meta mt-1">Try a different title, branch, folder, or path.</p>
     </div>
   );
@@ -1362,13 +1366,13 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
                 type="button"
                 onClick={toggleSidebar}
                 className={desktopSidebarToggleButtonClass}
-                aria-label="Close sessions"
+                aria-label={t('sessionsSidebar.closeSessions')}
               >
                 <RiLayoutLeftLine className="h-[18px] w-[18px]" />
               </button>
             </TooltipTrigger>
             <TooltipContent>
-              <p>Close sessions</p>
+              <p>{t('sessionsSidebar.closeSessions')}</p>
             </TooltipContent>
           </Tooltip>
         </div>
@@ -1496,7 +1500,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         <MobileOverlayPanel
           open={projectNotesPanelOpen}
           onClose={() => setProjectNotesPanelOpen(false)}
-          title={activeProjectLabelForHeader ? `Project notes - ${activeProjectLabelForHeader}` : 'Project notes'}
+          title={activeProjectLabelForHeader ? t('sessionsSidebar.projectNotesWithName', { name: activeProjectLabelForHeader }) : t('sessionsSidebar.projectNotes')}
         >
           <ProjectNotesTodoPanel
             projectRef={activeProjectRefForHeader}

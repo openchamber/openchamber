@@ -11,8 +11,10 @@ import { isDesktopLocalOriginActive, isTauriShell, isVSCodeRuntime, requestDirec
 import { sessionEvents } from '@/lib/sessionEvents';
 import { toast } from '@/components/ui';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
+import { useTranslation } from 'react-i18next';
 
 export const ProjectsSidebar: React.FC<{ onItemSelect?: () => void }> = ({ onItemSelect }) => {
+  const { t } = useTranslation();
   const projects = useProjectsStore((state) => state.projects);
   const addProject = useProjectsStore((state) => state.addProject);
   const selectedId = useUIStore((state) => state.settingsProjectsSelectedId);
@@ -34,23 +36,23 @@ export const ProjectsSidebar: React.FC<{ onItemSelect?: () => void }> = ({ onIte
         if (result.success && result.path) {
           const added = addProject(result.path, { id: result.projectId });
           if (!added) {
-            toast.error('Failed to add project', {
-              description: 'Please select a valid directory.',
+            toast.error(t('projects.failedAddProject'), {
+              description: t('projects.pleaseSelectValidDirectory'),
             });
             return;
           }
           setSelectedId(added.id);
         } else if (result.error && result.error !== 'Directory selection cancelled') {
-          toast.error('Failed to select directory', {
+          toast.error(t('projects.failedSelectDirectory'), {
             description: result.error,
           });
         }
       })
       .catch((error) => {
         console.error('Failed to select directory:', error);
-        toast.error('Failed to select directory');
+        toast.error(t('projects.failedSelectDirectory'));
       });
-  }, [addProject, setSelectedId, tauriIpcAvailable]);
+  }, [addProject, setSelectedId, t, tauriIpcAvailable]);
 
   React.useEffect(() => {
     if (projects.length === 0) {
@@ -70,9 +72,9 @@ export const ProjectsSidebar: React.FC<{ onItemSelect?: () => void }> = ({ onIte
       variant="background"
       header={
         <div className={cn('border-b px-3', 'pt-4 pb-3')}>
-          <h2 className="text-base font-semibold text-foreground mb-3">Projects</h2>
+          <h2 className="text-base font-semibold text-foreground mb-3">{t('projects.title')}</h2>
           <div className="flex items-center justify-between gap-2">
-            <span className="typography-meta text-muted-foreground">Total {projects.length}</span>
+            <span className="typography-meta text-muted-foreground">{t('projects.total', { count: projects.length })}</span>
             {!isVSCode && (
               <Button
                 type="button"
@@ -80,7 +82,7 @@ export const ProjectsSidebar: React.FC<{ onItemSelect?: () => void }> = ({ onIte
                 size="icon"
                 className="h-7 w-7 -my-1 text-muted-foreground"
                 onClick={handleAddProject}
-                aria-label="Add project"
+                aria-label={t('projects.addProject')}
               >
                 <RiAddLine className="size-4" />
               </Button>
