@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import './styles/fonts'
 import './index.css'
 import App from './App.tsx'
+import { initI18n, readPersistedUILanguage } from './i18n'
 import { SessionAuthGate } from './components/auth/SessionAuthGate'
 import { ThemeSystemProvider } from './contexts/ThemeSystemContext'
 import { ThemeProvider } from './components/providers/ThemeProvider'
@@ -26,6 +27,7 @@ const runtimeAPIs = (typeof window !== 'undefined' && window.__OPENCHAMBER_RUNTI
 
 await syncDesktopSettings();
 await initializeAppearancePreferences();
+await initI18n(readPersistedUILanguage());
 startAppearanceAutoSave();
 startModelPrefsAutoSave();
 startTypographyWatcher();

@@ -1976,6 +1976,17 @@ const normalizePwaAppName = (value, fallback = '') => {
   return normalized.slice(0, PWA_APP_NAME_MAX_LENGTH);
 };
 
+const normalizeUiLanguage = (value) => {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const normalized = value.trim();
+  if (normalized === 'system' || normalized === 'en' || normalized === 'zh-CN') {
+    return normalized;
+  }
+  return undefined;
+};
+
 const sanitizeSettingsUpdate = (payload) => {
   if (!payload || typeof payload !== 'object') {
     return {};
@@ -1983,6 +1994,11 @@ const sanitizeSettingsUpdate = (payload) => {
 
   const candidate = payload;
   const result = {};
+
+  const uiLanguage = normalizeUiLanguage(candidate.uiLanguage);
+  if (uiLanguage) {
+    result.uiLanguage = uiLanguage;
+  }
 
   if (typeof candidate.themeId === 'string' && candidate.themeId.length > 0) {
     result.themeId = candidate.themeId;
