@@ -5,7 +5,7 @@ const provider = createMiniMaxCodingPlanProvider({
   providerId: 'minimax-coding-plan',
   providerName: 'MiniMax Coding Plan (minimax.io)',
   aliases: ['minimax-coding-plan'],
-  endpoint: 'https://www.minimax.io/v1/api/openplatform/coding_plan/remains',
+  endpoint: 'https://api.minimax.io/v1/api/openplatform/coding_plan/remains',
 });
 
 export const providerId = provider.providerId;
