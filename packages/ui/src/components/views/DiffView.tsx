@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
+import { useTranslation } from 'react-i18next';
 
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { getLanguageFromExtension, isImageFile } from '@/lib/toolHelpers';
@@ -49,10 +50,10 @@ type FileEntry = GitStatus['files'][number] & {
 
 type DiffData = { original: string; modified: string; isBinary?: boolean };
 
-const BinaryDiffPlaceholder = React.memo(() => {
+const BinaryDiffPlaceholder = React.memo<{ message: string }>(({ message }) => {
     return (
         <div className="rounded-lg border border-border/60 bg-background px-3 py-2">
-            <div className="typography-meta text-muted-foreground">Content of this file cannot be viewed.</div>
+            <div className="typography-meta text-muted-foreground">{message}</div>
         </div>
     );
 });
@@ -65,33 +66,16 @@ type ChangeDescriptor = {
     description: string;
 };
 
-const CHANGE_DESCRIPTORS: Record<string, ChangeDescriptor> = {
-    '?': { code: '?', color: 'var(--status-info)', description: 'Untracked file' },
-    A: { code: 'A', color: 'var(--status-success)', description: 'New file' },
-    D: { code: 'D', color: 'var(--status-error)', description: 'Deleted file' },
-    R: { code: 'R', color: 'var(--status-info)', description: 'Renamed file' },
-    C: { code: 'C', color: 'var(--status-info)', description: 'Copied file' },
-    M: { code: 'M', color: 'var(--status-warning)', description: 'Modified file' },
+const CHANGE_DESCRIPTOR_KEYS: Record<string, { code: string; color: string; descriptionKey: string }> = {
+    '?': { code: '?', color: 'var(--status-info)', descriptionKey: 'diff.changeTypes.untracked' },
+    A: { code: 'A', color: 'var(--status-success)', descriptionKey: 'diff.changeTypes.new' },
+    D: { code: 'D', color: 'var(--status-error)', descriptionKey: 'diff.changeTypes.deleted' },
+    R: { code: 'R', color: 'var(--status-info)', descriptionKey: 'diff.changeTypes.renamed' },
+    C: { code: 'C', color: 'var(--status-info)', descriptionKey: 'diff.changeTypes.copied' },
+    M: { code: 'M', color: 'var(--status-warning)', descriptionKey: 'diff.changeTypes.modified' },
 };
 
-const DEFAULT_CHANGE_DESCRIPTOR = CHANGE_DESCRIPTORS.M;
-
-const DIFF_VIEW_MODE_OPTIONS: Array<{
-    value: DiffTabViewMode;
-    label: string;
-    description: string;
-}> = [
-    {
-        value: 'single',
-        label: 'Single file',
-        description: 'Show one file at a time',
-    },
-    {
-        value: 'stacked',
-        label: 'All files',
-        description: 'Stack all modified files together',
-    },
-];
+const DEFAULT_CHANGE_DESCRIPTOR = CHANGE_DESCRIPTOR_KEYS.M;
 
 const getChangeSymbol = (file: GitStatus['files'][number]): string => {
     const indexCode = file.index?.trim();
@@ -103,9 +87,14 @@ const getChangeSymbol = (file: GitStatus['files'][number]): string => {
     return indexCode?.charAt(0) || workingCode?.charAt(0) || 'M';
 };
 
-const describeChange = (file: GitStatus['files'][number]): ChangeDescriptor => {
+const describeChange = (file: GitStatus['files'][number], t: (key: string) => string): ChangeDescriptor => {
     const symbol = getChangeSymbol(file);
-    return CHANGE_DESCRIPTORS[symbol] ?? DEFAULT_CHANGE_DESCRIPTOR;
+    const descriptor = CHANGE_DESCRIPTOR_KEYS[symbol] ?? DEFAULT_CHANGE_DESCRIPTOR;
+    return {
+        code: descriptor.code,
+        color: descriptor.color,
+        description: t(descriptor.descriptionKey),
+    };
 };
 
 const isNewStatusFile = (file: GitStatus['files'][number]): boolean => {
@@ -200,6 +189,20 @@ const FileSelector = React.memo<FileSelectorProps>(({
     mode,
     onModeChange,
 }) => {
+    const { t } = useTranslation();
+    const diffViewModeOptions = React.useMemo(() => ([
+        {
+            value: 'single' as const,
+            label: t('diff.viewModes.single.label'),
+            description: t('diff.viewModes.single.description'),
+        },
+        {
+            value: 'stacked' as const,
+            label: t('diff.viewModes.stacked.label'),
+            description: t('diff.viewModes.stacked.description'),
+        },
+    ]), [t]);
+
     const getLabel = React.useCallback((path: string) => {
         if (!isMobile) return path;
         const lastSlash = path.lastIndexOf('/');
@@ -221,7 +224,7 @@ const FileSelector = React.memo<FileSelectorProps>(({
                             {formatDiffTotals(selectedFileEntry.insertions, selectedFileEntry.deletions)}
                         </div>
                     ) : (
-                        <span className="text-muted-foreground">Select file</span>
+                        <span className="text-muted-foreground">{t('diff.selectFile')}</span>
                     )}
                     <RiArrowDownSLine className="size-4 opacity-50" />
                 </button>
@@ -230,13 +233,13 @@ const FileSelector = React.memo<FileSelectorProps>(({
                 {showModeSelector && mode && onModeChange ? (
                     <>
                         <DropdownMenuLabel className="typography-meta text-muted-foreground">
-                            View mode
+                            {t('diff.viewMode')}
                         </DropdownMenuLabel>
                         <DropdownMenuRadioGroup
                             value={mode}
                             onValueChange={(value) => onModeChange(value as DiffTabViewMode)}
                         >
-                            {DIFF_VIEW_MODE_OPTIONS.map((option) => (
+                            {diffViewModeOptions.map((option) => (
                                 <DropdownMenuRadioItem
                                     key={option.value}
                                     value={option.value}
@@ -277,8 +280,21 @@ interface DiffViewModeSelectorProps {
 }
 
 const DiffViewModeSelector = React.memo<DiffViewModeSelectorProps>(({ mode, onModeChange }) => {
+    const { t } = useTranslation();
+    const diffViewModeOptions = React.useMemo(() => ([
+        {
+            value: 'single' as const,
+            label: t('diff.viewModes.single.label'),
+            description: t('diff.viewModes.single.description'),
+        },
+        {
+            value: 'stacked' as const,
+            label: t('diff.viewModes.stacked.label'),
+            description: t('diff.viewModes.stacked.description'),
+        },
+    ]), [t]);
     const currentOption =
-        DIFF_VIEW_MODE_OPTIONS.find((option) => option.value === mode) ?? DIFF_VIEW_MODE_OPTIONS[0];
+        diffViewModeOptions.find((option) => option.value === mode) ?? diffViewModeOptions[0];
 
     return (
         <DropdownMenu>
@@ -295,7 +311,7 @@ const DiffViewModeSelector = React.memo<DiffViewModeSelectorProps>(({ mode, onMo
                     value={mode}
                     onValueChange={(value) => onModeChange(value as DiffTabViewMode)}
                 >
-                    {DIFF_VIEW_MODE_OPTIONS.map((option) => (
+                    {diffViewModeOptions.map((option) => (
                         <DropdownMenuRadioItem key={option.value} value={option.value}>
                             <div className="flex flex-col gap-0.5">
                                 <span className="typography-meta text-foreground">
@@ -324,13 +340,14 @@ const FileList = React.memo<FileListProps>(({
     selectedFile,
     onSelectFile,
 }) => {
+    const { t } = useTranslation();
     if (changedFiles.length === 0) return null;
 
     return (
         <ScrollableOverlay outerClassName="flex-1 min-h-0" className="px-2 py-2">
             <ul className="flex flex-col gap-1">
                 {changedFiles.map((file) => {
-                    const descriptor = describeChange(file);
+                    const descriptor = describeChange(file, t);
                     const isActive = selectedFile === file.path;
 
                     return (
@@ -385,6 +402,7 @@ const ImageDiffViewer = React.memo<ImageDiffViewerProps>(({
     isVisible,
     renderSideBySide,
 }) => {
+    const { t } = useTranslation();
     const hasOriginal = diff.original.length > 0;
     const hasModified = diff.modified.length > 0;
 
@@ -406,10 +424,10 @@ const ImageDiffViewer = React.memo<ImageDiffViewerProps>(({
             <div className={containerClass}>
                 {hasOriginal && (
                     <div className={imageContainerClass}>
-                        <span className="typography-meta text-muted-foreground font-medium">Original</span>
+                        <span className="typography-meta text-muted-foreground font-medium">{t('diff.image.original')}</span>
                         <img
                             src={diff.original}
-                            alt={`Original: ${filePath}`}
+                            alt={t('diff.image.originalAlt', { filePath })}
                             className={renderSideBySide ? "max-w-full max-h-[calc(100%-2rem)] object-contain" : "max-w-full object-contain"}
                             style={{ imageRendering: 'auto' }}
                         />
@@ -418,11 +436,11 @@ const ImageDiffViewer = React.memo<ImageDiffViewerProps>(({
                 {hasModified && (
                     <div className={imageContainerClass}>
                         <span className="typography-meta text-muted-foreground font-medium">
-                            {hasOriginal ? 'Modified' : 'New'}
+                            {hasOriginal ? t('diff.image.modified') : t('diff.image.new')}
                         </span>
                         <img
                             src={diff.modified}
-                            alt={`Modified: ${filePath}`}
+                            alt={t('diff.image.modifiedAlt', { filePath })}
                             className={renderSideBySide ? "max-w-full max-h-[calc(100%-2rem)] object-contain" : "max-w-full object-contain"}
                             style={{ imageRendering: 'auto' }}
                         />
@@ -444,6 +462,7 @@ const InlineImageDiffViewer = React.memo<InlineImageDiffViewerProps>(({
     diff,
     renderSideBySide,
 }) => {
+    const { t } = useTranslation();
     const hasOriginal = diff.original.length > 0;
     const hasModified = diff.modified.length > 0;
 
@@ -460,10 +479,10 @@ const InlineImageDiffViewer = React.memo<InlineImageDiffViewerProps>(({
             <div className={containerClass}>
                 {hasOriginal && (
                     <div className={imageContainerClass}>
-                        <span className="typography-meta text-muted-foreground font-medium">Original</span>
+                        <span className="typography-meta text-muted-foreground font-medium">{t('diff.image.original')}</span>
                         <img
                             src={diff.original}
-                            alt={`Original: ${filePath}`}
+                            alt={t('diff.image.originalAlt', { filePath })}
                             className={renderSideBySide ? "max-w-full max-h-[70vh] object-contain" : "max-w-full object-contain"}
                             style={{ imageRendering: 'auto' }}
                         />
@@ -472,11 +491,11 @@ const InlineImageDiffViewer = React.memo<InlineImageDiffViewerProps>(({
                 {hasModified && (
                     <div className={imageContainerClass}>
                         <span className="typography-meta text-muted-foreground font-medium">
-                            {hasOriginal ? 'Modified' : 'New'}
+                            {hasOriginal ? t('diff.image.modified') : t('diff.image.new')}
                         </span>
                         <img
                             src={diff.modified}
-                            alt={`Modified: ${filePath}`}
+                            alt={t('diff.image.modifiedAlt', { filePath })}
                             className={renderSideBySide ? "max-w-full max-h-[70vh] object-contain" : "max-w-full object-contain"}
                             style={{ imageRendering: 'auto' }}
                         />
@@ -500,13 +519,14 @@ const InlineDiffViewer = React.memo<InlineDiffViewerProps>(({
     renderSideBySide,
     wrapLines,
 }) => {
+    const { t } = useTranslation();
     const language = React.useMemo(
         () => getLanguageFromExtension(filePath) || 'text',
         [filePath]
     );
 
     if (diff.isBinary) {
-        return <BinaryDiffPlaceholder />;
+        return <BinaryDiffPlaceholder message={t('diff.binaryContentUnavailable')} />;
     }
 
     if (isImageFile(filePath)) {
@@ -550,13 +570,14 @@ const SingleDiffViewer = React.memo<SingleDiffViewerProps>(({
     renderSideBySide,
     wrapLines,
 }) => {
+    const { t } = useTranslation();
     const language = React.useMemo(
         () => getLanguageFromExtension(filePath) || 'text',
         [filePath]
     );
 
     if (diff.isBinary) {
-        return <BinaryDiffPlaceholder />;
+        return <BinaryDiffPlaceholder message={t('diff.binaryContentUnavailable')} />;
     }
 
     // Don't render if not visible (memory optimization)
@@ -624,6 +645,7 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
     isOpeningInEditor = false,
     onOpenInEditor,
 }) => {
+    const { t } = useTranslation();
     const { git } = useRuntimeAPIs();
     const cachedDiff = useGitStore(
         React.useCallback((state) => {
@@ -641,7 +663,7 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
     const lastDiffRequestRef = React.useRef<string | null>(null);
     const sectionRef = React.useRef<HTMLDivElement | null>(null);
 
-    const descriptor = React.useMemo(() => describeChange(file), [file]);
+    const descriptor = React.useMemo(() => describeChange(file, t), [file, t]);
     const renderSideBySide = layout === 'side-by-side';
 
     const diffData = React.useMemo<DiffData | null>(() => {
@@ -830,7 +852,7 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                                 variant="ghost"
                                 size="sm"
                                 className="h-5 w-5 p-0 opacity-70 hover:opacity-100"
-                                title="Open this file in editor at change"
+                                title={t('diff.openThisFileInEditorAtChange')}
                                 onClick={(event) => {
                                     event.stopPropagation();
                                     onOpenInEditor(file.path, diffData);
@@ -861,7 +883,7 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                     {diffLoadError ? (
                         <div className="flex flex-col items-center gap-2 px-4 py-8 text-sm text-muted-foreground">
                             <div className="typography-ui-label font-semibold text-foreground">
-                                Failed to load diff
+                                {t('diff.failedToLoadDiff')}
                             </div>
                             <div className="typography-meta text-muted-foreground max-w-[32rem] text-center">
                                 {diffLoadError}
@@ -871,14 +893,14 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                                 className="typography-ui-label text-primary hover:underline"
                                 onClick={() => setDiffRetryNonce((nonce) => nonce + 1)}
                             >
-                                Retry
+                                {t('diff.retry')}
                             </button>
                         </div>
                     ) : null}
                     {isLoading && !diffData && !diffLoadError ? (
                         <div className="flex items-center justify-center gap-2 px-4 py-8 text-sm text-muted-foreground">
                             <RiLoader4Line size={16} className="animate-spin" />
-                            Loading diff…
+                            {t('diff.loadingDiff')}
                         </div>
                     ) : null}
                     {diffData ? (
@@ -910,6 +932,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
     pinSelectedFileHeaderToTopOnNavigate = false,
     showOpenInEditorAction = false,
 }) => {
+    const { t } = useTranslation();
     const { git, files } = useRuntimeAPIs();
     const effectiveDirectory = useEffectiveDirectory();
     const { screenWidth, isMobile } = useDeviceInfo();
@@ -1520,7 +1543,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                 {showFileSidebar && (
                     <section className="hidden lg:flex w-72 flex-col rounded-xl border border-border/60 bg-background/70 overflow-hidden">
                         <div className="flex items-center justify-between px-3 py-1.5 border-b border-border/40">
-                            <span className="typography-ui-header font-semibold text-foreground">Files</span>
+                            <span className="typography-ui-header font-semibold text-foreground">{t('diff.files')}</span>
                             <span className="typography-meta text-muted-foreground">{changedFiles.length}</span>
                         </div>
                         <FileList
@@ -1573,7 +1596,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
         if (!effectiveDirectory) {
             return (
                 <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-                    Select a session directory to view diffs
+                    {t('diff.selectSessionDirectory')}
                 </div>
             );
         }
@@ -1582,7 +1605,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
             return (
                 <div className="flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground">
                     <RiLoader4Line size={16} className="animate-spin" />
-                    Loading repository status…
+                    {t('diff.loadingRepositoryStatus')}
                 </div>
             );
         }
@@ -1590,7 +1613,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
         if (isGitRepo === false) {
             return (
                 <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-                    Not a git repository. Use the Git tab to initialize or change directories.
+                    {t('diff.notGitRepository')}
                 </div>
             );
         }
@@ -1598,7 +1621,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
         if (changedFiles.length === 0) {
             return (
                 <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-                    Working tree clean — no changes to display
+                    {t('diff.workingTreeClean')}
                 </div>
             );
         }
@@ -1615,7 +1638,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                         {diffLoadError ? (
                             <div className="flex flex-col items-center gap-2">
                                 <div className="typography-ui-label font-semibold text-foreground">
-                                    Failed to load diff
+                                    {t('diff.failedToLoadDiff')}
                                 </div>
                                 <div className="typography-meta text-muted-foreground max-w-[32rem] text-center">
                                     {diffLoadError}
@@ -1628,13 +1651,13 @@ export const DiffView: React.FC<DiffViewProps> = ({
                                         setDiffRetryNonce((n) => n + 1);
                                     }}
                                 >
-                                    Retry
+                                    {t('diff.retry')}
                                 </button>
                             </div>
                         ) : (
                             <>
                                 <RiLoader4Line size={16} className="animate-spin" />
-                                Loading diff…
+                                {t('diff.loadingDiff')}
                             </>
                         )}
                     </div>
@@ -1651,8 +1674,8 @@ export const DiffView: React.FC<DiffViewProps> = ({
                         <RiGitCommitLine size={16} />
                         <span className="typography-ui-label font-semibold text-foreground">
                             {isLoadingStatus && !status
-                                ? 'Loading changes…'
-                                : `${changedFiles.length} ${changedFiles.length === 1 ? 'file' : 'files'} changed`}
+                                ? t('diff.loadingChanges')
+                                : t('diff.changedCount', { count: changedFiles.length })}
                         </span>
                     </div>
                 )}
@@ -1681,7 +1704,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                             'h-5 w-5 p-0 transition-opacity',
                             diffWrapLines ? 'text-foreground opacity-100' : 'text-muted-foreground opacity-60 hover:opacity-100'
                         )}
-                        title={diffWrapLines ? 'Disable line wrap' : 'Enable line wrap'}
+                        title={diffWrapLines ? t('diff.disableLineWrap') : t('diff.enableLineWrap')}
                     >
                         <RiTextWrap className="size-4" />
                     </Button>
@@ -1695,7 +1718,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
                             void openSelectedFileInEditorAtChange();
                         }}
                         disabled={isOpeningSelectedInEditor}
-                        title="Open this file at first changed line"
+                        title={t('diff.openThisFileAtFirstChangedLine')}
                     >
                         {isOpeningSelectedInEditor ? (
                             <RiLoader4Line className="size-3.5 animate-spin" />
