@@ -80,8 +80,8 @@ export const createMiniMaxCodingPlanProvider = ({ providerId, providerName, alia
       const weeklyUsage = toNumber(firstModel.current_weekly_usage_count);
       const weeklyStartAt = toTimestamp(firstModel.weekly_start_time);
       const weeklyResetAt = toTimestamp(firstModel.weekly_end_time);
-      const intervalUsed = intervalTotal - intervalUsage;
-      const weeklyUsed = weeklyTotal - weeklyUsage;
+      const intervalUsed = intervalUsage;
+      const weeklyUsed = weeklyUsage;
       const intervalUsedPercent =
         intervalTotal > 0 ? Math.max(0, Math.min(100, (intervalUsed / intervalTotal) * 100)) : null;
       const intervalWindowSeconds =
