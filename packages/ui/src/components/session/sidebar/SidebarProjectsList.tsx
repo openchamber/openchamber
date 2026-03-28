@@ -75,6 +75,7 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
   const groupSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
   );
+  const [projectsCollapsed, setProjectsCollapsed] = React.useState(false);
 
   if (props.projectSections.length === 0) {
     return <ScrollableOverlay useScrollShadow scrollShadowSize={96} outerClassName="flex-1 min-h-0" className={cn('space-y-1 pb-1 pl-2.5 pr-2', props.mobileVariant ? '' : '')}>{props.topContent}{props.emptyState}</ScrollableOverlay>;
@@ -83,8 +84,6 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
   if (props.sectionsForRender.length === 0) {
     return <ScrollableOverlay useScrollShadow scrollShadowSize={96} outerClassName="flex-1 min-h-0" className={cn('space-y-1 pb-1 pl-2.5 pr-2', props.mobileVariant ? '' : '')}>{props.searchEmptyState}</ScrollableOverlay>;
   }
-
-  const [projectsCollapsed, setProjectsCollapsed] = React.useState(false);
 
   return (
     <ScrollableOverlay useScrollShadow scrollShadowSize={96} outerClassName="flex-1 min-h-0" className={cn('pb-1 pl-2.5 pr-2', props.mobileVariant ? '' : '')}>
