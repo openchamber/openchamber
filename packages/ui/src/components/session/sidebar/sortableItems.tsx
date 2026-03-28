@@ -21,6 +21,7 @@ import {
 import { cn } from '@/lib/utils';
 import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, getProjectIconImageUrl } from '@/lib/projectMeta';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
+import { useTranslation } from 'react-i18next';
 
 export interface SortableProjectItemProps {
   id: string;
@@ -86,6 +87,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   openSidebarMenuKey,
   setOpenSidebarMenuKey,
 }) => {
+  const { t } = useTranslation();
   const { currentTheme } = useThemeSystem();
   const {
     attributes,
@@ -229,13 +231,13 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                         'inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 hover:text-foreground transition-opacity',
                           mobileVariant ? 'opacity-100' : isHovered ? 'opacity-100' : 'opacity-0 pointer-events-none',
                         )}
-                        aria-label="New worktree"
+                        aria-label={t('sessionsSidebar.newWorktree')}
                       >
                         <RiNodeTree className="h-4 w-4" />
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="bottom" sideOffset={4}>
-                      <p>New worktree...</p>
+                      <p>{t('sessionsSidebar.newWorktree')}...</p>
                     </TooltipContent>
                   </Tooltip>
                 ) : null}
@@ -251,7 +253,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                           'inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 hover:text-foreground',
                           isMenuOpen ? 'opacity-100 pointer-events-auto' : mobileVariant ? 'opacity-100' : isHovered ? 'opacity-100' : 'opacity-0 pointer-events-none',
                         )}
-                        aria-label="Project menu"
+                        aria-label={t('sessionsSidebar.projectMenu')}
                         onClick={handleMenuTriggerClick}
                       >
                         <RiMore2Line className="h-3.5 w-3.5" />
@@ -261,19 +263,19 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                       {showCreateButtons && !isRepo && !hideDirectoryControls && onNewSession && (
                       <DropdownMenuItem onClick={onNewSession}>
                         <RiAddLine className="mr-1.5 h-4 w-4" />
-                        New Session
+                        {t('sessionsSidebar.newSession')}
                       </DropdownMenuItem>
                     )}
                     <DropdownMenuItem onClick={onRenameStart}>
                       <RiPencilAiLine className="mr-1.5 h-4 w-4" />
-                      Rename
+                      {t('sessionsSidebar.rename')}
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       onClick={onClose}
                       className="text-destructive focus:text-destructive"
                     >
                       <RiCloseLine className="mr-1.5 h-4 w-4" />
-                      Close Project
+                      {t('sessionsSidebar.closeProject')}
                     </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
@@ -293,13 +295,13 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                           'inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity',
                           mobileVariant ? 'opacity-100' : isHovered ? 'opacity-100' : 'opacity-0 pointer-events-none',
                         )}
-                        aria-label={isRepo ? 'New draft session' : 'New session'}
+                        aria-label={isRepo ? t('sessionsSidebar.newDraftSession') : t('sessionsSidebar.newSession')}
                       >
                         <RiAddLine className="h-4 w-4" />
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="bottom" sideOffset={4}>
-                      <p>{isRepo ? 'New draft session' : 'New session'}</p>
+                      <p>{isRepo ? t('sessionsSidebar.newDraftSession') : t('sessionsSidebar.newSession')}</p>
                     </TooltipContent>
                   </Tooltip>
                 </div>
