@@ -31,7 +31,6 @@ type Props = {
   projectNotesPanelOpen: boolean;
   setProjectNotesPanelOpen: (open: boolean) => void;
   activeProjectRefForHeader: ProjectRef | null;
-  activeProjectLabelForHeader: string | null;
   canOpenMultiRun: boolean;
   openMultiRunLauncher: () => void;
   stableActiveProjectIsRepo: boolean;
@@ -57,7 +56,6 @@ export function SidebarHeader(props: Props): React.ReactNode {
     projectNotesPanelOpen,
     setProjectNotesPanelOpen,
     activeProjectRefForHeader,
-    activeProjectLabelForHeader,
     canOpenMultiRun,
     openMultiRunLauncher,
     stableActiveProjectIsRepo,
