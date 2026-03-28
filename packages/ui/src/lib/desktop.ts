@@ -37,6 +37,7 @@ export type ManagedRemoteTunnelPreset = {
 };
 
 export type DesktopSettings = {
+  uiLanguage?: 'system' | 'en' | 'zh-CN';
   themeId?: string;
   useSystemTheme?: boolean;
   themeVariant?: 'light' | 'dark';
