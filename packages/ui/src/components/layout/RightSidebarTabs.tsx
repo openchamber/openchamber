@@ -5,25 +5,27 @@ import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { GitView } from '@/components/views';
 import { useUIStore } from '@/stores/useUIStore';
 import { SidebarFilesTree } from './SidebarFilesTree';
+import { useTranslation } from 'react-i18next';
 
 type RightTab = 'git' | 'files';
 
 export const RightSidebarTabs: React.FC = () => {
+  const { t } = useTranslation();
   const rightSidebarTab = useUIStore((state) => state.rightSidebarTab);
   const setRightSidebarTab = useUIStore((state) => state.setRightSidebarTab);
 
   const tabItems = React.useMemo(() => [
     {
       id: 'git',
-      label: 'Git',
+      label: t('settings.pages.git'),
       icon: <RiGitBranchLine className="h-3.5 w-3.5" />,
     },
     {
       id: 'files',
-      label: 'Files',
+      label: t('header.tabs.files'),
       icon: <RiFolder3Line className="h-3.5 w-3.5" />,
     },
-  ], []);
+  ], [t]);
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-transparent">

@@ -1,0 +1,5 @@
+# Arch Linux packaging build outputs
+/pkg/
+/src/
+/*.pkg.tar.*
+/*.tar.gz

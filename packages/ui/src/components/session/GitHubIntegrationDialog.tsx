@@ -33,6 +33,7 @@ import type {
   GitHubPullRequestSummary,
 } from '@/lib/api/types';
 import type { ProjectRef } from '@/lib/worktrees/worktreeManager';
+import { useTranslation } from 'react-i18next';
 
 type GitHubTab = 'issues' | 'prs';
 
@@ -56,6 +57,7 @@ export function GitHubIntegrationDialog({
   onOpenChange,
   onSelect,
 }: GitHubIntegrationDialogProps) {
+  const { t } = useTranslation();
   const isMobile = useUIStore((state) => state.isMobile);
   const { github } = useRuntimeAPIs();
   const githubAuthStatus = useGitHubAuthStore((state) => state.status);
@@ -297,12 +299,12 @@ export function GitHubIntegrationDialog({
         <div className="flex-1 flex flex-col items-center justify-center p-8 gap-4">
           <RiGithubLine className="h-12 w-12 text-muted-foreground" />
           <div className="text-center">
-            <p className="typography-ui-label text-foreground">Connect to GitHub</p>
+            <p className="typography-ui-label text-foreground">{t('githubLink.connectToGitHub')}</p>
             <p className="typography-small text-muted-foreground mt-1">
-              Link issues or pull requests to auto-fill worktree details
+              {t('githubLink.linkIssuesOrPrs')}
             </p>
           </div>
-          <Button onClick={openGitHubSettings} size="sm">Connect GitHub</Button>
+          <Button onClick={openGitHubSettings} size="sm">{t('githubLink.connectGitHub')}</Button>
         </div>
       ) : (
         <>
@@ -312,7 +314,7 @@ export function GitHubIntegrationDialog({
             <Input
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder={activeTab === 'issues' ? "Search issues or enter #123..." : "Search PRs or enter #456..."}
+               placeholder={activeTab === 'issues' ? t('githubLink.searchIssuesPlaceholder') : t('githubLink.searchPrsPlaceholder')}
               className="h-8 pl-9"
             />
           </div>
@@ -360,7 +362,7 @@ export function GitHubIntegrationDialog({
                     ))
                   ) : (
                     <div className="flex items-center justify-center h-[300px] text-center typography-small text-muted-foreground">
-                      No issues found
+                       {t('githubLink.noIssuesFound')}
                     </div>
                   )}
                   
@@ -372,7 +374,7 @@ export function GitHubIntegrationDialog({
                         onClick={() => void loadMore()}
                         className="h-7 text-xs"
                       >
-                        Load more
+                         {t('githubLink.loadMore')}
                       </Button>
                     </div>
                   )}
@@ -427,7 +429,7 @@ export function GitHubIntegrationDialog({
                     })
                   ) : (
                     <div className="flex items-center justify-center h-[300px] text-center typography-small text-muted-foreground">
-                      No pull requests found
+                       {t('githubLink.noPullRequestsFound')}
                     </div>
                   )}
                   
@@ -439,7 +441,7 @@ export function GitHubIntegrationDialog({
                         onClick={() => void loadMore()}
                         className="h-7 text-xs"
                       >
-                        Load more
+                         {t('githubLink.loadMore')}
                       </Button>
                     </div>
                   )}
@@ -473,7 +475,7 @@ export function GitHubIntegrationDialog({
           <div className="flex items-center gap-2 px-2 h-8 rounded-md bg-muted/50 border border-border/50">
             <RiCheckLine className="h-3.5 w-3.5 text-status-success shrink-0" />
             <span className="typography-small truncate max-w-[150px]">
-              {selectedIssue ? `Issue #${selectedIssue.number}` : `PR #${selectedPr?.number}`}
+               {selectedIssue ? t('githubLink.issueTag', { number: selectedIssue.number }) : t('githubLink.prTag', { number: selectedPr?.number })}
             </span>
             <button
               onClick={handleClear}
@@ -490,10 +492,10 @@ export function GitHubIntegrationDialog({
             <Checkbox
               checked={includeDiff}
               onChange={(checked) => setIncludeDiff(checked)}
-              ariaLabel="Include PR diff in session context"
+               ariaLabel={t('githubLink.includePrDiffInContext')}
             />
             <span className="typography-small text-foreground">
-              Include PR diff
+               {t('githubLink.includePrDiff')}
             </span>
           </label>
         )}
@@ -510,7 +512,7 @@ export function GitHubIntegrationDialog({
           onClick={() => onOpenChange(false)}
           className={cn(isMobile && 'flex-1')}
         >
-          Cancel
+           {t('sessions.cancel')}
         </Button>
         <Button
           size="sm"
@@ -518,7 +520,7 @@ export function GitHubIntegrationDialog({
           disabled={!canConfirm}
           className={cn(isMobile && 'flex-1')}
         >
-          Select
+           {t('githubLink.select')}
         </Button>
       </div>
     </div>
@@ -529,21 +531,21 @@ export function GitHubIntegrationDialog({
       {isMobile ? (
         <MobileOverlayPanel
           open={open}
-          title="Select from GitHub"
+           title={t('githubLink.selectFromGitHub')}
           onClose={() => onOpenChange(false)}
           footer={!isGitHubConnected ? undefined : footerContent}
           renderHeader={(closeButton) => (
             <div className="flex flex-col gap-2 px-3 py-2 border-b border-border/40">
               <div className="flex items-center justify-between">
-                <h2 className="typography-ui-label font-semibold text-foreground">Select from GitHub</h2>
+                 <h2 className="typography-ui-label font-semibold text-foreground">{t('githubLink.selectFromGitHub')}</h2>
                 {closeButton}
               </div>
               {/* Tabs - using SortableTabsStrip */}
               <div className="w-full">
                 <SortableTabsStrip
                   items={[
-                    { id: 'issues', label: 'Issues', icon: <RiGitBranchLine className="h-3.5 w-3.5" /> },
-                    { id: 'prs', label: 'Pull Requests', icon: <RiGitPullRequestLine className="h-3.5 w-3.5" /> },
+                     { id: 'issues', label: t('githubLink.issues'), icon: <RiGitBranchLine className="h-3.5 w-3.5" /> },
+                     { id: 'prs', label: t('githubLink.pullRequests'), icon: <RiGitPullRequestLine className="h-3.5 w-3.5" /> },
                   ]}
                   activeId={activeTab}
                   onSelect={(id) => {
@@ -560,7 +562,7 @@ export function GitHubIntegrationDialog({
                 <div className="flex items-center gap-2 px-2 py-1 rounded-md bg-muted/50 border border-border/50">
                   <RiCheckLine className="h-3.5 w-3.5 text-status-success shrink-0" />
                   <span className="typography-small truncate flex-1">
-                    {selectedIssue ? `Issue #${selectedIssue.number}` : `PR #${selectedPr?.number}`}
+                     {selectedIssue ? t('githubLink.issueTag', { number: selectedIssue.number }) : t('githubLink.prTag', { number: selectedPr?.number })}
                   </span>
                   <button
                     onClick={handleClear}
@@ -582,15 +584,15 @@ export function GitHubIntegrationDialog({
               <div className="flex items-center gap-3">
                 <DialogTitle className="flex items-center gap-2 shrink-0">
                   <RiGithubLine className="h-5 w-5" />
-                  Select from GitHub
+                   {t('githubLink.selectFromGitHub')}
                 </DialogTitle>
                 
                 {/* Tabs - using SortableTabsStrip */}
                 <div className="w-[220px]">
                   <SortableTabsStrip
                     items={[
-                      { id: 'issues', label: 'Issues', icon: <RiGitBranchLine className="h-3.5 w-3.5" /> },
-                      { id: 'prs', label: 'Pull Requests', icon: <RiGitPullRequestLine className="h-3.5 w-3.5" /> },
+                       { id: 'issues', label: t('githubLink.issues'), icon: <RiGitBranchLine className="h-3.5 w-3.5" /> },
+                       { id: 'prs', label: t('githubLink.pullRequests'), icon: <RiGitPullRequestLine className="h-3.5 w-3.5" /> },
                     ]}
                     activeId={activeTab}
                     onSelect={(id) => {

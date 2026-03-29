@@ -1,0 +1,110 @@
+pkgname=openchamber-desktop
+pkgver=i18n
+pkgrel=1
+pkgdesc="Unofficial Arch Linux source package skeleton for the OpenChamber desktop app"
+arch=('x86_64')
+url="https://github.com/gqcdm/openchamber"
+license=('MIT')
+install="$pkgname.install"
+
+# Linux desktop packaging is not an upstream-supported release target yet.
+# This PKGBUILD is intentionally a starting skeleton for source-built Arch packaging.
+
+depends=(
+  'webkit2gtk-4.1'
+  'gtk3'
+  'libayatana-appindicator'
+  'librsvg'
+  'opencode'
+)
+makedepends=(
+  'bun'
+  'cargo'
+  'desktop-file-utils'
+  'git'
+  'nodejs'
+  'npm'
+  'rust'
+)
+optdepends=(
+  'xdg-utils: desktop integration helpers'
+)
+
+source=(
+  "$pkgname-$pkgver.tar.gz::https://github.com/gqcdm/openchamber/archive/refs/heads/i18n.tar.gz"
+  "$pkgname.desktop"
+  "$pkgname.install"
+)
+sha256sums=(
+  'SKIP'
+  'SKIP'
+  'SKIP'
+)
+
+prepare() {
+  cd "$srcdir/openchamber-i18n"
+
+  # Upstream desktop builds currently target macOS first.
+  # Linux packagers should verify runtime/build prerequisites before publishing.
+  export npm_config_cache="$srcdir/npm-cache"
+  export CARGO_HOME="$srcdir/cargo-home"
+
+  bun install --frozen-lockfile
+}
+
+build() {
+  cd "$srcdir/openchamber-i18n"
+
+  export TAURI_ENV_TARGET_TRIPLE='x86_64-unknown-linux-gnu'
+  # Try to avoid leaking makepkg build paths like $srcdir into the packaged binary.
+  export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }--remap-path-prefix=$srcdir=/usr/src/$pkgname"
+
+  # Arch packaging intentionally avoids the AppImage/linuxdeploy bundling path.
+  # We build the sidecar/resources first, then compile the desktop binary directly.
+  bun run --cwd packages/desktop build:sidecar
+  cargo build --manifest-path packages/desktop/src-tauri/Cargo.toml --release
+}
+
+package() {
+  cd "$srcdir/openchamber-i18n"
+
+  local desktop_binary="packages/desktop/src-tauri/target/release/openchamber-desktop"
+  local sidecar_binary="packages/desktop/src-tauri/sidecars/openchamber-server-x86_64-unknown-linux-gnu"
+  local web_dist_dir="packages/desktop/src-tauri/resources/web-dist"
+  local icon_png="packages/desktop/src-tauri/icons/icon.png"
+
+  # Arch packaging bypasses Tauri's AppImage/linuxdeploy bundle output and
+  # installs the already-built binary, sidecar, and web assets directly.
+  if [[ ! -f "$desktop_binary" ]]; then
+    error "Expected desktop binary not found: $desktop_binary"
+    return 1
+  fi
+
+  if [[ ! -f "$sidecar_binary" ]]; then
+    error "Expected sidecar binary not found: $sidecar_binary"
+    return 1
+  fi
+
+  if [[ ! -d "$web_dist_dir" ]]; then
+    error "Expected bundled web assets not found: $web_dist_dir"
+    return 1
+  fi
+
+  if [[ ! -f "$icon_png" ]]; then
+    error "Expected desktop icon not found: $icon_png"
+    return 1
+  fi
+
+  install -dm755 "$pkgdir/usr/lib/$pkgname"
+  install -Dm755 "$desktop_binary" "$pkgdir/usr/lib/$pkgname/$pkgname"
+  install -Dm755 "$sidecar_binary" "$pkgdir/usr/lib/$pkgname/openchamber-server-x86_64-unknown-linux-gnu"
+  cp -a "$web_dist_dir" "$pkgdir/usr/lib/$pkgname/web-dist"
+
+  install -dm755 "$pkgdir/usr/bin"
+  ln -s "/usr/lib/$pkgname/$pkgname" "$pkgdir/usr/bin/$pkgname"
+
+  install -dm755 "$pkgdir/usr/share/applications"
+  install -Dm644 "$srcdir/$pkgname.desktop" "$pkgdir/usr/share/applications/$pkgname.desktop"
+  install -dm755 "$pkgdir/usr/share/pixmaps"
+  install -Dm644 "$icon_png" "$pkgdir/usr/share/pixmaps/openchamber.png"
+}

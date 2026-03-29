@@ -4,6 +4,7 @@ import type { SidebarSection } from '@/constants/sidebar';
 import { getSafeStorage } from './utils/safeStorage';
 import { SEMANTIC_TYPOGRAPHY, getTypographyVariable, type SemanticTypographyKey } from '@/lib/typography';
 import type { ShortcutCombo } from '@/lib/shortcuts';
+import type { UILanguage } from '@/i18n';
 
 export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files';
 export type RightSidebarTab = 'git' | 'files';
@@ -497,6 +498,7 @@ interface UIStore {
   settingsRemoteInstancesSelectedId: string | null;
   eventStreamStatus: EventStreamStatus;
   eventStreamHint: string | null;
+  uiLanguage: UILanguage;
   showReasoningTraces: boolean;
   chatRenderMode: ChatRenderMode;
   activityRenderMode: ActivityRenderMode;
@@ -611,6 +613,7 @@ interface UIStore {
   setSettingsProjectsSelectedId: (projectId: string | null) => void;
   setSettingsRemoteInstancesSelectedId: (instanceId: string | null) => void;
   setEventStreamStatus: (status: EventStreamStatus, hint?: string | null) => void;
+  setUiLanguage: (value: UILanguage) => void;
   setShowReasoningTraces: (value: boolean) => void;
   setChatRenderMode: (value: ChatRenderMode) => void;
   setActivityRenderMode: (value: ActivityRenderMode) => void;
@@ -724,6 +727,7 @@ export const useUIStore = create<UIStore>()(
         settingsRemoteInstancesSelectedId: null,
         eventStreamStatus: 'idle',
         eventStreamHint: null,
+        uiLanguage: 'system',
         showReasoningTraces: true,
         chatRenderMode: 'sorted',
         activityRenderMode: 'summary',
@@ -1288,6 +1292,10 @@ export const useUIStore = create<UIStore>()(
           });
         },
 
+        setUiLanguage: (value) => {
+          set({ uiLanguage: value });
+        },
+
         setShowReasoningTraces: (value) => {
           set({ showReasoningTraces: value });
         },
@@ -1738,7 +1746,7 @@ export const useUIStore = create<UIStore>()(
       {
         name: 'ui-store',
         storage: createJSONStorage(() => getSafeStorage()),
-        version: 7,
+        version: 8,
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {
             return persistedState;
@@ -1807,6 +1815,12 @@ export const useUIStore = create<UIStore>()(
             state.contextPanelByDirectory = sanitizeContextPanelByDirectory(state.contextPanelByDirectory);
           }
 
+          if (version < 8) {
+            if (state.uiLanguage !== 'system' && state.uiLanguage !== 'en' && state.uiLanguage !== 'zh-CN') {
+              state.uiLanguage = 'system';
+            }
+          }
+
           return state;
         },
         partialize: (state) => ({
@@ -1827,6 +1841,7 @@ export const useUIStore = create<UIStore>()(
           settingsHasOpenedOnce: state.settingsHasOpenedOnce,
           settingsProjectsSelectedId: state.settingsProjectsSelectedId,
           settingsRemoteInstancesSelectedId: state.settingsRemoteInstancesSelectedId,
+          uiLanguage: state.uiLanguage,
           isSessionCreateDialogOpen: state.isSessionCreateDialogOpen,
           // Note: isSettingsDialogOpen intentionally NOT persisted
           showReasoningTraces: state.showReasoningTraces,

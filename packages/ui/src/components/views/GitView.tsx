@@ -61,6 +61,7 @@ import type { GitRemote } from '@/lib/gitApi';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { cn } from '@/lib/utils';
 import { generateCommitMessage as generateSessionCommitMessage, getGitWorktreeBootstrapStatus } from '@/lib/gitApi';
+import { useTranslation } from 'react-i18next';
 
 type SyncAction = 'fetch' | 'pull' | 'push' | null;
 type CommitAction = 'commit' | 'commitAndPush' | null;
@@ -221,6 +222,7 @@ const normalizePath = (value?: string | null): string =>
   (value || '').replace(/\\/g, '/').replace(/\/+$/, '');
 
 export const GitView: React.FC = () => {
+  const { t } = useTranslation();
   const { git } = useRuntimeAPIs();
   const currentDirectory = useEffectiveDirectory();
   const [worktreeBootstrapStatus, setWorktreeBootstrapStatus] = React.useState<'pending' | 'ready' | 'failed' | null>(null);
@@ -1886,7 +1888,7 @@ export const GitView: React.FC = () => {
     return (
       <div className="flex h-full items-center justify-center px-4 text-center">
         <p className="typography-ui-label text-muted-foreground">
-          Select a session or directory to view repository details.
+          {t('git.view.selectSessionOrDirectory')}
         </p>
       </div>
     );
@@ -1897,7 +1899,7 @@ export const GitView: React.FC = () => {
       <div className="flex h-full items-center justify-center">
         <div className="flex items-center gap-2 text-muted-foreground">
           <RiLoader4Line className="size-4 animate-spin" />
-          <span className="typography-ui-label">Checking repository...</span>
+          <span className="typography-ui-label">{t('git.view.checkingRepository')}</span>
         </div>
       </div>
     );
@@ -1909,10 +1911,10 @@ export const GitView: React.FC = () => {
         <div className="flex h-full flex-col items-center justify-center px-4 text-center">
           <RiLoader4Line className="mb-3 size-6 animate-spin text-muted-foreground" />
           <p className="typography-ui-label font-semibold text-foreground">
-            Worktree setup is in progress
+            {t('git.view.worktreeSetupInProgress')}
           </p>
           <p className="typography-meta mt-1 text-muted-foreground">
-            Git tools will appear as soon as the new worktree is ready.
+            {t('git.view.gitToolsAppearWhenReady')}
           </p>
         </div>
       );
@@ -1922,10 +1924,10 @@ export const GitView: React.FC = () => {
       <div className="flex h-full flex-col items-center justify-center px-4 text-center">
         <RiGitBranchLine className="mb-3 size-6 text-muted-foreground" />
         <p className="typography-ui-label font-semibold text-foreground">
-          Not a Git repository
+            {t('git.view.notGitRepository')}
         </p>
         <p className="typography-meta mt-1 text-muted-foreground">
-          Choose a different directory or initialize Git to use this workspace.
+            {t('git.view.chooseDirectoryOrInit')}
         </p>
       </div>
     );
@@ -2073,7 +2075,7 @@ export const GitView: React.FC = () => {
                       onOperationComplete={handleOperationComplete}
                     />
                   ) : (
-                    <p className="typography-meta text-muted-foreground">Branch actions unavailable.</p>
+                    <p className="typography-meta text-muted-foreground">{t('git.view.branchActionsUnavailable')}</p>
                   )}
                 </div>
               ) : null}
@@ -2097,9 +2099,9 @@ export const GitView: React.FC = () => {
                     />
                   ) : (
                     <div className="space-y-1 pt-3">
-                      <div className="typography-ui-header font-semibold text-foreground">Re-integrate commits</div>
+                      <div className="typography-ui-header font-semibold text-foreground">{t('git.view.reintegrateCommits')}</div>
                       <div className="typography-micro text-muted-foreground">
-                        Available in worktree mode.
+                        {t('git.view.availableInWorktreeMode')}
                       </div>
                     </div>
                   )}
@@ -2120,9 +2122,9 @@ export const GitView: React.FC = () => {
                     />
                   ) : (
                     <div className="space-y-1">
-                      <div className="typography-ui-header font-semibold text-foreground">Pull Request</div>
+                      <div className="typography-ui-header font-semibold text-foreground">{t('git.view.pullRequest')}</div>
                       <div className="typography-micro text-muted-foreground">
-                        Push a non-base branch (with upstream) to create a PR.
+                        {t('git.view.pushNonBaseBranch')}
                       </div>
                     </div>
                   )}
@@ -2136,9 +2138,9 @@ export const GitView: React.FC = () => {
       <Dialog open={isHistoryDialogOpen} onOpenChange={setIsHistoryDialogOpen}>
         <DialogContent className="max-w-5xl max-h-[80vh] flex flex-col overflow-hidden">
           <DialogHeader>
-            <DialogTitle>History</DialogTitle>
+            <DialogTitle>{t('git.view.history')}</DialogTitle>
             <DialogDescription>
-              Browse recent commits and inspect file-level changes.
+              {t('git.view.browseRecentCommits')}
             </DialogDescription>
           </DialogHeader>
           <div className="flex-1 min-h-0">
@@ -2162,16 +2164,16 @@ export const GitView: React.FC = () => {
       <Dialog open={isGitmojiPickerOpen} onOpenChange={setIsGitmojiPickerOpen}>
         <DialogContent className="max-w-md p-0 overflow-hidden">
           <DialogHeader className="px-4 pt-4">
-            <DialogTitle>Pick a gitmoji</DialogTitle>
+            <DialogTitle>{t('git.view.pickGitmoji')}</DialogTitle>
           </DialogHeader>
           <Command className="h-[420px]">
             <CommandInput
-              placeholder="Search gitmojis..."
+              placeholder={t('git.view.searchGitmojis')}
               value={gitmojiSearch}
               onValueChange={setGitmojiSearch}
             />
             <CommandList>
-              <CommandEmpty>No gitmojis found.</CommandEmpty>
+              <CommandEmpty>{t('git.view.noGitmojisFound')}</CommandEmpty>
               <CommandGroup>
                 {(gitmojiEmojis.length === 0
                   ? []

@@ -3,6 +3,7 @@ import { cn } from '@/lib/utils';
 import { ErrorBoundary } from '../ui/ErrorBoundary';
 import { useUIStore } from '@/stores/useUIStore';
 import { isDesktopShell } from '@/lib/desktop';
+import { useTranslation } from 'react-i18next';
 
 export const SIDEBAR_CONTENT_WIDTH = 250;
 const SIDEBAR_MIN_WIDTH = 250;
@@ -16,6 +17,7 @@ interface SidebarProps {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, className }) => {
+    const { t } = useTranslation();
     const { sidebarWidth, setSidebarWidth } = useUIStore();
     const isDesktopApp = React.useMemo(() => isDesktopShell(), []);
     const [isResizing, setIsResizing] = React.useState(false);
@@ -146,7 +148,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
                     onPointerCancel={handlePointerEnd}
                     role="separator"
                     aria-orientation="vertical"
-                    aria-label="Resize left panel"
+                    aria-label={t('sidebar.resizeLeftPanel')}
                 />
             )}
             <div

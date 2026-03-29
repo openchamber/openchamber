@@ -2,28 +2,29 @@ import React from 'react';
 import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
 import { TextLoop } from '@/components/ui/TextLoop';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
-
-const phrases = [
-    "Fix the failing tests",
-    "Refactor this to be more readable",
-    "Add form validation",
-    "Optimize this function",
-    "Write tests for this",
-    "Explain how this works",
-    "Add a new feature",
-    "Help me debug this",
-    "Review my code",
-    "Simplify this logic",
-    "Add error handling",
-    "Create a new component",
-    "Update the documentation",
-    "Find the bug here",
-    "Improve performance",
-    "Add type definitions",
-];
+import { useTranslation } from 'react-i18next';
 
 const ChatEmptyState: React.FC = () => {
+    const { t } = useTranslation();
     const { currentTheme } = useThemeSystem();
+    const phrases = React.useMemo(() => ([
+        t('chat.emptyStatePhrases.fixFailingTests'),
+        t('chat.emptyStatePhrases.refactorReadable'),
+        t('chat.emptyStatePhrases.addFormValidation'),
+        t('chat.emptyStatePhrases.optimizeFunction'),
+        t('chat.emptyStatePhrases.writeTests'),
+        t('chat.emptyStatePhrases.explainHowItWorks'),
+        t('chat.emptyStatePhrases.addFeature'),
+        t('chat.emptyStatePhrases.helpDebug'),
+        t('chat.emptyStatePhrases.reviewCode'),
+        t('chat.emptyStatePhrases.simplifyLogic'),
+        t('chat.emptyStatePhrases.addErrorHandling'),
+        t('chat.emptyStatePhrases.createComponent'),
+        t('chat.emptyStatePhrases.updateDocs'),
+        t('chat.emptyStatePhrases.findBug'),
+        t('chat.emptyStatePhrases.improvePerformance'),
+        t('chat.emptyStatePhrases.addTypeDefinitions'),
+    ]), [t]);
 
     // Use theme's muted foreground for secondary text
     const textColor = currentTheme?.colors?.surface?.mutedForeground || 'var(--muted-foreground)';

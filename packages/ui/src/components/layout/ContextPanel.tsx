@@ -11,6 +11,7 @@ import { cn } from '@/lib/utils';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { ContextPanelContent } from './ContextSidebarTab';
+import { useTranslation } from 'react-i18next';
 
 const CONTEXT_PANEL_MIN_WIDTH = 360;
 const CONTEXT_PANEL_MAX_WIDTH = 1400;
@@ -56,14 +57,6 @@ const getRelativePathLabel = (filePath: string | null, directory: string): strin
   return normalizedFile;
 };
 
-const getModeLabel = (mode: 'diff' | 'file' | 'context' | 'plan' | 'chat'): string => {
-  if (mode === 'chat') return 'Chat';
-  if (mode === 'file') return 'Files';
-  if (mode === 'diff') return 'Diff';
-  if (mode === 'plan') return 'Plan';
-  return 'Context';
-};
-
 const getFileNameFromPath = (path: string | null): string | null => {
   if (!path) {
     return null;
@@ -80,18 +73,6 @@ const getFileNameFromPath = (path: string | null): string | null => {
   }
 
   return segments[segments.length - 1] || null;
-};
-
-const getTabLabel = (tab: { mode: 'diff' | 'file' | 'context' | 'plan' | 'chat'; label: string | null; targetPath: string | null }): string => {
-  if (tab.label) {
-    return tab.label;
-  }
-
-  if (tab.mode === 'file') {
-    return getFileNameFromPath(tab.targetPath) || 'Files';
-  }
-
-  return getModeLabel(tab.mode);
 };
 
 const getTabIcon = (tab: { mode: 'diff' | 'file' | 'context' | 'plan' | 'chat'; targetPath: string | null }): React.ReactNode | undefined => {
@@ -156,6 +137,7 @@ const truncateTabLabel = (value: string, maxChars: number): string => {
 };
 
 export const ContextPanel: React.FC = () => {
+  const { t } = useTranslation();
   const effectiveDirectory = useEffectiveDirectory() ?? '';
   const directoryKey = React.useMemo(() => normalizeDirectoryKey(effectiveDirectory), [effectiveDirectory]);
 
@@ -395,7 +377,17 @@ export const ContextPanel: React.FC = () => {
   }, [darkThemeId, lightThemeId, postEmbeddedVisibilityToChats, postThemeSyncToEmbeddedChat, tabs, themeMode]);
 
   const tabItems = React.useMemo(() => tabs.map((tab) => {
-    const rawLabel = getTabLabel(tab);
+    const rawLabel = tab.label
+      ? tab.label
+      : tab.mode === 'file'
+        ? (getFileNameFromPath(tab.targetPath) || t('header.tabs.files'))
+        : tab.mode === 'chat'
+          ? t('header.tabs.chat')
+          : tab.mode === 'diff'
+            ? t('header.tabs.diff')
+            : tab.mode === 'plan'
+              ? t('header.tabs.plan')
+              : t('contextPanel.context');
     const label = truncateTabLabel(rawLabel, CONTEXT_TAB_LABEL_MAX_CHARS);
     const tabPathLabel = getRelativePathLabel(tab.targetPath, effectiveDirectory);
     return {
@@ -403,9 +395,9 @@ export const ContextPanel: React.FC = () => {
       label,
       icon: getTabIcon(tab),
       title: tabPathLabel ? `${rawLabel}: ${tabPathLabel}` : rawLabel,
-      closeLabel: `Close ${label} tab`,
+      closeLabel: t('contextPanel.closeTab', { label }),
     };
-  }), [effectiveDirectory, tabs]);
+  }), [effectiveDirectory, t, tabs]);
 
   const activeNonChatContent = activeTab?.mode === 'diff'
     ? <DiffView hideStackedFileSidebar stackedDefaultCollapsedAll hideFileSelector pinSelectedFileHeaderToTopOnNavigate showOpenInEditorAction />
@@ -461,8 +453,8 @@ export const ContextPanel: React.FC = () => {
           size="sm"
           onClick={handleToggleExpanded}
           className="h-7 w-7 p-0"
-          title={isExpanded ? 'Collapse panel' : 'Expand panel'}
-          aria-label={isExpanded ? 'Collapse panel' : 'Expand panel'}
+          title={isExpanded ? t('contextPanel.collapsePanel') : t('contextPanel.expandPanel')}
+          aria-label={isExpanded ? t('contextPanel.collapsePanel') : t('contextPanel.expandPanel')}
         >
           {isExpanded ? <RiFullscreenExitLine className="h-3.5 w-3.5" /> : <RiFullscreenLine className="h-3.5 w-3.5" />}
         </Button>
@@ -559,7 +551,7 @@ export const ContextPanel: React.FC = () => {
                 chatFrameRefs.current.set(tab.id, node);
               }}
               src={src}
-              title={`Session chat ${sessionID}`}
+              title={t('contextPanel.sessionChat', { id: sessionID })}
               className={cn(
                 'absolute inset-0 h-full w-full border-0 bg-background',
                 activeChatTabID === tab.id ? 'block' : 'hidden'

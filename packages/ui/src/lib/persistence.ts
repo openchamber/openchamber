@@ -5,6 +5,7 @@ import { setDirectoryShowHidden } from '@/lib/directoryShowHidden';
 import { setFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
 import { loadAppearancePreferences, applyAppearancePreferences } from '@/lib/appearancePersistence';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { UI_LANGUAGE_STORAGE_KEY, applyUILanguage, isUILanguage } from '@/i18n';
 
 const persistToLocalStorage = (settings: DesktopSettings) => {
   if (typeof window === 'undefined') {
@@ -81,6 +82,9 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
     } else {
       localStorage.removeItem('openchamber.pwaName');
     }
+  }
+  if (isUILanguage(settings.uiLanguage)) {
+    localStorage.setItem(UI_LANGUAGE_STORAGE_KEY, settings.uiLanguage);
   }
 };
 
@@ -302,6 +306,10 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   if (typeof settings.showReasoningTraces === 'boolean' && settings.showReasoningTraces !== store.showReasoningTraces) {
     store.setShowReasoningTraces(settings.showReasoningTraces);
   }
+  if (isUILanguage(settings.uiLanguage) && settings.uiLanguage !== store.uiLanguage) {
+    store.setUiLanguage(settings.uiLanguage);
+    void applyUILanguage(settings.uiLanguage);
+  }
   if (typeof settings.autoDeleteEnabled === 'boolean' && settings.autoDeleteEnabled !== store.autoDeleteEnabled) {
     store.setAutoDeleteEnabled(settings.autoDeleteEnabled);
   }
@@ -463,6 +471,9 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
 
   if (typeof candidate.themeId === 'string' && candidate.themeId.length > 0) {
     result.themeId = candidate.themeId;
+  }
+  if (isUILanguage(candidate.uiLanguage)) {
+    result.uiLanguage = candidate.uiLanguage;
   }
   if (candidate.useSystemTheme === true || candidate.useSystemTheme === false) {
     result.useSystemTheme = candidate.useSystemTheme;

@@ -517,6 +517,7 @@ export interface ProjectEntry {
 }
 
 export interface SettingsPayload {
+  uiLanguage?: 'system' | 'en' | 'zh-CN';
   themeId?: string;
   useSystemTheme?: boolean;
   themeVariant?: 'light' | 'dark';

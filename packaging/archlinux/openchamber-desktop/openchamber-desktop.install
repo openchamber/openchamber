@@ -1,0 +1,17 @@
+post_install() {
+  cat <<'EOF'
+==> OpenChamber desktop for Arch Linux
+
+OpenChamber still requires the external 'opencode' runtime at run time.
+Make sure the 'opencode' executable is installed and available via PATH,
+or configured through the app's settings/environment.
+
+This package is managed by pacman. For Arch installs, use pacman to update
+openchamber-desktop instead of treating the bundled Tauri updater metadata
+or in-app updater prompts as authoritative.
+EOF
+}
+
+post_upgrade() {
+  post_install
+}

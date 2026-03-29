@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=OpenChamber
+GenericName=AI coding desktop client
+Comment=Unofficial Linux desktop package for OpenChamber
+Exec=openchamber-desktop
+Icon=openchamber
+Terminal=false
+Categories=Development;
+StartupWMClass=OpenChamber
