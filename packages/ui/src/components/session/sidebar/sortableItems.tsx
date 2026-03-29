@@ -200,8 +200,8 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                       )}
                     </span>
                     <span className={cn(
-                      'text-[14px] font-normal truncate lowercase',
-                      isActiveProject ? 'text-foreground' : 'text-foreground group-hover/project:text-foreground',
+                      'text-[14px] font-semibold truncate uppercase tracking-wide',
+                      isActiveProject ? 'text-foreground' : 'text-foreground/95 group-hover/project:text-foreground',
                     )}>
                       {projectLabel}
                     </span>

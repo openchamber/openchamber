@@ -90,7 +90,24 @@ export const useSessionSidebarSections = (args: Args) => {
   ]);
 
   const visibleProjectSections = React.useMemo(() => {
-    return projectSections;
+    // Auto-sort projects by most recent session activity (descending)
+    const sorted = [...projectSections].sort((a, b) => {
+      const getMostRecentTimestamp = (section: ProjectSection): number => {
+        let mostRecent = 0;
+        for (const group of section.groups) {
+          for (const node of group.sessions) {
+            const session = node.session;
+            const timestamp = session.time?.updated || session.time?.created || 0;
+            if (timestamp > mostRecent) {
+              mostRecent = timestamp;
+            }
+          }
+        }
+        return mostRecent;
+      };
+      return getMostRecentTimestamp(b) - getMostRecentTimestamp(a);
+    });
+    return sorted;
   }, [projectSections]);
 
   const groupSearchDataByGroup = React.useMemo(() => {
