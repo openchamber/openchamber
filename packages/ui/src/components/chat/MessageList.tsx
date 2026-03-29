@@ -22,9 +22,7 @@ import { useSessionStatus } from '@/sync/sync-context';
 import { useDeviceInfo } from '@/lib/device';
 import { FadeInDisabledProvider } from './message/FadeInOnReveal';
 import { hasPendingUserSendAnimation, consumePendingUserSendAnimation } from '@/lib/userSendAnimation';
-import { useAssistantStatus } from '@/hooks/useAssistantStatus';
-import { useConfigStore } from '@/stores/useConfigStore';
-import { StatusRow } from './StatusRow';
+import { StatusRowContainer } from './StatusRowContainer';
 import { streamPerfCount, streamPerfMeasure } from '@/stores/utils/streamDebug';
 
 const useStableEvent = <TArgs extends unknown[], TResult>(handler: (...args: TArgs) => TResult) => {
@@ -1011,8 +1009,6 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     const { isMobile } = useDeviceInfo();
     const { isWorking: sessionIsWorking } = useCurrentSessionActivity();
     const activeStreamingMessageId = useStreamingStore((state) => state.streamingMessageIds.get(sessionKey) ?? null);
-    const { working } = useAssistantStatus();
-    const currentAgentName = useConfigStore((state) => state.currentAgentName);
     const stickyUserHeader = useUIStore(state => state.stickyUserHeader);
     const chatRenderMode = useUIStore((state) => state.chatRenderMode);
     const activityRenderMode = useUIStore((state) => state.activityRenderMode);
@@ -1645,18 +1641,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                 )}
 
                 <div className="mb-3">
-                    <StatusRow
-                        isWorking={working.isWorking}
-                        statusText={working.statusText}
-                        isGenericStatus={working.isGenericStatus}
-                        isWaitingForPermission={working.isWaitingForPermission}
-                        wasAborted={working.wasAborted}
-                        abortActive={working.abortActive}
-                        retryInfo={working.retryInfo}
-                        showAssistantStatus
-                        showTodos={false}
-                        agentName={currentAgentName}
-                    />
+                    <StatusRowContainer />
                 </div>
 
                 {/* Bottom spacer */}

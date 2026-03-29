@@ -39,7 +39,6 @@ interface UseChatScrollManagerOptions {
     isSyncing: boolean;
     isMobile: boolean;
     chatRenderMode?: 'sorted' | 'live';
-    messageStreamStates: Map<string, unknown>;
     onActiveTurnChange?: (turnId: string | null) => void;
 }
 

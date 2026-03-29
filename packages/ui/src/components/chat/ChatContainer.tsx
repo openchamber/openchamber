@@ -111,8 +111,6 @@ export const ChatContainer: React.FC = () => {
             [currentSessionId],
         ),
     );
-    const messageStreamStates = useStreamingStore((s) => s.messageStreamStates);
-
     // Messages from sync system
     const sessionMessageRecords = useSessionMessageRecords(currentSessionId ?? '');
     const sessionMessages = currentSessionId ? sessionMessageRecords : EMPTY_MESSAGES;
@@ -239,7 +237,6 @@ export const ChatContainer: React.FC = () => {
         isSyncing,
         isMobile,
         chatRenderMode,
-        messageStreamStates,
         sessionPermissions: sessionBlockingCards,
         onActiveTurnChange: handleActiveTurnChange,
     });

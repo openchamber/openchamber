@@ -181,21 +181,58 @@ function handleEvent(
     }
   }
 
-  // Read live state, create shallow draft, apply ONE event, write back.
-  // Read live state, create shallow draft, apply ONE event, write back.
+  // Read live state, create targeted draft cloning ONLY fields the event
+  // type will mutate. This preserves reference identity for untouched slices
+  // so Zustand selectors skip re-renders for unrelated subscribers.
   const current = store.getState()
-  const draft: State = {
-    ...current,
-    session: [...current.session],
-    message: { ...current.message },
-    part: { ...current.part },
-    session_status: { ...current.session_status },
-    session_diff: { ...current.session_diff },
-    todo: { ...current.todo },
-    permission: { ...current.permission },
-    question: { ...current.question },
-    mcp: { ...current.mcp },
-    lsp: [...current.lsp],
+  const draft: State = { ...current }
+
+  switch (payload.type) {
+    case "session.created":
+    case "session.updated":
+    case "session.deleted":
+      draft.session = [...current.session]
+      draft.permission = { ...current.permission }
+      draft.todo = { ...current.todo }
+      draft.part = { ...current.part }
+      break
+    case "session.diff":
+      draft.session_diff = { ...current.session_diff }
+      break
+    case "session.status":
+      draft.session_status = { ...(current.session_status ?? {}) }
+      break
+    case "todo.updated":
+      draft.todo = { ...current.todo }
+      break
+    case "message.updated":
+      draft.message = { ...current.message }
+      break
+    case "message.removed":
+      draft.message = { ...current.message }
+      draft.part = { ...current.part }
+      break
+    case "message.part.updated":
+    case "message.part.removed":
+    case "message.part.delta":
+      draft.part = { ...current.part }
+      break
+    case "vcs.branch.updated":
+      break
+    case "permission.asked":
+    case "permission.replied":
+      draft.permission = { ...current.permission }
+      break
+    case "question.asked":
+    case "question.replied":
+    case "question.rejected":
+      draft.question = { ...current.question }
+      break
+    case "lsp.updated":
+      draft.lsp = [...current.lsp]
+      break
+    default:
+      break
   }
 
   if (applyDirectoryEvent(draft, payload)) {
@@ -413,7 +450,7 @@ export function useSessionParts(messageID: string, directory?: string) {
 /** Get status for a specific session */
 export function useSessionStatus(sessionID: string, directory?: string) {
   return useDirectorySync(
-    useCallback((state: State) => state.session_status[sessionID], [sessionID]),
+    useCallback((state: State) => state.session_status?.[sessionID], [sessionID]),
     directory,
   )
 }
@@ -460,22 +497,72 @@ export function useChildStoreManager() {
 /**
  * Get messages for a session in the old {info, parts}[] format.
  * Uses visible messages (filtered by revert state).
- * Uses visible messages (filtered by revert state).
+ *
+ * Uses a ref-stable parts lookup that only triggers re-renders when
+ * a part array for one of our displayed messages actually changes.
  */
 export function useSessionMessageRecords(sessionID: string, directory?: string) {
   const messages = useVisibleSessionMessages(sessionID, directory)
+  const store = useDirectoryStore(directory)
 
-  const allParts = useDirectorySync(
-    useCallback((state: State) => state.part, []),
-    directory,
-  )
+  // Track parts with a ref to avoid subscribing to entire state.part map.
+  // Re-derive only when messages list changes or on store subscription.
+  const prevPartsRef = useRef<Record<string, Part[]>>({})
+  const [partsSnapshot, setPartsSnapshot] = React.useState<Record<string, Part[]>>({})
+
+  React.useEffect(() => {
+    const messageIds = messages.map((m) => m.id)
+    let timer: ReturnType<typeof setTimeout> | null = null
+    let pending = false
+
+    const flush = () => {
+      timer = null
+      pending = false
+      const state = store.getState()
+      const prev = prevPartsRef.current
+      let changed = false
+      const next: Record<string, Part[]> = {}
+      for (const id of messageIds) {
+        const parts = state.part[id] ?? EMPTY_PARTS
+        next[id] = parts
+        if (parts !== prev[id]) changed = true
+      }
+      if (changed || Object.keys(prev).length !== messageIds.length) {
+        prevPartsRef.current = next
+        setPartsSnapshot(next)
+      }
+    }
+
+    // Initial sync
+    flush()
+
+    // Throttled subscription — batch rapid delta events into ~100ms updates
+    const unsub = store.subscribe(() => {
+      if (timer) {
+        pending = true
+        return
+      }
+      timer = setTimeout(() => {
+        flush()
+        if (pending) {
+          pending = false
+          timer = setTimeout(flush, 100)
+        }
+      }, 100)
+    })
+
+    return () => {
+      unsub()
+      if (timer) clearTimeout(timer)
+    }
+  }, [messages, store])
 
   return useMemo(
     () => messages.map((msg) => ({
       info: msg,
-      parts: allParts[msg.id] ?? EMPTY_PARTS,
+      parts: partsSnapshot[msg.id] ?? EMPTY_PARTS,
     })),
-    [messages, allParts],
+    [messages, partsSnapshot],
   )
 }
 

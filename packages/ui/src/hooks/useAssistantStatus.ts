@@ -133,8 +133,20 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
         }, [currentSessionId])
     );
 
-    const allParts = useDirectorySync(
-        React.useCallback((state) => state.part, [])
+    // Only subscribe to parts for the last assistant message — avoids re-render
+    // on every part delta for earlier messages.
+    const lastAssistantId = React.useMemo(() => {
+        for (let i = rawSessionMessages.length - 1; i >= 0; i--) {
+            if (rawSessionMessages[i].role === 'assistant') return rawSessionMessages[i].id;
+        }
+        return null;
+    }, [rawSessionMessages]);
+
+    const lastAssistantParts = useDirectorySync(
+        React.useCallback((state) => {
+            if (!lastAssistantId) return EMPTY_PARTS;
+            return state.part[lastAssistantId] ?? EMPTY_PARTS;
+        }, [lastAssistantId])
     );
 
     const sessionMessages = React.useMemo<SessionMessageRecord[]>(
@@ -144,10 +156,10 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
             }
             return rawSessionMessages.map((msg) => ({
                 info: msg,
-                parts: allParts[msg.id] ?? EMPTY_PARTS,
+                parts: msg.id === lastAssistantId ? lastAssistantParts : EMPTY_PARTS,
             }));
         },
-        [allParts, rawSessionMessages]
+        [lastAssistantParts, rawSessionMessages, lastAssistantId]
     );
 
     const sessionPermissionRequests = useSessionPermissions(currentSessionId ?? '');
