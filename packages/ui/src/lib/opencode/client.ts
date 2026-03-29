@@ -740,6 +740,7 @@ class OpencodeService {
           },
           agent: params.agent,
           variant: params.variant,
+          ...(params.messageId ? { messageID: params.messageId } : {}),
           ...(params.format ? { format: params.format } : {}),
           parts,
         }),

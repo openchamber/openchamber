@@ -26,6 +26,7 @@ import {
 
 // New sync system imports
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useViewportStore } from '@/sync/viewport-store';
 import { useStreamingStore } from '@/sync/streaming';
 import {
     useSessionMessageRecords,
@@ -83,12 +84,12 @@ const HYDRATING_SKELETON_ITEMS: Array<{
 export const ChatContainer: React.FC = () => {
     // Session UI state
     const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
-    const updateViewportAnchor = useSessionUIStore((s) => s.updateViewportAnchor);
     const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
     const setCurrentSession = useSessionUIStore((s) => s.setCurrentSession);
     const newSessionDraft = useSessionUIStore((s) => s.newSessionDraft);
-    const isSyncing = useSessionUIStore((s) => s.isSyncing);
-    const sessionMemoryStateMap = useSessionUIStore((s) => s.sessionMemoryState);
+    const updateViewportAnchor = useViewportStore((s) => s.updateViewportAnchor);
+    const isSyncing = useViewportStore((s) => s.isSyncing);
+    const sessionMemoryStateMap = useViewportStore((s) => s.sessionMemoryState);
 
     // Sync actions
     const sync = useSync();

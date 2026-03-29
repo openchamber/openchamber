@@ -2,6 +2,7 @@ import React from 'react';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
 import { useMessageQueueStore, type QueuedMessage } from '@/stores/messageQueueStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSelectionStore } from '@/sync/selection-store';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useContextStore } from '@/stores/contextStore';
 import { parseAgentMentions } from '@/lib/messages/agentMentions';
@@ -57,7 +58,7 @@ const buildQueuedPayload = (queue: QueuedMessage[]) => {
 const resolveSessionSendConfig = (sessionId: string) => {
   const context = useContextStore.getState();
   const config = useConfigStore.getState();
-  const message = useSessionUIStore.getState();
+  const selection = useSelectionStore.getState();
 
   const selectedAgent =
     context.getSessionAgentSelection(sessionId)
@@ -74,12 +75,12 @@ const resolveSessionSendConfig = (sessionId: string) => {
     agentModel?.providerId
     ?? sessionModel?.providerId
     ?? config.currentProviderId
-    ?? message.lastUsedProvider?.providerID;
+    ?? selection.lastUsedProvider?.providerID;
   const modelID =
     agentModel?.modelId
     ?? sessionModel?.modelId
     ?? config.currentModelId
-    ?? message.lastUsedProvider?.modelID;
+    ?? selection.lastUsedProvider?.modelID;
 
   const variant =
     selectedAgent && providerID && modelID

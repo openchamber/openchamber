@@ -22,6 +22,7 @@ import { cn } from '@/lib/utils';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSelectionStore } from '@/sync/selection-store';
 import * as sessionActions from '@/sync/session-actions';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useContextStore } from '@/stores/contextStore';
@@ -397,7 +398,7 @@ export function GitHubIssuePickerDialog({
       onOpenChange(false);
 
       const configState = useConfigStore.getState();
-      const lastUsedProvider = useSessionUIStore.getState().lastUsedProvider;
+      const lastUsedProvider = useSelectionStore.getState().lastUsedProvider;
 
       const defaultModel = resolveDefaultModelSelection();
       const providerID = defaultModel?.providerID || configState.currentProviderId || lastUsedProvider?.providerID;

@@ -12,6 +12,7 @@ import { bootstrapGlobal, bootstrapDirectory } from "./bootstrap"
 import { updateStreamingState } from "./streaming"
 import { setActionRefs } from "./session-actions"
 import { setSyncRefs } from "./sync-refs"
+import { opencodeClient } from "@/lib/opencode/client"
 import { appendNotification } from "./notification-store"
 import type { State } from "./types"
 import type { SessionStatus } from "@opencode-ai/sdk/v2/client"
@@ -308,7 +309,7 @@ export function SyncProvider(props: {
             const sessions = (result.data ?? [])
               .filter((s) => !!s?.id)
               .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-            store.setState({ session: sessions, sessionTotal: sessions.length })
+            store.setState({ session: sessions, sessionTotal: sessions.length, limit: Math.max(sessions.length, 50) })
           },
         }).finally(() => {
           bootingDirs.delete(directory)
@@ -360,8 +361,8 @@ export function SyncProvider(props: {
     setSyncRefs(props.sdk, childStores, props.directory)
     setActionRefs(
       props.sdk,
-      () => childStores.ensureChild(props.directory),
-      props.directory,
+      childStores,
+      () => opencodeClient.getDirectory() || props.directory,
     )
   }, [props.sdk, props.directory, childStores])
 
@@ -432,7 +433,6 @@ export function useSessionMessages(sessionID: string, directory?: string) {
 export function useVisibleSessionMessages(sessionID: string, directory?: string) {
   const messages = useSessionMessages(sessionID, directory)
   const revertMessageID = useSessionRevertMessageID(sessionID, directory)
-
   return useMemo(() => {
     if (!revertMessageID) return messages
     return messages.filter((m) => m.id < revertMessageID)

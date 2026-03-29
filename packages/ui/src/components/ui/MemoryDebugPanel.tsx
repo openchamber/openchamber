@@ -2,6 +2,7 @@ import React from 'react';
 import { RiBarChartBoxLine, RiCloseLine, RiDatabase2Line, RiFileCopyLine, RiPulseLine, RiRefreshLine } from '@remixicon/react';
 
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useViewportStore } from '@/sync/viewport-store';
 import { useSessions, useDirectorySync } from '@/sync/sync-context';
 import { MEMORY_LIMITS } from '@/stores/types/sessionTypes';
 import { useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
@@ -99,7 +100,8 @@ const PerfSection: React.FC<{ title: string; snapshot: StreamPerfSnapshot; empty
 export const DebugPanel: React.FC<DebugPanelProps> = ({ onClose }) => {
   const [activeTab, setActiveTab] = React.useState<DebugTab>('memory');
   const [copyState, setCopyState] = React.useState<'idle' | 'copied' | 'error'>('idle');
-  const { sessionMemoryState, currentSessionId } = useSessionUIStore();
+  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const sessionMemoryState = useViewportStore((state) => state.sessionMemoryState);
   const sessions = useSessions();
   const messageRecord = useDirectorySync((state) => state.message);
   const totalGitHubRequests = useGitHubPrStatusStore((state) => state.totalRequestCount);

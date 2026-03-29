@@ -1,6 +1,7 @@
 import React, { useRef, memo } from 'react';
 import { RiAttachment2, RiCloseLine, RiFileImageLine, RiFileLine, RiFilePdfLine, RiGithubLine, RiGitPullRequestLine } from '@remixicon/react';
-import { useSessionUIStore, type AttachedFile } from '@/sync/session-ui-store';
+import { useInputStore } from '@/sync/input-store';
+import type { AttachedFile } from '@/sync/session-ui-store';
 import { useUIStore } from '@/stores/useUIStore';
 import { toast } from '@/components/ui';
 import { cn } from '@/lib/utils';
@@ -13,7 +14,7 @@ import type { ToolPopupContent } from './message/types';
 
 export const FileAttachmentButton = memo(() => {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { addAttachedFile } = useSessionUIStore();
+  const { addAttachedFile } = useInputStore();
   const { isMobile } = useUIStore();
   const isVSCodeRuntime = useIsVSCodeRuntime();
   const buttonSizeClass = isMobile ? 'h-9 w-9' : 'h-7 w-7';
@@ -255,7 +256,7 @@ const FileChip = memo(({ file, onRemove }: FileChipProps) => {
 FileChip.displayName = 'FileChip';
 
 export const AttachedFilesList = memo(() => {
-  const { attachedFiles, removeAttachedFile } = useSessionUIStore();
+  const { attachedFiles, removeAttachedFile } = useInputStore();
 
   const localFiles = attachedFiles.filter((file) => file.source !== 'server');
 

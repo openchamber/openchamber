@@ -29,6 +29,8 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { opencodeClient } from '@/lib/opencode/client';
 import { SyncProvider, useSessions } from '@/sync/sync-context';
+import { useSync } from '@/sync/use-sync';
+import { setOptimisticRefs } from '@/sync/session-actions';
 import { useFontPreferences } from '@/hooks/useFontPreferences';
 import { CODE_FONT_OPTION_MAP, DEFAULT_MONO_FONT, DEFAULT_UI_FONT, UI_FONT_OPTION_MAP } from '@/lib/fontOptions';
 import { ConfigUpdateOverlay } from '@/components/ui/ConfigUpdateOverlay';
@@ -126,6 +128,12 @@ const SyncAppEffects: React.FC<{
   apis: RuntimeAPIs;
   embeddedBackgroundWorkEnabled: boolean;
 }> = ({ apis, embeddedBackgroundWorkEnabled }) => {
+  // Bridge useSync() optimistic ops to session-actions module refs
+  const sync = useSync();
+  React.useEffect(() => {
+    setOptimisticRefs(sync.optimistic.add, sync.optimistic.remove);
+  }, [sync.optimistic.add, sync.optimistic.remove]);
+
   useGitHubPrBackgroundTracking(embeddedBackgroundWorkEnabled ? apis.github : undefined, apis.git);
   usePwaManifestSync();
   useSessionAutoCleanup({ enabled: embeddedBackgroundWorkEnabled });

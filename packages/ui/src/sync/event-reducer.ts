@@ -140,14 +140,24 @@ export function applyDirectoryEvent(
         draft.message[info.sessionID] = [info]
         return true
       }
-      const next = [...messages]
-      const result = Binary.search(next, info.id, (m) => m.id)
+      const result = Binary.search(messages, info.id, (m) => m.id)
       if (result.found) {
+        // Skip message replacement if unchanged — preserves reference, avoids re-render
+        const existing = messages[result.index]
+        const unchanged = existing.role === info.role
+          && (existing as { finish?: unknown }).finish === (info as { finish?: unknown }).finish
+          && (existing.time as { completed?: number })?.completed === (info.time as { completed?: number })?.completed
+        if (unchanged) {
+          return false
+        }
+        const next = [...messages]
         next[result.index] = info
+        draft.message[info.sessionID] = next
       } else {
+        const next = [...messages]
         next.splice(result.index, 0, info)
+        draft.message[info.sessionID] = next
       }
-      draft.message[info.sessionID] = next
       return true
     }
 
@@ -180,7 +190,19 @@ export function applyDirectoryEvent(
       if (result.found) {
         next[result.index] = part
       } else {
-        next.splice(result.index, 0, part)
+        // Replace optimistic part (no sessionID) with server part of same type.
+        // Gate: only scan if the first part lacks sessionID (optimistic parts are
+        // always inserted first). Assistant messages never have optimistic parts,
+        // so this check is effectively free during streaming.
+        const hasOptimistic = next.length > 0 && !(next[0] as { sessionID?: string }).sessionID
+        const optimisticIdx = hasOptimistic && (part.type === "text" || part.type === "file")
+          ? next.findIndex((p) => p.type === part.type && !(p as { sessionID?: string }).sessionID)
+          : -1
+        if (optimisticIdx >= 0) {
+          next.splice(optimisticIdx, 1)
+        }
+        const insertResult = Binary.search(next, part.id, (p) => p.id)
+        next.splice(insertResult.index, 0, part)
       }
       draft.part[messageID] = next
       return true

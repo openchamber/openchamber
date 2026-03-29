@@ -8,6 +8,7 @@ import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { formatDirectoryName, cn } from '@/lib/utils';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useViewportStore } from '@/sync/viewport-store';
 import { useSessions, useDirectorySync, useAllSessionStatuses } from '@/sync/sync-context';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSync } from '@/sync/use-sync';
@@ -317,7 +318,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const updateSessionTitle = useSessionUIStore((state) => state.updateSessionTitle);
   const shareSession = useSessionUIStore((state) => state.shareSession);
   const unshareSession = useSessionUIStore((state) => state.unshareSession);
-  const sessionMemoryState = useSessionUIStore((state) => state.sessionMemoryState);
+  const sessionMemoryState = useViewportStore((state) => state.sessionMemoryState);
   const globalSessionStatuses = useAllSessionStatuses();
   // sessionAttentionStates removed — now using notification-store directly in SessionNodeItem
   const permissionsRecord = useDirectorySync((state) => state.permission ?? {});

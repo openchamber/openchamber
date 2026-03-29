@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/command';
 import { toast } from '@/components/ui';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useInputStore } from '@/sync/input-store';
 import { useUIStore } from '@/stores/useUIStore';
 import { execCommand } from '@/lib/execCommands';
 import {
@@ -217,8 +218,8 @@ Important:
     return { visibleText, instructionsText, payloadText };
   }, []);
 
-  const setPendingInputText = useSessionUIStore((s) => s.setPendingInputText);
-  const setPendingSyntheticParts = useSessionUIStore((s) => s.setPendingSyntheticParts);
+  const setPendingInputText = useInputStore((s) => s.setPendingInputText);
+  const setPendingSyntheticParts = useInputStore((s) => s.setPendingSyntheticParts);
 
   const handleResolveWithAi = React.useCallback((
     payload: { state: IntegrateInProgress; details: IntegrateConflictDetails },

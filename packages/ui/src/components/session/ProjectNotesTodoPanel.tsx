@@ -20,6 +20,7 @@ import {
 } from '@/lib/openchamberConfig';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useInputStore } from '@/sync/input-store';
 import { createWorktreeDraft } from '@/lib/worktreeSessionCreator';
 import { cn } from '@/lib/utils';
 
@@ -54,7 +55,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
 
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const openNewSessionDraft = useSessionUIStore((state) => state.openNewSessionDraft);
-  const setPendingInputText = useSessionUIStore((state) => state.setPendingInputText);
+  const setPendingInputText = useInputStore((state) => state.setPendingInputText);
   const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
   const setSessionSwitcherOpen = useUIStore((state) => state.setSessionSwitcherOpen);
 

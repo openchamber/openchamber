@@ -2,6 +2,7 @@ import React from 'react';
 import { cn } from '@/lib/utils';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSelectionStore } from '@/sync/selection-store';
 import { getAgentDisplayName } from './mobileControlsUtils';
 import { getAgentColor } from '@/lib/agentColors';
 
@@ -17,7 +18,7 @@ const LONG_PRESS_MS = 500;
 export const MobileAgentButton: React.FC<MobileAgentButtonProps> = ({ onCycleAgent, onOpenAgentPanel, className }) => {
     const { currentAgentName, getVisibleAgents } = useConfigStore();
     const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-    const sessionAgentName = useSessionUIStore((state) =>
+    const sessionAgentName = useSelectionStore((state) =>
         currentSessionId ? state.getSessionAgentSelection(currentSessionId) : null
     );
 

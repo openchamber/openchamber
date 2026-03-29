@@ -3,6 +3,7 @@ import { ErrorBoundary } from '../ui/ErrorBoundary';
 import { SessionSidebar } from '@/components/session/SessionSidebar';
 import { ChatView, SettingsView } from '@/components/views';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useViewportStore } from '@/sync/viewport-store';
 import { useSessions, useDirectorySync } from '@/sync/sync-context';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
@@ -99,7 +100,7 @@ export const VSCodeLayout: React.FC = () => {
     return sessions.find((session) => session.id === currentSessionId)?.title || 'Session';
   }, [currentSessionId, sessions]);
   const newSessionDraftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
-  const isSyncingMessages = useSessionUIStore((state) => state.isSyncing);
+  const isSyncingMessages = useViewportStore((state) => state.isSyncing);
   const hasActiveSessionWork = useDirectorySync((state) => {
     const statuses = state.session_status;
     if (!statuses || Object.keys(statuses).length === 0) {
@@ -159,7 +160,7 @@ export const VSCodeLayout: React.FC = () => {
       const state = useSessionUIStore.getState();
       const stillNoSession = !state.currentSessionId;
       const draftStillClosed = !state.newSessionDraft?.open;
-      const stillSyncing = state.isSyncing;
+      const stillSyncing = useViewportStore.getState().isSyncing;
       const stillActiveWork = false; // sync bootstrap tracks session status
 
       if (stillNoSession && draftStillClosed && !stillSyncing && !stillActiveWork) {

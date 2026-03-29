@@ -35,6 +35,7 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSelectionStore } from '@/sync/selection-store';
 import * as sessionActions from '@/sync/session-actions';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useContextStore } from '@/stores/contextStore';
@@ -398,7 +399,7 @@ export function NewWorktreeDialog({
     }
 
     const configState = useConfigStore.getState();
-    const lastUsedProvider = useSessionUIStore.getState().lastUsedProvider;
+    const lastUsedProvider = useSelectionStore.getState().lastUsedProvider;
     const defaultModel = resolveDefaultModelSelection();
     const providerID = defaultModel?.providerID || configState.currentProviderId || lastUsedProvider?.providerID;
     const modelID = defaultModel?.modelID || configState.currentModelId || lastUsedProvider?.modelID;

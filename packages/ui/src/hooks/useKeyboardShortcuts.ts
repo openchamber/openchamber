@@ -1,5 +1,6 @@
 import React from 'react';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSelectionStore } from '@/sync/selection-store';
 import * as sessionActions from '@/sync/session-actions';
 import { useUIStore } from '@/stores/useUIStore';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
@@ -265,14 +266,13 @@ export const useKeyboardShortcuts = () => {
         configState.cycleCurrentVariant();
 
         const nextVariant = useConfigStore.getState().currentVariant;
-        const sessionState = useSessionUIStore.getState();
-        const sessionId = sessionState.currentSessionId;
+        const sessionId = useSessionUIStore.getState().currentSessionId;
         const agentName = useConfigStore.getState().currentAgentName;
         const providerId = useConfigStore.getState().currentProviderId;
         const modelId = useConfigStore.getState().currentModelId;
 
         if (sessionId && agentName && providerId && modelId) {
-          sessionState.saveAgentModelVariantForSession(sessionId, agentName, providerId, modelId, nextVariant);
+          useSelectionStore.getState().saveAgentModelVariantForSession(sessionId, agentName, providerId, modelId, nextVariant);
         }
 
         return;

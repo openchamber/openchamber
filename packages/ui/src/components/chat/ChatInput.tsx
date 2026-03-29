@@ -21,6 +21,8 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useMessageQueueStore, type QueuedMessage } from '@/stores/messageQueueStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSelectionStore } from '@/sync/selection-store';
+import { useInputStore } from '@/sync/input-store';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
 import * as sessionActions from '@/sync/session-actions';
 import { useSessionMessageRecords } from '@/sync/sync-context';
@@ -327,14 +329,14 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
     const availableWorktreesByProject = useSessionUIStore((s) => s.availableWorktreesByProject);
     const abortPromptSessionId = useSessionUIStore((s) => s.abortPromptSessionId);
     const clearAbortPrompt = useSessionUIStore((s) => s.clearAbortPrompt);
-    const attachedFiles = useSessionUIStore((s) => s.attachedFiles);
-    const addAttachedFile = useSessionUIStore((s) => s.addAttachedFile);
-    const clearAttachedFiles = useSessionUIStore((s) => s.clearAttachedFiles);
-    const saveSessionAgentSelection = useSessionUIStore((s) => s.saveSessionAgentSelection);
-    const consumePendingInputText = useSessionUIStore((s) => s.consumePendingInputText);
-    const setPendingInputText = useSessionUIStore((s) => s.setPendingInputText);
-    const pendingInputText = useSessionUIStore((s) => s.pendingInputText);
-    const consumePendingSyntheticParts = useSessionUIStore((s) => s.consumePendingSyntheticParts);
+    const attachedFiles = useInputStore((s) => s.attachedFiles);
+    const addAttachedFile = useInputStore((s) => s.addAttachedFile);
+    const clearAttachedFiles = useInputStore((s) => s.clearAttachedFiles);
+    const saveSessionAgentSelection = useSelectionStore((s) => s.saveSessionAgentSelection);
+    const consumePendingInputText = useInputStore((s) => s.consumePendingInputText);
+    const setPendingInputText = useInputStore((s) => s.setPendingInputText);
+    const pendingInputText = useInputStore((s) => s.pendingInputText);
+    const consumePendingSyntheticParts = useInputStore((s) => s.consumePendingSyntheticParts);
     const acknowledgeSessionAbort = useSessionUIStore((s) => s.acknowledgeSessionAbort);
     const abortCurrentOperation = React.useCallback(
         (sessionIdOverride?: string) => sessionActions.abortCurrentOperation(sessionIdOverride ?? currentSessionId ?? ''),

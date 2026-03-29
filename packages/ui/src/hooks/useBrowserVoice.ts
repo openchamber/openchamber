@@ -28,6 +28,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { browserVoiceService } from '@/lib/voice/browserVoiceService';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useInputStore } from '@/sync/input-store';
 import { getSyncMessages, getSyncParts } from '@/sync/sync-refs';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useServerTTS } from './useServerTTS';
@@ -129,7 +130,7 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
   // Store access
   const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
   const sendMessage = useSessionUIStore((s) => s.sendMessage);
-  const setPendingInputText = useSessionUIStore((s) => s.setPendingInputText);
+  const setPendingInputText = useInputStore((s) => s.setPendingInputText);
   const createSession = useSessionUIStore((s) => s.createSession);
   const { currentProviderId, currentModelId, currentAgentName, voiceModeEnabled, voiceProvider, speechRate, speechPitch, speechVolume, sayVoice, browserVoice, openaiVoice, summarizeVoiceConversation, summarizeCharacterThreshold } = useConfigStore();
 

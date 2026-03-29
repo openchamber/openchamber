@@ -8,6 +8,7 @@ import type { ModelMetadata } from "@/types";
 import { getSafeStorage } from "./utils/safeStorage";
 import { filterVisibleAgents } from "./useAgentsStore";
 import { useSessionUIStore } from "@/sync/session-ui-store";
+import { useSelectionStore } from "@/sync/selection-store";
 import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry";
 import { updateDesktopSettings } from "@/lib/persistence";
 import { useDirectoryStore } from "@/stores/useDirectoryStore";
@@ -1448,26 +1449,26 @@ export const useConfigStore = create<ConfigStore>()(
                     });
 
                     if (agentName) {
-                        const uiState = useSessionUIStore.getState();
-                        const { currentSessionId } = uiState;
+                        const { currentSessionId } = useSessionUIStore.getState();
+                        const selState = useSelectionStore.getState();
 
                         if (currentSessionId) {
-                            uiState.saveSessionAgentSelection(currentSessionId, agentName);
+                            selState.saveSessionAgentSelection(currentSessionId, agentName);
                         }
 
-                        if (currentSessionId && uiState.isOpenChamberCreatedSession(currentSessionId)) {
-                            const existingAgentModel = uiState.getAgentModelForSession(currentSessionId, agentName);
+                        if (currentSessionId && useSessionUIStore.getState().isOpenChamberCreatedSession(currentSessionId)) {
+                            const existingAgentModel = selState.getAgentModelForSession(currentSessionId, agentName);
                             if (!existingAgentModel) {
-                                uiState.initializeNewOpenChamberSession(currentSessionId, agents);
+                                useSessionUIStore.getState().initializeNewOpenChamberSession(currentSessionId, agents);
                             }
                         }
                     }
 
                     if (agentName) {
-                        const { currentSessionId, getAgentModelForSession } = useSessionUIStore.getState();
+                        const { currentSessionId } = useSessionUIStore.getState();
 
                         if (currentSessionId) {
-                            const existingAgentModel = getAgentModelForSession(currentSessionId, agentName);
+                            const existingAgentModel = useSelectionStore.getState().getAgentModelForSession(currentSessionId, agentName);
                             if (existingAgentModel) {
                                 return;
                             }

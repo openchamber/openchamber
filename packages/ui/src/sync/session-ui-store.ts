@@ -40,6 +40,9 @@ import {
   archiveSession as archiveSessionAction,
   optimisticSend,
 } from "./session-actions"
+import { useInputStore, type SyntheticContextPart } from "./input-store"
+import { useSelectionStore } from "./selection-store"
+import { useViewportStore } from "./viewport-store"
 
 export type { AttachedFile }
 
@@ -106,7 +109,7 @@ function routeMessage(params: {
     modelID: params.modelID,
     agent: params.agent,
     files: params.files,
-    send: () => opencodeClient.sendMessage({
+    send: (messageID) => opencodeClient.sendMessage({
       id: params.sessionId,
       providerID: params.providerID,
       modelID: params.modelID,
@@ -115,6 +118,7 @@ function routeMessage(params: {
       variant: params.variant,
       files: params.files,
       additionalParts: params.additionalParts,
+      messageId: messageID,
     }).then(() => {}),
   })
 }
@@ -123,11 +127,9 @@ function routeMessage(params: {
 // Types
 // ---------------------------------------------------------------------------
 
-export type SyntheticContextPart = {
-  text: string
-  attachments?: AttachedFile[]
-  synthetic?: boolean
-}
+export type { SyntheticContextPart } from "./input-store"
+export type { SessionMemoryState } from "./viewport-store"
+export type { VoiceStatus, VoiceMode } from "./voice-store"
 
 export type NewSessionDraftState = {
   open: boolean
@@ -148,19 +150,6 @@ export type ViewportAnchor = {
   value: number
 }
 
-export type SessionMemoryState = {
-  viewportAnchor: number
-  isStreaming: boolean
-  streamStartTime?: number
-  lastAccessedAt: number
-  backgroundMessageCount: number
-  loadedTurnCount?: number
-  hasMoreAbove?: boolean
-  streamingCooldownUntil?: number
-  isZombie?: boolean
-  lastUserMessageAt?: number
-}
-
 export type SessionHistoryMeta = {
   limit: number
   hasMore: boolean
@@ -170,26 +159,11 @@ export type SessionHistoryMeta = {
   nextCursor?: string
 }
 
-type VoiceStatus = "disconnected" | "connecting" | "connected" | "error"
-type VoiceMode = "idle" | "speaking" | "listening"
-
 export type SessionUIState = {
   currentSessionId: string | null
-  attachedFiles: AttachedFile[]
-  sessionMemoryState: Map<string, SessionMemoryState>
   newSessionDraft: NewSessionDraftState
-  voiceStatus: VoiceStatus
-  voiceMode: VoiceMode
   abortPromptSessionId: string | null
   abortPromptExpiresAt: number | null
-  pendingInputText: string | null
-  pendingInputMode: "replace" | "append" | "append-inline"
-  pendingSyntheticParts: SyntheticContextPart[] | null
-  sessionModelSelections: Map<string, { providerId: string; modelId: string }>
-  sessionAgentSelections: Map<string, string>
-  sessionAgentModelSelections: Map<string, Map<string, { providerId: string; modelId: string }>>
-  lastUsedProvider: { providerID: string; modelID: string } | null
-  isSyncing: boolean
   error: string | null
   worktreeMetadata: Map<string, WorktreeMetadata>
   availableWorktrees: WorktreeMetadata[]
@@ -201,27 +175,11 @@ export type SessionUIState = {
   lastLoadedDirectory: string | null
 
   // Actions — UI state management
-  setCurrentSession: (id: string | null) => void
-  addAttachedFile: (file: File) => Promise<void>
-  removeAttachedFile: (id: string) => void
-  clearAttachedFiles: () => void
-  updateViewportAnchor: (sessionId: string, anchor: number) => void
-  setVoiceStatus: (status: VoiceStatus) => void
-  setVoiceMode: (mode: VoiceMode) => void
-  setPendingInputText: (text: string | null, mode?: "replace" | "append" | "append-inline") => void
-  consumePendingInputText: () => { text: string; mode: "replace" | "append" | "append-inline" } | null
-  setPendingSyntheticParts: (parts: SyntheticContextPart[] | null) => void
-  consumePendingSyntheticParts: () => SyntheticContextPart[] | null
+  setCurrentSession: (id: string | null, directoryHint?: string | null) => void
   openNewSessionDraft: (options?: Partial<NewSessionDraftState>) => void
   closeNewSessionDraft: () => void
   setNewSessionDraftTarget: (target: { projectId?: string | null; selectedProjectId?: string | null; directoryOverride?: string | null }, options?: { force?: boolean }) => void
   setDraftPreserveDirectoryOverride: (value: boolean) => void
-  saveSessionModelSelection: (sessionId: string, providerId: string, modelId: string) => void
-  getSessionModelSelection: (sessionId: string) => { providerId: string; modelId: string } | null
-  saveSessionAgentSelection: (sessionId: string, agentName: string) => void
-  getSessionAgentSelection: (sessionId: string) => string | null
-  saveAgentModelForSession: (sessionId: string, agentName: string, providerId: string, modelId: string) => void
-  getAgentModelForSession: (sessionId: string, agentName: string) => { providerId: string; modelId: string } | null
   acknowledgeSessionAbort: (sessionId: string) => void
   clearAbortPrompt: () => void
   armAbortPrompt: (durationMs?: number) => number | null
@@ -269,8 +227,6 @@ export type SessionUIState = {
   getDirectoryForSession: (sessionId: string) => string | null
   getLastMessageModel: (sessionId: string) => { providerID: string; modelID: string } | null
   getCurrentAgent: (sessionId: string) => string | undefined
-  saveAgentModelVariantForSession: (sessionId: string, agentName: string, providerId: string, modelId: string, variant: string | undefined) => void
-  getAgentModelVariantForSession: (sessionId: string, agentName: string, providerId: string, modelId: string) => string | undefined
   analyzeAndSaveExternalSessionChoices: (sessionId: string, agents: unknown[]) => Promise<Map<string, { timestamp: number; providerId: string; modelId: string }>>
   debugSessionMessages: (sessionId: string) => Promise<void>
   pollForTokenUpdates: () => void
@@ -391,9 +347,6 @@ const resolveSessionDirectory = (
   return resolveDirectoryKey(target)
 }
 
-// Variant selections stored in-memory
-const agentModelVariantSelections = new Map<string, Map<string, Map<string, string>>>()
-
 const DEFAULT_DRAFT: NewSessionDraftState = {
   open: false,
   directoryOverride: null,
@@ -406,21 +359,9 @@ const DEFAULT_DRAFT: NewSessionDraftState = {
 
 export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   currentSessionId: null,
-  attachedFiles: [],
-  sessionMemoryState: new Map(),
   newSessionDraft: { ...DEFAULT_DRAFT },
-  voiceStatus: "disconnected",
-  voiceMode: "idle",
   abortPromptSessionId: null,
   abortPromptExpiresAt: null,
-  pendingInputText: null,
-  pendingInputMode: "replace",
-  pendingSyntheticParts: null,
-  sessionModelSelections: new Map(),
-  sessionAgentSelections: new Map(),
-  sessionAgentModelSelections: new Map(),
-  lastUsedProvider: null,
-  isSyncing: false,
   error: null,
   worktreeMetadata: new Map(),
   availableWorktrees: [],
@@ -434,7 +375,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   // ---------------------------------------------------------------------------
   // setCurrentSession
   // ---------------------------------------------------------------------------
-  setCurrentSession: (id) => {
+  setCurrentSession: (id, directoryHint?: string | null) => {
     if (id) {
       get().closeNewSessionDraft()
     }
@@ -447,7 +388,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       (sid) => get().worktreeMetadata.get(sid),
     )
     const fallbackDir = opencodeClient.getDirectory() ?? directoryState.currentDirectory ?? null
-    const resolvedDir = sessionDir ?? fallbackDir
+    const resolvedDir = (directoryHint ? normalizePath(directoryHint) : null) ?? sessionDir ?? fallbackDir
 
     try {
       if (resolvedDir && directoryState.currentDirectory !== resolvedDir) {
@@ -460,11 +401,11 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
     // Save viewport anchor for previous session
     if (previousSessionId && previousSessionId !== id) {
-      const memState = get().sessionMemoryState.get(previousSessionId)
+      const memState = useViewportStore.getState().sessionMemoryState.get(previousSessionId)
       if (!memState?.isStreaming) {
         const prevMessages = getSyncMessages(previousSessionId)
         if (prevMessages.length > 0) {
-          get().updateViewportAnchor(previousSessionId, prevMessages.length - 1)
+          useViewportStore.getState().updateViewportAnchor(previousSessionId, prevMessages.length - 1)
         }
       }
     }
@@ -477,69 +418,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       markSessionViewed(id)
       setActiveSession(resolvedDir ?? "", id)
     }
-  },
-
-  // ---------------------------------------------------------------------------
-  // Attached files
-  // ---------------------------------------------------------------------------
-  addAttachedFile: async (file: File) => {
-    const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`
-    const dataUrl = await new Promise<string>((resolve) => {
-      const reader = new FileReader()
-      reader.onload = () => resolve(reader.result as string)
-      reader.readAsDataURL(file)
-    })
-    const attached: AttachedFile = {
-      id,
-      file,
-      dataUrl,
-      mimeType: file.type,
-      filename: file.name,
-      size: file.size,
-      source: "local",
-    }
-    set((s) => ({ attachedFiles: [...s.attachedFiles, attached] }))
-  },
-
-  removeAttachedFile: (id) =>
-    set((s) => ({ attachedFiles: s.attachedFiles.filter((f) => f.id !== id) })),
-
-  clearAttachedFiles: () => set({ attachedFiles: [] }),
-
-  updateViewportAnchor: (sessionId, anchor) =>
-    set((s) => {
-      const map = new Map(s.sessionMemoryState)
-      const existing = map.get(sessionId) ?? {
-        viewportAnchor: 0,
-        isStreaming: false,
-        lastAccessedAt: Date.now(),
-        backgroundMessageCount: 0,
-      }
-      map.set(sessionId, { ...existing, viewportAnchor: anchor, lastAccessedAt: Date.now() })
-      return { sessionMemoryState: map }
-    }),
-
-  setVoiceStatus: (status) => set({ voiceStatus: status }),
-  setVoiceMode: (mode) => set({ voiceMode: mode }),
-
-  setPendingInputText: (text, mode = "replace") =>
-    set({ pendingInputText: text, pendingInputMode: mode }),
-
-  consumePendingInputText: () => {
-    const { pendingInputText, pendingInputMode } = get()
-    if (pendingInputText === null) return null
-    set({ pendingInputText: null, pendingInputMode: "replace" })
-    return { text: pendingInputText, mode: pendingInputMode }
-  },
-
-  setPendingSyntheticParts: (parts) => set({ pendingSyntheticParts: parts }),
-
-  consumePendingSyntheticParts: () => {
-    const { pendingSyntheticParts } = get()
-    if (pendingSyntheticParts !== null) {
-      set({ pendingSyntheticParts: null })
-    }
-    return pendingSyntheticParts
   },
 
   // ---------------------------------------------------------------------------
@@ -607,8 +485,11 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       },
       currentSessionId: null,
       error: null,
-      ...(options?.initialPrompt ? { pendingInputText: options.initialPrompt, pendingInputMode: "replace" as const } : {}),
     })
+
+    if (options?.initialPrompt) {
+      useInputStore.getState().setPendingInputText(options.initialPrompt)
+    }
 
     try {
       const configState = useConfigStore.getState()
@@ -660,43 +541,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       if (!s.newSessionDraft?.open) return s
       return { newSessionDraft: { ...s.newSessionDraft, preserveDirectoryOverride: value } }
     }),
-
-  saveSessionModelSelection: (sessionId, providerId, modelId) =>
-    set((s) => {
-      const map = new Map(s.sessionModelSelections)
-      map.set(sessionId, { providerId, modelId })
-      return { sessionModelSelections: map, lastUsedProvider: { providerID: providerId, modelID: modelId } }
-    }),
-
-  getSessionModelSelection: (sessionId) => get().sessionModelSelections.get(sessionId) ?? null,
-
-  saveSessionAgentSelection: (sessionId, agentName) =>
-    set((s) => {
-      if (s.sessionAgentSelections.get(sessionId) === agentName) {
-        return s
-      }
-      const map = new Map(s.sessionAgentSelections)
-      map.set(sessionId, agentName)
-      return { sessionAgentSelections: map }
-    }),
-
-  getSessionAgentSelection: (sessionId) => get().sessionAgentSelections.get(sessionId) ?? null,
-
-  saveAgentModelForSession: (sessionId, agentName, providerId, modelId) =>
-    set((s) => {
-      const existing = s.sessionAgentModelSelections.get(sessionId)?.get(agentName)
-      if (existing?.providerId === providerId && existing?.modelId === modelId) {
-        return s
-      }
-      const outer = new Map(s.sessionAgentModelSelections)
-      const inner = new Map(outer.get(sessionId) ?? new Map())
-      inner.set(agentName, { providerId, modelId })
-      outer.set(sessionId, inner)
-      return { sessionAgentModelSelections: outer }
-    }),
-
-  getAgentModelForSession: (sessionId, agentName) =>
-    get().sessionAgentModelSelections.get(sessionId)?.get(agentName) ?? null,
 
   acknowledgeSessionAbort: (sessionId) =>
     set((s) => {
@@ -857,23 +701,24 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       const effectiveDraftAgent = trimmedAgent ?? draftAgentName
 
       if (configState.currentProviderId && configState.currentModelId) {
-        get().saveSessionModelSelection(created.id, configState.currentProviderId, configState.currentModelId)
+        useSelectionStore.getState().saveSessionModelSelection(created.id, configState.currentProviderId, configState.currentModelId)
       }
 
       if (effectiveDraftAgent) {
-        get().saveSessionAgentSelection(created.id, effectiveDraftAgent)
+        useSelectionStore.getState().saveSessionAgentSelection(created.id, effectiveDraftAgent)
         if (configState.currentProviderId && configState.currentModelId) {
-          get().saveAgentModelForSession(created.id, effectiveDraftAgent, configState.currentProviderId, configState.currentModelId)
-          get().saveAgentModelVariantForSession(created.id, effectiveDraftAgent, configState.currentProviderId, configState.currentModelId, variant)
+          useSelectionStore.getState().saveAgentModelForSession(created.id, effectiveDraftAgent, configState.currentProviderId, configState.currentModelId)
+          useSelectionStore.getState().saveAgentModelVariantForSession(created.id, effectiveDraftAgent, configState.currentProviderId, configState.currentModelId, variant)
         }
       }
 
       get().initializeNewOpenChamberSession(created.id, configState.agents ?? [])
 
       const draftSyntheticParts = draft.syntheticParts
+      const createdDirectory = normalizePath(draftDirectoryOverride ?? created.directory ?? null)
 
       get().closeNewSessionDraft()
-      get().setCurrentSession(created.id)
+      get().setCurrentSession(created.id, createdDirectory)
 
       if (draftTargetFolderId) {
         const scopeKey = draftDirectoryOverride || created.directory || null
@@ -886,7 +731,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         ? [...(additionalParts || []), ...draftSyntheticParts]
         : additionalParts
 
-      const createdDirectory = normalizePath(draftDirectoryOverride ?? created.directory ?? null)
       if (createdDirectory) {
         await waitForWorktreeBootstrap(createdDirectory)
       }
@@ -912,7 +756,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         additionalParts: mergedAdditionalParts?.map((p) => ({
           text: p.text,
           synthetic: p.synthetic,
-          files: p.attachments?.map((a) => ({
+          files: p.attachments?.map((a: AttachedFile) => ({
             type: "file" as const,
             mime: a.mimeType,
             url: a.dataUrl,
@@ -926,20 +770,21 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     // ---- Existing session ----
     const currentSessionId = get().currentSessionId
     const sessionAgentSelection = currentSessionId
-      ? get().getSessionAgentSelection(currentSessionId)
+      ? useSelectionStore.getState().getSessionAgentSelection(currentSessionId)
       : null
     const configAgentName = useConfigStore.getState().currentAgentName
     const effectiveAgent = trimmedAgent || sessionAgentSelection || configAgentName || undefined
 
     if (currentSessionId && effectiveAgent) {
-      get().saveSessionAgentSelection(currentSessionId, effectiveAgent)
-      get().saveAgentModelVariantForSession(currentSessionId, effectiveAgent, providerID, modelID, variant)
+      useSelectionStore.getState().saveSessionAgentSelection(currentSessionId, effectiveAgent)
+      useSelectionStore.getState().saveAgentModelVariantForSession(currentSessionId, effectiveAgent, providerID, modelID, variant)
     }
 
     if (currentSessionId) {
-      const memState = get().sessionMemoryState.get(currentSessionId)
+      const viewportState = useViewportStore.getState()
+      const memState = viewportState.sessionMemoryState.get(currentSessionId)
       if (!memState || !memState.lastUserMessageAt) {
-        const newMemState = new Map(get().sessionMemoryState)
+        const newMemState = new Map(viewportState.sessionMemoryState)
         newMemState.set(currentSessionId, {
           viewportAnchor: memState?.viewportAnchor ?? 0,
           isStreaming: memState?.isStreaming ?? false,
@@ -947,7 +792,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
           backgroundMessageCount: memState?.backgroundMessageCount ?? 0,
           lastUserMessageAt: Date.now(),
         })
-        set({ sessionMemoryState: newMemState })
+        useViewportStore.setState({ sessionMemoryState: newMemState })
       }
     }
 
@@ -1216,8 +1061,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     if (!session) return
 
     const { currentProviderId, currentModelId, currentAgentName } = useConfigStore.getState()
-    const pID = currentProviderId || get().lastUsedProvider?.providerID
-    const mID = currentModelId || get().lastUsedProvider?.modelID
+    const pID = currentProviderId || useSelectionStore.getState().lastUsedProvider?.providerID
+    const mID = currentModelId || useSelectionStore.getState().lastUsedProvider?.modelID
 
     if (!pID || !mID) return
 
@@ -1263,26 +1108,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   },
 
   getCurrentAgent: (sessionId) => {
-    return get().sessionAgentSelections.get(sessionId) ?? undefined
-  },
-
-  saveAgentModelVariantForSession: (sessionId: string, agentName: string, providerId: string, modelId: string, variant: string | undefined) => {
-    if (!variant) return
-    let sessionMap = agentModelVariantSelections.get(sessionId)
-    if (!sessionMap) {
-      sessionMap = new Map()
-      agentModelVariantSelections.set(sessionId, sessionMap)
-    }
-    let agentMap = sessionMap.get(agentName)
-    if (!agentMap) {
-      agentMap = new Map()
-      sessionMap.set(agentName, agentMap)
-    }
-    agentMap.set(`${providerId}/${modelId}`, variant)
-  },
-
-  getAgentModelVariantForSession: (sessionId: string, agentName: string, providerId: string, modelId: string) => {
-    return agentModelVariantSelections.get(sessionId)?.get(agentName)?.get(`${providerId}/${modelId}`)
+    return useSelectionStore.getState().sessionAgentSelections.get(sessionId) ?? undefined
   },
 
   analyzeAndSaveExternalSessionChoices: async () => new Map(),

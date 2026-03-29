@@ -1,5 +1,6 @@
 import React from 'react';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSelectionStore } from '@/sync/selection-store';
 import { useSessions, useAllSessionStatuses } from '@/sync/sync-context';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -178,7 +179,7 @@ function useSessionHelpers(
     const agent = (session as { agent?: string }).agent;
     if (agent) return agent;
 
-    const sessionAgentSelection = useSessionUIStore.getState().getSessionAgentSelection(session.id);
+    const sessionAgentSelection = useSelectionStore.getState().getSessionAgentSelection(session.id);
     if (sessionAgentSelection) return sessionAgentSelection;
 
     return agents[0]?.name ?? 'agent';

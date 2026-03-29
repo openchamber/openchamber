@@ -9,6 +9,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useContextStore } from '@/stores/contextStore';
 import { useStreamingStore } from '@/sync/streaming';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSelectionStore } from '@/sync/selection-store';
 import * as sessionActions from '@/sync/session-actions';
 import { useDeviceInfo } from '@/lib/device';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
@@ -158,8 +159,8 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     const isStreamingMessage = isInActiveTurn ? streamingMsgForSession === message.info.id : false;
     const hasActiveStreamInSession = typeof streamingMsgForSession === 'string' && streamingMsgForSession.length > 0;
 
-    const getAgentModelForSession = useSessionUIStore((s) => s.getAgentModelForSession);
-    const getSessionModelSelection = useSessionUIStore((s) => s.getSessionModelSelection);
+    const getAgentModelForSession = useSelectionStore((s) => s.getAgentModelForSession);
+    const getSessionModelSelection = useSelectionStore((s) => s.getSessionModelSelection);
     const revertToMessage = sessionActions.revertToMessage;
     const forkFromMessage = sessionActions.forkFromMessage;
 

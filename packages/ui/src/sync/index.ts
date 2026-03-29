@@ -94,10 +94,18 @@ export {
   useSessionUIStore,
   type SessionUIState,
   type AttachedFile,
-  type SyntheticContextPart,
   type NewSessionDraftState,
-  type SessionMemoryState,
 } from "./session-ui-store"
+
+// Input store (pending input, synthetic parts, attached files)
+export { useInputStore, type SyntheticContextPart } from "./input-store"
+
+// Viewport store (per-session scroll anchors, memory state)
+export {
+  useViewportStore,
+  type SessionMemoryState,
+  type ViewportState,
+} from "./viewport-store"
 
 // Sync refs (imperative access from non-React code)
 export {

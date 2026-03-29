@@ -6,23 +6,33 @@
 import type { OpencodeClient, Session, Message, Part } from "@opencode-ai/sdk/v2/client"
 import { Binary } from "./binary"
 import { useSessionUIStore } from "./session-ui-store"
-import { applyOptimisticAdd, applyOptimisticRemove, type OptimisticStore } from "./optimistic"
+import { useInputStore } from "./input-store"
 import type { DirectoryStore } from "./child-store"
 import type { StoreApi } from "zustand"
 
 // Reference set by SyncProvider — allows actions to access SDK and stores
 let _sdk: OpencodeClient | null = null
-let _getDirectoryStore: (() => StoreApi<DirectoryStore>) | null = null
-let _directory: string = ""
+let _childStores: { ensureChild: (dir: string) => StoreApi<DirectoryStore> } | null = null
+let _getDirectory: () => string = () => ""
+let _optimisticAdd: ((input: { sessionID: string; message: Message; parts: Part[] }) => void) | null = null
+let _optimisticRemove: ((input: { sessionID: string; messageID: string }) => void) | null = null
 
 export function setActionRefs(
   sdk: OpencodeClient,
-  getStore: () => StoreApi<DirectoryStore>,
-  directory: string,
+  childStores: { ensureChild: (dir: string) => StoreApi<DirectoryStore> },
+  getDirectory: () => string,
 ) {
   _sdk = sdk
-  _getDirectoryStore = getStore
-  _directory = directory
+  _childStores = childStores
+  _getDirectory = getDirectory
+}
+
+export function setOptimisticRefs(
+  add: (input: { sessionID: string; message: Message; parts: Part[] }) => void,
+  remove: (input: { sessionID: string; messageID: string }) => void,
+) {
+  _optimisticAdd = add
+  _optimisticRemove = remove
 }
 
 function sdk() {
@@ -31,12 +41,14 @@ function sdk() {
 }
 
 function dirStore() {
-  if (!_getDirectoryStore) throw new Error("Directory store not initialized")
-  return _getDirectoryStore()
+  if (!_childStores) throw new Error("Child stores not initialized")
+  const d = _getDirectory()
+  if (!d) throw new Error("No current directory")
+  return _childStores.ensureChild(d)
 }
 
 function dir() {
-  return _directory || undefined
+  return _getDirectory() || undefined
 }
 
 // ---------------------------------------------------------------------------
@@ -50,14 +62,15 @@ export async function createSession(
 ): Promise<Session | null> {
   try {
     const result = await sdk().session.create({
-      directory: directoryOverride ?? _directory,
+      directory: directoryOverride ?? dir(),
       title,
       parentID: parentID ?? undefined,
     })
     const session = result.data
     if (!session) return null
 
-    useSessionUIStore.getState().setCurrentSession(session.id)
+    const sessionDirectory = (session as { directory?: string }).directory ?? directoryOverride ?? null
+    useSessionUIStore.getState().setCurrentSession(session.id, sessionDirectory)
     useSessionUIStore.getState().markSessionAsOpenChamberCreated(session.id)
     return session
   } catch (error) {
@@ -133,18 +146,45 @@ export async function unshareSession(sessionId: string): Promise<Session | null>
 // Optimistic message send — insert user message before API call, rollback on error
 // ---------------------------------------------------------------------------
 
-let messageCounter = 0
+// ID generator matching OpenCode's Identifier.ascending format.
+// Uses BigInt(timestamp) * 0x1000 + counter, encoded as 6 hex bytes + random base62.
+// This ensures client-generated IDs sort correctly with server-generated ones.
+let lastIdTimestamp = 0
+let idCounter = 0
 
 function ascendingId(prefix: string): string {
   const now = Date.now()
-  const seq = (messageCounter++ % 1000).toString().padStart(3, "0")
-  return `${prefix}_${now}${seq}`
+  if (now !== lastIdTimestamp) {
+    lastIdTimestamp = now
+    idCounter = 0
+  }
+  idCounter += 1
+
+  const value = BigInt(now) * BigInt(0x1000) + BigInt(idCounter)
+  const bytes = new Uint8Array(6)
+  for (let i = 0; i < 6; i++) {
+    bytes[i] = Number((value >> BigInt(40 - 8 * i)) & BigInt(0xff))
+  }
+
+  let hex = ""
+  for (let i = 0; i < bytes.length; i++) {
+    hex += bytes[i].toString(16).padStart(2, "0")
+  }
+
+  const chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+  let rand = ""
+  for (let i = 0; i < 14; i++) {
+    rand += chars[Math.floor(Math.random() * 62)]
+  }
+
+  return `${prefix}_${hex}${rand}`
 }
 
 /**
  * Wraps an async send operation with optimistic user-message insertion.
- * The message + parts appear instantly in the child store. On error they
- * are rolled back and the session status reverts to idle.
+ * Uses useSync()'s optimistic infrastructure — message + parts are inserted
+ * into the store AND registered in the shadow Map. mergeOptimisticPage
+ * handles deduplication when the server echoes back the real message.
  */
 export async function optimisticSend(input: {
   sessionId: string
@@ -153,21 +193,23 @@ export async function optimisticSend(input: {
   modelID: string
   agent?: string
   files?: Array<{ type: "file"; mime: string; url: string; filename: string }>
-  /** The actual API call to perform after optimistic insert */
-  send: () => Promise<void>
+  /** The actual API call — receives the optimistic messageID so the server can use the same ID */
+  send: (messageID: string) => Promise<void>
 }): Promise<void> {
+  if (!_optimisticAdd || !_optimisticRemove) {
+    throw new Error("Optimistic refs not set — is useSync() mounted?")
+  }
+
   const store = dirStore()
-  const current = store.getState()
+  const messageID = ascendingId("msg")
+  const textPartId = ascendingId("prt")
 
-  const messageID = ascendingId("message")
-  const textPartId = ascendingId("part")
-
-  const msgParts: Array<{ id: string; type: string; text?: string; mime?: string; url?: string; filename?: string }> = [
-    { id: textPartId, type: "text" as const, text: input.content },
+  const optimisticParts: Part[] = [
+    { id: textPartId, type: "text", text: input.content } as Part,
   ]
   if (input.files) {
     for (const f of input.files) {
-      msgParts.push({ id: ascendingId("part"), type: "file" as const, mime: f.mime, url: f.url, filename: f.filename })
+      optimisticParts.push({ id: ascendingId("prt"), type: "file", mime: f.mime, url: f.url, filename: f.filename } as Part)
     }
   }
 
@@ -185,44 +227,36 @@ export async function optimisticSend(input: {
     time: { created: Date.now(), completed: 0 },
   } as unknown as Message
 
-  const draft: OptimisticStore = {
-    message: { ...current.message },
-    part: { ...current.part },
-  }
-  applyOptimisticAdd(draft, {
+  // Insert into store + register in shadow Map (for mergeOptimisticPage cleanup)
+  _optimisticAdd({
     sessionID: input.sessionId,
     message: optimisticMessage,
-    parts: msgParts.map((p) => ({ ...p } as Part)),
+    parts: optimisticParts,
   })
 
+  // Set busy status
+  const current = store.getState()
   store.setState({
     session_status: {
       ...current.session_status,
       [input.sessionId]: { type: "busy" as const },
     },
-    message: draft.message as Record<string, Message[]>,
-    part: draft.part as Record<string, Part[]>,
   })
 
   try {
-    await input.send()
+    await input.send(messageID)
   } catch (error) {
-    const s = store.getState()
-    const revertDraft: OptimisticStore = {
-      message: { ...s.message },
-      part: { ...s.part },
-    }
-    applyOptimisticRemove(revertDraft, {
+    // Rollback via optimistic infrastructure
+    _optimisticRemove({
       sessionID: input.sessionId,
       messageID,
     })
+    const s = store.getState()
     store.setState({
       session_status: {
         ...s.session_status,
         [input.sessionId]: { type: "idle" as const },
       },
-      message: revertDraft.message as Record<string, Message[]>,
-      part: revertDraft.part as Record<string, Part[]>,
     })
     throw error
   }
@@ -329,21 +363,38 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
       .trim()
   }
 
-  // Optimistically set revert marker — immediately hides reverted messages
+  // Optimistically remove reverted messages + set marker
   const prevRevert = (() => {
     const s = state.session.find((s) => s.id === sessionId)
     return (s as Session & { revert?: unknown })?.revert
   })()
   const sessions = [...state.session]
   const sessionIdx = sessions.findIndex((s) => s.id === sessionId)
+
+  // Remove messages at and after the revert point from the store
+  const prevMessages = state.message[sessionId] ?? []
+  const prevPart = { ...state.part }
+  const keptMessages = prevMessages.filter((m) => m.id < messageId)
+  const removedMessages = prevMessages.filter((m) => m.id >= messageId)
+  for (const m of removedMessages) {
+    delete prevPart[m.id]
+  }
+
+  const patch: Record<string, unknown> = {
+    message: { ...state.message, [sessionId]: keptMessages },
+    part: prevPart,
+  }
+
   if (sessionIdx >= 0) {
     sessions[sessionIdx] = { ...sessions[sessionIdx], revert: { messageID: messageId } } as Session
-    store.setState({ session: sessions })
+    patch.session = sessions
   }
+
+  store.setState(patch)
 
   // Restore reverted message text to input
   if (messageText) {
-    useSessionUIStore.setState({
+    useInputStore.setState({
       pendingInputText: messageText,
       pendingInputMode: "replace" as const,
     })
@@ -362,14 +413,18 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
       }
     }
   } catch (err) {
-    // Rollback optimistic revert marker on error
+    // Rollback: restore removed messages + revert marker
     const current = store.getState()
     const rollback = [...current.session]
     const idx = rollback.findIndex((s) => s.id === sessionId)
     if (idx >= 0) {
       rollback[idx] = { ...rollback[idx], revert: prevRevert } as Session
-      store.setState({ session: rollback })
     }
+    store.setState({
+      session: rollback,
+      message: { ...current.message, [sessionId]: prevMessages },
+      part: { ...current.part, ...Object.fromEntries(removedMessages.map((m) => [m.id, state.part[m.id] ?? []])) },
+    })
     throw err
   }
 }
@@ -444,7 +499,7 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
 
   // Restore forked message text to input
   if (messageText) {
-    useSessionUIStore.setState({
+    useInputStore.setState({
       pendingInputText: messageText,
       pendingInputMode: "replace" as const,
     })
