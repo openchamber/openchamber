@@ -20,10 +20,12 @@ import {
     renderWebSearchOutput,
     formatInputForDisplay,
     parseReadToolOutput,
+    tryParseJsonOutput,
 } from './toolRenderers';
 import type { ToolPopupContent, DiffViewMode } from './types';
 import { DiffViewToggle } from './DiffViewToggle';
 import { VirtualizedCodeBlock, type CodeLine } from './parts/VirtualizedCodeBlock';
+import { JsonTreeView } from '@/components/ui/JsonTreeView';
 
 interface ToolOutputDialogProps {
     popup: ToolPopupContent;
@@ -1182,6 +1184,18 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
 
                                 if (tool === 'read') {
                                     return <DialogReadContent popup={popup} syntaxTheme={syntaxTheme} pierreThemeConfig={pierreThemeConfig} />;
+                                }
+
+                                // JSON tree viewer for generic JSON outputs
+                                const jsonResult = popup.content ? tryParseJsonOutput(popup.content) : { data: null, isJson: false };
+                                if (jsonResult.isJson) {
+                                    return (
+                                        <JsonTreeView
+                                            jsonString={popup.content}
+                                            initiallyExpandedDepth={3}
+                                            maxHeight="70vh"
+                                        />
+                                    );
                                 }
 
                                 return (
