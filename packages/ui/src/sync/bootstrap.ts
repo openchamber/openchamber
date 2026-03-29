@@ -117,7 +117,7 @@ export async function bootstrapDirectory(input: {
         const permission: Record<string, PermissionRequest[]> = {}
         // Clear sessions no longer having permissions
         const current = getState()
-        for (const sessionID of Object.keys(current.permission)) {
+        for (const sessionID of Object.keys(current.permission ?? {})) {
           if (!grouped[sessionID]) permission[sessionID] = []
         }
         // Set grouped permissions sorted by id
@@ -136,7 +136,7 @@ export async function bootstrapDirectory(input: {
         )
         const question: Record<string, QuestionRequest[]> = {}
         const current = getState()
-        for (const sessionID of Object.keys(current.question)) {
+        for (const sessionID of Object.keys(current.question ?? {})) {
           if (!grouped[sessionID]) question[sessionID] = []
         }
         for (const [sessionID, questions] of Object.entries(grouped)) {

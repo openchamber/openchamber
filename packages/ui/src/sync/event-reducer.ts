@@ -300,7 +300,7 @@ function trimSessions(draft: State) {
   if (draft.session.length <= draft.limit) return
   // Keep sessions that have pending permissions (they need to stay visible)
   const hasPermission = new Set(
-    Object.entries(draft.permission)
+    Object.entries(draft.permission ?? {})
       .filter(([, perms]) => perms && perms.length > 0)
       .map(([sessionID]) => sessionID),
   )

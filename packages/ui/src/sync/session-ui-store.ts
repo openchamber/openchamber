@@ -1206,7 +1206,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     let sourceSessionId: string | undefined
     let sourceMessage: Message | undefined
 
-    for (const [sid, msgs] of Object.entries(state.message)) {
+    for (const [sid, msgs] of Object.entries(state.message ?? {})) {
       const found = msgs.find((m) => m.id === sourceMessageId)
       if (found) {
         sourceSessionId = sid

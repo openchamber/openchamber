@@ -41,7 +41,7 @@ export function updateStreamingState(state: State) {
   const nextStreamStates = new Map(useStreamingStore.getState().messageStreamStates)
   let changed = false
 
-  for (const [sessionID, status] of Object.entries(state.session_status)) {
+  for (const [sessionID, status] of Object.entries(state.session_status ?? {})) {
     const isBusy = (status as SessionStatus).type === "busy"
     const messages = state.message[sessionID]
 
@@ -98,7 +98,7 @@ export function updateStreamingState(state: State) {
   // Also mark completed any streaming messages for sessions no longer in status
   const currentIds = useStreamingStore.getState().streamingMessageIds
   for (const [sessionID, msgId] of currentIds) {
-    if (msgId && !state.session_status[sessionID]) {
+    if (msgId && !state.session_status?.[sessionID]) {
       const existing = nextStreamStates.get(msgId)
       if (existing && existing.phase === "streaming") {
         nextStreamStates.set(msgId, {

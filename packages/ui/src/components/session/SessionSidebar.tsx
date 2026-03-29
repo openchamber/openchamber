@@ -317,7 +317,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const sessionMemoryState = useSessionUIStore((state) => state.sessionMemoryState);
   const globalSessionStatuses = useAllSessionStatuses();
   // sessionAttentionStates removed — now using notification-store directly in SessionNodeItem
-  const permissionsRecord = useDirectorySync((state) => state.permission);
+  const permissionsRecord = useDirectorySync((state) => state.permission ?? {});
 
   const sessionStatus = React.useMemo(
     () => new Map(Object.entries(globalSessionStatuses)),
