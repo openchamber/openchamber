@@ -28,7 +28,9 @@ import {
     formatEditOutput,
     detectLanguageFromOutput,
     formatInputForDisplay,
+    tryParseJsonOutput,
 } from '../toolRenderers';
+import { JsonTreeViewer } from '@/components/ui/JsonTreeViewer';
 import { DiffViewToggle, type DiffViewMode } from '../DiffViewToggle';
 import { MinDurationShineText } from './MinDurationShineText';
 import { ToolRevealOnMount } from './ToolRevealOnMount';
@@ -532,6 +534,19 @@ const ToolScrollableTextOutput: React.FC<{
 }> = ({ output, part, metadata, input, syntaxTheme }) => {
     const renderedOutput = getToolOutputText(output, part, metadata);
     const outputLanguage = getToolOutputLanguage(output, part, metadata, input);
+    const jsonResult = React.useMemo(() => tryParseJsonOutput(renderedOutput), [renderedOutput]);
+
+    if (jsonResult.isJson) {
+        return (
+            <div className="tool-output-surface p-2 rounded-xl w-full min-w-0">
+                <JsonTreeViewer
+                    data={jsonResult.data}
+                    initiallyExpandedDepth={1}
+                    maxHeight="400px"
+                />
+            </div>
+        );
+    }
 
     return (
         <div className={part.tool === 'bash' ? 'typography-code text-muted-foreground/90' : undefined}>

@@ -24,6 +24,8 @@ import {
   RiEditLine,
   RiFileCopyLine,
   RiFileTransferLine,
+  RiCodeSSlashLine,
+  RiNodeTree,
 } from '@remixicon/react';
 import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
@@ -40,6 +42,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { CodeMirrorEditor } from '@/components/ui/CodeMirrorEditor';
 import { PreviewToggleButton } from './PreviewToggleButton';
+import { JsonTreeView } from '@/components/ui/JsonTreeView';
 import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { languageByExtension, loadLanguageByExtension } from '@/lib/codemirror/languageByExtension';
 import { createFlexokiCodeMirrorTheme } from '@/lib/codemirror/flexokiTheme';
@@ -263,6 +266,12 @@ const isMarkdownFile = (path: string): boolean => {
   return ext === 'md' || ext === 'markdown';
 };
 
+const isJsonFile = (path: string): boolean => {
+  if (!path) return false;
+  const ext = path.toLowerCase().split('.').pop();
+  return ext === 'json' || ext === 'jsonc' || ext === 'json5' || ext === 'geojson';
+};
+
 interface FileRowProps {
   node: FileNode;
   isExpanded: boolean;
@@ -466,6 +475,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const [isSearchOpen, setIsSearchOpen] = React.useState(false);
   const [textViewMode, setTextViewMode] = React.useState<'view' | 'edit'>('edit');
   const [mdViewMode, setMdViewMode] = React.useState<'preview' | 'edit'>('edit');
+  const [jsonViewMode, setJsonViewMode] = React.useState<'tree' | 'text'>('tree');
 
   const lightTheme = React.useMemo(
     () => availableThemes.find((theme) => theme.metadata.id === lightThemeId) ?? getDefaultTheme(false),
@@ -1632,6 +1642,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const canCopyPath = Boolean(selectedFile && displaySelectedPath.length > 0);
   const canEdit = Boolean(selectedFile && !isSelectedImage && files.writeFile && fileContent.length <= MAX_VIEW_CHARS);
   const isMarkdown = Boolean(selectedFile?.path && isMarkdownFile(selectedFile.path));
+  const isJson = Boolean(selectedFile?.path && isJsonFile(selectedFile.path));
   const isTextFile = Boolean(selectedFile && !isSelectedImage);
   const canUseShikiFileView = isTextFile && !isMarkdown;
   const staticLanguageExtension = React.useMemo(
@@ -1698,6 +1709,30 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const getMdViewMode = React.useCallback((): 'preview' | 'edit' => {
     return mdViewMode;
   }, [mdViewMode]);
+
+  const JSON_VIEWER_MODE_KEY = 'openchamber:files:json-viewer-mode';
+
+  React.useEffect(() => {
+    try {
+      const stored = localStorage.getItem(JSON_VIEWER_MODE_KEY);
+      if (stored === 'tree') {
+        setJsonViewMode('tree');
+      } else if (stored === 'text') {
+        setJsonViewMode('text');
+      }
+    } catch {
+      // Ignore localStorage errors
+    }
+  }, []);
+
+  const saveJsonViewMode = React.useCallback((mode: 'tree' | 'text') => {
+    setJsonViewMode(mode);
+    try {
+      localStorage.setItem(JSON_VIEWER_MODE_KEY, mode);
+    } catch {
+      // Ignore localStorage errors
+    }
+  }, []);
 
   React.useEffect(() => {
     if (!pendingFileNavigation || !root) {
@@ -2242,6 +2277,22 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           />
         )}
 
+        {isJson && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => saveJsonViewMode(jsonViewMode === 'tree' ? 'text' : 'tree')}
+            className="h-6 w-6 p-0 text-muted-foreground opacity-65 hover:opacity-100"
+            title={jsonViewMode === 'tree' ? 'Switch to Text View' : 'Switch to Tree View'}
+          >
+            {jsonViewMode === 'tree' ? (
+              <RiCodeSSlashLine className="size-4" />
+            ) : (
+              <RiNodeTree className="size-4" />
+            )}
+          </Button>
+        )}
+
         {canCopy && (
           <Button
             variant="ghost"
@@ -2537,6 +2588,25 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                 className="max-w-full max-h-[70vh] object-contain rounded-md border border-border/30 bg-primary/10"
               />
             </div>
+          ) : selectedFile && isJson && jsonViewMode === 'tree' ? (
+            <ErrorBoundary
+              fallback={
+                <div className="rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2">
+                  <div className="mb-1 font-medium text-destructive">JSON viewer unavailable</div>
+                  <div className="text-sm text-muted-foreground">
+                    Switch to text mode to view raw content.
+                  </div>
+                </div>
+              }
+            >
+              <div className="h-full overflow-auto">
+                <JsonTreeView
+                  jsonString={fileContent}
+                  maxHeight="100%"
+                  initiallyExpandedDepth={2}
+                />
+              </div>
+            </ErrorBoundary>
           ) : selectedFile && isMarkdown && getMdViewMode() === 'preview' ? (
             <div className="h-full overflow-auto p-3">
               {fileContent.length > 500 * 1024 && (

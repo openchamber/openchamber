@@ -28,6 +28,36 @@ const formatInputForDisplay = (input: Record<string, unknown>, toolName?: string
     return formatToolInput(input, toolName || '');
 };
 
+export const tryParseJsonOutput = (output: string): { data: unknown; isJson: boolean } => {
+    if (!output || typeof output !== 'string') {
+        return { data: null, isJson: false };
+    }
+
+    const trimmed = output.trim();
+
+    if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
+        return { data: null, isJson: false };
+    }
+
+    if (!trimmed.endsWith('}') && !trimmed.endsWith(']')) {
+        return { data: null, isJson: false };
+    }
+
+    if (trimmed.length < 2) {
+        return { data: null, isJson: false };
+    }
+
+    try {
+        const parsed = JSON.parse(trimmed);
+        if (parsed !== null && typeof parsed === 'object') {
+            return { data: parsed, isJson: true };
+        }
+        return { data: null, isJson: false };
+    } catch {
+        return { data: null, isJson: false };
+    }
+};
+
 export const formatEditOutput = (output: string, toolName: string, metadata?: Record<string, unknown>): string => {
     let cleaned = cleanOutput(output);
 
