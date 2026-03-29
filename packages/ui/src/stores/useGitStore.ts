@@ -18,6 +18,7 @@ const DIFF_PREFETCH_MAX_FILES = 25;
 const DIFF_PREFETCH_FOCUS_MAX_FILES = 40;
 const DIFF_PREFETCH_CONCURRENCY = 2;
 const DIFF_PREFETCH_TIMEOUT_MS = 15000;
+const DIFF_PREFETCH_LARGE_FILE_THRESHOLD = 500; // skip prefetch for files with >500 changed lines
 const RECENT_DIRECTORIES_LIMIT = 3;
 
 // Diff cache limits to prevent memory bloat with many modified files
@@ -580,6 +581,7 @@ export const useGitStore = create<GitStore>()(
 
         const { maxFiles = DIFF_PREFETCH_FOCUS_MAX_FILES } = options;
         const availablePaths = new Set(dirState.status.files.map((file) => file.path));
+        const diffStats = dirState.status.diffStats;
         const inFlight = getInFlightDiffs(directory);
 
         const dedupedPaths: string[] = [];
@@ -596,6 +598,11 @@ export const useGitStore = create<GitStore>()(
             continue;
           }
           if (inFlight.has(filePath)) {
+            continue;
+          }
+          // Skip large files during prefetch — they'll be fetched on-demand when user clicks
+          const stats = diffStats?.[filePath];
+          if (stats && (stats.insertions + stats.deletions) > DIFF_PREFETCH_LARGE_FILE_THRESHOLD) {
             continue;
           }
           dedupedPaths.push(filePath);

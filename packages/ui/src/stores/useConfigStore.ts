@@ -6,8 +6,8 @@ import { opencodeClient } from "@/lib/opencode/client";
 import { scopeMatches, subscribeToConfigChanges } from "@/lib/configSync";
 import type { ModelMetadata } from "@/types";
 import { getSafeStorage } from "./utils/safeStorage";
-import type { SessionStore } from "./types/sessionTypes";
 import { filterVisibleAgents } from "./useAgentsStore";
+import { useSessionUIStore } from "@/sync/session-ui-store";
 import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry";
 import { updateDesktopSettings } from "@/lib/persistence";
 import { useDirectoryStore } from "@/stores/useDirectoryStore";
@@ -529,7 +529,6 @@ interface ConfigStore {
 declare global {
     interface Window {
         __zustand_config_store__?: UseBoundStore<StoreApi<ConfigStore>>;
-        __zustand_session_store__?: UseBoundStore<StoreApi<SessionStore>>;
     }
 }
 
@@ -1448,44 +1447,29 @@ export const useConfigStore = create<ConfigStore>()(
                         };
                     });
 
-                    if (agentName && typeof window !== "undefined") {
+                    if (agentName) {
+                        const uiState = useSessionUIStore.getState();
+                        const { currentSessionId } = uiState;
 
-                        const sessionStore = window.__zustand_session_store__;
-                        if (sessionStore) {
-                            const sessionState = sessionStore.getState();
-                            const { currentSessionId, isOpenChamberCreatedSession, initializeNewOpenChamberSession, getAgentModelForSession } = sessionState;
+                        if (currentSessionId) {
+                            uiState.saveSessionAgentSelection(currentSessionId, agentName);
+                        }
 
-                            if (currentSessionId) {
-
-                                sessionStore.setState((state) => {
-                                    const newAgentContext = new Map(state.currentAgentContext);
-                                    newAgentContext.set(currentSessionId, agentName);
-                                    return { currentAgentContext: newAgentContext };
-                                });
-                            }
-
-                            if (currentSessionId && isOpenChamberCreatedSession(currentSessionId)) {
-                                const existingAgentModel = getAgentModelForSession(currentSessionId, agentName);
-                                if (!existingAgentModel) {
-
-                                    initializeNewOpenChamberSession(currentSessionId, agents);
-                                }
+                        if (currentSessionId && uiState.isOpenChamberCreatedSession(currentSessionId)) {
+                            const existingAgentModel = uiState.getAgentModelForSession(currentSessionId, agentName);
+                            if (!existingAgentModel) {
+                                uiState.initializeNewOpenChamberSession(currentSessionId, agents);
                             }
                         }
                     }
 
-                    if (agentName && typeof window !== "undefined") {
-                        const sessionStore = window.__zustand_session_store__;
-                        if (sessionStore?.getState) {
-                            const { currentSessionId, getAgentModelForSession } = sessionStore.getState();
+                    if (agentName) {
+                        const { currentSessionId, getAgentModelForSession } = useSessionUIStore.getState();
 
-                            if (currentSessionId) {
-                                const existingAgentModel = getAgentModelForSession(currentSessionId, agentName);
-
-                                if (existingAgentModel) {
-
-                                    return;
-                                }
+                        if (currentSessionId) {
+                            const existingAgentModel = getAgentModelForSession(currentSessionId, agentName);
+                            if (existingAgentModel) {
+                                return;
                             }
                         }
 

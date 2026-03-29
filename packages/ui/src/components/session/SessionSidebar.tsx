@@ -394,54 +394,45 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     };
 
     const loadGlobalSessions = async () => {
-      try {
-        const sdk = opencodeClient.getSdkClient();
-        const [active, archived] = await Promise.all([
-          listGlobalSessionPages(sdk, { archived: false, pageSize: 200 }),
-          listGlobalSessionPages(sdk, { archived: true, pageSize: 200 }),
-        ]);
+      const sdk = opencodeClient.getSdkClient();
 
-        if (cancelled) {
-          return;
-        }
+      // Load active and archived independently so one failure doesn't affect the other
+      const [activeResult, archivedResult] = await Promise.allSettled([
+        listGlobalSessionPages(sdk, { archived: false, pageSize: 200 }),
+        listGlobalSessionPages(sdk, { archived: true, pageSize: 200 }),
+      ]);
 
-        const nextByDirectory = new Map<string, Session[]>();
-        for (const session of active) {
-          const directory = resolveDirectoryKey(session);
-          if (!directory) {
-            continue;
-          }
-          const existing = nextByDirectory.get(directory) ?? [];
-          existing.push(session);
-          nextByDirectory.set(directory, existing);
-        }
+      if (cancelled) return;
 
-        setGlobalActiveSessions(active);
-        setArchivedSessions(archived);
-        setSessionsByDirectory(nextByDirectory);
+      const active = activeResult.status === 'fulfilled'
+        ? activeResult.value
+        : syncSessions;
 
-        // Discover worktrees for each project
-        discoverWorktrees();
-      } catch (error) {
-        if (cancelled) {
-          return;
-        }
-
-        console.warn('[SessionSidebar] Failed to load global session catalog, falling back to loaded sync sessions:', error);
-        const nextByDirectory = new Map<string, Session[]>();
-        for (const session of syncSessions) {
-          const directory = resolveDirectoryKey(session);
-          if (!directory) {
-            continue;
-          }
-          const existing = nextByDirectory.get(directory) ?? [];
-          existing.push(session);
-          nextByDirectory.set(directory, existing);
-        }
-        setGlobalActiveSessions(syncSessions);
-        setArchivedSessions([]);
-        setSessionsByDirectory(nextByDirectory);
+      if (activeResult.status === 'rejected') {
+        console.warn('[SessionSidebar] Failed to load active sessions, using sync fallback:', activeResult.reason);
       }
+
+      const archived = archivedResult.status === 'fulfilled'
+        ? archivedResult.value
+        : [];
+
+      if (archivedResult.status === 'rejected') {
+        console.warn('[SessionSidebar] Failed to load archived sessions:', archivedResult.reason);
+      }
+
+      const nextByDirectory = new Map<string, Session[]>();
+      for (const session of active) {
+        const directory = resolveDirectoryKey(session);
+        if (!directory) continue;
+        const existing = nextByDirectory.get(directory) ?? [];
+        existing.push(session);
+        nextByDirectory.set(directory, existing);
+      }
+
+      setGlobalActiveSessions(active);
+      setArchivedSessions(archived);
+      setSessionsByDirectory(nextByDirectory);
+      discoverWorktrees();
     };
 
     void loadGlobalSessions();
