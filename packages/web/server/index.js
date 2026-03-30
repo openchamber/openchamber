@@ -29,6 +29,7 @@ import {
   normalizeTunnelProvider,
 } from './lib/tunnels/types.js';
 import { prepareNotificationLastMessage } from './lib/notifications/index.js';
+import { applyForwardProxyResponseHeaders, collectForwardProxyHeaders } from './proxy-headers.js';
 import {
   TERMINAL_INPUT_WS_MAX_PAYLOAD_BYTES,
   TERMINAL_INPUT_WS_PATH,
@@ -6782,44 +6783,9 @@ function setupProxy(app) {
   });
 
 
-  const hopByHopRequestHeaders = new Set([
-    'host',
-    'connection',
-    'content-length',
-    'transfer-encoding',
-    'keep-alive',
-    'te',
-    'trailer',
-    'upgrade',
-  ]);
-
-  const hopByHopResponseHeaders = new Set([
-    'connection',
-    'content-length',
-    'transfer-encoding',
-    'keep-alive',
-    'te',
-    'trailer',
-    'upgrade',
-    'www-authenticate',
-  ]);
-
   const collectForwardHeaders = (req) => {
     const authHeaders = getOpenCodeAuthHeaders();
-    const headers = {};
-
-    for (const [key, value] of Object.entries(req.headers || {})) {
-      if (!value) continue;
-      const lowerKey = key.toLowerCase();
-      if (hopByHopRequestHeaders.has(lowerKey)) continue;
-      headers[lowerKey] = Array.isArray(value) ? value.join(', ') : String(value);
-    }
-
-    if (authHeaders.Authorization) {
-      headers.Authorization = authHeaders.Authorization;
-    }
-
-    return headers;
+    return collectForwardProxyHeaders(req.headers, authHeaders);
   };
 
   const collectRequestBodyBuffer = async (req) => {
@@ -6865,13 +6831,7 @@ function setupProxy(app) {
         signal: AbortSignal.timeout(LONG_REQUEST_TIMEOUT_MS),
       });
 
-      for (const [key, value] of upstreamResponse.headers.entries()) {
-        const lowerKey = key.toLowerCase();
-        if (hopByHopResponseHeaders.has(lowerKey)) {
-          continue;
-        }
-        res.setHeader(key, value);
-      }
+      applyForwardProxyResponseHeaders(upstreamResponse.headers, res);
 
       const upstreamBody = Buffer.from(await upstreamResponse.arrayBuffer());
       res.status(upstreamResponse.status).send(upstreamBody);
