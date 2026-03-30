@@ -147,3 +147,40 @@ export const registerSettingsUtilityRoutes = (app, dependencies) => {
     }
   });
 };
+
+export const registerCommonRequestMiddleware = (app, dependencies) => {
+  const { express } = dependencies;
+
+  app.use((req, res, next) => {
+    if (
+      req.path.startsWith('/api/config/agents') ||
+      req.path.startsWith('/api/config/commands') ||
+      req.path.startsWith('/api/config/mcp') ||
+      req.path.startsWith('/api/config/settings') ||
+      req.path.startsWith('/api/config/skills') ||
+      req.path.startsWith('/api/projects') ||
+      req.path.startsWith('/api/fs') ||
+      req.path.startsWith('/api/git') ||
+      req.path.startsWith('/api/prompts') ||
+      req.path.startsWith('/api/terminal') ||
+      req.path.startsWith('/api/opencode') ||
+      req.path.startsWith('/api/push') ||
+      req.path.startsWith('/api/voice') ||
+      req.path.startsWith('/api/tts') ||
+      req.path.startsWith('/api/openchamber/tunnel')
+    ) {
+      express.json({ limit: '50mb' })(req, res, next);
+    } else if (req.path.startsWith('/api')) {
+      next();
+    } else {
+      express.json({ limit: '50mb' })(req, res, next);
+    }
+  });
+
+  app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+  app.use((req, _res, next) => {
+    console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+    next();
+  });
+};
