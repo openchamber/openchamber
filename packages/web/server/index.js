@@ -44,7 +44,7 @@ import webPush from 'web-push';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const DEFAULT_PORT = 3000;
+const DEFAULT_PORT = 12801;
 const DESKTOP_NOTIFY_PREFIX = '[OpenChamberDesktopNotify] ';
 const uiNotificationClients = new Set();
 const HEALTH_CHECK_INTERVAL = 15000;

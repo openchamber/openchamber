@@ -27,7 +27,7 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const DEFAULT_PORT = 3000;
+const DEFAULT_PORT = 12801;
 const DEFAULT_TAIL_LINES = 200;
 const LOG_ROTATE_MAX_BYTES = 10 * 1024 * 1024;
 const LOG_ROTATE_KEEP = 5;
