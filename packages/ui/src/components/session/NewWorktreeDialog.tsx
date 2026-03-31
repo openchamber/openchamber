@@ -10,15 +10,19 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-  SelectLabel,
-  SelectGroup,
-  SelectSeparator,
-} from '@/components/ui/select';
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandSeparator,
+} from '@/components/ui/command';
 import {
   RiGitBranchLine,
   RiGitRepositoryLine,
@@ -29,6 +33,7 @@ import {
   RiCheckLine,
   RiExternalLinkLine,
   RiCloseLine,
+  RiArrowDownSLine,
 } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -45,6 +50,7 @@ import { getWorktreeSetupCommands } from '@/lib/openchamberConfig';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { generateBranchSlug } from '@/lib/git/branchNameGenerator';
 import { opencodeClient } from '@/lib/opencode/client';
+import { rankBranchesForQuery } from '@/lib/worktrees/branchSearch';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useGitBranches, useGitStore } from '@/stores/useGitStore';
 import { GitHubIntegrationDialog } from './GitHubIntegrationDialog';
@@ -234,12 +240,6 @@ export function NewWorktreeDialog({
   const isLoadingBranches = useGitStore((state) => state.isLoadingBranches);
   const fetchBranches = useGitStore((state) => state.fetchBranches);
 
-  React.useEffect(() => {
-    if (!open || !projectDirectory || !git) return;
-    if (branches?.all) return;
-    void fetchBranches(projectDirectory, git);
-  }, [open, projectDirectory, git, branches?.all, fetchBranches]);
-  
   // Compute local and remote branch lists (same pattern as GitView)
   const localBranches = React.useMemo(() => {
     if (!branches?.all) return [];
@@ -278,10 +278,122 @@ export function NewWorktreeDialog({
   
   const [githubDialogOpen, setGithubDialogOpen] = React.useState(false);
   
+  // Desktop branch picker states
+  const [existingBranchDropdownOpen, setExistingBranchDropdownOpen] = React.useState(false);
+  const [sourceBranchDropdownOpen, setSourceBranchDropdownOpen] = React.useState(false);
+
   // Mobile branch picker states
   const [existingBranchPickerOpen, setExistingBranchPickerOpen] = React.useState(false);
   const [sourceBranchPickerOpen, setSourceBranchPickerOpen] = React.useState(false);
-  
+
+  // Shared query state per picker (desktop + mobile)
+  const [existingBranchQuery, setExistingBranchQuery] = React.useState('');
+  const [sourceBranchQuery, setSourceBranchQuery] = React.useState('');
+  const existingBranchDropdownContentRef = React.useRef<HTMLDivElement | null>(null);
+  const sourceBranchDropdownContentRef = React.useRef<HTMLDivElement | null>(null);
+  const existingBranchMobileListWrapperRef = React.useRef<HTMLDivElement | null>(null);
+  const sourceBranchMobileListWrapperRef = React.useRef<HTMLDivElement | null>(null);
+
+  const findScrollableContainer = React.useCallback((startNode: HTMLElement | null): HTMLElement | null => {
+    let node: HTMLElement | null = startNode;
+    while (node && node !== document.body) {
+      const { overflowY } = window.getComputedStyle(node);
+      if ((overflowY === 'auto' || overflowY === 'scroll') && node.scrollHeight > node.clientHeight) {
+        return node;
+      }
+      node = node.parentElement;
+    }
+    return null;
+  }, []);
+
+  const resetScrollToTop = React.useCallback((container: HTMLElement | null) => {
+    if (!container) {
+      return;
+    }
+    container.scrollTop = 0;
+  }, []);
+
+  const resetDesktopPickerScroll = React.useCallback((contentRef: React.RefObject<HTMLDivElement | null>) => {
+    const list = contentRef.current?.querySelector<HTMLElement>('[data-slot="command-list"]') ?? null;
+    resetScrollToTop(list);
+  }, [resetScrollToTop]);
+
+  const resetMobilePickerScroll = React.useCallback((wrapperRef: React.RefObject<HTMLDivElement | null>) => {
+    const scrollContainer = findScrollableContainer(wrapperRef.current);
+    resetScrollToTop(scrollContainer);
+  }, [findScrollableContainer, resetScrollToTop]);
+
+  const existingBranchRankedGroups = React.useMemo(() => {
+    return rankBranchesForQuery({
+      localBranches,
+      remoteBranches,
+      query: existingBranchQuery,
+    });
+  }, [localBranches, remoteBranches, existingBranchQuery]);
+
+  const sourceBranchRankedGroups = React.useMemo(() => {
+    return rankBranchesForQuery({
+      localBranches,
+      remoteBranches,
+      query: sourceBranchQuery,
+    });
+  }, [localBranches, remoteBranches, sourceBranchQuery]);
+
+  const hasExistingBranchQuery = existingBranchQuery.trim().length > 0;
+  const hasSourceBranchQuery = sourceBranchQuery.trim().length > 0;
+  const hasExistingBranchMatches = existingBranchRankedGroups.matching.length > 0;
+  const hasSourceBranchMatches = sourceBranchRankedGroups.matching.length > 0;
+  const canFetchBranches = Boolean(projectDirectory && git);
+
+  const handleFetchBranches = React.useCallback(() => {
+    if (!projectDirectory || !git) {
+      return;
+    }
+    void fetchBranches(projectDirectory, git);
+  }, [projectDirectory, git, fetchBranches]);
+
+  React.useEffect(() => {
+    if (!existingBranchDropdownOpen && !existingBranchPickerOpen) {
+      setExistingBranchQuery('');
+    }
+  }, [existingBranchDropdownOpen, existingBranchPickerOpen]);
+
+  React.useEffect(() => {
+    if (!sourceBranchDropdownOpen && !sourceBranchPickerOpen) {
+      setSourceBranchQuery('');
+    }
+  }, [sourceBranchDropdownOpen, sourceBranchPickerOpen]);
+
+  React.useEffect(() => {
+    if (existingBranchDropdownOpen) {
+      resetDesktopPickerScroll(existingBranchDropdownContentRef);
+    }
+    if (existingBranchPickerOpen) {
+      resetMobilePickerScroll(existingBranchMobileListWrapperRef);
+    }
+  }, [
+    existingBranchDropdownOpen,
+    existingBranchPickerOpen,
+    existingBranchQuery,
+    resetDesktopPickerScroll,
+    resetMobilePickerScroll,
+  ]);
+
+  React.useEffect(() => {
+    if (sourceBranchDropdownOpen) {
+      resetDesktopPickerScroll(sourceBranchDropdownContentRef);
+    }
+    if (sourceBranchPickerOpen) {
+      resetMobilePickerScroll(sourceBranchMobileListWrapperRef);
+    }
+  }, [
+    sourceBranchDropdownOpen,
+    sourceBranchPickerOpen,
+    sourceBranchQuery,
+    resetDesktopPickerScroll,
+    resetMobilePickerScroll,
+  ]);
+
   // Validation state
   const [validation, setValidation] = React.useState<ValidationState>({
     isValidating: false,
@@ -630,6 +742,12 @@ Nice-to-have:
         selectedBranch: '',
         worktreeName: '',
       });
+      setExistingBranchDropdownOpen(false);
+      setSourceBranchDropdownOpen(false);
+      setExistingBranchPickerOpen(false);
+      setSourceBranchPickerOpen(false);
+      setExistingBranchQuery('');
+      setSourceBranchQuery('');
       setValidation({
         isValidating: false,
         branchError: null,
@@ -1035,17 +1153,29 @@ Nice-to-have:
                 <label className="typography-ui-label text-foreground block font-semibold">
                   Select Branch
                 </label>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setExistingBranchPickerOpen(true)}
-                  className="w-full justify-between h-9"
-                >
-                  <span className={existingBranchState.selectedBranch ? 'text-foreground' : 'text-muted-foreground'}>
-                    {existingBranchState.selectedBranch || 'Choose a branch...'}
-                  </span>
-                  <RiGitBranchLine className="h-4 w-4 text-muted-foreground" />
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setExistingBranchPickerOpen(true)}
+                    className="flex-1 justify-between h-9"
+                  >
+                    <span className={existingBranchState.selectedBranch ? 'text-foreground' : 'text-muted-foreground'}>
+                      {existingBranchState.selectedBranch || 'Choose a branch...'}
+                    </span>
+                    <RiGitBranchLine className="h-4 w-4 text-muted-foreground" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 w-8 px-0 shrink-0"
+                    onClick={handleFetchBranches}
+                    disabled={!canFetchBranches || isLoadingBranches}
+                    title="Fetch branches"
+                  >
+                    {isLoadingBranches ? <RiLoader4Line className="size-4 animate-spin" /> : <RiRefreshLine className="size-4" />}
+                  </Button>
+                </div>
                 
                 {/* Mobile Branch Picker Overlay */}
                 <MobileOverlayPanel
@@ -1053,7 +1183,13 @@ Nice-to-have:
                   title="Select Branch"
                   onClose={() => setExistingBranchPickerOpen(false)}
                 >
-                  <div className="space-y-4">
+                  <div className="space-y-4" ref={existingBranchMobileListWrapperRef}>
+                    <Input
+                      value={existingBranchQuery}
+                      onChange={(e) => setExistingBranchQuery(e.target.value)}
+                      placeholder="Search branches..."
+                      className="h-8"
+                    />
                     {isLoadingBranches ? (
                       <div className="px-2 py-8 text-center typography-small text-muted-foreground">
                         Loading branches...
@@ -1063,14 +1199,52 @@ Nice-to-have:
                         No branches found
                       </div>
                     ) : (
-                      <>
-                        {localBranches.length > 0 && (
+                      <div className="space-y-4">
+                        {hasExistingBranchQuery && hasExistingBranchMatches && (
                           <div className="space-y-2">
                             <div className="typography-small font-semibold text-foreground px-2">
-                              Local branches
+                              Matching branches
                             </div>
                             <div className="space-y-1">
-                              {localBranches.map(branch => (
+                              {existingBranchRankedGroups.matching.map((branch) => (
+                                <button
+                                  key={`${branch.source}-${branch.value}`}
+                                  onClick={() => {
+                                    setExistingBranchState(prev => ({
+                                      ...prev,
+                                      selectedBranch: branch.value,
+                                      worktreeName: slugifyWorktreeName(branch.label),
+                                    }));
+                                    setValidation(prev => ({ ...prev, touched: true }));
+                                    setExistingBranchPickerOpen(false);
+                                  }}
+                                  className={cn(
+                                    'w-full text-left px-3 py-2.5 rounded-md transition-colors',
+                                    existingBranchState.selectedBranch === branch.value
+                                      ? 'bg-interactive-selection text-interactive-selection-foreground'
+                                      : 'hover:bg-interactive-hover'
+                                  )}
+                                >
+                                  <span className="typography-small break-all">{branch.label}</span>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {hasExistingBranchQuery && !hasExistingBranchMatches && (
+                          <div className="px-2 py-1 text-center typography-small text-muted-foreground">
+                            No matching branches
+                          </div>
+                        )}
+
+                        {existingBranchRankedGroups.otherLocal.length > 0 && (
+                          <div className="space-y-2">
+                            <div className="typography-small font-semibold text-foreground px-2">
+                              {hasExistingBranchQuery ? 'Other local branches' : 'Local branches'}
+                            </div>
+                            <div className="space-y-1">
+                              {existingBranchRankedGroups.otherLocal.map((branch) => (
                                 <button
                                   key={branch}
                                   onClick={() => {
@@ -1095,13 +1269,14 @@ Nice-to-have:
                             </div>
                           </div>
                         )}
-                        {remoteBranches.length > 0 && (
+
+                        {existingBranchRankedGroups.otherRemote.length > 0 && (
                           <div className="space-y-2">
                             <div className="typography-small font-semibold text-foreground px-2">
-                              Remote branches
+                              {hasExistingBranchQuery ? 'Other remote branches' : 'Remote branches'}
                             </div>
                             <div className="space-y-1">
-                              {remoteBranches.map(branch => (
+                              {existingBranchRankedGroups.otherRemote.map((branch) => (
                                 <button
                                   key={`remotes/${branch}`}
                                   onClick={() => {
@@ -1126,7 +1301,7 @@ Nice-to-have:
                             </div>
                           </div>
                         )}
-                      </>
+                      </div>
                     )}
                   </div>
                 </MobileOverlayPanel>
@@ -1272,7 +1447,13 @@ Nice-to-have:
                   title="Select Source Branch"
                   onClose={() => setSourceBranchPickerOpen(false)}
                 >
-                  <div className="space-y-4">
+                  <div className="space-y-4" ref={sourceBranchMobileListWrapperRef}>
+                    <Input
+                      value={sourceBranchQuery}
+                      onChange={(e) => setSourceBranchQuery(e.target.value)}
+                      placeholder="Search branches..."
+                      className="h-8"
+                    />
                     {isLoadingBranches ? (
                       <div className="px-2 py-8 text-center typography-small text-muted-foreground">
                         Loading branches...
@@ -1282,14 +1463,47 @@ Nice-to-have:
                         No branches found
                       </div>
                     ) : (
-                      <>
-                        {localBranches.length > 0 && (
+                      <div className="space-y-4">
+                        {hasSourceBranchQuery && hasSourceBranchMatches && (
                           <div className="space-y-2">
                             <div className="typography-small font-semibold text-foreground px-2">
-                              Local branches
+                              Matching branches
                             </div>
                             <div className="space-y-1">
-                              {localBranches.map(branch => (
+                              {sourceBranchRankedGroups.matching.map((branch) => (
+                                <button
+                                  key={`${branch.source}-${branch.value}`}
+                                  onClick={() => {
+                                    setNewBranchState(prev => ({ ...prev, sourceBranch: branch.value }));
+                                    setSourceBranchPickerOpen(false);
+                                  }}
+                                  className={cn(
+                                    'w-full text-left px-3 py-2.5 rounded-md transition-colors',
+                                    newBranchState.sourceBranch === branch.value
+                                      ? 'bg-interactive-selection text-interactive-selection-foreground'
+                                      : 'hover:bg-interactive-hover'
+                                  )}
+                                >
+                                  <span className="typography-small break-all">{branch.label}</span>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {hasSourceBranchQuery && !hasSourceBranchMatches && (
+                          <div className="px-2 py-1 text-center typography-small text-muted-foreground">
+                            No matching branches
+                          </div>
+                        )}
+
+                        {sourceBranchRankedGroups.otherLocal.length > 0 && (
+                          <div className="space-y-2">
+                            <div className="typography-small font-semibold text-foreground px-2">
+                              {hasSourceBranchQuery ? 'Other local branches' : 'Local branches'}
+                            </div>
+                            <div className="space-y-1">
+                              {sourceBranchRankedGroups.otherLocal.map((branch) => (
                                 <button
                                   key={branch}
                                   onClick={() => {
@@ -1309,13 +1523,14 @@ Nice-to-have:
                             </div>
                           </div>
                         )}
-                        {remoteBranches.length > 0 && (
+
+                        {sourceBranchRankedGroups.otherRemote.length > 0 && (
                           <div className="space-y-2">
                             <div className="typography-small font-semibold text-foreground px-2">
-                              Remote branches
+                              {hasSourceBranchQuery ? 'Other remote branches' : 'Remote branches'}
                             </div>
                             <div className="space-y-1">
-                              {remoteBranches.map(branch => (
+                              {sourceBranchRankedGroups.otherRemote.map((branch) => (
                                 <button
                                   key={`remotes/${branch}`}
                                   onClick={() => {
@@ -1335,7 +1550,7 @@ Nice-to-have:
                             </div>
                           </div>
                         )}
-                      </>
+                      </div>
                     )}
                   </div>
                 </MobileOverlayPanel>
@@ -1433,59 +1648,129 @@ Nice-to-have:
                   <label className="typography-ui-label text-foreground block font-semibold">
                     Select Branch
                   </label>
-                  <Select
-                    value={existingBranchState.selectedBranch}
-                    onValueChange={(value) => {
-                      setExistingBranchState(prev => ({
-                        ...prev,
-                        selectedBranch: value,
-                        worktreeName: slugifyWorktreeName(value),
-                      }));
-                      setValidation(prev => ({ ...prev, touched: true }));
-                    }}
-                  >
-                    <SelectTrigger size="lg" className="w-fit">
-                      <SelectValue placeholder="Choose a branch..." />
-                    </SelectTrigger>
-                  <SelectContent className="max-h-[280px] max-w-[320px]">
-                    {isLoadingBranches ? (
-                      <div className="px-2 py-4 text-center typography-small text-muted-foreground">
-                        Loading branches...
-                      </div>
-                    ) : localBranches.length === 0 && remoteBranches.length === 0 ? (
-                      <div className="px-2 py-4 text-center typography-small text-muted-foreground">
-                        No branches found
-                      </div>
-                    ) : (
-                      <>
-                        {localBranches.length > 0 && (
-                          <SelectGroup>
-                            <SelectLabel className="typography-small font-semibold text-foreground">Local branches</SelectLabel>
-                            {localBranches.map(branch => (
-                              <SelectItem key={branch} value={branch} className="whitespace-normal break-all">
-                                {branch}
-                              </SelectItem>
-                            ))}
-                          </SelectGroup>
-                        )}
-                        {localBranches.length > 0 && remoteBranches.length > 0 && (
-                          <SelectSeparator />
-                        )}
-                        {remoteBranches.length > 0 && (
-                          <SelectGroup>
-                            <SelectLabel className="typography-small font-semibold text-foreground">Remote branches</SelectLabel>
-                            {remoteBranches.map(branch => (
-                              <SelectItem key={`remotes/${branch}`} value={`remotes/${branch}`} className="whitespace-normal break-all">
-                                {branch}
-                              </SelectItem>
-                            ))}
-                          </SelectGroup>
-                        )}
-                      </>
-                    )}
-                  </SelectContent>
-                </Select>
-              </div>
+                  <div className="flex items-center gap-2">
+                    <DropdownMenu open={existingBranchDropdownOpen} onOpenChange={setExistingBranchDropdownOpen}>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="outline" size="sm" className="h-9 min-w-[220px] max-w-full justify-between gap-2">
+                          <span className={cn('truncate', existingBranchState.selectedBranch ? 'text-foreground' : 'text-muted-foreground')}>
+                            {existingBranchState.selectedBranch || 'Choose a branch...'}
+                          </span>
+                          <RiArrowDownSLine className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="start" className="w-[320px] p-0" ref={existingBranchDropdownContentRef}>
+                        <Command shouldFilter={false}>
+                        <CommandInput
+                          placeholder="Search branches..."
+                          value={existingBranchQuery}
+                          onValueChange={setExistingBranchQuery}
+                        />
+                        <CommandList disableHorizontal>
+                          {isLoadingBranches ? (
+                            <div className="px-2 py-4 text-center typography-small text-muted-foreground">
+                              Loading branches...
+                            </div>
+                          ) : localBranches.length === 0 && remoteBranches.length === 0 ? (
+                            <CommandEmpty>No branches found</CommandEmpty>
+                          ) : (
+                            <>
+                              {hasExistingBranchQuery && hasExistingBranchMatches && (
+                                <CommandGroup heading="Matching branches">
+                                  {existingBranchRankedGroups.matching.map((branch) => (
+                                    <CommandItem
+                                      key={`${branch.source}-${branch.value}`}
+                                      value={branch.value}
+                                      onSelect={() => {
+                                        setExistingBranchState((prev) => ({
+                                          ...prev,
+                                          selectedBranch: branch.value,
+                                          worktreeName: slugifyWorktreeName(branch.label),
+                                        }));
+                                        setValidation((prev) => ({ ...prev, touched: true }));
+                                        setExistingBranchDropdownOpen(false);
+                                      }}
+                                    >
+                                      <span className="typography-small break-all">{branch.label}</span>
+                                    </CommandItem>
+                                  ))}
+                                </CommandGroup>
+                              )}
+
+                              {hasExistingBranchQuery && !hasExistingBranchMatches && (
+                                <div className="px-2 py-1 text-center typography-small text-muted-foreground">
+                                  No matching branches
+                                </div>
+                              )}
+
+                              {existingBranchRankedGroups.otherLocal.length > 0 && (
+                                <>
+                                  {hasExistingBranchQuery && <CommandSeparator />}
+                                  <CommandGroup heading={hasExistingBranchQuery ? 'Other local branches' : 'Local branches'}>
+                                    {existingBranchRankedGroups.otherLocal.map((branch) => (
+                                      <CommandItem
+                                        key={`local-${branch}`}
+                                        value={branch}
+                                        onSelect={() => {
+                                          setExistingBranchState((prev) => ({
+                                            ...prev,
+                                            selectedBranch: branch,
+                                            worktreeName: slugifyWorktreeName(branch),
+                                          }));
+                                          setValidation((prev) => ({ ...prev, touched: true }));
+                                          setExistingBranchDropdownOpen(false);
+                                        }}
+                                      >
+                                        <span className="typography-small break-all">{branch}</span>
+                                      </CommandItem>
+                                    ))}
+                                  </CommandGroup>
+                                </>
+                              )}
+
+                              {existingBranchRankedGroups.otherRemote.length > 0 && (
+                                <>
+                                  {(existingBranchRankedGroups.otherLocal.length > 0 || hasExistingBranchQuery) && (
+                                    <CommandSeparator />
+                                  )}
+                                  <CommandGroup heading={hasExistingBranchQuery ? 'Other remote branches' : 'Remote branches'}>
+                                    {existingBranchRankedGroups.otherRemote.map((branch) => (
+                                      <CommandItem
+                                        key={`remote-${branch}`}
+                                        value={`remotes/${branch}`}
+                                        onSelect={() => {
+                                          setExistingBranchState((prev) => ({
+                                            ...prev,
+                                            selectedBranch: `remotes/${branch}`,
+                                            worktreeName: slugifyWorktreeName(branch),
+                                          }));
+                                          setValidation((prev) => ({ ...prev, touched: true }));
+                                          setExistingBranchDropdownOpen(false);
+                                        }}
+                                      >
+                                        <span className="typography-small break-all">{branch}</span>
+                                      </CommandItem>
+                                    ))}
+                                  </CommandGroup>
+                                </>
+                              )}
+                            </>
+                          )}
+                        </CommandList>
+                        </Command>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 w-8 px-0 shrink-0"
+                      onClick={handleFetchBranches}
+                      disabled={!canFetchBranches || isLoadingBranches}
+                      title="Fetch branches"
+                    >
+                      {isLoadingBranches ? <RiLoader4Line className="size-4 animate-spin" /> : <RiRefreshLine className="size-4" />}
+                    </Button>
+                  </div>
+                </div>
             ) : (
               <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
@@ -1604,51 +1889,101 @@ Nice-to-have:
                   <label className="typography-ui-label text-foreground block font-semibold">
                     Source Branch
                   </label>
-                  <Select 
-                    value={newBranchState.sourceBranch} 
-                    onValueChange={(value) => setNewBranchState(prev => ({ ...prev, sourceBranch: value }))}
-                  >
-                    <SelectTrigger size="lg" className="w-fit">
-                      <SelectValue placeholder="Select source branch..." />
-                    </SelectTrigger>
-                    <SelectContent className="max-h-[280px] max-w-[320px]">
-                      {isLoadingBranches ? (
-                        <div className="px-2 py-4 text-center typography-small text-muted-foreground">
-                          Loading branches...
-                        </div>
-                      ) : localBranches.length === 0 && remoteBranches.length === 0 ? (
-                        <div className="px-2 py-4 text-center typography-small text-muted-foreground">
-                          No branches found
-                        </div>
-                      ) : (
-                        <>
-                          {localBranches.length > 0 && (
-                            <SelectGroup>
-                              <SelectLabel className="typography-small font-semibold text-foreground">Local branches</SelectLabel>
-                              {localBranches.map(branch => (
-                                <SelectItem key={branch} value={branch} className="whitespace-normal break-all">
-                                  {branch}
-                                </SelectItem>
-                              ))}
-                            </SelectGroup>
+                  <DropdownMenu open={sourceBranchDropdownOpen} onOpenChange={setSourceBranchDropdownOpen}>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" size="sm" className="h-9 min-w-[220px] max-w-full justify-between gap-2">
+                        <span className={cn('truncate', newBranchState.sourceBranch ? 'text-foreground' : 'text-muted-foreground')}>
+                          {newBranchState.sourceBranch || 'Select source branch...'}
+                        </span>
+                        <RiArrowDownSLine className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" className="w-[320px] p-0" ref={sourceBranchDropdownContentRef}>
+                      <Command shouldFilter={false}>
+                        <CommandInput
+                          placeholder="Search branches..."
+                          value={sourceBranchQuery}
+                          onValueChange={setSourceBranchQuery}
+                        />
+                        <CommandList disableHorizontal>
+                          {isLoadingBranches ? (
+                            <div className="px-2 py-4 text-center typography-small text-muted-foreground">
+                              Loading branches...
+                            </div>
+                          ) : localBranches.length === 0 && remoteBranches.length === 0 ? (
+                            <CommandEmpty>No branches found</CommandEmpty>
+                          ) : (
+                            <>
+                              {hasSourceBranchQuery && hasSourceBranchMatches && (
+                                <CommandGroup heading="Matching branches">
+                                  {sourceBranchRankedGroups.matching.map((branch) => (
+                                    <CommandItem
+                                      key={`${branch.source}-${branch.value}`}
+                                      value={branch.value}
+                                      onSelect={() => {
+                                        setNewBranchState((prev) => ({ ...prev, sourceBranch: branch.value }));
+                                        setSourceBranchDropdownOpen(false);
+                                      }}
+                                    >
+                                      <span className="typography-small break-all">{branch.label}</span>
+                                    </CommandItem>
+                                  ))}
+                                </CommandGroup>
+                              )}
+
+                              {hasSourceBranchQuery && !hasSourceBranchMatches && (
+                                <div className="px-2 py-1 text-center typography-small text-muted-foreground">
+                                  No matching branches
+                                </div>
+                              )}
+
+                              {sourceBranchRankedGroups.otherLocal.length > 0 && (
+                                <>
+                                  {hasSourceBranchQuery && <CommandSeparator />}
+                                  <CommandGroup heading={hasSourceBranchQuery ? 'Other local branches' : 'Local branches'}>
+                                    {sourceBranchRankedGroups.otherLocal.map((branch) => (
+                                      <CommandItem
+                                        key={`local-${branch}`}
+                                        value={branch}
+                                        onSelect={() => {
+                                          setNewBranchState((prev) => ({ ...prev, sourceBranch: branch }));
+                                          setSourceBranchDropdownOpen(false);
+                                        }}
+                                      >
+                                        <span className="typography-small break-all">{branch}</span>
+                                      </CommandItem>
+                                    ))}
+                                  </CommandGroup>
+                                </>
+                              )}
+
+                              {sourceBranchRankedGroups.otherRemote.length > 0 && (
+                                <>
+                                  {(sourceBranchRankedGroups.otherLocal.length > 0 || hasSourceBranchQuery) && (
+                                    <CommandSeparator />
+                                  )}
+                                  <CommandGroup heading={hasSourceBranchQuery ? 'Other remote branches' : 'Remote branches'}>
+                                    {sourceBranchRankedGroups.otherRemote.map((branch) => (
+                                      <CommandItem
+                                        key={`remote-${branch}`}
+                                        value={`remotes/${branch}`}
+                                        onSelect={() => {
+                                          setNewBranchState((prev) => ({ ...prev, sourceBranch: `remotes/${branch}` }));
+                                          setSourceBranchDropdownOpen(false);
+                                        }}
+                                      >
+                                        <span className="typography-small break-all">{branch}</span>
+                                      </CommandItem>
+                                    ))}
+                                  </CommandGroup>
+                                </>
+                              )}
+                            </>
                           )}
-                          {localBranches.length > 0 && remoteBranches.length > 0 && (
-                            <SelectSeparator />
-                          )}
-                          {remoteBranches.length > 0 && (
-                            <SelectGroup>
-                              <SelectLabel className="typography-small font-semibold text-foreground">Remote branches</SelectLabel>
-                              {remoteBranches.map(branch => (
-                                <SelectItem key={`remotes/${branch}`} value={`remotes/${branch}`} className="whitespace-normal break-all">
-                                  {branch}
-                                </SelectItem>
-                              ))}
-                            </SelectGroup>
-                          )}
-                        </>
-                      )}
-                    </SelectContent>
-                  </Select>
+                        </CommandList>
+                      </Command>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                   {newBranchState.sourceBranch && (
                     <div className="typography-micro text-muted-foreground">
                       New branch will be created from {newBranchState.sourceBranch}
