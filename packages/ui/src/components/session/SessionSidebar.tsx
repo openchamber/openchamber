@@ -47,8 +47,6 @@ import { SidebarFooter } from './sidebar/SidebarFooter';
 import { SidebarProjectsList } from './sidebar/SidebarProjectsList';
 import { SessionNodeItem } from './sidebar/SessionNodeItem';
 import { useUpdateStore } from '@/stores/useUpdateStore';
-import { opencodeClient } from '@/lib/opencode/client';
-import { listGlobalSessionPages } from '@/stores/globalSessions';
 import { listProjectWorktrees } from '@/lib/worktrees/worktreeManager';
 import { checkIsGitRepository } from '@/lib/gitApi';
 import type { WorktreeMetadata } from '@/types/worktree';
@@ -72,6 +70,7 @@ import {
   formatProjectLabel,
   normalizePath,
 } from './sidebar/utils';
+import { refreshGlobalSessions, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 
 const PROJECT_COLLAPSE_STORAGE_KEY = 'oc.sessions.projectCollapse';
 const GROUP_ORDER_STORAGE_KEY = 'oc.sessions.groupOrder';
@@ -309,9 +308,10 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
   const sync = useSync();
   const syncSessions = useSessions();
-  const [globalActiveSessions, setGlobalActiveSessions] = React.useState<Session[]>([]);
-  const [archivedSessions, setArchivedSessions] = React.useState<Session[]>([]);
-  const [sessionsByDirectory, setSessionsByDirectory] = React.useState<Map<string, Session[]>>(new Map());
+  const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
+  const archivedSessions = useGlobalSessionsStore((state) => state.archivedSessions);
+  const sessionsByDirectory = useGlobalSessionsStore((state) => state.sessionsByDirectory);
+  const hasLoadedGlobalSessions = useGlobalSessionsStore((state) => state.hasLoaded);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const newSessionDraftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
   const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
@@ -339,8 +339,8 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const updateStore = useUpdateStore();
 
   const sessions = React.useMemo(
-    () => (globalActiveSessions.length > 0 ? globalActiveSessions : syncSessions),
-    [globalActiveSessions, syncSessions],
+    () => (hasLoadedGlobalSessions ? globalActiveSessions : syncSessions),
+    [globalActiveSessions, hasLoadedGlobalSessions, syncSessions],
   );
 
   const syncSessionSignature = React.useMemo(
@@ -352,15 +352,6 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
   React.useEffect(() => {
     let cancelled = false;
-
-    const resolveDirectoryKey = (session: Session): string | null => {
-      const record = session as Session & {
-        directory?: string | null;
-        project?: { worktree?: string | null } | null;
-      };
-      return normalizePath(record.directory ?? null)
-        ?? normalizePath(record.project?.worktree ?? null);
-    };
 
     const discoverWorktrees = async () => {
       const projectEntries = useProjectsStore.getState().projects;
@@ -394,49 +385,8 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       });
     };
 
-    const loadGlobalSessions = async () => {
-      const sdk = opencodeClient.getSdkClient();
-
-      // Load active and archived independently so one failure doesn't affect the other
-      const [activeResult, archivedResult] = await Promise.allSettled([
-        listGlobalSessionPages(sdk, { archived: false, pageSize: 200 }),
-        listGlobalSessionPages(sdk, { archived: true, pageSize: 200 }),
-      ]);
-
-      if (cancelled) return;
-
-      const active = activeResult.status === 'fulfilled'
-        ? activeResult.value
-        : syncSessions;
-
-      if (activeResult.status === 'rejected') {
-        console.warn('[SessionSidebar] Failed to load active sessions, using sync fallback:', activeResult.reason);
-      }
-
-      const archived = archivedResult.status === 'fulfilled'
-        ? archivedResult.value
-        : [];
-
-      if (archivedResult.status === 'rejected') {
-        console.warn('[SessionSidebar] Failed to load archived sessions:', archivedResult.reason);
-      }
-
-      const nextByDirectory = new Map<string, Session[]>();
-      for (const session of active) {
-        const directory = resolveDirectoryKey(session);
-        if (!directory) continue;
-        const existing = nextByDirectory.get(directory) ?? [];
-        existing.push(session);
-        nextByDirectory.set(directory, existing);
-      }
-
-      setGlobalActiveSessions(active);
-      setArchivedSessions(archived);
-      setSessionsByDirectory(nextByDirectory);
-      discoverWorktrees();
-    };
-
-    void loadGlobalSessions();
+    void refreshGlobalSessions(syncSessions);
+    void discoverWorktrees();
 
     return () => {
       cancelled = true;
@@ -1093,6 +1043,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         branchLabel?: string | null;
       } | null;
     }>();
+    const projectPathLengthBySessionId = new Map<string, number>();
 
     projectSections.forEach((section) => {
       const projectLabel = formatProjectLabel(
@@ -1107,12 +1058,19 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
         const visit = (nodes: SessionNode[]) => {
           nodes.forEach((node) => {
+            const nextProjectPathLength = section.project.normalizedPath.length;
+            const currentProjectPathLength = projectPathLengthBySessionId.get(node.session.id) ?? -1;
+            if (nextProjectPathLength < currentProjectPathLength) {
+              return;
+            }
+
             meta.set(node.session.id, {
               node,
               projectId: section.project.id,
               groupDirectory: group.directory,
               secondaryMeta,
             });
+            projectPathLengthBySessionId.set(node.session.id, nextProjectPathLength);
             if (node.children.length > 0) {
               visit(node.children);
             }

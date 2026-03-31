@@ -36,8 +36,12 @@ import {
 import { markSessionViewed } from "./notification-store"
 import { setActiveSession } from "./sync-context"
 import {
+  createSession as createSessionAction,
   deleteSession as deleteSessionAction,
   archiveSession as archiveSessionAction,
+  updateSessionTitle as updateSessionTitleAction,
+  shareSession as shareSessionAction,
+  unshareSession as unshareSessionAction,
   optimisticSend,
 } from "./session-actions"
 import { useInputStore, type SyntheticContextPart } from "./input-store"
@@ -849,18 +853,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     get().closeNewSessionDraft()
 
     try {
-      const sdk = opencodeClient.getSdkClient()
       const dir = directoryOverride ?? opencodeClient.getDirectory()
-      const result = await sdk.session.create({
-        directory: dir,
-        title,
-        parentID: parentID ?? undefined,
-      })
-      const session = result.data
+      const session = await createSessionAction(title, dir, parentID ?? null)
       if (!session) return null
-
-      get().markSessionAsOpenChamberCreated(session.id)
-      get().setCurrentSession(session.id)
 
       if (targetFolderId) {
         const scopeKey = directoryOverride || get().lastLoadedDirectory || session.directory
@@ -909,20 +904,15 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   // updateSessionTitle — calls SDK, SSE event updates child store
   // ---------------------------------------------------------------------------
   updateSessionTitle: async (sessionId, title) => {
-    const sdk = opencodeClient.getSdkClient()
-    await sdk.session.update({ sessionID: sessionId, title })
+    await updateSessionTitleAction(sessionId, title)
   },
 
   shareSession: async (sessionId) => {
-    const sdk = opencodeClient.getSdkClient()
-    const result = await sdk.session.share({ sessionID: sessionId })
-    return result.data ?? null
+    return shareSessionAction(sessionId)
   },
 
   unshareSession: async (sessionId) => {
-    const sdk = opencodeClient.getSdkClient()
-    const result = await sdk.session.unshare({ sessionID: sessionId })
-    return result.data ?? null
+    return unshareSessionAction(sessionId)
   },
 
   // ---------------------------------------------------------------------------

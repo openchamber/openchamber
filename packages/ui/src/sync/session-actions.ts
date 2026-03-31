@@ -10,6 +10,7 @@ import { useInputStore } from "./input-store"
 import type { DirectoryStore } from "./child-store"
 import type { StoreApi } from "zustand"
 import { opencodeClient } from "@/lib/opencode/client"
+import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 
 // Reference set by SyncProvider — allows actions to access SDK and stores
 let _sdk: OpencodeClient | null = null
@@ -52,6 +53,17 @@ function dir() {
   return _getDirectory() || undefined
 }
 
+function getSessionDirectory(sessionId: string): string | undefined {
+  return useSessionUIStore.getState().getDirectoryForSession(sessionId) || dir()
+}
+
+function getDirectoryStore(directory?: string) {
+  if (!_childStores) throw new Error("Child stores not initialized")
+  const resolvedDirectory = directory || _getDirectory()
+  if (!resolvedDirectory) throw new Error("No current directory")
+  return _childStores.ensureChild(resolvedDirectory)
+}
+
 function getSessionReplyClient(sessionId?: string): OpencodeClient {
   const directory = sessionId
     ? useSessionUIStore.getState().getDirectoryForSession(sessionId)
@@ -80,10 +92,11 @@ export async function createSession(
     const session = result.data
     if (!session) return null
 
-    const sessionDirectory = (session as { directory?: string }).directory ?? directoryOverride ?? null
-    useSessionUIStore.getState().setCurrentSession(session.id, sessionDirectory)
-    useSessionUIStore.getState().markSessionAsOpenChamberCreated(session.id)
-    return session
+      const sessionDirectory = (session as { directory?: string }).directory ?? directoryOverride ?? null
+      useSessionUIStore.getState().setCurrentSession(session.id, sessionDirectory)
+      useSessionUIStore.getState().markSessionAsOpenChamberCreated(session.id)
+      useGlobalSessionsStore.getState().upsertSession(session)
+      return session
   } catch (error) {
     console.error("[session-actions] createSession failed", error)
     return null
@@ -91,8 +104,8 @@ export async function createSession(
 }
 
 /** Optimistically remove a session from the child store list. Returns previous list for rollback. */
-function optimisticRemoveSession(sessionId: string): Session[] | null {
-  const store = dirStore()
+function optimisticRemoveSession(sessionId: string, directory?: string): Session[] | null {
+  const store = getDirectoryStore(directory)
   const current = store.getState()
   const sessions = [...current.session]
   const result = Binary.search(sessions, sessionId, (s) => s.id)
@@ -107,18 +120,20 @@ function optimisticRemoveSession(sessionId: string): Session[] | null {
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export async function deleteSession(sessionId: string, _options?: Record<string, unknown>): Promise<boolean> {
+  const sessionDirectory = getSessionDirectory(sessionId)
   // Remove from UI immediately, rollback on error
-  const snapshot = optimisticRemoveSession(sessionId)
+  const snapshot = optimisticRemoveSession(sessionId, sessionDirectory)
   const ui = useSessionUIStore.getState()
   if (ui.currentSessionId === sessionId) {
     ui.setCurrentSession(null)
   }
   try {
-    await sdk().session.delete({ sessionID: sessionId, directory: dir() })
+    await sdk().session.delete({ sessionID: sessionId, directory: sessionDirectory })
+    useGlobalSessionsStore.getState().removeSessions([sessionId])
     return true
   } catch (error) {
     console.error("[session-actions] deleteSession failed", error)
-    if (snapshot) dirStore().setState({ session: snapshot })
+    if (snapshot) getDirectoryStore(sessionDirectory).setState({ session: snapshot })
     return false
   }
 }
@@ -140,6 +155,7 @@ export async function deleteSessionInDirectory(sessionId: string, directory: str
   if (ui.currentSessionId === sessionId) ui.setCurrentSession(null)
   try {
     await sdk().session.delete({ sessionID: sessionId, directory })
+    useGlobalSessionsStore.getState().removeSessions([sessionId])
     return true
   } catch (error) {
     console.error("[session-actions] deleteSessionInDirectory failed", error)
@@ -149,32 +165,47 @@ export async function deleteSessionInDirectory(sessionId: string, directory: str
 }
 
 export async function archiveSession(sessionId: string): Promise<boolean> {
-  const snapshot = optimisticRemoveSession(sessionId)
+  const sessionDirectory = getSessionDirectory(sessionId)
+  const snapshot = optimisticRemoveSession(sessionId, sessionDirectory)
   const ui = useSessionUIStore.getState()
   if (ui.currentSessionId === sessionId) {
     ui.setCurrentSession(null)
   }
   try {
-    await sdk().session.update({ sessionID: sessionId, directory: dir(), time: { archived: Date.now() } })
+    const archivedAt = Date.now()
+    await sdk().session.update({ sessionID: sessionId, directory: sessionDirectory, time: { archived: archivedAt } })
+    useGlobalSessionsStore.getState().archiveSessions([sessionId], archivedAt)
     return true
   } catch (error) {
     console.error("[session-actions] archiveSession failed", error)
-    if (snapshot) dirStore().setState({ session: snapshot })
+    if (snapshot) getDirectoryStore(sessionDirectory).setState({ session: snapshot })
     return false
   }
 }
 
 export async function updateSessionTitle(sessionId: string, title: string): Promise<void> {
-  await sdk().session.update({ sessionID: sessionId, directory: dir(), title })
+  const sessionDirectory = getSessionDirectory(sessionId)
+  const result = await sdk().session.update({ sessionID: sessionId, directory: sessionDirectory, title })
+  if (result.data) {
+    useGlobalSessionsStore.getState().upsertSession(result.data)
+  }
 }
 
 export async function shareSession(sessionId: string): Promise<Session | null> {
-  const result = await sdk().session.share({ sessionID: sessionId, directory: dir() })
+  const sessionDirectory = getSessionDirectory(sessionId)
+  const result = await sdk().session.share({ sessionID: sessionId, directory: sessionDirectory })
+  if (result.data) {
+    useGlobalSessionsStore.getState().upsertSession(result.data)
+  }
   return result.data ?? null
 }
 
 export async function unshareSession(sessionId: string): Promise<Session | null> {
-  const result = await sdk().session.unshare({ sessionID: sessionId, directory: dir() })
+  const sessionDirectory = getSessionDirectory(sessionId)
+  const result = await sdk().session.unshare({ sessionID: sessionId, directory: sessionDirectory })
+  if (result.data) {
+    useGlobalSessionsStore.getState().upsertSession(result.data)
+  }
   return result.data ?? null
 }
 
