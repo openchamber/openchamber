@@ -125,10 +125,17 @@ export const openSseProxy = async ({
 
   const result = await connect();
   const run = (async () => {
-    for await (const _ of result.stream) {
-      void _;
-      if (signal.aborted) {
-        break;
+    try {
+      for await (const _ of result.stream) {
+        void _;
+        if (signal.aborted) {
+          break;
+        }
+      }
+    } catch (error: unknown) {
+      const cause = (error as { cause?: { code?: string } } | null)?.cause;
+      if (!signal.aborted && cause?.code !== 'UND_ERR_SOCKET') {
+        throw error;
       }
     }
   })();

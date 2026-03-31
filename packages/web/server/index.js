@@ -8788,7 +8788,7 @@ async function main(options = {}) {
         forwardBlock(buffer.trim());
       }
     } catch (error) {
-      if (!controller.signal.aborted) {
+      if (!controller.signal.aborted && error?.cause?.code !== 'UND_ERR_SOCKET') {
         console.warn('SSE proxy stream error:', error);
       }
     } finally {
@@ -8929,7 +8929,7 @@ async function main(options = {}) {
         forwardBlock(buffer.trim());
       }
     } catch (error) {
-      if (!controller.signal.aborted) {
+      if (!controller.signal.aborted && error?.cause?.code !== 'UND_ERR_SOCKET') {
         console.warn('SSE proxy stream error:', error);
       }
     } finally {
