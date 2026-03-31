@@ -21,9 +21,10 @@ import {
 import { cn } from '@/lib/utils';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { useSessionStore } from '@/stores/useSessionStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSelectionStore } from '@/sync/selection-store';
+import * as sessionActions from '@/sync/session-actions';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { useMessageStore } from '@/stores/messageStore';
 import { useContextStore } from '@/stores/contextStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
@@ -377,7 +378,7 @@ export function GitHubIssuePickerDialog({
           return created.id;
         }
 
-        const session = await useSessionStore.getState().createSession(sessionTitle, projectDirectory, null);
+        const session = await sessionActions.createSession(sessionTitle, projectDirectory, null);
         if (!session?.id) {
           throw new Error('Failed to create session');
         }
@@ -385,10 +386,10 @@ export function GitHubIssuePickerDialog({
       })();
 
       // Ensure worktree-based sessions also get the issue title.
-      void useSessionStore.getState().updateSessionTitle(sessionId, sessionTitle).catch(() => undefined);
+      void sessionActions.updateSessionTitle(sessionId, sessionTitle).catch(() => undefined);
 
       try {
-        useSessionStore.getState().initializeNewOpenChamberSession(sessionId, useConfigStore.getState().agents);
+        useSessionUIStore.getState().initializeNewOpenChamberSession(sessionId, useConfigStore.getState().agents);
       } catch {
         // ignore
       }
@@ -397,7 +398,7 @@ export function GitHubIssuePickerDialog({
       onOpenChange(false);
 
       const configState = useConfigStore.getState();
-      const lastUsedProvider = useMessageStore.getState().lastUsedProvider;
+      const lastUsedProvider = useSelectionStore.getState().lastUsedProvider;
 
       const defaultModel = resolveDefaultModelSelection();
       const providerID = defaultModel?.providerID || configState.currentProviderId || lastUsedProvider?.providerID;

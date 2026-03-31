@@ -311,6 +311,11 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
       store.setAutoDeleteAfterDays(normalized);
     }
   }
+  if (settings.sessionRetentionAction === 'archive' || settings.sessionRetentionAction === 'delete') {
+    if (settings.sessionRetentionAction !== store.sessionRetentionAction) {
+      store.setSessionRetentionAction(settings.sessionRetentionAction);
+    }
+  }
 
   if (typeof settings.queueModeEnabled === 'boolean' && settings.queueModeEnabled !== queueStore.queueModeEnabled) {
     queueStore.setQueueMode(settings.queueModeEnabled);
@@ -521,6 +526,9 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (typeof candidate.autoDeleteAfterDays === 'number' && Number.isFinite(candidate.autoDeleteAfterDays)) {
     result.autoDeleteAfterDays = candidate.autoDeleteAfterDays;
+  }
+  if (candidate.sessionRetentionAction === 'archive' || candidate.sessionRetentionAction === 'delete') {
+    result.sessionRetentionAction = candidate.sessionRetentionAction;
   }
   if (typeof candidate.tunnelProvider === 'string') {
     const provider = candidate.tunnelProvider.trim().toLowerCase();
@@ -850,32 +858,57 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   return result;
 };
 
-const fetchWebSettings = async (): Promise<DesktopSettings | null> => {
-  const runtimeSettings = getRuntimeSettingsAPI();
-  if (runtimeSettings) {
-    try {
-      const result = await runtimeSettings.load();
-      return sanitizeWebSettings(result.settings);
-    } catch (error) {
-      console.warn('Failed to load shared settings from runtime settings API:', error);
+// Short-lived cache + in-flight dedup for settings fetches to avoid repeated GET calls during startup
+let _settingsCache: { value: DesktopSettings | null; at: number } | null = null;
+let _settingsInflight: Promise<DesktopSettings | null> | null = null;
+const SETTINGS_CACHE_TTL = 2_000; // 2 seconds — covers the startup burst
 
-    }
+const fetchWebSettings = async (): Promise<DesktopSettings | null> => {
+  // Return cached if fresh
+  if (_settingsCache && Date.now() - _settingsCache.at < SETTINGS_CACHE_TTL) {
+    return _settingsCache.value;
   }
 
-  try {
-    const response = await fetch('/api/config/settings', {
-      method: 'GET',
-      headers: { Accept: 'application/json' },
-    });
-    if (!response.ok) {
+  // Dedup concurrent calls
+  if (_settingsInflight) return _settingsInflight;
+
+  _settingsInflight = (async (): Promise<DesktopSettings | null> => {
+    const runtimeSettings = getRuntimeSettingsAPI();
+    if (runtimeSettings) {
+      try {
+        const result = await runtimeSettings.load();
+        const settings = sanitizeWebSettings(result.settings);
+        _settingsCache = { value: settings, at: Date.now() };
+        return settings;
+      } catch (error) {
+        console.warn('Failed to load shared settings from runtime settings API:', error);
+      }
+    }
+
+    try {
+      const response = await fetch('/api/config/settings', {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+      });
+      if (!response.ok) {
+        return null;
+      }
+      const data = await response.json().catch(() => null);
+      const settings = sanitizeWebSettings(data);
+      _settingsCache = { value: settings, at: Date.now() };
+      return settings;
+    } catch (error) {
+      console.warn('Failed to load shared settings from server:', error);
       return null;
     }
-    const data = await response.json().catch(() => null);
-    return sanitizeWebSettings(data);
-  } catch (error) {
-    console.warn('Failed to load shared settings from server:', error);
-    return null;
-  }
+  })().finally(() => { _settingsInflight = null; });
+
+  return _settingsInflight;
+};
+
+/** Invalidate cached settings (call after a successful PUT) */
+export const invalidateSettingsCache = (): void => {
+  _settingsCache = null;
 };
 
 export const syncDesktopSettings = async (): Promise<void> => {
@@ -916,12 +949,16 @@ export const syncDesktopSettings = async (): Promise<void> => {
   }
 };
 
-export const updateDesktopSettings = async (changes: Partial<DesktopSettings>): Promise<void> => {
-  if (typeof window === 'undefined') {
-    return;
-  }
+// Coalesce rapid updateDesktopSettings calls into a single PUT
+let _pendingSettingsChanges: Partial<DesktopSettings> | null = null;
+let _settingsFlushTimer: ReturnType<typeof setTimeout> | null = null;
+const SETTINGS_DEBOUNCE_MS = 200;
 
-  // Desktop shell uses the same HTTP settings API as web.
+const _flushSettingsUpdate = async (): Promise<void> => {
+  const changes = _pendingSettingsChanges;
+  _pendingSettingsChanges = null;
+  _settingsFlushTimer = null;
+  if (!changes || Object.keys(changes).length === 0) return;
 
   const runtimeSettings = getRuntimeSettingsAPI();
   if (runtimeSettings) {
@@ -956,10 +993,25 @@ export const updateDesktopSettings = async (changes: Partial<DesktopSettings>): 
     if (updated) {
       persistToLocalStorage(updated);
       applyDesktopUiPreferences(updated);
+      // Invalidate GET cache so next read sees the fresh data
+      _settingsCache = null;
     }
   } catch (error) {
     console.warn('Failed to update shared settings via API:', error);
   }
+};
+
+export const updateDesktopSettings = async (changes: Partial<DesktopSettings>): Promise<void> => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  _pendingSettingsChanges = { ...(_pendingSettingsChanges ?? {}), ...changes };
+
+  if (_settingsFlushTimer) {
+    clearTimeout(_settingsFlushTimer);
+  }
+  _settingsFlushTimer = setTimeout(() => void _flushSettingsUpdate(), SETTINGS_DEBOUNCE_MS);
 };
 
 export const initializeAppearancePreferences = async (): Promise<void> => {

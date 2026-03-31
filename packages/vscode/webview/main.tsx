@@ -1,5 +1,6 @@
 import { createVSCodeAPIs } from './api';
 import { onCommand, onThemeChange, proxyApiRequest, proxySessionMessageRequest, sendBridgeMessage, startSseProxy, stopSseProxy } from './api/bridge';
+import { vscodeStreamPerfCount, vscodeStreamPerfMeasure, vscodeStreamPerfObserve } from './api/streamPerf';
 import type { RuntimeAPIs } from '@openchamber/ui/lib/api/types';
 import {
   buildVSCodeThemeFromPalette,
@@ -132,15 +133,27 @@ let bootstrapFailed = false;
 const recordBootstrapFetch = (pathname: string, ok: boolean) => {
   if (!pathname.startsWith('/api/')) return;
 
+  // Don't mark as failed while still connecting — early 503s are expected
+  const isConnected = window.__OPENCHAMBER_CONNECTION__?.status === 'connected';
+
   if (pathname.startsWith('/api/config/providers')) {
-    if (ok) bootstrapProvidersReady = true;
-    else bootstrapFailed = true;
+    if (ok) {
+      bootstrapProvidersReady = true;
+      // Reset failed flag — a successful retry supersedes earlier 503s
+      if (bootstrapAgentsReady || !isConnected) bootstrapFailed = false;
+    } else if (isConnected) {
+      bootstrapFailed = true;
+    }
     return;
   }
 
   if (pathname === '/api/agent' || pathname.startsWith('/api/agent?')) {
-    if (ok) bootstrapAgentsReady = true;
-    else bootstrapFailed = true;
+    if (ok) {
+      bootstrapAgentsReady = true;
+      if (bootstrapProvidersReady || !isConnected) bootstrapFailed = false;
+    } else if (isConnected) {
+      bootstrapFailed = true;
+    }
   }
 };
 
@@ -395,14 +408,20 @@ const handleLocalApiRequest = async (url: URL, init?: RequestInit) => {
   const method = ((init?.method || 'GET') as string).toUpperCase();
 
   if (normalizedPathname === '/api/sessions/snapshot' && method === 'GET') {
-    return new Response(JSON.stringify({
-      statusSessions: {},
-      attentionSessions: {},
-      serverTime: Date.now(),
-    }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    const activity = await sendBridgeMessage<Record<string, { type: 'idle' | 'busy' | 'cooldown' }>>('api:session-activity:get')
+      .catch(() => ({}));
+    return new Response(
+      JSON.stringify({
+        statusSessions: {},
+        attentionSessions: {},
+        activitySessions: activity || {},
+        serverTime: Date.now(),
+      }),
+      {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    );
   }
 
   if (/^\/api\/sessions\/[^/]+\/(view|unview)$/.test(normalizedPathname) && method === 'POST') {
@@ -410,6 +429,84 @@ const handleLocalApiRequest = async (url: URL, init?: RequestInit) => {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     });
+  }
+
+  if (/^\/api\/sessions\/[^/]+\/message-sent$/.test(normalizedPathname) && method === 'POST') {
+    const sessionId = normalizedPathname.split('/')[3] || '';
+    return new Response(
+      JSON.stringify({
+        success: true,
+        sessionId,
+        messageSent: true,
+      }),
+      {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    );
+  }
+
+  if (normalizedPathname === '/api/session-activity' && method === 'GET') {
+    const activity = await sendBridgeMessage<Record<string, { type: 'idle' | 'busy' | 'cooldown' }>>('api:session-activity:get')
+      .catch(() => ({}));
+    return new Response(JSON.stringify(activity || {}), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  if (normalizedPathname === '/api/sessions/status' && method === 'GET') {
+    return new Response(
+      JSON.stringify({
+        sessions: {},
+        serverTime: Date.now(),
+      }),
+      {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    );
+  }
+
+  if (normalizedPathname === '/api/sessions/attention' && method === 'GET') {
+    return new Response(
+      JSON.stringify({
+        sessions: {},
+        serverTime: Date.now(),
+      }),
+      {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    );
+  }
+
+  if (/^\/api\/sessions\/[^/]+\/status$/.test(normalizedPathname) && method === 'GET') {
+    const sessionId = normalizedPathname.split('/')[3] || '';
+    return new Response(
+      JSON.stringify({
+        error: 'Session not found or no state available',
+        sessionId,
+      }),
+      {
+        status: 404,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    );
+  }
+
+  if (/^\/api\/sessions\/[^/]+\/attention$/.test(normalizedPathname) && method === 'GET') {
+    const sessionId = normalizedPathname.split('/')[3] || '';
+    return new Response(
+      JSON.stringify({
+        error: 'Session not found or no attention state available',
+        sessionId,
+      }),
+      {
+        status: 404,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    );
   }
 
   if (normalizedPathname === '/api/tts/status' && method === 'GET') {
@@ -734,6 +831,16 @@ const handleLocalApiRequest = async (url: URL, init?: RequestInit) => {
     return new Response(JSON.stringify(updated), { status: 200, headers: { 'Content-Type': 'application/json' } });
   }
 
+  if (pathname === '/api/config/opencode-resolution' && method === 'GET') {
+    try {
+      const data = await sendBridgeMessage('api:config/opencode-resolution:get');
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
   if (pathname.startsWith('/api/config/reload')) {
     await sendBridgeMessage('api:config/reload');
     return new Response(JSON.stringify({ restarted: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -746,6 +853,16 @@ const handleLocalApiRequest = async (url: URL, init?: RequestInit) => {
     } catch (error) {
       console.warn('[OpenChamber] Failed to fetch models metadata via bridge, returning empty set:', error);
       return new Response(JSON.stringify({}), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  if (pathname === '/api/zen/models' && method === 'GET') {
+    try {
+      const data = await sendBridgeMessage('api:zen:models');
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ error: message, models: [] }), { status: 502, headers: { 'Content-Type': 'application/json' } });
     }
   }
 
@@ -816,8 +933,9 @@ const handleLocalApiRequest = async (url: URL, init?: RequestInit) => {
   if (providerAuthMatch && (init?.method || 'GET').toUpperCase() === 'DELETE') {
     const providerId = decodeURIComponent(providerAuthMatch[1]);
     const scope = url.searchParams.get('scope') || 'auth';
+    const queryDirectory = url.searchParams.get('directory') || undefined;
     try {
-      const data = await sendBridgeMessage('api:provider/auth:delete', { providerId, scope });
+      const data = await sendBridgeMessage('api:provider/auth:delete', { providerId, scope, directory: queryDirectory });
       return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -829,8 +947,9 @@ const handleLocalApiRequest = async (url: URL, init?: RequestInit) => {
   const providerSourceMatch = pathname.match(/^\/api\/provider\/([^/]+)\/source$/);
   if (providerSourceMatch && (init?.method || 'GET').toUpperCase() === 'GET') {
     const providerId = decodeURIComponent(providerSourceMatch[1]);
+    const queryDirectory = url.searchParams.get('directory') || undefined;
     try {
-      const data = await sendBridgeMessage('api:provider/source:get', { providerId });
+      const data = await sendBridgeMessage('api:provider/source:get', { providerId, directory: queryDirectory });
       return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -877,7 +996,7 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const headers = { ...headersFromRequest, ...headersFromInit };
 
     if (isSseApiPath(targetUrl.pathname)) {
-      const start = await startSseProxy({ path: suffixPath, headers });
+      const start = await vscodeStreamPerfMeasure('vscode.webview.sse_start_ms', () => startSseProxy({ path: suffixPath, headers }));
       if (!start.streamId) {
         return new Response(null, { status: start.status || 503, headers: start.headers || {} });
       }
@@ -894,11 +1013,14 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
             if (!msg || msg.streamId !== streamId) return;
 
             if (msg.type === 'api:sse:chunk' && typeof msg.chunk === 'string') {
+              vscodeStreamPerfCount('vscode.webview.sse_chunk');
+              vscodeStreamPerfObserve('vscode.webview.sse_chunk_bytes', msg.chunk.length);
               controller.enqueue(encoder.encode(msg.chunk));
               return;
             }
 
             if (msg.type === 'api:sse:end') {
+              vscodeStreamPerfCount('vscode.webview.sse_end');
               unsubscribe?.();
               unsubscribe = null;
               if (typeof msg.error === 'string' && msg.error.length > 0) {
@@ -974,11 +1096,9 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
 // Listen for addToContext command from extension
 onCommand('addToContext', (payload) => {
   const { text } = payload as { text: string };
-  
-  // Import the store dynamically to avoid circular dependencies
-  import('@/stores/useSessionStore').then(({ useSessionStore }) => {
-    const store = useSessionStore.getState();
-    store.setPendingInputText(text, 'append');
+
+  import('@/sync/input-store').then(({ useInputStore }) => {
+    useInputStore.getState().setPendingInputText(text, 'append');
   });
 });
 
@@ -997,29 +1117,29 @@ onCommand('addFileMentions', (payload) => {
 
   const mentionText = paths.map((relativePath) => `@${relativePath}`).join(' ');
 
-  import('@/stores/useSessionStore').then(({ useSessionStore }) => {
-    const store = useSessionStore.getState();
-    store.setPendingInputText(mentionText, 'append-inline');
+  import('@/sync/input-store').then(({ useInputStore }) => {
+    useInputStore.getState().setPendingInputText(mentionText, 'append-inline');
   });
 });
 
 // Listen for createSessionWithPrompt command from extension (Explain, Improve Code)
 onCommand('createSessionWithPrompt', (payload) => {
   const { prompt } = payload as { prompt: string };
-  
+
   Promise.all([
-    import('@/stores/useSessionStore'),
+    import('@/sync/session-ui-store'),
     import('@/stores/useConfigStore'),
-  ]).then(([{ useSessionStore }, { useConfigStore }]) => {
-    const sessionStore = useSessionStore.getState();
+    import('@/sync/input-store'),
+  ]).then(([{ useSessionUIStore }, { useConfigStore }, { useInputStore }]) => {
+    const sessionStore = useSessionUIStore.getState();
     const configStore = useConfigStore.getState();
-    
+
     // Open a new session draft first
     sessionStore.openNewSessionDraft();
-    
+
     // Get current provider/model/agent configuration
     const { currentProviderId, currentModelId, currentAgentName } = configStore;
-    
+
     if (currentProviderId && currentModelId) {
       // Send the message - this will create the session from the draft and send
       sessionStore.sendMessage(
@@ -1035,16 +1155,15 @@ onCommand('createSessionWithPrompt', (payload) => {
       });
     } else {
       // If no provider/model configured, just set the text and let user send manually
-      sessionStore.setPendingInputText(prompt);
+      useInputStore.getState().setPendingInputText(prompt);
     }
   });
 });
 
 // Listen for newSession command from extension title bar button
 onCommand('newSession', () => {
-  import('@/stores/useSessionStore').then(({ useSessionStore }) => {
-    const store = useSessionStore.getState();
-    store.openNewSessionDraft();
+  import('@/sync/session-ui-store').then(({ useSessionUIStore }) => {
+    useSessionUIStore.getState().openNewSessionDraft();
   });
   
   // Also dispatch event to navigate to chat view in VSCodeLayout

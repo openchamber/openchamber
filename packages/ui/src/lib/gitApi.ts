@@ -3,7 +3,7 @@
 import type { RuntimeAPIs } from './api/types';
 import * as gitHttp from './gitApiHttp';
 import { opencodeClient } from './opencode/client';
-import { useSessionStore } from '@/stores/useSessionStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useContextStore } from '@/stores/contextStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 
@@ -56,10 +56,10 @@ export async function checkIsGitRepository(directory: string): Promise<boolean> 
   return gitHttp.checkIsGitRepository(directory);
 }
 
-export async function getGitStatus(directory: string): Promise<import('./api/types').GitStatus> {
+export async function getGitStatus(directory: string, options?: { mode?: 'light' }): Promise<import('./api/types').GitStatus> {
   const runtime = getRuntimeGit();
   if (runtime) return runtime.getGitStatus(directory);
-  return gitHttp.getGitStatus(directory);
+  return gitHttp.getGitStatus(directory, options);
 }
 
 export async function getGitDiff(directory: string, options: import('./api/types').GetGitDiffOptions): Promise<import('./api/types').GitDiffResponse> {
@@ -326,7 +326,7 @@ type SessionGenerationContext = {
 };
 
 const resolveSessionGenerationContext = (): SessionGenerationContext | null => {
-  const sessionId = useSessionStore.getState().currentSessionId;
+  const sessionId = useSessionUIStore.getState().currentSessionId;
   if (!sessionId) {
     return null;
   }

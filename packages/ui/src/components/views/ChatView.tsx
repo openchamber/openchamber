@@ -1,10 +1,10 @@
 import React from 'react';
 import { ChatContainer } from '@/components/chat/ChatContainer';
 import { ChatErrorBoundary } from '@/components/chat/ChatErrorBoundary';
-import { useSessionStore } from '@/stores/useSessionStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 
 export const ChatView: React.FC = () => {
-    const currentSessionId = useSessionStore((state) => state.currentSessionId);
+    const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
 
     return (
         <ChatErrorBoundary sessionId={currentSessionId || undefined}>

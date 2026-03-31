@@ -119,8 +119,9 @@ export async function checkIsGitRepository(directory: string): Promise<boolean> 
   }
 }
 
-export async function getGitStatus(directory: string): Promise<GitStatus> {
-  const key = normalizeDirectoryKey(directory);
+export async function getGitStatus(directory: string, options?: { mode?: 'light' }): Promise<GitStatus> {
+  const mode = options?.mode;
+  const key = mode === 'light' ? `${normalizeDirectoryKey(directory)}::light` : normalizeDirectoryKey(directory);
   const now = Date.now();
   const cached = gitStatusCache.get(key);
   if (cached && cached.expiresAt > now) {
@@ -133,7 +134,7 @@ export async function getGitStatus(directory: string): Promise<GitStatus> {
   }
 
   const task = (async () => {
-    const response = await fetch(buildUrl(`${API_BASE}/status`, directory));
+    const response = await fetch(buildUrl(`${API_BASE}/status`, directory, mode ? { mode } : undefined));
     if (!response.ok) {
       throw new Error(`Failed to get git status: ${response.statusText}`);
     }

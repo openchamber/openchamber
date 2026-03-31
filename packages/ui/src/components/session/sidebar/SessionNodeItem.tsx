@@ -38,6 +38,7 @@ import { DraggableSessionRow } from './sessionFolderDnd';
 import type { SessionNode, SessionSummaryMeta } from './types';
 import { formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText, resolveSessionDiffStats } from './utils';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
+import { useSessionUnseenCount } from '@/sync/notification-store';
 
 // Pre-defined palette with maximally distinct colors across hue + saturation + lightness.
 // Ordered so adjacent entries are perceptually far apart.
@@ -107,7 +108,6 @@ type Props = {
   expandedParents: Set<string>;
   hasSessionSearchQuery: boolean;
   normalizedSessionSearchQuery: string;
-  sessionAttentionStates: Map<string, { needsAttention?: boolean }>;
   notifyOnSubtasks: boolean;
   sessionStatus?: Map<string, { type?: string }>;
   permissions: Map<string, unknown[]>;
@@ -156,7 +156,6 @@ export function SessionNodeItem(props: Props): React.ReactNode {
     expandedParents,
     hasSessionSearchQuery,
     normalizedSessionSearchQuery,
-    sessionAttentionStates,
     notifyOnSubtasks,
     sessionStatus,
     permissions,
@@ -221,8 +220,8 @@ export function SessionNodeItem(props: Props): React.ReactNode {
   const isPinnedSession = pinnedSessionIds.has(session.id);
   const isExpanded = hasSessionSearchQuery ? true : expandedParents.has(session.id);
   const isSubtaskSession = Boolean((session as Session & { parentID?: string | null }).parentID);
-  const rawNeedsAttention = sessionAttentionStates.get(session.id)?.needsAttention === true;
-  const needsAttention = rawNeedsAttention && (!isSubtaskSession || notifyOnSubtasks);
+  const unseenCount = useSessionUnseenCount(session.id);
+  const needsAttention = unseenCount > 0 && (!isSubtaskSession || notifyOnSubtasks);
   const sessionSummary = session.summary as SessionSummaryMeta | undefined;
   const sessionDiffStats = resolveSessionDiffStats(sessionSummary);
   const sessionTimestamp = session.time?.updated || session.time?.created || Date.now();

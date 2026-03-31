@@ -31,6 +31,7 @@ import { getContextFileOpenFailureMessage, validateContextFileOpen } from '@/lib
 // Minimum width for side-by-side diff view (px)
 const SIDE_BY_SIDE_MIN_WIDTH = 1100;
 const DIFF_REQUEST_TIMEOUT_MS = 15000;
+const LARGE_DIFF_CHANGED_LINES = 500;
 
 // Perf: limit concurrent expanded diffs in stacked view.
 // Expanding many diffs mounts many Pierre instances + lots of DOM.
@@ -638,6 +639,7 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
     const [diffRetryNonce, setDiffRetryNonce] = React.useState(0);
     const [diffLoadError, setDiffLoadError] = React.useState<string | null>(null);
     const [isLoading, setIsLoading] = React.useState(false);
+    const [forceRenderLarge, setForceRenderLarge] = React.useState(false);
     const lastDiffRequestRef = React.useRef<string | null>(null);
     const sectionRef = React.useRef<HTMLDivElement | null>(null);
 
@@ -881,7 +883,24 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                             Loading diff…
                         </div>
                     ) : null}
-                    {diffData ? (
+                    {diffData && !forceRenderLarge && (file.insertions + file.deletions) > LARGE_DIFF_CHANGED_LINES ? (
+                        <div className="flex flex-col items-center gap-2 px-4 py-8 text-sm text-muted-foreground">
+                            <div className="typography-ui-label font-semibold text-foreground">
+                                Large diff ({file.insertions + file.deletions} changed lines)
+                            </div>
+                            <div className="typography-meta text-muted-foreground">
+                                Rendering may be slow. You can still view the diff by clicking below.
+                            </div>
+                            <button
+                                type="button"
+                                className="typography-ui-label text-primary hover:underline"
+                                onClick={() => setForceRenderLarge(true)}
+                            >
+                                Render anyway
+                            </button>
+                        </div>
+                    ) : null}
+                    {diffData && (forceRenderLarge || (file.insertions + file.deletions) <= LARGE_DIFF_CHANGED_LINES) ? (
                         <InlineDiffViewer
                             filePath={file.path}
                             diff={diffData}
@@ -917,7 +936,9 @@ export const DiffView: React.FC<DiffViewProps> = ({
     const isGitRepo = useIsGitRepo(effectiveDirectory ?? null);
     const status = useGitStatus(effectiveDirectory ?? null);
     const isLoadingStatus = useGitStore((state) => state.isLoadingStatus);
-    const { setActiveDirectory, fetchStatus, setDiff } = useGitStore();
+    const setActiveDirectory = useGitStore((state) => state.setActiveDirectory);
+    const fetchStatus = useGitStore((state) => state.fetchStatus);
+    const setDiff = useGitStore((state) => state.setDiff);
 	 
     const [selectedFile, setSelectedFile] = React.useState<string | null>(null);
     const [stackedExpandTarget, setStackedExpandTarget] = React.useState<string | null>(null);
@@ -1722,7 +1743,8 @@ export const useDiffFileCount = (): number => {
     const { git } = useRuntimeAPIs();
     const effectiveDirectory = useEffectiveDirectory();
 
-    const { setActiveDirectory, fetchStatus } = useGitStore();
+    const setActiveDirectory = useGitStore((state) => state.setActiveDirectory);
+    const fetchStatus = useGitStore((state) => state.fetchStatus);
     const fileCount = useGitFileCount(effectiveDirectory ?? null);
 
     React.useEffect(() => {

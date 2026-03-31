@@ -22,7 +22,6 @@ use std::{
     },
     time::Duration,
 };
-use tauri::utils::config::BackgroundThrottlingPolicy;
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 #[cfg(target_os = "macos")]
 use window_vibrancy::{
@@ -277,7 +276,7 @@ fn build_macos_menu<R: tauri::Runtime>(
         MENU_ITEM_TOGGLE_MEMORY_DEBUG_ID,
         "Toggle Memory Debug",
         true,
-        Some("Cmd+Shift+D"),
+        Some("CmdOrCtrl+Shift+D"),
     )?;
 
     let help_dialog = MenuItem::with_id(
@@ -2630,8 +2629,7 @@ fn create_window(
         .min_inner_size(MIN_WINDOW_WIDTH as f64, MIN_WINDOW_HEIGHT as f64)
         .decorations(true)
         .visible(false)
-        .initialization_script(&init_script)
-        .background_throttling(BackgroundThrottlingPolicy::Disabled);
+        .initialization_script(&init_script);
 
     let apply_restored_state = restored_state
         .as_ref()
@@ -2693,8 +2691,7 @@ fn create_startup_window(app: &tauri::AppHandle, restore_geometry: bool) -> Resu
         .min_inner_size(MIN_WINDOW_WIDTH as f64, MIN_WINDOW_HEIGHT as f64)
         .decorations(true)
         .visible(true)
-        .initialization_script(&splash_script)
-        .background_throttling(BackgroundThrottlingPolicy::Disabled);
+        .initialization_script(&splash_script);
 
     let apply_restored_state = restored_state
         .as_ref()

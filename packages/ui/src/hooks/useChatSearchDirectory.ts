@@ -1,13 +1,14 @@
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { useSessionStore } from '@/stores/useSessionStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSessions } from '@/sync/sync-context';
 import type { Session } from '@opencode-ai/sdk/v2';
 
 export const useChatSearchDirectory = (): string | undefined => {
-  const currentSessionId = useSessionStore((state) => state.currentSessionId);
-  const sessions = useSessionStore((state) => state.sessions);
-  const worktreeMap = useSessionStore((state) => state.worktreeMetadata);
-  const newSessionDraft = useSessionStore((state) => state.newSessionDraft);
+  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const sessions = useSessions();
+  const worktreeMap = useSessionUIStore((state) => state.worktreeMetadata);
+  const newSessionDraft = useSessionUIStore((state) => state.newSessionDraft);
 
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
   const projects = useProjectsStore((state) => state.projects);

@@ -187,12 +187,6 @@ export const HelpDialog: React.FC = () => {
           icon: RiLayoutLeftLine,
         },
         {
-          id: 'open_timeline',
-          description: "Open Timeline",
-          icon: RiTimeLine,
-          keys: '',
-        },
-        {
           id: 'toggle_services_menu',
           description: 'Toggle Services Menu',
           icon: RiStackLine,

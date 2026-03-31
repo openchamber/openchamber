@@ -1,5 +1,5 @@
 import React from 'react';
-import { useSessionStore } from '@/stores/useSessionStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useFireworksCelebration } from '@/contexts/FireworksContext';
 import type { GitIdentityProfile, CommitFileEntry } from '@/lib/api/types';
@@ -225,13 +225,11 @@ export const GitView: React.FC = () => {
   const currentDirectory = useEffectiveDirectory();
   const [worktreeBootstrapStatus, setWorktreeBootstrapStatus] = React.useState<'pending' | 'ready' | 'failed' | null>(null);
   const [isWaitingForGitRefreshAfterBootstrap, setIsWaitingForGitRefreshAfterBootstrap] = React.useState(false);
-  const {
-    currentSessionId,
-    worktreeMetadata: worktreeMap,
-    availableWorktrees,
-    newSessionDraft,
-    setDraftBootstrapPendingDirectory,
-  } = useSessionStore();
+  const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
+  const newSessionDraft = useSessionUIStore((s) => s.newSessionDraft);
+  const setDraftBootstrapPendingDirectory = useSessionUIStore((s) => s.setDraftBootstrapPendingDirectory);
+  const worktreeMap = useSessionUIStore((s) => s.worktreeMetadata);
+  const availableWorktrees = useSessionUIStore((s) => s.availableWorktrees);
   const normalizedCurrentDirectory = normalizePath(currentDirectory);
   const inferredWorktreeMetadata = React.useMemo(() => {
     if (!normalizedCurrentDirectory) {
@@ -276,16 +274,14 @@ export const GitView: React.FC = () => {
   const currentIdentity = useGitIdentity(currentDirectory ?? null);
   const isLoading = useGitStore((state) => state.isLoadingStatus);
   const isLogLoading = useGitStore((state) => state.isLoadingLog);
-  const {
-    setActiveDirectory,
-    fetchAll,
-    fetchStatus,
-    fetchBranches,
-    fetchLog,
-    fetchIdentity,
-    prefetchDiffs,
-    setLogMaxCount,
-  } = useGitStore();
+  const setActiveDirectory = useGitStore((state) => state.setActiveDirectory);
+  const fetchAll = useGitStore((state) => state.fetchAll);
+  const fetchStatus = useGitStore((state) => state.fetchStatus);
+  const fetchBranches = useGitStore((state) => state.fetchBranches);
+  const fetchLog = useGitStore((state) => state.fetchLog);
+  const fetchIdentity = useGitStore((state) => state.fetchIdentity);
+  const prefetchDiffs = useGitStore((state) => state.prefetchDiffs);
+  const setLogMaxCount = useGitStore((state) => state.setLogMaxCount);
   const isMobile = useUIStore((state) => state.isMobile);
   const openContextDiff = useUIStore((state) => state.openContextDiff);
   const navigateToDiff = useUIStore((state) => state.navigateToDiff);

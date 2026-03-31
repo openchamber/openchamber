@@ -1,5 +1,5 @@
 import React from 'react';
-import { useSessionStore } from '@/stores/useSessionStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useUIStore } from '@/stores/useUIStore';
 import { parseRoute, updateBrowserURL, hasRouteParams } from '@/lib/router';
 import type { RouteState, AppRouteState } from '@/lib/router';
@@ -38,7 +38,7 @@ export function useRouter(): void {
   const isApplyingRouteRef = React.useRef(false);
 
   // Get store actions (stable references)
-  const setCurrentSession = useSessionStore((state) => state.setCurrentSession);
+  const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
   const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
@@ -58,7 +58,7 @@ export function useRouter(): void {
       try {
         // 1. Apply session first (may trigger async operations)
         if (route.sessionId) {
-          const currentSessionId = useSessionStore.getState().currentSessionId;
+          const currentSessionId = useSessionUIStore.getState().currentSessionId;
           if (route.sessionId !== currentSessionId) {
             await setCurrentSession(route.sessionId);
           }
@@ -97,7 +97,7 @@ export function useRouter(): void {
    * Get current app state for URL serialization.
    */
   const getCurrentAppState = React.useCallback((): AppRouteState => {
-    const sessionState = useSessionStore.getState();
+    const sessionState = useSessionUIStore.getState();
     const uiState = useUIStore.getState();
 
     return {
@@ -158,9 +158,9 @@ export function useRouter(): void {
       return;
     }
 
-    let prevSessionId: string | null = useSessionStore.getState().currentSessionId;
+    let prevSessionId: string | null = useSessionUIStore.getState().currentSessionId;
 
-    const unsubscribe = useSessionStore.subscribe((state) => {
+    const unsubscribe = useSessionUIStore.subscribe((state) => {
       const sessionId = state.currentSessionId;
 
       // Skip if no change or if we're currently applying a route
@@ -261,7 +261,7 @@ export function navigateToRoute(route: Partial<RouteState>): void {
   if (win.__VSCODE_CONFIG__ !== undefined) {
     // In VS Code, just apply state changes directly
     if (route.sessionId) {
-      void useSessionStore.getState().setCurrentSession(route.sessionId);
+      void useSessionUIStore.getState().setCurrentSession(route.sessionId);
     }
     if (route.settingsPath) {
       useUIStore.getState().setSettingsPage(resolveSettingsSlug(route.settingsPath));
@@ -300,7 +300,7 @@ export function navigateToRoute(route: Partial<RouteState>): void {
 
   // Also apply to state
   if (route.sessionId) {
-    void useSessionStore.getState().setCurrentSession(route.sessionId);
+    void useSessionUIStore.getState().setCurrentSession(route.sessionId);
   }
   if (route.settingsPath) {
     useUIStore.getState().setSettingsPage(resolveSettingsSlug(route.settingsPath));
@@ -321,7 +321,7 @@ export function getShareableURL(): string {
     return '/';
   }
 
-  const sessionState = useSessionStore.getState();
+  const sessionState = useSessionUIStore.getState();
   const uiState = useUIStore.getState();
 
   const params = new URLSearchParams();

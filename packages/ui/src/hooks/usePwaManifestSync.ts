@@ -1,5 +1,6 @@
 import React from 'react';
-import { useSessionStore } from '@/stores/useSessionStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSessions } from '@/sync/sync-context';
 import { isWebRuntime } from '@/lib/desktop';
 import { PWA_RECENT_SESSIONS_STORAGE_KEY } from '@/lib/pwa';
 
@@ -60,8 +61,8 @@ const buildRecentShortcuts = (
 };
 
 export const usePwaManifestSync = () => {
-  const sessions = useSessionStore((state) => state.sessions);
-  const currentSessionId = useSessionStore((state) => state.currentSessionId);
+  const sessions = useSessions();
+  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
 
   const recentShortcuts = React.useMemo(() => {
     return buildRecentShortcuts(sessions, currentSessionId);

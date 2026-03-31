@@ -27,7 +27,7 @@ import { createWorktreeWithDefaults } from '@/lib/worktrees/worktreeCreate';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { getWorktreeSetupCommands } from '@/lib/openchamberConfig';
 import { sessionEvents } from '@/lib/sessionEvents';
-import { useSessionStore } from '@/stores/useSessionStore';
+import { useSessions } from '@/sync/sync-context';
 
 export interface BranchPickerProject {
   id: string;
@@ -65,7 +65,7 @@ const normalizePath = (value: string | null | undefined): string => {
 };
 
 export function BranchPickerDialog({ open, onOpenChange, project }: BranchPickerDialogProps) {
-  const sessions = useSessionStore((state) => state.sessions);
+  const sessions = useSessions();
   const [searchQuery, setSearchQuery] = React.useState('');
   const [branches, setBranches] = React.useState<GitBranch | null>(null);
   const [worktrees, setWorktrees] = React.useState<GitWorktreeInfo[]>([]);

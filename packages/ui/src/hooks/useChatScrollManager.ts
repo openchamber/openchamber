@@ -11,8 +11,6 @@ import {
 
 import { useScrollEngine } from './useScrollEngine';
 
-const useIsomorphicLayoutEffect = typeof window !== 'undefined' ? React.useLayoutEffect : React.useEffect;
-
 export type ContentChangeReason = 'text' | 'structural' | 'permission';
 
 interface ChatMessageRecord {
@@ -41,7 +39,6 @@ interface UseChatScrollManagerOptions {
     isSyncing: boolean;
     isMobile: boolean;
     chatRenderMode?: 'sorted' | 'live';
-    messageStreamStates: Map<string, unknown>;
     onActiveTurnChange?: (turnId: string | null) => void;
 }
 
@@ -110,6 +107,7 @@ export const useChatScrollManager = ({
     const lastScrollTopRef = React.useRef<number>(0);
     const touchLastYRef = React.useRef<number | null>(null);
     const pinnedSyncRafRef = React.useRef<number | null>(null);
+    const preferInstantPinRef = React.useRef(false);
     const viewportAnchorTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const pendingViewportAnchorRef = React.useRef<{ sessionId: string; anchor: number } | null>(null);
     const lastViewportAnchorRef = React.useRef<{ sessionId: string; anchor: number } | null>(null);
@@ -178,10 +176,20 @@ export const useChatScrollManager = ({
         }
 
         const distanceFromBottom = getDistanceFromBottom();
+        if (distanceFromBottom <= getAutoFollowThreshold()) {
+            preferInstantPinRef.current = false;
+            return;
+        }
+
+        if (preferInstantPinRef.current) {
+            scrollToBottomInternal({ instant: true });
+            return;
+        }
+
         if (distanceFromBottom > getAutoFollowThreshold()) {
             scrollPinnedToBottom();
         }
-    }, [getAutoFollowThreshold, getDistanceFromBottom, scrollPinnedToBottom, updateScrollButtonVisibility]);
+    }, [getAutoFollowThreshold, getDistanceFromBottom, scrollPinnedToBottom, scrollToBottomInternal, updateScrollButtonVisibility]);
 
     const schedulePinnedStateAndIndicators = React.useCallback(() => {
         if (typeof window === 'undefined') {
@@ -264,6 +272,7 @@ export const useChatScrollManager = ({
 
     const releasePinnedScroll = React.useCallback(() => {
         scrollEngine.cancelFollow();
+        preferInstantPinRef.current = false;
         updatePinnedState(false);
         schedulePinnedStateAndIndicators();
     }, [schedulePinnedStateAndIndicators, scrollEngine, updatePinnedState]);
@@ -296,6 +305,7 @@ export const useChatScrollManager = ({
         if (!isPinnedRef.current) {
             const distanceFromBottom = getDistanceFromBottom();
             if (distanceFromBottom <= getPinThreshold()) {
+                preferInstantPinRef.current = false;
                 updatePinnedState(true);
             }
         }
@@ -412,7 +422,7 @@ export const useChatScrollManager = ({
     }, [handleScrollEvent, handleWheelIntent, scrollEngine, updatePinnedState]);
 
     // Session switch - always start pinned at bottom
-    useIsomorphicLayoutEffect(() => {
+    React.useEffect(() => {
         if (!currentSessionId || currentSessionId === lastSessionIdRef.current) {
             return;
         }
@@ -423,6 +433,7 @@ export const useChatScrollManager = ({
         pendingViewportAnchorRef.current = null;
 
         // Always start pinned at bottom on session switch
+        preferInstantPinRef.current = true;
         updatePinnedState(true);
         setShowScrollButton(false);
 
@@ -534,12 +545,17 @@ export const useChatScrollManager = ({
 
         const container = scrollRef.current;
         if (!container) {
-            onActiveTurnChange(null);
             return;
         }
 
+        let lastActiveTurnId: string | null = null;
+
         const spy = createScrollSpy({
             onActive: (turnId) => {
+                if (turnId === lastActiveTurnId) {
+                    return;
+                }
+                lastActiveTurnId = turnId;
                 onActiveTurnChange(turnId);
             },
         });
@@ -626,7 +642,6 @@ export const useChatScrollManager = ({
             container.removeEventListener('scroll', handleScroll);
             mutationObserver.disconnect();
             spy.destroy();
-            onActiveTurnChange(null);
         };
     }, [currentSessionId, onActiveTurnChange, scrollRef, sessionMessages.length]);
 

@@ -231,13 +231,6 @@ const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
     description: 'Switch to the git panel',
   },
   {
-    id: 'open_timeline',
-    defaultCombo: 'mod+t',
-    label: 'Open timeline',
-    description: 'Open the timeline dialog',
-    customizable: true,
-  },
-  {
     id: 'open_help',
     defaultCombo: 'mod+.',
     label: 'Open keyboard shortcuts',

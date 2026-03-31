@@ -1,5 +1,7 @@
 import React from 'react';
-import { useSessionStore } from '@/stores/useSessionStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSelectionStore } from '@/sync/selection-store';
+import * as sessionActions from '@/sync/session-actions';
 import { useUIStore } from '@/stores/useUIStore';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useAssistantStatus } from '@/hooks/useAssistantStatus';
@@ -10,24 +12,26 @@ import { showOpenCodeStatus } from '@/lib/openCodeStatus';
 import { eventMatchesShortcut, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 
 export const useKeyboardShortcuts = () => {
-  const { openNewSessionDraft, abortCurrentOperation, armAbortPrompt, clearAbortPrompt, currentSessionId } = useSessionStore();
-  const {
-    toggleCommandPalette,
-    toggleHelpDialog,
-    toggleSidebar,
-    toggleRightSidebar,
-    setRightSidebarOpen,
-    setRightSidebarTab,
-    toggleBottomTerminal,
-    setBottomTerminalExpanded,
-    isMobile,
-    setSessionSwitcherOpen,
-    setActiveMainTab,
-    setSettingsDialogOpen,
-    setModelSelectorOpen,
-    toggleExpandedInput,
-    shortcutOverrides,
-  } = useUIStore();
+  const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
+  const armAbortPrompt = useSessionUIStore((s) => s.armAbortPrompt);
+  const clearAbortPrompt = useSessionUIStore((s) => s.clearAbortPrompt);
+  const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
+    const abortCurrentOperation = sessionActions.abortCurrentOperation;;
+  const toggleCommandPalette = useUIStore((s) => s.toggleCommandPalette);
+  const toggleHelpDialog = useUIStore((s) => s.toggleHelpDialog);
+  const toggleSidebar = useUIStore((s) => s.toggleSidebar);
+  const toggleRightSidebar = useUIStore((s) => s.toggleRightSidebar);
+  const setRightSidebarOpen = useUIStore((s) => s.setRightSidebarOpen);
+  const setRightSidebarTab = useUIStore((s) => s.setRightSidebarTab);
+  const toggleBottomTerminal = useUIStore((s) => s.toggleBottomTerminal);
+  const setBottomTerminalExpanded = useUIStore((s) => s.setBottomTerminalExpanded);
+  const isMobile = useUIStore((s) => s.isMobile);
+  const setSessionSwitcherOpen = useUIStore((s) => s.setSessionSwitcherOpen);
+  const setActiveMainTab = useUIStore((s) => s.setActiveMainTab);
+  const setSettingsDialogOpen = useUIStore((s) => s.setSettingsDialogOpen);
+  const setModelSelectorOpen = useUIStore((s) => s.setModelSelectorOpen);
+  const toggleExpandedInput = useUIStore((s) => s.toggleExpandedInput);
+  const shortcutOverrides = useUIStore((s) => s.shortcutOverrides);
   const { themeMode, setThemeMode } = useThemeSystem();
   const { working } = useAssistantStatus();
   const abortPrimedUntilRef = React.useRef<number | null>(null);
@@ -105,13 +109,6 @@ export const useKeyboardShortcuts = () => {
             activeElement.focus({ preventScroll: true });
           }
         });
-        return;
-      }
-
-      if (eventMatchesShortcut(e, combo('open_timeline'))) {
-        e.preventDefault();
-        const { isTimelineDialogOpen, setTimelineDialogOpen } = useUIStore.getState();
-        setTimelineDialogOpen(!isTimelineDialogOpen);
         return;
       }
 
@@ -270,14 +267,13 @@ export const useKeyboardShortcuts = () => {
         configState.cycleCurrentVariant();
 
         const nextVariant = useConfigStore.getState().currentVariant;
-        const sessionState = useSessionStore.getState();
-        const sessionId = sessionState.currentSessionId;
+        const sessionId = useSessionUIStore.getState().currentSessionId;
         const agentName = useConfigStore.getState().currentAgentName;
         const providerId = useConfigStore.getState().currentProviderId;
         const modelId = useConfigStore.getState().currentModelId;
 
         if (sessionId && agentName && providerId && modelId) {
-          sessionState.saveAgentModelVariantForSession(sessionId, agentName, providerId, modelId, nextVariant);
+          useSelectionStore.getState().saveAgentModelVariantForSession(sessionId, agentName, providerId, modelId, nextVariant);
         }
 
         return;
@@ -387,7 +383,7 @@ export const useKeyboardShortcuts = () => {
         if (primedUntil && now < primedUntil) {
           e.preventDefault();
           resetAbortPriming();
-          void abortCurrentOperation(sessionId || undefined);
+          void abortCurrentOperation(sessionId ?? '');
           return;
         }
 

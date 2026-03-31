@@ -33,6 +33,9 @@ const fetchStatus = async (
   return payload;
 };
 
+// In-flight dedup for refreshStatus
+let _inFlightAuthRefresh: Promise<GitHubAuthStatusWithError | null> | null = null;
+
 export const useGitHubAuthStore = create<GitHubAuthStore>((set, get) => ({
   status: null,
   isLoading: false,
@@ -44,19 +47,25 @@ export const useGitHubAuthStore = create<GitHubAuthStore>((set, get) => ({
       return status;
     }
 
+    if (_inFlightAuthRefresh) return _inFlightAuthRefresh;
+
     set({ isLoading: true });
-    try {
-      const payload = await fetchStatus(runtimeGitHub);
-      set({ status: payload, isLoading: false, hasChecked: true });
-      return payload;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      set({
-        status: { connected: false, error: message },
-        isLoading: false,
-        hasChecked: true,
-      });
-      return null;
-    }
+    _inFlightAuthRefresh = (async () => {
+      try {
+        const payload = await fetchStatus(runtimeGitHub);
+        set({ status: payload, isLoading: false, hasChecked: true });
+        return payload;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        set({
+          status: { connected: false, error: message },
+          isLoading: false,
+          hasChecked: true,
+        });
+        return null;
+      }
+    })().finally(() => { _inFlightAuthRefresh = null; });
+
+    return _inFlightAuthRefresh;
   },
 }));
