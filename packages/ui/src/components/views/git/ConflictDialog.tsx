@@ -9,7 +9,8 @@ import {
 import { Button } from '@/components/ui/button';
 
 import { RiAlertLine, RiLoader4Line, RiChat1Line, RiAddLine } from '@remixicon/react';
-import { useSessionStore } from '@/stores/useSessionStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useInputStore } from '@/sync/input-store';
 import { useUIStore } from '@/stores/useUIStore';
 import { toast } from '@/components/ui';
 import { getConflictDetails, type MergeConflictDetails } from '@/lib/gitApi';
@@ -33,10 +34,10 @@ export const ConflictDialog: React.FC<ConflictDialogProps> = ({
   onAbort,
   onClearState,
 }) => {
-  const openNewSessionDraft = useSessionStore((state) => state.openNewSessionDraft);
-  const currentSessionId = useSessionStore((state) => state.currentSessionId);
-  const setPendingInputText = useSessionStore((state) => state.setPendingInputText);
-  const setPendingSyntheticParts = useSessionStore((state) => state.setPendingSyntheticParts);
+  const openNewSessionDraft = useSessionUIStore((state) => state.openNewSessionDraft);
+  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const setPendingInputText = useInputStore((state) => state.setPendingInputText);
+  const setPendingSyntheticParts = useInputStore((state) => state.setPendingSyntheticParts);
   const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
 
   const [isLoading, setIsLoading] = React.useState(false);

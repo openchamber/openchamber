@@ -51,8 +51,8 @@ import { useDeviceInfo } from '@/lib/device';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { useUIStore } from '@/stores/useUIStore';
-import { useMessageStore } from '@/stores/messageStore';
-import { useSessionStore } from '@/stores/useSessionStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSelectionStore } from '@/sync/selection-store';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { getGitHubPrStatusKey, useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
@@ -284,7 +284,7 @@ export const PullRequestSection: React.FC<{
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
-  const currentSessionId = useSessionStore((state) => state.currentSessionId);
+  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const { isMobile, hasTouchInput } = useDeviceInfo();
 
   const openGitHubSettings = React.useCallback(() => {
@@ -633,7 +633,7 @@ export const PullRequestSection: React.FC<{
     }
 
     const { currentProviderId, currentModelId, currentAgentName, currentVariant } = useConfigStore.getState();
-    const lastUsedProvider = useMessageStore.getState().lastUsedProvider;
+    const lastUsedProvider = useSelectionStore.getState().lastUsedProvider;
     const providerID = currentProviderId || lastUsedProvider?.providerID;
     const modelID = currentModelId || lastUsedProvider?.modelID;
     if (!providerID || !modelID) {
@@ -656,14 +656,13 @@ export const PullRequestSection: React.FC<{
     instructionsText: string,
     payloadText: string,
   ) => {
-    void useMessageStore.getState().sendMessage(
+    void useSessionUIStore.getState().sendMessage(
       visibleText,
       target.providerID,
       target.modelID,
       target.currentAgentName ?? undefined,
-      target.sessionId,
       undefined,
-      null,
+      undefined,
       [
         { text: instructionsText, synthetic: true },
         { text: payloadText, synthetic: true },

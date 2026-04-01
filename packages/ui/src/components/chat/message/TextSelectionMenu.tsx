@@ -1,6 +1,7 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
-import { useSessionStore } from '@/stores/useSessionStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useInputStore } from '@/sync/input-store';
 import { useUIStore } from '@/stores/useUIStore';
 import { RiChatNewLine, RiAddLine, RiFileCopyLine } from '@remixicon/react';
 import { cn } from '@/lib/utils';
@@ -196,8 +197,8 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
   const pendingSelectionRef = React.useRef<SelectionPayload | null>(null);
   const openRafRef = React.useRef<number | null>(null);
   const isMenuVisibleRef = React.useRef(false);
-  const createSession = useSessionStore((state) => state.createSession);
-  const setPendingInputText = useSessionStore((state) => state.setPendingInputText);
+  const createSession = useSessionUIStore((state) => state.createSession);
+  const setPendingInputText = useInputStore((state) => state.setPendingInputText);
   const isMobile = useUIStore((state) => state.isMobile);
 
   React.useEffect(() => {

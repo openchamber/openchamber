@@ -16,8 +16,9 @@ const LOG_STALE_THRESHOLD = 10000;
 const REPO_CHECK_STALE_THRESHOLD = 60_000;
 const DIFF_PREFETCH_MAX_FILES = 25;
 const DIFF_PREFETCH_FOCUS_MAX_FILES = 40;
-const DIFF_PREFETCH_CONCURRENCY = 4;
+const DIFF_PREFETCH_CONCURRENCY = 2;
 const DIFF_PREFETCH_TIMEOUT_MS = 15000;
+const DIFF_PREFETCH_LARGE_FILE_THRESHOLD = 500; // skip prefetch for files with >500 changed lines
 const RECENT_DIRECTORIES_LIMIT = 3;
 
 // Diff cache limits to prevent memory bloat with many modified files
@@ -57,7 +58,7 @@ interface GitStore {
   setActiveDirectory: (directory: string | null) => void;
   getDirectoryState: (directory: string) => DirectoryGitState | null;
 
-  fetchStatus: (directory: string, git: GitAPI, options?: { silent?: boolean }) => Promise<boolean>;
+  fetchStatus: (directory: string, git: GitAPI, options?: { silent?: boolean; mode?: 'light' }) => Promise<boolean>;
   fetchBranches: (directory: string, git: GitAPI) => Promise<void>;
   fetchLog: (directory: string, git: GitAPI, maxCount?: number) => Promise<void>;
   fetchIdentity: (directory: string, git: GitAPI) => Promise<void>;
@@ -87,7 +88,7 @@ interface GitFileDiffResponse {
 
 interface GitAPI {
   checkIsGitRepository: (directory: string) => Promise<boolean>;
-  getGitStatus: (directory: string) => Promise<GitStatus>;
+  getGitStatus: (directory: string, options?: { mode?: 'light' }) => Promise<GitStatus>;
   getGitBranches: (directory: string) => Promise<GitBranch>;
   getGitLog: (directory: string, options?: { maxCount?: number }) => Promise<GitLogResponse>;
   getCurrentGitIdentity: (directory: string) => Promise<GitIdentitySummary | null>;
@@ -216,7 +217,8 @@ const hasStatusChanged = (oldStatus: GitStatus | null, newStatus: GitStatus | nu
     }
   }
 
-  if (haveDiffStatsChanged(oldStatus.diffStats, newStatus.diffStats)) return true;
+  // Skip diffStats comparison when light mode omits them (undefined)
+  if (newStatus.diffStats !== undefined && haveDiffStatsChanged(oldStatus.diffStats, newStatus.diffStats)) return true;
 
   return false;
 };
@@ -249,21 +251,24 @@ const getChangedFilePaths = (oldStatus: GitStatus | null, newStatus: GitStatus |
     }
   }
 
-  const oldStats = oldStatus?.diffStats ?? {};
-  const newStats = newStatus.diffStats ?? {};
-  const allStatPaths = new Set<string>([...Object.keys(oldStats), ...Object.keys(newStats)]);
+  // Only compare diffStats when light mode provides them (non-undefined)
+  if (newStatus.diffStats !== undefined) {
+    const oldStats = oldStatus?.diffStats ?? {};
+    const newStats = newStatus.diffStats ?? {};
+    const allStatPaths = new Set<string>([...Object.keys(oldStats), ...Object.keys(newStats)]);
 
-  for (const filePath of allStatPaths) {
-    const oldEntry = oldStats[filePath];
-    const newEntry = newStats[filePath];
+    for (const filePath of allStatPaths) {
+      const oldEntry = oldStats[filePath];
+      const newEntry = newStats[filePath];
 
-    if (!oldEntry || !newEntry) {
-      changed.add(filePath);
-      continue;
-    }
+      if (!oldEntry || !newEntry) {
+        changed.add(filePath);
+        continue;
+      }
 
-    if (oldEntry.insertions !== newEntry.insertions || oldEntry.deletions !== newEntry.deletions) {
-      changed.add(filePath);
+      if (oldEntry.insertions !== newEntry.insertions || oldEntry.deletions !== newEntry.deletions) {
+        changed.add(filePath);
+      }
     }
   }
 
@@ -371,7 +376,7 @@ export const useGitStore = create<GitStore>()(
               return false;
             }
 
-            const newStatus = await git.getGitStatus(directory);
+            const newStatus = await git.getGitStatus(directory, options.mode ? { mode: options.mode } : undefined);
 
             if (hasStatusChanged(dirState.status, newStatus)) {
               statusChanged = true;
@@ -402,10 +407,15 @@ export const useGitStore = create<GitStore>()(
                 bumpDiffFetchGeneration(directory);
               }
 
+              // Preserve diffStats from previous status when light mode returns none
+              const mergedStatus = newStatus.diffStats === undefined && currentDirState.status?.diffStats
+                ? { ...newStatus, diffStats: currentDirState.status.diffStats }
+                : newStatus;
+
               newDirectories.set(directory, {
                 ...currentDirState,
                 isGitRepo: true,
-                status: newStatus,
+                status: mergedStatus,
                 diffCache: nextDiffCache,
                 lastRepoCheckAt: shouldProbeRepository ? now : currentDirState.lastRepoCheckAt,
                 lastStatusFetch: Date.now(),
@@ -534,8 +544,7 @@ export const useGitStore = create<GitStore>()(
 
         await get().fetchIdentity(directory, git);
 
-        // Pre-fetch all diffs so they're ready when user opens Diff tab
-        void get().fetchAllDiffs(directory, git);
+        // Diff prefetch deferred — triggered on-demand when Git tab opens (GitView reactive prefetch)
 
       },
 
@@ -581,6 +590,7 @@ export const useGitStore = create<GitStore>()(
 
         const { maxFiles = DIFF_PREFETCH_FOCUS_MAX_FILES } = options;
         const availablePaths = new Set(dirState.status.files.map((file) => file.path));
+        const diffStats = dirState.status.diffStats;
         const inFlight = getInFlightDiffs(directory);
 
         const dedupedPaths: string[] = [];
@@ -597,6 +607,11 @@ export const useGitStore = create<GitStore>()(
             continue;
           }
           if (inFlight.has(filePath)) {
+            continue;
+          }
+          // Skip large files during prefetch — they'll be fetched on-demand when user clicks
+          const stats = diffStats?.[filePath];
+          if (stats && (stats.insertions + stats.deletions) > DIFF_PREFETCH_LARGE_FILE_THRESHOLD) {
             continue;
           }
           dedupedPaths.push(filePath);
@@ -731,16 +746,22 @@ export const useGitStore = create<GitStore>()(
 
             let anyStatusChanged = false;
 
+            const heavyFollowUps: string[] = [];
             for (const targetDirectory of pollTargets) {
-              const statusChanged = await get().fetchStatus(targetDirectory, git, { silent: true });
+              const statusChanged = await get().fetchStatus(targetDirectory, git, { silent: true, mode: 'light' });
               if (statusChanged) {
                 anyStatusChanged = true;
+                heavyFollowUps.push(targetDirectory);
                 if (targetDirectory === activeDirectory) {
                   await get().fetchLog(activeDirectory, git);
-                  // Pre-fetch all diffs so they're ready when user opens Diff tab
-                  void get().fetchAllDiffs(activeDirectory, git);
+                  // Diff prefetch deferred — triggered on-demand when Git tab opens (GitView reactive prefetch)
                 }
               }
+            }
+
+            // Light mode detected real changes — follow up with heavy fetch for diffStats
+            for (const dir of heavyFollowUps) {
+              get().fetchStatus(dir, git, { silent: true });
             }
 
             const bounds = getPollingBounds(get().pollingMode);

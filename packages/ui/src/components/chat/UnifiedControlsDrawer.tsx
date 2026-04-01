@@ -3,7 +3,8 @@ import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { cn } from '@/lib/utils';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { useSessionStore } from '@/stores/useSessionStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSelectionStore } from '@/sync/selection-store';
 import { useContextStore } from '@/stores/contextStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useModelLists } from '@/hooks/useModelLists';
@@ -55,11 +56,8 @@ export const UnifiedControlsDrawer: React.FC<UnifiedControlsDrawerProps> = ({
     } = useConfigStore();
     const { addRecentModel, addRecentEffort, recentEfforts } = useUIStore();
     const { recentModelsList } = useModelLists();
-    const {
-        currentSessionId,
-        saveAgentModelForSession,
-        saveAgentModelVariantForSession,
-    } = useSessionStore();
+    const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
+    const { saveAgentModelForSession, saveAgentModelVariantForSession } = useSelectionStore();
     const sessionAgentName = useContextStore((state) =>
         currentSessionId ? state.getSessionAgentSelection(currentSessionId) : null
     );

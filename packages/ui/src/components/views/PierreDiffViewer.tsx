@@ -29,6 +29,9 @@ import { useDeviceInfo } from '@/lib/device';
 import { cn } from '@/lib/utils';
 
 
+// Threshold (bytes) above which syntax highlighting is degraded for performance
+const LARGE_CONTENT_BYTES = 500_000;
+
 interface PierreDiffViewerProps {
   original: string;
   modified: string;
@@ -439,6 +442,11 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
   }, [darkResolvedTheme, diffThemeKey, isDark, lightResolvedTheme]);
 
 
+  const isLargeContent = useMemo(() =>
+    Math.max(original.length, modified.length) > LARGE_CONTENT_BYTES,
+    [original.length, modified.length],
+  );
+
   const options = useMemo(() => ({
     theme: {
       dark: darkTheme.metadata.id,
@@ -450,8 +458,9 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
     hunkSeparators: 'line-info-basic' as const,
     // Perf: disable intra-line diff (word-level) globally.
     lineDiffType: 'none' as const,
-    maxLineDiffLength: 1000,
-    maxLineLengthForHighlighting: 1000,
+    // Perf: degrade tokenization/highlighting for large files (>500KB)
+    maxLineDiffLength: isLargeContent ? 0 : 1000,
+    maxLineLengthForHighlighting: isLargeContent ? 1 : 1000,
     expansionLineCount: 20,
     overflow: wrapLines ? ('wrap' as const) : ('scroll' as const),
     disableFileHeader: true,
@@ -460,7 +469,7 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
     onLineSelected: handleSelectionChange,
     unsafeCSS: WEBKIT_SCROLL_FIX_CSS,
     renderAnnotation,
-  }), [darkTheme.metadata.id, isDark, lightTheme.metadata.id, renderSideBySide, wrapLines, handleSelectionChange, renderAnnotation]);
+  }), [darkTheme.metadata.id, isDark, isLargeContent, lightTheme.metadata.id, renderSideBySide, wrapLines, handleSelectionChange, renderAnnotation]);
 
 
   const lineAnnotations = useMemo(() => {

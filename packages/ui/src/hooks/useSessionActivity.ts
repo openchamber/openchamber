@@ -1,20 +1,14 @@
-
-
 import React from 'react';
-import { useSessionStore } from '@/stores/useSessionStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSessionStatus, useSessionMessages, useSessionPermissions } from '@/sync/sync-context';
 
 // Mirrors OpenCode SessionStatus: busy|retry|idle.
 export type SessionActivityPhase = 'idle' | 'busy' | 'retry';
 
 export interface SessionActivityResult {
-
   phase: SessionActivityPhase;
-
   isWorking: boolean;
-
   isBusy: boolean;
-
-  // Kept for backward compatibility; always false with server session.status.
   isCooldown: boolean;
 }
 
@@ -25,33 +19,49 @@ const IDLE_RESULT: SessionActivityResult = {
   isCooldown: false,
 };
 
+/**
+ * Determines if a session is actively working.
+ * Checks session_status and, as a narrow fallback, only the trailing
+ * assistant message when its completion update has not landed yet.
+ * Returns idle when permissions are pending (permission indicator takes priority).
+ */
 export function useSessionActivity(sessionId: string | null | undefined): SessionActivityResult {
-
-  const phase = useSessionStore((state) => {
-    if (!sessionId || !state.sessionStatus) {
-      return 'idle' as SessionActivityPhase;
-    }
-    const status = state.sessionStatus.get(sessionId);
-    return (status?.type ?? 'idle') as SessionActivityPhase;
-  });
+  const status = useSessionStatus(sessionId ?? '');
+  const messages = useSessionMessages(sessionId ?? '');
+  const permissions = useSessionPermissions(sessionId ?? '');
 
   return React.useMemo<SessionActivityResult>(() => {
-    if (phase === 'idle') {
-      return IDLE_RESULT;
-    }
-    const isBusy = phase === 'busy';
-    // No cooldown in server session.status; treat retry as working.
-    const isCooldown = false;
+    if (!sessionId) return IDLE_RESULT;
+
+    // Permissions pending → idle (permission indicator takes priority)
+    if (permissions.length > 0) return IDLE_RESULT;
+
+    const phase: SessionActivityPhase = (status?.type ?? 'idle') as SessionActivityPhase;
+
+    // Only trust the trailing assistant message as a transient fallback while
+    // waiting for session.status/message.updated to settle.
+    const lastMessage = messages[messages.length - 1];
+    const hasPendingAssistant = Boolean(
+      lastMessage
+      && lastMessage.role === 'assistant'
+      && typeof (lastMessage as { time?: { completed?: number } }).time?.completed !== 'number',
+    );
+
+    const statusWorking = phase !== 'idle';
+    const isWorking = statusWorking || hasPendingAssistant;
+
+    if (!isWorking) return IDLE_RESULT;
+
     return {
-      phase,
-      isWorking: phase === 'busy' || phase === 'retry',
-      isBusy,
-      isCooldown,
+      phase: statusWorking ? phase : 'busy',
+      isWorking: true,
+      isBusy: phase === 'busy' || (!statusWorking && hasPendingAssistant),
+      isCooldown: false,
     };
-  }, [phase]);
+  }, [sessionId, status, messages, permissions]);
 }
 
 export function useCurrentSessionActivity(): SessionActivityResult {
-  const currentSessionId = useSessionStore((state) => state.currentSessionId);
+  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   return useSessionActivity(currentSessionId);
 }

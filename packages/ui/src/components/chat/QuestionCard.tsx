@@ -4,7 +4,9 @@ import { Checkbox } from '@/components/ui/checkbox';
 
 import { cn } from '@/lib/utils';
 import type { QuestionRequest } from '@/types/question';
-import { useSessionStore } from '@/stores/useSessionStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSessions } from '@/sync/sync-context';
+import * as sessionActions from '@/sync/session-actions';
 
 interface QuestionCardProps {
   question: QuestionRequest;
@@ -14,15 +16,15 @@ type TabKey = string;
 const SUMMARY_TAB = 'summary';
 
 export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
-  const { respondToQuestion, rejectQuestion } = useSessionStore();
-  const isFromSubagent = useSessionStore(
-    React.useCallback((state) => {
-      const currentSessionId = state.currentSessionId;
-      if (!currentSessionId || question.sessionID === currentSessionId) return false;
-      const sourceSession = state.sessions.find((session) => session.id === question.sessionID);
-      return Boolean(sourceSession?.parentID && sourceSession.parentID === currentSessionId);
-    }, [question.sessionID])
-  );
+  const respondToQuestion = sessionActions.respondToQuestion;
+    const rejectQuestion = sessionActions.rejectQuestion;;
+  const sessions = useSessions();
+  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const isFromSubagent = React.useMemo(() => {
+    if (!currentSessionId || question.sessionID === currentSessionId) return false;
+    const sourceSession = sessions.find((session) => session.id === question.sessionID);
+    return Boolean(sourceSession?.parentID && sourceSession.parentID === currentSessionId);
+  }, [question.sessionID, currentSessionId, sessions]);
   const [activeTab, setActiveTab] = React.useState<TabKey>('0');
   const [isResponding, setIsResponding] = React.useState(false);
   const [hasResponded, setHasResponded] = React.useState(false);

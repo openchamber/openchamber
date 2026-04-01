@@ -2,7 +2,9 @@ import React from 'react';
 import { ErrorBoundary } from '../ui/ErrorBoundary';
 import { SessionSidebar } from '@/components/session/SessionSidebar';
 import { ChatView, SettingsView } from '@/components/views';
-import { useSessionStore } from '@/stores/useSessionStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useViewportStore } from '@/sync/viewport-store';
+import { useSessions, useDirectorySync } from '@/sync/sync-context';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
 import { McpDropdown } from '@/components/mcp/McpDropdown';
@@ -74,7 +76,7 @@ export const VSCodeLayout: React.FC = () => {
 
   const bootDraftOpen = React.useMemo(() => {
     try {
-      return Boolean(useSessionStore.getState().newSessionDraft?.open);
+      return Boolean(useSessionUIStore.getState().newSessionDraft?.open);
     } catch {
       return false;
     }
@@ -88,8 +90,8 @@ export const VSCodeLayout: React.FC = () => {
   const expandedSidebarResizeStartXRef = React.useRef(0);
   const expandedSidebarResizeStartWidthRef = React.useRef(SESSIONS_SIDEBAR_WIDTH);
   const expandedSidebarResizePointerIdRef = React.useRef<number | null>(null);
-  const currentSessionId = useSessionStore((state) => state.currentSessionId);
-  const sessions = useSessionStore((state) => state.sessions);
+  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const sessions = useSessions();
 
   const activeSessionTitle = React.useMemo(() => {
     if (!currentSessionId) {
@@ -97,21 +99,21 @@ export const VSCodeLayout: React.FC = () => {
     }
     return sessions.find((session) => session.id === currentSessionId)?.title || 'Session';
   }, [currentSessionId, sessions]);
-  const newSessionDraftOpen = useSessionStore((state) => Boolean(state.newSessionDraft?.open));
-  const isSyncingMessages = useSessionStore((state) => state.isSyncing);
-  const hasActiveSessionWork = useSessionStore((state) => {
-    const statuses = state.sessionStatus;
-    if (!statuses || statuses.size === 0) {
+  const newSessionDraftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
+  const isSyncingMessages = useViewportStore((state) => state.isSyncing);
+  const hasActiveSessionWork = useDirectorySync((state) => {
+    const statuses = state.session_status;
+    if (!statuses || Object.keys(statuses).length === 0) {
       return false;
     }
-    for (const status of statuses.values()) {
+    for (const status of Object.values(statuses)) {
       if (status?.type === 'busy' || status?.type === 'retry') {
         return true;
       }
     }
     return false;
   });
-  const openNewSessionDraft = useSessionStore((state) => state.openNewSessionDraft);
+  const openNewSessionDraft = useSessionUIStore((state) => state.openNewSessionDraft);
   const [connectionStatus, setConnectionStatus] = React.useState<'connecting' | 'connected' | 'error' | 'disconnected'>(
     () => (typeof window !== 'undefined'
       ? (window as { __OPENCHAMBER_CONNECTION__?: { status?: string } }).__OPENCHAMBER_CONNECTION__?.status as
@@ -120,9 +122,6 @@ export const VSCodeLayout: React.FC = () => {
   );
   const configInitialized = useConfigStore((state) => state.isInitialized);
   const initializeConfig = useConfigStore((state) => state.initializeApp);
-  const loadSessions = useSessionStore((state) => state.loadSessions);
-  const loadMessages = useSessionStore((state) => state.loadMessages);
-  const messages = useSessionStore((state) => state.messages);
   const [hasInitializedOnce, setHasInitializedOnce] = React.useState<boolean>(() => configInitialized);
   const [isInitializing, setIsInitializing] = React.useState<boolean>(false);
   const lastBootstrapAttemptAt = React.useRef<number>(0);
@@ -158,18 +157,11 @@ export const VSCodeLayout: React.FC = () => {
     }
 
     const timeoutId = window.setTimeout(() => {
-      const state = useSessionStore.getState();
+      const state = useSessionUIStore.getState();
       const stillNoSession = !state.currentSessionId;
       const draftStillClosed = !state.newSessionDraft?.open;
-      const stillSyncing = state.isSyncing;
-      const stillActiveWork = (() => {
-        const statuses = state.sessionStatus;
-        if (!statuses || statuses.size === 0) return false;
-        for (const status of statuses.values()) {
-          if (status?.type === 'busy' || status?.type === 'retry') return true;
-        }
-        return false;
-      })();
+      const stillSyncing = useViewportStore.getState().isSyncing;
+      const stillActiveWork = false; // sync bootstrap tracks session status
 
       if (stillNoSession && draftStillClosed && !stillSyncing && !stillActiveWork) {
         setCurrentView('sessions');
@@ -270,17 +262,10 @@ export const VSCodeLayout: React.FC = () => {
         if (!configState.isInitialized || !configState.isConnected || configState.providers.length === 0 || configState.agents.length === 0) {
           return;
         }
-        await loadSessions();
-        const sessionsError = useSessionStore.getState().error;
         if (debugEnabled) console.log('[OpenChamber][VSCode][bootstrap] post-load', {
           providers: configState.providers.length,
           agents: configState.agents.length,
-          sessions: useSessionStore.getState().sessions.length,
-          sessionsError,
         });
-        if (typeof sessionsError === 'string' && sessionsError.length > 0) {
-          return;
-        }
         setHasInitializedOnce(true);
       } catch {
         // Ignore bootstrap failures
@@ -289,7 +274,7 @@ export const VSCodeLayout: React.FC = () => {
       }
     };
     void runBootstrap();
-  }, [connectionStatus, configInitialized, hasInitializedOnce, initializeConfig, isInitializing, loadSessions]);
+  }, [connectionStatus, configInitialized, hasInitializedOnce, initializeConfig, isInitializing]);
 
   React.useEffect(() => {
     if (viewMode !== 'editor') {
@@ -314,34 +299,8 @@ export const VSCodeLayout: React.FC = () => {
     }
 
     hasAppliedInitialSession.current = true;
-    void useSessionStore.getState().setCurrentSession(initialSessionId);
+    void useSessionUIStore.getState().setCurrentSession(initialSessionId);
   }, [connectionStatus, hasInitializedOnce, initialSessionId, openNewSessionDraft, sessions, viewMode]);
-
-  // Hydrate messages when viewing chat
-  React.useEffect(() => {
-    const hydrateMessages = async () => {
-      if (!hasInitializedOnce || connectionStatus !== 'connected' || currentView !== 'chat' || newSessionDraftOpen) {
-        return;
-      }
-
-      if (!currentSessionId) {
-        return;
-      }
-
-      const hasMessagesEntry = messages.has(currentSessionId);
-      if (hasMessagesEntry) {
-        return;
-      }
-
-      try {
-        await loadMessages(currentSessionId);
-      } catch {
-        /* ignored */
-      }
-    };
-
-    void hydrateMessages();
-  }, [connectionStatus, currentSessionId, currentView, hasInitializedOnce, loadMessages, messages, newSessionDraftOpen]);
 
   // Track container width for responsive settings layout
   React.useEffect(() => {
@@ -532,8 +491,8 @@ interface VSCodeHeaderProps {
 }
 
 const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, onNewSession, onSettings, onAgentManager, showMcp, showContextUsage, showRateLimits }) => {
-  const { getCurrentModel } = useConfigStore();
-  const getContextUsage = useSessionStore((state) => state.getContextUsage);
+  const getCurrentModel = useConfigStore((s) => s.getCurrentModel);
+  const getContextUsage = useSessionUIStore((state) => state.getContextUsage);
   const quotaResults = useQuotaStore((state) => state.results);
   const fetchAllQuotas = useQuotaStore((state) => state.fetchAllQuotas);
   const isQuotaLoading = useQuotaStore((state) => state.isLoading);

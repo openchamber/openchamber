@@ -2,7 +2,7 @@ import React from 'react';
 import { RiCheckLine, RiCloseLine, RiTimeLine } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import type { PermissionRequest as PermissionRequestPayload, PermissionResponse } from '@/types/permission';
-import { useSessionStore } from '@/stores/useSessionStore';
+import * as sessionActions from '@/sync/session-actions';
 
 interface PermissionRequestProps {
   permission: PermissionRequestPayload;
@@ -15,7 +15,7 @@ export const PermissionRequest: React.FC<PermissionRequestProps> = ({
 }) => {
   const [isResponding, setIsResponding] = React.useState(false);
   const [hasResponded, setHasResponded] = React.useState(false);
-  const { respondToPermission } = useSessionStore();
+  const respondToPermission = sessionActions.respondToPermission;;
 
   const handleResponse = async (response: PermissionResponse) => {
     setIsResponding(true);

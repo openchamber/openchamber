@@ -16,12 +16,16 @@ import {
     RiSendPlane2Line,
 } from '@remixicon/react';
 import { BrowserVoiceButton } from '@/components/voice';
-import { useSessionStore } from '@/stores/useSessionStore';
-import { useSessionStore as useSessionManagementStore } from '@/stores/sessionStore';
+// sessionStore removed — currentSessionId comes from useSessionUIStore
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useMessageQueueStore, type QueuedMessage } from '@/stores/messageQueueStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSelectionStore } from '@/sync/selection-store';
+import { useInputStore } from '@/sync/input-store';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
+import * as sessionActions from '@/sync/session-actions';
+import { useSessionMessageRecords } from '@/sync/sync-context';
 import { useInlineCommentDraftStore, type InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
 import { appendInlineComments } from '@/lib/messages/inlineComments';
 import { AttachedFilesList } from './FileAttachment';
@@ -40,8 +44,7 @@ import { MobileSessionStatusBar } from './MobileSessionStatusBar';
 import { useAssistantStatus } from '@/hooks/useAssistantStatus';
 import { useCurrentSessionActivity } from '@/hooks/useSessionActivity';
 import { toast } from '@/components/ui';
-import { useFileStore } from '@/stores/fileStore';
-import { useMessageStore } from '@/stores/messageStore';
+// useMessageStore removed — messages now come from sync system
 import { isTauriShell, isVSCodeRuntime } from '@/lib/desktop';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { StopIcon } from '@/components/icons/StopIcon';
@@ -80,6 +83,28 @@ const VS_CODE_DROP_DATA_TYPES = [
 ];
 
 const FILE_URI_PREFIX = 'file://';
+
+const encodeFilePath = (filepath: string): string => {
+    let normalized = filepath.replace(/\\/g, '/');
+    if (/^[A-Za-z]:/.test(normalized)) {
+        normalized = `/${normalized}`;
+    }
+    return normalized
+        .split('/')
+        .map((segment, index) => {
+            if (index === 1 && /^[A-Za-z]:$/.test(segment)) return segment;
+            return encodeURIComponent(segment);
+        })
+        .join('/');
+};
+
+const toServerFileUrl = (filepath: string): string => {
+    const normalized = filepath.replace(/\\/g, '/').trim();
+    if (normalized.toLowerCase().startsWith(FILE_URI_PREFIX)) {
+        return normalized;
+    }
+    return `file://${encodeFilePath(normalized)}`;
+};
 
 const isLikelyAbsolutePath = (value: string): boolean => (
     value.startsWith('/')
@@ -273,7 +298,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
     const initialSessionIdRef = React.useRef<string | null>(null);
     const [message, setMessage] = React.useState(() => {
         // Read per-session draft at mount time using the current session from the store
-        const sessionId = useSessionStore.getState().currentSessionId;
+        const sessionId = useSessionUIStore.getState().currentSessionId;
         initialSessionIdRef.current = sessionId;
         const draft = getStoredDraft(sessionId);
         if (draft) {
@@ -313,25 +338,32 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
     const lastPersistedDraftRef = React.useRef<Map<string, string>>(new Map());
     const currentSessionIdForDraftRef = React.useRef<string | null>(null);
 
-    const sendMessage = useSessionStore((state) => state.sendMessage);
-    const currentSessionId = useSessionStore((state) => state.currentSessionId);
-    const newSessionDraft = useSessionStore((state) => state.newSessionDraft);
+    // TODO: port sendMessage to session-actions (complex — creates sessions, handles attachments, etc.)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sendMessage = React.useRef((...args: any[]) =>
+        Promise.resolve((useSessionUIStore.getState().sendMessage as (...a: unknown[]) => unknown)(...args)),
+    ).current;
+    const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
+    const newSessionDraft = useSessionUIStore((s) => s.newSessionDraft);
     const newSessionDraftOpen = Boolean(newSessionDraft?.open);
-    const setNewSessionDraftTarget = useSessionStore((state) => state.setNewSessionDraftTarget);
-    const availableWorktreesByProject = useSessionStore((state) => state.availableWorktreesByProject);
-    const abortCurrentOperation = useSessionStore((state) => state.abortCurrentOperation);
-    const acknowledgeSessionAbort = useSessionStore((state) => state.acknowledgeSessionAbort);
-    const abortPromptSessionId = useSessionStore((state) => state.abortPromptSessionId);
-    const clearAbortPrompt = useSessionStore((state) => state.clearAbortPrompt);
-    const attachedFiles = useSessionStore((state) => state.attachedFiles);
-    const addAttachedFile = useSessionStore((state) => state.addAttachedFile);
-    const clearAttachedFiles = useSessionStore((state) => state.clearAttachedFiles);
-    const saveSessionAgentSelection = useSessionStore((state) => state.saveSessionAgentSelection);
-    const consumePendingInputText = useSessionStore((state) => state.consumePendingInputText);
-    const setPendingInputText = useSessionStore((state) => state.setPendingInputText);
-    const pendingInputText = useSessionStore((state) => state.pendingInputText);
-    const consumePendingSyntheticParts = useSessionStore((state) => state.consumePendingSyntheticParts);
-    const currentManagementSessionId = useSessionManagementStore((state) => state.currentSessionId);
+    const setNewSessionDraftTarget = useSessionUIStore((s) => s.setNewSessionDraftTarget);
+    const availableWorktreesByProject = useSessionUIStore((s) => s.availableWorktreesByProject);
+    const abortPromptSessionId = useSessionUIStore((s) => s.abortPromptSessionId);
+    const clearAbortPrompt = useSessionUIStore((s) => s.clearAbortPrompt);
+    const attachedFiles = useInputStore((s) => s.attachedFiles);
+    const addAttachedFile = useInputStore((s) => s.addAttachedFile);
+    const clearAttachedFiles = useInputStore((s) => s.clearAttachedFiles);
+    const saveSessionAgentSelection = useSelectionStore((s) => s.saveSessionAgentSelection);
+    const consumePendingInputText = useInputStore((s) => s.consumePendingInputText);
+    const setPendingInputText = useInputStore((s) => s.setPendingInputText);
+    const pendingInputText = useInputStore((s) => s.pendingInputText);
+    const consumePendingSyntheticParts = useInputStore((s) => s.consumePendingSyntheticParts);
+    const acknowledgeSessionAbort = useSessionUIStore((s) => s.acknowledgeSessionAbort);
+    const abortCurrentOperation = React.useCallback(
+        (sessionIdOverride?: string) => sessionActions.abortCurrentOperation(sessionIdOverride ?? currentSessionId ?? ''),
+        [currentSessionId],
+    );
+    const currentManagementSessionId = currentSessionId;
     const projects = useProjectsStore((state) => state.projects);
     const activeProjectId = useProjectsStore((state) => state.activeProjectId);
     const setActiveProjectIdOnly = useProjectsStore((state) => state.setActiveProjectIdOnly);
@@ -339,7 +371,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
     const { currentProviderId, currentModelId, currentVariant, currentAgentName, setAgent, getVisibleAgents } = useConfigStore();
     const agents = getVisibleAgents();
     const primaryAgents = React.useMemo(() => agents.filter((agent) => agent.mode === 'primary'), [agents]);
-    const { isMobile, inputBarOffset, isKeyboardOpen, setTimelineDialogOpen, cornerRadius, persistChatDraft, inputSpellcheckEnabled, isExpandedInput, setExpandedInput } = useUIStore();
+    const { isMobile, inputBarOffset, isKeyboardOpen, cornerRadius, persistChatDraft, inputSpellcheckEnabled, isExpandedInput, setExpandedInput } = useUIStore();
     const { working } = useAssistantStatus();
     const { git: runtimeGit } = useRuntimeAPIs();
     const { currentTheme } = useThemeSystem();
@@ -351,10 +383,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
     const isDesktopExpanded = isExpandedInput && !isMobile;
     const chatInputRadius = 'var(--radius-lg)';
 
-    const sendableAttachedFiles = React.useMemo(
-        () => attachedFiles.filter((file) => file.source !== 'server'),
-        [attachedFiles],
-    );
+    const sendableAttachedFiles = attachedFiles;
 
     const hasInlineMentionForHighlight = React.useMemo(() => {
         if (!message || !message.includes('@') || inputMode === 'shell') {
@@ -426,8 +455,12 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
 
     const sanitizeAttachmentsForSend = React.useCallback(
         (files: AttachedFile[] | undefined): AttachedFile[] => (files ?? [])
-            .filter((file) => file.source !== 'server')
-            .map((file) => ({ ...file })),
+            .map((file) => ({
+                ...file,
+                dataUrl: file.source === 'server' && file.serverPath
+                    ? toServerFileUrl(file.serverPath)
+                    : file.dataUrl,
+            })),
         [],
     );
 
@@ -498,7 +531,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                 filename,
                 mimeType: 'text/plain',
                 size: 0,
-                dataUrl: normalizedServerPath,
+                dataUrl: toServerFileUrl(normalizedServerPath),
                 source: 'server',
                 serverPath: normalizedServerPath,
             });
@@ -565,15 +598,10 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
 
     // User message history for up/down arrow navigation
     // Get raw messages from store (stable reference)
-    const sessionMessages = useMessageStore(
-        React.useCallback(
-            (state) => (currentSessionId ? state.messages.get(currentSessionId) : undefined),
-            [currentSessionId]
-        )
-    );
+    const sessionMessages = useSessionMessageRecords(currentSessionId ?? "");
     // Derive user message history with useMemo to avoid infinite re-renders
     const userMessageHistory = React.useMemo(() => {
-        if (!sessionMessages) return [];
+        if (!sessionMessages || !currentSessionId) return [];
         return sessionMessages
             .filter((m) => m.info.role === 'user')
             .map((m) => {
@@ -585,7 +613,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
             })
             .filter((text) => text.length > 0)
             .reverse(); // Most recent first
-    }, [sessionMessages]);
+    }, [sessionMessages, currentSessionId]);
 
     // Keep messageRef in sync with message state
     React.useEffect(() => {
@@ -866,6 +894,12 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
         addToQueue(currentSessionId, {
             content: messageToQueue,
             attachments: attachmentsToQueue.length > 0 ? attachmentsToQueue : undefined,
+            sendConfig: currentProviderId && currentModelId ? {
+                providerID: currentProviderId,
+                modelID: currentModelId,
+                agent: currentAgentName ?? undefined,
+                variant: currentVariant ?? undefined,
+            } : undefined,
         });
 
         // Clear input and attachments
@@ -877,7 +911,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
         if (!isMobile) {
             textareaRef.current?.focus();
         }
-    }, [hasContent, currentSessionId, message, sendableAttachedFiles, sanitizeAttachmentsForSend, addToQueue, clearAttachedFiles, isMobile, consumeDrafts]);
+    }, [hasContent, currentSessionId, message, sendableAttachedFiles, sanitizeAttachmentsForSend, addToQueue, clearAttachedFiles, isMobile, consumeDrafts, currentProviderId, currentModelId, currentAgentName, currentVariant]);
 
     const handleSubmit = async (options?: SubmitOptions) => {
         const queuedOnly = options?.queuedOnly ?? false;
@@ -1037,25 +1071,26 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                 .split(/\s+/)[0]
                 ?.toLowerCase();
 
-            // NEW: /undo - revert to last message (populates input with reverted message text)
             if (commandName === 'undo' && currentSessionId) {
-                await useSessionStore.getState().handleSlashUndo(currentSessionId);
-                // Don't clear message - pendingInputText will populate it with reverted message
+                await useSessionUIStore.getState().handleSlashUndo(currentSessionId);
                 scrollToBottom?.({ instant: true, force: true });
-                return; // Don't send to assistant
+                return;
             }
-            // NEW: /redo - unrevert or partial redo (populates input with message text)
             else if (commandName === 'redo' && currentSessionId) {
-                await useSessionStore.getState().handleSlashRedo(currentSessionId);
-                // Don't clear message - pendingInputText will populate it
+                await useSessionUIStore.getState().handleSlashRedo(currentSessionId);
                 scrollToBottom?.({ instant: true, force: true });
-                return; // Don't send to assistant
+                return;
             }
-            // NEW: /timeline - open timeline dialog
-            else if (commandName === 'timeline' && currentSessionId) {
-                setTimelineDialogOpen(true);
-                setMessage('');
-                return; // Don't send to assistant
+            else if (commandName === 'compact' && currentSessionId) {
+                const { opencodeClient } = await import('@/lib/opencode/client');
+                const sdk = opencodeClient.getSdkClient();
+                const configState = useConfigStore.getState();
+                await sdk.session.summarize({
+                    sessionID: currentSessionId,
+                    modelID: configState.currentModelId || '',
+                    providerID: configState.currentProviderId || '',
+                });
+                return;
             }
         }
 
@@ -1108,21 +1143,21 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
             if (normalized.includes('payload too large') || normalized.includes('413') || normalized.includes('entity too large')) {
                 toast.error('Attachments are too large to send. Please try reducing the number or size of images.');
                 if (allAttachments.length > 0) {
-                    useFileStore.setState({ attachedFiles: allAttachments });
+                    useInputStore.setState({ attachedFiles: allAttachments });
                 }
                 return;
             }
 
             if (isSoftNetworkError) {
                 if (allAttachments.length > 0) {
-                    useFileStore.setState({ attachedFiles: allAttachments });
+                    useInputStore.setState({ attachedFiles: allAttachments });
                     toast.error('Failed to send attachments. Try fewer files or smaller images.');
                 }
                 return;
             }
 
             if (allAttachments.length > 0) {
-                useFileStore.setState({ attachedFiles: allAttachments });
+                useInputStore.setState({ attachedFiles: allAttachments });
             }
             toast.error(rawMessage || 'Message failed to send. Attachments restored.');
         });
@@ -2560,7 +2595,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
         if (!selectedDraftDirectory || !selectedDraftBranchIsKnown) {
             return;
         }
-        useSessionStore.getState().setDraftPreserveDirectoryOverride(false);
+        useSessionUIStore.getState().setDraftPreserveDirectoryOverride(false);
     }, [newSessionDraft?.open, newSessionDraft?.preserveDirectoryOverride, selectedDraftBranchIsKnown, selectedDraftDirectory]);
 
     const shouldShowDraftBranchSelector = React.useMemo(() => {
@@ -2574,7 +2609,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
     }, [isDiscoveringDraftBranches, projectRootBranchOption, worktreeBranchOptions.length]);
 
     const handleDraftProjectChange = React.useCallback((projectId: string) => {
-        const draft = useSessionStore.getState().newSessionDraft;
+        const draft = useSessionUIStore.getState().newSessionDraft;
         if (draft?.pendingWorktreeRequestId || draft?.bootstrapPendingDirectory || draft?.preserveDirectoryOverride) {
             return;
         }
@@ -2592,7 +2627,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
     }, [activeProjectId, projects, setActiveProjectIdOnly, setNewSessionDraftTarget]);
 
     const handleDraftDirectoryChange = React.useCallback((directory: string) => {
-        const draft = useSessionStore.getState().newSessionDraft;
+        const draft = useSessionUIStore.getState().newSessionDraft;
         if (draft?.pendingWorktreeRequestId || draft?.bootstrapPendingDirectory || draft?.preserveDirectoryOverride) {
             return;
         }

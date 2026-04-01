@@ -1,5 +1,6 @@
 import { createOpencodeClient } from '@opencode-ai/sdk/v2';
 import type { OpenCodeManager } from './opencode';
+import { waitForApiUrl } from './opencode-ready';
 
 type StreamEvent<TData = unknown> = {
   data: TData;
@@ -55,8 +56,8 @@ const resolveDefaultDirectory = (manager: OpenCodeManager): string => {
   return manager.getWorkingDirectory() || 'global';
 };
 
-const createAuthedClient = (manager: OpenCodeManager, headers?: Record<string, string>) => {
-  const baseUrl = manager.getApiUrl();
+const createAuthedClient = async (manager: OpenCodeManager, headers?: Record<string, string>) => {
+  const baseUrl = await waitForApiUrl(manager);
   if (!baseUrl) {
     throw new Error('OpenCode API URL not available');
   }
@@ -98,7 +99,7 @@ export const openSseProxy = async ({
   signal,
   onChunk,
 }: OpenSseProxyOptions): Promise<OpenSseProxyResult> => {
-  const client = createAuthedClient(manager, headers);
+  const client = await createAuthedClient(manager, headers);
   const { pathname, directory } = normalizeSsePath(path);
   const resolvedDirectory = directory || resolveDefaultDirectory(manager);
 

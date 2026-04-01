@@ -5,6 +5,7 @@ This module fetches quota and usage signals for supported providers in the web s
 
 ## Entrypoints and structure
 - `packages/web/server/lib/quota/index.js`: public entrypoint imported by `packages/web/server/index.js`.
+- `packages/web/server/lib/quota/routes.js`: Express route registration for quota endpoints.
 - `packages/web/server/lib/quota/providers/index.js`: provider registry, configured-provider list, and provider dispatcher.
 - `packages/web/server/lib/quota/providers/interface.js`: JSDoc provider contract used as implementation reference.
 - `packages/web/server/lib/quota/providers/google/`: Google-specific auth, API, and transform modules.

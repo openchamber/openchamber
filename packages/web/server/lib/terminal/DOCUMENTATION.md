@@ -6,6 +6,7 @@ This module provides WebSocket protocol utilities for terminal input handling in
 ## Entrypoints and structure
 - `packages/web/server/lib/terminal/`: Terminal module directory.
   - `index.js`: Stable module entrypoint that re-exports protocol helpers/constants.
+  - `runtime.js`: Runtime module that owns terminal session state, WS server setup, and `/api/terminal/*` route registration.
   - `input-ws-protocol.js`: Single-file module containing all terminal input WebSocket protocol utilities.
 - `packages/web/server/lib/terminal/input-ws-protocol.test.js`: Test file for protocol utilities.
 

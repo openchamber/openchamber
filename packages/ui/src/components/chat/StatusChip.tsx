@@ -1,7 +1,7 @@
 import React from 'react';
 import { cn } from '@/lib/utils';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { useSessionStore } from '@/stores/useSessionStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useContextStore } from '@/stores/contextStore';
 import { formatEffortLabel, getAgentDisplayName, getModelDisplayName } from './mobileControlsUtils';
 
@@ -19,7 +19,7 @@ export const StatusChip: React.FC<StatusChipProps> = ({ onClick, className }) =>
         getCurrentModelVariants,
         getVisibleAgents,
     } = useConfigStore();
-    const currentSessionId = useSessionStore((state) => state.currentSessionId);
+    const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
     const sessionAgentName = useContextStore((state) =>
         currentSessionId ? state.getSessionAgentSelection(currentSessionId) : null
     );

@@ -171,15 +171,10 @@ export const projectTurnActivity = (input: ProjectActivityInput): ProjectActivit
         });
 
         let firstWithAny: string | undefined;
-        let cumulative = 0;
         for (const message of input.assistantMessages) {
             const count = countByMessage.get(message.info.id) ?? 0;
             if (count > 0 && !firstWithAny) {
                 firstWithAny = message.info.id;
-            }
-            cumulative += count;
-            if (cumulative >= 2) {
-                return message.info.id;
             }
         }
 

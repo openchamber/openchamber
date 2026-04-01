@@ -7,12 +7,11 @@ import { deriveMessageRole } from '@/components/chat/message/messageRole';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { generateSyntaxTheme } from '@/lib/theme/syntaxThemeGenerator';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { useSessionStore } from '@/stores/useSessionStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSessions, useSessionMessageRecords } from '@/sync/sync-context';
 import { copyTextToClipboard } from '@/lib/clipboard';
 
 type SessionMessage = { info: Message; parts: Part[] };
-
-const EMPTY_SESSION_MESSAGES: SessionMessage[] = [];
 
 type ProviderModelLike = {
   id?: string;
@@ -277,12 +276,9 @@ export const ContextPanelContent: React.FC = () => {
   const [expandedRawMessages, setExpandedRawMessages] = React.useState<Record<string, boolean>>({});
   const [copiedRawMessageId, setCopiedRawMessageId] = React.useState<string | null>(null);
   const copyResetTimeoutRef = React.useRef<number | null>(null);
-  const currentSessionId = useSessionStore((state) => state.currentSessionId);
-  const sessions = useSessionStore((state) => state.sessions);
-  const sessionMessages = useSessionStore((state) => {
-    if (!state.currentSessionId) return EMPTY_SESSION_MESSAGES;
-    return state.messages.get(state.currentSessionId) ?? EMPTY_SESSION_MESSAGES;
-  });
+  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const sessions = useSessions();
+  const sessionMessages = useSessionMessageRecords(currentSessionId ?? '');
   const providers = useConfigStore((state) => state.providers);
 
   React.useEffect(() => {

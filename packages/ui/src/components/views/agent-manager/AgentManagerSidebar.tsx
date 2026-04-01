@@ -5,6 +5,7 @@ import {
   RiMore2Line,
   RiSearchLine,
   RiGitBranchLine,
+  RiLoader4Line,
 } from '@remixicon/react';
 import { toast } from '@/components/ui';
 import { Input } from '@/components/ui/input';
@@ -26,16 +27,16 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import { useAgentGroupsStore, type AgentGroup } from '@/stores/useAgentGroupsStore';
-import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useAllSessionStatuses } from '@/sync/sync-context';
 
 const formatRelativeTime = (timestamp: number): string => {
   const now = Date.now();
   const diff = now - timestamp;
-  
+
   const minutes = Math.floor(diff / (60 * 1000));
   const hours = Math.floor(diff / (60 * 60 * 1000));
   const days = Math.floor(diff / (24 * 60 * 60 * 1000));
-  
+
   if (minutes < 1) return 'now';
   if (minutes < 60) return `${minutes}m`;
   if (hours < 24) return `${hours}h`;
@@ -45,30 +46,30 @@ const formatRelativeTime = (timestamp: number): string => {
 interface AgentGroupItemProps {
   group: AgentGroup;
   isSelected: boolean;
+  isBusy: boolean;
   onSelect: () => void;
 }
 
-const AgentGroupItem: React.FC<AgentGroupItemProps> = ({ group, isSelected, onSelect }) => {
+const AgentGroupItem: React.FC<AgentGroupItemProps> = ({ group, isSelected, isBusy, onSelect }) => {
   const [menuOpen, setMenuOpen] = React.useState(false);
   const [confirmOpen, setConfirmOpen] = React.useState(false);
   const [isDeleting, setIsDeleting] = React.useState(false);
-  const deleteGroup = useAgentGroupsStore((state) => state.deleteGroup);
+  const deleteGroupSessions = useAgentGroupsStore((s) => s.deleteGroupSessions);
 
   const handleDeleteGroup = React.useCallback(async () => {
     if (isDeleting) return;
     setIsDeleting(true);
     toast.info(`Deleting "${group.name}"...`);
-    const ok = await deleteGroup(group.name);
-    if (ok) {
+    const { failedIds, failedWorktreePaths } = await deleteGroupSessions(group.sessions, { removeWorktrees: true });
+    if (failedIds.length === 0 && failedWorktreePaths.length === 0) {
       toast.success(`Deleted "${group.name}"`);
     } else {
-      const error = useAgentGroupsStore.getState().error;
-      toast.error(error || `Failed to delete "${group.name}"`);
+      toast.error(`Failed to fully delete "${group.name}"`);
     }
     setIsDeleting(false);
     setConfirmOpen(false);
-  }, [deleteGroup, group.name, isDeleting]);
-  
+  }, [deleteGroupSessions, group.name, group.sessions, isDeleting]);
+
   return (
     <>
       <div
@@ -83,9 +84,12 @@ const AgentGroupItem: React.FC<AgentGroupItemProps> = ({ group, isSelected, onSe
             type="button"
             className="flex min-w-0 flex-1 flex-col gap-0.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
           >
-            <span className="truncate typography-ui-label font-normal text-foreground">
-              {group.name}
-            </span>
+            <div className="flex items-center gap-1.5">
+              <span className="truncate typography-ui-label font-normal text-foreground">
+                {group.name}
+              </span>
+              {isBusy && <RiLoader4Line className="h-3 w-3 animate-spin text-amber-500 flex-shrink-0" />}
+            </div>
             <div className="flex items-center gap-2">
               <span className="typography-micro text-muted-foreground/60 flex items-center gap-1">
                 <RiGitBranchLine className="h-3 w-3" />
@@ -96,7 +100,7 @@ const AgentGroupItem: React.FC<AgentGroupItemProps> = ({ group, isSelected, onSe
               </span>
             </div>
           </button>
-          
+
           <div className="flex items-center gap-1.5 self-stretch">
             <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
               <DropdownMenuTrigger asChild>
@@ -154,6 +158,7 @@ const AgentGroupItem: React.FC<AgentGroupItemProps> = ({ group, isSelected, onSe
 
 interface AgentManagerSidebarProps {
   className?: string;
+  groups: AgentGroup[];
   selectedGroupName?: string | null;
   onGroupSelect?: (groupName: string) => void;
   onNewAgent?: () => void;
@@ -161,36 +166,40 @@ interface AgentManagerSidebarProps {
 
 export const AgentManagerSidebar: React.FC<AgentManagerSidebarProps> = ({
   className,
+  groups,
   selectedGroupName,
   onGroupSelect,
   onNewAgent,
 }) => {
   const [searchQuery, setSearchQuery] = React.useState('');
   const [showAll, setShowAll] = React.useState(false);
-  
-  const { groups, isLoading, loadGroups } = useAgentGroupsStore();
-  const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
-  
-  // Load groups when directory changes
-  React.useEffect(() => {
-    if (currentDirectory) {
-      loadGroups();
+  const isLoading = useAgentGroupsStore((s) => s.isLoading);
+
+  // Session statuses for busy indicators
+  const allStatuses = useAllSessionStatuses();
+  const busyGroups = React.useMemo(() => {
+    const set = new Set<string>();
+    for (const group of groups) {
+      if (group.sessions.some((s) => allStatuses[s.id]?.type === 'busy')) {
+        set.add(group.name);
+      }
     }
-  }, [currentDirectory, loadGroups]);
-  
+    return set;
+  }, [groups, allStatuses]);
+
   const MAX_VISIBLE = 5;
-  
+
   const filteredGroups = React.useMemo(() => {
     if (!searchQuery.trim()) return groups;
     const query = searchQuery.toLowerCase();
-    return groups.filter(group => 
+    return groups.filter(group =>
       group.name.toLowerCase().includes(query)
     );
   }, [searchQuery, groups]);
-  
+
   const visibleGroups = showAll ? filteredGroups : filteredGroups.slice(0, MAX_VISIBLE);
   const remainingCount = filteredGroups.length - MAX_VISIBLE;
-  
+
   return (
     <div className={cn('flex h-full flex-col text-foreground border-r border-border/30', className)}>
       {/* Search Input */}
@@ -205,7 +214,7 @@ export const AgentManagerSidebar: React.FC<AgentManagerSidebarProps> = ({
           />
         </div>
       </div>
-      
+
       {/* New Agent Button */}
       <div className="px-2.5 pb-2">
         <Button
@@ -217,7 +226,7 @@ export const AgentManagerSidebar: React.FC<AgentManagerSidebarProps> = ({
           <span className="typography-ui-label">New Agent Group</span>
         </Button>
       </div>
-      
+
       {/* Agent Groups Section Header */}
       <div className="px-2.5 py-1.5 flex items-center gap-1">
         <RiArrowDownSLine className="h-4 w-4 text-muted-foreground" />
@@ -230,7 +239,7 @@ export const AgentManagerSidebar: React.FC<AgentManagerSidebarProps> = ({
           </span>
         )}
       </div>
-      
+
       {/* Group List */}
       <ScrollableOverlay
         outerClassName="flex-1 min-h-0"
@@ -241,11 +250,11 @@ export const AgentManagerSidebar: React.FC<AgentManagerSidebarProps> = ({
             key={group.name}
             group={group}
             isSelected={selectedGroupName === group.name}
+            isBusy={busyGroups.has(group.name)}
             onSelect={() => onGroupSelect?.(group.name)}
           />
         ))}
-        
-        {/* Show More Link */}
+
         {!showAll && remainingCount > 0 && (
           <button
             type="button"
@@ -255,8 +264,7 @@ export const AgentManagerSidebar: React.FC<AgentManagerSidebarProps> = ({
             ... More ({remainingCount})
           </button>
         )}
-        
-        {/* Show Less Link */}
+
         {showAll && filteredGroups.length > MAX_VISIBLE && (
           <button
             type="button"
@@ -266,8 +274,7 @@ export const AgentManagerSidebar: React.FC<AgentManagerSidebarProps> = ({
             Show less
           </button>
         )}
-        
-        {/* Empty State */}
+
         {!isLoading && filteredGroups.length === 0 && (
           <div className="py-4 text-center">
             <p className="typography-meta text-muted-foreground">
