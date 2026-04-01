@@ -2,8 +2,12 @@ import { WebSocketServer } from 'ws';
 import {
   TERMINAL_INPUT_WS_MAX_PAYLOAD_BYTES,
   TERMINAL_INPUT_WS_PATH,
+  TERMINAL_OUTPUT_REPLAY_MAX_BYTES,
+  appendTerminalOutputReplayChunk,
+  createTerminalOutputReplayBuffer,
   createTerminalInputWsControlFrame,
   isRebindRateLimited,
+  listTerminalOutputReplayChunksSince,
   normalizeTerminalInputWsMessageToText,
   parseRequestPathname,
   pruneRebindTimestamps,
@@ -150,8 +154,10 @@ export function createTerminalRuntime({
   };
 
   const terminalSessions = new Map();
+  const terminalWsConnections = new Set();
   const MAX_TERMINAL_SESSIONS = 20;
   const TERMINAL_IDLE_TIMEOUT = 30 * 60 * 1000;
+  const terminalRuntimeName = typeof globalThis.Bun === 'undefined' ? 'node' : 'bun';
   const sanitizeTerminalEnv = (env) => {
     const next = { ...env };
     delete next.BASH_XTRACEFD;
@@ -159,13 +165,22 @@ export function createTerminalRuntime({
     delete next.ENV;
     return next;
   };
-  const terminalInputCapabilities = {
+  const terminalTransportCapabilities = {
     input: {
       preferred: 'ws',
       transports: ['http', 'ws'],
       ws: {
         path: TERMINAL_INPUT_WS_PATH,
-        v: 1,
+        v: 2,
+        enc: 'text+json-bin-control',
+      },
+    },
+    stream: {
+      preferred: 'ws',
+      transports: ['sse', 'ws'],
+      ws: {
+        path: TERMINAL_INPUT_WS_PATH,
+        v: 2,
         enc: 'text+json-bin-control',
       },
     },
@@ -189,13 +204,17 @@ export function createTerminalRuntime({
 
   terminalInputWsServer.on('connection', (socket) => {
     const connectionState = {
+      socket,
       boundSessionId: null,
       invalidFrames: 0,
       rebindTimestamps: [],
+      replayCursorBySession: new Map(),
       lastActivityAt: Date.now(),
     };
 
-    sendTerminalInputWsControl(socket, { t: 'ok', v: 1 });
+    terminalWsConnections.add(connectionState);
+
+    sendTerminalInputWsControl(socket, { t: 'ok', v: 2 });
 
     const heartbeatInterval = setInterval(() => {
       if (socket.readyState !== 1) {
@@ -231,7 +250,7 @@ export function createTerminalRuntime({
         }
 
         if (controlMessage.t === 'p') {
-          sendTerminalInputWsControl(socket, { t: 'po', v: 1 });
+          sendTerminalInputWsControl(socket, { t: 'po', v: 2 });
           return;
         }
 
@@ -268,9 +287,32 @@ export function createTerminalRuntime({
           return;
         }
 
+        const replaySinceRaw =
+          typeof controlMessage.r === 'number' && Number.isFinite(controlMessage.r)
+            ? Math.max(0, Math.trunc(controlMessage.r))
+            : 0;
+        const rememberedReplayCursor = connectionState.replayCursorBySession.get(nextSessionId) ?? 0;
+        const replaySince = Math.max(replaySinceRaw, rememberedReplayCursor);
+
         connectionState.rebindTimestamps.push(now);
         connectionState.boundSessionId = nextSessionId;
-        sendTerminalInputWsControl(socket, { t: 'bok', v: 1 });
+        sendTerminalInputWsControl(socket, {
+          t: 'bok',
+          v: 2,
+          s: nextSessionId,
+          runtime: terminalRuntimeName,
+          ptyBackend: targetSession.ptyBackend || 'unknown',
+        });
+
+        const replayChunks = listTerminalOutputReplayChunksSince(targetSession.outputReplayBuffer, replaySince);
+        for (const replayChunk of replayChunks) {
+          try {
+            socket.send(replayChunk.data);
+            connectionState.replayCursorBySession.set(nextSessionId, replayChunk.id);
+          } catch {
+            break;
+          }
+        }
         return;
       }
 
@@ -301,6 +343,8 @@ export function createTerminalRuntime({
 
     socket.on('close', () => {
       clearInterval(heartbeatInterval);
+      connectionState.boundSessionId = null;
+      terminalWsConnections.delete(connectionState);
     });
 
     socket.on('error', (error) => {
@@ -346,6 +390,56 @@ export function createTerminalRuntime({
 
     void handleUpgrade();
   });
+
+  const wireTerminalSession = (sessionId, session) => {
+    session.ptyProcess.onData((data) => {
+      session.lastActivity = Date.now();
+      const replayChunk = appendTerminalOutputReplayChunk(
+        session.outputReplayBuffer,
+        data,
+        TERMINAL_OUTPUT_REPLAY_MAX_BYTES
+      );
+
+      for (const wsConnection of terminalWsConnections) {
+        if (wsConnection.boundSessionId !== sessionId) {
+          continue;
+        }
+
+        if (!wsConnection.socket || wsConnection.socket.readyState !== 1) {
+          continue;
+        }
+
+        try {
+          wsConnection.socket.send(data);
+          if (replayChunk) {
+            wsConnection.replayCursorBySession.set(sessionId, replayChunk.id);
+          }
+        } catch {
+        }
+      }
+    });
+
+    session.ptyProcess.onExit(({ exitCode, signal }) => {
+      console.log(`Terminal session ${sessionId} exited with code ${exitCode}, signal ${signal}`);
+      for (const wsConnection of terminalWsConnections) {
+        if (wsConnection.boundSessionId !== sessionId) {
+          continue;
+        }
+
+        wsConnection.boundSessionId = null;
+        wsConnection.replayCursorBySession.delete(sessionId);
+        sendTerminalInputWsControl(wsConnection.socket, {
+          t: 'x',
+          v: 2,
+          s: sessionId,
+          exitCode,
+          signal,
+        });
+      }
+
+      terminalSessions.delete(sessionId);
+    });
+  };
 
   const idleSweepInterval = setInterval(() => {
     const now = Date.now();
@@ -399,17 +493,14 @@ export function createTerminalRuntime({
         cwd,
         lastActivity: Date.now(),
         clients: new Set(),
+        outputReplayBuffer: createTerminalOutputReplayBuffer(),
       };
 
       terminalSessions.set(sessionId, session);
-
-      ptyProcess.onExit(({ exitCode, signal }) => {
-        console.log(`Terminal session ${sessionId} exited with code ${exitCode}, signal ${signal}`);
-        terminalSessions.delete(sessionId);
-      });
+      wireTerminalSession(sessionId, session);
 
       console.log(`Created terminal session: ${sessionId} in ${cwd} using shell ${shell}`);
-      res.json({ sessionId, cols: cols || 80, rows: rows || 24, capabilities: terminalInputCapabilities });
+      res.json({ sessionId, cols: cols || 80, rows: rows || 24, capabilities: terminalTransportCapabilities });
     } catch (error) {
       console.error('Failed to create terminal session:', error);
       res.status(500).json({ error: error.message || 'Failed to create terminal session' });
@@ -433,9 +524,8 @@ export function createTerminalRuntime({
     session.clients.add(clientId);
     session.lastActivity = Date.now();
 
-    const runtime = typeof globalThis.Bun === 'undefined' ? 'node' : 'bun';
     const ptyBackend = session.ptyBackend || 'unknown';
-    res.write(`data: ${JSON.stringify({ type: 'connected', runtime, ptyBackend })}\n\n`);
+    res.write(`data: ${JSON.stringify({ type: 'connected', runtime: terminalRuntimeName, ptyBackend })}\n\n`);
 
     const heartbeatInterval = setInterval(() => {
       try {
@@ -501,7 +591,7 @@ export function createTerminalRuntime({
     req.on('close', cleanup);
     req.on('error', cleanup);
 
-    console.log(`Terminal connected: session=${sessionId} client=${clientId} runtime=${runtime} pty=${ptyBackend}`);
+    console.log(`Terminal connected: session=${sessionId} client=${clientId} runtime=${terminalRuntimeName} pty=${ptyBackend}`);
   });
 
   app.post('/api/terminal/:sessionId/input', express.text({ type: '*/*' }), (req, res) => {
@@ -613,17 +703,14 @@ export function createTerminalRuntime({
         cwd,
         lastActivity: Date.now(),
         clients: new Set(),
+        outputReplayBuffer: createTerminalOutputReplayBuffer(),
       };
 
       terminalSessions.set(newSessionId, session);
-
-      ptyProcess.onExit(({ exitCode, signal }) => {
-        console.log(`Terminal session ${newSessionId} exited with code ${exitCode}, signal ${signal}`);
-        terminalSessions.delete(newSessionId);
-      });
+      wireTerminalSession(newSessionId, session);
 
       console.log(`Restarted terminal session: ${sessionId} -> ${newSessionId} in ${cwd} using shell ${shell}`);
-      res.json({ sessionId: newSessionId, cols: cols || 80, rows: rows || 24, capabilities: terminalInputCapabilities });
+      res.json({ sessionId: newSessionId, cols: cols || 80, rows: rows || 24, capabilities: terminalTransportCapabilities });
     } catch (error) {
       console.error('Failed to restart terminal session:', error);
       res.status(500).json({ error: error.message || 'Failed to restart terminal session' });
