@@ -11,7 +11,9 @@ import { toolDisplayStyles } from '@/lib/typography';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { useSessionStore } from '@/stores/useSessionStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSessionMessageRecords } from '@/sync/sync-context';
+import { getSyncChildStores, getSyncDirectory } from '@/sync/sync-refs';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionActivity } from '@/hooks/useSessionActivity';
 import { opencodeClient } from '@/lib/opencode/client';
@@ -587,8 +589,6 @@ type TaskToolSummaryEntry = {
 
 type SessionMessageWithParts = MessageRecord;
 
-const EMPTY_SESSION_MESSAGES: SessionMessageWithParts[] = [];
-
 const normalizeSessionIdCandidate = (value: unknown): string | undefined => {
     if (typeof value !== 'string') {
         return undefined;
@@ -859,7 +859,7 @@ const TaskToolSummary: React.FC<{
     animateTailText?: boolean;
     isActive?: boolean;
 }> = ({ entries, isExpanded, isMobile, output, sessionId, onShowPopup, input, animateTailText = true, isActive = false }) => {
-    const setCurrentSession = useSessionStore((state) => state.setCurrentSession);
+    const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
     const showToolFileIcons = useUIStore((state) => state.showToolFileIcons);
     const displayEntries = entries;
 
@@ -1689,14 +1689,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
         return readTaskSessionIdFromOutput(taskOutputString);
     }, [isTaskTool, metadata, parsedTaskMetadata.sessionId, partMetadata, taskOutputString]);
 
-    const childSessionMessages = useSessionStore(
-        React.useCallback((store) => {
-            if (!taskSessionId) {
-                return EMPTY_SESSION_MESSAGES;
-            }
-            return (store.messages.get(taskSessionId) as SessionMessageWithParts[] | undefined) ?? EMPTY_SESSION_MESSAGES;
-        }, [taskSessionId])
-    );
+    const childSessionMessages = useSessionMessageRecords(taskSessionId ?? '');
 
     const metadataTaskSummaryEntries = React.useMemo<TaskToolSummaryEntry[]>(() => {
         if (!isTaskTool) {
@@ -1916,7 +1909,20 @@ const ToolPart: React.FC<ToolPartProps> = ({
 
                 taskPollLastSignatureRef.current = nextSignature;
                 taskPollNoChangeCountRef.current = 0;
-                useSessionStore.getState().syncMessages(taskSessionId, messages);
+                // Inject fetched subagent messages into sync child store
+                const childStores = getSyncChildStores();
+                const dir = getSyncDirectory();
+                childStores.update(dir, (prev) => {
+                    const records = messages as SessionMessageWithParts[];
+                    const partPatch: Record<string, import('@opencode-ai/sdk/v2').Part[]> = { ...prev.part };
+                    for (const rec of records) {
+                        partPatch[rec.info.id] = rec.parts;
+                    }
+                    return {
+                        message: { ...prev.message, [taskSessionId]: records.map((r) => r.info) as import('@opencode-ai/sdk/v2').Message[] },
+                        part: partPatch,
+                    };
+                });
             } catch {
                 // Ignore transient subagent fetch errors.
             } finally {

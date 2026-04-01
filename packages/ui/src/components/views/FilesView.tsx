@@ -272,6 +272,12 @@ const isJsonFile = (path: string): boolean => {
   return ext === 'json' || ext === 'jsonc' || ext === 'json5' || ext === 'geojson';
 };
 
+const isHtmlFile = (path: string): boolean => {
+  if (!path) return false;
+  const ext = path.toLowerCase().split('.').pop();
+  return ext === 'html' || ext === 'htm';
+};
+
 interface FileRowProps {
   node: FileNode;
   isExpanded: boolean;
@@ -476,6 +482,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const [textViewMode, setTextViewMode] = React.useState<'view' | 'edit'>('edit');
   const [mdViewMode, setMdViewMode] = React.useState<'preview' | 'edit'>('edit');
   const [jsonViewMode, setJsonViewMode] = React.useState<'tree' | 'text'>('tree');
+  const [htmlViewMode, setHtmlViewMode] = React.useState<'preview' | 'edit'>('edit');
 
   const lightTheme = React.useMemo(
     () => availableThemes.find((theme) => theme.metadata.id === lightThemeId) ?? getDefaultTheme(false),
@@ -1643,8 +1650,9 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const canEdit = Boolean(selectedFile && !isSelectedImage && files.writeFile && fileContent.length <= MAX_VIEW_CHARS);
   const isMarkdown = Boolean(selectedFile?.path && isMarkdownFile(selectedFile.path));
   const isJson = Boolean(selectedFile?.path && isJsonFile(selectedFile.path));
+  const isHtml = Boolean(selectedFile?.path && isHtmlFile(selectedFile.path));
   const isTextFile = Boolean(selectedFile && !isSelectedImage);
-  const canUseShikiFileView = isTextFile && !isMarkdown;
+  const canUseShikiFileView = isTextFile && !isMarkdown && !(isHtml && htmlViewMode === 'preview');
   const staticLanguageExtension = React.useMemo(
     () => (selectedFilePath ? languageByExtension(selectedFilePath) : null),
     [selectedFilePath],
@@ -1680,6 +1688,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
   React.useEffect(() => {
     setTextViewMode('edit');
+    setHtmlViewMode('edit');
   }, [selectedFile?.path]);
 
   const MD_VIEWER_MODE_KEY = 'openchamber:files:md-viewer-mode';
@@ -1725,6 +1734,21 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     }
   }, []);
 
+  const HTML_VIEWER_MODE_KEY = 'openchamber:files:html-viewer-mode';
+
+  React.useEffect(() => {
+    try {
+      const stored = localStorage.getItem(HTML_VIEWER_MODE_KEY);
+      if (stored === 'preview') {
+        setHtmlViewMode('preview');
+      } else if (stored === 'edit') {
+        setHtmlViewMode('edit');
+      }
+    } catch {
+      // Ignore localStorage errors
+    }
+  }, []);
+
   const saveJsonViewMode = React.useCallback((mode: 'tree' | 'text') => {
     setJsonViewMode(mode);
     try {
@@ -1734,6 +1758,18 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     }
   }, []);
 
+  const saveHtmlViewMode = React.useCallback((mode: 'preview' | 'edit') => {
+    setHtmlViewMode(mode);
+    try {
+      localStorage.setItem(HTML_VIEWER_MODE_KEY, mode);
+    } catch {
+      // Ignore localStorage errors
+    }
+  }, []);
+
+  const getHtmlViewMode = React.useCallback((): 'preview' | 'edit' => {
+    return htmlViewMode;
+  }, [htmlViewMode]);
   React.useEffect(() => {
     if (!pendingFileNavigation || !root) {
       return;
@@ -2270,10 +2306,16 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           </>
         )}
 
-        {isMarkdown && (
+        {(isMarkdown || isHtmlFile(selectedFile?.path ?? '')) && (
           <PreviewToggleButton
-            currentMode={getMdViewMode()}
-            onToggle={() => saveMdViewMode(getMdViewMode() === 'preview' ? 'edit' : 'preview')}
+            currentMode={isMarkdown ? getMdViewMode() : getHtmlViewMode()}
+            onToggle={() => {
+              if (isHtmlFile(selectedFile?.path ?? '')) {
+                saveHtmlViewMode(getHtmlViewMode() === 'preview' ? 'edit' : 'preview');
+              } else {
+                saveMdViewMode(getMdViewMode() === 'preview' ? 'edit' : 'preview');
+              }
+            }}
           />
         )}
 
@@ -2630,6 +2672,21 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                   stripFrontmatter
                 />
               </ErrorBoundary>
+            </div>
+          ) : selectedFile && isHtml && htmlViewMode === 'preview' ? (
+            <div className="h-full overflow-hidden">
+              <iframe
+                srcDoc={(() => {
+                  // Inject base tag for relative paths (CSS/JS/images) to work
+                  const basePath = selectedFile.path.substring(0, selectedFile.path.lastIndexOf('/') + 1);
+                  if (!basePath) return fileContent;
+                  const baseTag = `<base href="${runtime.isDesktop ? basePath : basePath}">`;
+                  return fileContent.replace(/<head([^>]*)>/i, `<head$1>${baseTag}`);
+                })()}
+                className="w-full h-full border-none"
+                sandbox="allow-scripts allow-same-origin allow-forms"
+                title="HTML Preview"
+              />
             </div>
           ) : selectedFile && canUseShikiFileView && textViewMode === 'view' ? (
             renderShikiFileView(selectedFile, draftContent)

@@ -6,8 +6,9 @@ import { opencodeClient } from "@/lib/opencode/client";
 import { scopeMatches, subscribeToConfigChanges } from "@/lib/configSync";
 import type { ModelMetadata } from "@/types";
 import { getSafeStorage } from "./utils/safeStorage";
-import type { SessionStore } from "./types/sessionTypes";
 import { filterVisibleAgents } from "./useAgentsStore";
+import { useSessionUIStore } from "@/sync/session-ui-store";
+import { useSelectionStore } from "@/sync/selection-store";
 import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry";
 import { updateDesktopSettings } from "@/lib/persistence";
 import { useDirectoryStore } from "@/stores/useDirectoryStore";
@@ -529,9 +530,12 @@ interface ConfigStore {
 declare global {
     interface Window {
         __zustand_config_store__?: UseBoundStore<StoreApi<ConfigStore>>;
-        __zustand_session_store__?: UseBoundStore<StoreApi<SessionStore>>;
     }
 }
+
+// In-flight dedup: prevent concurrent duplicate loadProviders/loadAgents calls for the same directory
+const _inFlightProviders = new Map<string, Promise<void>>();
+const _inFlightAgents = new Map<string, Promise<boolean>>();
 
 export const useConfigStore = create<ConfigStore>()(
     devtools(
@@ -724,6 +728,12 @@ export const useConfigStore = create<ConfigStore>()(
 
                 loadProviders: async (options) => {
                     const directoryKey = toDirectoryKey(options?.directory ?? fromDirectoryKey(get().activeDirectoryKey));
+
+                    // Dedup: if a load is already in-flight for this directory, reuse it
+                    const existing = _inFlightProviders.get(directoryKey);
+                    if (existing) return existing;
+
+                    const promise = (async () => {
                     const existingSnapshot = get().directoryScoped[directoryKey];
                     const previousProviders = existingSnapshot?.providers ?? (get().activeDirectoryKey === directoryKey ? get().providers : []);
                     const previousDefaults = existingSnapshot?.defaultProviders ?? (get().activeDirectoryKey === directoryKey ? get().defaultProviders : {});
@@ -872,6 +882,10 @@ export const useConfigStore = create<ConfigStore>()(
 
                         return nextState;
                     });
+                    })().finally(() => _inFlightProviders.delete(directoryKey));
+
+                    _inFlightProviders.set(directoryKey, promise);
+                    return promise;
                 },
 
                 setProvider: (providerId: string) => {
@@ -1082,6 +1096,12 @@ export const useConfigStore = create<ConfigStore>()(
 
                 loadAgents: async (options) => {
                     const directoryKey = toDirectoryKey(options?.directory ?? fromDirectoryKey(get().activeDirectoryKey));
+
+                    // Dedup: if a load is already in-flight for this directory, reuse it
+                    const existing = _inFlightAgents.get(directoryKey);
+                    if (existing) return existing;
+
+                    const promise = (async (): Promise<boolean> => {
                     const existingSnapshot = get().directoryScoped[directoryKey];
                     const previousAgents = existingSnapshot?.agents ?? (get().activeDirectoryKey === directoryKey ? get().agents : []);
                     let lastError: unknown = null;
@@ -1392,6 +1412,10 @@ export const useConfigStore = create<ConfigStore>()(
                     });
 
                     return false;
+                    })().finally(() => _inFlightAgents.delete(directoryKey));
+
+                    _inFlightAgents.set(directoryKey, promise);
+                    return promise;
                 },
 
                 setAgent: (agentName: string | undefined) => {
@@ -1424,44 +1448,29 @@ export const useConfigStore = create<ConfigStore>()(
                         };
                     });
 
-                    if (agentName && typeof window !== "undefined") {
+                    if (agentName) {
+                        const { currentSessionId } = useSessionUIStore.getState();
+                        const selState = useSelectionStore.getState();
 
-                        const sessionStore = window.__zustand_session_store__;
-                        if (sessionStore) {
-                            const sessionState = sessionStore.getState();
-                            const { currentSessionId, isOpenChamberCreatedSession, initializeNewOpenChamberSession, getAgentModelForSession } = sessionState;
+                        if (currentSessionId) {
+                            selState.saveSessionAgentSelection(currentSessionId, agentName);
+                        }
 
-                            if (currentSessionId) {
-
-                                sessionStore.setState((state) => {
-                                    const newAgentContext = new Map(state.currentAgentContext);
-                                    newAgentContext.set(currentSessionId, agentName);
-                                    return { currentAgentContext: newAgentContext };
-                                });
-                            }
-
-                            if (currentSessionId && isOpenChamberCreatedSession(currentSessionId)) {
-                                const existingAgentModel = getAgentModelForSession(currentSessionId, agentName);
-                                if (!existingAgentModel) {
-
-                                    initializeNewOpenChamberSession(currentSessionId, agents);
-                                }
+                        if (currentSessionId && useSessionUIStore.getState().isOpenChamberCreatedSession(currentSessionId)) {
+                            const existingAgentModel = selState.getAgentModelForSession(currentSessionId, agentName);
+                            if (!existingAgentModel) {
+                                useSessionUIStore.getState().initializeNewOpenChamberSession(currentSessionId, agents);
                             }
                         }
                     }
 
-                    if (agentName && typeof window !== "undefined") {
-                        const sessionStore = window.__zustand_session_store__;
-                        if (sessionStore?.getState) {
-                            const { currentSessionId, getAgentModelForSession } = sessionStore.getState();
+                    if (agentName) {
+                        const { currentSessionId } = useSessionUIStore.getState();
 
-                            if (currentSessionId) {
-                                const existingAgentModel = getAgentModelForSession(currentSessionId, agentName);
-
-                                if (existingAgentModel) {
-
-                                    return;
-                                }
+                        if (currentSessionId) {
+                            const existingAgentModel = useSelectionStore.getState().getAgentModelForSession(currentSessionId, agentName);
+                            if (existingAgentModel) {
+                                return;
                             }
                         }
 
@@ -1792,9 +1801,7 @@ export const useConfigStore = create<ConfigStore>()(
                         return undefined;
                     }
 
-                    const derived = deriveModelMetadata(providerId, model);
-                    set({ modelsMetadata: new Map(modelsMetadata).set(key, derived) });
-                    return derived;
+                    return deriveModelMetadata(providerId, model);
                 },
                 getVisibleAgents: () => {
                     const { agents } = get();

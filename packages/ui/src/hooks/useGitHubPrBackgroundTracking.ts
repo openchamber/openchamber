@@ -1,11 +1,13 @@
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
 import type { RuntimeAPIs } from '@/lib/api/types';
+import { mapWithConcurrency } from '@/lib/concurrency';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { useSessionStore } from '@/stores/useSessionStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSessions } from '@/sync/sync-context';
 
 const MAX_BACKGROUND_PR_DIRECTORIES = 20;
 const ACTIVE_DIRECTORY_REFRESH_TTL_MS = 15_000;
@@ -94,34 +96,6 @@ const prioritizeDirectoriesForFetch = (
   });
 };
 
-const mapWithConcurrency = async <T, R>(
-  values: T[],
-  concurrency: number,
-  mapper: (value: T) => Promise<R>,
-): Promise<R[]> => {
-  if (values.length === 0) {
-    return [];
-  }
-
-  const safeConcurrency = Math.max(1, Math.min(concurrency, values.length));
-  const results = new Array<R>(values.length);
-  let cursor = 0;
-
-  const worker = async () => {
-    while (true) {
-      const nextIndex = cursor;
-      cursor += 1;
-      if (nextIndex >= values.length) {
-        return;
-      }
-      results[nextIndex] = await mapper(values[nextIndex]);
-    }
-  };
-
-  await Promise.all(Array.from({ length: safeConcurrency }, () => worker()));
-  return results;
-};
-
 const toPrTargets = (cache: Map<string, BranchCacheEntry>, directories: string[]): PrTarget[] => {
   const result: PrTarget[] = [];
   directories.forEach((directory) => {
@@ -144,10 +118,9 @@ export const useGitHubPrBackgroundTracking = (
 ): void => {
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const projects = useProjectsStore((state) => state.projects);
-  const sessions = useSessionStore((state) => state.sessions);
-  const archivedSessions = useSessionStore((state) => state.archivedSessions);
-  const availableWorktreesByProject = useSessionStore((state) => state.availableWorktreesByProject);
-  const worktreeMetadata = useSessionStore((state) => state.worktreeMetadata);
+  const sessions = useSessions();
+  const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
+  const worktreeMetadata = useSessionUIStore((state) => state.worktreeMetadata);
 
   const githubAuthStatus = useGitHubAuthStore((state) => state.status);
   const githubAuthChecked = useGitHubAuthStore((state) => state.hasChecked);
@@ -229,7 +202,7 @@ export const useGitHubPrBackgroundTracking = (
       add(metadata.path);
     });
 
-    [...sessions, ...archivedSessions]
+    [...sessions]
       .sort((a, b) => (b.time?.updated ?? 0) - (a.time?.updated ?? 0))
       .forEach((rawSession) => {
         const session = rawSession as SessionLike;
@@ -238,7 +211,7 @@ export const useGitHubPrBackgroundTracking = (
       });
 
     return Array.from(ordered.values()).slice(0, MAX_BACKGROUND_PR_DIRECTORIES);
-  }, [archivedSessions, availableWorktreesByProject, currentDirectory, projects, sessions, worktreeMetadata]);
+  }, [availableWorktreesByProject, currentDirectory, projects, sessions, worktreeMetadata]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -275,7 +248,7 @@ export const useGitHubPrBackgroundTracking = (
         STATUS_FETCH_CONCURRENCY,
         async (directory) => {
           try {
-            const status = await git.getGitStatus(directory);
+            const status = await git.getGitStatus(directory, { mode: 'light' });
             const branch = typeof status.current === 'string' ? status.current.trim() : '';
             return {
               directory,
@@ -383,7 +356,11 @@ export const useGitHubPrBackgroundTracking = (
       }
     };
 
-    void runRefresh({ forceCurrent: true, maxFetchCount: MAX_STATUS_FETCH_ON_RESUME });
+    // Delay initial PR tracking to avoid startup CPU burst
+    const startupDelayId = window.setTimeout(() => {
+      if (cancelled) return;
+      void runRefresh({ forceCurrent: true, maxFetchCount: MAX_STATUS_FETCH_ON_RESUME });
+    }, 5_000);
 
     const intervalId = window.setInterval(() => {
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
@@ -442,6 +419,7 @@ export const useGitHubPrBackgroundTracking = (
 
     return () => {
       cancelled = true;
+      window.clearTimeout(startupDelayId);
       window.clearInterval(intervalId);
       window.removeEventListener('focus', refreshOnResume);
       document.removeEventListener('visibilitychange', refreshOnResume);

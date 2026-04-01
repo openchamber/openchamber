@@ -2,7 +2,8 @@ import React from 'react';
 import { useGitStore } from '@/stores/useGitStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import { useSessionStore } from '@/stores/useSessionStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSessions, useSessionStatus } from '@/sync/sync-context';
 
 /**
  * Background git polling hook - monitors git status regardless of which tab is open.
@@ -20,8 +21,17 @@ export function useGitPolling() {
 
     const { git } = useRuntimeAPIs();
     const fallbackDirectory = useDirectoryStore((state) => state.currentDirectory);
-    const { currentSessionId, sessions, worktreeMetadata: worktreeMap, sessionStatus } = useSessionStore();
-    const { setActiveDirectory, startPolling, setPollingMode, stopPolling, fetchAll, fetchStatus, clearDiffCache } = useGitStore();
+    const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+    const sessions = useSessions();
+    const worktreeMap = useSessionUIStore((state) => state.worktreeMetadata);
+    const currentStatus = useSessionStatus(currentSessionId ?? '');
+    const setActiveDirectory = useGitStore((state) => state.setActiveDirectory);
+    const startPolling = useGitStore((state) => state.startPolling);
+    const setPollingMode = useGitStore((state) => state.setPollingMode);
+    const stopPolling = useGitStore((state) => state.stopPolling);
+    const fetchAll = useGitStore((state) => state.fetchAll);
+    const fetchStatus = useGitStore((state) => state.fetchStatus);
+    const clearDiffCache = useGitStore((state) => state.clearDiffCache);
     const immediateRefreshTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const lastImmediateRefreshAtRef = React.useRef<number>(0);
 
@@ -40,12 +50,12 @@ export function useGitPolling() {
         if (!currentSessionId) {
             return 'idle';
         }
-        const activeStatus = sessionStatus?.get(currentSessionId)?.type;
+        const activeStatus = currentStatus?.type;
         if (activeStatus === 'busy' || activeStatus === 'retry') {
             return activeStatus;
         }
         return 'idle';
-    }, [currentSessionId, sessionStatus]);
+    }, [currentSessionId, currentStatus]);
 
     const pollingMode = activeSessionStatus === 'busy' || activeSessionStatus === 'retry' ? 'busy' : 'normal';
 
@@ -84,7 +94,7 @@ export function useGitPolling() {
             immediateRefreshTimerRef.current = null;
             lastImmediateRefreshAtRef.current = Date.now();
             void (async () => {
-                const statusChanged = await fetchStatus(targetDirectory, git, { silent: true });
+                const statusChanged = await fetchStatus(targetDirectory, git, { silent: true, mode: 'light' });
                 if (shouldForceDiffRefresh && !statusChanged) {
                     clearDiffCache(targetDirectory);
                 }

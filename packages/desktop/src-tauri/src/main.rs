@@ -22,12 +22,27 @@ use std::{
     },
     time::Duration,
 };
-use tauri::utils::config::BackgroundThrottlingPolicy;
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 #[cfg(target_os = "macos")]
 use window_vibrancy::{
     apply_vibrancy, clear_vibrancy, NSVisualEffectMaterial,
 };
+
+/// Disable pinch-to-zoom / magnification gestures on macOS to avoid accidental
+/// zoom and the continuous gesture event processing overhead.
+#[cfg(target_os = "macos")]
+fn disable_pinch_zoom(window: &tauri::WebviewWindow) {
+    let _ = window.with_webview(|webview| unsafe {
+        use objc2::rc::Retained;
+        use objc2_web_kit::WKWebView;
+        let wk_webview: Retained<WKWebView> =
+            Retained::retain(webview.inner().cast()).unwrap();
+        wk_webview.setAllowsMagnification(false);
+    });
+}
+
+#[cfg(not(target_os = "macos"))]
+fn disable_pinch_zoom(_window: &tauri::WebviewWindow) {}
 
 /// Global counter for generating unique window labels.
 static WINDOW_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -277,7 +292,7 @@ fn build_macos_menu<R: tauri::Runtime>(
         MENU_ITEM_TOGGLE_MEMORY_DEBUG_ID,
         "Toggle Memory Debug",
         true,
-        Some("Cmd+Shift+D"),
+        Some("CmdOrCtrl+Shift+D"),
     )?;
 
     let help_dialog = MenuItem::with_id(
@@ -1175,9 +1190,11 @@ fn is_app_bundle_installed(bundle_name: &str) -> bool {
 const SIDECAR_NAME: &str = "openchamber-server";
 const SIDECAR_NOTIFY_PREFIX: &str = "[OpenChamberDesktopNotify] ";
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(20);
-const HEALTH_POLL_INTERVAL: Duration = Duration::from_millis(250);
+const HEALTH_POLL_INITIAL_INTERVAL: Duration = Duration::from_millis(250);
+const HEALTH_POLL_MAX_INTERVAL: Duration = Duration::from_millis(2000);
 const LOCAL_SIDECAR_HEALTH_TIMEOUT: Duration = Duration::from_secs(8);
-const LOCAL_SIDECAR_HEALTH_POLL_INTERVAL: Duration = Duration::from_millis(100);
+const LOCAL_SIDECAR_HEALTH_POLL_INITIAL_INTERVAL: Duration = Duration::from_millis(100);
+const LOCAL_SIDECAR_HEALTH_POLL_MAX_INTERVAL: Duration = Duration::from_millis(1000);
 const STARTUP_REMOTE_PROBE_SOFT_TIMEOUT: Duration = Duration::from_secs(2);
 const STARTUP_REMOTE_PROBE_HARD_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -1742,7 +1759,12 @@ fn maybe_show_sidecar_notification(app: &tauri::AppHandle, payload: SidecarNotif
     let _ = builder.show();
 }
 
-async fn wait_for_health_with(url: &str, timeout: Duration, poll_interval: Duration) -> bool {
+async fn wait_for_health_with(
+    url: &str,
+    timeout: Duration,
+    initial_interval: Duration,
+    max_interval: Duration,
+) -> bool {
     let client = match reqwest::Client::builder().no_proxy().build() {
         Ok(c) => c,
         Err(_) => return false,
@@ -1750,6 +1772,7 @@ async fn wait_for_health_with(url: &str, timeout: Duration, poll_interval: Durat
 
     let deadline = std::time::Instant::now() + timeout;
     let health_url = format!("{}/health", url.trim_end_matches('/'));
+    let mut interval = initial_interval;
 
     while std::time::Instant::now() < deadline {
         if let Ok(resp) = client.get(&health_url).send().await {
@@ -1757,14 +1780,15 @@ async fn wait_for_health_with(url: &str, timeout: Duration, poll_interval: Durat
                 return true;
             }
         }
-        tokio::time::sleep(poll_interval).await;
+        tokio::time::sleep(interval).await;
+        interval = (interval * 2).min(max_interval);
     }
 
     false
 }
 
 async fn wait_for_health(url: &str) -> bool {
-    wait_for_health_with(url, HEALTH_TIMEOUT, HEALTH_POLL_INTERVAL).await
+    wait_for_health_with(url, HEALTH_TIMEOUT, HEALTH_POLL_INITIAL_INTERVAL, HEALTH_POLL_MAX_INTERVAL).await
 }
 
 fn kill_sidecar(app: tauri::AppHandle) {
@@ -1774,16 +1798,28 @@ fn kill_sidecar(app: tauri::AppHandle) {
 
     let sidecar_url = state.url.lock().expect("sidecar url mutex").clone();
     if let Some(url) = sidecar_url {
-        let shutdown_url = format!("{}/api/system/shutdown", url.trim_end_matches('/'));
-        if let Ok(client) = reqwest::blocking::Client::builder()
-            .no_proxy()
-            .timeout(Duration::from_millis(1500))
-            .build()
-        {
-            if let Ok(resp) = client.post(shutdown_url).send() {
-                if resp.status().is_success() {
-                    std::thread::sleep(Duration::from_millis(100));
-                }
+        // Attempt graceful shutdown via a raw HTTP POST to avoid pulling in
+        // reqwest::blocking (and its extra thread pool) just for this one call.
+        if let Ok(parsed) = url::Url::parse(&url) {
+            let host = parsed.host_str().unwrap_or("127.0.0.1");
+            let port = parsed.port().unwrap_or(80);
+            let path = "/api/system/shutdown";
+            if let Ok(mut stream) =
+                std::net::TcpStream::connect_timeout(
+                    &format!("{host}:{port}").parse().unwrap(),
+                    Duration::from_millis(1500),
+                )
+            {
+                use std::io::Write;
+                let _ = stream.set_write_timeout(Some(Duration::from_millis(1500)));
+                let _ = stream.set_read_timeout(Some(Duration::from_millis(1500)));
+                let request = format!(
+                    "POST {path} HTTP/1.1\r\nHost: {host}:{port}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                );
+                let _ = stream.write_all(request.as_bytes());
+                let _ = stream.flush();
+                // Brief pause to let the sidecar begin its shutdown sequence.
+                std::thread::sleep(Duration::from_millis(100));
             }
         }
     }
@@ -2068,7 +2104,8 @@ async fn spawn_local_server(app: &tauri::AppHandle) -> Result<String> {
         if !wait_for_health_with(
             &url,
             LOCAL_SIDECAR_HEALTH_TIMEOUT,
-            LOCAL_SIDECAR_HEALTH_POLL_INTERVAL,
+            LOCAL_SIDECAR_HEALTH_POLL_INITIAL_INTERVAL,
+            LOCAL_SIDECAR_HEALTH_POLL_MAX_INTERVAL,
         )
         .await
         {
@@ -2452,9 +2489,42 @@ fn read_desktop_theme_override() -> Option<tauri::Theme> {
     parse_theme_override(theme_mode, theme_variant)
 }
 
+fn read_desktop_vibrancy_enabled() -> bool {
+    let raw = fs::read_to_string(settings_file_path()).ok();
+    let parsed = raw
+        .as_deref()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
+    parsed
+        .as_ref()
+        .and_then(|v| v.get("desktopVibrancy"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true) // enabled by default
+}
+
+fn write_desktop_vibrancy_to_disk(enabled: bool) -> Result<()> {
+    let path = settings_file_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let mut root: serde_json::Value = if let Ok(raw) = fs::read_to_string(&path) {
+        serde_json::from_str(&raw).unwrap_or(serde_json::json!({}))
+    } else {
+        serde_json::json!({})
+    };
+    if !root.is_object() {
+        root = serde_json::json!({});
+    }
+    root["desktopVibrancy"] = serde_json::Value::Bool(enabled);
+    fs::write(&path, serde_json::to_string_pretty(&root)?)?;
+    Ok(())
+}
+
 #[cfg(target_os = "macos")]
 fn apply_macos_window_vibrancy(window: &tauri::WebviewWindow) {
-    let _ = clear_vibrancy(window);
+    if !read_desktop_vibrancy_enabled() {
+        let _ = clear_vibrancy(window);
+        return;
+    }
 
     if let Err(error) = apply_vibrancy(
         window,
@@ -2468,6 +2538,56 @@ fn apply_macos_window_vibrancy(window: &tauri::WebviewWindow) {
 
 #[cfg(not(target_os = "macos"))]
 fn apply_macos_window_vibrancy(_window: &tauri::WebviewWindow) {}
+
+#[tauri::command]
+fn desktop_set_vibrancy(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    write_desktop_vibrancy_to_disk(enabled).map_err(|e| e.to_string())?;
+
+    #[cfg(target_os = "macos")]
+    {
+        for window in app.webview_windows().values() {
+            if enabled {
+                if let Err(error) = apply_vibrancy(
+                    window,
+                    NSVisualEffectMaterial::Sidebar,
+                    None,
+                    None,
+                ) {
+                    log::warn!("[desktop:vibrancy] Failed to apply vibrancy: {error}");
+                }
+            } else {
+                let _ = clear_vibrancy(window);
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    let _ = app;
+
+    Ok(())
+}
+
+/// Apply platform-specific window builder configuration.
+fn apply_platform_window_config<M: Manager<tauri::Wry>>(
+    builder: WebviewWindowBuilder<'_, tauri::Wry, M>,
+) -> WebviewWindowBuilder<'_, tauri::Wry, M> {
+    #[cfg(target_os = "macos")]
+    let builder = builder
+        .transparent(read_desktop_vibrancy_enabled())
+        .hidden_title(true)
+        .title_bar_style(tauri::TitleBarStyle::Overlay)
+        .traffic_light_position(tauri::Position::Logical(tauri::LogicalPosition {
+            x: 17.0,
+            y: 26.0,
+        }));
+
+    #[cfg(target_os = "windows")]
+    let builder = builder.additional_browser_args(
+        "--proxy-bypass-list=<-loopback> --disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection",
+    );
+
+    builder
+}
 
 #[tauri::command]
 fn desktop_set_window_theme(
@@ -2630,8 +2750,9 @@ fn create_window(
         .min_inner_size(MIN_WINDOW_WIDTH as f64, MIN_WINDOW_HEIGHT as f64)
         .decorations(true)
         .visible(false)
-        .initialization_script(&init_script)
-        .background_throttling(BackgroundThrottlingPolicy::Disabled);
+        .initialization_script(&init_script);
+
+    builder = apply_platform_window_config(builder);
 
     let apply_restored_state = restored_state
         .as_ref()
@@ -2646,21 +2767,10 @@ fn create_window(
             .position(state.x as f64, state.y as f64);
     }
 
-    #[cfg(target_os = "macos")]
-    {
-        builder = builder
-            .transparent(true)
-            .hidden_title(true)
-            .title_bar_style(tauri::TitleBarStyle::Overlay)
-            .traffic_light_position(tauri::Position::Logical(tauri::LogicalPosition {
-                x: 17.0,
-                y: 26.0,
-            }));
-    }
-
     let window = builder.build()?;
     let _ = window.set_theme(read_desktop_theme_override());
     apply_macos_window_vibrancy(&window);
+    disable_pinch_zoom(&window);
 
     if let Some(state) = restored_state.as_ref().filter(|_| apply_restored_state) {
         if state.maximized || state.fullscreen {
@@ -2693,8 +2803,9 @@ fn create_startup_window(app: &tauri::AppHandle, restore_geometry: bool) -> Resu
         .min_inner_size(MIN_WINDOW_WIDTH as f64, MIN_WINDOW_HEIGHT as f64)
         .decorations(true)
         .visible(true)
-        .initialization_script(&splash_script)
-        .background_throttling(BackgroundThrottlingPolicy::Disabled);
+        .initialization_script(&splash_script);
+
+    builder = apply_platform_window_config(builder);
 
     let apply_restored_state = restored_state
         .as_ref()
@@ -2709,21 +2820,10 @@ fn create_startup_window(app: &tauri::AppHandle, restore_geometry: bool) -> Resu
             .position(state.x as f64, state.y as f64);
     }
 
-    #[cfg(target_os = "macos")]
-    {
-        builder = builder
-            .transparent(true)
-            .hidden_title(true)
-            .title_bar_style(tauri::TitleBarStyle::Overlay)
-            .traffic_light_position(tauri::Position::Logical(tauri::LogicalPosition {
-                x: 17.0,
-                y: 26.0,
-            }));
-    }
-
     let window = builder.build()?;
     let _ = window.set_theme(read_desktop_theme_override());
     apply_macos_window_vibrancy(&window);
+    disable_pinch_zoom(&window);
 
     if let Some(state) = restored_state.as_ref().filter(|_| apply_restored_state) {
         if state.maximized || state.fullscreen {
@@ -2929,13 +3029,38 @@ fn open_new_window(app: &tauri::AppHandle) {
 }
 
 fn main() {
+    // Ensure localhost traffic never routes through a system/VPN proxy.
+    for key in ["NO_PROXY", "no_proxy"] {
+        let existing = env::var(key).unwrap_or_default();
+        let loopback = ["127.0.0.1", "localhost", "::1"];
+        let missing: Vec<&str> = loopback
+            .iter()
+            .filter(|addr| !existing.split(',').any(|part| part.trim() == **addr))
+            .copied()
+            .collect();
+        if !missing.is_empty() {
+            let merged = if existing.is_empty() {
+                missing.join(",")
+            } else {
+                format!("{},{}", existing, missing.join(","))
+            };
+            env::set_var(key, &merged);
+        }
+    }
+
     let log_builder = tauri_plugin_log::Builder::default()
         .level(log::LevelFilter::Info)
         .clear_targets()
-        .targets([
-            tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
-            tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Webview),
-        ]);
+        .targets(if cfg!(debug_assertions) {
+            vec![
+                tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Webview),
+            ]
+        } else {
+            vec![tauri_plugin_log::Target::new(
+                tauri_plugin_log::TargetKind::Stdout,
+            )]
+        });
 
     let builder = tauri::Builder::default()
         .manage(SidecarState::default())
@@ -3158,6 +3283,7 @@ fn main() {
             desktop_hosts_set,
             desktop_host_probe,
             desktop_set_window_theme,
+            desktop_set_vibrancy,
             remote_ssh::desktop_ssh_instances_get,
             remote_ssh::desktop_ssh_instances_set,
             remote_ssh::desktop_ssh_import_hosts,

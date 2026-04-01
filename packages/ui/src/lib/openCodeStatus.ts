@@ -1,4 +1,5 @@
-import { useSessionStore } from '@/stores/useSessionStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { getSyncSessions } from '@/sync/sync-refs';
 import { useUIStore } from '@/stores/useUIStore';
 
 declare const __APP_VERSION__: string | undefined;
@@ -37,10 +38,11 @@ type OpenChamberOpencodeResolution = {
 };
 
 const getCurrentDirectory = (): string => {
-  const state = useSessionStore.getState();
+  const state = useSessionUIStore.getState();
   const currentSessionId = state.currentSessionId;
   if (!currentSessionId) return '';
-  const session = state.sessions.find((s) => s.id === currentSessionId);
+  const sessions = getSyncSessions();
+  const session = sessions.find((s) => s.id === currentSessionId);
   return typeof session?.directory === 'string' ? session.directory : '';
 };
 

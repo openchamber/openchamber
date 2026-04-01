@@ -19,6 +19,7 @@ import * as zai from './zai.js';
 import * as minimaxCodingPlan from './minimax-coding-plan.js';
 import * as minimaxCnCodingPlan from './minimax-cn-coding-plan.js';
 import * as ollamaCloud from './ollama-cloud.js';
+import * as zhipuai from './zhipuai.js';
 
 const registry = {
   claude: {
@@ -92,6 +93,12 @@ const registry = {
     providerName: ollamaCloud.providerName,
     isConfigured: ollamaCloud.isConfigured,
     fetchQuota: ollamaCloud.fetchQuota
+  },
+  'zhipuai-coding-plan': {
+    providerId: zhipuai.providerId,
+    providerName: zhipuai.providerName,
+    isConfigured: zhipuai.isConfigured,
+    fetchQuota: zhipuai.fetchQuota
   }
 };
 
@@ -150,3 +157,4 @@ export const fetchNanoGptQuota = nanogpt.fetchQuota;
 export const fetchMinimaxCodingPlanQuota = minimaxCodingPlan.fetchQuota;
 export const fetchMinimaxCnCodingPlanQuota = minimaxCnCodingPlan.fetchQuota;
 export const fetchOllamaCloudQuota = ollamaCloud.fetchQuota;
+export const fetchZhipuaiQuota = zhipuai.fetchQuota;

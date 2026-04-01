@@ -135,10 +135,27 @@
     overscroll-behavior-y: none;
   }
 
-  :root.desktop-runtime body,
-  :root.desktop-runtime #root {
+  :root.desktop-runtime:not(.no-vibrancy) body,
+  :root.desktop-runtime:not(.no-vibrancy) #root {
     background: transparent !important;
     background-color: transparent !important;
+  }
+
+  :root.desktop-runtime.no-vibrancy body,
+  :root.desktop-runtime.no-vibrancy #root {
+    background: var(--background) !important;
+    background-color: var(--background) !important;
+  }
+
+  /* When vibrancy is off, force sidebar overlays to solid and disable blur. */
+  :root.desktop-runtime.no-vibrancy {
+    --sidebar-overlay-strong: var(--sidebar) !important;
+    --sidebar-overlay-soft: var(--sidebar) !important;
+  }
+
+  :root.desktop-runtime.no-vibrancy .backdrop-blur {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
   }
 
   .font-sans {

@@ -145,6 +145,21 @@ export const MainLayout: React.FC = () => {
         }
     }, [isSessionSwitcherOpen, isMobile]);
 
+    // Ensure mobile drawers are closed when opening full-screen settings
+    useEffect(() => {
+        if (!isMobile || !isSettingsDialogOpen) {
+            return;
+        }
+
+        setMobileLeftDrawerOpen(false);
+        if (isSessionSwitcherOpen) {
+            useUIStore.getState().setSessionSwitcherOpen(false);
+        }
+        if (isRightSidebarOpen) {
+            setRightSidebarOpen(false);
+        }
+    }, [isMobile, isSettingsDialogOpen, isSessionSwitcherOpen, isRightSidebarOpen, setRightSidebarOpen]);
+
     // Sync right drawer and git sidebar state
     useEffect(() => {
         if (isMobile) {

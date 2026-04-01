@@ -1,7 +1,84 @@
 import React, { type JSX, type ReactNode } from 'react';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
-import type { RuntimeAPIs } from '@/lib/api/types';
+import type { FilesAPI, RuntimeAPIs } from '@/lib/api/types';
+import {
+  approxStringBytes,
+  evictContentLru,
+  setContentBytes,
+  touchContent as touchContentLru,
+  removeContentBytes,
+} from '@/sync/content-cache';
+
+/** Wrap a FilesAPI with an in-memory LRU content cache. */
+function withContentCache(files: FilesAPI): FilesAPI {
+  const cache = new Map<string, { content: string; path: string }>();
+
+  const cachedReadFile: FilesAPI['readFile'] = files.readFile
+    ? async (path: string) => {
+        const hit = cache.get(path);
+        if (hit) {
+          touchContentLru(path);
+          return hit;
+        }
+
+        const result = await files.readFile!(path);
+        const bytes = approxStringBytes(result.content);
+        cache.set(path, result);
+        setContentBytes(path, bytes);
+
+        // Evict if over limits
+        const keep = new Set<string>();
+        evictContentLru(keep, (evictPath) => {
+          cache.delete(evictPath);
+        });
+
+        return result;
+      }
+    : undefined;
+
+  // Invalidate cache on writes, deletes, renames
+  const cachedWriteFile: FilesAPI['writeFile'] = files.writeFile
+    ? async (path, content) => {
+        cache.delete(path);
+        removeContentBytes(path);
+        return files.writeFile!(path, content);
+      }
+    : undefined;
+
+  const cachedDelete: FilesAPI['delete'] = files.delete
+    ? async (path) => {
+        cache.delete(path);
+        removeContentBytes(path);
+        return files.delete!(path);
+      }
+    : undefined;
+
+  const cachedRename: FilesAPI['rename'] = files.rename
+    ? async (oldPath, newPath) => {
+        cache.delete(oldPath);
+        removeContentBytes(oldPath);
+        cache.delete(newPath);
+        removeContentBytes(newPath);
+        return files.rename!(oldPath, newPath);
+      }
+    : undefined;
+
+  return {
+    ...files,
+    readFile: cachedReadFile,
+    writeFile: cachedWriteFile,
+    delete: cachedDelete,
+    rename: cachedRename,
+  };
+}
 
 export function RuntimeAPIProvider({ apis, children }: { apis: RuntimeAPIs; children: ReactNode }): JSX.Element {
-  return <RuntimeAPIContext.Provider value={apis}>{children}</RuntimeAPIContext.Provider>;
+  const cachedApis = React.useMemo<RuntimeAPIs>(
+    () => ({
+      ...apis,
+      files: withContentCache(apis.files),
+    }),
+    [apis],
+  );
+  return <RuntimeAPIContext.Provider value={cachedApis}>{children}</RuntimeAPIContext.Provider>;
 }

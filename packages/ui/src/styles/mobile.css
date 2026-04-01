@@ -281,9 +281,9 @@
       padding-bottom: var(--oc-safe-area-bottom-visual) !important;
     }
 
-    /* Drawer safe area - only top/bottom padding, no positioning */
+    /* Drawer safe area - top already offset by header height */
     .drawer-safe-area {
-      padding-top: var(--oc-safe-area-top);
+      padding-top: 0;
       padding-bottom: var(--oc-safe-area-bottom-visual);
     }
 

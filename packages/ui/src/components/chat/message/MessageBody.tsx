@@ -19,7 +19,7 @@ import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
 import type { ContentChangeReason } from '@/hooks/useChatScrollManager';
 
 import { SimpleMarkdownRenderer } from '../MarkdownRenderer';
-import { useSessionStore } from '@/stores/useSessionStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useUIStore } from '@/stores/useUIStore';
 import { flattenAssistantTextParts } from '@/lib/messages/messageText';
 import { MULTIRUN_EXECUTION_FORK_PROMPT_META_TEXT } from '@/lib/messages/executionMeta';
@@ -35,6 +35,7 @@ import { ToolRevealOnMount } from './parts/ToolRevealOnMount';
 import { StaticToolRow } from './parts/ProgressiveGroup';
 import { isExpandableTool, isStandaloneTool } from './parts/toolRenderUtils';
 import TurnActivity from '../components/TurnActivity';
+import { areRenderRelevantPartsEqual } from './renderCompare';
 
 type SubtaskPartLike = Part & {
     type: 'subtask';
@@ -77,7 +78,7 @@ const normalizeSubtaskModel = (model: SubtaskPartLike['model']): string | null =
 
 const UserSubtaskPart: React.FC<{ part: SubtaskPartLike }> = ({ part }) => {
     const [expanded, setExpanded] = React.useState(false);
-    const setCurrentSession = useSessionStore((state) => state.setCurrentSession);
+    const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
 
     const description = typeof part.description === 'string' ? part.description.trim() : '';
     const command = typeof part.command === 'string' ? part.command.trim() : '';
@@ -254,6 +255,7 @@ const formatTurnDuration = (durationMs: number): string => {
 
 
 interface MessageBodyProps {
+    sessionId?: string;
     messageId: string;
     parts: Part[];
     isUser: boolean;
@@ -562,6 +564,7 @@ const UserMessageBody: React.FC<{
 };
 
 const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
+    sessionId,
     messageId,
     parts,
     isMessageCompleted,
@@ -696,7 +699,7 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
         return visibleParts.filter((part) => part.type === 'text');
     }, [visibleParts]);
 
-    const createSessionFromAssistantMessage = useSessionStore((state) => state.createSessionFromAssistantMessage);
+    const createSessionFromAssistantMessage = useSessionUIStore((state) => state.createSessionFromAssistantMessage);
     const openMultiRunLauncherWithPrompt = useUIStore((state) => state.openMultiRunLauncherWithPrompt);
     const chatRenderMode = useUIStore((state) => state.chatRenderMode);
     const isSortedRenderMode = chatRenderMode === 'sorted';
@@ -1065,6 +1068,8 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
         return all.filter((segment) => segment.anchorMessageId === messageId);
     }, [isSortedRenderMode, messageId, turnGroupingContext?.activityGroupSegments]);
 
+    const hasAnchoredActivitySegments = activityGroupSegmentsForMessage.length > 0;
+
     const activityByPart = React.useMemo(() => {
         const byRef = new Map<Part, (typeof activityPartsForTurn)[number]>();
         const byId = new Map<string, (typeof activityPartsForTurn)[number]>();
@@ -1092,9 +1097,14 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
     }, [activityPartsForTurn]);
 
     const toggleActivityGroup = turnGroupingContext?.toggleGroup;
+    const isActivityOwnerMessage = !isSortedRenderMode
+        || !turnGroupingContext?.activityOwnerMessageId
+        || turnGroupingContext.activityOwnerMessageId === messageId
+        || hasAnchoredActivitySegments;
 
     const shouldRenderActivityGroup = isSortedRenderMode
-        && activityGroupSegmentsForMessage.length > 0
+        && isActivityOwnerMessage
+        && hasAnchoredActivitySegments
         && Boolean(toggleActivityGroup);
 
 
@@ -1155,6 +1165,7 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
                     <AssistantTextPart
                         key={`assistant-text-${messageId}-${i}`}
                         part={part}
+                        sessionId={sessionId}
                         messageId={messageId}
                         streamPhase={streamPhase}
                         chatRenderMode={chatRenderMode}
@@ -1190,6 +1201,7 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
                             <AssistantTextPart
                                 key={`reasoning-${messageId}-${i}`}
                                 part={part}
+                                sessionId={sessionId}
                                 messageId={messageId}
                                 streamPhase={streamPhase}
                                 chatRenderMode={chatRenderMode}
@@ -1206,8 +1218,13 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
                 const toolPart = part as ToolPartType;
                 const toolName = toolPart.tool?.toLowerCase() ?? '';
 
+                if (isSortedRenderMode && !isActivityOwnerMessage) {
+                    i += 1;
+                    continue;
+                }
+
                 const activity = activityByPart.get(part);
-                if (activity?.kind === 'tool' && !isStandaloneTool(toolName)) {
+                if (activity?.kind === 'tool' && (shouldRenderActivityGroup || !isStandaloneTool(toolName))) {
                     i += 1;
                     continue;
                 }
@@ -1279,8 +1296,10 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
         expandedTools,
         hasStopFinish,
         isMobile,
+        isActivityOwnerMessage,
         isSortedRenderMode,
         messageId,
+        sessionId,
         onContentChange,
         onShowPopup,
         onToggleTool,
@@ -1525,4 +1544,37 @@ const MessageBody: React.FC<MessageBodyProps> = ({ isUser, ...props }) => {
     return <AssistantMessageBody {...props} />;
 };
 
-export default React.memo(MessageBody);
+export default React.memo(MessageBody, (prev, next) => {
+    return prev.sessionId === next.sessionId
+        && prev.messageId === next.messageId
+        && prev.isUser === next.isUser
+        && areRenderRelevantPartsEqual(prev.parts, next.parts)
+        && prev.isMessageCompleted === next.isMessageCompleted
+        && prev.messageFinish === next.messageFinish
+        && prev.messageCompletedAt === next.messageCompletedAt
+        && prev.messageCreatedAt === next.messageCreatedAt
+        && prev.syntaxTheme === next.syntaxTheme
+        && prev.isMobile === next.isMobile
+        && prev.hasTouchInput === next.hasTouchInput
+        && prev.copiedCode === next.copiedCode
+        && prev.expandedTools === next.expandedTools
+        && prev.streamPhase === next.streamPhase
+        && prev.allowAnimation === next.allowAnimation
+        && prev.shouldShowHeader === next.shouldShowHeader
+        && prev.hasTextContent === next.hasTextContent
+        && prev.copiedMessage === next.copiedMessage
+        && prev.showReasoningTraces === next.showReasoningTraces
+        && prev.agentMention === next.agentMention
+        && prev.turnGroupingContext === next.turnGroupingContext
+        && prev.errorMessage === next.errorMessage
+        && prev.userActionsMode === next.userActionsMode
+        && prev.stickyUserHeaderEnabled === next.stickyUserHeaderEnabled
+        && prev.onCopyCode === next.onCopyCode
+        && prev.onToggleTool === next.onToggleTool
+        && prev.onShowPopup === next.onShowPopup
+        && prev.onContentChange === next.onContentChange
+        && prev.onCopyMessage === next.onCopyMessage
+        && prev.onAuxiliaryContentComplete === next.onAuxiliaryContentComplete
+        && prev.onRevert === next.onRevert
+        && prev.onFork === next.onFork;
+});

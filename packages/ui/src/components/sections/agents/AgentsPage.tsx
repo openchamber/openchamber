@@ -5,8 +5,7 @@ import { NumberInput } from '@/components/ui/number-input';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui';
 import { useAgentsStore, type AgentConfig, type AgentScope } from '@/stores/useAgentsStore';
-import { useConfigStore } from '@/stores/useConfigStore';
-import { usePermissionStore } from '@/stores/permissionStore';
+import { useDirectorySync } from '@/sync/sync-context';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useDeviceInfo } from '@/lib/device';
 import { opencodeClient } from '@/lib/opencode/client';
@@ -184,7 +183,6 @@ const buildPermissionConfigWithGlobal = (
 export const AgentsPage: React.FC = () => {
   const { isMobile } = useDeviceInfo();
   const { selectedAgentName, getAgentByName, createAgent, updateAgent, agents, agentDraft, setAgentDraft } = useAgentsStore();
-  useConfigStore();
 
   const selectedAgent = selectedAgentName ? getAgentByName(selectedAgentName) : null;
   const isNewAgent = Boolean(agentDraft && agentDraft.name === selectedAgentName && !selectedAgent);
@@ -220,7 +218,7 @@ export const AgentsPage: React.FC = () => {
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory ?? null);
   const [toolIds, setToolIds] = React.useState<string[]>([]);
 
-  const permissionsBySession = usePermissionStore((state) => state.permissions);
+  const permissionsBySession = useDirectorySync((state) => state.permission);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -264,7 +262,7 @@ export const AgentsPage: React.FC = () => {
       }
     }
 
-    for (const permissions of permissionsBySession.values()) {
+    for (const permissions of Object.values(permissionsBySession)) {
       for (const request of permissions) {
         const permissionName = request.permission?.trim();
         if (permissionName && permissionName !== 'invalid') {

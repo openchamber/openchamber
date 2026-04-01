@@ -6,10 +6,8 @@ import { AgentGroupDetail } from './AgentGroupDetail';
 import { cn } from '@/lib/utils';
 import { useAgentGroupsStore } from '@/stores/useAgentGroupsStore';
 import { useMultiRunStore } from '@/stores/useMultiRunStore';
-import { useSessionStore } from '@/stores/useSessionStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { streamDebugEnabled } from '@/stores/utils/streamDebug';
 import type { CreateMultiRunParams } from '@/types/multirun';
 
 interface AgentManagerViewProps {
@@ -30,37 +28,37 @@ export const AgentManagerView: React.FC<AgentManagerViewProps> = ({ className })
             'connecting' | 'connected' | 'error' | 'disconnected' | undefined
         : 'connecting') || 'connecting'
   );
-  const configInitialized = useConfigStore((state) => state.isInitialized);
-  const initializeApp = useConfigStore((state) => state.initializeApp);
-  const loadSessions = useSessionStore((state) => state.loadSessions);
-  const setDirectory = useDirectoryStore((state) => state.setDirectory);
+  const configInitialized = useConfigStore((s) => s.isInitialized);
+  const initializeApp = useConfigStore((s) => s.initializeApp);
+  const setDirectory = useDirectoryStore((s) => s.setDirectory);
+  const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
   const bootstrapAttemptAt = React.useRef<number>(0);
 
-  const { 
-    selectedGroupName, 
-    selectGroup, 
-    getSelectedGroup,
-    loadGroups,
-  } = useAgentGroupsStore();
+  const groups = useAgentGroupsStore((s) => s.groups);
+  const selectedGroupName = useAgentGroupsStore((s) => s.selectedGroupName);
+  const selectGroup = useAgentGroupsStore((s) => s.selectGroup);
+  const loadGroups = useAgentGroupsStore((s) => s.loadGroups);
 
-  const { createMultiRun, isLoading: isCreatingMultiRun } = useMultiRunStore();
+  const createMultiRun = useMultiRunStore((s) => s.createMultiRun);
+  const isCreatingMultiRun = useMultiRunStore((s) => s.isLoading);
 
+  const selectedGroup = React.useMemo(
+    () => (selectedGroupName ? groups.find((g) => g.name === selectedGroupName) ?? null : null),
+    [groups, selectedGroupName],
+  );
+
+  // VS Code connection bootstrap
   React.useEffect(() => {
-    if (!isVSCodeRuntime) {
-      return;
-    }
+    if (!isVSCodeRuntime) return;
 
     const current =
       (typeof window !== 'undefined'
         ? (window as unknown as { __OPENCHAMBER_CONNECTION__?: { status?: string } }).__OPENCHAMBER_CONNECTION__?.status
         : undefined) as 'connecting' | 'connected' | 'error' | 'disconnected' | undefined;
-    if (current === 'connected' || current === 'connecting' || current === 'error' || current === 'disconnected') {
-      setConnectionStatus(current);
-    }
+    if (current) setConnectionStatus(current);
 
     const handler = (event: Event) => {
-      const detail = (event as CustomEvent<{ status?: string; error?: string }>).detail;
-      const status = detail?.status;
+      const status = (event as CustomEvent<{ status?: string }>).detail?.status;
       if (status === 'connected' || status === 'connecting' || status === 'error' || status === 'disconnected') {
         setConnectionStatus(status);
       }
@@ -70,14 +68,9 @@ export const AgentManagerView: React.FC<AgentManagerViewProps> = ({ className })
   }, [isVSCodeRuntime]);
 
   React.useEffect(() => {
-    if (!isVSCodeRuntime || connectionStatus !== 'connected') {
-      return;
-    }
-
+    if (!isVSCodeRuntime || connectionStatus !== 'connected') return;
     const now = Date.now();
-    if (now - bootstrapAttemptAt.current < 750) {
-      return;
-    }
+    if (now - bootstrapAttemptAt.current < 750) return;
     bootstrapAttemptAt.current = now;
 
     const workspaceFolder = (typeof window !== 'undefined'
@@ -85,52 +78,22 @@ export const AgentManagerView: React.FC<AgentManagerViewProps> = ({ className })
       : null);
 
     if (typeof workspaceFolder === 'string' && workspaceFolder.trim().length > 0) {
-      try {
-        setDirectory(workspaceFolder, { showOverlay: false });
-      } catch {
-        // ignored
-      }
+      try { setDirectory(workspaceFolder, { showOverlay: false }); } catch { /* ignored */ }
     }
 
-    const runBootstrap = async () => {
-      try {
-        if (!configInitialized) {
-          await initializeApp();
-        }
+    if (!configInitialized) void initializeApp();
+  }, [connectionStatus, configInitialized, initializeApp, isVSCodeRuntime, setDirectory]);
 
-        const configState = useConfigStore.getState();
-        if (
-          !configState.isInitialized ||
-          !configState.isConnected ||
-          configState.providers.length === 0 ||
-          configState.agents.length === 0
-        ) {
-          return;
-        }
-
-        await loadSessions();
-
-        if (streamDebugEnabled()) {
-          console.log('[OpenChamber][VSCode][agentManager] bootstrap complete', {
-            providers: configState.providers.length,
-            agents: configState.agents.length,
-            sessions: useSessionStore.getState().sessions.length,
-          });
-        }
-      } catch {
-        // ignored
-      }
-    };
-
-    void runBootstrap();
-  }, [connectionStatus, configInitialized, initializeApp, isVSCodeRuntime, loadSessions, setDirectory]);
+  // Load groups on mount and when directory changes
+  React.useEffect(() => {
+    void loadGroups();
+  }, [currentDirectory, loadGroups]);
 
   const handleGroupSelect = React.useCallback((groupName: string) => {
     selectGroup(groupName);
   }, [selectGroup]);
 
   const handleNewAgent = React.useCallback(() => {
-    // Clear selection to show the empty state / new agent form
     selectGroup(null);
   }, [selectGroup]);
 
@@ -141,54 +104,30 @@ export const AgentManagerView: React.FC<AgentManagerViewProps> = ({ className })
 
     if (result) {
       toast.success(`Agent group "${params.name}" created with ${result.sessionIds.length} session(s)`);
-      const groupSlug = result.groupSlug;
-
-      const waitForGroup = async (attempts = 6) => {
-        for (let attempt = 0; attempt < attempts; attempt += 1) {
-          await loadGroups();
-          const groupsState = useAgentGroupsStore.getState();
-          if (groupsState.groups.some((group) => group.name === groupSlug)) {
-            return true;
-          }
-          await new Promise((resolve) => setTimeout(resolve, 500));
-        }
-        return false;
-      };
-
-      // Refresh sessions + groups and wait briefly for OpenCode to surface the new worktree sessions.
-      try {
-        await useSessionStore.getState().loadSessions();
-      } catch {
-        // ignore
-      }
-
-      await waitForGroup();
-      selectGroup(groupSlug);
+      // Refresh groups — new worktrees + sessions now exist
+      await loadGroups();
+      selectGroup(result.groupSlug);
     } else {
       const error = useMultiRunStore.getState().error;
       toast.error(error || 'Failed to create agent group');
     }
   }, [createMultiRun, loadGroups, selectGroup]);
 
-  const selectedGroup = getSelectedGroup();
-
   return (
     <div className={cn('flex h-full w-full bg-background', className)}>
-      {/* Left Sidebar - Agent Groups List */}
       <div className="w-64 flex-shrink-0">
         <AgentManagerSidebar
+          groups={groups}
           selectedGroupName={selectedGroupName}
           onGroupSelect={handleGroupSelect}
           onNewAgent={handleNewAgent}
         />
       </div>
-      
-      {/* Main Content Area */}
       <div className="flex-1 min-w-0">
         {selectedGroup ? (
           <AgentGroupDetail group={selectedGroup} />
         ) : (
-          <AgentManagerEmptyState 
+          <AgentManagerEmptyState
             onCreateGroup={handleCreateGroup}
             isCreating={isCreatingMultiRun}
           />
