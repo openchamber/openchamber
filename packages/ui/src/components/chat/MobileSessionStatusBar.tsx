@@ -1,5 +1,7 @@
 import React from 'react';
-import { useSessionStore } from '@/stores/useSessionStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSelectionStore } from '@/sync/selection-store';
+import { useSessions, useAllSessionStatuses } from '@/sync/sync-context';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -52,6 +54,7 @@ import { ProjectEditDialog } from '@/components/layout/ProjectEditDialog';
 import { useDrawerSwipe } from '@/hooks/useDrawerSwipe';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
+import { useNotificationStore } from '@/sync/notification-store';
 
 interface MobileSessionStatusBarProps {
   onSessionSwitch?: (sessionId: string) => void;
@@ -74,9 +77,10 @@ const normalize = (value: string): string => {
 
 function useSessionGrouping(
   sessions: Session[],
-  sessionStatus: Map<string, { type: string }> | undefined,
-  sessionAttentionStates: Map<string, { needsAttention: boolean }> | undefined
+  sessionStatus: Record<string, { type: string }> | undefined
 ) {
+  const unseenCounts = useNotificationStore((s) => s.index.session.unseenCount);
+
   const parentChildMap = React.useMemo(() => {
     const map = new Map<string, Session[]>();
     const allIds = new Set(sessions.map((s) => s.id));
@@ -91,7 +95,7 @@ function useSessionGrouping(
   }, [sessions]);
 
   const getStatusType = React.useCallback((sessionId: string): 'busy' | 'retry' | 'idle' => {
-    const status = sessionStatus?.get(sessionId);
+    const status = sessionStatus?.[sessionId];
     if (status?.type === 'busy' || status?.type === 'retry') return status.type;
     return 'idle';
   }, [sessionStatus]);
@@ -126,7 +130,7 @@ function useSessionGrouping(
     topLevel.forEach((session) => {
       const statusType = getStatusType(session.id);
       const hasRunning = hasRunningChildren(session.id);
-      const attention = sessionAttentionStates?.get(session.id)?.needsAttention ?? false;
+      const attention = (unseenCounts[session.id] ?? 0) > 0;
 
       const enriched: SessionWithStatus = {
         ...session,
@@ -155,28 +159,27 @@ function useSessionGrouping(
     viewed.sort(sortByUpdated);
 
     return [...running, ...viewed];
-  }, [sessions, getStatusType, hasRunningChildren, getRunningChildrenCount, getChildIndicators, sessionAttentionStates]);
+  }, [sessions, getStatusType, hasRunningChildren, getRunningChildrenCount, getChildIndicators, unseenCounts]);
 
   const totalRunning = processedSessions.reduce((sum, s) => {
     const selfRunning = s._statusType !== 'idle' ? 1 : 0;
     return sum + selfRunning + (s._runningChildrenCount ?? 0);
   }, 0);
 
-  const totalUnread = processedSessions.filter((s) => sessionAttentionStates?.get(s.id)?.needsAttention ?? false).length;
+  const totalUnread = processedSessions.filter((s) => (unseenCounts[s.id] ?? 0) > 0).length;
 
   return { sessions: processedSessions, totalRunning, totalUnread, totalCount: processedSessions.length };
 }
 
 function useSessionHelpers(
   agents: Array<{ name: string }>,
-  sessionStatus: Map<string, { type: string }> | undefined,
-  sessionAttentionStates: Map<string, { needsAttention: boolean }> | undefined
+  sessionStatus: Record<string, { type: string }> | undefined
 ) {
   const getSessionAgentName = React.useCallback((session: Session): string => {
     const agent = (session as { agent?: string }).agent;
     if (agent) return agent;
 
-    const sessionAgentSelection = useSessionStore.getState().getSessionAgentSelection(session.id);
+    const sessionAgentSelection = useSelectionStore.getState().getSessionAgentSelection(session.id);
     if (sessionAgentSelection) return sessionAgentSelection;
 
     return agents[0]?.name ?? 'agent';
@@ -189,14 +192,14 @@ function useSessionHelpers(
   }, []);
 
   const isRunning = React.useCallback((sessionId: string): boolean => {
-    const status = sessionStatus?.get(sessionId);
+    const status = sessionStatus?.[sessionId];
     return status?.type === 'busy' || status?.type === 'retry';
   }, [sessionStatus]);
 
-  // Use server-authoritative attention state instead of local activity state
+  const unseenCounts = useNotificationStore((s) => s.index.session.unseenCount);
   const needsAttention = React.useCallback((sessionId: string): boolean => {
-    return sessionAttentionStates?.get(sessionId)?.needsAttention ?? false;
-  }, [sessionAttentionStates]);
+    return (unseenCounts[sessionId] ?? 0) > 0;
+  }, [unseenCounts]);
 
   return { getSessionAgentName, getSessionTitle, isRunning, needsAttention };
 }
@@ -204,17 +207,16 @@ function useSessionHelpers(
 // Hook to calculate project status indicators
 function useProjectStatus(
   sessions: Session[],
-  sessionStatus: Map<string, { type: string }> | undefined,
-  sessionAttentionStates: Map<string, { needsAttention: boolean }> | undefined,
+  sessionStatus: Record<string, { type: string }> | undefined,
   currentSessionId: string | null
 ) {
-  const availableWorktreesByProject = useSessionStore((state) => state.availableWorktreesByProject);
-  const sessionsByDirectory = useSessionStore((state) => state.sessionsByDirectory);
-  const getSessionsByDirectory = useSessionStore((state) => state.getSessionsByDirectory);
+  const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
+  const getSessionsByDirectory = useSessionUIStore((state) => state.getSessionsByDirectory);
+  const notifUnseenCounts = useNotificationStore((s) => s.index.session.unseenCount);
 
   const projectStatusMap = React.useCallback((projectPath: string): { hasRunning: boolean; hasUnread: boolean } => {
     const getStatusType = (sessionId: string): 'busy' | 'retry' | 'idle' => {
-      const status = sessionStatus?.get(sessionId);
+      const status = sessionStatus?.[sessionId];
       if (status?.type === 'busy' || status?.type === 'retry') return status.type;
       return 'idle';
     };
@@ -241,7 +243,7 @@ function useProjectStatus(
     let hasUnread = false;
 
     for (const dir of dirs) {
-      const list = sessionsByDirectory.get(dir) ?? getSessionsByDirectory(dir);
+      const list = getSessionsByDirectory(dir);
       for (const session of list) {
         if (!session?.id || seen.has(session.id)) {
           continue;
@@ -253,7 +255,7 @@ function useProjectStatus(
           hasRunning = true;
         }
 
-        if (session.id !== currentSessionId && sessionAttentionStates?.get(session.id)?.needsAttention === true) {
+        if (session.id !== currentSessionId && (notifUnseenCounts[session.id] ?? 0) > 0) {
           hasUnread = true;
         }
 
@@ -267,7 +269,7 @@ function useProjectStatus(
     }
 
     return { hasRunning, hasUnread };
-  }, [sessionsByDirectory, getSessionsByDirectory, availableWorktreesByProject, sessionStatus, sessionAttentionStates, currentSessionId]);
+  }, [getSessionsByDirectory, availableWorktreesByProject, sessionStatus, notifUnseenCounts, currentSessionId]);
 
   return projectStatusMap;
 }
@@ -1290,7 +1292,7 @@ function ExpandedView({
   const [collapsedHeight, setCollapsedHeight] = React.useState<number | null>(null);
   const [hasMeasured, setHasMeasured] = React.useState(false);
   const { handleTouchStart, handleTouchMove, handleTouchEnd } = useDrawerSwipe();
-  const availableWorktreesByProject = useSessionStore((state) => state.availableWorktreesByProject);
+  const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
 
   React.useEffect(() => {
     if (containerRef.current && !hasMeasured && !isExpanded) {
@@ -1429,13 +1431,12 @@ export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
   cornerRadius,
 }) => {
   const { currentTheme } = useThemeSystem();
-  const sessions = useSessionStore((state) => state.sessions);
-  const currentSessionId = useSessionStore((state) => state.currentSessionId);
-  const sessionStatus = useSessionStore((state) => state.sessionStatus);
-  const sessionAttentionStates = useSessionStore((state) => state.sessionAttentionStates);
-  const setCurrentSession = useSessionStore((state) => state.setCurrentSession);
-  const openNewSessionDraft = useSessionStore((state) => state.openNewSessionDraft);
-  const getContextUsage = useSessionStore((state) => state.getContextUsage);
+  const sessions = useSessions();
+  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const sessionStatus = useAllSessionStatuses();
+  const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
+  const openNewSessionDraft = useSessionUIStore((state) => state.openNewSessionDraft);
+  const getContextUsage = useSessionUIStore((state) => state.getContextUsage);
   const agents = useConfigStore((state) => state.agents);
   const { getCurrentModel } = useConfigStore();
   const { isMobile, showMobileSessionStatusBar, isMobileSessionStatusBarCollapsed, setIsMobileSessionStatusBarCollapsed } = useUIStore();
@@ -1452,9 +1453,9 @@ export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
   // Directory store
   const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
 
-  const { sessions: sortedSessions, totalRunning, totalUnread, totalCount } = useSessionGrouping(sessions, sessionStatus, sessionAttentionStates);
-  const { getSessionAgentName, getSessionTitle, needsAttention } = useSessionHelpers(agents, sessionStatus, sessionAttentionStates);
-  const getProjectStatus = useProjectStatus(sessions, sessionStatus, sessionAttentionStates, currentSessionId);
+  const { sessions: sortedSessions, totalRunning, totalUnread, totalCount } = useSessionGrouping(sessions, sessionStatus);
+  const { getSessionAgentName, getSessionTitle, needsAttention } = useSessionHelpers(agents, sessionStatus);
+  const getProjectStatus = useProjectStatus(sessions, sessionStatus, currentSessionId);
 
   const currentSession = sessions.find((s) => s.id === currentSessionId);
   const currentSessionTitle = currentSession

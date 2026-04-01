@@ -1,5 +1,6 @@
 import React from 'react';
 import { checkIsGitRepository } from '@/lib/gitApi';
+import { mapWithConcurrency } from '@/lib/concurrency';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 
 type Project = { id: string; path: string; normalizedPath: string };
@@ -39,26 +40,25 @@ export const useProjectRepoStatus = (args: Args): void => {
       };
     }
 
-    normalized.forEach((project) => {
-      checkIsGitRepository(project.path)
-        .then((result) => {
-          if (!cancelled) {
-            setProjectRepoStatus((prev) => {
-              const next = new Map(prev);
-              next.set(project.id, result);
-              return next;
-            });
-          }
-        })
-        .catch(() => {
-          if (!cancelled) {
-            setProjectRepoStatus((prev) => {
-              const next = new Map(prev);
-              next.set(project.id, null);
-              return next;
-            });
-          }
-        });
+    void mapWithConcurrency(normalized, 2, async (project) => {
+      try {
+        const result = await checkIsGitRepository(project.path);
+        if (!cancelled) {
+          setProjectRepoStatus((prev) => {
+            const next = new Map(prev);
+            next.set(project.id, result);
+            return next;
+          });
+        }
+      } catch {
+        if (!cancelled) {
+          setProjectRepoStatus((prev) => {
+            const next = new Map(prev);
+            next.set(project.id, null);
+            return next;
+          });
+        }
+      }
     });
 
     return () => {
@@ -78,12 +78,10 @@ export const useProjectRepoStatus = (args: Args): void => {
   React.useEffect(() => {
     let cancelled = false;
     const run = async () => {
-        const entries = await Promise.all(
-        normalizedProjects.map(async (project) => {
-          const branch = await getRootBranch(project.normalizedPath).catch(() => null);
-          return { id: project.id, branch };
-        }),
-      );
+      const entries = await mapWithConcurrency(normalizedProjects, 2, async (project) => {
+        const branch = await getRootBranch(project.normalizedPath).catch(() => null);
+        return { id: project.id, branch };
+      });
       if (cancelled) {
         return;
       }

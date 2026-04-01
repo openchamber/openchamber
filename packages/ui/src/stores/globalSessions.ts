@@ -1,4 +1,5 @@
 import type { OpencodeClient, Session } from "@opencode-ai/sdk/v2";
+import { retry } from "@/sync/retry";
 
 export type GlobalSessionRecord = Session & {
     project?: {
@@ -71,11 +72,14 @@ export async function listGlobalSessionPages(
     let cursor: number | undefined;
 
     while (true) {
-        const response = await apiClient.experimental.session.list({
-            archived: options.archived,
-            limit: options.pageSize,
-            ...(cursor ? { cursor } : {}),
-        });
+        const response = await retry(
+            () => apiClient.experimental.session.list({
+                archived: options.archived,
+                limit: options.pageSize,
+                ...(cursor ? { cursor } : {}),
+            }),
+            { attempts: 3, delay: 500, retryIf: () => true },
+        );
 
         const payload = Array.isArray(response.data) ? (response.data as GlobalSessionRecord[]) : [];
         if (payload.length === 0) {

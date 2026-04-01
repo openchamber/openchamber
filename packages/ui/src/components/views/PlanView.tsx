@@ -15,7 +15,8 @@ import { generateSyntaxTheme } from '@/lib/theme/syntaxThemeGenerator';
 import { createFlexokiCodeMirrorTheme } from '@/lib/codemirror/flexokiTheme';
 import { languageByExtension } from '@/lib/codemirror/languageByExtension';
 import { RiCheckLine, RiClipboardLine, RiFileCopy2Line } from '@remixicon/react';
-import { useSessionStore } from '@/stores/useSessionStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSessions } from '@/sync/sync-context';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { EditorView } from '@codemirror/view';
@@ -80,8 +81,8 @@ type SelectedLineRange = {
 };
 
 export const PlanView: React.FC = () => {
-  const currentSessionId = useSessionStore((state) => state.currentSessionId);
-  const sessions = useSessionStore((state) => state.sessions);
+  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const sessions = useSessions();
   const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
   const runtimeApis = useRuntimeAPIs();
   useUIStore();

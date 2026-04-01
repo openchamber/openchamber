@@ -1,5 +1,6 @@
 import React from 'react';
-import { useSessionStore } from '@/stores/useSessionStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSessions } from '@/sync/sync-context';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { cn } from '@/lib/utils';
 
@@ -23,8 +24,8 @@ const formatDirectoryPath = (path?: string) => {
 };
 
 export const SidebarContextSummary: React.FC<SidebarContextSummaryProps> = ({ className }) => {
-    const currentSessionId = useSessionStore((state) => state.currentSessionId);
-    const sessions = useSessionStore((state) => state.sessions);
+    const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+    const sessions = useSessions();
     const { currentDirectory } = useDirectoryStore();
 
     const activeSessionTitle = React.useMemo(() => {

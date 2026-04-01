@@ -6,11 +6,10 @@ export const clampPercent = (value: number | null): number | null => {
 };
 
 export const formatPercent = (value: number | null): string => {
-  const clamped = clampPercent(value);
-  if (clamped === null) {
+  if (typeof value !== 'number' || Number.isNaN(value)) {
     return '-';
   }
-  return `${clamped}%`;
+  return `${Math.round(value)}%`;
 };
 
 export const resolveUsageTone = (percent: number | null): 'safe' | 'warn' | 'critical' => {

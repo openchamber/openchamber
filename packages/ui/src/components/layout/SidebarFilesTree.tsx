@@ -453,13 +453,29 @@ export const SidebarFilesTree: React.FC = () => {
   React.useEffect(() => {
     if (!root || expandedPaths.length === 0) return;
 
-    for (const expandedPath of expandedPaths) {
-      const normalized = normalizePath(expandedPath);
-      if (!normalized || normalized === root) continue;
-      if (!normalized.startsWith(`${root}/`)) continue;
-      if (loadedDirsRef.current.has(normalized) || inFlightDirsRef.current.has(normalized)) continue;
-      void loadDirectory(normalized);
-    }
+    // Sort by depth so parent dirs load before children
+    const toLoad = expandedPaths
+      .map((p) => normalizePath(p))
+      .filter((normalized): normalized is string =>
+        !!normalized &&
+        normalized !== root &&
+        normalized.startsWith(`${root}/`) &&
+        !loadedDirsRef.current.has(normalized) &&
+        !inFlightDirsRef.current.has(normalized),
+      )
+      .sort((a, b) => a.split('/').length - b.split('/').length);
+
+    if (toLoad.length === 0) return;
+
+    // Load with concurrency limit to avoid API stampede on startup
+    let cancelled = false;
+    void (async () => {
+      for (let i = 0; i < toLoad.length && !cancelled; i += 3) {
+        const batch = toLoad.slice(i, i + 3);
+        await Promise.all(batch.map((dir) => loadDirectory(dir)));
+      }
+    })();
+    return () => { cancelled = true; };
   }, [expandedPaths, loadDirectory, root]);
 
   // --- Fuzzy search scoring (matching FilesView) ---

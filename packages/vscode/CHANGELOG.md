@@ -1,3 +1,11 @@
+## [1.9.2] - 2026-03-31
+
+- Chat/Performance: overhauled live sync and streaming updates to reduce re-render churn and keep long-running chats smoother in the extension.
+- Sessions/UI: refined sidebar behavior with cleaner spacing, better truncation/tooltips, and a resizable sessions pane for tighter workspace control.
+- Chat/Editor integration: improved Explorer file insertion so drag-and-drop and context actions add `@` file mentions more reliably without duplicate path text.
+- Reliability: startup now queues bridge and stream requests until the API is ready, reducing false bootstrap failures and early-session instability.
+- Chat: reasoning content now renders through the markdown pipeline for more consistent readability during live responses.
+
 ## [1.9.1] - 2026-03-20
 
 - Sessions: sidebar lists now keep sessions visible in both Recent and Project sections for easier session discovery (thanks to @nguyenngothuong).

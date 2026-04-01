@@ -1,4 +1,4 @@
-import type { SessionMemoryState } from '@/stores/types/sessionTypes';
+import type { SessionMemoryState } from '@/sync/viewport-store';
 
 export interface TurnHistorySignalsInput {
     memoryState: SessionMemoryState | null;

@@ -15,7 +15,8 @@ import {
   CommandList,
 } from '@/components/ui/command';
 import { toast } from '@/components/ui';
-import { useSessionStore } from '@/stores/useSessionStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useInputStore } from '@/sync/input-store';
 import { useUIStore } from '@/stores/useUIStore';
 import { execCommand } from '@/lib/execCommands';
 import {
@@ -55,7 +56,7 @@ export const IntegrateCommitsSection: React.FC<{
   refreshKey,
   onRefresh,
 }) => {
-  const currentSessionId = useSessionStore((s) => s.currentSessionId);
+  const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
   const setActiveMainTab = useUIStore((s) => s.setActiveMainTab);
   const [branchDropdownOpen, setBranchDropdownOpen] = React.useState(false);
   const searchInputRef = React.useRef<HTMLInputElement>(null);
@@ -167,7 +168,7 @@ export const IntegrateCommitsSection: React.FC<{
   const persistTarget = React.useCallback(
     (branch: string) => {
       if (!currentSessionId) return;
-      useSessionStore.getState().setWorktreeMetadata(currentSessionId, {
+      useSessionUIStore.getState().setWorktreeMetadata(currentSessionId, {
         ...worktreeMetadata,
         createdFromBranch: branch,
       });
@@ -175,7 +176,7 @@ export const IntegrateCommitsSection: React.FC<{
     [currentSessionId, worktreeMetadata]
   );
 
-  const openNewSessionDraft = useSessionStore((s) => s.openNewSessionDraft);
+  const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
 
   const buildConflictContext = React.useCallback((payload: { state: IntegrateInProgress; details: IntegrateConflictDetails }) => {
     const visibleText = `Resolve cherry-pick conflicts, stage the resolved files, and continue the cherry-pick. Keep intent of commit ${payload.state.currentCommit} onto branch ${payload.state.targetBranch}.`;
@@ -217,8 +218,8 @@ Important:
     return { visibleText, instructionsText, payloadText };
   }, []);
 
-  const setPendingInputText = useSessionStore((s) => s.setPendingInputText);
-  const setPendingSyntheticParts = useSessionStore((s) => s.setPendingSyntheticParts);
+  const setPendingInputText = useInputStore((s) => s.setPendingInputText);
+  const setPendingSyntheticParts = useInputStore((s) => s.setPendingSyntheticParts);
 
   const handleResolveWithAi = React.useCallback((
     payload: { state: IntegrateInProgress; details: IntegrateConflictDetails },

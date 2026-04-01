@@ -1,10 +1,10 @@
 import React from 'react';
-import { RiCommandLine, RiFileLine, RiFlashlightLine, RiRefreshLine, RiScissorsLine, RiTerminalBoxLine, RiArrowGoBackLine, RiArrowGoForwardLine, RiTimeLine } from '@remixicon/react';
+import { RiCommandLine, RiFileLine, RiFlashlightLine, RiRefreshLine, RiScissorsLine, RiTerminalBoxLine, RiArrowGoBackLine, RiArrowGoForwardLine } from '@remixicon/react';
 import { cn, fuzzyMatch } from '@/lib/utils';
-import { useSessionStore } from '@/stores/useSessionStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSessionMessages } from '@/sync/sync-context';
 import { useCommandsStore } from '@/stores/useCommandsStore';
 import { useSkillsStore } from '@/stores/useSkillsStore';
-import { useShallow } from 'zustand/react/shallow';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 
 interface CommandInfo {
@@ -42,16 +42,9 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
   onTabSelect,
   style,
 }, ref) => {
-  const { hasMessagesInCurrentSession, currentSessionId } = useSessionStore(
-    useShallow((state) => {
-      const sessionId = state.currentSessionId;
-      const messageCount = sessionId ? (state.messages.get(sessionId)?.length ?? 0) : 0;
-      return {
-        hasMessagesInCurrentSession: messageCount > 0,
-        currentSessionId: sessionId,
-      };
-    })
-  );
+  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const sessionMessages = useSessionMessages(currentSessionId ?? '');
+  const hasMessagesInCurrentSession = sessionMessages.length > 0;
   const hasSession = Boolean(currentSessionId);
 
   const [commands, setCommands] = React.useState<CommandInfo[]>([]);
@@ -114,7 +107,6 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
             ? [
                 { name: 'undo', description: 'Undo the last message', isBuiltIn: true },
                 { name: 'redo', description: 'Redo previously undone messages', isBuiltIn: true },
-                { name: 'timeline', description: 'Jump to a specific message', isBuiltIn: true },
               ]
             : []
           ),
@@ -158,7 +150,6 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
             ? [
                 { name: 'undo', description: 'Undo the last message', isBuiltIn: true },
                 { name: 'redo', description: 'Redo previously undone messages', isBuiltIn: true },
-                { name: 'timeline', description: 'Jump to a specific message', isBuiltIn: true },
               ]
             : []
           ),
@@ -233,8 +224,6 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
         return <RiArrowGoBackLine className="h-3.5 w-3.5 text-orange-500" />;
       case 'redo':
         return <RiArrowGoForwardLine className="h-3.5 w-3.5 text-orange-500" />;
-      case 'timeline':
-        return <RiTimeLine className="h-3.5 w-3.5 text-blue-500" />;
       case 'compact':
         return <RiScissorsLine className="h-3.5 w-3.5 text-purple-500" />;
       case 'test':

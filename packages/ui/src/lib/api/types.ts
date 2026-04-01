@@ -394,7 +394,7 @@ export interface GitWorktreeAPI {
 
 export interface GitAPI {
   checkIsGitRepository(directory: string): Promise<boolean>;
-  getGitStatus(directory: string): Promise<GitStatus>;
+  getGitStatus(directory: string, options?: { mode?: 'light' }): Promise<GitStatus>;
   getGitDiff(directory: string, options: GetGitDiffOptions): Promise<GitDiffResponse>;
   getGitFileDiff(directory: string, options: GetGitFileDiffOptions): Promise<GitFileDiffResponse>;
   revertGitFile(directory: string, filePath: string): Promise<void>;
@@ -490,6 +490,7 @@ export interface FilesAPI {
   listDirectory(path: string, options?: ListDirectoryOptions): Promise<DirectoryListResult>;
   search(payload: FileSearchQuery): Promise<FileSearchResult[]>;
   createDirectory(path: string): Promise<{ success: boolean; path: string }>;
+  statFile?(path: string): Promise<{ path: string; isFile: boolean; size: number }>;
   readFile?(path: string): Promise<{ content: string; path: string }>;
   readFileBinary?(path: string): Promise<{ dataUrl: string; path: string }>;
   writeFile?(path: string, content: string): Promise<{ success: boolean; path: string }>;
@@ -536,6 +537,7 @@ export interface SettingsPayload {
   notificationMode?: 'always' | 'hidden-only';
   autoDeleteEnabled?: boolean;
   autoDeleteAfterDays?: number;
+  sessionRetentionAction?: 'archive' | 'delete';
   queueModeEnabled?: boolean;
   gitmojiEnabled?: boolean;
   inputSpellcheckEnabled?: boolean;

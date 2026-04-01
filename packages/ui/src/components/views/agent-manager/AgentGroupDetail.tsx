@@ -5,6 +5,7 @@ import {
   RiCheckLine,
   RiMore2Line,
   RiFileCopyLine,
+  RiLoader4Line,
 } from '@remixicon/react';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
@@ -12,7 +13,8 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 import { cn } from '@/lib/utils';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { useAgentGroupsStore, type AgentGroup, type AgentGroupSession } from '@/stores/useAgentGroupsStore';
-import { useSessionStore } from '@/stores/useSessionStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useGlobalSessionStatus, useAllSessionStatuses } from '@/sync/sync-context';
 import { ChatContainer } from '@/components/chat/ChatContainer';
 import { ChatErrorBoundary } from '@/components/chat/ChatErrorBoundary';
 import {
@@ -35,53 +37,57 @@ interface AgentGroupDetailProps {
   className?: string;
 }
 
+const SessionStatusDot: React.FC<{ sessionId: string }> = ({ sessionId }) => {
+  const status = useGlobalSessionStatus(sessionId);
+  if (!status || status.type === 'idle') return null;
+  return (
+    <span className="relative flex h-2 w-2 flex-shrink-0" title={status.type}>
+      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+      <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
+    </span>
+  );
+};
+
 export const AgentGroupDetail: React.FC<AgentGroupDetailProps> = ({
   group,
   className,
 }) => {
-  const { selectedSessionId, selectSession, deleteGroupWorktree, keepOnlyGroupWorktree } = useAgentGroupsStore();
-  const { setCurrentSession, currentSessionId } = useSessionStore();
+  const selectedSessionId = useAgentGroupsStore((s) => s.selectedSessionId);
+  const selectSession = useAgentGroupsStore((s) => s.selectSession);
+  const deleteGroupSessions = useAgentGroupsStore((s) => s.deleteGroupSessions);
+  const setCurrentSession = useSessionUIStore((s) => s.setCurrentSession);
+  const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
   const [worktreeDialog, setWorktreeDialog] = React.useState<null | { kind: 'remove' | 'keepOnly'; path: string; label: string }>(null);
   const [isProcessing, setIsProcessing] = React.useState(false);
-  
-  // Find the currently selected session
+
   const selectedSession = React.useMemo(() => {
     if (!selectedSessionId) return group.sessions[0] ?? null;
     return group.sessions.find((s) => s.id === selectedSessionId) ?? group.sessions[0] ?? null;
   }, [group.sessions, selectedSessionId]);
-  
-  // When selecting a session, switch to that OpenCode session
-  // NOTE: We intentionally do NOT change the global directory here to avoid
-  // re-triggering loadGroups() which would cause groups to disappear
+
   const handleSessionSelect = React.useCallback((session: AgentGroupSession) => {
     selectSession(session.id);
-    
-    // Switch to the OpenCode session
-    setCurrentSession(session.id);
+    setCurrentSession(session.id, session.path);
   }, [selectSession, setCurrentSession]);
-  
+
   // Auto-select first session when group changes and sync OpenCode session
   React.useEffect(() => {
     if (group.sessions.length > 0) {
-      const session = selectedSessionId 
+      const session = selectedSessionId
         ? group.sessions.find((s) => s.id === selectedSessionId) ?? group.sessions[0]
         : group.sessions[0];
-      
-      if (session) {
-        // Always ensure the OpenCode session is synced
-        if (session.id !== currentSessionId) {
-          setCurrentSession(session.id);
-        }
-        
-        // Update selection if not already selected
-        if (!selectedSessionId) {
-          selectSession(session.id);
+
+        if (session) {
+          if (session.id !== currentSessionId) {
+            setCurrentSession(session.id, session.path);
+          }
+          if (!selectedSessionId) {
+            selectSession(session.id);
         }
       }
     }
   }, [group.name, group.sessions, selectedSessionId, currentSessionId, selectSession, setCurrentSession]);
 
-  // Check if the current OpenCode session matches the selected agent group session
   const isSessionSynced = selectedSession?.id === currentSessionId;
 
   const handleCopyWorktreePath = React.useCallback(() => {
@@ -98,12 +104,12 @@ export const AgentGroupDetail: React.FC<AgentGroupDetailProps> = ({
     });
   }, [selectedSession?.path]);
 
-  const handleRemoveSelectedWorktree = React.useCallback(async () => {
+  const handleRemoveSelectedWorktree = React.useCallback(() => {
     if (!selectedSession) return;
     setWorktreeDialog({ kind: 'remove', path: selectedSession.path, label: selectedSession.displayLabel });
   }, [selectedSession]);
 
-  const handleKeepOnlySelectedWorktree = React.useCallback(async () => {
+  const handleKeepOnlySelectedWorktree = React.useCallback(() => {
     if (!selectedSession) return;
     setWorktreeDialog({ kind: 'keepOnly', path: selectedSession.path, label: selectedSession.displayLabel });
   }, [selectedSession]);
@@ -112,32 +118,36 @@ export const AgentGroupDetail: React.FC<AgentGroupDetailProps> = ({
     if (!worktreeDialog || isProcessing) return;
     setIsProcessing(true);
     try {
+      const normalize = (v: string) => v.replace(/\\/g, '/').replace(/\/+$/, '') || v;
+      const targetPath = normalize(worktreeDialog.path);
+      let sessionsToDelete: AgentGroupSession[];
+
       if (worktreeDialog.kind === 'remove') {
         toast.info('Removing worktree...');
-        const ok = await deleteGroupWorktree(group.name, worktreeDialog.path);
-        if (ok) {
-          toast.success('Worktree removed');
-        } else {
-          const error = useAgentGroupsStore.getState().error;
-          toast.error(error || 'Failed to remove worktree');
-          return;
-        }
+        sessionsToDelete = group.sessions.filter((s) => normalize(s.path) === targetPath);
       } else {
         toast.info('Removing other worktrees...');
-        const ok = await keepOnlyGroupWorktree(group.name, worktreeDialog.path);
-        if (ok) {
-          toast.success('Removed other worktrees');
-        } else {
-          const error = useAgentGroupsStore.getState().error;
-          toast.error(error || 'Failed to remove other worktrees');
-          return;
-        }
+        sessionsToDelete = group.sessions.filter((s) => normalize(s.path) !== targetPath);
+      }
+
+      const { failedIds, failedWorktreePaths } = await deleteGroupSessions(sessionsToDelete, { removeWorktrees: true });
+      if (failedIds.length > 0 || failedWorktreePaths.length > 0) {
+        toast.error('Failed to fully remove worktree');
+      } else {
+        toast.success(worktreeDialog.kind === 'remove' ? 'Worktree removed' : 'Removed other worktrees');
       }
       setWorktreeDialog(null);
     } finally {
       setIsProcessing(false);
     }
-  }, [deleteGroupWorktree, group.name, isProcessing, keepOnlyGroupWorktree, worktreeDialog]);
+  }, [deleteGroupSessions, group.sessions, isProcessing, worktreeDialog]);
+
+  // Group-level status: show if any session is busy
+  const allStatuses = useAllSessionStatuses();
+  const groupBusy = React.useMemo(
+    () => group.sessions.some((s) => allStatuses[s.id]?.type === 'busy'),
+    [group.sessions, allStatuses],
+  );
 
   return (
     <div className={cn('flex h-full flex-col bg-background', className)}>
@@ -145,7 +155,10 @@ export const AgentGroupDetail: React.FC<AgentGroupDetailProps> = ({
       <div className="flex-shrink-0 border-b border-border/30 px-4 py-3">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0 flex-1">
-            <h1 className="typography-heading-lg text-foreground truncate">{group.name}</h1>
+            <div className="flex items-center gap-2">
+              <h1 className="typography-heading-lg text-foreground truncate">{group.name}</h1>
+              {groupBusy && <RiLoader4Line className="h-4 w-4 animate-spin text-amber-500 flex-shrink-0" />}
+            </div>
             <div className="flex items-center gap-2 mt-1 typography-meta text-muted-foreground">
               <span>{group.sessionCount} model{group.sessionCount !== 1 ? 's' : ''}</span>
               <span>·</span>
@@ -156,7 +169,7 @@ export const AgentGroupDetail: React.FC<AgentGroupDetailProps> = ({
             </div>
           </div>
         </div>
-        
+
         {/* Model Selector Dropdown */}
         {group.sessions.length > 0 && (
           <div className="mt-3 flex items-center gap-2">
@@ -170,9 +183,9 @@ export const AgentGroupDetail: React.FC<AgentGroupDetailProps> = ({
                   <div className="flex items-center gap-2 min-w-0">
                     {selectedSession && (
                       <>
-                        <ProviderLogo 
-                          providerId={selectedSession.providerId} 
-                          className="h-5 w-5 flex-shrink-0" 
+                        <ProviderLogo
+                          providerId={selectedSession.providerId}
+                          className="h-5 w-5 flex-shrink-0"
                         />
                         <span className="truncate typography-body">
                           {selectedSession.modelId}
@@ -182,6 +195,7 @@ export const AgentGroupDetail: React.FC<AgentGroupDetailProps> = ({
                             #{selectedSession.instanceNumber}
                           </span>
                         )}
+                        <SessionStatusDot sessionId={selectedSession.id} />
                       </>
                     )}
                   </div>
@@ -195,9 +209,9 @@ export const AgentGroupDetail: React.FC<AgentGroupDetailProps> = ({
                     onClick={() => handleSessionSelect(session)}
                     className="flex items-center gap-2 py-2"
                   >
-                    <ProviderLogo 
-                      providerId={session.providerId} 
-                      className="h-5 w-5 flex-shrink-0" 
+                    <ProviderLogo
+                      providerId={session.providerId}
+                      className="h-5 w-5 flex-shrink-0"
                     />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
@@ -209,6 +223,7 @@ export const AgentGroupDetail: React.FC<AgentGroupDetailProps> = ({
                             #{session.instanceNumber}
                           </span>
                         )}
+                        <SessionStatusDot sessionId={session.id} />
                       </div>
                       {session.branch && (
                         <div className="flex items-center gap-1 typography-micro text-muted-foreground/60">
@@ -236,7 +251,7 @@ export const AgentGroupDetail: React.FC<AgentGroupDetailProps> = ({
                 <DropdownMenuItem
                   onSelect={(e) => {
                     e.preventDefault();
-                    void handleRemoveSelectedWorktree();
+                    handleRemoveSelectedWorktree();
                   }}
                   variant="destructive"
                 >
@@ -245,7 +260,7 @@ export const AgentGroupDetail: React.FC<AgentGroupDetailProps> = ({
                 <DropdownMenuItem
                   onSelect={(e) => {
                     e.preventDefault();
-                    void handleKeepOnlySelectedWorktree();
+                    handleKeepOnlySelectedWorktree();
                   }}
                 >
                   Leave this one, remove others
@@ -292,7 +307,7 @@ export const AgentGroupDetail: React.FC<AgentGroupDetailProps> = ({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      
+
       {/* Chat Content */}
       <div className="flex-1 min-h-0">
         {selectedSession ? (
@@ -302,7 +317,6 @@ export const AgentGroupDetail: React.FC<AgentGroupDetailProps> = ({
             </ChatErrorBoundary>
           ) : (
             <div className="h-full flex flex-col">
-              {/* Info banner about the worktree */}
               <div className="px-4 py-2 bg-muted/30 border-b border-border/30">
                 <div className="flex items-center gap-2 typography-meta text-muted-foreground">
                   <ProviderLogo providerId={selectedSession.providerId} className="h-4 w-4" />
@@ -315,8 +329,6 @@ export const AgentGroupDetail: React.FC<AgentGroupDetailProps> = ({
                   </span>
                 </div>
               </div>
-              
-              {/* Loading or no session state */}
               <div className="flex-1 flex items-center justify-center">
                 <div className="text-center p-8">
                   <p className="typography-body text-muted-foreground mb-2">

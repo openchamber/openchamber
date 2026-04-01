@@ -296,7 +296,20 @@ const parseRepoFromApiUrl = (value) => {
   }
 };
 
+// Track repos where the GitHub Search API returned 403 (token lacks scope for that org)
+const _searchApiDisabledRepos = new Map();
+const SEARCH_API_RETRY_MS = 5 * 60 * 1000; // retry after 5 minutes
+
 const searchFallbackPr = async ({ octokit, branch, repoNames }) => {
+  // Build a repo key to check/store 403 status per-repo
+  const repoKey = [...repoNames].sort().join(',').toLowerCase();
+
+  // Skip if this repo set returned 403 recently
+  const disabledAt = _searchApiDisabledRepos.get(repoKey);
+  if (disabledAt && Date.now() - disabledAt < SEARCH_API_RETRY_MS) {
+    return null;
+  }
+
   const normalizedRepoNames = new Set(repoNames.map((name) => normalizeLower(name)).filter(Boolean));
 
   for (const state of ['open', 'closed']) {
@@ -306,8 +319,14 @@ const searchFallbackPr = async ({ octokit, branch, repoNames }) => {
         q: `is:pr state:${state} head:${branch}`,
         per_page: 20,
       });
+      // If we get here, search API works for this repo — clear the disabled flag
+      _searchApiDisabledRepos.delete(repoKey);
     } catch (error) {
-      if (error?.status === 403 || error?.status === 404) {
+      if (error?.status === 403) {
+        _searchApiDisabledRepos.set(repoKey, Date.now());
+        return null;
+      }
+      if (error?.status === 404) {
         continue;
       }
       throw error;

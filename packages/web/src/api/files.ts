@@ -110,6 +110,23 @@ export const createWebFilesAPI = (): FilesAPI => ({
     };
   },
 
+  async statFile(path: string): Promise<{ path: string; isFile: boolean; size: number }> {
+    const target = normalizePath(path);
+    const response = await fetch(`/api/fs/stat?path=${encodeURIComponent(target)}`);
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: response.statusText }));
+      throw new Error((error as { error?: string }).error || 'Failed to stat file');
+    }
+
+    const result = await response.json().catch(() => ({}));
+    return {
+      path: typeof (result as { path?: string }).path === 'string' ? normalizePath((result as { path: string }).path) : target,
+      isFile: Boolean((result as { isFile?: boolean }).isFile),
+      size: typeof (result as { size?: number }).size === 'number' ? (result as { size: number }).size : 0,
+    };
+  },
+
   async readFile(path: string): Promise<{ content: string; path: string }> {
     const target = normalizePath(path);
     const response = await fetch(`/api/fs/read?path=${encodeURIComponent(target)}`);

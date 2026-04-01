@@ -22,6 +22,12 @@ const DEFAULT_READY_TIMEOUT_SEC: u64 = 30;
 const DEFAULT_RECONNECT_MAX_ATTEMPTS: u32 = 5;
 const MAX_LOG_LINES_PER_INSTANCE: usize = 1200;
 
+/// Monitor starts with fast polling and relaxes to steady-state after stabilization.
+const MONITOR_INITIAL_POLL_SECS: u64 = 2;
+const MONITOR_STEADY_POLL_SECS: u64 = 10;
+/// Number of healthy ticks before switching from initial to steady-state polling.
+const MONITOR_STABILIZE_TICKS: u32 = 5;
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DesktopSshInstancesConfig {
@@ -1027,6 +1033,7 @@ fn wait_for_master_ready(
     master: &mut Child,
 ) -> Result<()> {
     let deadline = std::time::Instant::now() + Duration::from_secs(timeout_sec as u64);
+    let mut poll_ms: u64 = 250;
     while std::time::Instant::now() < deadline {
         let args = vec![
             "-o".to_string(),
@@ -1056,7 +1063,8 @@ fn wait_for_master_ready(
             return Err(anyhow!(stderr.trim().to_string()));
         }
 
-        std::thread::sleep(Duration::from_millis(250));
+        std::thread::sleep(Duration::from_millis(poll_ms));
+        poll_ms = (poll_ms * 2).min(2000);
     }
 
     Err(anyhow!("SSH ControlMaster connection timed out"))
@@ -1552,19 +1560,34 @@ fn is_local_tunnel_reachable(local_port: u16) -> bool {
 }
 
 fn wait_local_forward_ready(local_port: u16) -> Result<()> {
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_millis(1000))
-        .no_proxy()
-        .build()?;
     let deadline = std::time::Instant::now() + Duration::from_secs(DEFAULT_READY_TIMEOUT_SEC);
-    let target = format!("http://127.0.0.1:{local_port}/health");
+    let addr: std::net::SocketAddr = format!("127.0.0.1:{local_port}").parse()?;
+    let mut poll_ms: u64 = 250;
     while std::time::Instant::now() < deadline {
-        if let Ok(response) = client.get(&target).send() {
-            if response.status().is_success() || response.status().as_u16() == 401 {
-                return Ok(());
+        if let Ok(mut stream) =
+            TcpStream::connect_timeout(&addr, Duration::from_millis(1000))
+        {
+            use std::io::{Read as IoRead, Write};
+            let _ = stream.set_read_timeout(Some(Duration::from_millis(1000)));
+            let _ = stream.set_write_timeout(Some(Duration::from_millis(1000)));
+            let request = format!(
+                "GET /health HTTP/1.1\r\nHost: 127.0.0.1:{local_port}\r\nConnection: close\r\n\r\n"
+            );
+            if stream.write_all(request.as_bytes()).is_ok() {
+                let mut buf = [0u8; 32];
+                if let Ok(n) = stream.read(&mut buf) {
+                    let head = std::str::from_utf8(&buf[..n]).unwrap_or("");
+                    // Match "HTTP/1.x 2xx" or "HTTP/1.x 401"
+                    if head.starts_with("HTTP/1.")
+                        && (head.contains(" 2") || head.contains(" 401"))
+                    {
+                        return Ok(());
+                    }
+                }
             }
         }
-        std::thread::sleep(Duration::from_millis(250));
+        std::thread::sleep(Duration::from_millis(poll_ms));
+        poll_ms = (poll_ms * 2).min(2000);
     }
     Err(anyhow!(
         "Timed out waiting for forwarded OpenChamber health"
@@ -2353,8 +2376,14 @@ impl DesktopSshManagerInner {
         let inner = Arc::clone(self);
         let id_for_task = id.clone();
         let handle = tauri::async_runtime::spawn(async move {
+            let mut healthy_ticks: u32 = 0;
             loop {
-                tokio::time::sleep(Duration::from_secs(2)).await;
+                let poll_secs = if healthy_ticks >= MONITOR_STABILIZE_TICKS {
+                    MONITOR_STEADY_POLL_SECS
+                } else {
+                    MONITOR_INITIAL_POLL_SECS
+                };
+                tokio::time::sleep(Duration::from_secs(poll_secs)).await;
 
                 let mut dropped_reason: Option<String> = None;
                 let mut detached_notice: Option<String> = None;
@@ -2424,18 +2453,21 @@ impl DesktopSshManagerInner {
                                 );
                             }
                         } else if session.master_detached {
-                            if !is_control_master_alive(&session.parsed, &session.control_path) {
-                                if is_local_tunnel_reachable(session.local_port) {
-                                    if detached_notice.is_none() {
-                                        detached_notice = Some(
-                                            "SSH ControlMaster check failed but local tunnel is still reachable"
-                                                .to_string(),
-                                        );
-                                    }
-                                } else {
-                                    dropped_reason =
-                                        Some("SSH ControlMaster is not reachable".to_string());
-                                }
+                            // Fast path: check local tunnel first (cheap TCP probe)
+                            // before spawning an SSH subprocess for control master check.
+                            if is_local_tunnel_reachable(session.local_port) {
+                                // Tunnel is alive — skip the expensive SSH check entirely.
+                            } else if !is_control_master_alive(
+                                &session.parsed,
+                                &session.control_path,
+                            ) {
+                                dropped_reason =
+                                    Some("SSH ControlMaster is not reachable".to_string());
+                            } else {
+                                detached_notice = Some(
+                                    "Local tunnel unreachable but ControlMaster is alive"
+                                        .to_string(),
+                                );
                             }
                         } else if let Some(status) = session.master.try_wait().ok().flatten() {
                             if status.success()
@@ -2471,6 +2503,7 @@ impl DesktopSshManagerInner {
                 }
 
                 if dropped_reason.is_none() {
+                    healthy_ticks = healthy_ticks.saturating_add(1);
                     continue;
                 }
 

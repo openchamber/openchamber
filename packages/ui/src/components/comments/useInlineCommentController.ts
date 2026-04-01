@@ -1,7 +1,7 @@
 import React from 'react';
 import { toast } from '@/components/ui';
 import { useInlineCommentDraftStore, type InlineCommentDraft, type InlineCommentSource } from '@/stores/useInlineCommentDraftStore';
-import { useSessionStore } from '@/stores/useSessionStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 
 type LineRangeBase = {
   start: number;
@@ -48,8 +48,8 @@ export function useInlineCommentController<TRange extends LineRangeBase>(
 ) {
   const { source, fileLabel, language, getCodeForRange, toStoreRange, fromDraftRange } = options;
 
-  const currentSessionId = useSessionStore((state) => state.currentSessionId);
-  const newSessionDraftOpen = useSessionStore((state) => state.newSessionDraft?.open);
+  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const newSessionDraftOpen = useSessionUIStore((state) => state.newSessionDraft?.open);
 
   const addDraft = useInlineCommentDraftStore((state) => state.addDraft);
   const updateDraft = useInlineCommentDraftStore((state) => state.updateDraft);

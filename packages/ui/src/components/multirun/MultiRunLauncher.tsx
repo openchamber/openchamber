@@ -11,7 +11,7 @@ import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { cn, formatDirectoryName } from '@/lib/utils';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useMultiRunStore } from '@/stores/useMultiRunStore';
-import { useSessionStore } from '@/stores/useSessionStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { getWorktreeSetupCommands } from '@/lib/openchamberConfig';
 import type { ProjectRef } from '@/lib/openchamberConfig';
@@ -440,7 +440,7 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
       const result = await createMultiRun(params);
        if (result) {
          if (result.firstSessionId) {
-           useSessionStore.getState().setCurrentSession(result.firstSessionId);
+           useSessionUIStore.getState().setCurrentSession(result.firstSessionId);
          }
 
          // Close launcher

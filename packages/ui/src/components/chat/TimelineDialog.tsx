@@ -7,8 +7,8 @@ import {
     DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { useSessionStore } from '@/stores/useSessionStore';
-import { useMessageStore } from '@/stores/messageStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSessionMessageRecords } from '@/sync/sync-context';
 import { RiLoader4Line, RiSearchLine, RiTimeLine, RiGitBranchLine, RiArrowGoBackLine } from '@remixicon/react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { Part } from '@opencode-ai/sdk/v2';
@@ -44,13 +44,10 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
     onScrollByTurnOffset,
     onResumeToLatest,
 }) => {
-    const currentSessionId = useSessionStore((state) => state.currentSessionId);
-    const messages = useMessageStore((state) =>
-        currentSessionId ? state.messages.get(currentSessionId) || [] : []
-    );
-    const revertToMessage = useSessionStore((state) => state.revertToMessage);
-    const forkFromMessage = useSessionStore((state) => state.forkFromMessage);
-    const loadSessions = useSessionStore((state) => state.loadSessions);
+    const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+    const messages = useSessionMessageRecords(currentSessionId ?? '');
+    const revertToMessage = useSessionUIStore((state) => state.revertToMessage);
+    const forkFromMessage = useSessionUIStore((state) => state.forkFromMessage);
 
     const [forkingMessageId, setForkingMessageId] = React.useState<string | null>(null);
     const [searchQuery, setSearchQuery] = React.useState('');
@@ -78,7 +75,6 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
         setForkingMessageId(messageId);
         try {
             await forkFromMessage(currentSessionId, messageId);
-            await loadSessions();
             onOpenChange(false);
         } finally {
             setForkingMessageId(null);
