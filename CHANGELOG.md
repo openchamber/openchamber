@@ -14,6 +14,7 @@ All notable changes to this project will be documented in this file.
 - Docker/Deployments: improved container defaults for broader compatibility, including UID 1000 user behavior, non-fatal SSH key generation, and better localhost detection in container networking (thanks to @yulia-ivashko).
 - Web/PWA: fixed manifest behavior behind Cloudflare Access so install flows work more reliably in protected environments (thanks to @arthurfiorette).
 
+
 ## [1.9.1] - 2026-03-20
 
 - Sessions/UI: restored Project Notes access in the sidebar, polished notes/todo editing, and fixed project action overlap so project controls stay reachable for non-git directories.
