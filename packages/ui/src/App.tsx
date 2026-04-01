@@ -277,6 +277,8 @@ function App({ apis }: AppProps) {
     if (providersCount > 0 && agentsCount > 0) return;
 
     let active = true;
+    let retries = 0;
+    const MAX_RETRIES = 15;
     const attempt = async () => {
       const state = useConfigStore.getState();
       if (state.providers.length > 0 && state.agents.length > 0) return;
@@ -287,7 +289,11 @@ function App({ apis }: AppProps) {
     };
 
     void attempt();
-    const id = setInterval(() => { if (active) void attempt(); }, 2000);
+    const id = setInterval(() => {
+      if (!active) return;
+      if (++retries >= MAX_RETRIES) { clearInterval(id); return; }
+      void attempt();
+    }, 2000);
     return () => { active = false; clearInterval(id); };
   }, [isConnected, isVSCodeRuntime, loadAgents, loadProviders, providersCount, agentsCount]);
 

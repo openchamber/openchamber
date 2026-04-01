@@ -1,5 +1,5 @@
 import * as fs from 'fs';
-import { getFsMimeType, resolveFileReadPath, type FsReadPathResolution } from './bridge-fs-helpers-runtime';
+import { getFsMimeType, normalizeFsPath, resolveFileReadPath, type FsReadPathResolution } from './bridge-fs-helpers-runtime';
 
 type ApiProxyResponsePayload = {
   status: number;
@@ -48,7 +48,7 @@ export const tryHandleLocalFsProxy = async (method: string, requestPath: string)
     return buildProxyJsonError(400, 'Invalid request path');
   }
 
-  if (parsed.pathname !== '/api/fs/read' && parsed.pathname !== '/api/fs/raw') {
+  if (parsed.pathname !== '/api/fs/stat' && parsed.pathname !== '/api/fs/read' && parsed.pathname !== '/api/fs/raw') {
     return null;
   }
 
@@ -66,6 +66,21 @@ export const tryHandleLocalFsProxy = async (method: string, requestPath: string)
     const stats = await fs.promises.stat(resolution.resolvedPath);
     if (!stats.isFile()) {
       return buildProxyJsonError(400, 'Specified path is not a file');
+    }
+
+    if (parsed.pathname === '/api/fs/stat') {
+      return {
+        status: 200,
+        headers: {
+          'content-type': 'application/json',
+          'cache-control': 'no-store',
+        },
+        bodyBase64: base64EncodeUtf8(JSON.stringify({
+          path: normalizeFsPath(resolution.resolvedPath),
+          isFile: true,
+          size: stats.size,
+        })),
+      };
     }
 
     if (parsed.pathname === '/api/fs/read') {
@@ -93,6 +108,9 @@ export const tryHandleLocalFsProxy = async (method: string, requestPath: string)
     const err = error as NodeJS.ErrnoException;
     if (err?.code === 'ENOENT') {
       return buildProxyJsonError(404, 'File not found');
+    }
+    if (parsed.pathname === '/api/fs/stat') {
+      return buildProxyJsonError(500, 'Unable to stat file');
     }
     return buildProxyJsonError(500, 'Unable to read file');
   }

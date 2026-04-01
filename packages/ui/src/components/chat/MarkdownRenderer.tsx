@@ -1022,23 +1022,15 @@ const getContextDirectory = (effectiveDirectory: string, resolvedPath: string): 
 const useFileReferenceInteractions = ({
   containerRef,
   effectiveDirectory,
-  readFile,
   editor,
   preferRuntimeEditor,
-  deferValidationUntilIdle = false,
 }: {
   containerRef: React.RefObject<HTMLDivElement | null>;
   effectiveDirectory: string;
-  readFile?: (path: string) => Promise<{ content: string; path: string }>;
   editor?: EditorAPI;
   preferRuntimeEditor?: boolean;
-  deferValidationUntilIdle?: boolean;
 }) => {
-  const validationCacheRef = React.useRef<Map<string, boolean>>(new Map());
-  const inFlightValidationsRef = React.useRef<Map<string, Promise<boolean>>>(new Map());
-  const annotationPassRef = React.useRef(0);
   const annotationDebounceRef = React.useRef<number | null>(null);
-  const isValidationSweepRunningRef = React.useRef(false);
 
   React.useEffect(() => {
     const container = containerRef.current;
@@ -1046,154 +1038,47 @@ const useFileReferenceInteractions = ({
       return;
     }
 
-    let disposed = false;
-
-    const isPathResolvable = async (resolvedPath: string): Promise<boolean> => {
-      const cache = validationCacheRef.current;
-      if (cache.has(resolvedPath)) {
-        return cache.get(resolvedPath) === true;
-      }
-
-      const inFlight = inFlightValidationsRef.current.get(resolvedPath);
-      if (inFlight) {
-        return inFlight;
-      }
-
-      const checkPromise = (async () => {
-        try {
-          if (!readFile) {
-            return false;
-          }
-          await readFile(resolvedPath);
-          cache.set(resolvedPath, true);
-          return true;
-        } catch {
-          cache.set(resolvedPath, false);
-          return false;
-        } finally {
-          inFlightValidationsRef.current.delete(resolvedPath);
-        }
-      })();
-
-      inFlightValidationsRef.current.set(resolvedPath, checkPromise);
-      return checkPromise;
-    };
-
-    const clearCandidateLinkAttrs = (candidate: HTMLElement) => {
-      candidate.removeAttribute('data-openchamber-file-link');
-      candidate.removeAttribute('data-openchamber-file-ref');
-      candidate.removeAttribute('data-openchamber-file-path');
-      if (candidate.getAttribute('title') === 'Open file') {
-        candidate.removeAttribute('title');
-      }
-      if (candidate.tagName.toLowerCase() !== 'a') {
-        candidate.removeAttribute('role');
-        candidate.removeAttribute('tabindex');
-      }
-    };
-
-    const applyCandidateLinkAttrs = (candidate: HTMLElement, rawCandidate: string, resolvedPath: string) => {
-      candidate.setAttribute('data-openchamber-file-link', 'true');
-      candidate.setAttribute('data-openchamber-file-ref', rawCandidate);
-      candidate.setAttribute('data-openchamber-file-path', resolvedPath);
-      candidate.setAttribute('title', 'Open file');
-      if (candidate.tagName.toLowerCase() !== 'a') {
-        candidate.setAttribute('role', 'button');
-        candidate.setAttribute('tabindex', '0');
-      }
-    };
-
-    const runValidationSweep = async (paths: string[], expectedPassID: number) => {
-      if (deferValidationUntilIdle) {
-        return;
-      }
-      if (isValidationSweepRunningRef.current || paths.length === 0) {
-        return;
-      }
-
-      isValidationSweepRunningRef.current = true;
-      const maxConcurrent = 3;
-      let cursor = 0;
-
-      const worker = async () => {
-        while (!disposed && cursor < paths.length) {
-          const index = cursor;
-          cursor += 1;
-          const pathToCheck = paths[index];
-          if (!pathToCheck) {
-            continue;
-          }
-          await isPathResolvable(pathToCheck);
-        }
-      };
-
-      try {
-        await Promise.all(Array.from({ length: Math.min(maxConcurrent, paths.length) }, () => worker()));
-      } finally {
-        isValidationSweepRunningRef.current = false;
-      }
-
-      if (!disposed && annotationPassRef.current === expectedPassID) {
-        void annotateFileLinks();
-      }
-    };
-
-    const annotateFileLinks = async () => {
-      const passID = annotationPassRef.current + 1;
-      annotationPassRef.current = passID;
+    const annotateFileLinks = () => {
       const candidates = container.querySelectorAll<HTMLElement>('[data-streamdown="inline-code"], a');
-      const unresolvedPaths = new Set<string>();
 
       for (const candidate of Array.from(candidates)) {
         const rawCandidate = extractPathCandidateFromElement(candidate);
         const resolved = getResolvedReference(rawCandidate, effectiveDirectory);
         if (!resolved) {
-          clearCandidateLinkAttrs(candidate);
+          candidate.removeAttribute('data-openchamber-file-link');
+          candidate.removeAttribute('data-openchamber-file-ref');
+          candidate.removeAttribute('data-openchamber-file-path');
+          if (candidate.getAttribute('title') === 'Open file') {
+            candidate.removeAttribute('title');
+          }
+          if (candidate.tagName.toLowerCase() !== 'a') {
+            candidate.removeAttribute('role');
+            candidate.removeAttribute('tabindex');
+          }
           continue;
         }
 
-        if (annotationPassRef.current !== passID) {
-          return;
+        candidate.setAttribute('data-openchamber-file-link', 'true');
+        candidate.setAttribute('data-openchamber-file-ref', rawCandidate);
+        candidate.setAttribute('data-openchamber-file-path', resolved.resolvedPath);
+        candidate.setAttribute('title', 'Open file');
+        if (candidate.tagName.toLowerCase() !== 'a') {
+          candidate.setAttribute('role', 'button');
+          candidate.setAttribute('tabindex', '0');
         }
-
-        const cachedResult = validationCacheRef.current.get(resolved.resolvedPath);
-        if (cachedResult === true) {
-          applyCandidateLinkAttrs(candidate, rawCandidate, resolved.resolvedPath);
-          continue;
-        }
-
-        clearCandidateLinkAttrs(candidate);
-        if (cachedResult !== false) {
-          unresolvedPaths.add(resolved.resolvedPath);
-        }
-      }
-
-      if (unresolvedPaths.size > 0) {
-        void runValidationSweep(Array.from(unresolvedPaths), passID);
       }
     };
 
-    const openFileReference = async (sourceElement: HTMLElement): Promise<boolean> => {
+    const openFileReference = (sourceElement: HTMLElement) => {
       const raw = sourceElement.getAttribute('data-openchamber-file-ref') || extractPathCandidateFromElement(sourceElement);
       const resolved = getResolvedReference(raw, effectiveDirectory);
       if (!resolved) {
-        return false;
-      }
-
-      const isResolvable = await isPathResolvable(resolved.resolvedPath);
-      if (!isResolvable) {
-        sourceElement.removeAttribute('data-openchamber-file-link');
-        sourceElement.removeAttribute('data-openchamber-file-ref');
-        sourceElement.removeAttribute('data-openchamber-file-path');
-        if (sourceElement.getAttribute('title') === 'Open file') {
-          sourceElement.removeAttribute('title');
-        }
-        return false;
+        return;
       }
 
       const contextDirectory = getContextDirectory(effectiveDirectory, resolved.resolvedPath);
       if (preferRuntimeEditor && editor) {
-        await editor.openFile(
+        void editor.openFile(
           resolved.resolvedPath,
           Number.isFinite(resolved.line ?? Number.NaN)
             ? Math.max(1, Math.trunc(resolved.line as number))
@@ -1202,7 +1087,7 @@ const useFileReferenceInteractions = ({
             ? Math.max(1, Math.trunc(resolved.column as number))
             : undefined,
         );
-        return true;
+        return;
       }
 
       const uiStore = useUIStore.getState();
@@ -1218,7 +1103,6 @@ const useFileReferenceInteractions = ({
       } else {
         uiStore.openContextFile(contextDirectory, resolved.resolvedPath);
       }
-      return true;
     };
 
     const handleClick = (event: MouseEvent) => {
@@ -1235,7 +1119,7 @@ const useFileReferenceInteractions = ({
       event.preventDefault();
       event.stopPropagation();
 
-      void openFileReference(fileRefElement);
+      openFileReference(fileRefElement);
     };
 
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -1251,36 +1135,34 @@ const useFileReferenceInteractions = ({
       event.preventDefault();
       event.stopPropagation();
 
-      void openFileReference(target);
+      openFileReference(target);
     };
 
-    void annotateFileLinks();
+    annotateFileLinks();
 
     const observer = new MutationObserver(() => {
       if (annotationDebounceRef.current !== null && typeof window !== 'undefined') {
         window.clearTimeout(annotationDebounceRef.current);
       }
       if (typeof window === 'undefined') {
-        void annotateFileLinks();
+        annotateFileLinks();
         return;
       }
       annotationDebounceRef.current = window.setTimeout(() => {
         annotationDebounceRef.current = null;
-        void annotateFileLinks();
-      }, deferValidationUntilIdle ? 280 : 120);
+        annotateFileLinks();
+      }, 120);
     });
     observer.observe(container, {
       childList: true,
       subtree: true,
-      ...(deferValidationUntilIdle ? {} : { characterData: true }),
+      characterData: true,
     });
 
     container.addEventListener('click', handleClick);
     container.addEventListener('keydown', handleKeyDown);
 
     return () => {
-      disposed = true;
-      annotationPassRef.current += 1;
       if (annotationDebounceRef.current !== null && typeof window !== 'undefined') {
         window.clearTimeout(annotationDebounceRef.current);
       }
@@ -1289,7 +1171,7 @@ const useFileReferenceInteractions = ({
       container.removeEventListener('click', handleClick);
       container.removeEventListener('keydown', handleKeyDown);
     };
-  }, [containerRef, deferValidationUntilIdle, editor, effectiveDirectory, preferRuntimeEditor, readFile]);
+  }, [containerRef, editor, effectiveDirectory, preferRuntimeEditor]);
 };
 
 const useMermaidInlineInteractions = ({
@@ -1397,7 +1279,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
   variant = 'assistant',
   onShowPopup,
 }) => {
-  const { files, editor, runtime } = useRuntimeAPIs();
+  const { editor, runtime } = useRuntimeAPIs();
   const streamdownContainerRef = React.useRef<HTMLDivElement>(null);
   const effectiveDirectory = useEffectiveDirectory() ?? '';
   const mermaidBlocks = React.useMemo(() => extractMermaidBlocks(content), [content]);
@@ -1405,10 +1287,8 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
   useFileReferenceInteractions({
     containerRef: streamdownContainerRef,
     effectiveDirectory,
-    readFile: files.readFile,
     editor,
     preferRuntimeEditor: runtime.isVSCode,
-    deferValidationUntilIdle: isStreaming,
   });
   useExternalLinkInteractions({ containerRef: streamdownContainerRef });
 
@@ -1474,7 +1354,7 @@ export const SimpleMarkdownRenderer: React.FC<{
   onShowPopup,
   allowMermaidWheelZoom = false,
 }) => {
-  const { files, editor, runtime } = useRuntimeAPIs();
+  const { editor, runtime } = useRuntimeAPIs();
   const renderedContent = React.useMemo(
     () => (stripFrontmatter ? stripLeadingFrontmatter(content) : content),
     [content, stripFrontmatter],
@@ -1491,7 +1371,6 @@ export const SimpleMarkdownRenderer: React.FC<{
   useFileReferenceInteractions({
     containerRef: streamdownContainerRef,
     effectiveDirectory,
-    readFile: files.readFile,
     editor,
     preferRuntimeEditor: runtime.isVSCode,
   });

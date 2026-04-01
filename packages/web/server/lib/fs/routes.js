@@ -283,6 +283,54 @@ export const registerFsRoutes = (app, dependencies) => {
     }
   });
 
+  app.get('/api/fs/stat', async (req, res) => {
+    const filePath = typeof req.query.path === 'string' ? req.query.path.trim() : '';
+    if (!filePath) {
+      return res.status(400).json({ error: 'Path is required' });
+    }
+
+    try {
+      const resolved = await resolveWorkspacePathFromContext({
+        req,
+        targetPath: filePath,
+        resolveProjectDirectory,
+        path,
+        os,
+        normalizeDirectoryPath,
+        openchamberUserConfigRoot,
+      });
+      if (!resolved.ok) {
+        return res.status(400).json({ error: resolved.error });
+      }
+
+      const [canonicalPath, canonicalBase] = await Promise.all([
+        fsPromises.realpath(resolved.resolved),
+        fsPromises.realpath(resolved.base).catch(() => path.resolve(resolved.base)),
+      ]);
+
+      if (!isPathWithinRoot(canonicalPath, canonicalBase, path, os)) {
+        return res.status(403).json({ error: 'Access to file denied' });
+      }
+
+      const stats = await fsPromises.stat(canonicalPath);
+      if (!stats.isFile()) {
+        return res.status(400).json({ error: 'Specified path is not a file' });
+      }
+
+      return res.json({ path: canonicalPath, isFile: true, size: stats.size });
+    } catch (error) {
+      const err = error;
+      if (err && typeof err === 'object' && err.code === 'ENOENT') {
+        return res.status(404).json({ error: 'File not found' });
+      }
+      if (err && typeof err === 'object' && err.code === 'EACCES') {
+        return res.status(403).json({ error: 'Access to file denied' });
+      }
+      console.error('Failed to stat file:', error);
+      return res.status(500).json({ error: (error && error.message) || 'Failed to stat file' });
+    }
+  });
+
   app.get('/api/fs/read', async (req, res) => {
     const filePath = typeof req.query.path === 'string' ? req.query.path.trim() : '';
     if (!filePath) {

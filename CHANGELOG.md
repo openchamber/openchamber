@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+
+## [1.9.3] - 2026-03-01
+
+- Security/Chat: user messages now escape raw HTML by default, so pasted markup is shown safely as text instead of being interpreted by the renderer (thanks to @kalac2232).
+- Desktop/Performance: reduced Tauri shell CPU/GPU overhead to keep the Desktop app cooler and smoother during longer sessions.
+- Sessions/Drafts: draft chat config now stays synced with the selected draft target directory, reducing wrong-model or wrong-agent carryover when switching draft context (thanks to @hkay-dev).
+- VSCode/Files: added file stat support in the extension bridge so markdown-related file checks resolve more reliably before opening or rendering (thanks to @geekifan).
+- Chat/Models: added arrow-key navigation for thinking-mode selection in model controls, making keyboard model tuning faster during prompt setup (thanks to @daveotero).
+- Files: added HTML preview support in the file viewer, so `.html` files can be inspected visually without leaving OpenChamber (thanks to @nguyenngothuong).
+- Chat: improved error message readability with clearer styling and safer word-wrapping, so failures are easier to scan without layout breakage (thanks to @nguyenngothuong).
+- Chat/JSON: added an interactive JSON tree viewer with collapse/expand controls and richer color cues for easier inspection of large structured outputs (thanks to @nguyenngothuong).
+- Mobile/Settings: fixed lingering settings drawers and removed extra top spacing for a cleaner, less obstructed mobile layout (thanks to @Jovines).
+- Git/Worktrees: fixed worktree detection and reset stale integration state when switching contexts, reducing wrong-target behavior in worktree flows (thanks to @jwcrystal).
+- Desktop/Settings: window vibrancy now correctly controls macOS window transparency, and settings copy now clarifies when full transparency changes take effect.
+- Reliability/Proxy: hardened OpenCode proxy header handling (including identity-encoding normalization, compression-header cleanup, hop-by-hop response-header stripping) and suppressed expected SSE close noise, improving stream stability and reducing false proxy errors (thanks to @jwcrystal, @Jovines, @JiwaniZakir, @shekohex).
+- Reliability/Proxy: restored proxied chat event streaming so live responses continue working when OpenChamber is deployed behind a proxy.
+- Terminal/Reliability: switched terminal transport to a pure WebSocket path with fallback handling, improving responsiveness and stability for interactive terminal sessions (thanks to @geekifan).
+- Usage/Providers: added ZhipuAI quota tracking and fixed MiniMax coding-plan and GitHub Copilot overusage calculations for more accurate usage reporting (thanks to @kalac2232, @baruchvitorino, @ebrainte).
+
 ## [1.9.2] - 2026-03-31
 
 - Chat/Performance: rebuilt live session sync and streaming updates to cut render churn, reduce CPU spikes, and keep long-running chats smoother and more stable across runtimes.

@@ -413,6 +413,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const [desktopModelQuery, setDesktopModelQuery] = React.useState('');
     const [modelSelectedIndex, setModelSelectedIndex] = React.useState(0);
     const modelItemRefs = React.useRef<(HTMLDivElement | null)[]>([]);
+    const [pendingThinkingVariants, setPendingThinkingVariants] = React.useState<Map<string, string | undefined>>(new Map());
+    const [adjustedThinkingModels, setAdjustedThinkingModels] = React.useState<Set<string>>(new Set());
 
     React.useEffect(() => {
         if (activeMobilePanel === 'model') {
@@ -441,6 +443,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         if (!isModelSelectorOpen) {
             setDesktopModelQuery('');
             setModelSelectedIndex(0);
+            setPendingThinkingVariants(new Map());
+            setAdjustedThinkingModels(new Set());
 
             // Restore focus to chat input when model selector closes
             if (wasOpen && !isCompact) {
@@ -1887,12 +1891,32 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
         const showProviderLogo = keyPrefix === 'fav' || keyPrefix === 'recent';
 
-        // Build animated metadata slides for desktop
+        // Check if model supports thinking variants - variants are on the model object, not metadata
+        const modelVariants = (model as { variants?: Record<string, unknown> } | undefined)?.variants;
+        const hasThinkingVariants = modelVariants && Object.keys(modelVariants).length > 0;
+        const mapKey = `${providerID}:${modelID}`;
+        const wasAdjusted = adjustedThinkingModels.has(mapKey);
+        const pendingVariant = pendingThinkingVariants.get(mapKey);
+        const effectiveVariant = pendingVariant ?? (isSelected ? currentVariant : undefined);
+
+        // Build thinking variant display - only show for models that were adjusted with arrow keys
+        let thinkingDisplay: React.ReactNode = null;
+        if (hasThinkingVariants && wasAdjusted && (isHighlighted || isSelected)) {
+            const displayLabel = effectiveVariant
+                ? effectiveVariant.charAt(0).toUpperCase() + effectiveVariant.slice(1)
+                : 'Default';
+            thinkingDisplay = (
+                <span key="thinking" className="typography-micro text-muted-foreground whitespace-nowrap">
+                    Thinking: {displayLabel}
+                </span>
+            );
+        }
+
+        // Build animated metadata slides for desktop (price/capabilities) - only shown when not showing thinking
         const priceText = formatCompactPrice(metadata);
         const hasPrice = priceText !== null;
         const hasCapabilities = indicatorIcons.length > 0;
 
-        // Build slides array: price first, then capabilities
         const slides: React.ReactNode[] = [];
         if (hasPrice) {
             slides.push(
@@ -1919,9 +1943,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             );
         }
 
-        // Rotate metadata in interactive desktop-style pickers (web/desktop), keep VS Code static.
         const supportsRotatingMetadata = !isVSCodeRuntime;
-        const shouldAnimate = supportsRotatingMetadata && slides.length > 1 && (isHighlighted || isSelected);
+        const shouldShowThinking = hasThinkingVariants && wasAdjusted;
+        const shouldAnimate = supportsRotatingMetadata && slides.length > 1 && (isHighlighted || isSelected) && !shouldShowThinking;
         const staticSlideIndex = !supportsRotatingMetadata && hasCapabilities && hasPrice ? 1 : 0;
         const staticMetadataSlide = slides[staticSlideIndex];
 
@@ -1950,8 +1974,12 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                     ) : null}
                 </div>
                 <div className="flex items-center gap-1 flex-shrink-0">
-                    {/* Metadata slot: animated TextLoop for desktop highlighted/selected rows, static otherwise */}
-                    {slides.length > 0 && (
+                    {/* Metadata slot: thinking variant for adjusted models, otherwise price/capabilities carousel */}
+                    {shouldShowThinking && (isHighlighted || isSelected) ? (
+                        <div className="flex w-[140px] justify-end items-center">
+                            {thinkingDisplay}
+                        </div>
+                    ) : slides.length > 0 ? (
                         <div className={cn(
                             "items-center",
                             shouldAnimate ? "flex w-[140px] justify-end" : ((isHighlighted || isSelected) ? "flex" : "hidden group-hover:flex")
@@ -1967,7 +1995,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 </>
                             )}
                         </div>
-                    )}
+                    ) : null}
                     {isSelected && (
                         <RiCheckLine className="h-4 w-4 text-primary" />
                     )}
@@ -2071,6 +2099,13 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
         const totalItems = flatModelList.length;
 
+        // Check if currently highlighted model supports thinking variants
+        const highlightedItem = flatModelList[modelSelectedIndex];
+        const highlightedSupportsThinking = highlightedItem ? (() => {
+            const modelVariants = (highlightedItem.model as { variants?: Record<string, unknown> } | undefined)?.variants;
+            return modelVariants && Object.keys(modelVariants).length > 0;
+        })() : false;
+
         // Handle keyboard navigation
         const handleModelKeyDown = (e: React.KeyboardEvent) => {
             e.stopPropagation();
@@ -2091,11 +2126,55 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                     const prevIndex = (modelSelectedIndex - 1 + Math.max(1, totalItems)) % Math.max(1, totalItems);
                     modelItemRefs.current[prevIndex]?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
                 }, 0);
+            } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+                e.preventDefault();
+                const selectedItem = flatModelList[modelSelectedIndex];
+                if (!selectedItem) return;
+
+                const { providerID, modelID, model } = selectedItem;
+                const modelVariants = (model as { variants?: Record<string, unknown> } | undefined)?.variants;
+                if (!modelVariants) return;
+
+                const variantKeys = Object.keys(modelVariants);
+                if (variantKeys.length === 0) return;
+
+                const mapKey = `${providerID}:${modelID}`;
+                const currentPending = pendingThinkingVariants.get(mapKey);
+                const activeModelVariant = currentPending ?? (currentProviderId === providerID && currentModelId === modelID ? currentVariant : undefined);
+
+                const variantsWithDefault: Array<string | undefined> = [undefined, ...variantKeys];
+                const currentVariantIndex = variantsWithDefault.indexOf(activeModelVariant);
+                const safeCurrentIndex = currentVariantIndex >= 0 ? currentVariantIndex : 0;
+                const direction = e.key === 'ArrowRight' ? 1 : -1;
+                const nextVariantIndex = (safeCurrentIndex + direction + variantsWithDefault.length) % variantsWithDefault.length;
+                const nextVariant = variantsWithDefault[nextVariantIndex];
+
+                setPendingThinkingVariants((prev) => {
+                    const next = new Map(prev);
+                    next.set(mapKey, nextVariant);
+                    return next;
+                });
+                setAdjustedThinkingModels((prev) => {
+                    const next = new Set(prev);
+                    next.add(mapKey);
+                    return next;
+                });
             } else if (e.key === 'Enter') {
                 e.preventDefault();
                 const selectedItem = flatModelList[modelSelectedIndex];
                 if (selectedItem) {
-                    handleProviderAndModelChange(selectedItem.providerID, selectedItem.modelID);
+                    const { providerID, modelID } = selectedItem;
+                    const mapKey = `${providerID}:${modelID}`;
+                    const pendingVariant = pendingThinkingVariants.get(mapKey);
+                    const wasAdjusted = adjustedThinkingModels.has(mapKey);
+
+                    handleProviderAndModelChange(providerID, modelID);
+
+                    if (wasAdjusted) {
+                        setTimeout(() => {
+                            handleVariantSelect(pendingVariant);
+                        }, 0);
+                    }
                 }
             } else if (e.key === 'Escape') {
                 e.preventDefault();
@@ -2292,7 +2371,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
                             {/* Keyboard hints footer */}
                             <div className="px-3 pt-1 pb-1.5 border-t border-border/40 typography-micro text-muted-foreground">
-                                ↑↓ navigate • Enter select • Esc close
+                                ↑↓ navigate{highlightedSupportsThinking ? ' • ←→ thinking' : ''} • Enter select • Esc close
                             </div>
                         </DropdownMenuContent>
                     </DropdownMenu>

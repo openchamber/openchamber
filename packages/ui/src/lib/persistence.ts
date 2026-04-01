@@ -82,6 +82,9 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
       localStorage.removeItem('openchamber.pwaName');
     }
   }
+  if (typeof settings.desktopVibrancy === 'boolean') {
+    localStorage.setItem('desktopVibrancy', String(settings.desktopVibrancy));
+  }
 };
 
 type PersistApi = {

@@ -180,6 +180,39 @@ export async function handleFsBridgeMessage(
       }
     }
 
+    case 'api:fs:stat': {
+      const target = (payload as { path: string })?.path;
+      if (!target) {
+        return { id, type, success: false, error: 'Path is required' };
+      }
+
+      const resolution = await deps.resolveFileReadPath(target);
+      if (!resolution.ok) {
+        return { id, type, success: false, error: resolution.error };
+      }
+
+      try {
+        const stats = await fs.promises.stat(resolution.resolvedPath);
+        if (!stats.isFile()) {
+          return { id, type, success: false, error: 'Specified path is not a file' };
+        }
+
+        return {
+          id,
+          type,
+          success: true,
+          data: {
+            path: deps.normalizeFsPath(resolution.resolvedPath),
+            isFile: true,
+            size: stats.size,
+          },
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to stat file';
+        return { id, type, success: false, error: message };
+      }
+    }
+
     case 'api:fs:write': {
       const { path: targetPath, content } = (payload as { path: string; content: string }) || {};
       if (!targetPath) {

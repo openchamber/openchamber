@@ -10,7 +10,7 @@
  */
 
 import { create } from "zustand"
-import type { Session, Part, Message, TextPart, Agent } from "@opencode-ai/sdk/v2/client"
+import type { Session, Part, Message, TextPart } from "@opencode-ai/sdk/v2/client"
 import type { AttachedFile, SessionContextUsage } from "@/stores/types/sessionTypes"
 import type { WorktreeMetadata } from "@/types/worktree"
 import { opencodeClient } from "@/lib/opencode/client"
@@ -350,6 +350,10 @@ const resolveSessionDirectory = (
   return resolveDirectoryKey(target)
 }
 
+const activateConfigForDirectory = async (directory: string | null | undefined): Promise<void> => {
+  await useConfigStore.getState().activateDirectory(normalizePath(directory))
+}
+
 const DEFAULT_DRAFT: NewSessionDraftState = {
   open: false,
   directoryOverride: null,
@@ -494,19 +498,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       useInputStore.getState().setPendingInputText(options.initialPrompt)
     }
 
-    try {
-      const configState = useConfigStore.getState()
-      const visibleAgents = configState.getVisibleAgents()
-      let agentName: string | undefined
-      if (configState.settingsDefaultAgent) {
-        const settingsAgent = visibleAgents.find((a: Agent) => a.name === configState.settingsDefaultAgent)
-        if (settingsAgent) agentName = settingsAgent.name
-      }
-      if (!agentName) {
-        agentName = visibleAgents.find((a: Agent) => a.name === "build")?.name || visibleAgents[0]?.name
-      }
-      if (agentName) configState.setAgent(agentName)
-    } catch { /* ignored */ }
+    void activateConfigForDirectory(directory)
   },
 
   // ---------------------------------------------------------------------------
@@ -530,14 +522,20 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     })
   },
 
-  setNewSessionDraftTarget: (target) =>
-    set((s) => ({
-      newSessionDraft: {
-        ...s.newSessionDraft,
-        selectedProjectId: target.projectId ?? target.selectedProjectId ?? s.newSessionDraft.selectedProjectId,
-        directoryOverride: target.directoryOverride ?? s.newSessionDraft.directoryOverride,
-      },
-    })),
+  setNewSessionDraftTarget: (target) => {
+    let nextDirectory: string | null = null
+    set((s) => {
+      nextDirectory = normalizePath(target.directoryOverride ?? s.newSessionDraft.directoryOverride)
+      return {
+        newSessionDraft: {
+          ...s.newSessionDraft,
+          selectedProjectId: target.projectId ?? target.selectedProjectId ?? s.newSessionDraft.selectedProjectId,
+          directoryOverride: target.directoryOverride ?? s.newSessionDraft.directoryOverride,
+        },
+      }
+    })
+    void activateConfigForDirectory(nextDirectory)
+  },
 
   setDraftPreserveDirectoryOverride: (value) =>
     set((s) => {
@@ -629,10 +627,17 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       return { worktreeMetadata: map }
     }),
 
-  overrideNewSessionDraftTarget: (options) =>
-    set((s) => ({
-      newSessionDraft: { ...s.newSessionDraft, ...options },
-    })),
+  overrideNewSessionDraftTarget: (options) => {
+    let nextDirectory: string | null = null
+    set((s) => {
+      const nextDraft = { ...s.newSessionDraft, ...options }
+      nextDirectory = normalizePath(
+        typeof nextDraft.directoryOverride === "string" ? nextDraft.directoryOverride : null,
+      )
+      return { newSessionDraft: nextDraft }
+    })
+    void activateConfigForDirectory(nextDirectory)
+  },
 
   resolvePendingDraftWorktreeTarget: (requestId, directory, options) =>
     set((s) => {
@@ -699,6 +704,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         directory: normalizePath(draftDirectoryOverride ?? created.directory ?? null),
       })
 
+      const draftSyntheticParts = draft.syntheticParts
+      await activateConfigForDirectory(draftDirectoryOverride ?? created.directory ?? null)
+
       const configState = useConfigStore.getState()
       const draftAgentName = configState.currentAgentName
       const effectiveDraftAgent = trimmedAgent ?? draftAgentName
@@ -717,7 +725,6 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
       get().initializeNewOpenChamberSession(created.id, configState.agents ?? [])
 
-      const draftSyntheticParts = draft.syntheticParts
       const createdDirectory = normalizePath(draftDirectoryOverride ?? created.directory ?? null)
 
       get().closeNewSessionDraft()

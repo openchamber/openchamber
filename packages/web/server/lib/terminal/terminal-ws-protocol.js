@@ -1,6 +1,6 @@
-export const TERMINAL_INPUT_WS_PATH = '/api/terminal/input-ws';
-export const TERMINAL_INPUT_WS_CONTROL_TAG_JSON = 0x01;
-export const TERMINAL_INPUT_WS_MAX_PAYLOAD_BYTES = 64 * 1024;
+export const TERMINAL_WS_PATH = '/api/terminal/ws';
+export const TERMINAL_WS_CONTROL_TAG_JSON = 0x01;
+export const TERMINAL_WS_MAX_PAYLOAD_BYTES = 64 * 1024;
 
 export const parseRequestPathname = (requestUrl) => {
   if (typeof requestUrl !== 'string' || requestUrl.length === 0) {
@@ -14,7 +14,9 @@ export const parseRequestPathname = (requestUrl) => {
   }
 };
 
-export const normalizeTerminalInputWsMessageToBuffer = (rawData) => {
+export const isTerminalWsPathname = (pathname) => pathname === TERMINAL_WS_PATH;
+
+export const normalizeTerminalWsMessageToBuffer = (rawData) => {
   if (Buffer.isBuffer(rawData)) {
     return rawData;
   }
@@ -26,21 +28,21 @@ export const normalizeTerminalInputWsMessageToBuffer = (rawData) => {
   return Buffer.from(rawData);
 };
 
-export const normalizeTerminalInputWsMessageToText = (rawData) => {
+export const normalizeTerminalWsMessageToText = (rawData) => {
   if (typeof rawData === 'string') {
     return rawData;
   }
 
-  return normalizeTerminalInputWsMessageToBuffer(rawData).toString('utf8');
+  return normalizeTerminalWsMessageToBuffer(rawData).toString('utf8');
 };
 
-export const readTerminalInputWsControlFrame = (rawData) => {
+export const readTerminalWsControlFrame = (rawData) => {
   if (!rawData) {
     return null;
   }
 
-  const buffer = normalizeTerminalInputWsMessageToBuffer(rawData);
-  if (buffer.length < 2 || buffer[0] !== TERMINAL_INPUT_WS_CONTROL_TAG_JSON) {
+  const buffer = normalizeTerminalWsMessageToBuffer(rawData);
+  if (buffer.length < 2 || buffer[0] !== TERMINAL_WS_CONTROL_TAG_JSON) {
     return null;
   }
 
@@ -55,9 +57,9 @@ export const readTerminalInputWsControlFrame = (rawData) => {
   }
 };
 
-export const createTerminalInputWsControlFrame = (payload) => {
+export const createTerminalWsControlFrame = (payload) => {
   const jsonBytes = Buffer.from(JSON.stringify(payload), 'utf8');
-  return Buffer.concat([Buffer.from([TERMINAL_INPUT_WS_CONTROL_TAG_JSON]), jsonBytes]);
+  return Buffer.concat([Buffer.from([TERMINAL_WS_CONTROL_TAG_JSON]), jsonBytes]);
 };
 
 export const pruneRebindTimestamps = (timestamps, now, windowMs) =>

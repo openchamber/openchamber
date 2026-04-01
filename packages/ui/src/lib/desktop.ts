@@ -147,6 +147,8 @@ export type DesktopSettings = {
   skillCatalogs?: SkillCatalogConfig[];
   // Opt-in to send anonymous usage reports for update checks (default: true)
   reportUsage?: boolean;
+  // macOS window vibrancy effect (default: true)
+  desktopVibrancy?: boolean;
 };
 
 type TauriGlobal = {
@@ -634,6 +636,21 @@ export const clearDesktopCache = async (): Promise<boolean> => {
     return true;
   } catch (error) {
     console.warn('Failed to clear cache', error);
+    return false;
+  }
+};
+
+export const desktopSetVibrancy = async (enabled: boolean): Promise<boolean> => {
+  if (!isTauriShell()) {
+    return false;
+  }
+
+  try {
+    const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
+    await tauri?.core?.invoke?.('desktop_set_vibrancy', { enabled });
+    return true;
+  } catch (error) {
+    console.warn('Failed to set vibrancy', error);
     return false;
   }
 };

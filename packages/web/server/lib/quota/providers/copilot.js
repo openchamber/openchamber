@@ -18,7 +18,7 @@ const buildCopilotWindows = (payload) => {
     const entitlement = toNumber(snapshot.entitlement);
     const remaining = toNumber(snapshot.remaining);
     const usedPercent = entitlement && remaining !== null
-      ? Math.max(0, Math.min(100, 100 - (remaining / entitlement) * 100))
+      ? Math.max(0, 100 - (remaining / entitlement) * 100)
       : null;
     const valueLabel = entitlement !== null && remaining !== null
       ? `${remaining.toFixed(0)} / ${entitlement.toFixed(0)} left`

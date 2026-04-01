@@ -29,20 +29,23 @@ export interface RetryPolicy {
   maxDelayMs: number;
 }
 
+export interface TerminalTransportCapability {
+  preferred?: 'ws' | 'http' | 'sse';
+  transports?: Array<'ws' | 'http' | 'sse'>;
+  ws?: {
+    path: string;
+    v?: number;
+    enc?: string;
+  };
+}
+
 export interface TerminalSession {
   sessionId: string;
   cols: number;
   rows: number;
   capabilities?: {
-    input?: {
-      preferred?: 'ws' | 'http';
-      transports?: Array<'ws' | 'http'>;
-      ws?: {
-        path: string;
-        v?: number;
-        enc?: string;
-      };
-    };
+    input?: TerminalTransportCapability;
+    stream?: TerminalTransportCapability;
   };
 }
 
@@ -490,6 +493,7 @@ export interface FilesAPI {
   listDirectory(path: string, options?: ListDirectoryOptions): Promise<DirectoryListResult>;
   search(payload: FileSearchQuery): Promise<FileSearchResult[]>;
   createDirectory(path: string): Promise<{ success: boolean; path: string }>;
+  statFile?(path: string): Promise<{ path: string; isFile: boolean; size: number }>;
   readFile?(path: string): Promise<{ content: string; path: string }>;
   readFileBinary?(path: string): Promise<{ dataUrl: string; path: string }>;
   writeFile?(path: string, content: string): Promise<{ success: boolean; path: string }>;

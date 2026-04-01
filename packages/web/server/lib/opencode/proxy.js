@@ -1,5 +1,10 @@
-import express from 'express';
 import { createProxyMiddleware } from 'http-proxy-middleware';
+
+import {
+  applyForwardProxyResponseHeaders,
+  collectForwardProxyHeaders,
+  shouldForwardProxyResponseHeader,
+} from '../../proxy-headers.js';
 
 export const registerOpenCodeProxy = (app, deps) => {
   const {
@@ -24,6 +29,91 @@ export const registerOpenCodeProxy = (app, deps) => {
     console.log('Setting up OpenCode API gate (OpenCode not started yet)');
   }
   app.set('opencodeProxyConfigured', true);
+
+  const isAbortError = (error) => error?.name === 'AbortError';
+
+  const forwardSseRequest = async (req, res) => {
+    const abortController = new AbortController();
+    const closeUpstream = () => abortController.abort();
+    let upstream = null;
+    let reader = null;
+
+    req.on('close', closeUpstream);
+
+    try {
+      const requestUrl = typeof req.originalUrl === 'string' && req.originalUrl.length > 0
+        ? req.originalUrl
+        : (typeof req.url === 'string' ? req.url : '');
+      const upstreamPath = requestUrl.startsWith('/api') ? requestUrl.slice(4) || '/' : requestUrl;
+      const headers = collectForwardProxyHeaders(req.headers, getOpenCodeAuthHeaders());
+      headers.accept ??= 'text/event-stream';
+      headers['cache-control'] ??= 'no-cache';
+
+      upstream = await fetch(buildOpenCodeUrl(upstreamPath, ''), {
+        method: 'GET',
+        headers,
+        signal: abortController.signal,
+      });
+
+      res.status(upstream.status);
+      applyForwardProxyResponseHeaders(upstream.headers, res);
+
+      const contentType = upstream.headers.get('content-type') || 'text/event-stream';
+      const isEventStream = contentType.toLowerCase().includes('text/event-stream');
+
+      if (!upstream.body) {
+        res.end(await upstream.text().catch(() => ''));
+        return;
+      }
+
+      if (!isEventStream) {
+        res.end(await upstream.text());
+        return;
+      }
+
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no');
+      if (typeof res.flushHeaders === 'function') {
+        res.flushHeaders();
+      }
+
+      reader = upstream.body.getReader();
+      while (!abortController.signal.aborted) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
+        if (value && value.length > 0) {
+          res.write(value);
+        }
+      }
+
+      res.end();
+    } catch (error) {
+      if (isAbortError(error)) {
+        return;
+      }
+      console.error('[proxy] OpenCode SSE proxy error:', error?.message ?? error);
+      if (!res.headersSent) {
+        res.status(503).json({ error: 'OpenCode service unavailable' });
+      } else {
+        res.end();
+      }
+    } finally {
+      req.off('close', closeUpstream);
+      try {
+        if (reader) {
+          await reader.cancel();
+          reader.releaseLock();
+        } else if (upstream?.body && !upstream.body.locked) {
+          await upstream.body.cancel();
+        }
+      } catch {
+      }
+    }
+  };
 
   // Ensure API prefix is detected before proxying
   app.use('/api', (_req, _res, next) => {
@@ -138,7 +228,10 @@ export const registerOpenCodeProxy = (app, deps) => {
     });
   }
 
-  // http-proxy-middleware handles SSE, large bodies, timeouts correctly
+  app.get('/api/global/event', forwardSseRequest);
+  app.get('/api/event', forwardSseRequest);
+
+  // Generic proxy for non-SSE OpenCode API routes.
   const apiProxy = createProxyMiddleware({
     target: `http://127.0.0.1:${runtime.openCodePort || 3902}`,
     changeOrigin: true,
@@ -154,6 +247,17 @@ export const registerOpenCodeProxy = (app, deps) => {
         const authHeaders = getOpenCodeAuthHeaders();
         if (authHeaders.Authorization) {
           proxyReq.setHeader('Authorization', authHeaders.Authorization);
+        }
+
+        // Defensive: request identity encoding from upstream OpenCode.
+        // This avoids compressed-body/header mismatches in multi-proxy setups.
+        proxyReq.setHeader('accept-encoding', 'identity');
+      },
+      proxyRes: (proxyRes) => {
+        for (const key of Object.keys(proxyRes.headers || {})) {
+          if (!shouldForwardProxyResponseHeader(key)) {
+            delete proxyRes.headers[key];
+          }
         }
       },
       error: (err, _req, res) => {
