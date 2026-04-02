@@ -234,7 +234,8 @@ const buildModelMetadataKey = (providerId: string, modelId: string) => {
     return `${normalizedProvider}/${modelId}`;
 };
 
-const mapModalities = (cap: { text: boolean; audio: boolean; image: boolean; video: boolean; pdf: boolean }): string[] => {
+const mapModalities = (cap: { text: boolean; audio: boolean; image: boolean; video: boolean; pdf: boolean } | undefined): string[] => {
+    if (!cap) return [];
     const result: string[] = [];
     if (cap.text) result.push('text');
     if (cap.audio) result.push('audio');
@@ -248,20 +249,20 @@ const deriveModelMetadata = (providerId: string, model: ProviderModel): ModelMet
     id: model.id,
     providerId,
     name: model.name,
-    tool_call: model.capabilities.toolcall,
-    reasoning: model.capabilities.reasoning,
-    temperature: model.capabilities.temperature,
-    attachment: model.capabilities.attachment,
-    modalities: {
+    tool_call: model.capabilities?.toolcall,
+    reasoning: model.capabilities?.reasoning,
+    temperature: model.capabilities?.temperature,
+    attachment: model.capabilities?.attachment,
+    modalities: model.capabilities ? {
         input: mapModalities(model.capabilities.input),
         output: mapModalities(model.capabilities.output),
-    },
-    cost: {
+    } : undefined,
+    cost: model.cost ? {
         input: model.cost.input,
         output: model.cost.output,
-        cache_read: model.cost.cache.read,
-        cache_write: model.cost.cache.write,
-    },
+        cache_read: model.cost.cache?.read,
+        cache_write: model.cost.cache?.write,
+    } : undefined,
     limit: model.limit,
     release_date: model.release_date,
 });
