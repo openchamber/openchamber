@@ -1072,7 +1072,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                             />
                                         ) : null}
                                     </div>
-                                    {showStickyInlineHoverRow ? <div aria-hidden="true" className="pointer-events-none absolute left-0 right-0 top-full h-11" /> : null}
+                                    {showStickyInlineHoverRow ? <div aria-hidden="true" className="absolute left-0 right-0 top-full h-11" /> : null}
                                 </div>
                             </FadeInOnReveal>
                         )
