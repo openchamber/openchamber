@@ -12,7 +12,7 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useSessionMessageRecords } from '@/sync/sync-context';
+import { useDirectorySync, useSessionMessageRecords } from '@/sync/sync-context';
 import { getSyncChildStores } from '@/sync/sync-refs';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionActivity } from '@/hooks/useSessionActivity';
@@ -38,6 +38,7 @@ import { MinDurationShineText } from './MinDurationShineText';
 import { ToolRevealOnMount } from './ToolRevealOnMount';
 import { getToolIcon } from './toolPresentation';
 import { useDurationTickerNow } from './useDurationTicker';
+import { resolveFallbackTaskSessionId } from './resolveFallbackTaskSessionId';
 
 type ToolStateWithMetadata = ToolStateUnion & { metadata?: Record<string, unknown>; input?: Record<string, unknown>; output?: string; error?: string; time?: { start: number; end?: number } };
 
@@ -1561,6 +1562,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
     const state = part.state;
     const showToolFileIcons = useUIStore((s) => s.showToolFileIcons);
     const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
+    const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
 
     const normalizedPartTool = normalizeToolName(part.tool);
     const isTaskTool = normalizedPartTool === 'task';
@@ -1660,6 +1662,16 @@ const ToolPart: React.FC<ToolPartProps> = ({
         return Math.min(...candidates);
     }, [localStartAt, pinnedTime.start, time?.start]);
 
+    const taskSessionResolutionStart = React.useMemo(() => {
+        if (typeof pinnedTime.start === 'number') {
+            return pinnedTime.start;
+        }
+        if (typeof time?.start === 'number') {
+            return time.start;
+        }
+        return localStartAt;
+    }, [localStartAt, pinnedTime.start, time?.start]);
+
     const taskOutputString = React.useMemo(() => {
         return typeof stateWithData.output === 'string' ? stateWithData.output : undefined;
     }, [stateWithData.output]);
@@ -1668,7 +1680,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
         return parseTaskMetadataBlock(taskOutputString);
     }, [taskOutputString]);
 
-    const taskSessionId = React.useMemo<string | undefined>(() => {
+    const explicitTaskSessionId = React.useMemo<string | undefined>(() => {
         if (!isTaskTool) {
             return undefined;
         }
@@ -1688,6 +1700,26 @@ const ToolPart: React.FC<ToolPartProps> = ({
         }
         return readTaskSessionIdFromOutput(taskOutputString);
     }, [isTaskTool, metadata, parsedTaskMetadata.sessionId, partMetadata, taskOutputString]);
+
+    const fallbackTaskSessionId = useDirectorySync(
+        React.useCallback((storeState) => {
+            if (explicitTaskSessionId) {
+                return undefined;
+            }
+
+            return resolveFallbackTaskSessionId({
+                isTaskTool,
+                parentSessionId: currentSessionId ?? undefined,
+                taskStartTime: taskSessionResolutionStart,
+                isTaskFinalized: isFinalized,
+                sessions: storeState.session,
+                sessionStatusMap: storeState.session_status,
+            });
+        }, [explicitTaskSessionId, isTaskTool, currentSessionId, taskSessionResolutionStart, isFinalized]),
+        currentDirectory,
+    );
+
+    const taskSessionId = explicitTaskSessionId ?? fallbackTaskSessionId;
 
     const childSessionMessages = useSessionMessageRecords(taskSessionId ?? '', currentDirectory);
 
