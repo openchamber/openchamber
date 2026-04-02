@@ -34,11 +34,15 @@ const HEARTBEAT_TIMEOUT_MS = 15_000
 // Pipeline factory
 // ---------------------------------------------------------------------------
 
-export function createEventPipeline(input: {
+export type EventPipelineInput = {
   sdk: OpencodeClient
   onEvent: (directory: string, payload: Event) => void
-}) {
-  const { sdk, onEvent } = input
+  /** Called after SSE reconnects (visibility restore or heartbeat timeout). */
+  onReconnect?: () => void
+}
+
+export function createEventPipeline(input: EventPipelineInput) {
+  const { sdk, onEvent, onReconnect } = input
   const abort = new AbortController()
 
   // Queue state
@@ -194,24 +198,36 @@ export function createEventPipeline(input: {
 
       if (abort.signal.aborted) return
       await wait(RECONNECT_DELAY_MS)
+      onReconnect?.()
     }
   })().finally(flush)
 
-  // Visibility handler — flush immediately when tab becomes visible
+  // Visibility handler — abort SSE on heartbeat timeout so the loop reconnects.
+  // The reconnect triggers onReconnect above, which lets consumers resync state.
   const onVisibility = () => {
     if (typeof document === "undefined") return
     if (document.visibilityState !== "visible") return
     if (Date.now() - lastEventAt < HEARTBEAT_TIMEOUT_MS) return
     attempt?.abort()
   }
+
+  // pageshow handler — fires on back-forward cache restore (common on mobile PWA).
+  // bfcache restores the page without a fresh load, so SSE state may be stale.
+  const onPageShow = (event: PageTransitionEvent) => {
+    if (!event.persisted) return
+    attempt?.abort()
+  }
+
   if (typeof document !== "undefined") {
     document.addEventListener("visibilitychange", onVisibility)
+    window.addEventListener("pageshow", onPageShow)
   }
 
   // Cleanup — abort SSE, flush remaining events, remove listeners
   const cleanup = () => {
     if (typeof document !== "undefined") {
       document.removeEventListener("visibilitychange", onVisibility)
+      window.removeEventListener("pageshow", onPageShow)
     }
     abort.abort()
     flush()

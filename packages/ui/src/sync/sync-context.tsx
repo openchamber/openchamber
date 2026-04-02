@@ -380,6 +380,50 @@ export function SyncProvider(props: {
       onEvent: (directory, payload) => {
         handleEvent(directory, payload, childStores)
       },
+      onReconnect: () => {
+        // After SSE reconnects (visibility restore / heartbeat timeout),
+        // re-fetch authoritative state for directories with active sessions.
+        for (const [dir, store] of childStores.children) {
+          const state = store.getState()
+          // Find sessions that were not idle when we last heard from them.
+          const activeSessionIds: string[] = []
+          for (const [sid, status] of Object.entries(state.session_status ?? {})) {
+            if (status && (status as SessionStatus).type !== "idle") {
+              activeSessionIds.push(sid)
+            }
+          }
+          if (activeSessionIds.length === 0) continue
+
+          void props.sdk.session.list({
+            directory: dir,
+            roots: true,
+            limit: 50,
+          }).then((result) => {
+            if ((result as { error?: unknown }).error) return
+            const sessions = (result.data ?? [])
+              .filter((s) => s?.id)
+              .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+            const current = store.getState()
+            store.setState({ session: sessions, sessionTotal: sessions.length })
+            // Sync global status for sidebar
+            const currentGlobal = useGlobalSessionStatusStore.getState().statuses
+            const updated: Record<string, SessionStatus> = { ...currentGlobal }
+            let changed = false
+            for (const s of sessions) {
+              const newStatus = current.session_status?.[s.id]
+              if (newStatus && newStatus !== updated[s.id]) {
+                updated[s.id] = newStatus
+                changed = true
+              }
+            }
+            if (changed) {
+              useGlobalSessionStatusStore.setState({ statuses: updated })
+            }
+          }).catch(() => {
+            // Transient failure during resync — SSE will catch up
+          })
+        }
+      },
     })
     return cleanup
   }, [props.sdk, childStores])

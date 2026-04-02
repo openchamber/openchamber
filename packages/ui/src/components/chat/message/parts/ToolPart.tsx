@@ -1744,7 +1744,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
         return false;
     }, [childSessionMessages, isTaskTool, taskSessionId]);
 
-    const childSessionActivity = useSessionActivity(taskSessionId);
+    const childSessionActivity = useSessionActivity(taskSessionId, currentDirectory);
     const [taskChildSeenActive, setTaskChildSeenActive] = React.useState(false);
     const [taskChildPollingStopped, setTaskChildPollingStopped] = React.useState(false);
 

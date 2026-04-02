@@ -25,10 +25,10 @@ const IDLE_RESULT: SessionActivityResult = {
  * assistant message when its completion update has not landed yet.
  * Returns idle when permissions are pending (permission indicator takes priority).
  */
-export function useSessionActivity(sessionId: string | null | undefined): SessionActivityResult {
-  const status = useSessionStatus(sessionId ?? '');
-  const messages = useSessionMessages(sessionId ?? '');
-  const permissions = useSessionPermissions(sessionId ?? '');
+export function useSessionActivity(sessionId: string | null | undefined, directory?: string): SessionActivityResult {
+  const status = useSessionStatus(sessionId ?? '', directory);
+  const messages = useSessionMessages(sessionId ?? '', directory);
+  const permissions = useSessionPermissions(sessionId ?? '', directory);
 
   return React.useMemo<SessionActivityResult>(() => {
     if (!sessionId) return IDLE_RESULT;
