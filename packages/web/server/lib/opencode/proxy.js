@@ -231,6 +231,15 @@ export const registerOpenCodeProxy = (app, deps) => {
   app.get('/api/global/event', forwardSseRequest);
   app.get('/api/event', forwardSseRequest);
 
+  const resolveProxyTarget = () => {
+    try {
+      return new URL(buildOpenCodeUrl('/', '')).origin;
+    } catch {
+      const rt = getRuntime();
+      return `http://127.0.0.1:${rt.openCodePort || 3902}`;
+    }
+  };
+
   // Generic proxy for non-SSE OpenCode API routes.
   const apiProxy = createProxyMiddleware({
     target: `http://127.0.0.1:${runtime.openCodePort || 3902}`,
@@ -238,8 +247,7 @@ export const registerOpenCodeProxy = (app, deps) => {
     pathRewrite: { '^/api': '' },
     // Dynamic target — port can change after restart
     router: () => {
-      const rt = getRuntime();
-      return `http://127.0.0.1:${rt.openCodePort || 3902}`;
+      return resolveProxyTarget();
     },
     on: {
       proxyReq: (proxyReq) => {
