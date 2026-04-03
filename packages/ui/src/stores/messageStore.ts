@@ -1064,7 +1064,7 @@ export const useMessageStore = create<MessageStore>()(
                                 if (firstToken.length <= 1) return false;
                                 const tokenWithoutLeadingSlash = firstToken.slice(1);
                                 if (!tokenWithoutLeadingSlash.includes('/')) return false;
-                                // Namespaced commands (e.g. /colin/commit) contain '/' but
+                                // Namespaced commands (e.g. /my/commit) contain '/' but
                                 // should not be treated as absolute file paths.
                                 if (useCommandsStore.getState().getCommandByName(tokenWithoutLeadingSlash)) return false;
                                 return true;
