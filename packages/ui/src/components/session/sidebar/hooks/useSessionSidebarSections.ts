@@ -3,6 +3,7 @@ import type { Session } from '@opencode-ai/sdk/v2';
 import type { SessionGroup, SessionNode, GroupSearchData } from '../types';
 import { dedupeSessionsById, normalizePath } from '../utils';
 import type { WorktreeMetadata } from '@/types/worktree';
+import { useUIStore } from '@/stores/useUIStore';
 
 type ProjectItem = {
   id: string;
@@ -89,9 +90,31 @@ export const useSessionSidebarSections = (args: Args) => {
     projectRootBranches,
   ]);
 
+  const sortProjectsByActivity = useUIStore((state) => state.sortProjectsByActivity);
+
   const visibleProjectSections = React.useMemo(() => {
-    return projectSections;
-  }, [projectSections]);
+    // Optionally sort projects by most recent session activity (descending)
+    if (!sortProjectsByActivity) {
+      return projectSections;
+    }
+    const sorted = [...projectSections].sort((a, b) => {
+      const getMostRecentTimestamp = (section: ProjectSection): number => {
+        let mostRecent = 0;
+        for (const group of section.groups) {
+          for (const node of group.sessions) {
+            const session = node.session;
+            const timestamp = session.time?.updated || session.time?.created || 0;
+            if (timestamp > mostRecent) {
+              mostRecent = timestamp;
+            }
+          }
+        }
+        return mostRecent;
+      };
+      return getMostRecentTimestamp(b) - getMostRecentTimestamp(a);
+    });
+    return sorted;
+  }, [projectSections, sortProjectsByActivity]);
 
   const groupSearchDataByGroup = React.useMemo(() => {
     const result = new WeakMap<SessionGroup, GroupSearchData>();

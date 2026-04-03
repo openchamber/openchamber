@@ -9,6 +9,7 @@ import {
   useSensors,
 } from '@dnd-kit/core';
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { RiArrowDownSLine, RiArrowRightSLine, RiFolderLine } from '@remixicon/react';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { formatDirectoryName, formatPathForDisplay, cn } from '@/lib/utils';
 import type { SessionGroup } from './types';
@@ -73,6 +74,7 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
   const groupSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
   );
+  const [projectsCollapsed, setProjectsCollapsed] = React.useState(false);
 
   if (props.projectSections.length === 0) {
     return <ScrollableOverlay useScrollShadow scrollShadowSize={96} outerClassName="flex-1 min-h-0" className={cn('space-y-1 pb-1 pl-2.5 pr-2', props.mobileVariant ? '' : '')}>{props.topContent}{props.emptyState}</ScrollableOverlay>;
@@ -83,8 +85,25 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
   }
 
   return (
-    <ScrollableOverlay useScrollShadow scrollShadowSize={96} outerClassName="flex-1 min-h-0" className={cn('space-y-1 pb-1 pl-2.5 pr-2', props.mobileVariant ? '' : '')}>
+    <ScrollableOverlay useScrollShadow scrollShadowSize={96} outerClassName="flex-1 min-h-0" className={cn('pb-1 pl-2.5 pr-2', props.mobileVariant ? '' : '')}>
       {props.topContent}
+
+      {props.sectionsForRender.length > 0 && !props.hasSessionSearchQuery ? (
+        <div className="space-y-3 pt-2">
+          <button
+            type="button"
+            onClick={() => setProjectsCollapsed((prev) => !prev)}
+            className="group flex w-full items-center gap-1 rounded-md px-0.5 py-0.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+            aria-expanded={!projectsCollapsed}
+          >
+            <span className="inline-flex h-4 w-4 items-center justify-center text-muted-foreground">
+              {projectsCollapsed ? <RiArrowRightSLine className="h-3.5 w-3.5" /> : <RiArrowDownSLine className="h-3.5 w-3.5" />}
+            </span>
+            <RiFolderLine className="h-3.5 w-3.5 text-primary mr-1" />
+            <span className="text-[14px] font-normal text-foreground/95 uppercase tracking-wide">PROJECTS</span>
+          </button>
+          {!projectsCollapsed ? (
+            <div className="space-y-4 pl-2">
       {props.showOnlyMainWorkspace ? (
         <div className="space-y-[0.6rem] py-1">
           {(() => {
@@ -239,6 +258,10 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
           </DndContext>
         </>
       )}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </ScrollableOverlay>
   );
 }

@@ -3,6 +3,86 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { RiCheckboxBlankLine, RiCheckboxLine } from '@remixicon/react';
 import type { Session } from '@opencode-ai/sdk/v2';
 
+// --- Folder Name Dialog (for create/rename folders) ---
+
+export type FolderNameDialogState = {
+  mode: 'create' | 'rename';
+  folderId?: string;
+  folderName?: string;
+} | null;
+
+export function FolderNameDialog(props: {
+  value: FolderNameDialogState;
+  setValue: (next: FolderNameDialogState) => void;
+  onConfirm: (name: string) => void;
+}): React.ReactNode {
+  const { value, setValue, onConfirm } = props;
+  const [inputValue, setInputValue] = React.useState('');
+
+  React.useEffect(() => {
+    if (value) {
+      setInputValue(value.mode === 'rename' && value.folderName ? value.folderName : '');
+    }
+  }, [value]);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (inputValue.trim()) {
+      onConfirm(inputValue.trim());
+      setValue(null);
+    }
+  };
+
+  const handleOpenChange = (open: boolean) => {
+    if (!open) setValue(null);
+  };
+
+  return (
+    <Dialog open={Boolean(value)} onOpenChange={handleOpenChange}>
+      <DialogContent showCloseButton={false} className="max-w-sm gap-5">
+        <form onSubmit={handleSubmit}>
+          <DialogHeader>
+            <DialogTitle>
+              {value?.mode === 'create' ? 'Create folder' : 'Rename folder'}
+            </DialogTitle>
+            <DialogDescription>
+              {value?.mode === 'create'
+                ? 'Enter a name for the new folder.'
+                : 'Enter a new name for the folder.'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-3">
+            <input
+              type="text"
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              placeholder="Folder name"
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+              autoFocus
+            />
+          </div>
+          <DialogFooter>
+            <button
+              type="button"
+              onClick={() => setValue(null)}
+              className="inline-flex h-8 items-center justify-center rounded-md border border-border px-3 typography-ui-label text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={!inputValue.trim()}
+              className="inline-flex h-8 items-center justify-center rounded-md bg-primary px-3 typography-ui-label text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:opacity-50 disabled:pointer-events-none"
+            >
+              {value?.mode === 'create' ? 'Create' : 'Rename'}
+            </button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export type DeleteSessionConfirmState = {
   session: Session;
   descendantCount: number;

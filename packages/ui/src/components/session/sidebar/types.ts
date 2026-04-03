@@ -34,3 +34,29 @@ export type GroupSearchData = {
   groupMatches: boolean;
   hasMatch: boolean;
 };
+
+/**
+ * Session may have parent ID stored under different field names across API versions.
+ * This type union allows type-safe access to all known variants.
+ */
+type SessionWithParentId = Session & {
+  parentID?: string | null;
+  parentId?: string | null;
+  parent_session_id?: string | null;
+};
+
+/**
+ * Returns the parent session ID from a session, checking all known field names.
+ * Returns undefined if no parent ID is found.
+ */
+export function getSessionParentId(session: Session): string | null | undefined {
+  const s = session as SessionWithParentId;
+  return s.parentID ?? s.parentId ?? s.parent_session_id;
+}
+
+/**
+ * Returns true if the session is a subtask (has a parent session).
+ */
+export function isSubtaskSession(session: Session): boolean {
+  return Boolean(getSessionParentId(session));
+}

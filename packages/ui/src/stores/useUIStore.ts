@@ -506,6 +506,8 @@ interface UIStore {
   autoDeleteAfterDays: number;
   sessionRetentionAction: SessionRetentionAction;
   autoDeleteLastRunAt: number | null;
+  recentSessionHours: number;
+  sortProjectsByActivity: boolean;
   messageLimit: number;
   fontSize: number;
   terminalFontSize: number;
@@ -621,6 +623,8 @@ interface UIStore {
   setAutoDeleteAfterDays: (days: number) => void;
   setSessionRetentionAction: (value: SessionRetentionAction) => void;
   setAutoDeleteLastRunAt: (timestamp: number | null) => void;
+  setRecentSessionHours: (hours: number) => void;
+  setSortProjectsByActivity: (value: boolean) => void;
   setMessageLimit: (value: number) => void;
   setFontSize: (size: number) => void;
   setTerminalFontSize: (size: number) => void;
@@ -735,6 +739,8 @@ export const useUIStore = create<UIStore>()(
         autoDeleteAfterDays: 30,
         sessionRetentionAction: 'archive',
         autoDeleteLastRunAt: null,
+        recentSessionHours: 48,
+        sortProjectsByActivity: true,
         messageLimit: 200,
         fontSize: 100,
         terminalFontSize: 13,
@@ -1325,6 +1331,15 @@ export const useUIStore = create<UIStore>()(
           set({ autoDeleteLastRunAt: timestamp });
         },
 
+        setRecentSessionHours: (hours: number) => {
+          const clampedHours = Math.max(1, Math.min(720, hours));
+          set({ recentSessionHours: clampedHours });
+        },
+
+        setSortProjectsByActivity: (value: boolean) => {
+          set({ sortProjectsByActivity: value });
+        },
+
         setMessageLimit: (value) => {
           const clamped = Math.max(10, Math.min(500, Math.round(value)));
           set({ messageLimit: clamped });
@@ -1845,6 +1860,8 @@ export const useUIStore = create<UIStore>()(
           autoDeleteAfterDays: state.autoDeleteAfterDays,
           sessionRetentionAction: state.sessionRetentionAction,
           autoDeleteLastRunAt: state.autoDeleteLastRunAt,
+          recentSessionHours: state.recentSessionHours,
+          sortProjectsByActivity: state.sortProjectsByActivity,
           messageLimit: state.messageLimit,
           fontSize: state.fontSize,
           terminalFontSize: state.terminalFontSize,

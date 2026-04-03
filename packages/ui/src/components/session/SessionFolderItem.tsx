@@ -148,7 +148,7 @@ const SessionFolderItemBase = <TSessionNode,>({
       <div
         ref={droppableRef}
         className={cn(
-          'group/folder relative flex items-center justify-between gap-1.5 py-1 min-w-0 rounded-md',
+          'group/folder relative flex items-center justify-between gap-1 py-0.5 min-w-0 rounded-md',
           'cursor-pointer',
           isDropTarget && 'bg-primary/10 ring-1 ring-inset ring-primary/30',
         )}
@@ -173,7 +173,7 @@ const SessionFolderItemBase = <TSessionNode,>({
             ? (mobileVariant ? 'pr-7' : 'group-hover/folder:pr-7 group-focus-within/folder:pr-7')
             : '',
         )}>
-          <FolderIcon className={cn('h-3.5 w-3.5 flex-shrink-0', isDropTarget ? 'text-primary' : 'text-muted-foreground')} />
+          <FolderIcon className={cn('h-3 w-3 flex-shrink-0', isDropTarget ? 'text-primary' : 'text-muted-foreground')} />
 
           {renaming ? (
             <form
@@ -231,16 +231,16 @@ const SessionFolderItemBase = <TSessionNode,>({
             </form>
           ) : (
             <div className="min-w-0 flex items-center gap-1.5 flex-1">
-              <span className={cn('typography-ui-label font-semibold truncate', isDropTarget ? 'text-primary' : 'text-muted-foreground')}>
+              <span className={cn('text-[12px] font-medium truncate', isDropTarget ? 'text-primary' : 'text-muted-foreground')}>
                 {folder.name}
               </span>
-              <span className="typography-micro text-muted-foreground/70 flex-shrink-0">
+              <span className="text-[11px] text-muted-foreground/70 flex-shrink-0">
                 • {sessions.length}
               </span>
               {isCollapsed ? (
-                <RiArrowRightSLine className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
+                <RiArrowRightSLine className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
               ) : (
-                <RiArrowDownSLine className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
+                <RiArrowDownSLine className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
               )}
             </div>
           )}
