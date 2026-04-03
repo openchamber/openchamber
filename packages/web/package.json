@@ -1,5 +1,5 @@
 {
-  "name": "@nguyentamdat/openchamber",
+  "name": "@openchamber/web",
   "version": "1.9.3",
   "private": false,
   "type": "module",
