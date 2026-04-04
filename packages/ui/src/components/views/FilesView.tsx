@@ -94,6 +94,12 @@ type SelectedLineRange = {
   end: number;
 };
 
+type FileStatSnapshot = {
+  path: string;
+  size: number;
+  mtimeMs?: number;
+};
+
 const getParentDirectoryPath = (path: string): string => {
   const normalized = normalizePath(path);
   if (!normalized) return '';
@@ -567,6 +573,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const [draftContent, setDraftContent] = React.useState('');
   const [isSaving, setIsSaving] = React.useState(false);
   const autoSaveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastLoadedFileStatRef = React.useRef<FileStatSnapshot | null>(null);
   const [autoSaveStatus, setAutoSaveStatus] = React.useState<'idle' | 'saved'>('idle');
 
   const [confirmDiscardOpen, setConfirmDiscardOpen] = React.useState(false);
@@ -1130,6 +1137,19 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     return response.text();
   }, [files]);
 
+  const readFileStat = React.useCallback(async (path: string): Promise<FileStatSnapshot | null> => {
+    if (files.statFile) {
+      const result = await files.statFile(path);
+      return {
+        path: result.path,
+        size: result.size,
+        mtimeMs: result.mtimeMs,
+      };
+    }
+
+    return null;
+  }, [files]);
+
   const displayedContent = React.useMemo(() => {
     return fileContent.length > MAX_VIEW_CHARS
       ? `${fileContent.slice(0, MAX_VIEW_CHARS)}\n\n… truncated …`
@@ -1157,6 +1177,14 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           return;
         }
         setFileContent(draftContent);
+        void readFileStat(selectedFile.path)
+          .then((stat) => {
+            if (!stat) {
+              return;
+            }
+            lastLoadedFileStatRef.current = stat;
+          })
+          .catch(() => {});
       })
       .catch((error) => {
         toast.error(error instanceof Error ? error.message : 'Save failed');
@@ -1164,7 +1192,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       .finally(() => {
         setIsSaving(false);
       });
-  }, [draftContent, files, isDirty, selectedFile]);
+  }, [draftContent, files, isDirty, readFileStat, selectedFile]);
 
   React.useEffect(() => {
     if (!isDirty) {
@@ -1288,6 +1316,14 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           ? `${content.slice(0, MAX_VIEW_CHARS)}\n\n… truncated …`
           : content);
         setLoadedFilePath(node.path);
+        void readFileStat(node.path)
+          .then((stat) => {
+            if (!stat) {
+              return;
+            }
+            lastLoadedFileStatRef.current = stat;
+          })
+          .catch(() => {});
       })
       .catch((error) => {
         if (isDirectoryReadError(error)) {
@@ -1321,11 +1357,12 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
         setFileContent('');
         setDraftContent('');
         setFileError(error instanceof Error ? error.message : 'Failed to read file');
+        lastLoadedFileStatRef.current = null;
       })
       .finally(() => {
         setFileLoading(false);
       });
-  }, [expandPaths, isMobile, loadDirectory, readFile, root, runtime.isDesktop, searchQuery, setSelectedPath]);
+  }, [expandPaths, isMobile, loadDirectory, readFile, readFileStat, root, runtime.isDesktop, searchQuery, setSelectedPath]);
 
   const ensurePathVisible = React.useCallback(async (targetPath: string, includeTarget: boolean) => {
     if (!root) {
@@ -1399,6 +1436,55 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     // Selection changes are guarded; this effect is also what restores persisted tabs on mount.
     void loadSelectedFile(selectedFile);
   }, [loadSelectedFile, loadedFilePath, selectedFile]);
+
+  React.useEffect(() => {
+    if (!selectedFile?.path || loadedFilePath !== selectedFile.path) {
+      return;
+    }
+
+    let cancelled = false;
+    const interval = window.setInterval(() => {
+      if (document.hidden) {
+        return;
+      }
+
+      void readFileStat(selectedFile.path)
+        .then((latestStat) => {
+          if (cancelled || !latestStat) {
+            return;
+          }
+
+          const previousStat = lastLoadedFileStatRef.current;
+          if (!previousStat || previousStat.path !== selectedFile.path) {
+            lastLoadedFileStatRef.current = latestStat;
+            return;
+          }
+
+          const changedByMtime = typeof previousStat.mtimeMs === 'number'
+            && typeof latestStat.mtimeMs === 'number'
+            && previousStat.mtimeMs !== latestStat.mtimeMs;
+          const changedBySize = previousStat.size !== latestStat.size;
+
+          if (!changedByMtime && !changedBySize) {
+            return;
+          }
+
+          if (isDirty) {
+            return;
+          }
+
+          lastLoadedFileStatRef.current = latestStat;
+          setLoadedFilePath(null);
+          void loadSelectedFile(selectedFile);
+        })
+        .catch(() => {});
+    }, 2000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [isDirty, loadSelectedFile, loadedFilePath, readFileStat, selectedFile]);
 
   const discardAndContinue = React.useCallback(() => {
     const nextFile = pendingSelectFileRef.current;

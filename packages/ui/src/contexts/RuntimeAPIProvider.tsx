@@ -11,28 +11,62 @@ import {
 
 /** Wrap a FilesAPI with an in-memory LRU content cache. */
 function withContentCache(files: FilesAPI): FilesAPI {
-  const cache = new Map<string, { content: string; path: string }>();
+  const cache = new Map<string, { content: string; path: string; size?: number; mtimeMs?: number }>();
+
+  const syncCacheEntry = (
+    path: string,
+    result: { content: string; path: string },
+    stat?: { isFile: boolean; size: number; mtimeMs?: number } | null,
+  ): { content: string; path: string } => {
+    const bytes = approxStringBytes(result.content);
+    cache.set(path, {
+      ...result,
+      size: stat?.isFile ? stat.size : undefined,
+      mtimeMs: stat?.isFile ? stat.mtimeMs : undefined,
+    });
+    setContentBytes(path, bytes);
+
+    const keep = new Set<string>();
+    evictContentLru(keep, (evictPath) => {
+      cache.delete(evictPath);
+    });
+
+    return result;
+  };
+
+  const readFreshFile = async (path: string): Promise<{ content: string; path: string }> => {
+    const [result, stat] = await Promise.all([
+      files.readFile!(path),
+      files.statFile?.(path).catch(() => null),
+    ]);
+
+    return syncCacheEntry(path, result, stat);
+  };
 
   const cachedReadFile: FilesAPI['readFile'] = files.readFile
     ? async (path: string) => {
         const hit = cache.get(path);
         if (hit) {
+          if (files.statFile) {
+            const stat = await files.statFile(path).catch(() => null);
+            const statMatches = Boolean(
+              stat?.isFile &&
+              stat.size === hit.size &&
+              stat.mtimeMs === hit.mtimeMs,
+            );
+
+            if (!statMatches) {
+              cache.delete(path);
+              removeContentBytes(path);
+              return readFreshFile(path);
+            }
+          }
+
           touchContentLru(path);
-          return hit;
+          return { content: hit.content, path: hit.path };
         }
 
-        const result = await files.readFile!(path);
-        const bytes = approxStringBytes(result.content);
-        cache.set(path, result);
-        setContentBytes(path, bytes);
-
-        // Evict if over limits
-        const keep = new Set<string>();
-        evictContentLru(keep, (evictPath) => {
-          cache.delete(evictPath);
-        });
-
-        return result;
+        return readFreshFile(path);
       }
     : undefined;
 
