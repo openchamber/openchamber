@@ -19,6 +19,20 @@ const OPENCHAMBER_DATA_DIR = process.env.OPENCHAMBER_DATA_DIR
 
 const PASSKEY_STORE_FILE = path.join(OPENCHAMBER_DATA_DIR, 'ui-passkeys.json');
 
+const createUserId = () => crypto.randomBytes(32).toString('base64url');
+
+const decodeUserId = (value) => {
+  if (typeof value !== 'string' || !value) {
+    return null;
+  }
+
+  try {
+    return Uint8Array.from(Buffer.from(value, 'base64url'));
+  } catch {
+    return null;
+  }
+};
+
 const normalizeLabel = (value, fallback) => {
   if (typeof value !== 'string') {
     return fallback;
@@ -119,7 +133,7 @@ export const createUiPasskeys = ({
 
   const createEmptyStore = () => ({
     version: DEFAULT_STORE_VERSION,
-    userID: crypto.randomBytes(32).toString('base64url'),
+    userID: createUserId(),
     passwordBinding,
     passkeys: [],
   });
@@ -133,7 +147,7 @@ export const createUiPasskeys = ({
         const parsed = JSON.parse(raw);
         store = {
           version: DEFAULT_STORE_VERSION,
-          userID: typeof parsed?.userID === 'string' && parsed.userID ? parsed.userID : store.userID,
+          userID: decodeUserId(parsed?.userID) ? parsed.userID : store.userID,
           passwordBinding: typeof parsed?.passwordBinding === 'string' ? parsed.passwordBinding : '',
           passkeys: Array.isArray(parsed?.passkeys) ? parsed.passkeys.map(parseStoredPasskey).filter(Boolean) : [],
         };
@@ -151,12 +165,12 @@ export const createUiPasskeys = ({
     }
 
     if (store.passwordBinding !== passwordBinding) {
-      store = {
-        version: DEFAULT_STORE_VERSION,
-        userID: store.userID || crypto.randomBytes(32).toString('base64url'),
-        passwordBinding,
-        passkeys: [],
-      };
+        store = {
+          version: DEFAULT_STORE_VERSION,
+          userID: store.userID || createUserId(),
+          passwordBinding,
+          passkeys: [],
+        };
       persistStore(store);
       return store;
     }
@@ -235,10 +249,17 @@ export const createUiPasskeys = ({
     }
 
     const store = loadStore();
+    const userID = decodeUserId(store.userID);
+    if (!userID) {
+      const error = new Error('Passkey storage is invalid. Please try again.');
+      error.statusCode = 500;
+      throw error;
+    }
+
     const options = await generateRegistrationOptions({
       rpName,
       rpID,
-      userID: store.userID,
+      userID,
       userName: 'openchamber-ui',
       userDisplayName: 'OpenChamber UI',
       attestationType: 'none',
