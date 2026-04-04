@@ -507,14 +507,14 @@ const searchPathFor = (...args) => openCodeEnvRuntime.searchPathFor(...args);
 const resolveGitBinaryForSpawn = (...args) => openCodeEnvRuntime.resolveGitBinaryForSpawn(...args);
 const resolveWslExecutablePath = (...args) => openCodeEnvRuntime.resolveWslExecutablePath(...args);
 const buildWslExecArgs = (...args) => openCodeEnvRuntime.buildWslExecArgs(...args);
-const opencodeShimInterpreter = (...args) => openCodeEnvRuntime.opencodeShimInterpreter(...args);
+const resolveManagedOpenCodeLaunchSpec = (...args) => openCodeEnvRuntime.resolveManagedOpenCodeLaunchSpec(...args);
 const clearResolvedOpenCodeBinary = (...args) => openCodeEnvRuntime.clearResolvedOpenCodeBinary(...args);
 const openCodeResolutionRuntime = createOpenCodeResolutionRuntime({
   path,
   resolveOpencodeCliPath,
   applyOpencodeBinaryFromSettings,
   ensureOpencodeCliEnv,
-  opencodeShimInterpreter,
+  resolveManagedOpenCodeLaunchSpec,
   getResolvedState: () => ({
     resolvedOpencodeBinary,
     resolvedOpencodeBinarySource,
@@ -726,7 +726,7 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
   ensureLocalOpenCodeServerPassword,
   buildWslExecArgs,
   resolveWslExecutablePath,
-  opencodeShimInterpreter,
+  resolveManagedOpenCodeLaunchSpec,
   setOpenCodePort,
   setDetectedOpenCodeApiPrefix,
   setupProxy: (...args) => setupProxy(...args),
@@ -748,6 +748,7 @@ const bootstrapOpenCodeAtStartup = async (...args) => {
   });
 };
 const killProcessOnPort = (...args) => openCodeLifecycleRuntime.killProcessOnPort(...args);
+const waitForPortRelease = (...args) => openCodeLifecycleRuntime.waitForPortRelease(...args);
 
 const fetchAgentsSnapshot = (...args) => serverUtilsRuntime.fetchAgentsSnapshot(...args);
 const fetchProvidersSnapshot = (...args) => serverUtilsRuntime.fetchProvidersSnapshot(...args);
@@ -777,6 +778,7 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
     openCodeProcess = value;
   },
   killProcessOnPort,
+  waitForPortRelease,
   getServer: () => server,
   getUiAuthController: () => uiAuthController,
   setUiAuthController: (value) => {
@@ -844,26 +846,33 @@ async function main(options = {}) {
     runtimeName: process.env.OPENCHAMBER_RUNTIME || 'web',
     serverStartedAt,
     gracefulShutdown,
-    getHealthSnapshot: () => ({
-      openCodePort,
-      openCodeRunning: Boolean(openCodePort && isOpenCodeReady && !isRestartingOpenCode),
-      openCodeSecureConnection: isOpenCodeConnectionSecure(),
-      openCodeAuthSource: openCodeAuthSource || null,
-      openCodeApiPrefix: '',
-      openCodeApiPrefixDetected: true,
-      isOpenCodeReady,
-      lastOpenCodeError,
-      opencodeBinaryResolved: resolvedOpencodeBinary || null,
-      opencodeBinarySource: resolvedOpencodeBinarySource || null,
-      opencodeShimInterpreter: resolvedOpencodeBinary ? opencodeShimInterpreter(resolvedOpencodeBinary) : null,
-      opencodeViaWsl: useWslForOpencode,
-      opencodeWslBinary: resolvedWslBinary || null,
-      opencodeWslPath: resolvedWslOpencodePath || null,
-      opencodeWslDistro: resolvedWslDistro || null,
-      nodeBinaryResolved: resolvedNodeBinary || null,
-      bunBinaryResolved: resolvedBunBinary || null,
-      planModeExperimentalEnabled: PLAN_MODE_EXPERIMENT_ENABLED,
-    }),
+    getHealthSnapshot: () => {
+      const launchSpec = resolvedOpencodeBinary && !useWslForOpencode
+        ? resolveManagedOpenCodeLaunchSpec(resolvedOpencodeBinary)
+        : null;
+      return {
+        openCodePort,
+        openCodeRunning: Boolean(openCodePort && isOpenCodeReady && !isRestartingOpenCode),
+        openCodeSecureConnection: isOpenCodeConnectionSecure(),
+        openCodeAuthSource: openCodeAuthSource || null,
+        openCodeApiPrefix: '',
+        openCodeApiPrefixDetected: true,
+        isOpenCodeReady,
+        lastOpenCodeError,
+        opencodeBinaryResolved: resolvedOpencodeBinary || null,
+        opencodeBinarySource: resolvedOpencodeBinarySource || null,
+        opencodeLaunchBinary: launchSpec?.binary || null,
+        opencodeLaunchArgs: launchSpec?.args || [],
+        opencodeLaunchWrapperType: launchSpec?.wrapperType || null,
+        opencodeViaWsl: useWslForOpencode,
+        opencodeWslBinary: resolvedWslBinary || null,
+        opencodeWslPath: resolvedWslOpencodePath || null,
+        opencodeWslDistro: resolvedWslDistro || null,
+        nodeBinaryResolved: resolvedNodeBinary || null,
+        bunBinaryResolved: resolvedBunBinary || null,
+        planModeExperimentalEnabled: PLAN_MODE_EXPERIMENT_ENABLED,
+      };
+    },
     uiPassword,
     tunnelAuthController,
     readSettingsFromDiskMigrated,

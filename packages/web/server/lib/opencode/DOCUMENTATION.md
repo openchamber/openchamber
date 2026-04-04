@@ -112,6 +112,7 @@ This module provides OpenCode server integration utilities for the web server ru
   - `refreshOpenCodeAfterConfigChange(reason, options?)`
   - `bootstrapOpenCodeAtStartup()`
   - `startHealthMonitoring(healthCheckIntervalMs)`
+  - `waitForPortRelease(port, timeoutMs, hostname?)`
   - `killProcessOnPort(port)`
 
 ## Public exports (env-runtime.js)
@@ -122,10 +123,10 @@ This module provides OpenCode server integration utilities for the web server ru
   - `ensureOpencodeCliEnv()`
   - `applyOpencodeBinaryFromSettings()`
   - `resolveOpencodeCliPath()`
+  - `resolveManagedOpenCodeLaunchSpec(opencodePath)`: resolves the effective managed OpenCode launch target, unwrapping Windows package-manager shims to a direct native binary or explicit runtime+script when possible.
   - `resolveGitBinaryForSpawn()`
   - `resolveWslExecutablePath()`
   - `buildWslExecArgs(execArgs, distroOverride?)`
-  - `opencodeShimInterpreter(opencodePath)`
   - `isExecutable(filePath)`
   - `searchPathFor(binaryName)`
   - `clearResolvedOpenCodeBinary()`
@@ -288,7 +289,7 @@ This module provides OpenCode server integration utilities for the web server ru
 ## Public exports (opencode-resolution-runtime.js)
 - `createOpenCodeResolutionRuntime(dependencies)`: creates runtime for OpenCode binary/source snapshot resolution.
 - Returned API:
-  - `getOpenCodeResolutionSnapshot(settings)`
+  - `getOpenCodeResolutionSnapshot(settings)`: returns configured/resolved OpenCode binary details plus effective managed-launch fields (`launchBinary`, `launchArgs`, `launchWrapperType`) when applicable.
 
 ## Public exports (tunnel-wiring-runtime.js)
 - `createTunnelWiringRuntime(dependencies)`: creates runtime for tunnel service construction and tunnel route registration.
