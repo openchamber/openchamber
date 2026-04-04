@@ -3,6 +3,7 @@ import { SignJWT, jwtVerify } from 'jose';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { createUiPasskeys } from './ui-passkeys.js';
 
 const SESSION_COOKIE_NAME = 'oc_ui_session';
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
@@ -232,7 +233,11 @@ const parseCookies = (cookieHeader) => {
       return acc;
     }
     const value = rest.join('=').trim();
-    acc[key] = decodeURIComponent(value || '');
+    try {
+      acc[key] = decodeURIComponent(value || '');
+    } catch {
+      acc[key] = value || '';
+    }
     return acc;
   }, {});
 };
@@ -309,6 +314,7 @@ export const createUiAuth = ({
   password,
   cookieName = SESSION_COOKIE_NAME,
   sessionTtlMs = SESSION_TTL_MS,
+  readSettingsFromDiskMigrated,
 } = {}) => {
   const normalizedPassword = normalizePassword(password);
 
@@ -344,6 +350,21 @@ export const createUiAuth = ({
       handleSessionCreate: (_req, res) => {
         res.status(400).json({ error: 'UI password not configured' });
       },
+      handlePasskeyStatus: (_req, res) => {
+        res.json({ enabled: false, hasPasskeys: false, passkeyCount: 0, rpID: null });
+      },
+      handlePasskeyRegistrationOptions: (_req, res) => {
+        res.status(400).json({ error: 'UI password not configured' });
+      },
+      handlePasskeyRegistrationVerify: (_req, res) => {
+        res.status(400).json({ error: 'UI password not configured' });
+      },
+      handlePasskeyAuthenticationOptions: (_req, res) => {
+        res.status(400).json({ error: 'UI password not configured' });
+      },
+      handlePasskeyAuthenticationVerify: (_req, res) => {
+        res.status(400).json({ error: 'UI password not configured' });
+      },
       ensureSessionToken,
       dispose: () => {
 
@@ -354,6 +375,7 @@ export const createUiAuth = ({
   const salt = crypto.randomBytes(16);
   const expectedHash = crypto.scryptSync(normalizedPassword, salt, 64);
   const JWT_SECRET = getOrCreateJwtSecret();
+  const passwordBinding = crypto.createHmac('sha256', JWT_SECRET).update(normalizedPassword).digest('hex');
 
   const getTokenFromRequest = (req) => {
     const cookies = parseCookies(req.headers.cookie);
@@ -424,6 +446,11 @@ export const createUiAuth = ({
     return token;
   };
 
+  const passkeyController = createUiPasskeys({
+    passwordBinding,
+    readSettingsFromDiskMigrated,
+  });
+
   startRateLimitCleanup();
 
   const respondUnauthorized = (req, res) => {
@@ -488,12 +515,64 @@ export const createUiAuth = ({
     res.json({ authenticated: true });
   };
 
+  const respondPasskeyError = (res, error) => {
+    const statusCode = typeof error?.statusCode === 'number' ? error.statusCode : 400;
+    res.status(statusCode).json({ error: error?.message || 'Passkey request failed' });
+  };
+
+  const handlePasskeyStatus = (req, res) => {
+    try {
+      res.json(passkeyController.getStatus(req));
+    } catch (error) {
+      respondPasskeyError(res, error);
+    }
+  };
+
+  const handlePasskeyRegistrationOptions = async (req, res) => {
+    try {
+      const label = typeof req.body?.label === 'string' ? req.body.label : '';
+      const options = await passkeyController.beginRegistration(req, { label });
+      res.json(options);
+    } catch (error) {
+      respondPasskeyError(res, error);
+    }
+  };
+
+  const handlePasskeyRegistrationVerify = async (req, res) => {
+    try {
+      const result = await passkeyController.finishRegistration(req.body);
+      res.json(result);
+    } catch (error) {
+      respondPasskeyError(res, error);
+    }
+  };
+
+  const handlePasskeyAuthenticationOptions = async (req, res) => {
+    try {
+      const options = await passkeyController.beginAuthentication(req);
+      res.json(options);
+    } catch (error) {
+      respondPasskeyError(res, error);
+    }
+  };
+
+  const handlePasskeyAuthenticationVerify = async (req, res) => {
+    try {
+      await passkeyController.finishAuthentication(req.body);
+      await issueSession(req, res);
+      res.json({ authenticated: true });
+    } catch (error) {
+      respondPasskeyError(res, error);
+    }
+  };
+
   const dispose = () => {
     loginRateLimiter.clear();
     if (rateLimitCleanupTimer) {
       clearInterval(rateLimitCleanupTimer);
       rateLimitCleanupTimer = null;
     }
+    passkeyController.dispose();
   };
 
   return {
@@ -501,6 +580,11 @@ export const createUiAuth = ({
     requireAuth,
     handleSessionStatus,
     handleSessionCreate,
+    handlePasskeyStatus,
+    handlePasskeyRegistrationOptions,
+    handlePasskeyRegistrationVerify,
+    handlePasskeyAuthenticationOptions,
+    handlePasskeyAuthenticationVerify,
     ensureSessionToken: async (req, _res) => {
       const token = getTokenFromRequest(req);
       return (await isSessionValid(token)) ? token : null;
