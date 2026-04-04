@@ -428,6 +428,12 @@ export const registerFsRoutes = (app, dependencies) => {
       };
       const mimeType = mimeMap[ext] || 'application/octet-stream';
 
+      const download = req.query.download === 'true';
+      if (download) {
+        const fileName = path.basename(canonicalPath);
+        res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+      }
+
       const content = await fsPromises.readFile(canonicalPath);
       res.setHeader('Cache-Control', 'no-store');
       return res.type(mimeType).send(content);
