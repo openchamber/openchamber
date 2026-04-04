@@ -119,6 +119,48 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
     }
   });
 
+  app.get('/api/passkeys', async (req, res, next) => {
+    const requestScope = tunnelAuthController.classifyRequestScope(req);
+    if (requestScope === 'tunnel' || requestScope === 'unknown-public') {
+      return res.status(403).json({ error: 'Passkey management is disabled for tunnel scope', tunnelLocked: true });
+    }
+    try {
+      await uiAuthController.requireAuth(req, res, async () => {
+        await uiAuthController.handlePasskeyList(req, res);
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.delete('/api/passkeys/:id', async (req, res, next) => {
+    const requestScope = tunnelAuthController.classifyRequestScope(req);
+    if (requestScope === 'tunnel' || requestScope === 'unknown-public') {
+      return res.status(403).json({ error: 'Passkey management is disabled for tunnel scope', tunnelLocked: true });
+    }
+    try {
+      await uiAuthController.requireAuth(req, res, async () => {
+        await uiAuthController.handlePasskeyRevoke(req, res);
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post('/api/auth/reset', async (req, res, next) => {
+    const requestScope = tunnelAuthController.classifyRequestScope(req);
+    if (requestScope === 'tunnel' || requestScope === 'unknown-public') {
+      return res.status(403).json({ error: 'Global sign-out is disabled for tunnel scope', tunnelLocked: true });
+    }
+    try {
+      await uiAuthController.requireAuth(req, res, async () => {
+        await uiAuthController.handleResetAuth(req, res);
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.get('/connect', async (req, res) => {
     try {
       const token = typeof req.query?.t === 'string' ? req.query.t : '';

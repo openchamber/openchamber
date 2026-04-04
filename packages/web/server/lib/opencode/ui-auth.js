@@ -7,6 +7,7 @@ import { createUiPasskeys } from './ui-passkeys.js';
 
 const SESSION_COOKIE_NAME = 'oc_ui_session';
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+const TRUSTED_DEVICE_SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 const RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000;
 const RATE_LIMIT_MAX_ATTEMPTS = Number(process.env.OPENCHAMBER_RATE_LIMIT_MAX_ATTEMPTS) || 10;
@@ -279,6 +280,8 @@ const normalizePassword = (candidate) => {
   return candidate.normalize().trim();
 };
 
+const isTrustedDeviceRequest = (value) => value === true;
+
 const OPENCHAMBER_DATA_DIR = process.env.OPENCHAMBER_DATA_DIR
   ? path.resolve(process.env.OPENCHAMBER_DATA_DIR)
   : path.join(os.homedir(), '.config', 'openchamber');
@@ -310,6 +313,18 @@ function getOrCreateJwtSecret() {
   return new TextEncoder().encode(secret);
 }
 
+function persistJwtSecret(secret) {
+  if (process.env.OPENCODE_JWT_SECRET) {
+    const error = new Error('Global sign-out is unavailable while OPENCODE_JWT_SECRET is set');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  fs.mkdirSync(OPENCHAMBER_DATA_DIR, { recursive: true });
+  fs.writeFileSync(JWT_SECRET_FILE, secret, { mode: 0o600 });
+  return new TextEncoder().encode(secret);
+}
+
 export const createUiAuth = ({
   password,
   cookieName = SESSION_COOKIE_NAME,
@@ -319,9 +334,9 @@ export const createUiAuth = ({
   const normalizedPassword = normalizePassword(password);
 
   if (!normalizedPassword) {
-    const setSessionCookie = (req, res, token) => {
+    const setSessionCookie = (req, res, token, ttlMs = sessionTtlMs) => {
       const secure = isSecureRequest(req);
-      const maxAgeSeconds = Math.floor(sessionTtlMs / 1000);
+      const maxAgeSeconds = Math.floor(ttlMs / 1000);
       const header = buildCookie({
         name: cookieName,
         value: encodeURIComponent(token),
@@ -337,7 +352,7 @@ export const createUiAuth = ({
         return cookies[cookieName];
       }
       const token = crypto.randomBytes(32).toString('base64url');
-      setSessionCookie(req, res, token);
+      setSessionCookie(req, res, token, sessionTtlMs);
       return token;
     };
 
@@ -365,6 +380,15 @@ export const createUiAuth = ({
       handlePasskeyAuthenticationVerify: (_req, res) => {
         res.status(400).json({ error: 'UI password not configured' });
       },
+      handlePasskeyList: (_req, res) => {
+        res.json({ passkeys: [] });
+      },
+      handlePasskeyRevoke: (_req, res) => {
+        res.status(400).json({ error: 'UI password not configured' });
+      },
+      handleResetAuth: (_req, res) => {
+        res.status(400).json({ error: 'UI password not configured' });
+      },
       ensureSessionToken,
       dispose: () => {
 
@@ -374,8 +398,28 @@ export const createUiAuth = ({
 
   const salt = crypto.randomBytes(16);
   const expectedHash = crypto.scryptSync(normalizedPassword, salt, 64);
-  const JWT_SECRET = getOrCreateJwtSecret();
-  const passwordBinding = crypto.createHmac('sha256', JWT_SECRET).update(normalizedPassword).digest('hex');
+  let jwtSecret = getOrCreateJwtSecret();
+  let passwordBinding = crypto.createHmac('sha256', jwtSecret).update(normalizedPassword).digest('hex');
+  const resolveSessionTtlMs = (trustDevice) => (trustDevice ? TRUSTED_DEVICE_SESSION_TTL_MS : sessionTtlMs);
+  let passkeyController = createUiPasskeys({
+    passwordBinding,
+    readSettingsFromDiskMigrated,
+  });
+
+  const rebuildPasskeyController = () => {
+    passkeyController.dispose();
+    passwordBinding = crypto.createHmac('sha256', jwtSecret).update(normalizedPassword).digest('hex');
+    passkeyController = createUiPasskeys({
+      passwordBinding,
+      readSettingsFromDiskMigrated,
+    });
+  };
+
+  const rotateJwtSecret = () => {
+    const nextSecret = crypto.randomBytes(32).toString('hex');
+    jwtSecret = persistJwtSecret(nextSecret);
+    rebuildPasskeyController();
+  };
 
   const getTokenFromRequest = (req) => {
     const cookies = parseCookies(req.headers.cookie);
@@ -385,9 +429,9 @@ export const createUiAuth = ({
     return null;
   };
 
-  const setSessionCookie = (req, res, token) => {
+  const setSessionCookie = (req, res, token, ttlMs) => {
     const secure = isSecureRequest(req);
-    const maxAgeSeconds = Math.floor(sessionTtlMs / 1000);
+    const maxAgeSeconds = Math.floor(ttlMs / 1000);
     const header = buildCookie({
       name: cookieName,
       value: encodeURIComponent(token),
@@ -429,27 +473,23 @@ export const createUiAuth = ({
       return false;
     }
     try {
-      await jwtVerify(token, JWT_SECRET);
+      await jwtVerify(token, jwtSecret);
       return true;
     } catch {
       return false;
     }
   };
 
-  const issueSession = async (req, res) => {
+  const issueSession = async (req, res, { trustDevice = false } = {}) => {
+    const ttlMs = resolveSessionTtlMs(trustDevice);
     const token = await new SignJWT({ type: 'ui-session' })
       .setProtectedHeader({ alg: 'HS256' })
       .setIssuedAt()
-      .setExpirationTime(sessionTtlMs / 1000 + 's')
-      .sign(JWT_SECRET);
-    setSessionCookie(req, res, token);
+      .setExpirationTime(ttlMs / 1000 + 's')
+      .sign(jwtSecret);
+    setSessionCookie(req, res, token, ttlMs);
     return token;
   };
-
-  const passkeyController = createUiPasskeys({
-    passwordBinding,
-    readSettingsFromDiskMigrated,
-  });
 
   startRateLimitCleanup();
 
@@ -511,7 +551,9 @@ export const createUiAuth = ({
 
     await clearRateLimit(req);
 
-    await issueSession(req, res);
+    await issueSession(req, res, {
+      trustDevice: isTrustedDeviceRequest(req.body?.trustDevice),
+    });
     res.json({ authenticated: true });
   };
 
@@ -559,8 +601,42 @@ export const createUiAuth = ({
   const handlePasskeyAuthenticationVerify = async (req, res) => {
     try {
       await passkeyController.finishAuthentication(req.body);
-      await issueSession(req, res);
+      await issueSession(req, res, {
+        trustDevice: isTrustedDeviceRequest(req.body?.trustDevice),
+      });
       res.json({ authenticated: true });
+    } catch (error) {
+      respondPasskeyError(res, error);
+    }
+  };
+
+  const handlePasskeyList = (req, res) => {
+    try {
+      res.json({ passkeys: passkeyController.listPasskeys(req) });
+    } catch (error) {
+      respondPasskeyError(res, error);
+    }
+  };
+
+  const handlePasskeyRevoke = (req, res) => {
+    try {
+      const result = passkeyController.revokePasskey(req, req.params?.id);
+      res.json(result);
+    } catch (error) {
+      respondPasskeyError(res, error);
+    }
+  };
+
+  const handleResetAuth = (req, res) => {
+    try {
+      const passkeyResult = passkeyController.clearAllPasskeys();
+      rotateJwtSecret();
+      clearSessionCookie(req, res);
+      res.json({
+        cleared: true,
+        clearedPasskeys: passkeyResult.clearedCount,
+        signedOutEverywhere: true,
+      });
     } catch (error) {
       respondPasskeyError(res, error);
     }
@@ -585,6 +661,9 @@ export const createUiAuth = ({
     handlePasskeyRegistrationVerify,
     handlePasskeyAuthenticationOptions,
     handlePasskeyAuthenticationVerify,
+    handlePasskeyList,
+    handlePasskeyRevoke,
+    handleResetAuth,
     ensureSessionToken: async (req, _res) => {
       const token = getTokenFromRequest(req);
       return (await isSessionValid(token)) ? token : null;

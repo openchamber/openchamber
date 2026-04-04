@@ -83,8 +83,8 @@ const getCurrentRpId = (req) => {
   const forwardedHost = typeof req.headers['x-forwarded-host'] === 'string'
     ? req.headers['x-forwarded-host'].split(',')[0].trim()
     : '';
-  const hostname = normalizeHost(typeof req.hostname === 'string' ? req.hostname : '');
-  return hostname || normalizeHost(forwardedHost || req.headers.host || '');
+  const host = forwardedHost || (typeof req.headers.host === 'string' ? req.headers.host.trim() : '');
+  return normalizeHost(host || req.hostname || '');
 };
 
 const parseStoredPasskey = (record) => {
@@ -230,6 +230,76 @@ export const createUiPasskeys = ({
     };
   };
 
+  const listPasskeys = (req) => {
+    assertEnabled();
+
+    const store = loadStore();
+    const rpID = getCurrentRpId(req);
+    if (!rpID) {
+      return [];
+    }
+
+    return getPasskeysForRpId(store, rpID).map((passkey) => ({
+      id: passkey.id,
+      label: passkey.label,
+      createdAt: passkey.createdAt,
+      lastUsedAt: passkey.lastUsedAt,
+      deviceType: passkey.deviceType,
+      backedUp: passkey.backedUp,
+    }));
+  };
+
+  const revokePasskey = (req, passkeyId) => {
+    assertEnabled();
+
+    const normalizedPasskeyId = typeof passkeyId === 'string' ? passkeyId.trim() : '';
+    if (!normalizedPasskeyId) {
+      const error = new Error('Passkey ID is required');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const store = loadStore();
+    const rpID = getCurrentRpId(req);
+    const existingPasskey = store.passkeys.find((passkey) => passkey.id === normalizedPasskeyId && passkey.rpID === rpID);
+
+    if (!existingPasskey) {
+      const error = new Error('Passkey not found for this host');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    const nextPasskeys = store.passkeys.filter((passkey) => !(passkey.id === normalizedPasskeyId && passkey.rpID === rpID));
+    persistStore({
+      ...store,
+      passwordBinding,
+      passkeys: nextPasskeys,
+    });
+
+    return {
+      revoked: true,
+      passkeyCount: nextPasskeys.filter((passkey) => passkey.rpID === rpID).length,
+    };
+  };
+
+  const clearAllPasskeys = () => {
+    assertEnabled();
+
+    const store = loadStore();
+    const clearedCount = store.passkeys.length;
+    persistStore({
+      ...store,
+      userID: crypto.randomBytes(32).toString('base64url'),
+      passwordBinding,
+      passkeys: [],
+    });
+
+    return {
+      cleared: true,
+      clearedCount,
+    };
+  };
+
   const beginRegistration = async (req, { label } = {}) => {
     assertEnabled();
     cleanupChallengeMap(registrationChallenges);
@@ -268,7 +338,6 @@ export const createUiPasskeys = ({
         transports: passkey.transports,
       })),
       authenticatorSelection: {
-        authenticatorAttachment: 'platform',
         residentKey: 'required',
         userVerification: 'required',
       },
@@ -463,6 +532,9 @@ export const createUiPasskeys = ({
   return {
     enabled: Boolean(passwordBinding),
     getStatus,
+    listPasskeys,
+    revokePasskey,
+    clearAllPasskeys,
     beginRegistration,
     finishRegistration,
     beginAuthentication,

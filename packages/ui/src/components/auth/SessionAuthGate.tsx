@@ -1,61 +1,27 @@
 import React from 'react';
 import { RiLockLine, RiLockUnlockLine, RiLoader4Line } from '@remixicon/react';
-import {
-  browserSupportsWebAuthn,
-  platformAuthenticatorIsAvailable,
-  startAuthentication,
-  startRegistration,
-} from '@simplewebauthn/browser';
+import { browserSupportsWebAuthn } from '@simplewebauthn/browser';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
+import { toast } from '@/components/ui';
 import { isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
 import { syncDesktopSettings, initializeAppearancePreferences } from '@/lib/persistence';
 import { applyPersistedDirectoryPreferences } from '@/lib/directoryPersistence';
 import { DesktopHostSwitcherInline } from '@/components/desktop/DesktopHostSwitcher';
 import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
+import {
+  authenticateWithPasskey,
+  cancelPasskeyCeremony,
+  defaultPasskeyStatus,
+  fetchPasskeyStatus,
+  isPasskeyCeremonyAbort,
+  type PasskeyStatus,
+  registerCurrentDevicePasskey,
+} from '@/lib/passkeys';
 
 const STATUS_CHECK_ENDPOINT = '/auth/session';
-const PASSKEY_STATUS_ENDPOINT = '/auth/passkey/status';
-const PASSKEY_AUTH_OPTIONS_ENDPOINT = '/auth/passkey/authenticate/options';
-const PASSKEY_AUTH_VERIFY_ENDPOINT = '/auth/passkey/authenticate/verify';
-const PASSKEY_REGISTER_OPTIONS_ENDPOINT = '/auth/passkey/register/options';
-const PASSKEY_REGISTER_VERIFY_ENDPOINT = '/auth/passkey/register/verify';
-
-type PasskeyStatus = {
-  enabled: boolean;
-  hasPasskeys: boolean;
-  passkeyCount: number;
-  rpID: string | null;
-};
-
-const defaultPasskeyStatus: PasskeyStatus = {
-  enabled: false,
-  hasPasskeys: false,
-  passkeyCount: 0,
-  rpID: null,
-};
-
-const postJson = async (url: string, body?: unknown): Promise<Response> => fetch(url, {
-  method: 'POST',
-  credentials: 'include',
-  headers: {
-    'Content-Type': 'application/json',
-    Accept: 'application/json',
-  },
-  body: body === undefined ? undefined : JSON.stringify(body),
-});
-
-const getErrorMessage = async (response: Response, fallback: string): Promise<string> => {
-  try {
-    const payload = await response.json();
-    if (payload && typeof payload.error === 'string' && payload.error.trim()) {
-      return payload.error;
-    }
-  } catch {
-    // Ignore malformed error payloads and fall back to the default message.
-  }
-  return fallback;
-};
+const TRUST_DEVICE_STORAGE_KEY = 'openchamber.uiAuth.trustDevice';
 
 const fetchSessionStatus = async (): Promise<Response> => {
   console.log('[Frontend Auth] Checking session status...');
@@ -70,7 +36,14 @@ const fetchSessionStatus = async (): Promise<Response> => {
   return response;
 };
 
-const submitPassword = async (password: string): Promise<Response> => {
+const readStoredTrustDevice = (): boolean => {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+  return window.localStorage.getItem(TRUST_DEVICE_STORAGE_KEY) === 'true';
+};
+
+const submitPassword = async (password: string, trustDevice: boolean): Promise<Response> => {
   console.log('[Frontend Auth] Submitting password...');
   const response = await fetch(STATUS_CHECK_ENDPOINT, {
     method: 'POST',
@@ -79,32 +52,10 @@ const submitPassword = async (password: string): Promise<Response> => {
       'Content-Type': 'application/json',
       Accept: 'application/json',
     },
-    body: JSON.stringify({ password }),
+    body: JSON.stringify({ password, trustDevice }),
   });
   console.log('[Frontend Auth] Password submit response:', response.status, response.statusText);
   return response;
-};
-
-const fetchPasskeyStatus = async (): Promise<PasskeyStatus> => {
-  const response = await fetch(PASSKEY_STATUS_ENDPOINT, {
-    method: 'GET',
-    credentials: 'include',
-    headers: {
-      Accept: 'application/json',
-    },
-  });
-
-  if (!response.ok) {
-    return defaultPasskeyStatus;
-  }
-
-  const payload = await response.json().catch(() => null);
-  return {
-    enabled: payload?.enabled === true,
-    hasPasskeys: payload?.hasPasskeys === true,
-    passkeyCount: typeof payload?.passkeyCount === 'number' ? payload.passkeyCount : 0,
-    rpID: typeof payload?.rpID === 'string' && payload.rpID ? payload.rpID : null,
-  };
 };
 
 const AuthShell: React.FC<{ children: React.ReactNode }> = ({ children }) => (
@@ -187,9 +138,17 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) =>
   const [passkeyStatus, setPasskeyStatus] = React.useState<PasskeyStatus>(defaultPasskeyStatus);
   const [supportsPasskeys, setSupportsPasskeys] = React.useState(false);
   const [isPasskeyBusy, setIsPasskeyBusy] = React.useState(false);
-  const [hasFreshSession, setHasFreshSession] = React.useState(false);
+  const [trustDevice, setTrustDevice] = React.useState<boolean>(() => readStoredTrustDevice());
+  const [activePasskeyAction, setActivePasskeyAction] = React.useState<'auth' | 'register' | null>(null);
   const passwordInputRef = React.useRef<HTMLInputElement | null>(null);
   const hasResyncedRef = React.useRef(skipAuth);
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    window.localStorage.setItem(TRUST_DEVICE_STORAGE_KEY, trustDevice ? 'true' : 'false');
+  }, [trustDevice]);
 
   const refreshPasskeyStatus = React.useCallback(async () => {
     if (skipAuth) {
@@ -221,10 +180,8 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) =>
           }
           return;
         }
-
-        const available = await platformAuthenticatorIsAvailable();
         if (!cancelled) {
-          setSupportsPasskeys(available);
+          setSupportsPasskeys(true);
         }
       } catch {
         if (!cancelled) {
@@ -258,7 +215,6 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) =>
           console.log('[Frontend Auth] Session is authenticated');
           setState('authenticated');
           setIsTunnelLocked(false);
-          setHasFreshSession(false);
           setErrorMessage('');
           setRetryAfter(undefined);
           return;
@@ -276,7 +232,6 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) =>
           }
           setIsTunnelLocked(data.tunnelLocked === true);
           setPasskeyStatus(latestPasskeyStatus);
-          setHasFreshSession(false);
           setState('locked');
           setRetryAfter(undefined);
           return;
@@ -343,61 +298,59 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) =>
   };
 
   const registerPasskeyForCurrentSession = React.useCallback(async () => {
-    const label = typeof navigator.userAgent === 'string' && navigator.userAgent.trim()
-      ? navigator.userAgent
-      : 'This device';
-
-    const optionsResponse = await postJson(PASSKEY_REGISTER_OPTIONS_ENDPOINT, { label });
-    if (!optionsResponse.ok) {
-      throw new Error(await getErrorMessage(optionsResponse, 'Could not start passkey setup.'));
+    setActivePasskeyAction('register');
+    setIsPasskeyBusy(true);
+    try {
+      await registerCurrentDevicePasskey();
+    } finally {
+      setActivePasskeyAction(null);
+      setIsPasskeyBusy(false);
     }
-
-    const { requestId, optionsJSON } = await optionsResponse.json();
-    const registrationResponse = await startRegistration({ optionsJSON });
-    const verifyResponse = await postJson(PASSKEY_REGISTER_VERIFY_ENDPOINT, {
-      requestId,
-      response: registrationResponse,
-    });
-
-    if (!verifyResponse.ok) {
-      throw new Error(await getErrorMessage(verifyResponse, 'Could not finish passkey setup.'));
-    }
-
     await refreshPasskeyStatus();
   }, [refreshPasskeyStatus]);
+
+  const cancelActivePasskey = React.useCallback(() => {
+    cancelPasskeyCeremony();
+    setActivePasskeyAction(null);
+    setIsPasskeyBusy(false);
+  }, []);
 
   const handlePasswordUnlock = React.useCallback(async (enrollPasskey: boolean) => {
     if (isTunnelLocked) {
       return;
     }
-    if (!password || isSubmitting || isPasskeyBusy) {
+    if (!password || isSubmitting) {
       return;
+    }
+
+    if (isPasskeyBusy) {
+      cancelActivePasskey();
     }
 
     setIsSubmitting(true);
     setErrorMessage('');
-    setHasFreshSession(false);
 
     try {
-      const response = await submitPassword(password);
+      const response = await submitPassword(password, trustDevice);
       if (response.ok) {
         console.log('[Frontend Auth] Login successful');
         setPassword('');
         setIsTunnelLocked(false);
         if (enrollPasskey && supportsPasskeys) {
-          setIsPasskeyBusy(true);
           try {
             await registerPasskeyForCurrentSession();
+            toast.success('Passkey added');
             setState('authenticated');
             return;
           } catch (error) {
-            const message = error instanceof Error ? error.message : 'Passkey setup was cancelled.';
-            setErrorMessage(`${message} You are still unlocked for this session.`);
-            setHasFreshSession(true);
-            setState('locked');
+            if (isPasskeyCeremonyAbort(error)) {
+              toast.message('Passkey setup canceled');
+            } else {
+              const message = error instanceof Error ? error.message : 'Passkey setup failed.';
+              toast.error(message);
+            }
+            setState('authenticated');
             return;
-          } finally {
-            setIsPasskeyBusy(false);
           }
         }
         setState('authenticated');
@@ -433,45 +386,72 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) =>
     } finally {
       setIsSubmitting(false);
     }
-  }, [isPasskeyBusy, isSubmitting, isTunnelLocked, password, registerPasskeyForCurrentSession, supportsPasskeys]);
+  }, [cancelActivePasskey, isPasskeyBusy, isSubmitting, isTunnelLocked, password, registerPasskeyForCurrentSession, supportsPasskeys, trustDevice]);
 
   const handlePasskeyUnlock = React.useCallback(async () => {
-    if (isSubmitting || isPasskeyBusy || !supportsPasskeys) {
+    if (isSubmitting || !supportsPasskeys) {
+      return;
+    }
+
+    if (isPasskeyBusy) {
+      cancelActivePasskey();
       return;
     }
 
     setIsPasskeyBusy(true);
+    setActivePasskeyAction('auth');
     setErrorMessage('');
-    setHasFreshSession(false);
 
     try {
-      const optionsResponse = await postJson(PASSKEY_AUTH_OPTIONS_ENDPOINT);
-      if (!optionsResponse.ok) {
-        setErrorMessage(await getErrorMessage(optionsResponse, 'Passkey sign-in is not available right now.'));
-        return;
-      }
-
-      const { requestId, optionsJSON } = await optionsResponse.json();
-      const authResponse = await startAuthentication({ optionsJSON });
-      const verifyResponse = await postJson(PASSKEY_AUTH_VERIFY_ENDPOINT, {
-        requestId,
-        response: authResponse,
-      });
-
-      if (!verifyResponse.ok) {
-        setErrorMessage(await getErrorMessage(verifyResponse, 'Passkey sign-in failed.'));
-        return;
-      }
+      await authenticateWithPasskey(trustDevice);
 
       setPassword('');
       setState('authenticated');
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Passkey sign-in was cancelled.';
-      setErrorMessage(message);
+      if (isPasskeyCeremonyAbort(error)) {
+        setErrorMessage('');
+      } else {
+        const message = error instanceof Error ? error.message : 'Passkey sign-in was cancelled.';
+        setErrorMessage(message);
+      }
     } finally {
+      setActivePasskeyAction(null);
       setIsPasskeyBusy(false);
     }
-  }, [isPasskeyBusy, isSubmitting, supportsPasskeys]);
+  }, [cancelActivePasskey, isPasskeyBusy, isSubmitting, supportsPasskeys, trustDevice]);
+
+  const handlePasskeySetupOnly = React.useCallback(async () => {
+    if (isSubmitting || isTunnelLocked || !supportsPasskeys) {
+      return;
+    }
+
+    if (isPasskeyBusy) {
+      cancelActivePasskey();
+      return;
+    }
+
+    if (state !== 'authenticated') {
+      if (!password) {
+        setErrorMessage('Enter your password to add a passkey.');
+        return;
+      }
+      await handlePasswordUnlock(true);
+      return;
+    }
+
+    setErrorMessage('');
+    try {
+      await registerPasskeyForCurrentSession();
+      toast.success('Passkey added');
+    } catch (error) {
+      if (isPasskeyCeremonyAbort(error)) {
+        toast.message('Passkey setup canceled');
+        return;
+      }
+      const message = error instanceof Error ? error.message : 'Passkey setup failed.';
+      toast.error(message);
+    }
+  }, [cancelActivePasskey, handlePasswordUnlock, isPasskeyBusy, isSubmitting, isTunnelLocked, password, registerPasskeyForCurrentSession, state, supportsPasskeys]);
 
   const canOfferPasskeySetup = supportsPasskeys && passkeyStatus.enabled;
   const canUsePasskey = canOfferPasskeySetup && passkeyStatus.hasPasskeys;
@@ -511,14 +491,14 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) =>
                   variant="outline"
                   className="w-full"
                   onClick={() => void handlePasskeyUnlock()}
-                  disabled={isSubmitting || isPasskeyBusy}
+                  disabled={isSubmitting || (isPasskeyBusy && activePasskeyAction !== 'auth')}
                 >
                   {isPasskeyBusy ? (
                     <RiLoader4Line className="h-4 w-4 animate-spin" />
                   ) : (
                     <RiLockUnlockLine className="h-4 w-4" />
                   )}
-                  <span>{isPasskeyBusy ? 'Waiting for passkey…' : 'Use passkey'}</span>
+                  <span>{isPasskeyBusy && activePasskeyAction === 'auth' ? 'Cancel passkey' : 'Use passkey'}</span>
                 </Button>
               )}
               <div className="flex items-center gap-2">
@@ -540,13 +520,13 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) =>
                     className="pl-10"
                     aria-invalid={Boolean(errorMessage) || undefined}
                     aria-describedby={errorMessage ? 'oc-ui-auth-error' : undefined}
-                    disabled={isSubmitting || isPasskeyBusy}
+                    disabled={isSubmitting}
                   />
                 </div>
                 <Button
                   type="submit"
                   size="icon"
-                  disabled={!password || isSubmitting || isPasskeyBusy}
+                  disabled={!password || isSubmitting}
                   aria-label={isSubmitting ? 'Unlocking' : 'Unlock'}
                 >
                   {isSubmitting ? (
@@ -556,29 +536,42 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) =>
                   )}
                 </Button>
               </div>
-              {canOfferPasskeySetup && !passkeyStatus.hasPasskeys && (
-                <div className="flex justify-center pt-1">
+              {canOfferPasskeySetup ? (
+                <div className="flex items-center justify-between pt-1">
+                  <label className="flex items-center gap-2 text-center typography-micro text-muted-foreground">
+                    <Checkbox
+                      checked={trustDevice}
+                      onChange={setTrustDevice}
+                      disabled={isSubmitting}
+                      ariaLabel="Trust this device"
+                      className="size-4"
+                      iconClassName="size-4"
+                    />
+                    <span>Trust this device</span>
+                  </label>
                   <Button
                     type="button"
                     variant="ghost"
                     size="sm"
                     className="text-muted-foreground hover:text-foreground"
-                    onClick={() => void handlePasswordUnlock(true)}
-                    disabled={!password || isSubmitting || isPasskeyBusy}
+                    onClick={() => void handlePasskeySetupOnly()}
+                    disabled={isSubmitting}
                   >
-                    {isSubmitting && !isPasskeyBusy ? 'Unlocking…' : 'Set up passkey'}
+                    {isPasskeyBusy && activePasskeyAction === 'register' ? 'Cancel passkey setup' : 'Add passkey'}
                   </Button>
                 </div>
-              )}
-              {hasFreshSession && (
-                <Button
-                  type="button"
-                  variant="secondary"
-                  className="w-full"
-                  onClick={() => setState('authenticated')}
-                >
-                  Continue to app
-                </Button>
+              ) : (
+                <label className="flex items-center justify-center gap-2 pt-1 text-center typography-micro text-muted-foreground">
+                  <Checkbox
+                    checked={trustDevice}
+                    onChange={setTrustDevice}
+                    disabled={isSubmitting}
+                    ariaLabel="Trust this device"
+                    className="size-4"
+                    iconClassName="size-4"
+                  />
+                  <span>Trust this device</span>
+                </label>
               )}
               {errorMessage && (
                 <p id="oc-ui-auth-error" className="typography-meta text-destructive">

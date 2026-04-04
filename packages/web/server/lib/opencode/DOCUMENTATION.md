@@ -238,6 +238,9 @@ This module provides OpenCode server integration utilities for the web server ru
    - `POST /auth/passkey/authenticate/verify`
    - `POST /auth/passkey/register/options`
    - `POST /auth/passkey/register/verify`
+   - `GET /api/passkeys`
+   - `DELETE /api/passkeys/:id`
+   - `POST /api/auth/reset`
    - `GET /connect`
    - `app.use('/api', ...)` auth/tunnel guard
 - `registerSettingsUtilityRoutes(app, dependencies)`: registers small settings utility endpoints:
