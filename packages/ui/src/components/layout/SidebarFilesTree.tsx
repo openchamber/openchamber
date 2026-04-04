@@ -13,6 +13,7 @@ import {
   RiMore2Fill,
   RiRefreshLine,
   RiSearchLine,
+  RiDownloadLine,
 } from '@remixicon/react';
 
 import { toast } from '@/components/ui';
@@ -132,6 +133,7 @@ interface FileRowProps {
     canDelete: boolean;
     canReveal: boolean;
   };
+  downloadFile?: (path: string) => Promise<void>;
   contextMenuPath: string | null;
   setContextMenuPath: (path: string | null) => void;
   onSelect: (node: FileNode) => void;
@@ -147,6 +149,7 @@ const FileRow: React.FC<FileRowProps> = ({
   status,
   badge,
   permissions,
+  downloadFile,
   contextMenuPath,
   setContextMenuPath,
   onSelect,
@@ -244,6 +247,14 @@ const FileRow: React.FC<FileRowProps> = ({
               }}>
                 <RiFileCopyLine className="mr-2 h-4 w-4" /> Copy Path
               </DropdownMenuItem>
+              {!isDir && downloadFile && (
+                <DropdownMenuItem onClick={(e) => {
+                  e.stopPropagation();
+                  void downloadFile(node.path);
+                }}>
+                  <RiDownloadLine className="mr-2 h-4 w-4" /> Save
+                </DropdownMenuItem>
+              )}
               {canReveal && (
                 <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onRevealPath(node.path); }}>
                   <RiFolderReceivedLine className="mr-2 h-4 w-4" /> Reveal in Finder
@@ -749,6 +760,7 @@ export const SidebarFilesTree: React.FC = () => {
             status={!isDir ? getFileStatus(node.path) : undefined}
             badge={isDir ? getFolderBadge(node.path) : undefined}
             permissions={{ canRename, canCreateFile, canCreateFolder, canDelete, canReveal }}
+            downloadFile={files.downloadFile}
             contextMenuPath={contextMenuPath}
             setContextMenuPath={setContextMenuPath}
             onSelect={handleOpenFile}

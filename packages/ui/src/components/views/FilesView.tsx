@@ -422,7 +422,7 @@ const FileRow: React.FC<FileRowProps> = ({
                   e.stopPropagation();
                   void downloadFile(node.path);
                 }}>
-                  <RiDownloadLine className="mr-2 h-4 w-4" /> Download
+                  <RiDownloadLine className="mr-2 h-4 w-4" /> Save
                 </DropdownMenuItem>
               )}
               {canReveal && (
@@ -2416,8 +2416,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
               if (fn) void fn(selectedFile.path);
             }}
             className="h-6 w-6 p-0"
-            title="Download file"
-            aria-label="Download file"
+            title="Save file"
+            aria-label="Save file"
           >
             <RiDownloadLine className="h-4 w-4" />
           </Button>
