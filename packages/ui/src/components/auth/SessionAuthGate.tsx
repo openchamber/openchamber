@@ -557,15 +557,18 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) =>
                 </Button>
               </div>
               {canOfferPasskeySetup && !passkeyStatus.hasPasskeys && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="w-full"
-                  onClick={() => void handlePasswordUnlock(true)}
-                  disabled={!password || isSubmitting || isPasskeyBusy}
-                >
-                  {isSubmitting && !isPasskeyBusy ? 'Unlocking…' : 'Unlock + set up passkey'}
-                </Button>
+                <div className="flex justify-center pt-1">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="text-muted-foreground hover:text-foreground"
+                    onClick={() => void handlePasswordUnlock(true)}
+                    disabled={!password || isSubmitting || isPasskeyBusy}
+                  >
+                    {isSubmitting && !isPasskeyBusy ? 'Unlocking…' : 'Set up passkey'}
+                  </Button>
+                </div>
               )}
               {hasFreshSession && (
                 <Button
@@ -580,11 +583,6 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) =>
               {errorMessage && (
                 <p id="oc-ui-auth-error" className="typography-meta text-destructive">
                   {errorMessage}
-                </p>
-              )}
-              {canOfferPasskeySetup && (
-                <p className="typography-micro text-muted-foreground">
-                  Passkeys use Face ID, Touch ID, or your device fingerprint for future unlocks on this host.
                 </p>
               )}
             </form>
