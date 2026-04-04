@@ -22,6 +22,7 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
+import { renderMagicPrompt } from '@/lib/magicPrompts';
 import type { GitHubPullRequestContextResult, GitHubPullRequestSummary, GitHubPullRequestsListResult } from '@/lib/api/types';
 
 const parsePrNumber = (value: string): number | null => {
@@ -46,50 +47,6 @@ const parsePrNumber = (value: string): number | null => {
 const buildPullRequestContextText = (payload: GitHubPullRequestContextResult) => {
   return `GitHub pull request context (JSON)\n${JSON.stringify(payload, null, 2)}`;
 };
-
-const PR_REVIEW_INSTRUCTIONS = `Before reporting issues:
-- First identify the PR intent (what it's trying to achieve) from title/body/diff, then evaluate whether the implementation matches that intent; call out missing pieces, incorrect behavior vs intent, and scope creep.
-- Gather any needed repository context (code, config, docs) to validate assumptions.
-- No speculation: if something is unclear or cannot be verified, say what's missing and ask for it instead of guessing.
-
-Output rules:
-- Start with a 1-2 sentence summary.
-- Provide a single concise PR review comment.
-- No emojis. No code snippets. No fenced blocks.
-- Short inline code identifiers allowed, but no snippets or fenced blocks.
-- Reference evidence with file paths and line ranges (e.g., path/to/file.ts:120-138). If exact lines aren't available, cite the file and say "approx" + why.
-- Keep the entire comment under ~300 words.
-
-Report:
-- Must-fix issues (blocking)-brief why and a one-line action each.
-- Nice-to-have improvements (optional)-brief why and a one-line action each.
-
-Quality & safety (general):
-- Call out correctness risks, edge cases, performance regressions, security/privacy concerns, and backwards-compatibility risks.
-- Call out missing tests/verification steps and suggest the minimal validation needed.
-- Note readability/maintainability issues when they materially affect future changes.
-
-Applicability (only if relevant):
-- If changes affect multiple components/targets/environments (e.g., client/server, OSs, deployments), state what is affected vs not, and why.
-
-Architecture:
-- Call out breakages, missing implementations across modules/targets, boundary violations, and cross-cutting concerns (errors, logging/observability, accessibility).
-
-Precedence:
-- If local precedent conflicts with best practices, state it and suggest a follow-up task.
-
-Do not implement changes until I confirm; end with a short "Next actions" sentence describing the recommended plan.
-
-Format exactly:
-Must-fix:
-- <issue> - <brief why> - <file:line-range> - Action: <one-line action>
-Nice-to-have:
-- <issue> - <brief why> - <file:line-range> - Action: <one-line action>
-If no issues, write:
-Must-fix:
-- None
-Nice-to-have:
-- None`;
 
 export function GitHubPrPickerDialog({
   open,
@@ -272,6 +229,7 @@ export function GitHubPrPickerDialog({
       }
 
       if (onSelect) {
+        const instructionsText = await renderMagicPrompt('github.pr.review.instructions');
         onSelect({
           number: context.pr.number,
           title: context.pr.title,
@@ -279,7 +237,7 @@ export function GitHubPrPickerDialog({
           head: context.pr.head,
           base: context.pr.base,
           includeDiff,
-          instructionsText: PR_REVIEW_INSTRUCTIONS,
+          instructionsText,
           contextText: buildPullRequestContextText(context),
           author: context.pr.author
             ? {

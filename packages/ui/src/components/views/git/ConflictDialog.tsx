@@ -14,6 +14,7 @@ import { useInputStore } from '@/sync/input-store';
 import { useUIStore } from '@/stores/useUIStore';
 import { toast } from '@/components/ui';
 import { getConflictDetails, type MergeConflictDetails } from '@/lib/gitApi';
+import { renderMagicPrompt } from '@/lib/magicPrompts';
 
 interface ConflictDialogProps {
   open: boolean;
@@ -65,36 +66,29 @@ export const ConflictDialog: React.FC<ConflictDialogProps> = ({
       });
   }, [open, directory]);
 
-  const buildConflictContext = React.useCallback((): {
+  const buildConflictContext = React.useCallback(async (): Promise<{
     visibleText: string;
     instructionsText: string;
     payloadText: string;
-  } | null => {
+  } | null> => {
     if (!conflictDetails) return null;
 
     const operationLabel = operation === 'merge' ? 'merge' : 'rebase';
     const headRef = conflictDetails.headInfo || (operation === 'merge' ? 'MERGE_HEAD' : 'REBASE_HEAD');
     const continueCmd = operation === 'merge' ? 'git commit --no-edit' : 'git rebase --continue';
 
-    const visibleText = `Resolve ${operationLabel} conflicts, stage the resolved files, and complete the ${operationLabel}. Preserve the intent of changes from ${headRef}.`;
+    const visibleText = await renderMagicPrompt('git.conflict.resolve.visible', {
+      operation_label: operationLabel,
+      head_ref: headRef,
+    });
 
-    const instructionsText = `Git ${operationLabel} operation is in progress with conflicts.
-- Directory: ${directory}
-- Operation: ${operation}
-- Head Info: ${conflictDetails.headInfo || 'N/A'}
-
-Required steps:
-1. Read each conflicted file to understand the conflict markers (<<<<<<< HEAD, =======, >>>>>>> ...)
-2. Edit each file to resolve conflicts by choosing the correct code or merging both changes appropriately
-3. Stage all resolved files with: git add <file>
-4. Complete the ${operationLabel} with: ${continueCmd}
-
-Important:
-- Remove ALL conflict markers from files (<<<<<<< HEAD, =======, >>>>>>>)
-- Make sure the final code is syntactically correct and preserves intent from both sides
-- Do not leave any files with unresolved conflict markers
-- After completing all steps, confirm the ${operationLabel} was successful
-`;
+    const instructionsText = await renderMagicPrompt('git.conflict.resolve.instructions', {
+      operation_label: operationLabel,
+      directory,
+      operation,
+      head_info: conflictDetails.headInfo || 'N/A',
+      continue_cmd: continueCmd,
+    });
 
     const payloadText = `${operationLabel} conflict context (JSON)\n${JSON.stringify(
       {
@@ -122,8 +116,8 @@ Important:
     onOpenChange(false);
   };
 
-  const handleResolveInCurrentSession = () => {
-    const context = buildConflictContext();
+  const handleResolveInCurrentSession = async () => {
+    const context = await buildConflictContext();
     if (!context) {
       toast.error('No conflict details available');
       return;
@@ -146,8 +140,8 @@ Important:
     onOpenChange(false);
   };
 
-  const handleResolveInNewSession = () => {
-    const context = buildConflictContext();
+  const handleResolveInNewSession = async () => {
+    const context = await buildConflictContext();
     if (!context) {
       toast.error('No conflict details available');
       return;
@@ -234,7 +228,9 @@ Important:
           <div className="flex flex-col gap-2 pt-2">
             <Button
               variant="default"
-              onClick={handleResolveInNewSession}
+              onClick={() => {
+                void handleResolveInNewSession();
+              }}
               disabled={isLoading || !conflictDetails}
               className="w-full gap-2"
             >

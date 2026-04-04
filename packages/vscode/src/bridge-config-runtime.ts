@@ -47,6 +47,10 @@ type BridgeMessageInput = {
 type ConfigRuntimeDeps = {
   readSettings: (ctx?: BridgeContext) => Record<string, unknown>;
   persistSettings: (changes: Record<string, unknown>, ctx?: BridgeContext) => Promise<Record<string, unknown>>;
+  readMagicPromptOverrides: () => { version: number; overrides: Record<string, string> };
+  saveMagicPromptOverride: (id: string, text: string) => Promise<{ version: number; overrides: Record<string, string> }>;
+  resetMagicPromptOverride: (id: string) => Promise<{ version: number; overrides: Record<string, string> }>;
+  resetAllMagicPromptOverrides: () => Promise<{ version: number; overrides: Record<string, string> }>;
   fetchOpenCodeSkillsFromApi: (ctx: BridgeContext | undefined, workingDirectory?: string) => Promise<DiscoveredSkill[] | null>;
   clientReloadDelayMs: number;
 };
@@ -138,6 +142,38 @@ export async function handleConfigBridgeMessage(
       const changes = (payload as Record<string, unknown>) || {};
       const updated = await deps.persistSettings(changes, ctx);
       return { id, type, success: true, data: updated };
+    }
+
+    case 'api:magic-prompts:get': {
+      return { id, type, success: true, data: deps.readMagicPromptOverrides() };
+    }
+
+    case 'api:magic-prompts:save': {
+      const request = (payload || {}) as { id?: string; text?: string };
+      const promptId = typeof request.id === 'string' ? request.id : '';
+      if (!promptId) {
+        return { id, type, success: false, error: 'Prompt id is required' };
+      }
+      if (typeof request.text !== 'string') {
+        return { id, type, success: false, error: 'Prompt text is required' };
+      }
+      const data = await deps.saveMagicPromptOverride(promptId, request.text);
+      return { id, type, success: true, data };
+    }
+
+    case 'api:magic-prompts:reset': {
+      const request = (payload || {}) as { id?: string };
+      const promptId = typeof request.id === 'string' ? request.id : '';
+      if (!promptId) {
+        return { id, type, success: false, error: 'Prompt id is required' };
+      }
+      const data = await deps.resetMagicPromptOverride(promptId);
+      return { id, type, success: true, data };
+    }
+
+    case 'api:magic-prompts:reset-all': {
+      const data = await deps.resetAllMagicPromptOverrides();
+      return { id, type, success: true, data };
     }
 
     case 'api:config/reload': {

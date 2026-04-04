@@ -831,6 +831,30 @@ const handleLocalApiRequest = async (url: URL, init?: RequestInit) => {
     return new Response(JSON.stringify(updated), { status: 200, headers: { 'Content-Type': 'application/json' } });
   }
 
+  if (pathname === '/api/magic-prompts') {
+    if (method === 'GET') {
+      const data = await sendBridgeMessage('api:magic-prompts:get');
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (method === 'DELETE') {
+      const data = await sendBridgeMessage('api:magic-prompts:reset-all');
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  if (pathname.startsWith('/api/magic-prompts/')) {
+    const id = decodeURIComponent(pathname.slice('/api/magic-prompts/'.length));
+    if (method === 'PUT') {
+      const body = init?.body ? JSON.parse(init.body as string) : {};
+      const data = await sendBridgeMessage('api:magic-prompts:save', { id, text: body?.text });
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (method === 'DELETE') {
+      const data = await sendBridgeMessage('api:magic-prompts:reset', { id });
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
   if (pathname === '/api/config/opencode-resolution' && method === 'GET') {
     try {
       const data = await sendBridgeMessage('api:config/opencode-resolution:get');

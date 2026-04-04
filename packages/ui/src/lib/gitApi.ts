@@ -3,6 +3,7 @@
 import type { RuntimeAPIs } from './api/types';
 import * as gitHttp from './gitApiHttp';
 import { opencodeClient } from './opencode/client';
+import { renderMagicPrompt } from './magicPrompts';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useContextStore } from '@/stores/contextStore';
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -131,25 +132,16 @@ export async function generateCommitMessage(
     agent: generationSession.agent,
   });
 
-  const prompt = `You are generating a Conventional Commits subject line using session context and selected file paths.
-
-Return JSON with exactly this shape:
-{"subject": string, "highlights": string[]}
-
-Rules:
-- subject format: <type>: <summary>
-- allowed types: feat, fix, refactor, perf, docs, test, build, ci, chore, style, revert
-- no scope in subject
-- keep subject concise and user-facing
-- highlights: 0-3 concise user-facing points
-
-Selected files:
-${files.map((file) => `- ${file}`).join('\n')}`;
+  const visiblePrompt = await renderMagicPrompt('git.commit.generate.visible');
+  const hiddenPrompt = await renderMagicPrompt('git.commit.generate.instructions', {
+    selected_files: files.map((file) => `- ${file}`).join('\n'),
+  });
 
   try {
     const structured = await runStructuredGenerationInActiveSession({
       directory,
-      prompt,
+      visiblePrompt,
+      hiddenPrompt,
       generationSession,
       schema: {
         type: 'object',
@@ -257,30 +249,20 @@ export async function generatePullRequestDescription(
     changedFiles: changedFiles.length,
   });
 
-  const prompt = `You are drafting GitHub Pull Request title and body using session context, commit list, and changed files.
-
-Return JSON with exactly this shape:
-{"title": string, "body": string}
-
-Rules:
-- title: concise, outcome-first, conventional style
-- body: markdown with sections: ## Summary, ## Why, ## Testing
-- keep output concrete and user-facing
-
-Base branch: ${payload.base}
-Head branch: ${payload.head}
-
-Commits in range (base...head):
-${commits.map((commit) => `- ${commit.hash.slice(0, 7)} ${commit.subject || '(no subject)'}`).join('\n')}
-
-Files changed across these commits:
-${changedFiles.length > 0 ? changedFiles.map((file) => `- ${file}`).join('\n') : '- none detected'}
-${payload.context?.trim() ? `\nAdditional context:\n${payload.context.trim()}` : ''}`;
+  const visiblePrompt = await renderMagicPrompt('git.pr.generate.visible');
+  const hiddenPrompt = await renderMagicPrompt('git.pr.generate.instructions', {
+    base_branch: payload.base,
+    head_branch: payload.head,
+    commits: commits.map((commit) => `- ${commit.hash.slice(0, 7)} ${commit.subject || '(no subject)'}`).join('\n'),
+    changed_files: changedFiles.length > 0 ? changedFiles.map((file) => `- ${file}`).join('\n') : '- none detected',
+    additional_context_block: payload.context?.trim() ? `\nAdditional context:\n${payload.context.trim()}` : '',
+  });
 
   try {
     const structured = await runStructuredGenerationInActiveSession({
       directory,
-      prompt,
+      visiblePrompt,
+      hiddenPrompt,
       generationSession,
       schema: {
         type: 'object',
@@ -355,13 +337,15 @@ const resolveSessionGenerationContext = (): SessionGenerationContext | null => {
 
 const runStructuredGenerationInActiveSession = async ({
   directory,
-  prompt,
+  visiblePrompt,
+  hiddenPrompt,
   generationSession,
   schema,
   kind,
 }: {
   directory: string;
-  prompt: string;
+  visiblePrompt: string;
+  hiddenPrompt?: string;
   generationSession: SessionGenerationContext;
   schema: Record<string, unknown>;
   kind: 'commit' | 'pr';
@@ -376,18 +360,17 @@ const runStructuredGenerationInActiveSession = async ({
     agent: generationSession.agent,
   });
   const trimmedDirectory = typeof directory === 'string' ? directory.trim() : '';
-  const firstNewlineIndex = prompt.indexOf('\n');
-  const visiblePrompt = (firstNewlineIndex === -1 ? prompt : prompt.slice(0, firstNewlineIndex)).trim();
-  const hiddenPrompt = (firstNewlineIndex === -1 ? '' : prompt.slice(firstNewlineIndex + 1)).trim();
+  const visiblePromptText = typeof visiblePrompt === 'string' ? visiblePrompt.trim() : '';
+  const hiddenPromptText = typeof hiddenPrompt === 'string' ? hiddenPrompt.trim() : '';
   const promptParts: Array<{ type: 'text'; text: string; synthetic?: boolean }> = [];
-  if (visiblePrompt) {
-    promptParts.push({ type: 'text', text: visiblePrompt, synthetic: false });
+  if (visiblePromptText) {
+    promptParts.push({ type: 'text', text: visiblePromptText, synthetic: false });
   }
-  if (hiddenPrompt) {
-    promptParts.push({ type: 'text', text: hiddenPrompt, synthetic: true });
+  if (hiddenPromptText) {
+    promptParts.push({ type: 'text', text: hiddenPromptText, synthetic: true });
   }
   if (promptParts.length === 0) {
-    promptParts.push({ type: 'text', text: prompt, synthetic: false });
+    throw new Error('Generation prompts are empty');
   }
 
   const response = await opencodeClient.withDirectory(directory, async () => {

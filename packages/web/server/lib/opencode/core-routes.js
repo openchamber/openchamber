@@ -161,6 +161,7 @@ export const registerCommonRequestMiddleware = (app, dependencies) => {
       req.path.startsWith('/api/projects') ||
       req.path.startsWith('/api/fs') ||
       req.path.startsWith('/api/git') ||
+      req.path.startsWith('/api/magic-prompts') ||
       req.path.startsWith('/api/prompts') ||
       req.path.startsWith('/api/terminal') ||
       req.path.startsWith('/api/opencode') ||
