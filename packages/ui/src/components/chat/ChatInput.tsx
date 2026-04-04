@@ -2233,8 +2233,30 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
             }
         });
 
+        // Fallback: on Linux/Tauri, WebKitGTK may not expose clipboard images
+        // via clipboardData. Try reading via native clipboard tools.
         const imageFiles = Array.from(fileMap.values());
-        if (imageFiles.length === 0) {
+        if (imageFiles.length === 0 && typeof window !== 'undefined' && (window as any).__TAURI__) {
+            try {
+                const { invoke } = await import('@tauri-apps/api/core');
+                const result = await invoke<{ mime: string; base64: string } | null>('desktop_read_clipboard_image');
+                if (result && result.base64) {
+                    const byteCharacters = atob(result.base64);
+                    const byteNumbers = new Array(byteCharacters.length);
+                    for (let i = 0; i < byteCharacters.length; i++) {
+                        byteNumbers[i] = byteCharacters.charCodeAt(i);
+                    }
+                    const byteArray = new Uint8Array(byteNumbers);
+                    const file = new File([byteArray], `clipboard-image.${result.mime.split('/')[1]}`, { type: result.mime });
+                    fileMap.set(`${file.name}-${file.size}`, file);
+                }
+            } catch {
+                // Native clipboard read failed — fall through to normal paste
+            }
+        }
+
+        const finalImageFiles = Array.from(fileMap.values());
+        if (finalImageFiles.length === 0) {
             return;
         }
 
@@ -2249,7 +2271,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
             insertTextAtSelection(pastedText);
         }
 
-        for (const file of imageFiles) {
+        for (const file of finalImageFiles) {
             try {
                 await addAttachedFile(file);
             } catch (error) {

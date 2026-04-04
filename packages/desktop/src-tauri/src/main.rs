@@ -2378,6 +2378,123 @@ struct FileContent {
     size: usize,
 }
 
+/// Read image data from the system clipboard.
+/// On Linux, uses wl-paste (Wayland) or xclip (X11) to query available
+/// image MIME types and read the first available one.
+/// On macOS, uses osascript to read PNG from clipboard.
+/// Returns { mime, base64 } or null if no image is available.
+#[tauri::command]
+fn desktop_read_clipboard_image() -> Result<Option<ClipboardImage>, String> {
+    let os = std::env::consts::OS;
+
+    if os == "linux" {
+        let mime_priority = ["image/png", "image/jpeg", "image/webp", "image/gif", "image/bmp"];
+
+        // Try Wayland first
+        if std::env::var("WAYLAND_DISPLAY").is_ok() {
+            let types_output = Command::new("wl-paste")
+                .arg("--list-types")
+                .output()
+                .ok()
+                .and_then(|o| String::from_utf8(o.stdout).ok());
+
+            if let Some(types_str) = types_output {
+                let available: HashSet<String> = types_str
+                    .lines()
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+
+                for mime in &mime_priority {
+                    if available.contains(*mime) {
+                        let data = Command::new("wl-paste")
+                            .args(["-t", mime])
+                            .output()
+                            .ok();
+                        if let Some(output) = data {
+                            if output.status.success() && !output.stdout.is_empty() {
+                                return Ok(Some(ClipboardImage {
+                                    mime: mime.to_string(),
+                                    base64: general_purpose::STANDARD.encode(&output.stdout),
+                                }));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Try X11 via xclip
+        let targets_output = Command::new("xclip")
+            .args(["-selection", "clipboard", "-t", "TARGETS", "-o"])
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok());
+
+        if let Some(targets_str) = targets_output {
+            let available: HashSet<String> = targets_str
+                .lines()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+
+            for mime in &mime_priority {
+                if available.contains(*mime) {
+                    let data = Command::new("xclip")
+                        .args(["-selection", "clipboard", "-t", mime, "-o"])
+                        .output()
+                        .ok();
+                    if let Some(output) = data {
+                        if output.status.success() && !output.stdout.is_empty() {
+                            return Ok(Some(ClipboardImage {
+                                mime: mime.to_string(),
+                                base64: general_purpose::STANDARD.encode(&output.stdout),
+                            }));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if os == "macos" {
+        let tmpfile = format!("/tmp/openchamber-clipboard-{}.png", std::process::id());
+        let result = Command::new("osascript")
+            .args([
+                "-e",
+                &format!(
+                    r#"set imageData to the clipboard as "PNGf"
+set fileRef to open for access POSIX file "{}" with write permission
+set eof fileRef to 0
+write imageData to fileRef
+close access fileRef"#,
+                    tmpfile
+                ),
+            ])
+            .output()
+            .ok();
+
+        if result.is_some() {
+            if let Ok(bytes) = std::fs::read(&tmpfile) {
+                let _ = std::fs::remove_file(&tmpfile);
+                return Ok(Some(ClipboardImage {
+                    mime: "image/png".to_string(),
+                    base64: general_purpose::STANDARD.encode(&bytes),
+                }));
+            }
+            let _ = std::fs::remove_file(&tmpfile);
+        }
+    }
+
+    Ok(None)
+}
+
+#[derive(Serialize)]
+struct ClipboardImage {
+    mime: String,
+    base64: String,
+}
+
 #[cfg(target_os = "macos")]
 fn macos_major_version() -> Option<u32> {
     fn cmd_stdout(cmd: &str, args: &[&str]) -> Option<String> {
@@ -3293,6 +3410,7 @@ fn main() {
             remote_ssh::desktop_ssh_logs,
             remote_ssh::desktop_ssh_logs_clear,
             desktop_read_file,
+            desktop_read_clipboard_image,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
