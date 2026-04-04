@@ -95,14 +95,14 @@ export const UnifiedControlsDrawer: React.FC<UnifiedControlsDrawerProps> = ({
     const fallbackEfforts = getQuickEffortOptions(variants);
     const baseEfforts = fallbackEfforts.length > 0 ? fallbackEfforts : recentEffortOptions;
     const quickEfforts = React.useMemo(() => {
-        const base = baseEfforts.slice(0, 4);
+        const base = baseEfforts.slice(0, 3);
         const orderedRecents = recentEffortOptions.slice().reverse();
         for (const recent of orderedRecents) {
             if (base.some((entry) => entry === recent)) {
                 continue;
             }
             base.unshift(recent);
-            base.splice(4);
+            base.splice(3);
         }
         if (!base.some((entry) => entry === currentVariant)) {
             if (base.length > 0) {
@@ -113,7 +113,7 @@ export const UnifiedControlsDrawer: React.FC<UnifiedControlsDrawerProps> = ({
         }
         if (!base.some((entry) => entry === undefined)) {
             base.push(undefined);
-            base.splice(4);
+            base.splice(3);
         }
         return base;
     }, [baseEfforts, currentVariant, recentEffortOptions]);
@@ -216,7 +216,7 @@ export const UnifiedControlsDrawer: React.FC<UnifiedControlsDrawerProps> = ({
                         <div className="typography-meta font-semibold uppercase tracking-wide text-muted-foreground">
                             Effort
                         </div>
-                        <div className="flex flex-wrap gap-2">
+                        <div className="flex items-center gap-2">
                             {quickEfforts.map((variant) => {
                                 const isSelected = variant === currentVariant || (!variant && !currentVariant);
                                 return (
@@ -225,9 +225,10 @@ export const UnifiedControlsDrawer: React.FC<UnifiedControlsDrawerProps> = ({
                                         type="button"
                                         onClick={() => handleEffortSelect(variant)}
                                         className={cn(
-                                            'inline-flex items-center rounded-full border px-2.5 py-1 typography-meta font-medium',
+                                            'flex-1 min-w-0 min-h-[44px] items-center justify-center rounded-full border px-3 py-2 typography-meta font-medium truncate',
+                                            'touch-manipulation transition-colors active:scale-[0.99]',
                                             isSelected
-                                                ? 'border-primary/30 bg-primary/10 text-foreground'
+                                                ? 'border-primary/30 bg-interactive-selection/15 text-interactive-selection-foreground'
                                                 : 'border-border/40 text-muted-foreground hover:bg-interactive-hover/50'
                                         )}
                                         aria-pressed={isSelected}
@@ -240,7 +241,7 @@ export const UnifiedControlsDrawer: React.FC<UnifiedControlsDrawerProps> = ({
                                 <button
                                     type="button"
                                     onClick={onOpenEffort}
-                                    className="inline-flex items-center rounded-full border border-border/40 px-2.5 py-1 typography-meta font-medium text-muted-foreground hover:bg-interactive-hover/50"
+                                    className="flex-shrink-0 min-h-[44px] min-w-[44px] items-center justify-center rounded-full border border-border/40 px-3 py-2 typography-meta font-medium text-muted-foreground touch-manipulation transition-colors active:scale-[0.99] hover:bg-interactive-hover/50"
                                     aria-label="More effort options"
                                 >
                                     ...
