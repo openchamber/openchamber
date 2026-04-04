@@ -41,6 +41,7 @@ This module provides OpenCode server integration utilities for the web server ru
 - `packages/web/server/lib/opencode/watcher.js`: global SSE watcher runtime for push/session event fanout.
 - `packages/web/server/lib/opencode/shared.js`: shared utilities for config, markdown, skills, and git helpers.
 - `packages/web/server/lib/opencode/ui-auth.js`: UI session authentication with rate limiting.
+- `packages/web/server/lib/opencode/ui-passkeys.js`: UI passkey storage and WebAuthn registration/authentication helpers.
 
 ## Public exports (auth.js)
 - `readAuthFile()`: Reads and parses `~/.local/share/opencode/auth.json`.
@@ -229,11 +230,19 @@ This module provides OpenCode server integration utilities for the web server ru
   - `GET /health`
   - `POST /api/system/shutdown`
   - `GET /api/system/info`
-- `registerAuthAndAccessRoutes(app, dependencies)`: registers browser auth/session exchange and API access middleware:
-  - `GET /auth/session`
-  - `POST /auth/session`
-  - `GET /connect`
-  - `app.use('/api', ...)` auth/tunnel guard
+ - `registerAuthAndAccessRoutes(app, dependencies)`: registers browser auth/session exchange and API access middleware:
+   - `GET /auth/session`
+   - `POST /auth/session`
+   - `GET /auth/passkey/status`
+   - `POST /auth/passkey/authenticate/options`
+   - `POST /auth/passkey/authenticate/verify`
+   - `POST /auth/passkey/register/options`
+   - `POST /auth/passkey/register/verify`
+   - `GET /api/passkeys`
+   - `DELETE /api/passkeys/:id`
+   - `POST /api/auth/reset`
+   - `GET /connect`
+   - `app.use('/api', ...)` auth/tunnel guard
 - `registerSettingsUtilityRoutes(app, dependencies)`: registers small settings utility endpoints:
   - `GET /api/config/themes`
   - `POST /api/config/reload`
