@@ -40,7 +40,7 @@ const TUNNEL_BOOTSTRAP_TTL_MIN_MS = 60 * 1000;
 const TUNNEL_BOOTSTRAP_TTL_MAX_MS = 24 * 60 * 60 * 1000;
 const TUNNEL_SESSION_TTL_DEFAULT_MS = 8 * 60 * 60 * 1000;
 const TUNNEL_SESSION_TTL_MIN_MS = 5 * 60 * 1000;
-const TUNNEL_SESSION_TTL_MAX_MS = 24 * 60 * 60 * 1000;
+const TUNNEL_SESSION_TTL_MAX_MS = 30 * 24 * 60 * 60 * 1000;
 const CONNECT_TTL_PICKER_OPTIONS = [
   { value: String(3 * 60 * 1000), label: '3m' },
   { value: String(TUNNEL_BOOTSTRAP_TTL_DEFAULT_MS), label: '30m' },
@@ -54,6 +54,8 @@ const SESSION_TTL_PICKER_OPTIONS = [
   { value: String(TUNNEL_SESSION_TTL_DEFAULT_MS), label: '8h' },
   { value: String(12 * 60 * 60 * 1000), label: '12h' },
   { value: String(24 * 60 * 60 * 1000), label: '24h' },
+  { value: String(7 * 24 * 60 * 60 * 1000), label: '1w' },
+  { value: String(30 * 24 * 60 * 60 * 1000), label: '30d' },
   { value: '__custom__', label: 'Custom' },
 ];
 const PACKAGE_JSON = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
