@@ -55,10 +55,13 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     allowedProviderIds,
     placeholder
 }) => {
-    const { providers, modelsMetadata } = useConfigStore();
+    const providers = useConfigStore((state) => state.providers);
+    const modelsMetadata = useConfigStore((state) => state.modelsMetadata);
     const isMobile = useUIStore(state => state.isMobile);
     const hiddenModels = useUIStore(state => state.hiddenModels);
-    const { toggleFavoriteModel, isFavoriteModel, addRecentModel } = useUIStore();
+    const toggleFavoriteModel = useUIStore((state) => state.toggleFavoriteModel);
+    const isFavoriteModel = useUIStore((state) => state.isFavoriteModel);
+    const addRecentModel = useUIStore((state) => state.addRecentModel);
     const { favoriteModelsList, recentModelsList } = useModelLists();
     const { isMobile: deviceIsMobile } = useDeviceInfo();
     const isActuallyMobile = isMobile || deviceIsMobile;

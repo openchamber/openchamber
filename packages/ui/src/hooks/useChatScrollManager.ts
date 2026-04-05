@@ -457,7 +457,48 @@ export const useChatScrollManager = ({
         const container = scrollRef.current;
         if (!container || typeof ResizeObserver === 'undefined') return;
 
+        let lastScrollHeight = container.scrollHeight;
+        let lastClientHeight = container.clientHeight;
+
         const observer = new ResizeObserver(() => {
+            const nextScrollHeight = container.scrollHeight;
+            const nextClientHeight = container.clientHeight;
+            const scrollHeightChanged = nextScrollHeight !== lastScrollHeight;
+            const clientHeightChanged = nextClientHeight !== lastClientHeight;
+
+            if (clientHeightChanged) {
+                const previousDistanceFromBottom = Math.max(
+                    0,
+                    lastScrollHeight - lastScrollTopRef.current - lastClientHeight,
+                );
+
+                if (isPinnedRef.current) {
+                    const targetScrollTop = Math.max(
+                        0,
+                        nextScrollHeight - nextClientHeight - previousDistanceFromBottom,
+                    );
+
+                    if (Math.abs(container.scrollTop - targetScrollTop) > 0.5) {
+                        markProgrammaticScroll();
+                        container.scrollTop = targetScrollTop;
+                        lastScrollTopRef.current = targetScrollTop;
+                    }
+
+                    lastScrollHeight = nextScrollHeight;
+                    lastClientHeight = nextClientHeight;
+                    updateScrollButtonVisibility();
+                    return;
+                }
+            }
+
+            lastScrollHeight = nextScrollHeight;
+            lastClientHeight = nextClientHeight;
+
+            if (clientHeightChanged && !scrollHeightChanged) {
+                updateScrollButtonVisibility();
+                return;
+            }
+
             schedulePinnedStateAndIndicators();
         });
 
@@ -474,7 +515,7 @@ export const useChatScrollManager = ({
             observer.disconnect();
             childObserver.disconnect();
         };
-    }, [schedulePinnedStateAndIndicators]);
+    }, [schedulePinnedStateAndIndicators, updateScrollButtonVisibility]);
 
     React.useEffect(() => {
         if (typeof window === 'undefined') {

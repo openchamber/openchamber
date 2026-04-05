@@ -21,14 +21,14 @@ const IDLE_RESULT: SessionActivityResult = {
 
 /**
  * Determines if a session is actively working.
- * Checks session_status and, as a narrow fallback, only the trailing
- * assistant message when its completion update has not landed yet.
+ * Checks session_status and, only when status is missing, falls back to the
+ * trailing assistant message when its completion update has not landed yet.
  * Returns idle when permissions are pending (permission indicator takes priority).
  */
-export function useSessionActivity(sessionId: string | null | undefined): SessionActivityResult {
-  const status = useSessionStatus(sessionId ?? '');
-  const messages = useSessionMessages(sessionId ?? '');
-  const permissions = useSessionPermissions(sessionId ?? '');
+export function useSessionActivity(sessionId: string | null | undefined, directory?: string): SessionActivityResult {
+  const status = useSessionStatus(sessionId ?? '', directory);
+  const messages = useSessionMessages(sessionId ?? '', directory);
+  const permissions = useSessionPermissions(sessionId ?? '', directory);
 
   return React.useMemo<SessionActivityResult>(() => {
     if (!sessionId) return IDLE_RESULT;
@@ -47,8 +47,11 @@ export function useSessionActivity(sessionId: string | null | undefined): Sessio
       && typeof (lastMessage as { time?: { completed?: number } }).time?.completed !== 'number',
     );
 
-    const statusWorking = phase !== 'idle';
+    const hasAuthoritativeStatus = status !== undefined;
+    const statusWorking = hasAuthoritativeStatus && phase !== 'idle';
     const isWorking = statusWorking || hasPendingAssistant;
+
+    if (hasAuthoritativeStatus && !statusWorking) return IDLE_RESULT;
 
     if (!isWorking) return IDLE_RESULT;
 

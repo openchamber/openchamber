@@ -64,7 +64,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
       [projectRoot],
     ),
   );
-  const { getVisibleAgents } = useConfigStore();
+  const getVisibleAgents = useConfigStore((state) => state.getVisibleAgents);
   const searchFiles = useFileSearchStore((state) => state.searchFiles);
   const debouncedQuery = useDebouncedValue(searchQuery, 180);
   const showHidden = useDirectoryShowHidden();

@@ -1,14 +1,17 @@
 # OpenChamber - AI Agent Reference (verified)
 
 ## Core purpose
+
 OpenChamber provides UI runtimes (web/desktop/VS Code) for interacting with an OpenCode server (local auto-start or remote URL). UI uses HTTP + SSE via `@opencode-ai/sdk`.
 
 ## Runtime architecture (IMPORTANT)
+
 - `Desktop` is a thin Tauri shell that starts the web server sidecar and loads the web UI from `http://127.0.0.1:<port>`.
 - All backend logic lives in `packages/web/server/*` (and `packages/vscode/*` for the VS Code runtime). Desktop Rust is not a feature backend.
 - Tauri is used only for stable native integrations: menu, dialog (open folder), notifications, updater, deep-links.
 
 ## Tech stack (source of truth: `package.json`, resolved: `bun.lock`)
+
 - Runtime/tooling: Bun (`package.json` `packageManager`), Node >=20 (`package.json` `engines`)
 - UI: React, TypeScript, Vite, Tailwind v4
 - State: Zustand (`packages/ui/src/stores/`)
@@ -18,55 +21,78 @@ OpenChamber provides UI runtimes (web/desktop/VS Code) for interacting with an O
 - VS Code: extension + webview (`packages/vscode/`)
 
 ## Monorepo layout
+
 Workspaces are `packages/*` (see `package.json`).
+
 - Shared UI: `packages/ui`
 - Web app + server + CLI: `packages/web`
 - Desktop app (Tauri): `packages/desktop`
 - VS Code extension: `packages/vscode`
 
 ## Documentation map
+
 Before changing any mapped module, read its module documentation first.
 
 ### web
+
 Web runtime and server implementation for OpenChamber.
 
 #### lib
+
 Server-side integration modules used by API routes and runtime services.
 
 ##### quota
+
 Quota provider registry, dispatch, and provider integrations for usage endpoints.
+
 - Module docs: `packages/web/server/lib/quota/DOCUMENTATION.md`
 
 ##### git
+
 Git repository operations for the web server runtime.
+
 - Module docs: `packages/web/server/lib/git/DOCUMENTATION.md`
 
 ##### github
+
 GitHub authentication, OAuth device flow, Octokit client factory, and repository URL parsing.
+
 - Module docs: `packages/web/server/lib/github/DOCUMENTATION.md`
 
 ##### opencode
+
 OpenCode server integration utilities including config management, provider authentication, and UI authentication.
+
 - Module docs: `packages/web/server/lib/opencode/DOCUMENTATION.md`
 
 ##### notifications
+
 Notification message preparation utilities for system notifications, including text truncation and optional summarization.
+
 - Module docs: `packages/web/server/lib/notifications/DOCUMENTATION.md`
 
 ##### terminal
+
 WebSocket protocol utilities for terminal input handling including message normalization, control frame parsing, and rate limiting.
+
 - Module docs: `packages/web/server/lib/terminal/DOCUMENTATION.md`
 
 ##### tts
+
 Server-side text-to-speech services and summarization helpers for `/api/tts/*` endpoints.
+
 - Module docs: `packages/web/server/lib/tts/DOCUMENTATION.md`
 
 ##### skills-catalog
+
 Skills catalog management including discovery, installation, and configuration of agent skill packages.
+
 - Module docs: `packages/web/server/lib/skills-catalog/DOCUMENTATION.md`
 
 ## Build / dev commands (verified)
+
 All scripts are in `package.json`.
+
 - Validate: `bun run type-check`, `bun run lint`
 - Build all: `bun run build`
 - Desktop build: `bun run desktop:build`
@@ -74,6 +100,7 @@ All scripts are in `package.json`.
 - Release smoke build: `bun run release:test` (shell script: `scripts/test-release-build.sh`)
 
 ## Runtime entry points
+
 - Web bootstrap: `packages/web/src/main.tsx`
 - Web server: `packages/web/server/index.js`
 - Web CLI: `packages/web/bin/cli.js` (package bin: `packages/web/package.json`)
@@ -83,6 +110,7 @@ All scripts are in `package.json`.
 - VS Code webview bootstrap: `packages/vscode/webview/main.tsx`
 
 ## OpenCode integration
+
 - UI client wrapper: `packages/ui/src/lib/opencode/client.ts` (imports `@opencode-ai/sdk/v2`)
 - SSE hookup: `packages/ui/src/hooks/useEventStream.ts`
 - Web server embeds/starts OpenCode server: `packages/web/server/index.js` (`createOpencodeServer`)
@@ -90,6 +118,7 @@ All scripts are in `package.json`.
 - External server support: Set `OPENCODE_HOST` (full base URL, e.g. `http://hostname:4096`) or `OPENCODE_PORT`, plus `OPENCODE_SKIP_START=true`, to connect to existing OpenCode instance
 
 ## Key UI patterns (reference files)
+
 - Settings shell: `packages/ui/src/components/views/SettingsView.tsx`
 - Settings shared primitives: `packages/ui/src/components/sections/shared/`
 - Settings sections: `packages/ui/src/components/sections/` (incl `skills/`)
@@ -98,16 +127,19 @@ All scripts are in `package.json`.
 - Terminal UI: `packages/ui/src/components/terminal/` (uses `ghostty-web`)
 
 ## External / system integrations (active)
+
 - Git: `packages/ui/src/lib/gitApi.ts`, `packages/web/server/index.js` (`simple-git`)
 - Terminal PTY: `packages/web/server/index.js` (`bun-pty`/`node-pty`)
 - Skills catalog: `packages/web/server/lib/skills-catalog/`, UI: `packages/ui/src/components/sections/skills/`
 
 ## Agent constraints
+
 - Do not modify `../opencode` (separate repo).
 - Do not run git/GitHub commands unless explicitly asked.
-- Keep baseline green (run `bun run type-check`, `bun run lint`, `bun run build` before finalizing changes).
+- Keep baseline green (run `bun run type-check`, `bun run lint` before finalizing changes).
 
 ## Agent code of conduct
+
 - Prefer the smallest correct change.
 - Preserve working behavior before improving structure.
 - Do not add cleverness where a direct implementation is enough.
@@ -117,6 +149,7 @@ All scripts are in `package.json`.
 - Finish work end-to-end: implementation, verification, and cleanup.
 
 ## Development rules
+
 - Keep diffs tight; avoid drive-by refactors.
 - Follow local precedent; inspect nearby code before introducing new patterns.
 - Backend changes: keep web, desktop, and VS Code behavior consistent when they share contracts.
@@ -132,28 +165,33 @@ All scripts are in `package.json`.
 ## Architecture patterns
 
 ### Thin entrypoints, focused modules
+
 - Keep orchestration entrypoints thin: `index.js`, bridge files, bootstrap files, provider roots.
 - Move route, domain, and runtime logic into focused modules with clear ownership.
 - Prefer dependency injection over hidden module coupling.
 - Add or update module documentation when ownership changes.
 
 ### Strong source of truth
+
 - Prefer deterministic state over heuristics.
 - Use live server/session state for live activity. Do not let historical anomalies masquerade as current execution.
 - If a fallback is necessary, scope it narrowly to the active entity and treat it as temporary.
 - Restore derived UI state from authoritative records. Example: restore model or agent from the latest user message, not assistant-side guesses.
 
 ### Live state vs historical state
+
 - Derive live UI behavior from live state channels, not persisted history.
 - Use historical records to restore context, not to infer that work is still in progress.
 - If live state is delayed, use the narrowest possible transient fallback and clear it as soon as authoritative state arrives.
 
 ### Cross-runtime parity
+
 - If web defines a route or payload contract that shared UI depends on, keep VS Code and desktop parity where applicable.
 - Shared behavior differences must be intentional and visible in code.
 - Do not ship a web-only assumption into shared UI.
 
 ### Partial-failure-safe flows
+
 - Cross-directory and multi-entity operations must tolerate partial failure.
 - Prefer per-item results, rollback paths, or resumable cleanup over all-or-nothing assumptions.
 - Never leave optimistic state or local caches stranded after failure.
@@ -196,6 +234,7 @@ are defined in the `clack-cli-patterns` skill and should not be duplicated here.
 When working on terminal CLI commands, prompts, or output formatting, agents **MUST** study the Clack CLI skill first.
 
 **Before starting terminal CLI work:**
+
 ```
 skill({ name: "clack-cli-patterns" })
 ```
@@ -207,6 +246,7 @@ Scope: terminal CLI only (for example `packages/web/bin/*`). Do not apply this r
 When working on any UI components, styling, or visual changes, agents **MUST** study the theme system skill first.
 
 **Before starting any UI work:**
+
 ```
 skill({ name: "theme-system" })
 ```
@@ -224,6 +264,8 @@ These rules exist because violating them has caused measurable regressions (rend
 - **Update only the fields that changed.** Preserve references for untouched state branches.
 - **Prefer leaf selectors over container selectors.** Subscribe to the smallest stable value that satisfies the component.
 - **Isolate hot consumers.** If a value changes often and only a few components need it, move it to a narrower store or consume it in a memoized child.
+- **Do not subscribe shell/layout components to broad live collections.** If a shell only needs one field, entity, or derived flag, subscribe to that instead of the whole collection.
+- **Treat provider roots as global hot paths.** A top-level provider must not subscribe to high-frequency data unless the feature is actually enabled and the subscription is essential.
 
 ### Zustand referential equality
 
@@ -232,6 +274,7 @@ Zustand skips re-renders when a selector returns the same reference (`Object.is`
 - **Never spread all state fields in an update.** Only create new references for fields that actually changed. A `message.part.delta` event should not clone `session`, `permission`, etc.
 - **Select leaf values, not containers.** `useStore((s) => s.permission[sessionID])` is correct. `useStore((s) => s.permission)` subscribes to every permission change across all sessions.
 - **Preserve references when merging.** If prepending older messages, keep existing message object references. Only add truly new items. Return the original array if nothing was added.
+- **For derived collections, preserve item identity when presentation-relevant fields are unchanged.** Reuse previous item references for unchanged rows/items and move high-frequency live fields to narrow per-item selectors.
 
 ### Store splitting
 
@@ -266,6 +309,8 @@ A single store with N properties means every subscriber re-evaluates on every st
 
 - **Capture send config at queue time.** Queue items must include provider/model/agent/variant snapshot; do not re-resolve from mutable live state at send time.
 - **Keep server-selected attachments sendable.** Preserve server-backed file selections in queue/submit flows and convert them to proper `file://` URLs before sending.
+- **Do not let text input state repaint unrelated chrome.** Typing should not force unrelated controls, menus, indicators, or toolbars to re-render on every keystroke.
+- **Extract slow-changing chrome from hot input paths.** If controls do not depend on the current text value, move them behind memoized boundaries with stable callbacks.
 
 ### Bootstrap resilience
 
@@ -276,6 +321,16 @@ A single store with N properties means every subscriber re-evaluates on every st
 
 - **Never use `await waitForFrames()` for scroll preservation.** Frames of visible scroll jump are unacceptable. Use `useLayoutEffect` to adjust scroll synchronously after React commits DOM — before the browser paints.
 - **Capture scroll state before the state change, restore in layout effect.** The pattern: save `scrollHeight`/`scrollTop` into a ref before triggering the update, consume it in `useLayoutEffect` on the rendered output.
+- **Do not let viewport resizes masquerade as content growth.** Viewport-height changes must not trigger the same scroll compensation logic used for actual content growth.
+- **Disable or narrow native/browser scroll anchoring when custom scroll logic exists.** Browser anchoring and app-managed pinning/follow logic will fight and produce jiggle.
+- **Autosize textareas without transient collapse on growth.** Avoid `height='auto'` shrink/expand cycles on every character when the content only grew; this creates visible layout bounce.
+
+### List ordering and view consistency
+
+- **Do not sort structural lists directly from high-churn live fields.** If live updates are frequent, sorting directly from them causes reorder thrash and wide rerender cascades.
+- **If live recency is required, freeze order during high-frequency updates and apply a one-shot reorder only at an intentional lifecycle edge.** Choose the lifecycle edge explicitly instead of letting every intermediate update reshuffle the UI.
+- **Use one ordering source for all views of the same data.** Different views of the same entities must derive from the same ranked list or rank map; do not let each surface re-derive ordering independently.
+- **Do not mix global snapshots and local live snapshots without an explicit reconciliation policy.** If multiple data sources feed one view, define which fields win and how they merge.
 
 ### Component isolation
 
@@ -295,6 +350,7 @@ A single store with N properties means every subscriber re-evaluates on every st
 - **Pass directory hints when the source of truth isn't available yet.** Newly created sessions aren't in the sync store until SSE delivers them. Pass the known directory as a parameter instead of relying on lookup.
 
 ## Regression-prevention checklist
+
 - When adding fallback logic, ask: can stale persisted data keep this path active forever?
 - When deriving UI state, ask: is this live state, historical state, or inferred state?
 - When adding store fields, ask: who reads this, how often does it change, and should it live elsewhere?
@@ -304,11 +360,13 @@ A single store with N properties means every subscriber re-evaluates on every st
 - When fixing a bug with a heuristic, prefer narrowing the heuristic over widening it.
 
 ## Validation expectations
+
 - Run `bun run type-check`, `bun run lint`, and `bun run build` before finalizing.
 - For hot-path changes, verify behavior under streaming or repeated events, not just static render.
 - For sync or startup changes, verify fresh load, retry/failure, and restart behavior.
 - For session changes, verify create, stream, abort, permission, archive/delete, and revisit flows when relevant.
 
 ## Recent changes
+
 - Releases + high-level changes: `CHANGELOG.md`
 - Recent commits: `git log --oneline` (latest tags: `v1.4.6`, `v1.4.5`)

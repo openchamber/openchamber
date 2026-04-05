@@ -98,6 +98,18 @@ const OPENCHAMBER_VERSION = (() => {
   }
   return 'unknown';
 })();
+
+const isEnvFlagEnabled = (value) => {
+  if (value === true || value === 1) return true;
+  if (typeof value !== 'string') return false;
+  const normalized = value.trim().toLowerCase();
+  return normalized === '1' || normalized === 'true';
+};
+
+const PLAN_MODE_EXPERIMENT_ENABLED =
+  isEnvFlagEnabled(process.env.OPENCODE_EXPERIMENTAL_PLAN_MODE)
+  || isEnvFlagEnabled(process.env.OPENCODE_EXPERIMENTAL);
+
 const fsPromises = fs.promises;
 
 const settingsNormalizationRuntime = createSettingsNormalizationRuntime({
@@ -850,6 +862,7 @@ async function main(options = {}) {
       opencodeWslDistro: resolvedWslDistro || null,
       nodeBinaryResolved: resolvedNodeBinary || null,
       bunBinaryResolved: resolvedBunBinary || null,
+      planModeExperimentalEnabled: PLAN_MODE_EXPERIMENT_ENABLED,
     }),
     uiPassword,
     tunnelAuthController,

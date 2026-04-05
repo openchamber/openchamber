@@ -15,7 +15,7 @@ type Args = {
   homeDirectory: string | null;
   worktreeMetadata: Map<string, WorktreeMetadata>;
   pinnedSessionIds: Set<string>;
-  gitDirectories: Map<string, { status?: { current?: string | null } | null }>;
+  gitBranches: Map<string, string | null>;
   isVSCode: boolean;
 };
 
@@ -196,7 +196,7 @@ export const useSessionGrouping = (args: Args) => {
 
       sortedWorktrees.forEach((meta) => {
         const directory = normalizePath(meta.path) ?? meta.path;
-        const currentBranch = args.gitDirectories.get(directory)?.status?.current?.trim() || null;
+        const currentBranch = args.gitBranches.get(directory)?.trim() || null;
         const metadataBranch = meta.branch?.trim() || null;
         const shouldSyncLabelWithBranch = Boolean(
           currentBranch && metadataBranch && meta.label && normalizeForBranchComparison(meta.label) === normalizeForBranchComparison(metadataBranch),
@@ -234,7 +234,7 @@ export const useSessionGrouping = (args: Args) => {
 
       return groups;
     },
-    [args.homeDirectory, args.worktreeMetadata, args.pinnedSessionIds, args.gitDirectories, args.isVSCode],
+    [args.homeDirectory, args.worktreeMetadata, args.pinnedSessionIds, args.gitBranches, args.isVSCode],
   );
 
   return {

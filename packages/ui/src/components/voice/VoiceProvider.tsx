@@ -1,5 +1,11 @@
 import React from 'react';
 import { useVoiceContext } from '@/hooks/useVoiceContext';
+import { useConfigStore } from '@/stores/useConfigStore';
+
+const VoiceContextBridge = React.memo(function VoiceContextBridge() {
+    useVoiceContext();
+    return null;
+});
 
 /**
  * Provider component that initializes voice context sync.
@@ -13,8 +19,12 @@ import { useVoiceContext } from '@/hooks/useVoiceContext';
  * ```
  */
 export function VoiceProvider({ children }: { children: React.ReactNode }) {
-    // Activate session-to-voice sync
-    useVoiceContext();
-    
-    return <>{children}</>;
+    const voiceModeEnabled = useConfigStore((state) => state.voiceModeEnabled);
+
+    return (
+        <>
+            {voiceModeEnabled ? <VoiceContextBridge /> : null}
+            {children}
+        </>
+    );
 }

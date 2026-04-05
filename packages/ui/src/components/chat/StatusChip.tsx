@@ -11,14 +11,12 @@ interface StatusChipProps {
 }
 
 export const StatusChip: React.FC<StatusChipProps> = ({ onClick, className }) => {
-    const {
-        currentModelId,
-        currentVariant,
-        currentAgentName,
-        getCurrentProvider,
-        getCurrentModelVariants,
-        getVisibleAgents,
-    } = useConfigStore();
+    const currentModelId = useConfigStore((state) => state.currentModelId);
+    const currentVariant = useConfigStore((state) => state.currentVariant);
+    const currentAgentName = useConfigStore((state) => state.currentAgentName);
+    const getCurrentProvider = useConfigStore((state) => state.getCurrentProvider);
+    const getCurrentModelVariants = useConfigStore((state) => state.getCurrentModelVariants);
+    const getVisibleAgents = useConfigStore((state) => state.getVisibleAgents);
     const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
     const sessionAgentName = useContextStore((state) =>
         currentSessionId ? state.getSessionAgentSelection(currentSessionId) : null

@@ -52,7 +52,9 @@ const renderShortcut = (id: string, fallbackCombo: string, overrides: Record<str
 };
 
 export const HelpDialog: React.FC = () => {
-  const { isHelpDialogOpen, setHelpDialogOpen, shortcutOverrides } = useUIStore();
+  const isHelpDialogOpen = useUIStore((state) => state.isHelpDialogOpen);
+  const setHelpDialogOpen = useUIStore((state) => state.setHelpDialogOpen);
+  const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
   const mod = getModifierLabel();
 
   const shortcuts: ShortcutSection[] = [

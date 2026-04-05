@@ -51,26 +51,70 @@ const normalizeDirectoryKey = (value: string): string => {
     return normalized;
 };
 
+const MemoSessionSidebar = React.memo(SessionSidebar);
+const MemoHeader = React.memo(Header);
+const MemoChatView = React.memo(ChatView);
+const MemoPlanView = React.memo(PlanView);
+const MemoGitView = React.memo(GitView);
+const MemoDiffView = React.memo(DiffView);
+const MemoTerminalView = React.memo(TerminalView);
+const MemoFilesView = React.memo(FilesView);
+const MemoRightSidebarTabs = React.memo(RightSidebarTabs);
+
+const DesktopLeftSidebar = React.memo(function DesktopLeftSidebar({
+    isSidebarOpen,
+    isMobile,
+}: {
+    isSidebarOpen: boolean;
+    isMobile: boolean;
+}) {
+    return (
+        <Sidebar isOpen={isSidebarOpen} isMobile={isMobile} className="border-0">
+            <ErrorBoundary>
+                <MemoSessionSidebar />
+            </ErrorBoundary>
+        </Sidebar>
+    );
+});
+
+const DesktopRightPanel = React.memo(function DesktopRightPanel({
+    isRightSidebarOpen,
+    setDesktopRightSidebarActionsHost,
+}: {
+    isRightSidebarOpen: boolean;
+    setDesktopRightSidebarActionsHost: React.Dispatch<React.SetStateAction<HTMLDivElement | null>>;
+}) {
+    return (
+        <RightSidebar
+            isOpen={isRightSidebarOpen}
+            className="border-0"
+            onTopActionsHostChange={setDesktopRightSidebarActionsHost}
+        >
+            <ErrorBoundary>
+                <MemoRightSidebarTabs />
+            </ErrorBoundary>
+        </RightSidebar>
+    );
+});
+
 export const MainLayout: React.FC = () => {
     const RIGHT_SIDEBAR_AUTO_CLOSE_WIDTH = 1140;
     const RIGHT_SIDEBAR_AUTO_OPEN_WIDTH = 1220;
     const BOTTOM_TERMINAL_AUTO_CLOSE_HEIGHT = 640;
     const BOTTOM_TERMINAL_AUTO_OPEN_HEIGHT = 700;
-    const {
-        isSidebarOpen,
-        isRightSidebarOpen,
-        isBottomTerminalOpen,
-        setRightSidebarOpen,
-        setBottomTerminalOpen,
-        activeMainTab,
-        setIsMobile,
-        isSessionSwitcherOpen,
-        isSettingsDialogOpen,
-        setSettingsDialogOpen,
-        isMultiRunLauncherOpen,
-        setMultiRunLauncherOpen,
-        multiRunLauncherPrefillPrompt,
-    } = useUIStore();
+    const isSidebarOpen = useUIStore((state) => state.isSidebarOpen);
+    const isRightSidebarOpen = useUIStore((state) => state.isRightSidebarOpen);
+    const isBottomTerminalOpen = useUIStore((state) => state.isBottomTerminalOpen);
+    const setRightSidebarOpen = useUIStore((state) => state.setRightSidebarOpen);
+    const setBottomTerminalOpen = useUIStore((state) => state.setBottomTerminalOpen);
+    const activeMainTab = useUIStore((state) => state.activeMainTab);
+    const setIsMobile = useUIStore((state) => state.setIsMobile);
+    const isSessionSwitcherOpen = useUIStore((state) => state.isSessionSwitcherOpen);
+    const isSettingsDialogOpen = useUIStore((state) => state.isSettingsDialogOpen);
+    const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
+    const isMultiRunLauncherOpen = useUIStore((state) => state.isMultiRunLauncherOpen);
+    const setMultiRunLauncherOpen = useUIStore((state) => state.setMultiRunLauncherOpen);
+    const multiRunLauncherPrefillPrompt = useUIStore((state) => state.multiRunLauncherPrefillPrompt);
 
     const { isMobile } = useDeviceInfo();
     const isDesktopShellRuntime = React.useMemo(() => isDesktopShell(), []);
@@ -948,7 +992,7 @@ export const MainLayout: React.FC = () => {
                                     </div>
                                 </div>
                                 <BottomTerminalDock isOpen={isBottomTerminalOpen} isMobile={isMobile}>
-                                    <ErrorBoundary><TerminalView /></ErrorBoundary>
+                                    {isBottomTerminalOpen ? <ErrorBoundary><TerminalView /></ErrorBoundary> : null}
                                 </BottomTerminalDock>
                             </div>
                             <RightSidebar

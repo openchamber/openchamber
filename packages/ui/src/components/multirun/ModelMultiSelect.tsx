@@ -115,7 +115,8 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
   maxModels,
   addButtonClassName,
 }) => {
-  const { providers, modelsMetadata } = useConfigStore();
+  const providers = useConfigStore((state) => state.providers);
+  const modelsMetadata = useConfigStore((state) => state.modelsMetadata);
   const { favoriteModelsList, recentModelsList } = useModelLists();
   const [isOpen, setIsOpen] = React.useState(false);
   const [searchQuery, setSearchQuery] = React.useState('');

@@ -66,6 +66,7 @@ type Props = {
   setRenameFolderDraft: React.Dispatch<React.SetStateAction<string>>;
   setRenamingFolderId: React.Dispatch<React.SetStateAction<string | null>>;
   pinnedSessionIds: Set<string>;
+  sessionOrderIndex: Map<string, number>;
   prVisualStateByDirectoryBranch: Map<string, {
     visualState: 'draft' | 'open' | 'blocked' | 'merged' | 'closed';
     number: number;
@@ -130,11 +131,23 @@ export function SessionGroupSection(props: Props): React.ReactNode {
     setRenameFolderDraft,
     setRenamingFolderId,
     pinnedSessionIds,
+    sessionOrderIndex,
     prVisualStateByDirectoryBranch,
     onToggleCollapsedGroup,
     dragHandleProps,
     compactBodyPadding = false,
   } = props;
+
+  const compareSessionNodes = React.useCallback((a: SessionNode, b: SessionNode) => {
+    const aIndex = sessionOrderIndex.get(a.session.id);
+    const bIndex = sessionOrderIndex.get(b.session.id);
+    if (aIndex !== undefined || bIndex !== undefined) {
+      if (aIndex === undefined) return 1;
+      if (bIndex === undefined) return -1;
+      if (aIndex !== bIndex) return aIndex - bIndex;
+    }
+    return compareSessionsByPinnedAndTime(a.session, b.session, pinnedSessionIds);
+  }, [pinnedSessionIds, sessionOrderIndex]);
 
   const searchData = hasSessionSearchQuery ? groupSearchDataByGroup.get(group) : null;
   const displayMode = useSessionDisplayStore((state) => state.displayMode);
@@ -144,7 +157,11 @@ export function SessionGroupSection(props: Props): React.ReactNode {
   const maxVisible = hideDirectoryControls ? 10 : 5;
   const groupMatchesSearch = hasSessionSearchQuery ? searchData?.groupMatches === true : false;
   const shouldFilterGroupContents = hasSessionSearchQuery;
-  const sourceGroupNodes = shouldFilterGroupContents ? (searchData?.filteredNodes ?? []) : group.sessions;
+  const sourceGroupNodes = React.useMemo(
+    () => [...(shouldFilterGroupContents ? (searchData?.filteredNodes ?? []) : group.sessions)]
+      .sort(compareSessionNodes),
+    [compareSessionNodes, group.sessions, searchData?.filteredNodes, shouldFilterGroupContents],
+  );
   const folderScopeKey = group.folderScopeKey ?? normalizePath(group.directory ?? null);
   const scopeFolders = folderScopeKey ? getFoldersForScope(folderScopeKey) : [];
 
@@ -163,7 +180,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
     const nodes = folder.sessionIds
       .map((sid) => nodeBySessionId.get(sid))
       .filter((n): n is SessionNode => Boolean(n))
-      .sort((a, b) => compareSessionsByPinnedAndTime(a.session, b.session, pinnedSessionIds));
+      .sort(compareSessionNodes);
     return { folder, nodes };
   });
 

@@ -5,6 +5,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { defaultCodeDark, defaultCodeLight } from '@/lib/codeTheme';
 import { MessageFreshnessDetector } from '@/lib/messageFreshness';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useContextStore } from '@/stores/contextStore';
 import { useStreamingStore } from '@/sync/streaming';
@@ -214,6 +215,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     const showStickyInlineHoverRow = isUser && !isMobile && stickyUserHeader && !useExternalUserActionsRow;
 
     const sessionId = message.info.sessionID;
+    const planModeEnabled = useFeatureFlagsStore((state) => state.planModeEnabled);
 
     // Keep non-active-turn rows detached from context-store churn.
     const { currentContextAgent, savedSessionAgentSelection } = useContextStore(
@@ -228,8 +230,8 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
             return message.parts;
         }
 
-        return normalizeUserDisplayParts(message.parts);
-    }, [isUser, message.parts]);
+        return normalizeUserDisplayParts(message.parts, { planModeEnabled });
+    }, [isUser, message.parts, planModeEnabled]);
 
     const previousUserMetadata = React.useMemo(() => {
         if (isUser || !previousMessage) {
@@ -269,6 +271,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     }, [isUser, previousMessage]);
 
     const previousIsModeSwitchMessage = React.useMemo(() => {
+        if (!planModeEnabled) return false;
         if (isUser || !previousMessage) return false;
         const parts = Array.isArray(previousMessage.parts) ? previousMessage.parts : [];
         for (let i = 0; i < parts.length; i++) {
@@ -281,7 +284,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
             }
         }
         return false;
-    }, [isUser, previousMessage]);
+    }, [isUser, planModeEnabled, previousMessage]);
 
     const agentName = React.useMemo(() => {
         if (isUser) return undefined;

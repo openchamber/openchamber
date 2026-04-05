@@ -81,15 +81,16 @@ const buildGitHubAttachmentPart = (text: string): Part | null => {
     return null;
 };
 
-const shouldKeepSyntheticUserText = (text: string): boolean => {
+const shouldKeepSyntheticUserText = (text: string, planModeEnabled: boolean): boolean => {
     const trimmed = text.trim();
-    if (trimmed.startsWith('User has requested to enter plan mode')) return true;
-    if (trimmed.startsWith('The plan at ')) return true;
+    if (planModeEnabled && trimmed.startsWith('User has requested to enter plan mode')) return true;
+    if (planModeEnabled && trimmed.startsWith('The plan at ')) return true;
     if (trimmed.startsWith('The following tool was executed by the user')) return true;
     return false;
 };
 
-export const normalizeUserDisplayParts = (parts: Part[]): Part[] => {
+export const normalizeUserDisplayParts = (parts: Part[], options?: { planModeEnabled?: boolean }): Part[] => {
+    const planModeEnabled = options?.planModeEnabled === true;
     return parts
         .filter((part) => {
             const synthetic = (part as { synthetic?: boolean }).synthetic === true;
@@ -101,7 +102,7 @@ export const normalizeUserDisplayParts = (parts: Part[]): Part[] => {
             }
 
             const normalizedText = text.trimStart();
-            return shouldKeepSyntheticUserText(text)
+            return shouldKeepSyntheticUserText(text, planModeEnabled)
                 || normalizedText.startsWith(GITHUB_ISSUE_CONTEXT_PREFIX)
                 || normalizedText.startsWith(GITHUB_PR_CONTEXT_PREFIX);
         })

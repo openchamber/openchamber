@@ -16,7 +16,8 @@ interface SidebarProps {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, className }) => {
-    const { sidebarWidth, setSidebarWidth } = useUIStore();
+    const sidebarWidth = useUIStore((state) => state.sidebarWidth);
+    const setSidebarWidth = useUIStore((state) => state.setSidebarWidth);
     const isDesktopApp = React.useMemo(() => isDesktopShell(), []);
     const [isResizing, setIsResizing] = React.useState(false);
     const startXRef = React.useRef(0);

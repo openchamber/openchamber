@@ -43,8 +43,6 @@ type Props = {
   collapsedProjects: Set<string>;
   hideDirectoryControls: boolean;
   projectRepoStatus: Map<string, boolean | null>;
-  hoveredProjectId: string | null;
-  setHoveredProjectId: (id: string | null) => void;
   isDesktopShellRuntime: boolean;
   stuckProjectHeaders: Set<string>;
   mobileVariant: boolean;
@@ -144,7 +142,6 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
                 const projectDescription = formatPathForDisplay(project.normalizedPath, props.homeDirectory);
                 const isCollapsed = props.collapsedProjects.has(projectKey);
                 const isActiveProject = projectKey === props.activeProjectId;
-                const isHovered = props.hoveredProjectId === projectKey;
                 const isRepo = props.projectRepoStatus.get(projectKey);
                 const orderedGroups = props.getOrderedGroups(projectKey, section.groups);
                 const rootGroup = orderedGroups.find((group) => group.isMain) ?? null;
@@ -164,14 +161,12 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
                     projectIconBackground={project.iconBackground}
                     isCollapsed={isCollapsed}
                     isActiveProject={isActiveProject}
-                    isHovered={isHovered}
                     isRepo={Boolean(isRepo)}
                     isDesktopShell={props.isDesktopShellRuntime}
                     isStuck={props.stuckProjectHeaders.has(projectKey)}
                     hideDirectoryControls={props.hideDirectoryControls}
                     mobileVariant={props.mobileVariant}
                     onToggle={() => props.toggleProject(projectKey)}
-                    onHoverChange={(hovered) => props.setHoveredProjectId(hovered ? projectKey : null)}
                     onNewSession={() => {
                       if (projectKey !== props.activeProjectId) props.setActiveProjectIdOnly(projectKey);
                       props.setActiveMainTab('chat');

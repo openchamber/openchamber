@@ -13,12 +13,20 @@ const cleanOutput = (output: string) => {
 
 export const hasLspDiagnostics = (output: string): boolean => {
     if (!output) return false;
-    return output.includes('<file_diagnostics>') || output.includes('This file has errors') || output.includes('please fix');
+    return output.includes('<diagnostics')
+        || output.includes('<file_diagnostics>')
+        || output.includes('LSP errors detected')
+        || output.includes('This file has errors');
 };
 
 const stripLspDiagnostics = (output: string): string => {
     if (!output) return '';
-    return output.replace(/This file has errors.*?<\/file_diagnostics>/s, '').trim();
+    return output
+        .replace(/\n{0,2}LSP errors detected[\s\S]*?<diagnostics[^>]*>[\s\S]*?<\/diagnostics>/g, '')
+        .replace(/\n{0,2}This file has errors[\s\S]*?<\/file_diagnostics>/g, '')
+        .replace(/<diagnostics[^>]*>[\s\S]*?<\/diagnostics>/g, '')
+        .replace(/<file_diagnostics>[\s\S]*?<\/file_diagnostics>/g, '')
+        .trim();
 };
 
 const formatInputForDisplay = (input: Record<string, unknown>, toolName?: string) => {
@@ -61,11 +69,11 @@ export const tryParseJsonOutput = (output: string): { data: unknown; isJson: boo
 export const formatEditOutput = (output: string, toolName: string, metadata?: Record<string, unknown>): string => {
     let cleaned = cleanOutput(output);
 
-    if ((toolName === 'edit' || toolName === 'multiedit') && hasLspDiagnostics(cleaned)) {
+    if ((toolName === 'edit' || toolName === 'multiedit' || toolName === 'write' || toolName === 'apply_patch') && hasLspDiagnostics(cleaned)) {
         cleaned = stripLspDiagnostics(cleaned);
     }
 
-    if ((toolName === 'edit' || toolName === 'multiedit') && cleaned.trim().length === 0 && metadata?.diff) {
+    if ((toolName === 'edit' || toolName === 'multiedit' || toolName === 'apply_patch') && cleaned.trim().length === 0 && metadata?.diff) {
 
         const diff = metadata.diff;
         return typeof diff === 'string' ? diff : String(diff);

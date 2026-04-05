@@ -14,7 +14,7 @@ export interface ModelListItem {
 }
 
 export const useModelLists = () => {
-  const { providers } = useConfigStore();
+  const providers = useConfigStore((state) => state.providers);
   const favoriteModels = useUIStore((state) => state.favoriteModels);
   const recentModels = useUIStore((state) => state.recentModels);
   const hiddenModels = useUIStore((state) => state.hiddenModels);

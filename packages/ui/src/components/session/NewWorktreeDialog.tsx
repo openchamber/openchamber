@@ -52,7 +52,7 @@ import { generateBranchSlug } from '@/lib/git/branchNameGenerator';
 import { opencodeClient } from '@/lib/opencode/client';
 import { rankBranchesForQuery } from '@/lib/worktrees/branchSearch';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import { useGitBranches, useGitStore } from '@/stores/useGitStore';
+import { useGitBranches, useGitStore, useGitLoadingBranches } from '@/stores/useGitStore';
 import { GitHubIntegrationDialog } from './GitHubIntegrationDialog';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
@@ -237,7 +237,7 @@ export function NewWorktreeDialog({
   
   // Use cached branches from Git store (instant if already fetched)
   const branches = useGitBranches(projectDirectory);
-  const isLoadingBranches = useGitStore((state) => state.isLoadingBranches);
+  const isLoadingBranches = useGitLoadingBranches(projectDirectory);
   const fetchBranches = useGitStore((state) => state.fetchBranches);
 
   // Compute local and remote branch lists (same pattern as GitView)

@@ -34,6 +34,8 @@ import {
 } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { useGlobalSessionStatus, useSession, useSessionPermissions } from '@/sync/sync-context';
+import { useViewportStore } from '@/sync/viewport-store';
 import { DraggableSessionRow } from './sessionFolderDnd';
 import type { SessionNode, SessionSummaryMeta } from './types';
 import { formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText, resolveSessionDiffStats } from './utils';
@@ -60,15 +62,12 @@ type Props = {
   projectId?: string | null;
   archivedBucket?: boolean;
   directoryStatus: Map<string, 'unknown' | 'exists' | 'missing'>;
-  sessionMemoryState: Map<string, { isZombie?: boolean }>;
   currentSessionId: string | null;
   pinnedSessionIds: Set<string>;
   expandedParents: Set<string>;
   hasSessionSearchQuery: boolean;
   normalizedSessionSearchQuery: string;
   notifyOnSubtasks: boolean;
-  sessionStatus?: Map<string, { type?: string }>;
-  permissions: Map<string, unknown[]>;
   editingId: string | null;
   setEditingId: (id: string | null) => void;
   editTitle: string;
@@ -99,7 +98,59 @@ type Props = {
   renderContext?: 'project' | 'recent';
 };
 
-export function SessionNodeItem(props: Props): React.ReactNode {
+const getNodeChildSignature = (node: SessionNode): string => {
+  if (node.children.length === 0) {
+    return '';
+  }
+
+  return node.children
+    .map((child) => `${child.session.id}:${child.children.length}`)
+    .join('|');
+};
+
+const areEqual = (prev: Props, next: Props): boolean => {
+  const prevSession = prev.node.session;
+  const nextSession = next.node.session;
+  const prevSessionId = prevSession.id;
+  const nextSessionId = nextSession.id;
+
+  if (prevSessionId !== nextSessionId) return false;
+  if (prev.node.session !== next.node.session) return false;
+  if (getNodeChildSignature(prev.node) !== getNodeChildSignature(next.node)) return false;
+  if (prev.depth !== next.depth) return false;
+  if (prev.groupDirectory !== next.groupDirectory) return false;
+  if (prev.projectId !== next.projectId) return false;
+  if (prev.archivedBucket !== next.archivedBucket) return false;
+  if ((prev.currentSessionId === prevSessionId) !== (next.currentSessionId === nextSessionId)) return false;
+  if (prev.pinnedSessionIds.has(prevSessionId) !== next.pinnedSessionIds.has(nextSessionId)) return false;
+  if (prev.expandedParents.has(prevSessionId) !== next.expandedParents.has(nextSessionId)) return false;
+  if (prev.hasSessionSearchQuery !== next.hasSessionSearchQuery) return false;
+  if (prev.normalizedSessionSearchQuery !== next.normalizedSessionSearchQuery) return false;
+  if (prev.notifyOnSubtasks !== next.notifyOnSubtasks) return false;
+  if ((prev.editingId === prevSessionId) !== (next.editingId === nextSessionId)) return false;
+  if (prev.editTitle !== next.editTitle && ((prev.editingId === prevSessionId) || (next.editingId === nextSessionId))) return false;
+  if ((prev.copiedSessionId === prevSessionId) !== (next.copiedSessionId === nextSessionId)) return false;
+
+  const prevMenuKey = `${prev.renderContext ?? 'project'}:${prev.archivedBucket ? 'archived' : 'active'}:${prevSessionId}`;
+  const nextMenuKey = `${next.renderContext ?? 'project'}:${next.archivedBucket ? 'archived' : 'active'}:${nextSessionId}`;
+  if ((prev.openSidebarMenuKey === prevMenuKey) !== (next.openSidebarMenuKey === nextMenuKey)) return false;
+
+  const prevDirectory = normalizePath((prevSession as Session & { directory?: string | null }).directory ?? null)
+    ?? normalizePath(prev.groupDirectory ?? null);
+  const nextDirectory = normalizePath((nextSession as Session & { directory?: string | null }).directory ?? null)
+    ?? normalizePath(next.groupDirectory ?? null);
+  if (prevDirectory !== nextDirectory) return false;
+  if ((prevDirectory ? prev.directoryStatus.get(prevDirectory) : null) !== (nextDirectory ? next.directoryStatus.get(nextDirectory) : null)) return false;
+
+  if ((prev.secondaryMeta?.projectLabel ?? null) !== (next.secondaryMeta?.projectLabel ?? null)) return false;
+  if ((prev.secondaryMeta?.branchLabel ?? null) !== (next.secondaryMeta?.branchLabel ?? null)) return false;
+  if (prev.mobileVariant !== next.mobileVariant) return false;
+  if ((prev.renderContext ?? 'project') !== (next.renderContext ?? 'project')) return false;
+
+  return true;
+};
+
+function SessionNodeItemComponent(props: Props): React.ReactNode {
   const {
     node,
     depth = 0,
@@ -107,15 +158,12 @@ export function SessionNodeItem(props: Props): React.ReactNode {
     projectId,
     archivedBucket = false,
     directoryStatus,
-    sessionMemoryState,
     currentSessionId,
     pinnedSessionIds,
     expandedParents,
     hasSessionSearchQuery,
     normalizedSessionSearchQuery,
     notifyOnSubtasks,
-    sessionStatus,
-    permissions,
     editingId,
     setEditingId,
     editTitle,
@@ -163,24 +211,30 @@ export function SessionNodeItem(props: Props): React.ReactNode {
   const suppressNextSelectRef = React.useRef(false);
 
   const session = node.session;
+  const liveSession = useSession(session.id);
+  const resolvedSession = liveSession ?? session;
   const menuInstanceKey = `${renderContext}:${archivedBucket ? 'archived' : 'active'}:${session.id}`;
   const sessionDirectory =
     normalizePath((session as Session & { directory?: string | null }).directory ?? null)
     ?? normalizePath(groupDirectory ?? null);
+  const isZombie = useViewportStore(
+    React.useCallback((state) => Boolean(state.sessionMemoryState.get(session.id)?.isZombie), [session.id]),
+  );
+  const sessionStatus = useGlobalSessionStatus(session.id);
+  const sessionPermissions = useSessionPermissions(session.id, sessionDirectory ?? undefined);
   const directoryState = sessionDirectory ? directoryStatus.get(sessionDirectory) : null;
   const isMissingDirectory = directoryState === 'missing';
-  const memoryState = sessionMemoryState.get(session.id);
   const isActive = currentSessionId === session.id;
-  const sessionTitle = session.title || 'Untitled Session';
+  const sessionTitle = resolvedSession.title || 'Untitled Session';
   const hasChildren = node.children.length > 0;
   const isPinnedSession = pinnedSessionIds.has(session.id);
   const isExpanded = hasSessionSearchQuery ? true : expandedParents.has(session.id);
-  const isSubtaskSession = Boolean((session as Session & { parentID?: string | null }).parentID);
+  const isSubtaskSession = Boolean((resolvedSession as Session & { parentID?: string | null }).parentID);
   const unseenCount = useSessionUnseenCount(session.id);
   const needsAttention = unseenCount > 0 && (!isSubtaskSession || notifyOnSubtasks);
-  const sessionSummary = session.summary as SessionSummaryMeta | undefined;
+  const sessionSummary = resolvedSession.summary as SessionSummaryMeta | undefined;
   const sessionDiffStats = resolveSessionDiffStats(sessionSummary);
-  const sessionTimestamp = session.time?.updated || session.time?.created || Date.now();
+  const sessionTimestamp = resolvedSession.time?.updated || resolvedSession.time?.created || Date.now();
   const sessionUpdatedLabel = formatSessionDateLabel(sessionTimestamp);
   const sessionCompactUpdatedLabel = formatSessionCompactDateLabel(sessionTimestamp);
   const isMenuOpen = openSidebarMenuKey === menuInstanceKey;
@@ -236,9 +290,9 @@ export function SessionNodeItem(props: Props): React.ReactNode {
     );
   }
 
-  const statusType = sessionStatus?.get(session.id)?.type ?? 'idle';
+  const statusType = sessionStatus?.type ?? 'idle';
   const isStreaming = statusType === 'busy' || statusType === 'retry';
-  const pendingPermissionCount = permissions.get(session.id)?.length ?? 0;
+  const pendingPermissionCount = sessionPermissions.length;
   const showUnreadStatus = !isStreaming && needsAttention && !isActive;
   const showStatusMarker = isStreaming || showUnreadStatus;
   const statusMarkerContent = isStreaming
@@ -296,7 +350,7 @@ export function SessionNodeItem(props: Props): React.ReactNode {
     </span>
   ) : null;
 
-  const streamingIndicator = memoryState?.isZombie
+  const streamingIndicator = isZombie
     ? <RiErrorWarningLine className="h-4 w-4 text-status-warning" />
     : null;
 
@@ -338,14 +392,14 @@ export function SessionNodeItem(props: Props): React.ReactNode {
         {isPinnedSession ? <RiUnpinLine className="mr-1 h-4 w-4" /> : <RiPushpinLine className="mr-1 h-4 w-4" />}
         {isPinnedSession ? 'Unpin session' : 'Pin session'}
       </DropdownMenuItem>
-      {!session.share ? (
-        <DropdownMenuItem onClick={() => handleShareSession(session)} className="[&>svg]:mr-1">
+      {!resolvedSession.share ? (
+        <DropdownMenuItem onClick={() => handleShareSession(resolvedSession)} className="[&>svg]:mr-1">
           <RiShare2Line className="mr-1 h-4 w-4" />
           Share
         </DropdownMenuItem>
       ) : (
         <>
-          <DropdownMenuItem onClick={() => { if (session.share?.url) handleCopyShareUrl(session.share.url, session.id); }} className="[&>svg]:mr-1">
+          <DropdownMenuItem onClick={() => { if (resolvedSession.share?.url) handleCopyShareUrl(resolvedSession.share.url, session.id); }} className="[&>svg]:mr-1">
             {copiedSessionId === session.id ? <><RiCheckLine className="mr-1 h-4 w-4" style={{ color: 'var(--status-success)' }} />Copied</> : <><RiFileCopyLine className="mr-1 h-4 w-4" />Copy link</>}
           </DropdownMenuItem>
           <DropdownMenuItem onClick={() => handleUnshareSession(session.id)} className="[&>svg]:mr-1">
@@ -601,3 +655,5 @@ export function SessionNodeItem(props: Props): React.ReactNode {
     </React.Fragment>
   );
 }
+
+export const SessionNodeItem = React.memo(SessionNodeItemComponent, areEqual);

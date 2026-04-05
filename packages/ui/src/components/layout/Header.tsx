@@ -21,14 +21,15 @@ import { DiffIcon } from '@/components/icons/DiffIcon';
 import { useUIStore, type MainTab } from '@/stores/useUIStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useSessions, useSessionMessageRecords } from '@/sync/sync-context';
+import { useSession, useSessionMessageRecords } from '@/sync/sync-context';
 import { getAllSyncSessions } from '@/sync/sync-refs';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
-import { useGitStore } from '@/stores/useGitStore';
-import { useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
+import { useGitBranchLabel } from '@/stores/useGitStore';
+import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
+import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
@@ -57,7 +58,7 @@ import {
 } from '@/components/ui/collapsible';
 import { RiArrowDownSLine, RiArrowRightSLine } from '@remixicon/react';
 import type { UsageWindow } from '@/types';
-import type { GitHubAuthStatus, GitHubPullRequestStatus } from '@/lib/api/types';
+import type { GitHubAuthStatus } from '@/lib/api/types';
 import type { SessionContextUsage } from '@/stores/types/sessionTypes';
 import { DesktopHostSwitcherDialog } from '@/components/desktop/DesktopHostSwitcher';
 import { OpenInAppButton } from '@/components/desktop/OpenInAppButton';
@@ -65,6 +66,453 @@ import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
 import { isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
 import { desktopHostsGet, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
 import { resolveSessionDiffStats } from '@/components/session/sidebar/utils';
+import type { Session } from '@opencode-ai/sdk/v2/client';
+
+const DESKTOP_HEADER_ICON_BUTTON_CLASS = 'app-region-no-drag inline-flex h-8 w-8 items-center justify-center gap-2 rounded-md typography-ui-label font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-50 hover:bg-interactive-hover transition-colors';
+const MOBILE_HEADER_ICON_BUTTON_CLASS = 'app-region-no-drag inline-flex h-9 w-9 items-center justify-center gap-2 p-2 rounded-md typography-ui-label font-medium text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-50 hover:text-foreground hover:bg-interactive-hover transition-colors';
+
+type HeaderIconActionButtonProps = {
+  visible?: boolean;
+  title: string;
+  ariaLabel: string;
+  onClick: () => void;
+  className?: string;
+  Icon: RemixiconComponentType;
+  iconClassName?: string;
+};
+
+const HeaderIconActionButton = React.memo(function HeaderIconActionButton({
+  visible = true,
+  title,
+  ariaLabel,
+  onClick,
+  className,
+  Icon,
+  iconClassName,
+}: HeaderIconActionButtonProps) {
+  if (!visible) {
+    return null;
+  }
+
+  return (
+    <Tooltip delayDuration={500}>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          onClick={onClick}
+          aria-label={ariaLabel}
+          className={className ?? DESKTOP_HEADER_ICON_BUTTON_CLASS}
+        >
+          <Icon className={iconClassName ?? 'h-[18px] w-[18px]'} />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>
+        <p>{title}</p>
+      </TooltipContent>
+    </Tooltip>
+  );
+});
+
+type DesktopGitHubControlProps = {
+  isMobile: boolean;
+  githubAuthStatus: GitHubAuthStatus | null;
+  githubAccounts: Array<NonNullable<GitHubAuthStatus['accounts']>[number]>;
+  githubAvatarUrl: string | null;
+  githubLogin: string | null;
+  isSwitchingGitHubAccount: boolean;
+  handleGitHubAccountSwitch: (accountId: string) => Promise<void>;
+};
+
+const DesktopGitHubControl = React.memo(function DesktopGitHubControl({
+  isMobile,
+  githubAuthStatus,
+  githubAccounts,
+  githubAvatarUrl,
+  githubLogin,
+  isSwitchingGitHubAccount,
+  handleGitHubAccountSwitch,
+}: DesktopGitHubControlProps) {
+  if (!githubAuthStatus?.connected || isMobile) {
+    return null;
+  }
+
+  if (githubAccounts.length > 1) {
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            className={cn(
+              DESKTOP_HEADER_ICON_BUTTON_CLASS,
+              'h-7 w-7 overflow-hidden rounded-full border border-border/60 bg-muted/80 p-0'
+            )}
+            title={githubLogin ? `GitHub: ${githubLogin}` : 'GitHub connected'}
+            disabled={isSwitchingGitHubAccount}
+          >
+            {githubAvatarUrl ? (
+              <img
+                src={githubAvatarUrl}
+                alt={githubLogin ? `${githubLogin} avatar` : 'GitHub avatar'}
+                className="h-full w-full object-cover"
+                loading="lazy"
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <RiGithubFill className="h-3.5 w-3.5 text-foreground" />
+            )}
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-64">
+          <DropdownMenuLabel className="typography-ui-header font-semibold text-foreground">
+            GitHub Accounts
+          </DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          {githubAccounts.map((account) => {
+            const accountUser = account.user;
+            const isCurrent = Boolean(account.current);
+            return (
+              <DropdownMenuItem
+                key={account.id}
+                className="gap-2"
+                disabled={isCurrent || isSwitchingGitHubAccount}
+                onSelect={() => {
+                  if (!isCurrent) {
+                    void handleGitHubAccountSwitch(account.id);
+                  }
+                }}
+              >
+                {accountUser?.avatarUrl ? (
+                  <img
+                    src={accountUser.avatarUrl}
+                    alt={accountUser.login ? `${accountUser.login} avatar` : 'GitHub avatar'}
+                    className="h-6 w-6 rounded-full border border-border/60 bg-muted object-cover"
+                    loading="lazy"
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <div className="flex h-6 w-6 items-center justify-center rounded-full border border-border/60 bg-muted">
+                    <RiGithubFill className="h-3 w-3 text-muted-foreground" />
+                  </div>
+                )}
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span className="truncate typography-ui-label text-foreground">
+                    {accountUser?.name?.trim() || accountUser?.login || 'GitHub'}
+                  </span>
+                  {accountUser?.login ? (
+                    <span className="truncate typography-micro font-mono text-muted-foreground">
+                      {accountUser.login}
+                    </span>
+                  ) : null}
+                </span>
+                {isCurrent ? <RiCheckLine className="h-4 w-4 text-primary" /> : null}
+              </DropdownMenuItem>
+            );
+          })}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
+  }
+
+  return (
+    <div
+      className="app-region-no-drag flex h-7 w-7 items-center justify-center overflow-hidden rounded-full border border-border/60 bg-muted/80"
+      title={githubLogin ? `GitHub: ${githubLogin}` : 'GitHub connected'}
+    >
+      {githubAvatarUrl ? (
+        <img
+          src={githubAvatarUrl}
+          alt={githubLogin ? `${githubLogin} avatar` : 'GitHub avatar'}
+          className="h-full w-full object-cover"
+          loading="lazy"
+          referrerPolicy="no-referrer"
+        />
+      ) : (
+        <RiGithubFill className="h-3.5 w-3.5 text-foreground" />
+      )}
+    </div>
+  );
+});
+
+type DesktopServicesMenuProps = {
+  isDesktopApp: boolean;
+  currentInstanceLabel: string;
+  compactCurrentInstanceLabel: string;
+  isDesktopServicesOpen: boolean;
+  setIsDesktopServicesOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  refreshCurrentInstanceLabel: () => Promise<void>;
+  desktopServicesTab: 'instance' | 'usage' | 'mcp';
+  setDesktopServicesTab: React.Dispatch<React.SetStateAction<'instance' | 'usage' | 'mcp'>>;
+  quotaResultsLength: number;
+  fetchAllQuotas: () => Promise<unknown>;
+  servicesTabItems: SortableTabsStripItem[];
+  quotaLastUpdated: number | null;
+  quotaDisplayMode: 'usage' | 'remaining';
+  quotaDisplayTabItems: SortableTabsStripItem[];
+  handleDisplayModeChange: (mode: 'usage' | 'remaining') => Promise<void>;
+  handleUsageRefresh: () => void;
+  isQuotaLoading: boolean;
+  isUsageRefreshSpinning: boolean;
+  hasRateLimits: boolean;
+  rateLimitGroups: RateLimitGroup[];
+  expandedFamilies: Record<string, string[]>;
+  toggleFamilyExpanded: (providerId: string, familyId: string) => void;
+  shortcutLabel: (actionId: string) => string;
+};
+
+const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
+  isDesktopApp,
+  currentInstanceLabel,
+  compactCurrentInstanceLabel,
+  isDesktopServicesOpen,
+  setIsDesktopServicesOpen,
+  refreshCurrentInstanceLabel,
+  desktopServicesTab,
+  setDesktopServicesTab,
+  quotaResultsLength,
+  fetchAllQuotas,
+  servicesTabItems,
+  quotaLastUpdated,
+  quotaDisplayMode,
+  quotaDisplayTabItems,
+  handleDisplayModeChange,
+  handleUsageRefresh,
+  isQuotaLoading,
+  isUsageRefreshSpinning,
+  hasRateLimits,
+  rateLimitGroups,
+  expandedFamilies,
+  toggleFamilyExpanded,
+  shortcutLabel,
+}: DesktopServicesMenuProps) {
+  return (
+    <DropdownMenu
+      open={isDesktopServicesOpen}
+      onOpenChange={(open) => {
+        setIsDesktopServicesOpen(open);
+        if (open) {
+          void refreshCurrentInstanceLabel();
+          if (desktopServicesTab === 'usage' && quotaResultsLength === 0) {
+            void fetchAllQuotas();
+          }
+        }
+      }}
+    >
+      <Tooltip delayDuration={500}>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              aria-label={isDesktopApp
+                ? `Open instance, usage and MCP (current: ${currentInstanceLabel})`
+                : 'Open services, usage and MCP'}
+              className={cn(
+                DESKTOP_HEADER_ICON_BUTTON_CLASS,
+                isDesktopApp ? 'w-auto max-w-[14rem] justify-start gap-1.5 px-2.5' : 'h-8 w-8'
+              )}
+            >
+              <RiStackLine className="h-[18px] w-[18px]" />
+              {isDesktopApp ? (
+                <span className="truncate typography-ui-label font-medium text-foreground">{compactCurrentInstanceLabel}</span>
+              ) : null}
+            </button>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent>
+          <p>
+            {isDesktopApp ? `Current instance: ${currentInstanceLabel}` : 'Services'} ({shortcutLabel('toggle_services_menu')}; next tab {shortcutLabel('cycle_services_tab')})
+          </p>
+        </TooltipContent>
+      </Tooltip>
+      <DropdownMenuContent
+        align="end"
+        className="w-[min(27rem,calc(100vw-2rem))] max-h-[75vh] overflow-y-auto bg-[var(--surface-elevated)] p-0"
+      >
+        <div className="sticky top-0 z-20 px-2 pt-1.5 pb-px">
+          <div className="h-9">
+            <SortableTabsStrip
+              items={servicesTabItems}
+              activeId={desktopServicesTab}
+              onSelect={(tabID) => {
+                const value = tabID as 'instance' | 'usage' | 'mcp';
+                setDesktopServicesTab(value);
+                if (value === 'usage' && quotaResultsLength === 0) {
+                  void fetchAllQuotas();
+                }
+              }}
+              layoutMode="fit"
+              variant="active-pill"
+              activePillInsetClassName="gap-0.5 px-px py-0"
+              activePillButtonClassName="h-8"
+              className="h-full"
+            />
+          </div>
+        </div>
+
+        {isDesktopApp && desktopServicesTab === 'instance' ? (
+          <DesktopHostSwitcherDialog
+            embedded
+            open={isDesktopServicesOpen && desktopServicesTab === 'instance'}
+            onOpenChange={() => {}}
+            onHostSwitched={() => setIsDesktopServicesOpen(false)}
+          />
+        ) : null}
+
+        {desktopServicesTab === 'mcp' ? (
+          <McpDropdownContent active={isDesktopServicesOpen && desktopServicesTab === 'mcp'} />
+        ) : null}
+
+        {desktopServicesTab === 'usage' ? (
+          <div className="overflow-x-hidden">
+            <div className="flex items-center justify-between gap-3 border-b border-[var(--interactive-border)] px-4 py-2.5">
+              <div className="flex min-w-0 items-baseline gap-2">
+                <span className="typography-ui-header font-semibold text-foreground">Rate limits</span>
+                <span className="truncate typography-micro text-muted-foreground">{formatTime(quotaLastUpdated)}</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="h-7 w-[10.5rem]">
+                  <SortableTabsStrip
+                    items={quotaDisplayTabItems}
+                    activeId={quotaDisplayMode}
+                    onSelect={(tabID) => void handleDisplayModeChange(tabID as 'usage' | 'remaining')}
+                    layoutMode="fit"
+                    variant="active-pill"
+                    activePillInsetClassName="gap-0.5 px-px py-0"
+                    className="h-full"
+                  />
+                </div>
+                <button
+                  type="button"
+                  className={cn(
+                    'inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors',
+                    'hover:text-foreground hover:bg-interactive-hover',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'
+                  )}
+                  onClick={handleUsageRefresh}
+                  disabled={isQuotaLoading || isUsageRefreshSpinning}
+                  aria-label="Refresh rate limits"
+                >
+                  <RiRefreshLine className={cn('h-4 w-4', isUsageRefreshSpinning && 'animate-spin')} />
+                </button>
+              </div>
+            </div>
+
+            {!hasRateLimits ? (
+              <div className="px-4 py-5 text-center">
+                <span className="typography-ui-label text-muted-foreground">No rate limits available.</span>
+              </div>
+            ) : null}
+
+            <div className="py-2">
+              {rateLimitGroups.map((group, index) => {
+                const providerExpandedFamilies = expandedFamilies[group.providerId] ?? [];
+                return (
+                  <React.Fragment key={group.providerId}>
+                    {index > 0 ? <div className="mx-4 my-2 border-t border-[var(--interactive-border)]" /> : null}
+                    <div className="flex items-center gap-2 px-4 py-2">
+                      <ProviderLogo providerId={group.providerId} className="h-4 w-4" />
+                      <span className="typography-ui-label font-medium text-foreground">{group.providerName}</span>
+                    </div>
+                    {group.entries.length === 0 && (!group.modelFamilies || group.modelFamilies.length === 0) ? (
+                      <div className="px-4 pb-2">
+                        <span className="typography-ui-label text-muted-foreground">{group.error ?? 'No rate limits reported.'}</span>
+                      </div>
+                    ) : (
+                      <div className="space-y-3 px-4 pb-2">
+                        {group.entries.map(([label, window]) => {
+                          const displayPercent = quotaDisplayMode === 'remaining' ? window.remainingPercent : window.usedPercent;
+                          const paceInfo = calculatePace(window.usedPercent, window.resetAt, window.windowSeconds, label);
+                          const expectedMarker = paceInfo?.dailyAllocationPercent != null
+                            ? (quotaDisplayMode === 'remaining'
+                                ? 100 - calculateExpectedUsagePercent(paceInfo.elapsedRatio)
+                                : calculateExpectedUsagePercent(paceInfo.elapsedRatio))
+                            : null;
+                          return (
+                            <div key={`${group.providerId}-${label}`} className="flex flex-col gap-1.5">
+                              <div className="flex min-w-0 items-center justify-between gap-3">
+                                <div className="min-w-0 flex items-center gap-2">
+                                  <span className="truncate typography-ui-label text-foreground">{formatWindowLabel(label)}</span>
+                                  {window.resetAfterFormatted ?? window.resetAtFormatted ? (
+                                    <span className="truncate typography-micro text-muted-foreground">
+                                      {window.resetAfterFormatted ?? window.resetAtFormatted}
+                                    </span>
+                                  ) : null}
+                                </div>
+                                <span className="typography-ui-label tabular-nums text-foreground">
+                                  {formatPercent(displayPercent) === '-' ? '' : formatPercent(displayPercent)}
+                                </span>
+                              </div>
+                              <UsageProgressBar
+                                percent={displayPercent}
+                                tonePercent={window.usedPercent}
+                                className="h-1.5"
+                                expectedMarkerPercent={expectedMarker}
+                              />
+                              {paceInfo ? <PaceIndicator paceInfo={paceInfo} compact /> : null}
+                            </div>
+                          );
+                        })}
+                        {group.modelFamilies && group.modelFamilies.length > 0 ? (
+                          <div className="space-y-0.5">
+                            {group.modelFamilies.map((family) => {
+                              const familyKey = family.familyId ?? 'other';
+                              const isExpanded = providerExpandedFamilies.includes(familyKey);
+                              return (
+                                <Collapsible
+                                  key={familyKey}
+                                  open={isExpanded}
+                                  onOpenChange={() => toggleFamilyExpanded(group.providerId, familyKey)}
+                                >
+                                  <CollapsibleTrigger className="flex w-full items-center justify-between rounded-md px-1 py-1.5 text-left hover:bg-[var(--interactive-hover)]/50 transition-colors">
+                                    <span className="typography-ui-label font-medium text-foreground">{family.familyLabel}</span>
+                                    {isExpanded ? <RiArrowDownSLine className="h-4 w-4 text-muted-foreground" /> : <RiArrowRightSLine className="h-4 w-4 text-muted-foreground" />}
+                                  </CollapsibleTrigger>
+                                  <CollapsibleContent>
+                                    <div className="space-y-2.5 pb-1 pl-1 pt-1">
+                                      {family.models.map(([modelName, window]) => {
+                                        const displayPercent = quotaDisplayMode === 'remaining' ? window.remainingPercent : window.usedPercent;
+                                        const paceInfo = calculatePace(window.usedPercent, window.resetAt, window.windowSeconds);
+                                        const expectedMarker = paceInfo?.dailyAllocationPercent != null
+                                          ? (quotaDisplayMode === 'remaining'
+                                              ? 100 - calculateExpectedUsagePercent(paceInfo.elapsedRatio)
+                                              : calculateExpectedUsagePercent(paceInfo.elapsedRatio))
+                                          : null;
+                                        return (
+                                          <div key={`${group.providerId}-${modelName}`} className="flex flex-col gap-1.5">
+                                            <div className="flex min-w-0 items-center justify-between gap-3">
+                                              <span className="truncate typography-micro text-muted-foreground">{getDisplayModelName(modelName)}</span>
+                                              <span className="typography-ui-label tabular-nums text-foreground">
+                                                {formatPercent(displayPercent) === '-' ? '' : formatPercent(displayPercent)}
+                                              </span>
+                                            </div>
+                                            <UsageProgressBar
+                                              percent={displayPercent}
+                                              tonePercent={window.usedPercent}
+                                              className="h-1.5"
+                                              expectedMarkerPercent={expectedMarker}
+                                            />
+                                            {paceInfo ? <PaceIndicator paceInfo={paceInfo} compact /> : null}
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </CollapsibleContent>
+                                </Collapsible>
+                              );
+                            })}
+                          </div>
+                        ) : null}
+                      </div>
+                    )}
+                  </React.Fragment>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+});
 
 
 const isSameContextUsage = (
@@ -81,48 +529,6 @@ const isSameContextUsage = (
     && (a.normalizedOutput ?? 0) === (b.normalizedOutput ?? 0)
     && a.thresholdLimit === b.thresholdLimit
     && (a.lastMessageId ?? '') === (b.lastMessageId ?? '');
-};
-
-type PrVisualState = 'draft' | 'open' | 'blocked' | 'merged' | 'closed';
-
-const getPrVisualState = (status: GitHubPullRequestStatus | null): PrVisualState | null => {
-  const pr = status?.pr;
-  if (!pr) {
-    return null;
-  }
-  if (pr.state === 'merged') {
-    return 'merged';
-  }
-  if (pr.state === 'closed') {
-    return 'closed';
-  }
-  if (pr.draft) {
-    return 'draft';
-  }
-  const checksFailed = status?.checks?.state === 'failure';
-  const mergeableState = typeof pr.mergeableState === 'string' ? pr.mergeableState : '';
-  const notMergeable = pr.mergeable === false || mergeableState === 'blocked' || mergeableState === 'dirty';
-  if (checksFailed || notMergeable) {
-    return 'blocked';
-  }
-  return 'open';
-};
-
-const getPrVisualPriority = (state: PrVisualState): number => {
-  switch (state) {
-    case 'open':
-      return 5;
-    case 'blocked':
-      return 4;
-    case 'draft':
-      return 3;
-    case 'merged':
-      return 2;
-    case 'closed':
-      return 1;
-    default:
-      return 0;
-  }
 };
 
 const formatCompactHeaderLabel = (value: string): string => {
@@ -211,6 +617,18 @@ interface TabConfig {
   showDot?: boolean;
 }
 
+interface RateLimitGroup {
+  providerId: string;
+  providerName: string;
+  entries: Array<[string, UsageWindow]>;
+  error?: string;
+  modelFamilies?: Array<{
+    familyId: string | null;
+    familyLabel: string;
+    models: Array<[string, UsageWindow]>;
+  }>;
+}
+
 interface HeaderProps {
   onToggleLeftDrawer?: () => void;
   onToggleRightDrawer?: () => void;
@@ -240,7 +658,7 @@ export const Header: React.FC<HeaderProps> = ({
   const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
 
-  const { getCurrentModel } = useConfigStore();
+  const getCurrentModel = useConfigStore((state) => state.getCurrentModel);
   const runtimeApis = useRuntimeAPIs();
 
   const getContextUsage = useSessionUIStore((state) => state.getContextUsage);
@@ -249,7 +667,8 @@ export const Header: React.FC<HeaderProps> = ({
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const currentSessionMessageRecords = useSessionMessageRecords(currentSessionId ?? '');
   const currentSessionMessages = currentSessionId ? (currentSessionMessageRecords.length > 0 ? currentSessionMessageRecords : undefined) : undefined;
-  const sessions = useSessions();
+  const currentSyncedSession = useSession(currentSessionId ?? null);
+  const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
   const activeProject = useProjectsStore((state) => {
     if (!state.activeProjectId) {
       return null;
@@ -360,8 +779,8 @@ export const Header: React.FC<HeaderProps> = ({
   }, [contextUsage, currentSessionId, isContextUsageResolvedForSession]);
 
   const isSessionSwitcherOpen = useUIStore((state) => state.isSessionSwitcherOpen);
-  const githubAvatarUrl = githubAuthStatus?.connected ? githubAuthStatus.user?.avatarUrl : null;
-  const githubLogin = githubAuthStatus?.connected ? githubAuthStatus.user?.login : null;
+  const githubAvatarUrl = githubAuthStatus?.connected ? (githubAuthStatus.user?.avatarUrl ?? null) : null;
+  const githubLogin = githubAuthStatus?.connected ? (githubAuthStatus.user?.login ?? null) : null;
   const githubAccounts = githubAuthStatus?.accounts ?? [];
   const [isSwitchingGitHubAccount, setIsSwitchingGitHubAccount] = React.useState(false);
   const [isMobileRateLimitsOpen, setIsMobileRateLimitsOpen] = React.useState(false);
@@ -431,18 +850,6 @@ export const Header: React.FC<HeaderProps> = ({
   const selectedModels = useQuotaStore((state) => state.selectedModels);
   const expandedFamilies = useQuotaStore((state) => state.expandedFamilies);
   const toggleFamilyExpanded = useQuotaStore((state) => state.toggleFamilyExpanded);
-
-  interface RateLimitGroup {
-    providerId: string;
-    providerName: string;
-    entries: Array<[string, UsageWindow]>;
-    error?: string;
-    modelFamilies?: Array<{
-      familyId: string | null;
-      familyLabel: string;
-      models: Array<[string, UsageWindow]>;
-    }>;
-  }
 
   const rateLimitGroups = React.useMemo(() => {
     const groups: RateLimitGroup[] = [];
@@ -561,16 +968,82 @@ export const Header: React.FC<HeaderProps> = ({
     });
   }, [fetchAllQuotas, isUsageRefreshSpinning]);
 
-  const currentSession = React.useMemo(() => {
+  const currentSessionLive = React.useMemo(() => {
     if (!currentSessionId) return null;
-    // Try current directory's store first, then fall back to all child stores.
-    // The sidebar loads sessions globally via SDK, but the header uses
-    // useSessions() which only has the current directory. This fallback
-    // ensures the title/directory show when the session lives elsewhere.
-    return sessions.find((s) => s.id === currentSessionId)
+    // Resolve from the global sessions snapshot first (same source as sidebar).
+    // Child-store lists are intentionally partial/truncated during bootstrap.
+    return globalActiveSessions.find((s) => s.id === currentSessionId)
+      ?? currentSyncedSession
       ?? getAllSyncSessions().find((s) => s.id === currentSessionId)
       ?? null;
-  }, [currentSessionId, sessions]);
+  }, [currentSessionId, currentSyncedSession, globalActiveSessions]);
+
+  const lastResolvedSessionRef = React.useRef<{
+    sessionId: string;
+    session: Session;
+    expiresAt: number;
+  } | null>(null);
+  const [sessionFallbackVersion, setSessionFallbackVersion] = React.useState(0);
+
+  React.useEffect(() => {
+    if (!currentSessionId) {
+      if (lastResolvedSessionRef.current) {
+        lastResolvedSessionRef.current = null;
+        setSessionFallbackVersion((value) => value + 1);
+      }
+      return;
+    }
+
+    if (currentSessionLive) {
+      lastResolvedSessionRef.current = {
+        sessionId: currentSessionId,
+        session: currentSessionLive,
+        expiresAt: Date.now() + 2000,
+      };
+      return;
+    }
+
+    const cached = lastResolvedSessionRef.current;
+    if (!cached || cached.sessionId !== currentSessionId) {
+      return;
+    }
+
+    const remainingMs = cached.expiresAt - Date.now();
+    if (remainingMs <= 0) {
+      lastResolvedSessionRef.current = null;
+      setSessionFallbackVersion((value) => value + 1);
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      if (lastResolvedSessionRef.current?.sessionId === currentSessionId) {
+        lastResolvedSessionRef.current = null;
+      }
+      setSessionFallbackVersion((value) => value + 1);
+    }, remainingMs);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [currentSessionId, currentSessionLive]);
+
+  void sessionFallbackVersion;
+  const currentSession = (() => {
+    if (currentSessionLive) {
+      return currentSessionLive;
+    }
+
+    if (!currentSessionId) {
+      return null;
+    }
+
+    const cached = lastResolvedSessionRef.current;
+    if (cached && cached.sessionId === currentSessionId && cached.expiresAt > Date.now()) {
+      return cached.session;
+    }
+
+    return null;
+  })();
 
   const worktreePath = useSessionUIStore((state) => {
     if (!currentSessionId) return '';
@@ -580,9 +1053,6 @@ export const Header: React.FC<HeaderProps> = ({
     if (!currentSessionId) return null;
     return state.worktreeMetadata.get(currentSessionId)?.branch?.trim() ?? null;
   });
-  const gitDirectories = useGitStore((state) => state.directories);
-  const prStatusEntries = useGitHubPrStatusStore((state) => state.entries);
-
   const worktreeDirectory = React.useMemo(() => {
     return normalize(worktreePath || '');
   }, [worktreePath]);
@@ -603,6 +1073,26 @@ export const Header: React.FC<HeaderProps> = ({
     return worktreeDirectory || sessionDirectory || draftDirectory;
   }, [draftDirectory, sessionDirectory, worktreeDirectory]);
 
+  const catalogWorktreeBranch = useSessionUIStore((state) => {
+    const candidateDirectory = normalize(worktreeDirectory || sessionDirectory || '');
+    if (!candidateDirectory) {
+      return null;
+    }
+
+    for (const worktrees of state.availableWorktreesByProject.values()) {
+      const match = worktrees.find((worktree) => normalize(worktree.path) === candidateDirectory);
+      const branch = match?.branch?.trim();
+      if (branch) {
+        return branch;
+      }
+    }
+
+    return null;
+  });
+
+  const gitBranchForDirectory = useGitBranchLabel(openDirectory || null);
+  const currentBranchLabel = gitBranchForDirectory || currentSessionWorktreeBranch || catalogWorktreeBranch;
+
   const currentSessionTitle = React.useMemo(() => {
     if (!currentSessionId) {
       return activeProjectLabel ?? 'OpenChamber';
@@ -614,78 +1104,6 @@ export const Header: React.FC<HeaderProps> = ({
   const currentSessionDiffStats = React.useMemo(() => {
     return resolveSessionDiffStats(currentSession?.summary as Parameters<typeof resolveSessionDiffStats>[0]);
   }, [currentSession?.summary]);
-
-  const currentBranchLabel = React.useMemo(() => {
-    const directory = normalize(openDirectory || '');
-    if (directory) {
-      const gitBranch = gitDirectories.get(directory)?.status?.current?.trim();
-      if (gitBranch) {
-        return gitBranch;
-      }
-    }
-    return currentSessionWorktreeBranch;
-  }, [currentSessionWorktreeBranch, gitDirectories, openDirectory]);
-
-  const currentSessionPr = React.useMemo(() => {
-    const directory = normalize(openDirectory || '');
-    const branch = currentBranchLabel?.trim();
-    if (!directory || !branch) {
-      return null;
-    }
-
-    let bestMatch: { visualState: PrVisualState; number: number; canMerge: boolean | null; checksState: string | null } | null = null;
-    const prEntries = Object.values(prStatusEntries);
-    for (const entry of prEntries) {
-      const entryDirectory = normalize(entry.params?.directory ?? entry.identity?.directory ?? '');
-      const entryBranch = entry.params?.branch?.trim() ?? entry.identity?.branch?.trim() ?? '';
-      if (!entryDirectory || !entryBranch || entryDirectory !== directory || entryBranch !== branch) {
-        continue;
-      }
-
-      const visualState = getPrVisualState(entry.status ?? null);
-      const number = entry.status?.pr?.number;
-      if (!visualState || !number) {
-        continue;
-      }
-
-      const next = {
-        visualState,
-        number,
-        canMerge: typeof entry.status?.canMerge === 'boolean' ? entry.status.canMerge : null,
-        checksState: entry.status?.checks?.state ?? null,
-      };
-
-      if (!bestMatch || getPrVisualPriority(next.visualState) > getPrVisualPriority(bestMatch.visualState)) {
-        bestMatch = next;
-      }
-    }
-
-    return bestMatch;
-  }, [currentBranchLabel, openDirectory, prStatusEntries]);
-
-  const currentSessionPrLabel = React.useMemo(() => {
-    if (!currentSessionPr) {
-      return null;
-    }
-
-    switch (currentSessionPr.visualState) {
-      case 'merged':
-        return `PR #${currentSessionPr.number} merged`;
-      case 'closed':
-        return `PR #${currentSessionPr.number} closed`;
-      case 'draft':
-        return `PR #${currentSessionPr.number} draft`;
-      case 'blocked':
-        return `PR #${currentSessionPr.number} blocked`;
-      case 'open':
-        if (currentSessionPr.canMerge === true || currentSessionPr.checksState === 'success') {
-          return `PR #${currentSessionPr.number} ready`;
-        }
-        return `PR #${currentSessionPr.number} open`;
-      default:
-        return null;
-    }
-  }, [currentSessionPr]);
 
   const currentSessionChanges = React.useMemo(() => {
     if (currentSessionDiffStats) {
@@ -738,7 +1156,8 @@ export const Header: React.FC<HeaderProps> = ({
 
 
   const [planTabAvailable, setPlanTabAvailable] = React.useState(false);
-  const showPlanTab = planTabAvailable;
+  const planModeEnabled = useFeatureFlagsStore((state) => state.planModeEnabled);
+  const showPlanTab = planModeEnabled && planTabAvailable;
   const lastPlanSessionKeyRef = React.useRef<string>('');
 
   const handleGitHubAccountSwitch = React.useCallback(async (accountId: string) => {
@@ -774,6 +1193,14 @@ export const Header: React.FC<HeaderProps> = ({
   }, [isSwitchingGitHubAccount, runtimeApis.github, setGitHubAuthStatus]);
 
   React.useEffect(() => {
+    if (!planModeEnabled) {
+      setPlanTabAvailable(false);
+      if (useUIStore.getState().activeMainTab === 'plan') {
+        useUIStore.getState().setActiveMainTab('chat');
+      }
+      return;
+    }
+
     let cancelled = false;
 
     const checkExists = async (directory: string, fileName: string): Promise<boolean> => {
@@ -834,6 +1261,7 @@ export const Header: React.FC<HeaderProps> = ({
       window.clearInterval(interval);
     };
   }, [
+    planModeEnabled,
     sessionDirectory,
     currentSession?.slug,
     currentSession?.time?.created,
@@ -923,8 +1351,8 @@ export const Header: React.FC<HeaderProps> = ({
     return getActiveContextMode(panelState) === 'plan';
   }, [contextPanelByDirectory, openDirectory]);
 
-  const desktopHeaderIconButtonClass = 'app-region-no-drag inline-flex h-8 w-8 items-center justify-center gap-2 rounded-md typography-ui-label font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-50 hover:bg-interactive-hover transition-colors';
-  const mobileHeaderIconButtonClass = 'app-region-no-drag inline-flex h-9 w-9 items-center justify-center gap-2 p-2 rounded-md typography-ui-label font-medium text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-50 hover:text-foreground hover:bg-interactive-hover transition-colors';
+  const desktopHeaderIconButtonClass = DESKTOP_HEADER_ICON_BUTTON_CLASS;
+  const mobileHeaderIconButtonClass = MOBILE_HEADER_ICON_BUTTON_CLASS;
 
   const desktopPaddingClass = React.useMemo(() => {
     if (!isSidebarOpen && isDesktopApp && isMacPlatform && !isDesktopWindowFullscreen) {
@@ -1258,108 +1686,6 @@ export const Header: React.FC<HeaderProps> = ({
     return <React.Fragment key={tab.id}>{tabButton}</React.Fragment>;
   };
 
-  const renderDesktopGitHubControl = () => {
-    if (!githubAuthStatus?.connected || isMobile) {
-      return null;
-    }
-
-    if (githubAccounts.length > 1) {
-      return (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              className={cn(
-                desktopHeaderIconButtonClass,
-                'h-7 w-7 overflow-hidden rounded-full border border-border/60 bg-muted/80 p-0'
-              )}
-              title={githubLogin ? `GitHub: ${githubLogin}` : 'GitHub connected'}
-              disabled={isSwitchingGitHubAccount}
-            >
-              {githubAvatarUrl ? (
-                <img
-                  src={githubAvatarUrl}
-                  alt={githubLogin ? `${githubLogin} avatar` : 'GitHub avatar'}
-                  className="h-full w-full object-cover"
-                  loading="lazy"
-                  referrerPolicy="no-referrer"
-                />
-              ) : (
-                <RiGithubFill className="h-3.5 w-3.5 text-foreground" />
-              )}
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-64">
-            <DropdownMenuLabel className="typography-ui-header font-semibold text-foreground">
-              GitHub Accounts
-            </DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            {githubAccounts.map((account) => {
-              const accountUser = account.user;
-              const isCurrent = Boolean(account.current);
-              return (
-                <DropdownMenuItem
-                  key={account.id}
-                  className="gap-2"
-                  disabled={isCurrent || isSwitchingGitHubAccount}
-                  onSelect={() => {
-                    if (!isCurrent) {
-                      void handleGitHubAccountSwitch(account.id);
-                    }
-                  }}
-                >
-                  {accountUser?.avatarUrl ? (
-                    <img
-                      src={accountUser.avatarUrl}
-                      alt={accountUser.login ? `${accountUser.login} avatar` : 'GitHub avatar'}
-                      className="h-6 w-6 rounded-full border border-border/60 bg-muted object-cover"
-                      loading="lazy"
-                      referrerPolicy="no-referrer"
-                    />
-                  ) : (
-                    <div className="flex h-6 w-6 items-center justify-center rounded-full border border-border/60 bg-muted">
-                      <RiGithubFill className="h-3 w-3 text-muted-foreground" />
-                    </div>
-                  )}
-                  <span className="flex min-w-0 flex-1 flex-col">
-                    <span className="truncate typography-ui-label text-foreground">
-                      {accountUser?.name?.trim() || accountUser?.login || 'GitHub'}
-                    </span>
-                    {accountUser?.login ? (
-                      <span className="truncate typography-micro font-mono text-muted-foreground">
-                        {accountUser.login}
-                      </span>
-                    ) : null}
-                  </span>
-                  {isCurrent ? <RiCheckLine className="h-4 w-4 text-primary" /> : null}
-                </DropdownMenuItem>
-              );
-            })}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      );
-    }
-
-    return (
-      <div
-        className="app-region-no-drag flex h-7 w-7 items-center justify-center overflow-hidden rounded-full border border-border/60 bg-muted/80"
-        title={githubLogin ? `GitHub: ${githubLogin}` : 'GitHub connected'}
-      >
-        {githubAvatarUrl ? (
-          <img
-            src={githubAvatarUrl}
-            alt={githubLogin ? `${githubLogin} avatar` : 'GitHub avatar'}
-            className="h-full w-full object-cover"
-            loading="lazy"
-            referrerPolicy="no-referrer"
-          />
-        ) : (
-          <RiGithubFill className="h-3.5 w-3.5 text-foreground" />
-        )}
-      </div>
-    );
-  };
-
   const desktopSidebarActions = (
     <>
       {showPlanTab && (
@@ -1380,284 +1706,52 @@ export const Header: React.FC<HeaderProps> = ({
         </Tooltip>
       )}
       <OpenInAppButton directory={openDirectory} activeFilePath={selectedFilePath} className="mr-1" />
-      <DropdownMenu
-        open={isDesktopServicesOpen}
-        onOpenChange={(open) => {
-          setIsDesktopServicesOpen(open);
-          if (open) {
-            void refreshCurrentInstanceLabel();
-            if (desktopServicesTab === 'usage' && quotaResults.length === 0) {
-              fetchAllQuotas();
-            }
-          }
-        }}
-      >
-        <Tooltip delayDuration={500}>
-          <TooltipTrigger asChild>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                aria-label={isDesktopApp
-                  ? `Open instance, usage and MCP (current: ${currentInstanceLabel})`
-                  : 'Open services, usage and MCP'}
-                className={cn(
-                  desktopHeaderIconButtonClass,
-                  isDesktopApp ? 'w-auto max-w-[14rem] justify-start gap-1.5 px-2.5' : 'h-8 w-8'
-                )}
-              >
-                <RiStackLine className="h-[18px] w-[18px]" />
-                {isDesktopApp ? (
-                  <span className="truncate typography-ui-label font-medium text-foreground">{compactCurrentInstanceLabel}</span>
-                ) : null}
-              </button>
-            </DropdownMenuTrigger>
-          </TooltipTrigger>
-          <TooltipContent>
-            <p>
-              {isDesktopApp ? `Current instance: ${currentInstanceLabel}` : 'Services'} ({shortcutLabel('toggle_services_menu')}; next tab {shortcutLabel('cycle_services_tab')})
-            </p>
-          </TooltipContent>
-        </Tooltip>
-        <DropdownMenuContent
-          align="end"
-          className="w-[min(27rem,calc(100vw-2rem))] max-h-[75vh] overflow-y-auto bg-[var(--surface-elevated)] p-0"
-        >
-          <div className="sticky top-0 z-20 px-2 pt-1.5 pb-px">
-            <div className="h-9">
-              <SortableTabsStrip
-                items={servicesTabItems}
-                activeId={desktopServicesTab}
-                onSelect={(tabID) => {
-                  const value = tabID as 'instance' | 'usage' | 'mcp';
-                  setDesktopServicesTab(value);
-                  if (value === 'usage' && quotaResults.length === 0) {
-                    fetchAllQuotas();
-                  }
-                }}
-                layoutMode="fit"
-                variant="active-pill"
-                activePillInsetClassName="gap-0.5 px-px py-0"
-                activePillButtonClassName="h-8"
-                className="h-full"
-              />
-            </div>
-          </div>
-
-          {isDesktopApp && desktopServicesTab === 'instance' ? (
-            <DesktopHostSwitcherDialog
-              embedded
-              open={isDesktopServicesOpen && desktopServicesTab === 'instance'}
-              onOpenChange={() => {}}
-              onHostSwitched={() => setIsDesktopServicesOpen(false)}
-            />
-          ) : null}
-
-          {desktopServicesTab === 'mcp' ? (
-            <McpDropdownContent active={isDesktopServicesOpen && desktopServicesTab === 'mcp'} />
-          ) : null}
-
-          {desktopServicesTab === 'usage' ? (
-            <div className="overflow-x-hidden">
-              {/* Usage header bar */}
-              <div className="flex items-center justify-between gap-3 border-b border-[var(--interactive-border)] px-4 py-2.5">
-                <div className="flex min-w-0 items-baseline gap-2">
-                  <span className="typography-ui-header font-semibold text-foreground">Rate limits</span>
-                  <span className="truncate typography-micro text-muted-foreground">{formatTime(quotaLastUpdated)}</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <div className="h-7 w-[10.5rem]">
-                    <SortableTabsStrip
-                      items={quotaDisplayTabItems}
-                      activeId={quotaDisplayMode}
-                      onSelect={(tabID) => handleDisplayModeChange(tabID as 'usage' | 'remaining')}
-                      layoutMode="fit"
-                      variant="active-pill"
-                      activePillInsetClassName="gap-0.5 px-px py-0"
-                      className="h-full"
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    className={cn(
-                      'inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors',
-                      'hover:text-foreground hover:bg-interactive-hover',
-                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'
-                    )}
-                    onClick={handleUsageRefresh}
-                    disabled={isQuotaLoading || isUsageRefreshSpinning}
-                    aria-label="Refresh rate limits"
-                  >
-                    <RiRefreshLine className={cn('h-4 w-4', isUsageRefreshSpinning && 'animate-spin')} />
-                  </button>
-                </div>
-              </div>
-
-              {!hasRateLimits ? (
-                <div className="px-4 py-5 text-center">
-                  <span className="typography-ui-label text-muted-foreground">No rate limits available.</span>
-                </div>
-              ) : null}
-
-              {/* Provider groups */}
-              <div className="py-2">
-                {rateLimitGroups.map((group, index) => {
-                  const providerExpandedFamilies = expandedFamilies[group.providerId] ?? [];
-
-                  return (
-                    <React.Fragment key={group.providerId}>
-                      {index > 0 ? (
-                        <div className="mx-4 my-2 border-t border-[var(--interactive-border)]" />
-                      ) : null}
-
-                      {/* Provider header */}
-                      <div className="flex items-center gap-2 px-4 py-2">
-                        <ProviderLogo providerId={group.providerId} className="h-4 w-4" />
-                        <span className="typography-ui-label font-medium text-foreground">{group.providerName}</span>
-                      </div>
-
-                      {group.entries.length === 0 && (!group.modelFamilies || group.modelFamilies.length === 0) ? (
-                        <div className="px-4 pb-2">
-                          <span className="typography-ui-label text-muted-foreground">{group.error ?? 'No rate limits reported.'}</span>
-                        </div>
-                      ) : (
-                        <div className="space-y-3 px-4 pb-2">
-                          {/* Window-level entries */}
-                          {group.entries.map(([label, window]) => {
-                            const displayPercent = quotaDisplayMode === 'remaining' ? window.remainingPercent : window.usedPercent;
-                            const paceInfo = calculatePace(window.usedPercent, window.resetAt, window.windowSeconds, label);
-                            const expectedMarker = paceInfo?.dailyAllocationPercent != null
-                              ? (quotaDisplayMode === 'remaining'
-                                  ? 100 - calculateExpectedUsagePercent(paceInfo.elapsedRatio)
-                                  : calculateExpectedUsagePercent(paceInfo.elapsedRatio))
-                              : null;
-
-                            return (
-                              <div key={`${group.providerId}-${label}`} className="flex flex-col gap-1.5">
-                                <div className="flex min-w-0 items-center justify-between gap-3">
-                                  <div className="min-w-0 flex items-center gap-2">
-                                    <span className="truncate typography-ui-label text-foreground">{formatWindowLabel(label)}</span>
-                                    {window.resetAfterFormatted ?? window.resetAtFormatted ? (
-                                      <span className="truncate typography-micro text-muted-foreground">
-                                        {window.resetAfterFormatted ?? window.resetAtFormatted}
-                                      </span>
-                                    ) : null}
-                                  </div>
-                                  <span className="typography-ui-label tabular-nums text-foreground">
-                                    {formatPercent(displayPercent) === '-' ? '' : formatPercent(displayPercent)}
-                                  </span>
-                                </div>
-                                <UsageProgressBar
-                                  percent={displayPercent}
-                                  tonePercent={window.usedPercent}
-                                  className="h-1.5"
-                                  expectedMarkerPercent={expectedMarker}
-                                />
-                                {paceInfo ? (
-                                  <PaceIndicator paceInfo={paceInfo} compact />
-                                ) : null}
-                              </div>
-                            );
-                          })}
-
-                          {/* Model family collapsibles */}
-                          {group.modelFamilies && group.modelFamilies.length > 0 ? (
-                            <div className="space-y-0.5">
-                              {group.modelFamilies.map((family) => {
-                                const isExpanded = providerExpandedFamilies.includes(family.familyId ?? 'other');
-
-                                return (
-                                  <Collapsible
-                                    key={family.familyId ?? 'other'}
-                                    open={isExpanded}
-                                    onOpenChange={() => toggleFamilyExpanded(group.providerId, family.familyId ?? 'other')}
-                                  >
-                                    <CollapsibleTrigger className="flex w-full items-center justify-between rounded-md px-1 py-1.5 text-left hover:bg-[var(--interactive-hover)]/50 transition-colors">
-                                      <span className="typography-ui-label font-medium text-foreground">{family.familyLabel}</span>
-                                      {isExpanded ? (
-                                        <RiArrowDownSLine className="h-4 w-4 text-muted-foreground" />
-                                      ) : (
-                                        <RiArrowRightSLine className="h-4 w-4 text-muted-foreground" />
-                                      )}
-                                    </CollapsibleTrigger>
-                                    <CollapsibleContent>
-                                      <div className="space-y-2.5 pb-1 pl-1 pt-1">
-                                        {family.models.map(([modelName, window]) => {
-                                          const displayPercent = quotaDisplayMode === 'remaining' ? window.remainingPercent : window.usedPercent;
-                                          const paceInfo = calculatePace(window.usedPercent, window.resetAt, window.windowSeconds);
-                                          const expectedMarker = paceInfo?.dailyAllocationPercent != null
-                                            ? (quotaDisplayMode === 'remaining'
-                                                ? 100 - calculateExpectedUsagePercent(paceInfo.elapsedRatio)
-                                                : calculateExpectedUsagePercent(paceInfo.elapsedRatio))
-                                            : null;
-
-                                          return (
-                                            <div key={`${group.providerId}-${modelName}`} className="flex flex-col gap-1.5">
-                                              <div className="flex min-w-0 items-center justify-between gap-3">
-                                                <span className="truncate typography-micro text-muted-foreground">{getDisplayModelName(modelName)}</span>
-                                                <span className="typography-ui-label tabular-nums text-foreground">
-                                                  {formatPercent(displayPercent) === '-' ? '' : formatPercent(displayPercent)}
-                                                </span>
-                                              </div>
-                                              <UsageProgressBar
-                                                percent={displayPercent}
-                                                tonePercent={window.usedPercent}
-                                                className="h-1.5"
-                                                expectedMarkerPercent={expectedMarker}
-                                              />
-                                              {paceInfo ? (
-                                                <PaceIndicator paceInfo={paceInfo} compact />
-                                              ) : null}
-                                            </div>
-                                          );
-                                        })}
-                                      </div>
-                                    </CollapsibleContent>
-                                  </Collapsible>
-                                );
-                              })}
-                            </div>
-                          ) : null}
-                        </div>
-                      )}
-                    </React.Fragment>
-                  );
-                })}
-              </div>
-            </div>
-          ) : null}
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <Tooltip delayDuration={500}>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            onClick={toggleBottomTerminal}
-            aria-label="Toggle terminal panel"
-            className={desktopHeaderIconButtonClass}
-          >
-            <RiTerminalBoxLine className="h-[18px] w-[18px]" />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent>
-          <p>Terminal panel ({shortcutLabel('toggle_terminal')})</p>
-        </TooltipContent>
-      </Tooltip>
-      <Tooltip delayDuration={500}>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            onClick={toggleRightSidebar}
-            aria-label="Toggle right sidebar"
-            className={desktopHeaderIconButtonClass}
-          >
-            <RiLayoutRightLine className="h-[18px] w-[18px]" />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent>
-          <p>Right sidebar ({shortcutLabel('toggle_right_sidebar')})</p>
-        </TooltipContent>
-      </Tooltip>
-      {renderDesktopGitHubControl()}
+      <DesktopServicesMenu
+        isDesktopApp={isDesktopApp}
+        currentInstanceLabel={currentInstanceLabel}
+        compactCurrentInstanceLabel={compactCurrentInstanceLabel}
+        isDesktopServicesOpen={isDesktopServicesOpen}
+        setIsDesktopServicesOpen={setIsDesktopServicesOpen}
+        refreshCurrentInstanceLabel={refreshCurrentInstanceLabel}
+        desktopServicesTab={desktopServicesTab}
+        setDesktopServicesTab={setDesktopServicesTab}
+        quotaResultsLength={quotaResults.length}
+        fetchAllQuotas={fetchAllQuotas}
+        servicesTabItems={servicesTabItems}
+        quotaLastUpdated={quotaLastUpdated}
+        quotaDisplayMode={quotaDisplayMode}
+        quotaDisplayTabItems={quotaDisplayTabItems}
+        handleDisplayModeChange={handleDisplayModeChange}
+        handleUsageRefresh={handleUsageRefresh}
+        isQuotaLoading={isQuotaLoading}
+        isUsageRefreshSpinning={isUsageRefreshSpinning}
+        hasRateLimits={hasRateLimits}
+        rateLimitGroups={rateLimitGroups}
+        expandedFamilies={expandedFamilies}
+        toggleFamilyExpanded={toggleFamilyExpanded}
+        shortcutLabel={shortcutLabel}
+      />
+      <HeaderIconActionButton
+        title={`Terminal panel (${shortcutLabel('toggle_terminal')})`}
+        ariaLabel="Toggle terminal panel"
+        onClick={toggleBottomTerminal}
+        Icon={RiTerminalBoxLine}
+      />
+      <HeaderIconActionButton
+        title={`Right sidebar (${shortcutLabel('toggle_right_sidebar')})`}
+        ariaLabel="Toggle right sidebar"
+        onClick={toggleRightSidebar}
+        Icon={RiLayoutRightLine}
+      />
+      <DesktopGitHubControl
+        isMobile={isMobile}
+        githubAuthStatus={githubAuthStatus}
+        githubAccounts={githubAccounts}
+        githubAvatarUrl={githubAvatarUrl}
+        githubLogin={githubLogin}
+        isSwitchingGitHubAccount={isSwitchingGitHubAccount}
+        handleGitHubAccountSwitch={handleGitHubAccountSwitch}
+      />
     </>
   );
 
@@ -1674,23 +1768,14 @@ export const Header: React.FC<HeaderProps> = ({
       role="tablist"
       aria-label="Main navigation"
     >
-      {!isSidebarOpen ? (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              onClick={handleOpenSessionSwitcher}
-              aria-label="Open sessions"
-              className={`${desktopHeaderIconButtonClass} shrink-0`}
-            >
-              <RiLayoutLeftLine className="h-[18px] w-[18px]" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>
-            <p>Open sessions ({shortcutLabel('toggle_sidebar')})</p>
-          </TooltipContent>
-        </Tooltip>
-      ) : null}
+      <HeaderIconActionButton
+        visible={!isSidebarOpen}
+        title={`Open sessions (${shortcutLabel('toggle_sidebar')})`}
+        ariaLabel="Open sessions"
+        onClick={handleOpenSessionSwitcher}
+        className={`${desktopHeaderIconButtonClass} shrink-0`}
+        Icon={RiLayoutLeftLine}
+      />
 
       <div className={cn('flex min-w-0 flex-1 items-center', !isSidebarOpen && 'pl-3')}>
         {!isLeftSidebarOpen ? (
@@ -1722,7 +1807,7 @@ export const Header: React.FC<HeaderProps> = ({
             <div className="truncate pl-1 typography-ui-label text-[14px] font-normal leading-tight text-foreground">
               {currentSessionTitle}
             </div>
-            {(activeProjectLabel || currentBranchLabel || currentSessionPrLabel || hasNonZeroSessionChanges) ? (
+            {(activeProjectLabel || currentBranchLabel || hasNonZeroSessionChanges) ? (
               <div className="flex min-w-0 items-center gap-1.5 truncate pl-1 typography-micro text-[10.5px] font-normal leading-tight text-muted-foreground/75">
                 {activeProjectLabel ? <span className="truncate">{activeProjectLabel}</span> : null}
                 {currentBranchLabel ? (
@@ -1731,7 +1816,6 @@ export const Header: React.FC<HeaderProps> = ({
                     <span className="truncate">{currentBranchLabel}</span>
                   </span>
                 ) : null}
-                {currentSessionPrLabel ? <span className="truncate">{currentSessionPrLabel}</span> : null}
                 {hasNonZeroSessionChanges ? (
                   <span className="inline-flex flex-shrink-0 items-center gap-0 text-[0.92em]">
                     <span className="text-status-success/80">+{currentSessionChanges.additions}</span>

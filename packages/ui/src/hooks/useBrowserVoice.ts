@@ -132,7 +132,19 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
   const sendMessage = useSessionUIStore((s) => s.sendMessage);
   const setPendingInputText = useInputStore((s) => s.setPendingInputText);
   const createSession = useSessionUIStore((s) => s.createSession);
-  const { currentProviderId, currentModelId, currentAgentName, voiceModeEnabled, voiceProvider, speechRate, speechPitch, speechVolume, sayVoice, browserVoice, openaiVoice, summarizeVoiceConversation, summarizeCharacterThreshold } = useConfigStore();
+  const currentProviderId = useConfigStore((state) => state.currentProviderId);
+  const currentModelId = useConfigStore((state) => state.currentModelId);
+  const currentAgentName = useConfigStore((state) => state.currentAgentName);
+  const voiceModeEnabled = useConfigStore((state) => state.voiceModeEnabled);
+  const voiceProvider = useConfigStore((state) => state.voiceProvider);
+  const speechRate = useConfigStore((state) => state.speechRate);
+  const speechPitch = useConfigStore((state) => state.speechPitch);
+  const speechVolume = useConfigStore((state) => state.speechVolume);
+  const sayVoice = useConfigStore((state) => state.sayVoice);
+  const browserVoice = useConfigStore((state) => state.browserVoice);
+  const openaiVoice = useConfigStore((state) => state.openaiVoice);
+  const summarizeVoiceConversation = useConfigStore((state) => state.summarizeVoiceConversation);
+  const summarizeCharacterThreshold = useConfigStore((state) => state.summarizeCharacterThreshold);
 
   const shouldCheckOpenAIAvailability = voiceModeEnabled && voiceProvider === 'openai';
   const shouldCheckSayAvailability = voiceModeEnabled && voiceProvider === 'say';

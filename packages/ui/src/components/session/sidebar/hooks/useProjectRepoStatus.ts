@@ -1,79 +1,59 @@
 import React from 'react';
-import { checkIsGitRepository } from '@/lib/gitApi';
-import { mapWithConcurrency } from '@/lib/concurrency';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
+import { mapWithConcurrency } from '@/lib/concurrency';
+import { useGitStore } from '@/stores/useGitStore';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 
 type Project = { id: string; path: string; normalizedPath: string };
 
-type DirectoryState = { status?: { current?: string | null } | null };
-
 type Args = {
-  projects: Array<{ id: string; path: string }>;
   normalizedProjects: Project[];
-  normalizePath: (value?: string | null) => string | null;
-  gitDirectories: Map<string, DirectoryState>;
+  gitRepoStatus: Map<string, { isGitRepo: boolean | null; branch: string | null }>;
   setProjectRepoStatus: React.Dispatch<React.SetStateAction<Map<string, boolean | null>>>;
   setProjectRootBranches: React.Dispatch<React.SetStateAction<Map<string, string>>>;
 };
 
 export const useProjectRepoStatus = (args: Args): void => {
   const {
-    projects,
     normalizedProjects,
-    normalizePath,
-    gitDirectories,
+    gitRepoStatus,
     setProjectRepoStatus,
     setProjectRootBranches,
   } = args;
 
+  const { git } = useRuntimeAPIs();
+  const ensureStatus = useGitStore((state) => state.ensureStatus);
+
+  // Derive repo status from centralized Git store
   React.useEffect(() => {
-    let cancelled = false;
-    const normalized = projects
-      .map((project) => ({ id: project.id, path: normalizePath(project.path) }))
-      .filter((project): project is { id: string; path: string } => Boolean(project.path));
-
-    setProjectRepoStatus(new Map());
-
-    if (normalized.length === 0) {
-      return () => {
-        cancelled = true;
-      };
+    if (!git || normalizedProjects.length === 0) {
+      setProjectRepoStatus(new Map());
+      return;
     }
 
-    void mapWithConcurrency(normalized, 2, async (project) => {
-      try {
-        const result = await checkIsGitRepository(project.path);
-        if (!cancelled) {
-          setProjectRepoStatus((prev) => {
-            const next = new Map(prev);
-            next.set(project.id, result);
-            return next;
-          });
-        }
-      } catch {
-        if (!cancelled) {
-          setProjectRepoStatus((prev) => {
-            const next = new Map(prev);
-            next.set(project.id, null);
-            return next;
-          });
-        }
-      }
+    // Trigger ensureStatus for each project to populate store
+    normalizedProjects.forEach((project) => {
+      void ensureStatus(project.normalizedPath, git);
     });
+  }, [normalizedProjects, git, ensureStatus, setProjectRepoStatus]);
 
-    return () => {
-      cancelled = true;
-    };
-  }, [normalizePath, projects, setProjectRepoStatus]);
+  // Read isGitRepo from the store-populated state
+  React.useEffect(() => {
+    const next = new Map<string, boolean | null>();
+    normalizedProjects.forEach((project) => {
+      next.set(project.id, gitRepoStatus.get(project.normalizedPath)?.isGitRepo ?? null);
+    });
+    setProjectRepoStatus(next);
+  }, [normalizedProjects, gitRepoStatus, setProjectRepoStatus]);
 
   const projectGitBranchesKey = React.useMemo(() => {
     return normalizedProjects
       .map((project) => {
-        const dirState = gitDirectories.get(project.normalizedPath);
-        return `${project.id}:${dirState?.status?.current ?? ''}`;
+        const branch = gitRepoStatus.get(project.normalizedPath)?.branch ?? '';
+        return `${project.id}:${branch}`;
       })
       .join('|');
-  }, [normalizedProjects, gitDirectories]);
+  }, [normalizedProjects, gitRepoStatus]);
 
   React.useEffect(() => {
     let cancelled = false;

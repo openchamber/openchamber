@@ -18,6 +18,12 @@ type ThumbMetrics = {
 };
 
 const USER_SCROLL_INTENT_WINDOW_MS = 1000;
+const METRIC_EPSILON = 0.5;
+const EMPTY_THUMB: ThumbMetrics = { length: 0, offset: 0 };
+
+const isSameThumbMetrics = (a: ThumbMetrics, b: ThumbMetrics): boolean => {
+  return Math.abs(a.length - b.length) < METRIC_EPSILON && Math.abs(a.offset - b.offset) < METRIC_EPSILON;
+};
 
 export const OverlayScrollbar: React.FC<OverlayScrollbarProps> = ({
   containerRef,
@@ -52,6 +58,7 @@ export const OverlayScrollbar: React.FC<OverlayScrollbarProps> = ({
     const { scrollHeight, clientHeight, scrollTop, scrollWidth, clientWidth, scrollLeft } = container;
     const trackInset = 8;
 
+    let nextVertical: ThumbMetrics = EMPTY_THUMB;
     if (scrollHeight > clientHeight) {
       const trackLength = Math.max(clientHeight - trackInset * 2, 0);
       const rawThumb = (clientHeight / scrollHeight) * trackLength;
@@ -59,11 +66,11 @@ export const OverlayScrollbar: React.FC<OverlayScrollbarProps> = ({
       const maxOffset = Math.max(trackLength - length, 0);
       const maxScroll = Math.max(scrollHeight - clientHeight, 1);
       const offset = (scrollTop / maxScroll) * maxOffset;
-      setVertical({ length, offset });
-    } else {
-      setVertical({ length: 0, offset: 0 });
+      nextVertical = { length, offset };
     }
+    setVertical((prev) => (isSameThumbMetrics(prev, nextVertical) ? prev : nextVertical));
 
+    let nextHorizontal: ThumbMetrics = EMPTY_THUMB;
     if (!disableHorizontal && scrollWidth > clientWidth) {
       const trackLength = Math.max(clientWidth - trackInset * 2, 0);
       const rawThumb = (clientWidth / scrollWidth) * trackLength;
@@ -71,10 +78,9 @@ export const OverlayScrollbar: React.FC<OverlayScrollbarProps> = ({
       const maxOffset = Math.max(trackLength - length, 0);
       const maxScroll = Math.max(scrollWidth - clientWidth, 1);
       const offset = (scrollLeft / maxScroll) * maxOffset;
-      setHorizontal({ length, offset });
-    } else {
-      setHorizontal({ length: 0, offset: 0 });
+      nextHorizontal = { length, offset };
     }
+    setHorizontal((prev) => (isSameThumbMetrics(prev, nextHorizontal) ? prev : nextHorizontal));
   }, [containerRef, minThumbSize, disableHorizontal]);
 
   const scheduleMetricsUpdate = React.useCallback(() => {

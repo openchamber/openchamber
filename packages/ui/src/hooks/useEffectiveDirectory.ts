@@ -1,7 +1,6 @@
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useSessions } from '@/sync/sync-context';
+import { useSessionDirectory } from '@/sync/sync-context';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import type { Session } from '@opencode-ai/sdk/v2';
 
 /**
  * Hook that resolves the effective working directory for tabs (Git, Diff, Files, Terminal).
@@ -18,7 +17,7 @@ import type { Session } from '@opencode-ai/sdk/v2';
 export const useEffectiveDirectory = (): string | undefined => {
     const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
     const newSessionDraft = useSessionUIStore((s) => s.newSessionDraft);
-    const sessions = useSessions();
+    const currentSessionDirectory = useSessionDirectory(currentSessionId);
     const worktreeMap = useSessionUIStore((s) => s.worktreeMetadata);
     const fallbackDirectory = useDirectoryStore((s) => s.currentDirectory);
 
@@ -28,12 +27,8 @@ export const useEffectiveDirectory = (): string | undefined => {
         if (worktreeMetadata?.path) {
             return worktreeMetadata.path;
         }
-
-        const currentSession = sessions.find((session) => session.id === currentSessionId);
-        type SessionWithDirectory = Session & { directory?: string };
-        const sessionDirectory = (currentSession as SessionWithDirectory | undefined)?.directory;
-        if (sessionDirectory) {
-            return sessionDirectory;
+        if (currentSessionDirectory) {
+            return currentSessionDirectory;
         }
     }
 

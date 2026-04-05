@@ -55,8 +55,8 @@ export const CommandPalette: React.FC = () => {
     handleClose();
   };
 
-  const handleOpenSession = (sessionId: string) => {
-    setCurrentSession(sessionId);
+  const handleOpenSession = (sessionId: string, directoryHint?: string | null) => {
+    setCurrentSession(sessionId, directoryHint ?? null);
     handleClose();
   };
 
@@ -289,7 +289,7 @@ export const CommandPalette: React.FC = () => {
               {currentSessions.map((session) => (
                 <CommandItem
                   key={session.id}
-                  onSelect={() => handleOpenSession(session.id)}
+                  onSelect={() => handleOpenSession(session.id, currentDirectory ?? null)}
                 >
                   <RiChatAi3Line className="mr-2 h-4 w-4" />
                   <span className="truncate">

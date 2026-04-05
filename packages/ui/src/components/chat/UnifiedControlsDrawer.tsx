@@ -43,21 +43,22 @@ export const UnifiedControlsDrawer: React.FC<UnifiedControlsDrawerProps> = ({
     onOpenModel,
     onOpenEffort,
 }) => {
-    const {
-        providers,
-        currentProviderId,
-        currentModelId,
-        currentVariant,
-        setProvider,
-        setModel,
-        setCurrentVariant,
-        getCurrentModelVariants,
-        getModelMetadata,
-    } = useConfigStore();
-    const { addRecentModel, addRecentEffort, recentEfforts } = useUIStore();
+    const providers = useConfigStore((state) => state.providers);
+    const currentProviderId = useConfigStore((state) => state.currentProviderId);
+    const currentModelId = useConfigStore((state) => state.currentModelId);
+    const currentVariant = useConfigStore((state) => state.currentVariant);
+    const setProvider = useConfigStore((state) => state.setProvider);
+    const setModel = useConfigStore((state) => state.setModel);
+    const setCurrentVariant = useConfigStore((state) => state.setCurrentVariant);
+    const getCurrentModelVariants = useConfigStore((state) => state.getCurrentModelVariants);
+    const getModelMetadata = useConfigStore((state) => state.getModelMetadata);
+    const addRecentModel = useUIStore((state) => state.addRecentModel);
+    const addRecentEffort = useUIStore((state) => state.addRecentEffort);
+    const recentEfforts = useUIStore((state) => state.recentEfforts);
     const { recentModelsList } = useModelLists();
     const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
-    const { saveAgentModelForSession, saveAgentModelVariantForSession } = useSelectionStore();
+    const saveAgentModelForSession = useSelectionStore((state) => state.saveAgentModelForSession);
+    const saveAgentModelVariantForSession = useSelectionStore((state) => state.saveAgentModelVariantForSession);
     const sessionAgentName = useContextStore((state) =>
         currentSessionId ? state.getSessionAgentSelection(currentSessionId) : null
     );

@@ -1,6 +1,6 @@
 import React from 'react';
 import { RiArrowLeftLine } from '@remixicon/react';
-import type { Message, Part } from '@opencode-ai/sdk/v2';
+import type { Message, Part, Session } from '@opencode-ai/sdk/v2';
 
 import { ChatInput } from './ChatInput';
 import { useUIStore } from '@/stores/useUIStore';
@@ -104,7 +104,9 @@ export const ChatContainer: React.FC = () => {
     );
 
     // UI store
-    const { isExpandedInput, stickyUserHeader, chatRenderMode } = useUIStore();
+    const isExpandedInput = useUIStore((state) => state.isExpandedInput);
+    const stickyUserHeader = useUIStore((state) => state.stickyUserHeader);
+    const chatRenderMode = useUIStore((state) => state.chatRenderMode);
 
     // Streaming state
     const streamingMessageId = useStreamingStore(
@@ -191,7 +193,8 @@ export const ChatContainer: React.FC = () => {
 
     const handleReturnToParentSession = React.useCallback(() => {
         if (!parentSession) return;
-        setCurrentSession(parentSession.id);
+        const parentDirectory = (parentSession as Session & { directory?: string | null }).directory ?? null;
+        setCurrentSession(parentSession.id, parentDirectory);
     }, [parentSession, setCurrentSession]);
 
     const returnToParentButton = parentSession ? (
@@ -515,9 +518,7 @@ export const ChatContainer: React.FC = () => {
                         <ScrollShadow
                             className="absolute inset-0 overflow-y-auto overflow-x-hidden z-0 chat-scroll overlay-scrollbar-target"
                             ref={scrollRef}
-                            style={(timelineController.pendingRevealWork || timelineController.isLoadingOlder)
-                                ? { overflowAnchor: 'none' }
-                                : undefined}
+                            style={{ overflowAnchor: 'none' }}
                             observeMutations={false}
                             hideTopShadow={isMobile && stickyUserHeader}
                             data-scroll-shadow="true"

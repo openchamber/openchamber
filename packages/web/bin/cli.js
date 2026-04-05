@@ -1647,7 +1647,7 @@ async function checkOpenCodeCLI(onNotice) {
   );
 }
 
-async function isPortAvailable(port) {
+async function isPortAvailable(port, host) {
   if (!Number.isFinite(port) || port <= 0) {
     return false;
   }
@@ -1656,7 +1656,7 @@ async function isPortAvailable(port) {
     const server = net.createServer();
     server.unref();
     server.on('error', () => resolve(false));
-    server.listen({ port }, () => {
+    server.listen({ port, host }, () => {
       server.close(() => resolve(true));
     });
   });
@@ -2715,7 +2715,7 @@ const commands = {
         throw new Error(`OpenChamber is already running on port ${targetPort} (PID: ${existingPid})`);
       }
 
-      if (explicitPort && !(await isPortAvailable(targetPort))) {
+      if (explicitPort && !(await isPortAvailable(targetPort, options.host))) {
         const systemInfo = await fetchSystemInfoFromPort(targetPort);
         if (systemInfo?.runtime === 'desktop') {
           throw new Error(

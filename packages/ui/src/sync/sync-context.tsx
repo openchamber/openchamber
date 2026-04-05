@@ -1,6 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useContext, useEffect, useRef, useCallback, useMemo } from "react"
 import type { Event, Message, Part } from "@opencode-ai/sdk/v2/client"
+import type { Session } from "@opencode-ai/sdk/v2"
 import type { StoreApi } from "zustand"
 import { useStore } from "zustand"
 import type { OpencodeClient } from "@opencode-ai/sdk/v2/client"
@@ -13,6 +14,7 @@ import { retry } from "./retry"
 import { updateStreamingState } from "./streaming"
 import { setActionRefs } from "./session-actions"
 import { setSyncRefs } from "./sync-refs"
+import { stripMessageDiffSnapshots, stripSessionDiffSnapshots } from "./sanitize"
 import { opencodeClient } from "@/lib/opencode/client"
 import { usePermissionStore } from "@/stores/permissionStore"
 import { autoRespondsPermission, normalizeDirectory } from "@/stores/utils/permissionAutoAccept"
@@ -86,6 +88,10 @@ export function useAllSessionStatuses(): Record<string, SessionStatus> {
 let bootingRoot = false
 let bootedAt = 0
 const BOOT_DEBOUNCE_MS = 1500
+const RECONNECT_MESSAGE_LIMIT = 200
+const RECONNECT_SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
+
+const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 
 // Module-level refs for notification viewed check.
 // Used to determine if user is currently viewing the session when a notification arrives.
@@ -107,11 +113,156 @@ function isRecentBoot() {
   return bootingRoot || Date.now() - bootedAt < BOOT_DEBOUNCE_MS
 }
 
+function setGlobalSessionStatuses(nextStatuses: Record<string, SessionStatus>) {
+  const current = useGlobalSessionStatusStore.getState().statuses
+  let changed = false
+  const merged = { ...current }
+
+  for (const [sessionId, status] of Object.entries(nextStatuses)) {
+    if (!status || merged[sessionId] === status) continue
+    merged[sessionId] = status
+    changed = true
+  }
+
+  if (changed) {
+    useGlobalSessionStatusStore.setState({ statuses: merged })
+  }
+}
+
+function getReconnectCandidateSessionIds(state: State) {
+  const ids = new Set<string>()
+
+  for (const [sessionId, status] of Object.entries(state.session_status ?? {})) {
+    if (status && status.type !== "idle") ids.add(sessionId)
+  }
+
+  for (const [sessionId, messages] of Object.entries(state.message ?? {})) {
+    const lastMessage = messages[messages.length - 1]
+    if (
+      lastMessage
+      && lastMessage.role === "assistant"
+      && typeof (lastMessage as { time?: { completed?: number } }).time?.completed !== "number"
+    ) {
+      ids.add(sessionId)
+    }
+  }
+
+  return Array.from(ids)
+}
+
+function toSessionStatus(status: Awaited<ReturnType<typeof opencodeClient.getSessionStatus>>[string]): SessionStatus | undefined {
+  if (!status) return undefined
+  if (status.type === "idle" || status.type === "busy") {
+    return { type: status.type }
+  }
+  if (
+    status.type === "retry"
+    && typeof status.attempt === "number"
+    && typeof status.message === "string"
+    && typeof status.next === "number"
+  ) {
+    return {
+      type: "retry",
+      attempt: status.attempt,
+      message: status.message,
+      next: status.next,
+    }
+  }
+  return undefined
+}
+
+async function resyncDirectoryAfterReconnect(directory: string, store: StoreApi<DirectoryStore>) {
+  const current = store.getState()
+  const candidateSessionIds = getReconnectCandidateSessionIds(current)
+  if (candidateSessionIds.length === 0) return
+
+  const nextStatuses = await opencodeClient.getSessionStatusForDirectory(directory)
+  const relevantStatuses: Record<string, SessionStatus> = {}
+
+  for (const sessionId of candidateSessionIds) {
+    const nextStatus = toSessionStatus(nextStatuses[sessionId])
+    if (nextStatus) {
+      relevantStatuses[sessionId] = nextStatus
+    }
+  }
+
+  if (Object.keys(relevantStatuses).length > 0) {
+    store.setState((state: DirectoryStore) => ({
+      session_status: { ...state.session_status, ...relevantStatuses },
+    }))
+    setGlobalSessionStatuses(relevantStatuses)
+  }
+
+  const scopedClient = opencodeClient.getScopedSdkClient(directory)
+  await Promise.all(candidateSessionIds.map(async (sessionId) => {
+    const [sessionResponse, messageResponse] = await Promise.all([
+      scopedClient.session.get({ sessionID: sessionId }).catch(() => null),
+      scopedClient.session.messages({ sessionID: sessionId, limit: RECONNECT_MESSAGE_LIMIT }).catch(() => null),
+    ])
+    const session = sessionResponse?.data
+    const records = messageResponse?.data
+    if (!session || !records) return
+
+    const nextSession = stripSessionDiffSnapshots(session)
+    const nextMessages = records
+      .filter((record) => !!record?.info?.id)
+      .map((record) => stripMessageDiffSnapshots(record.info))
+      .sort((a, b) => cmp(a.id, b.id))
+    const nextMessageIds = new Set(nextMessages.map((message) => message.id))
+
+    store.setState((state: DirectoryStore) => {
+      const sessions = [...state.session]
+      const sessionIndex = sessions.findIndex((item) => item.id === nextSession.id)
+      let sessionChanged = false
+      let sessionTotal = state.sessionTotal
+
+      if (sessionIndex >= 0) {
+        if (sessions[sessionIndex] !== nextSession) {
+          sessions[sessionIndex] = nextSession
+          sessionChanged = true
+        }
+      } else {
+        sessions.push(nextSession)
+        sessions.sort((a, b) => cmp(a.id, b.id))
+        if (!nextSession.parentID) sessionTotal += 1
+        sessionChanged = true
+      }
+
+      const nextPartState = { ...state.part }
+      const previousMessages = state.message[sessionId] ?? []
+      for (const message of previousMessages) {
+        if (!nextMessageIds.has(message.id)) {
+          delete nextPartState[message.id]
+        }
+      }
+      for (const record of records) {
+        const messageId = record?.info?.id
+        if (!messageId) continue
+        nextPartState[messageId] = (record.parts ?? [])
+          .filter((part) => !!part?.id && !RECONNECT_SKIP_PARTS.has(part.type))
+          .sort((a, b) => cmp(a.id, b.id))
+      }
+
+      return {
+        ...(sessionChanged ? { session: sessions, sessionTotal } : {}),
+        message: { ...state.message, [sessionId]: nextMessages },
+        part: nextPartState,
+      }
+    })
+  }))
+}
+
 function handleEvent(
-  directory: string,
+  rawDirectory: string,
   payload: Event,
   childStores: ChildStoreManager,
 ) {
+  // Normalize directory path: SSE events from OpenCode use native OS separators
+  // (backslashes on Windows) and may differ in drive-letter case.
+  // Child stores are keyed with forward slashes and uppercase drive letters.
+  const directory = rawDirectory && rawDirectory !== "global"
+    ? rawDirectory.replace(/\\/g, "/").replace(/^([a-z]):/, (_, l: string) => l.toUpperCase() + ":")
+    : rawDirectory
   // Global events
   if (directory === "global" || !directory) {
     const recent = isRecentBoot()
@@ -375,10 +526,27 @@ export function SyncProvider(props: {
   // Event pipeline — created once per mount. No class, no start/stop.
   // Abort controller owned by the pipeline closure. Cleanup aborts + flushes.
   useEffect(() => {
+    const reconnectResyncing = new Set<string>()
+
     const { cleanup } = createEventPipeline({
       sdk: props.sdk,
       onEvent: (directory, payload) => {
         handleEvent(directory, payload, childStores)
+      },
+      onReconnect: () => {
+        for (const [dir, store] of childStores.children) {
+          if (reconnectResyncing.has(dir)) continue
+          if (getReconnectCandidateSessionIds(store.getState()).length === 0) continue
+
+          reconnectResyncing.add(dir)
+          void resyncDirectoryAfterReconnect(dir, store)
+            .catch(() => {
+              // Transient failure during resync — next SSE event or reconnect will catch up.
+            })
+            .finally(() => {
+              reconnectResyncing.delete(dir)
+            })
+        }
       },
     })
     return cleanup
@@ -514,6 +682,145 @@ export function useSessions(directory?: string) {
   )
 }
 
+const getSidebarSessionSignature = (session: Session, stableUpdatedAt: number): string => {
+  const directory = (session as Session & { directory?: string | null }).directory ?? ''
+  const parentID = (session as Session & { parentID?: string | null }).parentID ?? ''
+  const projectWorktree = (session as Session & { project?: { worktree?: string | null } | null }).project?.worktree ?? ''
+  const shared = session.share?.url ?? ''
+  return [
+    session.id,
+    session.title ?? '',
+    session.time?.created ?? 0,
+    session.time?.archived ? 1 : 0,
+    directory,
+    parentID,
+    projectWorktree,
+    shared,
+    stableUpdatedAt,
+  ].join('|')
+}
+
+/** Get sessions stabilized for sidebar tree rendering */
+export function useSidebarSessions(directory?: string): Session[] {
+  const store = useDirectoryStore(directory)
+  const cacheRef = React.useRef<{
+    source: Session[]
+    streamingSignature: string
+    array: Session[]
+    signatures: Map<string, string>
+    sessionsById: Map<string, Session>
+    stableUpdatedAtById: Map<string, number>
+    streamingById: Map<string, boolean>
+  } | null>(null)
+
+  const getSnapshot = React.useCallback(() => {
+    const state = store.getState()
+    const source = state.session
+    const cached = cacheRef.current
+    const streamingSignature = source
+      .map((session) => {
+        const statusType = state.session_status?.[session.id]?.type
+        const isStreaming = statusType === 'busy' || statusType === 'retry'
+        return `${session.id}:${isStreaming ? 1 : 0}`
+      })
+      .join('|')
+
+    if (cached && cached.source === source && cached.streamingSignature === streamingSignature) {
+      return cached.array
+    }
+
+    const signatures = new Map<string, string>()
+    const sessionsById = new Map<string, Session>()
+    const stableUpdatedAtById = new Map<string, number>()
+    const streamingById = new Map<string, boolean>()
+    let changed = !cached || cached.array.length !== source.length
+
+    const array = source.map((session) => {
+      const rawUpdatedAt = Number(session.time?.updated ?? session.time?.created ?? 0)
+      const statusType = state.session_status?.[session.id]?.type
+      const isStreaming = statusType === 'busy' || statusType === 'retry'
+      const cachedUpdatedAt = cached?.stableUpdatedAtById.get(session.id) ?? rawUpdatedAt
+      const wasStreaming = cached?.streamingById.get(session.id) ?? false
+      const stableUpdatedAt = isStreaming
+        ? (wasStreaming ? cachedUpdatedAt : Math.max(rawUpdatedAt, cachedUpdatedAt, Date.now()))
+        : cachedUpdatedAt
+      const signature = getSidebarSessionSignature(session, stableUpdatedAt)
+      signatures.set(session.id, signature)
+      stableUpdatedAtById.set(session.id, stableUpdatedAt)
+      streamingById.set(session.id, isStreaming)
+
+      const cachedSession = cached?.sessionsById.get(session.id)
+      if (
+        cachedSession
+        && cached?.signatures.get(session.id) === signature
+      ) {
+        sessionsById.set(session.id, cachedSession)
+        return cachedSession
+      }
+
+      changed = true
+      const nextSession = stableUpdatedAt === rawUpdatedAt
+        ? session
+        : {
+            ...session,
+            time: {
+              ...session.time,
+              updated: stableUpdatedAt,
+            },
+          }
+      sessionsById.set(session.id, nextSession)
+      return nextSession
+    })
+
+    if (!changed && cached) {
+      cacheRef.current = {
+        source,
+        streamingSignature,
+        array: cached.array,
+        signatures,
+        sessionsById: cached.sessionsById,
+        stableUpdatedAtById,
+        streamingById,
+      }
+      return cached.array
+    }
+
+    cacheRef.current = { source, streamingSignature, array, signatures, sessionsById, stableUpdatedAtById, streamingById }
+    return array
+  }, [store])
+
+  return React.useSyncExternalStore(store.subscribe, getSnapshot, getSnapshot)
+}
+
+/** Get one session by id for a directory */
+export function useSession(sessionID?: string | null, directory?: string) {
+  return useDirectorySync(
+    useCallback(
+      (state: State) => {
+        if (!sessionID) return undefined
+        return state.session.find((session) => session.id === sessionID)
+      },
+      [sessionID],
+    ),
+    directory,
+  )
+}
+
+/** Get one session directory by id for a directory */
+export function useSessionDirectory(sessionID?: string | null, directory?: string): string | undefined {
+  return useDirectorySync(
+    useCallback(
+      (state: State) => {
+        if (!sessionID) return undefined
+        const session = state.session.find((candidate) => candidate.id === sessionID)
+        return (session as (typeof session & { directory?: string | null }) | undefined)?.directory ?? undefined
+      },
+      [sessionID],
+    ),
+    directory,
+  )
+}
+
 /** Get the SDK client */
 export function useSyncSDK() {
   return useSyncSystem().sdk
@@ -604,7 +911,8 @@ export function useSessionMessageRecords(sessionID: string, directory?: string) 
 
 /**
  * Determines if a session is actively working.
- * Checks session_status AND incomplete assistant messages as fallback.
+ * Checks session_status and only falls back to incomplete assistant messages
+ * when authoritative status is missing.
  * Returns false when permissions are pending (permission indicator takes priority).
  */
 export function useIsSessionWorking(sessionID: string, directory?: string): boolean {
@@ -617,7 +925,8 @@ export function useIsSessionWorking(sessionID: string, directory?: string): bool
     if (permissions.length > 0) return false
 
     // Check session_status
-    const statusWorking = status !== undefined && status.type !== "idle"
+    const hasAuthoritativeStatus = status !== undefined
+    const statusWorking = hasAuthoritativeStatus && status.type !== "idle"
 
     // Check for incomplete assistant message (fallback if status event delayed)
     let hasPendingAssistant = false
@@ -629,7 +938,8 @@ export function useIsSessionWorking(sessionID: string, directory?: string): bool
       }
     }
 
-    return statusWorking || hasPendingAssistant
+    if (hasAuthoritativeStatus) return statusWorking
+    return hasPendingAssistant
   }, [status, permissions, messages])
 }
 

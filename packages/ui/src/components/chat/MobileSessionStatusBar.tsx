@@ -1438,8 +1438,11 @@ export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
   const openNewSessionDraft = useSessionUIStore((state) => state.openNewSessionDraft);
   const getContextUsage = useSessionUIStore((state) => state.getContextUsage);
   const agents = useConfigStore((state) => state.agents);
-  const { getCurrentModel } = useConfigStore();
-  const { isMobile, showMobileSessionStatusBar, isMobileSessionStatusBarCollapsed, setIsMobileSessionStatusBarCollapsed } = useUIStore();
+  const getCurrentModel = useConfigStore((state) => state.getCurrentModel);
+  const isMobile = useUIStore((state) => state.isMobile);
+  const showMobileSessionStatusBar = useUIStore((state) => state.showMobileSessionStatusBar);
+  const isMobileSessionStatusBarCollapsed = useUIStore((state) => state.isMobileSessionStatusBarCollapsed);
+  const setIsMobileSessionStatusBarCollapsed = useUIStore((state) => state.setIsMobileSessionStatusBarCollapsed);
   const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
 
   // Project store

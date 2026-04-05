@@ -158,7 +158,7 @@ export const StatusRow: React.FC<StatusRowProps> = ({
     () => (currentSessionId ? todosRecord[currentSessionId] ?? EMPTY_TODOS : EMPTY_TODOS),
     [todosRecord, currentSessionId],
   );
-  const { isMobile } = useUIStore();
+  const isMobile = useUIStore((state) => state.isMobile);
   const isCompact = isMobile || isVSCodeRuntime();
 
   // Filter out cancelled todos for display and keep original order.
