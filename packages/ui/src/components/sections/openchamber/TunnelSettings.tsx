@@ -61,6 +61,8 @@ const SESSION_TTL_OPTIONS: TtlOption[] = [
   { value: '28800000', label: '8h', ms: 8 * 60 * 60 * 1000 },
   { value: '43200000', label: '12h', ms: 12 * 60 * 60 * 1000 },
   { value: '86400000', label: '24h', ms: 24 * 60 * 60 * 1000 },
+  { value: '604800000', label: '1w', ms: 7 * 24 * 60 * 60 * 1000 },
+  { value: '2592000000', label: '30d', ms: 30 * 24 * 60 * 60 * 1000 },
 ];
 
 const MANAGED_REMOTE_TUNNEL_DOC_URL = 'https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/get-started/create-remote-tunnel/';
