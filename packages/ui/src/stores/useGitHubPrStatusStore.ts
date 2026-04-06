@@ -667,17 +667,6 @@ const derivePrVisualState = (status: GitHubPullRequestStatus | null): string | n
   return 'open';
 };
 
-const prVisualPriority = (state: string): number => {
-  switch (state) {
-    case 'open': return 5;
-    case 'blocked': return 4;
-    case 'draft': return 3;
-    case 'merged': return 2;
-    case 'closed': return 1;
-    default: return 0;
-  }
-};
-
 const deriveSummary = (entry: PrStatusEntry): PrVisualSummary | null => {
   const vs = derivePrVisualState(entry.status ?? null);
   const pr = entry.status?.pr;

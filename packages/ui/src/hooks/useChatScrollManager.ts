@@ -515,7 +515,7 @@ export const useChatScrollManager = ({
             observer.disconnect();
             childObserver.disconnect();
         };
-    }, [schedulePinnedStateAndIndicators, updateScrollButtonVisibility]);
+    }, [schedulePinnedStateAndIndicators, updateScrollButtonVisibility, markProgrammaticScroll]);
 
     React.useEffect(() => {
         if (typeof window === 'undefined') {
