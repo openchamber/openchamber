@@ -25,7 +25,7 @@ import { useSelectionStore } from '@/sync/selection-store';
 import { useInputStore } from '@/sync/input-store';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
 import * as sessionActions from '@/sync/session-actions';
-import { useSessionMessageRecords } from '@/sync/sync-context';
+import { useUserMessageHistory } from '@/sync/sync-context';
 import { useInlineCommentDraftStore, type InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
 import { appendInlineComments } from '@/lib/messages/inlineComments';
 import { AttachedFilesList } from './FileAttachment';
@@ -41,7 +41,6 @@ import { StatusRow } from './StatusRow';
 import { MobileAgentButton } from './MobileAgentButton';
 import { MobileModelButton } from './MobileModelButton';
 import { MobileSessionStatusBar } from './MobileSessionStatusBar';
-import { useAssistantStatus } from '@/hooks/useAssistantStatus';
 import { useCurrentSessionActivity } from '@/hooks/useSessionActivity';
 import { toast } from '@/components/ui';
 // useMessageStore removed — messages now come from sync system
@@ -655,7 +654,7 @@ const saveStoredDraft = (sessionId: string | null, draft: string): void => {
     }
 };
 
-export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBottom }) => {
+const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBottom }) => {
     // Track if we restored a draft on mount (for text selection)
     const initialDraftRef = React.useRef<string | null>(null);
     // Track initial session ID (captured at mount time for draft restoration)
@@ -749,7 +748,6 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
     const inputSpellcheckEnabled = useUIStore((state) => state.inputSpellcheckEnabled);
     const isExpandedInput = useUIStore((state) => state.isExpandedInput);
     const setExpandedInput = useUIStore((state) => state.setExpandedInput);
-    const { working } = useAssistantStatus();
     const { git: runtimeGit } = useRuntimeAPIs();
     const { currentTheme } = useThemeSystem();
     const chatSearchDirectory = useChatSearchDirectory();
@@ -973,24 +971,9 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
     const consumeDrafts = useInlineCommentDraftStore((state) => state.consumeDrafts);
     const hasDrafts = draftCount > 0;
 
-    // User message history for up/down arrow navigation
-    // Get raw messages from store (stable reference)
-    const sessionMessages = useSessionMessageRecords(currentSessionId ?? "");
-    // Derive user message history with useMemo to avoid infinite re-renders
-    const userMessageHistory = React.useMemo(() => {
-        if (!sessionMessages || !currentSessionId) return [];
-        return sessionMessages
-            .filter((m) => m.info.role === 'user')
-            .map((m) => {
-                const textPart = m.parts.find((p) => p.type === 'text');
-                if (textPart && 'text' in textPart) {
-                    return String(textPart.text);
-                }
-                return '';
-            })
-            .filter((text) => text.length > 0)
-            .reverse(); // Most recent first
-    }, [sessionMessages, currentSessionId]);
+    // User message history for up/down arrow navigation.
+    // Keep this on a narrow hook instead of full session message records.
+    const userMessageHistory = useUserMessageHistory(currentSessionId ?? "");
 
     // Keep messageRef in sync with message state
     React.useEffect(() => {
@@ -1248,7 +1231,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
     const hasQueuedMessages = queuedMessages.length > 0;
     const canSend = hasContent || hasQueuedMessages;
 
-    const canAbort = working.isWorking;
+    const canAbort = sessionPhase !== 'idle';
 
     // Keep a ref to handleSubmit so callbacks don't depend on it.
     type SubmitOptions = {
@@ -3135,10 +3118,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
         });
     }, [permissionAutoAcceptEnabled, permissionScopeSessionId, setSessionAutoAccept]);
 
-    const workingStatusText = working.statusText;
-
     React.useEffect(() => {
-        const pendingAbortBanner = Boolean(working.wasAborted);
+        const pendingAbortBanner = Boolean(abortPromptSessionId) && abortPromptSessionId === currentSessionId;
         if (!prevWasAbortedRef.current && pendingAbortBanner && !showAbortStatus) {
             startAbortIndicator();
             if (currentSessionId) {
@@ -3147,11 +3128,11 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
         }
         prevWasAbortedRef.current = pendingAbortBanner;
     }, [
+        abortPromptSessionId,
         acknowledgeSessionAbort,
         currentSessionId,
         showAbortStatus,
         startAbortIndicator,
-        working.wasAborted,
     ]);
 
     React.useEffect(() => {
@@ -3298,13 +3279,6 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                     </div>
                 )}
                 <MemoStatusRow
-                    isWorking={working.isWorking}
-                    statusText={workingStatusText}
-                    isGenericStatus={working.isGenericStatus}
-                    isWaitingForPermission={working.isWaitingForPermission}
-                    wasAborted={working.wasAborted}
-                    abortActive={working.abortActive}
-                    retryInfo={working.retryInfo}
                     showAbortStatus={showAbortStatus}
                     showAssistantStatus={false}
                     showTodos
@@ -3732,3 +3706,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
         </>
     );
 };
+
+ChatInputComponent.displayName = 'ChatInput';
+
+export const ChatInput = React.memo(ChatInputComponent);

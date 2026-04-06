@@ -7,6 +7,7 @@ import {
     buildTurnWindowModel,
     clampTurnStart,
     getInitialTurnStart,
+    updateTurnWindowModelIncremental,
     windowMessagesByTurn,
     type TurnWindowModel,
 } from '../lib/turns/windowTurns';
@@ -70,7 +71,19 @@ export const useChatTimelineController = ({
     isPinned,
     isOverflowing,
 }: UseChatTimelineControllerOptions): UseChatTimelineControllerResult => {
-    const turnWindowModel = React.useMemo(() => buildTurnWindowModel(messages), [messages]);
+    const previousTurnWindowModelRef = React.useRef<TurnWindowModel | null>(null);
+    const previousMessagesRef = React.useRef<ChatMessageEntry[] | null>(null);
+    const turnWindowModel = React.useMemo(() => {
+        const incrementalModel = updateTurnWindowModelIncremental(
+            previousTurnWindowModelRef.current,
+            previousMessagesRef.current,
+            messages,
+        );
+        const nextModel = incrementalModel ?? buildTurnWindowModel(messages);
+        previousTurnWindowModelRef.current = nextModel;
+        previousMessagesRef.current = messages;
+        return nextModel;
+    }, [messages]);
 
     const [turnStart, setTurnStart] = React.useState(() => getInitialTurnStart(turnWindowModel.turnCount));
     const [isLoadingOlder, setIsLoadingOlder] = React.useState(false);

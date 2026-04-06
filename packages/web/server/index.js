@@ -339,6 +339,7 @@ let isExternalOpenCode = false;
 let exitOnShutdown = true;
 let uiAuthController = null;
 let activeTunnelController = null;
+let globalWatcherStartPromise = null;
 const tunnelProviderRegistry = createTunnelProviderRegistry([
   createCloudflareTunnelProvider(),
 ]);
@@ -739,13 +740,24 @@ const waitForOpenCodeReady = (...args) => openCodeLifecycleRuntime.waitForOpenCo
 const waitForAgentPresence = (...args) => openCodeLifecycleRuntime.waitForAgentPresence(...args);
 const refreshOpenCodeAfterConfigChange = (...args) => openCodeLifecycleRuntime.refreshOpenCodeAfterConfigChange(...args);
 const startHealthMonitoring = () => openCodeLifecycleRuntime.startHealthMonitoring(HEALTH_CHECK_INTERVAL);
+const ensureGlobalWatcherStarted = async () => {
+  if (globalWatcherStartPromise) {
+    return globalWatcherStartPromise;
+  }
+
+  globalWatcherStartPromise = openCodeWatcherRuntime.start().catch((error) => {
+    globalWatcherStartPromise = null;
+    throw error;
+  });
+
+  return globalWatcherStartPromise;
+};
 const bootstrapOpenCodeAtStartup = async (...args) => {
   await openCodeLifecycleRuntime.bootstrapOpenCodeAtStartup(...args);
   scheduleOpenCodeApiDetection();
-  startHealthMonitoring();
-  void openCodeWatcherRuntime.start().catch((error) => {
-    console.warn(`Global event watcher startup failed: ${error?.message || error}`);
-  });
+  if (openCodeLifecycleState.openCodeProcess && !openCodeLifecycleState.isExternalOpenCode) {
+    startHealthMonitoring();
+  }
 };
 const killProcessOnPort = (...args) => openCodeLifecycleRuntime.killProcessOnPort(...args);
 
@@ -871,6 +883,7 @@ async function main(options = {}) {
     resolveZenModel,
     sayTTSCapability,
     ensurePushInitialized,
+    ensureGlobalWatcherStarted,
     getOrCreateVapidKeys,
     getUiSessionTokenFromRequest,
     writeSettingsToDisk,

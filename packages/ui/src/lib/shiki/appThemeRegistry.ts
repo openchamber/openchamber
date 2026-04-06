@@ -89,7 +89,3 @@ export const ensurePierreThemeRegistered = (theme: Theme): void => {
   registerCustomTheme(id, async () => resolved);
   registeredPierreThemes.add(id);
 };
-
-export const getStreamdownThemePair = (light: Theme, dark: Theme) => {
-  return [getResolvedShikiTheme(light), getResolvedShikiTheme(dark)] as const;
-};

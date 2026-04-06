@@ -25,6 +25,7 @@ export const createBootstrapRuntime = (dependencies) => {
       resolveZenModel,
       sayTTSCapability,
       ensurePushInitialized,
+      ensureGlobalWatcherStarted,
       getOrCreateVapidKeys,
       getUiSessionTokenFromRequest,
       writeSettingsToDisk,
@@ -74,6 +75,7 @@ export const createBootstrapRuntime = (dependencies) => {
     registerNotificationRoutes(app, {
       uiAuthController,
       ensurePushInitialized,
+      ensureGlobalWatcherStarted,
       getOrCreateVapidKeys,
       getUiSessionTokenFromRequest,
       readSettingsFromDiskMigrated,

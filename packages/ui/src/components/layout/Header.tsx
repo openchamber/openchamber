@@ -21,7 +21,7 @@ import { DiffIcon } from '@/components/icons/DiffIcon';
 import { useUIStore, type MainTab } from '@/stores/useUIStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useSession, useSessionMessageRecords } from '@/sync/sync-context';
+import { useSession, useSessionMessagesResolved } from '@/sync/sync-context';
 import { getAllSyncSessions } from '@/sync/sync-refs';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
@@ -665,8 +665,7 @@ export const Header: React.FC<HeaderProps> = ({
   const openNewSessionDraft = useSessionUIStore((state) => state.openNewSessionDraft);
   const isNewSessionDraftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-  const currentSessionMessageRecords = useSessionMessageRecords(currentSessionId ?? '');
-  const currentSessionMessages = currentSessionId ? (currentSessionMessageRecords.length > 0 ? currentSessionMessageRecords : undefined) : undefined;
+  const currentSessionMessagesResolved = useSessionMessagesResolved(currentSessionId ?? '');
   const currentSyncedSession = useSession(currentSessionId ?? null);
   const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
   const activeProject = useProjectsStore((state) => {
@@ -760,7 +759,7 @@ export const Header: React.FC<HeaderProps> = ({
   const outputLimit = (limit && typeof limit.output === 'number' ? limit.output : 0);
   const contextUsage = getContextUsage(contextLimit, outputLimit);
   const [stableDesktopContextUsage, setStableDesktopContextUsage] = React.useState<SessionContextUsage | null>(null);
-  const isContextUsageResolvedForSession = !currentSessionId || currentSessionMessages !== undefined;
+  const isContextUsageResolvedForSession = !currentSessionId || currentSessionMessagesResolved;
 
   useEffect(() => {
     if (!currentSessionId) {

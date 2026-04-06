@@ -41,6 +41,23 @@ export type EventPipelineInput = {
   onReconnect?: () => void
 }
 
+const normalizeEventType = (payload: Event): Event => {
+  const type = (payload as { type?: unknown }).type
+  if (typeof type !== "string") {
+    return payload
+  }
+
+  const match = /^(.*)\.(\d+)$/.exec(type)
+  if (!match || !match[1]) {
+    return payload
+  }
+
+  return {
+    ...payload,
+    type: match[1] as Event["type"],
+  } as unknown as Event
+}
+
 function resolveEventDirectory(event: unknown, payload: Event): string {
   const directDirectory =
     typeof event === "object" && event !== null && typeof (event as { directory?: unknown }).directory === "string"
@@ -190,21 +207,22 @@ export function createEventPipeline(input: EventPipelineInput) {
           if (!payload || typeof payload !== "object" || typeof (payload as { type?: unknown }).type !== "string") {
             continue
           }
-          const directory = resolveEventDirectory(event, payload)
-          const k = key(directory, payload)
+          const normalizedPayload = normalizeEventType(payload)
+          const directory = resolveEventDirectory(event, normalizedPayload)
+          const k = key(directory, normalizedPayload)
           if (k) {
             const i = coalesced.get(k)
             if (i !== undefined) {
-              queue[i] = { directory, payload }
-              if (payload.type === "message.part.updated") {
-                const part = (payload.properties as { part: { messageID: string; id: string } }).part
+              queue[i] = { directory, payload: normalizedPayload }
+              if (normalizedPayload.type === "message.part.updated") {
+                const part = (normalizedPayload.properties as { part: { messageID: string; id: string } }).part
                 staleDeltas.add(deltaKey(directory, part.messageID, part.id))
               }
               continue
             }
             coalesced.set(k, queue.length)
           }
-          queue.push({ directory, payload })
+          queue.push({ directory, payload: normalizedPayload })
           schedule()
 
           if (Date.now() - yielded < STREAM_YIELD_MS) continue

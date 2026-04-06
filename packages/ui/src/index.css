@@ -870,61 +870,109 @@ html:not(.dark) .chat-scroll {
 }
 
 /* Text font: IBM Plex Sans */
-.streamdown-content {
+.markdown-content {
   font-family: var(--font-sans);
   font-size: var(--text-markdown);
+  line-height: inherit;
+}
+
+.markdown-content p,
+.markdown-content li,
+.markdown-content blockquote,
+.markdown-content td,
+.markdown-content th {
+  line-height: inherit;
 }
 
 /* Tool markdown should render at code size to match tool card typography. */
-.streamdown-content.streamdown-tool {
+.markdown-content.markdown-tool {
   font-size: var(--text-code) !important;
 }
 
 /* Reasoning markdown renders at meta size, dimmed. */
-.streamdown-content.streamdown-reasoning {
+.markdown-content.markdown-reasoning {
   font-size: var(--text-meta);
-  color: var(--muted-foreground);
+  color: var(--surface-muted-foreground);
+  --markdown-heading1: inherit;
+  --markdown-heading2: inherit;
+  --markdown-heading3: inherit;
+  --markdown-heading4: inherit;
+  --markdown-link: inherit;
+  --markdown-link-hover: var(--surface-foreground);
+  --markdown-blockquote: inherit;
+  --markdown-bold: inherit;
+  --markdown-italic: inherit;
+  --markdown-strikethrough: inherit;
 }
 
-.streamdown-content.streamdown-reasoning strong,
-.streamdown-content.streamdown-reasoning b,
-.streamdown-content.streamdown-reasoning [data-streamdown="strong"],
-.streamdown-content.streamdown-reasoning [data-streamdown="bold"] {
+.markdown-content.markdown-reasoning p,
+.markdown-content.markdown-reasoning li,
+.markdown-content.markdown-reasoning td,
+.markdown-content.markdown-reasoning th,
+.markdown-content.markdown-reasoning h1,
+.markdown-content.markdown-reasoning h2,
+.markdown-content.markdown-reasoning h3,
+.markdown-content.markdown-reasoning h4,
+.markdown-content.markdown-reasoning h5,
+.markdown-content.markdown-reasoning h6,
+.markdown-content.markdown-reasoning strong,
+.markdown-content.markdown-reasoning b,
+.markdown-content.markdown-reasoning em,
+.markdown-content.markdown-reasoning del,
+.markdown-content.markdown-reasoning [data-markdown="strong"],
+.markdown-content.markdown-reasoning [data-markdown="bold"] {
+  color: var(--surface-muted-foreground) !important;
+}
+
+.markdown-content.markdown-reasoning a,
+.markdown-content.markdown-reasoning [data-openchamber-file-link="true"] {
+  color: var(--surface-muted-foreground) !important;
+}
+
+.markdown-content.markdown-reasoning a:hover,
+.markdown-content.markdown-reasoning [data-openchamber-file-link="true"]:hover {
+  color: var(--surface-foreground) !important;
+}
+
+.markdown-content.markdown-reasoning strong,
+.markdown-content.markdown-reasoning b,
+.markdown-content.markdown-reasoning [data-markdown="strong"],
+.markdown-content.markdown-reasoning [data-markdown="bold"] {
   font-weight: inherit !important;
   color: inherit !important;
   font-style: inherit !important;
 }
 
-.streamdown-content.streamdown-tool code,
-.streamdown-content.streamdown-tool pre {
+.markdown-content.markdown-tool code,
+.markdown-content.markdown-tool pre {
   font-size: inherit !important;
 }
 
 /* Streamdown headers: keep proportional but not oversized */
-.streamdown-content h1 {
+.markdown-content h1 {
   font-size: 1.125em;
   font-weight: 600;
   margin-top: 1em;
   margin-bottom: 0.5em;
 }
 
-.streamdown-content h2 {
+.markdown-content h2 {
   font-size: 1.0625em;
   font-weight: 600;
   margin-top: 0.875em;
   margin-bottom: 0.375em;
 }
 
-.streamdown-content h3 {
+.markdown-content h3 {
   font-size: 1em;
   font-weight: 600;
   margin-top: 0.75em;
   margin-bottom: 0.25em;
 }
 
-.streamdown-content h4,
-.streamdown-content h5,
-.streamdown-content h6 {
+.markdown-content h4,
+.markdown-content h5,
+.markdown-content h6 {
   font-size: 1em;
   font-weight: 600;
   margin-top: 0.625em;
@@ -932,14 +980,14 @@ html:not(.dark) .chat-scroll {
 }
 
 /* Code font: IBM Plex Mono */
-.streamdown-content code,
-.streamdown-content pre {
+.markdown-content code,
+.markdown-content pre {
   font-family: var(--font-mono);
   font-size: var(--text-code);
 }
 
 /* Override Streamdown's hardcoded bg-muted for inline code - use theme colors instead */
-.streamdown-content code[data-streamdown="inline-code"] {
+.markdown-content code[data-markdown="inline-code"] {
   background-color: var(--markdown-inline-code-bg, var(--surface-muted)) !important;
   color: var(--markdown-inline-code, var(--foreground)) !important;
   word-break: break-all;
@@ -947,123 +995,123 @@ html:not(.dark) .chat-scroll {
 }
 
 /* Markdown headings - use theme colors */
-.streamdown-content h1 {
+.markdown-content h1 {
   color: var(--markdown-heading1, var(--primary));
 }
 
-.streamdown-content h2 {
+.markdown-content h2 {
   color: var(--markdown-heading2, var(--primary));
 }
 
-.streamdown-content h3 {
+.markdown-content h3 {
   color: var(--markdown-heading3, var(--primary));
 }
 
-.streamdown-content h4,
-.streamdown-content h5,
-.streamdown-content h6 {
+.markdown-content h4,
+.markdown-content h5,
+.markdown-content h6 {
   color: var(--markdown-heading4, var(--foreground));
 }
 
 /* Markdown links - use theme colors */
-.streamdown-content a {
+.markdown-content a {
   color: var(--markdown-link, var(--primary));
 }
 
-.streamdown-content a:hover {
+.markdown-content a:hover {
   color: var(--markdown-link-hover, var(--primary));
 }
 
-.streamdown-content [data-openchamber-file-link="true"] {
+.markdown-content [data-openchamber-file-link="true"] {
   color: var(--markdown-link, var(--primary));
   cursor: pointer;
   text-decoration: underline;
   text-underline-offset: 2px;
 }
 
-.streamdown-content [data-openchamber-file-link="true"]:hover {
+.markdown-content [data-openchamber-file-link="true"]:hover {
   color: var(--markdown-link-hover, var(--primary));
 }
 
 /* Markdown blockquote - use theme colors */
-.streamdown-content blockquote {
+.markdown-content blockquote {
   color: var(--markdown-blockquote, var(--muted-foreground));
   border-left-color: var(--markdown-blockquote-border, var(--border));
 }
 
 /* Markdown horizontal rule - use theme colors */
-.streamdown-content hr {
+.markdown-content hr {
   border-color: var(--markdown-hr, var(--border));
 }
 
 /* Markdown bold/italic/strikethrough - use theme colors */
-.streamdown-content strong {
+.markdown-content strong {
   color: var(--markdown-bold, var(--foreground));
 }
 
-.streamdown-content em {
+.markdown-content em {
   color: var(--markdown-italic, var(--foreground));
 }
 
-.streamdown-content del {
+.markdown-content del {
   color: var(--markdown-strikethrough, var(--muted-foreground));
 }
 
 /* Streamdown code blocks: ensure light/dark Shiki vars work even when Tailwind doesn't scan Streamdown's internal class names. */
-.streamdown-content [data-streamdown="code-block-body"] {
+.markdown-content [data-markdown="code-block-body"] {
   font-size: var(--text-code);
   background-color: transparent;
   color: var(--shiki-light, inherit);
 }
 
-.streamdown-content [data-streamdown="code-block-body"] span[style*="--sdm-c"] {
+.markdown-content [data-markdown="code-block-body"] span[style*="--sdm-c"] {
   color: var(--sdm-c) !important;
 }
 
-.streamdown-content [data-streamdown="code-block-body"] span[style*="--sdm-tbg"] {
+.markdown-content [data-markdown="code-block-body"] span[style*="--sdm-tbg"] {
   background-color: var(--sdm-tbg) !important;
 }
 
-.streamdown-content [data-streamdown="code-block-body"] span[style*="--shiki-light"] {
+.markdown-content [data-markdown="code-block-body"] span[style*="--shiki-light"] {
   color: var(--shiki-light) !important;
 }
 
-.streamdown-content [data-streamdown="code-block-body"] span[style*="--shiki-light-bg"] {
+.markdown-content [data-markdown="code-block-body"] span[style*="--shiki-light-bg"] {
   background-color: var(--shiki-light-bg) !important;
 }
 
-.dark .streamdown-content [data-streamdown="code-block-body"] {
+.dark .markdown-content [data-markdown="code-block-body"] {
   background-color: transparent;
   color: var(--shiki-dark, var(--shiki-light, inherit));
 }
 
-.dark .streamdown-content [data-streamdown="code-block-body"] span[style*="--shiki-dark"] {
+.dark .markdown-content [data-markdown="code-block-body"] span[style*="--shiki-dark"] {
   color: var(--shiki-dark) !important;
 }
 
-.dark .streamdown-content [data-streamdown="code-block-body"] span[style*="--shiki-dark-bg"] {
+.dark .markdown-content [data-markdown="code-block-body"] span[style*="--shiki-dark-bg"] {
   background-color: var(--shiki-dark-bg) !important;
 }
 
 /* Fix list styling - override Tailwind reset */
-.streamdown-content ul {
+.markdown-content ul {
   list-style-type: disc;
   list-style-position: outside;
   padding-left: 1.5em;
 }
 
-.streamdown-content ol {
+.markdown-content ol {
   list-style-type: decimal;
   list-style-position: outside;
   padding-left: 1.5em;
 }
 
-.streamdown-content li {
+.markdown-content li {
   display: list-item;
 }
 
 /* Reduce code block header height */
-[data-streamdown="code-block-header"] {
+[data-markdown="code-block-header"] {
   margin: 0;
   padding: 0.375rem 0.75rem;
   display: flex;
@@ -1078,7 +1126,7 @@ html:not(.dark) .chat-scroll {
 }
 
 /* Disable Streamdown's code block virtualization and keep block chrome fixed */
-.streamdown-content [data-streamdown="code-block"] {
+.markdown-content [data-markdown="code-block"] {
   content-visibility: visible !important;
   contain-intrinsic-size: none !important;
   position: relative;
@@ -1095,7 +1143,7 @@ html:not(.dark) .chat-scroll {
   border-radius: 0.75rem;
 }
 
-.streamdown-content [data-streamdown="code-block"] > div:not([data-streamdown]) {
+.markdown-content [data-markdown="code-block"] > div:not([data-markdown]) {
   position: absolute;
   top: 0;
   right: 0;
@@ -1106,7 +1154,7 @@ html:not(.dark) .chat-scroll {
 }
 
 /* Streamdown code block body: scroll text content within the card body */
-.streamdown-content [data-streamdown="code-block-body"] {
+.markdown-content [data-markdown="code-block-body"] {
   display: block;
   inline-size: 100%;
   min-width: 0;
@@ -1122,7 +1170,7 @@ html:not(.dark) .chat-scroll {
   border-radius: 0;
 }
 
-.streamdown-content [data-streamdown="code-block-body"] pre {
+.markdown-content [data-markdown="code-block-body"] pre {
   display: block;
   width: 100%;
   min-width: 100%;
@@ -1135,21 +1183,21 @@ html:not(.dark) .chat-scroll {
   background: transparent !important;
 }
 
-.streamdown-content [data-streamdown="code-block-body"] > * {
+.markdown-content [data-markdown="code-block-body"] > * {
   border: 0 !important;
   border-radius: 0 !important;
   box-shadow: none !important;
   background: transparent !important;
 }
 
-.streamdown-content [data-streamdown="code-block-body"] code {
+.markdown-content [data-markdown="code-block-body"] code {
   white-space: pre;
   overflow-wrap: normal;
   word-break: normal;
   background: transparent !important;
 }
 
-.streamdown-content [data-streamdown="code-block-actions"] {
+.markdown-content [data-markdown="code-block-actions"] {
   pointer-events: auto;
   transition: opacity 0.15s ease;
   border: 0 !important;
@@ -1158,7 +1206,7 @@ html:not(.dark) .chat-scroll {
   gap: 0.125rem;
 }
 
-.streamdown-content [data-streamdown="code-block-actions"] button {
+.markdown-content [data-markdown="code-block-actions"] button {
   border: 0 !important;
   background: transparent !important;
   box-shadow: none !important;
@@ -1167,26 +1215,26 @@ html:not(.dark) .chat-scroll {
   min-height: 1.5rem;
 }
 
-.streamdown-content [data-streamdown="code-block-actions"] button svg {
+.markdown-content [data-markdown="code-block-actions"] button svg {
   width: 0.875rem;
   height: 0.875rem;
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .streamdown-content [data-streamdown="code-block"] [data-streamdown="code-block-actions"] {
+  .markdown-content [data-markdown="code-block"] [data-markdown="code-block-actions"] {
     opacity: 0;
     pointer-events: none;
   }
 
-  .streamdown-content [data-streamdown="code-block"]:hover [data-streamdown="code-block-actions"],
-  .streamdown-content [data-streamdown="code-block"]:focus-within [data-streamdown="code-block-actions"] {
+  .markdown-content [data-markdown="code-block"]:hover [data-markdown="code-block-actions"],
+  .markdown-content [data-markdown="code-block"]:focus-within [data-markdown="code-block-actions"] {
     opacity: 1;
     pointer-events: auto;
   }
 }
 
 /* Mermaid block: position context for controls wrapper. */
-[data-streamdown="mermaid-block"] {
+[data-markdown="mermaid-block"] {
   position: relative;
   border-radius: 0.75rem;
   border: 1px solid var(--interactive-border);
@@ -1194,17 +1242,17 @@ html:not(.dark) .chat-scroll {
   padding: 0.5rem;
 }
 
-[data-streamdown="mermaid-block"] [data-streamdown="mermaid-scroll"] {
+[data-markdown="mermaid-block"] [data-markdown="mermaid-scroll"] {
   overflow: auto;
 }
 
-[data-streamdown="mermaid-block"] [data-streamdown="mermaid"] {
+[data-markdown="mermaid-block"] [data-markdown="mermaid"] {
   width: max-content;
   min-width: 100%;
   display: block;
 }
 
-[data-streamdown="mermaid-block"] [data-streamdown="mermaid-ascii"] {
+[data-markdown="mermaid-block"] [data-markdown="mermaid-ascii"] {
   margin: 0;
   white-space: pre;
   width: max-content;
@@ -1214,30 +1262,30 @@ html:not(.dark) .chat-scroll {
   background: transparent;
 }
 
-[data-streamdown="mermaid-block"] [data-streamdown="mermaid"] svg {
+[data-markdown="mermaid-block"] [data-markdown="mermaid"] svg {
   width: auto !important;
   min-width: 100%;
   max-width: none !important;
   height: auto !important;
 }
 
-[data-streamdown="mermaid-block"] svg {
+[data-markdown="mermaid-block"] svg {
   display: block;
   background: var(--surface-elevated);
 }
 
 /* Fullscreen Mermaid popup: scale diagrams to fill available viewport panel area. */
-.streamdown-mermaid-fullscreen {
+.markdown-mermaid-fullscreen {
   height: 100%;
   width: 100%;
 }
 
-.streamdown-mermaid-fullscreen .streamdown-content {
+.markdown-mermaid-fullscreen .markdown-content {
   height: 100%;
   width: 100%;
 }
 
-.streamdown-mermaid-fullscreen [data-streamdown="mermaid-block"] {
+.markdown-mermaid-fullscreen [data-markdown="mermaid-block"] {
   width: 100%;
   height: 100%;
   min-height: 100%;
@@ -1247,20 +1295,20 @@ html:not(.dark) .chat-scroll {
   background: var(--surface-elevated);
 }
 
-.streamdown-mermaid-fullscreen [data-streamdown="mermaid-block"] [data-streamdown="mermaid-scroll"] {
+.markdown-mermaid-fullscreen [data-markdown="mermaid-block"] [data-markdown="mermaid-scroll"] {
   width: 100%;
   height: 100%;
   overflow: auto;
 }
 
-.streamdown-mermaid-fullscreen [data-streamdown="mermaid-block"] [data-streamdown="mermaid"] {
+.markdown-mermaid-fullscreen [data-markdown="mermaid-block"] [data-markdown="mermaid"] {
   width: max-content;
   min-width: 100%;
   min-height: 100%;
   display: block;
 }
 
-.streamdown-mermaid-fullscreen [data-streamdown="mermaid-block"] [data-streamdown="mermaid-ascii"] {
+.markdown-mermaid-fullscreen [data-markdown="mermaid-block"] [data-markdown="mermaid-ascii"] {
   margin: 0;
   white-space: pre;
   width: max-content;
@@ -1271,7 +1319,7 @@ html:not(.dark) .chat-scroll {
   background: transparent;
 }
 
-.streamdown-mermaid-fullscreen [data-streamdown="mermaid-block"] svg {
+.markdown-mermaid-fullscreen [data-markdown="mermaid-block"] svg {
   width: auto !important;
   height: auto !important;
   max-width: none !important;

@@ -26,6 +26,7 @@ export const registerNotificationRoutes = (app, dependencies) => {
   const {
     uiAuthController,
     ensurePushInitialized,
+    ensureGlobalWatcherStarted,
     getOrCreateVapidKeys,
     getUiSessionTokenFromRequest,
     readSettingsFromDiskMigrated,
@@ -45,6 +46,17 @@ export const registerNotificationRoutes = (app, dependencies) => {
     setPushInitialized,
   } = dependencies;
 
+  const ensureSessionWatcher = async () => {
+    if (typeof ensureGlobalWatcherStarted !== 'function') {
+      return;
+    }
+    try {
+      await ensureGlobalWatcherStarted();
+    } catch (error) {
+      console.warn('[OpenCodeWatcher] lazy start failed:', error?.message ?? error);
+    }
+  };
+
   app.get('/api/push/vapid-public-key', async (_req, res) => {
     try {
       await ensurePushInitialized();
@@ -58,6 +70,7 @@ export const registerNotificationRoutes = (app, dependencies) => {
 
   app.post('/api/push/subscribe', async (req, res) => {
     await ensurePushInitialized();
+    await ensureSessionWatcher();
 
     const uiToken = uiAuthController?.ensureSessionToken
       ? await uiAuthController.ensureSessionToken(req, res)
@@ -146,10 +159,12 @@ export const registerNotificationRoutes = (app, dependencies) => {
   });
 
   app.get('/api/session-activity', (_req, res) => {
+    void ensureSessionWatcher();
     res.json(getSessionActivitySnapshot());
   });
 
-  app.get('/api/sessions/snapshot', (_req, res) => {
+  app.get('/api/sessions/snapshot', async (_req, res) => {
+    await ensureSessionWatcher();
     res.json({
       statusSessions: getSessionStateSnapshot(),
       attentionSessions: getSessionAttentionSnapshot(),
@@ -157,7 +172,8 @@ export const registerNotificationRoutes = (app, dependencies) => {
     });
   });
 
-  app.get('/api/sessions/status', (_req, res) => {
+  app.get('/api/sessions/status', async (_req, res) => {
+    await ensureSessionWatcher();
     const snapshot = getSessionStateSnapshot();
     res.json({
       sessions: snapshot,
@@ -165,7 +181,8 @@ export const registerNotificationRoutes = (app, dependencies) => {
     });
   });
 
-  app.get('/api/sessions/:id/status', (req, res) => {
+  app.get('/api/sessions/:id/status', async (req, res) => {
+    await ensureSessionWatcher();
     const sessionId = req.params.id;
     const state = getSessionState(sessionId);
 
@@ -182,7 +199,8 @@ export const registerNotificationRoutes = (app, dependencies) => {
     });
   });
 
-  app.get('/api/sessions/attention', (_req, res) => {
+  app.get('/api/sessions/attention', async (_req, res) => {
+    await ensureSessionWatcher();
     const snapshot = getSessionAttentionSnapshot();
     res.json({
       sessions: snapshot,
@@ -190,7 +208,8 @@ export const registerNotificationRoutes = (app, dependencies) => {
     });
   });
 
-  app.get('/api/sessions/:id/attention', (req, res) => {
+  app.get('/api/sessions/:id/attention', async (req, res) => {
+    await ensureSessionWatcher();
     const sessionId = req.params.id;
     const state = getSessionAttentionState(sessionId);
 

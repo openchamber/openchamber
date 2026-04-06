@@ -8,7 +8,6 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useContextStore } from '@/stores/contextStore';
-import { useStreamingStore } from '@/sync/streaming';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import * as sessionActions from '@/sync/session-actions';
@@ -131,6 +130,7 @@ interface ChatMessageProps {
     turnGroupingContext?: TurnGroupingContext;
     assistantHeaderMessageId?: string;
     isInActiveTurn?: boolean;
+    activeStreamingPhase?: StreamPhase | null;
     animateUserOnMount?: boolean;
     onUserAnimationConsumed?: (messageId: string) => void;
 }
@@ -144,6 +144,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     turnGroupingContext,
     assistantHeaderMessageId,
     isInActiveTurn = false,
+    activeStreamingPhase = null,
     animateUserOnMount = false,
     onUserAnimationConsumed,
 }) => {
@@ -152,13 +153,6 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     const messageContainerRef = React.useRef<HTMLDivElement | null>(null);
 
     const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
-    const streamState = useStreamingStore((s) => s.messageStreamStates.get(message.info.id));
-    const lifecyclePhase = isInActiveTurn ? (streamState?.phase ?? null) : null;
-
-    const msgSessionId = (message.info as { sessionID?: string }).sessionID ?? currentSessionId ?? null;
-    const streamingMsgForSession = useStreamingStore((s) => msgSessionId ? s.streamingMessageIds.get(msgSessionId) ?? null : null);
-    const isStreamingMessage = isInActiveTurn ? streamingMsgForSession === message.info.id : false;
-    const hasActiveStreamInSession = typeof streamingMsgForSession === 'string' && streamingMsgForSession.length > 0;
 
     const getAgentModelForSession = useSelectionStore((s) => s.getAgentModelForSession);
     const getSessionModelSelection = useSelectionStore((s) => s.getSessionModelSelection);
@@ -166,13 +160,8 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     const forkFromMessage = sessionActions.forkFromMessage;
 
     streamPerfCount('ui.chat_message.render');
-    if (isStreamingMessage) {
+    if (isInActiveTurn) {
         streamPerfCount('ui.chat_message.render.streaming');
-    } else if (hasActiveStreamInSession) {
-        streamPerfCount('ui.chat_message.render.static_during_stream');
-        if (!isInActiveTurn) {
-            streamPerfCount('ui.chat_message.render.static_outside_active_turn_during_stream');
-        }
     }
 
     const providers = useConfigStore.getState().providers;
@@ -596,11 +585,11 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         if (isMessageCompleted) {
             return 'completed';
         }
-        if (lifecyclePhase) {
-            return lifecyclePhase;
+        if (isInActiveTurn) {
+            return activeStreamingPhase ?? 'streaming';
         }
-        return isStreamingMessage ? 'streaming' : 'completed';
-    }, [isMessageCompleted, lifecyclePhase, isStreamingMessage]);
+        return 'completed';
+    }, [activeStreamingPhase, isInActiveTurn, isMessageCompleted]);
 
     React.useEffect(() => {
         if (!isUser || !animateUserOnMount) {
@@ -1148,6 +1137,7 @@ export default React.memo(ChatMessage, (prev, next) => {
         && prev.turnGroupingContext === next.turnGroupingContext
         && prev.assistantHeaderMessageId === next.assistantHeaderMessageId
         && prev.isInActiveTurn === next.isInActiveTurn
+        && prev.activeStreamingPhase === next.activeStreamingPhase
         && prev.animateUserOnMount === next.animateUserOnMount
         && prev.onUserAnimationConsumed === next.onUserAnimationConsumed;
 });
