@@ -88,8 +88,7 @@ export const fetchQuota = async () => {
     const weeklyStartAt = toTimestamp(firstModel.weekly_start_time);
     const weeklyResetAt = toTimestamp(firstModel.weekly_end_time);
 
-    // For minimaxi.com: usage_count represents USED credits
-    const intervalUsed = intervalUsage;
+    const intervalUsed = intervalTotal - intervalUsage;
     const weeklyUsed = weeklyUsage;
 
     const intervalUsedPercent =
