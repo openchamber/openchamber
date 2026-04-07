@@ -175,6 +175,7 @@ function App({ apis }: AppProps) {
   const appReadyDispatchedRef = React.useRef(false);
   const embeddedSessionChat = React.useMemo<EmbeddedSessionChatConfig | null>(() => readEmbeddedSessionChatConfig(), []);
   const embeddedBackgroundWorkEnabled = !embeddedSessionChat || isEmbeddedVisible;
+  const recentDesktopNotificationTagsRef = React.useRef<Map<string, number>>(new Map());
 
   React.useEffect(() => {
     setStreamPerfEnabled(showMemoryDebug);
@@ -370,6 +371,68 @@ function App({ apis }: AppProps) {
       }
     };
   }, [embeddedSessionChat]);
+
+  React.useEffect(() => {
+    if (embeddedSessionChat || !isDesktopRuntime || typeof window === 'undefined' || typeof EventSource === 'undefined') {
+      return;
+    }
+
+    const source = new EventSource('/api/notifications/stream');
+
+    const handleMessage = (event: MessageEvent<string>) => {
+      type DesktopNotificationEvent = {
+        type?: string;
+        properties?: {
+          title?: string;
+          body?: string;
+          tag?: string;
+          desktopStdoutActive?: boolean;
+        };
+      };
+
+      let payload: DesktopNotificationEvent;
+
+      try {
+        payload = JSON.parse(event.data) as DesktopNotificationEvent;
+      } catch {
+        return;
+      }
+
+      if (payload?.type !== 'openchamber:notification') {
+        return;
+      }
+
+      if (payload.properties?.desktopStdoutActive === true) {
+        return;
+      }
+
+      const tag = typeof payload.properties?.tag === 'string' ? payload.properties.tag : '';
+      if (tag) {
+        const now = Date.now();
+        const lastSeenAt = recentDesktopNotificationTagsRef.current.get(tag) ?? 0;
+        if (now - lastSeenAt < 5000) {
+          return;
+        }
+        recentDesktopNotificationTagsRef.current.set(tag, now);
+      }
+
+      void apis.notifications.notifyAgentCompletion({
+        title: payload.properties?.title,
+        body: payload.properties?.body,
+        tag: tag || undefined,
+      });
+    };
+
+    source.addEventListener('message', handleMessage as EventListener);
+    source.onerror = () => {
+      // Let EventSource reconnect automatically.
+    };
+
+    return () => {
+      source.removeEventListener('message', handleMessage as EventListener);
+      source.close();
+    };
+  }, [apis.notifications, embeddedSessionChat, isDesktopRuntime]);
 
   React.useEffect(() => {
     if (!embeddedSessionChat?.directory || isVSCodeRuntime) {

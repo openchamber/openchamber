@@ -2068,16 +2068,23 @@ async fn spawn_local_server(app: &tauri::AppHandle) -> Result<String> {
         let app_handle = app.clone();
         tauri::async_runtime::spawn(async move {
             let mut rx = rx;
+            let mut stdout_buffer = String::new();
             while let Some(event) = rx.recv().await {
                 match event {
                     CommandEvent::Stdout(bytes) => {
-                        let line = String::from_utf8_lossy(&bytes);
-                        if let Some(rest) = line.strip_prefix(SIDECAR_NOTIFY_PREFIX) {
-                            if let Ok(parsed) =
-                                serde_json::from_str::<SidecarNotifyPayload>(rest.trim())
-                            {
-                                maybe_show_sidecar_notification(&app_handle, parsed);
+                        stdout_buffer.push_str(&String::from_utf8_lossy(&bytes));
+
+                        while let Some(newline_index) = stdout_buffer.find('\n') {
+                            let line = stdout_buffer[..newline_index].trim_end_matches('\r');
+                            if let Some(rest) = line.strip_prefix(SIDECAR_NOTIFY_PREFIX) {
+                                if let Ok(parsed) =
+                                    serde_json::from_str::<SidecarNotifyPayload>(rest.trim())
+                                {
+                                    maybe_show_sidecar_notification(&app_handle, parsed);
+                                }
                             }
+
+                            stdout_buffer.drain(..=newline_index);
                         }
                     }
                     CommandEvent::Error(error) => {

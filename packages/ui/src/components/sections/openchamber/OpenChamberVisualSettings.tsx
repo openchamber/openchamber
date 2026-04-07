@@ -250,12 +250,41 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
             return;
         }
 
-        const intervalId = setInterval(() => {
-            setChatRenderPreviewTick((prev) => (prev + 1) % 24);
-        }, 420);
+        // Use requestAnimationFrame for smoother animation without setInterval overhead
+        let rafId: number | null = null;
+        let lastTime = Date.now();
+        
+        const tick = () => {
+            const now = Date.now();
+            // Update every ~420ms
+            if (now - lastTime >= 420) {
+                setChatRenderPreviewTick((prev) => (prev + 1) % 24);
+                lastTime = now;
+            }
+            rafId = requestAnimationFrame(tick);
+        };
+        
+        // Only run when visible
+        if (typeof document === 'undefined' || document.visibilityState === 'visible') {
+            rafId = requestAnimationFrame(tick);
+        }
+        
+        const onVisibility = () => {
+            if (document.visibilityState === 'visible' && rafId === null) {
+                rafId = requestAnimationFrame(tick);
+            } else if (document.visibilityState !== 'visible' && rafId !== null) {
+                cancelAnimationFrame(rafId);
+                rafId = null;
+            }
+        };
+        
+        document.addEventListener('visibilitychange', onVisibility);
 
         return () => {
-            clearInterval(intervalId);
+            document.removeEventListener('visibilitychange', onVisibility);
+            if (rafId !== null) {
+                cancelAnimationFrame(rafId);
+            }
         };
     }, [shouldAnimateChatPreview]);
 

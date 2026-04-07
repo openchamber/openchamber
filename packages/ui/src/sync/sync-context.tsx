@@ -36,7 +36,14 @@ type SyncSystem = {
   directory: string
 }
 
-const SyncContext = createContext<SyncSystem | null>(null)
+const SYNC_CONTEXT_GLOBAL_KEY = "__openchamber_sync_context__"
+type SyncGlobal = typeof globalThis & {
+  [SYNC_CONTEXT_GLOBAL_KEY]?: React.Context<SyncSystem | null>
+}
+
+const syncGlobal = globalThis as SyncGlobal
+const SyncContext = syncGlobal[SYNC_CONTEXT_GLOBAL_KEY] ?? createContext<SyncSystem | null>(null)
+syncGlobal[SYNC_CONTEXT_GLOBAL_KEY] = SyncContext
 
 function useSyncSystem() {
   const ctx = useContext(SyncContext)
@@ -171,7 +178,391 @@ function toSessionStatus(status: Awaited<ReturnType<typeof opencodeClient.getSes
   return undefined
 }
 
-async function resyncDirectoryAfterReconnect(directory: string, store: StoreApi<DirectoryStore>) {
+type EventRoutingIndex = {
+  sessionDirectoryById: Map<string, string>
+  messageSessionById: Map<string, string>
+  sessionMessageIdsById: Map<string, Set<string>>
+}
+
+const createEventRoutingIndex = (): EventRoutingIndex => ({
+  sessionDirectoryById: new Map(),
+  messageSessionById: new Map(),
+  sessionMessageIdsById: new Map(),
+})
+
+const normalizeEventDirectory = (rawDirectory: string): string => {
+  if (!rawDirectory || rawDirectory === "global") {
+    return rawDirectory
+  }
+  const normalized = rawDirectory.replace(/\\/g, "/").replace(/^([a-z]):/, (_, l: string) => l.toUpperCase() + ":")
+  // Strip trailing slashes to match child store keys (normalizeDirectoryPath in useDirectoryStore)
+  return normalized.length > 1 ? normalized.replace(/\/+$/, "") : normalized
+}
+
+const getSessionIdFromPayload = (event: Event): string | null => {
+  const properties = (event as { properties?: unknown }).properties
+  if (!properties || typeof properties !== "object") {
+    return null
+  }
+
+  const props = properties as Record<string, unknown>
+
+  if (event.type === "message.updated") {
+    const info = props.info
+    if (!info || typeof info !== "object") {
+      return null
+    }
+    const sessionID = (info as { sessionID?: unknown }).sessionID
+    return typeof sessionID === "string" && sessionID.length > 0 ? sessionID : null
+  }
+
+  if (
+    event.type === "message.removed"
+    || event.type === "session.status"
+    || event.type === "todo.updated"
+    || event.type === "permission.asked"
+    || event.type === "permission.replied"
+    || event.type === "question.asked"
+    || event.type === "question.replied"
+    || event.type === "question.rejected"
+    || event.type === "session.deleted"
+  ) {
+    const sessionID = props.sessionID
+    return typeof sessionID === "string" && sessionID.length > 0 ? sessionID : null
+  }
+
+  if (event.type === "message.part.updated") {
+    const part = props.part
+    if (!part || typeof part !== "object") {
+      return null
+    }
+    const sessionID = (part as { sessionID?: unknown }).sessionID
+    return typeof sessionID === "string" && sessionID.length > 0 ? sessionID : null
+  }
+
+  if (event.type === "session.created" || event.type === "session.updated") {
+    const info = props.info
+    if (!info || typeof info !== "object") {
+      return null
+    }
+    const id = (info as { id?: unknown }).id
+    return typeof id === "string" && id.length > 0 ? id : null
+  }
+
+  return null
+}
+
+const getMessageIdFromPayload = (event: Event): string | null => {
+  const properties = (event as { properties?: unknown }).properties
+  if (!properties || typeof properties !== "object") {
+    return null
+  }
+
+  const props = properties as Record<string, unknown>
+
+  if (event.type === "message.updated") {
+    const info = props.info
+    if (!info || typeof info !== "object") {
+      return null
+    }
+    const id = (info as { id?: unknown }).id
+    return typeof id === "string" && id.length > 0 ? id : null
+  }
+
+  if (event.type === "message.removed" || event.type === "message.part.delta" || event.type === "message.part.removed") {
+    const messageID = props.messageID
+    return typeof messageID === "string" && messageID.length > 0 ? messageID : null
+  }
+
+  if (event.type === "message.part.updated") {
+    const part = props.part
+    if (!part || typeof part !== "object") {
+      return null
+    }
+    const messageID = (part as { messageID?: unknown }).messageID
+    return typeof messageID === "string" && messageID.length > 0 ? messageID : null
+  }
+
+  return null
+}
+
+const setIndexedSessionDirectory = (routingIndex: EventRoutingIndex, sessionID: string, directory: string) => {
+  if (!sessionID || !directory || directory === "global") {
+    return
+  }
+  routingIndex.sessionDirectoryById.set(sessionID, directory)
+}
+
+const setIndexedSessionMessages = (
+  routingIndex: EventRoutingIndex,
+  sessionID: string,
+  directory: string,
+  messages: Message[],
+) => {
+  if (!sessionID) {
+    return
+  }
+
+  setIndexedSessionDirectory(routingIndex, sessionID, directory)
+
+  const previous = routingIndex.sessionMessageIdsById.get(sessionID)
+  const next = new Set<string>()
+
+  for (const message of messages) {
+    if (!message?.id) {
+      continue
+    }
+    next.add(message.id)
+    routingIndex.messageSessionById.set(message.id, sessionID)
+  }
+
+  if (previous) {
+    for (const previousMessageID of previous) {
+      if (!next.has(previousMessageID)) {
+        routingIndex.messageSessionById.delete(previousMessageID)
+      }
+    }
+  }
+
+  routingIndex.sessionMessageIdsById.set(sessionID, next)
+}
+
+const setIndexedMessage = (
+  routingIndex: EventRoutingIndex,
+  sessionID: string,
+  messageID: string,
+  directory: string,
+) => {
+  if (!sessionID || !messageID) {
+    return
+  }
+
+  setIndexedSessionDirectory(routingIndex, sessionID, directory)
+  routingIndex.messageSessionById.set(messageID, sessionID)
+
+  const existing = routingIndex.sessionMessageIdsById.get(sessionID)
+  if (existing) {
+    existing.add(messageID)
+  } else {
+    routingIndex.sessionMessageIdsById.set(sessionID, new Set([messageID]))
+  }
+}
+
+const removeIndexedMessage = (
+  routingIndex: EventRoutingIndex,
+  messageID: string,
+  sessionHint?: string | null,
+) => {
+  if (!messageID) {
+    return
+  }
+
+  const sessionID = sessionHint ?? routingIndex.messageSessionById.get(messageID)
+  routingIndex.messageSessionById.delete(messageID)
+
+  if (!sessionID) {
+    return
+  }
+
+  const messageIds = routingIndex.sessionMessageIdsById.get(sessionID)
+  if (!messageIds) {
+    return
+  }
+
+  messageIds.delete(messageID)
+  if (messageIds.size === 0) {
+    routingIndex.sessionMessageIdsById.delete(sessionID)
+  }
+}
+
+const removeIndexedSession = (routingIndex: EventRoutingIndex, sessionID: string) => {
+  if (!sessionID) {
+    return
+  }
+
+  routingIndex.sessionDirectoryById.delete(sessionID)
+  const messageIds = routingIndex.sessionMessageIdsById.get(sessionID)
+  if (messageIds) {
+    for (const messageID of messageIds) {
+      routingIndex.messageSessionById.delete(messageID)
+    }
+  }
+  routingIndex.sessionMessageIdsById.delete(sessionID)
+}
+
+const ingestDirectoryStateIntoRoutingIndex = (
+  routingIndex: EventRoutingIndex,
+  directory: string,
+  state: State,
+) => {
+  const nextSessionIds = new Set<string>()
+
+  for (const session of state.session) {
+    if (!session?.id) {
+      continue
+    }
+    nextSessionIds.add(session.id)
+    setIndexedSessionDirectory(routingIndex, session.id, directory)
+  }
+
+  for (const sessionID of Object.keys(state.message)) {
+    nextSessionIds.add(sessionID)
+    setIndexedSessionDirectory(routingIndex, sessionID, directory)
+    setIndexedSessionMessages(routingIndex, sessionID, directory, state.message[sessionID] ?? EMPTY_MESSAGES)
+  }
+
+  for (const [indexedSessionID, indexedDirectory] of routingIndex.sessionDirectoryById) {
+    if (indexedDirectory !== directory) {
+      continue
+    }
+    if (!nextSessionIds.has(indexedSessionID)) {
+      removeIndexedSession(routingIndex, indexedSessionID)
+    }
+  }
+}
+
+const findSessionInChildStores = (
+  sessionID: string,
+  childStores: ChildStoreManager,
+  routingIndex: EventRoutingIndex,
+): string | null => {
+  for (const [dir, store] of childStores.children) {
+    const state = store.getState()
+    if (
+      state.session.some((s) => s.id === sessionID)
+      || Object.prototype.hasOwnProperty.call(state.message, sessionID)
+      || Object.prototype.hasOwnProperty.call(state.session_status ?? {}, sessionID)
+    ) {
+      // Self-heal: populate the routing index so future events resolve instantly
+      setIndexedSessionDirectory(routingIndex, sessionID, dir)
+      return dir
+    }
+  }
+  return null
+}
+
+const resolveDirectoryFromRoutingIndex = (
+  routingIndex: EventRoutingIndex,
+  rawDirectory: string,
+  payload: Event,
+  childStores: ChildStoreManager,
+): string => {
+  const normalizedDirectory = normalizeEventDirectory(rawDirectory)
+
+  const sessionID = getSessionIdFromPayload(payload)
+  if (sessionID) {
+    const indexedDirectory = routingIndex.sessionDirectoryById.get(sessionID)
+    if (indexedDirectory) {
+      return indexedDirectory
+    }
+
+    // Routing index miss — scan child stores for this session.
+    // Covers optimistic sessions not yet indexed and events with wrong/empty directory.
+    const found = findSessionInChildStores(sessionID, childStores, routingIndex)
+    if (found) {
+      return found
+    }
+  }
+
+  const messageID = getMessageIdFromPayload(payload)
+  if (messageID) {
+    const sessionFromMessage = routingIndex.messageSessionById.get(messageID)
+    if (sessionFromMessage) {
+      const indexedDirectory = routingIndex.sessionDirectoryById.get(sessionFromMessage)
+      if (indexedDirectory) {
+        return indexedDirectory
+      }
+    }
+
+    // Scan child stores for a store that has parts for this message
+    for (const [dir, store] of childStores.children) {
+      if (Object.prototype.hasOwnProperty.call(store.getState().part, messageID)) {
+        return dir
+      }
+    }
+  }
+
+  // Single-store fallback: if there's only one directory, use it
+  if (
+    (sessionID || messageID)
+    && (!normalizedDirectory || normalizedDirectory === "global")
+    && childStores.children.size === 1
+  ) {
+    const onlyDirectory = childStores.children.keys().next().value
+    if (typeof onlyDirectory === "string" && onlyDirectory.length > 0) {
+      return onlyDirectory
+    }
+  }
+
+  return normalizedDirectory
+}
+
+const updateRoutingIndexFromEvent = (
+  routingIndex: EventRoutingIndex,
+  directory: string,
+  payload: Event,
+) => {
+  if (!directory || directory === "global") {
+    return
+  }
+
+  const sessionID = getSessionIdFromPayload(payload)
+  if (sessionID) {
+    setIndexedSessionDirectory(routingIndex, sessionID, directory)
+  }
+
+  switch (payload.type) {
+    case "session.created":
+    case "session.updated": {
+      const info = (payload.properties as { info?: Session }).info
+      if (info?.id) {
+        setIndexedSessionDirectory(routingIndex, info.id, directory)
+      }
+      return
+    }
+
+    case "session.deleted": {
+      const deletedSessionID = (payload.properties as { sessionID?: string }).sessionID
+      if (deletedSessionID) {
+        removeIndexedSession(routingIndex, deletedSessionID)
+      }
+      return
+    }
+
+    case "message.updated": {
+      const info = (payload.properties as { info?: Message }).info
+      if (info?.id && info.sessionID) {
+        setIndexedMessage(routingIndex, info.sessionID, info.id, directory)
+      }
+      return
+    }
+
+    case "message.removed": {
+      const props = payload.properties as { sessionID?: string; messageID?: string }
+      if (props.messageID) {
+        removeIndexedMessage(routingIndex, props.messageID, props.sessionID)
+      }
+      return
+    }
+
+    case "message.part.updated": {
+      const part = (payload.properties as { part?: Part }).part as (Part & { sessionID?: string; messageID?: string }) | undefined
+      if (part?.messageID && part.sessionID) {
+        setIndexedMessage(routingIndex, part.sessionID, part.messageID, directory)
+      }
+      return
+    }
+
+    default:
+      return
+  }
+}
+
+async function resyncDirectoryAfterReconnect(
+  directory: string,
+  store: StoreApi<DirectoryStore>,
+  routingIndex: EventRoutingIndex,
+) {
   const current = store.getState()
   const candidateSessionIds = getReconnectCandidateSessionIds(current)
   if (candidateSessionIds.length === 0) return
@@ -249,20 +640,22 @@ async function resyncDirectoryAfterReconnect(directory: string, store: StoreApi<
         part: nextPartState,
       }
     })
+
+    setIndexedSessionDirectory(routingIndex, nextSession.id, directory)
+    setIndexedSessionMessages(routingIndex, sessionId, directory, nextMessages)
   }))
+
+  ingestDirectoryStateIntoRoutingIndex(routingIndex, directory, store.getState())
 }
 
 function handleEvent(
   rawDirectory: string,
   payload: Event,
   childStores: ChildStoreManager,
+  routingIndex: EventRoutingIndex,
 ) {
-  // Normalize directory path: SSE events from OpenCode use native OS separators
-  // (backslashes on Windows) and may differ in drive-letter case.
-  // Child stores are keyed with forward slashes and uppercase drive letters.
-  const directory = rawDirectory && rawDirectory !== "global"
-    ? rawDirectory.replace(/\\/g, "/").replace(/^([a-z]):/, (_, l: string) => l.toUpperCase() + ":")
-    : rawDirectory
+  const directory = resolveDirectoryFromRoutingIndex(routingIndex, rawDirectory, payload, childStores)
+
   // Global events
   if (directory === "global" || !directory) {
     const recent = isRecentBoot()
@@ -297,7 +690,23 @@ function handleEvent(
   }
 
   // Directory events
-  const store = childStores.getChild(directory)
+  let store = childStores.getChild(directory)
+  let resolvedDirectory = directory
+
+  if (!store) {
+    // Store not found for this directory — attempt recovery by scanning
+    // child stores for the session. This handles directory mismatches
+    // (trailing slashes, case differences, events with wrong directory).
+    const sessionID = getSessionIdFromPayload(payload)
+    if (sessionID) {
+      const fallbackDir = findSessionInChildStores(sessionID, childStores, routingIndex)
+      if (fallbackDir) {
+        store = childStores.getChild(fallbackDir)
+        resolvedDirectory = fallbackDir
+      }
+    }
+  }
+
   if (!store) {
     // Try as global event for unknown directories
     const result = reduceGlobalEvent(payload)
@@ -312,7 +721,7 @@ function handleEvent(
     return
   }
 
-  childStores.mark(directory)
+  childStores.mark(resolvedDirectory)
 
   // Notification dispatch for session turn-complete and error events.
   // These are NOT handled by the event reducer — only the notification store.
@@ -326,10 +735,10 @@ function handleEvent(
       // subtask — skip notification
     } else if (sessionID) {
       appendNotification({
-        directory,
+        directory: resolvedDirectory,
         session: sessionID,
         time: Date.now(),
-        viewed: isViewedInCurrentSession(directory, sessionID),
+        viewed: isViewedInCurrentSession(resolvedDirectory, sessionID),
         ...(payload.type === "session.error"
           ? { type: "error" as const, error: props.error }
           : { type: "turn-complete" as const }),
@@ -395,6 +804,8 @@ function handleEvent(
     store.setState(draft)
   }
 
+  updateRoutingIndexFromEvent(routingIndex, resolvedDirectory, payload)
+
   // Update global session status for cross-directory sidebar visibility
   if (payload.type === "session.status") {
     const props = payload.properties as { sessionID: string; status: SessionStatus }
@@ -402,15 +813,15 @@ function handleEvent(
   }
 
   if (payload.type === "permission.asked") {
-    const normalizedDirectory = normalizeDirectory(directory)
-    if (!normalizedDirectory) {
+    const nd = normalizeDirectory(resolvedDirectory)
+    if (!nd) {
       return
     }
 
     const permission = payload.properties as PermissionRequest
     const sessions = store.getState().session
     const autoAccept = usePermissionStore.getState().autoAccept
-    if (autoRespondsPermission({ autoAccept, sessions, sessionID: permission.sessionID, directory: normalizedDirectory })) {
+    if (autoRespondsPermission({ autoAccept, sessions, sessionID: permission.sessionID, directory: nd })) {
       void sessionActions.respondToPermission(permission.sessionID, permission.id, "once").catch(() => undefined)
     }
   }
@@ -428,6 +839,9 @@ export function SyncProvider(props: {
   const childStoresRef = useRef<ChildStoreManager | null>(null)
   if (!childStoresRef.current) childStoresRef.current = new ChildStoreManager()
   const childStores = childStoresRef.current
+  const routingIndexRef = useRef<EventRoutingIndex | null>(null)
+  if (!routingIndexRef.current) routingIndexRef.current = createEventRoutingIndex()
+  const routingIndex = routingIndexRef.current
 
   const system = useMemo<SyncSystem>(
     () => ({
@@ -458,6 +872,9 @@ export function SyncProvider(props: {
             getState: () => store.getState(),
             set: (patch) => {
               store.setState(patch)
+              if (patch.session || patch.message) {
+                ingestDirectoryStateIntoRoutingIndex(routingIndex, directory, store.getState())
+              }
               if (patch.session_status) {
                 const current = useGlobalSessionStatusStore.getState().statuses
                 const merged = { ...current, ...patch.session_status }
@@ -484,6 +901,7 @@ export function SyncProvider(props: {
                 .filter((s) => !!s?.id)
                 .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
               store.setState({ session: sessions, sessionTotal: sessions.length, limit: Math.max(sessions.length, 50) })
+              ingestDirectoryStateIntoRoutingIndex(routingIndex, directory, store.getState())
             }),
           })
 
@@ -507,7 +925,7 @@ export function SyncProvider(props: {
       isBooting: (directory) => bootingDirs.has(directory),
       isLoadingSessions: () => false,
     })
-  }, [childStores, props.sdk])
+  }, [childStores, props.sdk, routingIndex])
 
   // Bootstrap global state — set bootingRoot/bootedAt to suppress
   // redundant refresh events during startup
@@ -531,7 +949,7 @@ export function SyncProvider(props: {
     const { cleanup } = createEventPipeline({
       sdk: props.sdk,
       onEvent: (directory, payload) => {
-        handleEvent(directory, payload, childStores)
+        handleEvent(directory, payload, childStores, routingIndex)
       },
       onReconnect: () => {
         for (const [dir, store] of childStores.children) {
@@ -539,7 +957,7 @@ export function SyncProvider(props: {
           if (getReconnectCandidateSessionIds(store.getState()).length === 0) continue
 
           reconnectResyncing.add(dir)
-          void resyncDirectoryAfterReconnect(dir, store)
+          void resyncDirectoryAfterReconnect(dir, store, routingIndex)
             .catch(() => {
               // Transient failure during resync — next SSE event or reconnect will catch up.
             })
@@ -550,24 +968,27 @@ export function SyncProvider(props: {
       },
     })
     return cleanup
-  }, [props.sdk, childStores])
+  }, [props.sdk, childStores, routingIndex])
 
   // Ensure current directory's child store exists
   useEffect(() => {
     if (props.directory) {
-      childStores.ensureChild(props.directory)
+      const store = childStores.ensureChild(props.directory)
+      ingestDirectoryStateIntoRoutingIndex(routingIndex, props.directory, store.getState())
     }
-  }, [props.directory, childStores])
+  }, [props.directory, childStores, routingIndex])
 
   // Set refs so non-React code (session-actions, session-ui-store) can access sync state
   useEffect(() => {
-    setSyncRefs(props.sdk, childStores, props.directory)
+    setSyncRefs(props.sdk, childStores, props.directory, (sessionID, dir) => {
+      setIndexedSessionDirectory(routingIndex, sessionID, dir)
+    })
     setActionRefs(
       props.sdk,
       childStores,
       () => opencodeClient.getDirectory() || props.directory,
     )
-  }, [props.sdk, props.directory, childStores])
+  }, [props.sdk, props.directory, childStores, routingIndex])
 
   // Subscribe to child store for streaming state derivation
   useEffect(() => {
@@ -640,6 +1061,17 @@ export function useVisibleSessionMessages(sessionID: string, directory?: string)
     if (!revertMessageID) return messages
     return messages.filter((m) => m.id < revertMessageID)
   }, [messages, revertMessageID])
+}
+
+/** Check whether the message list for a session has been loaded into sync state. */
+export function useSessionMessagesResolved(sessionID: string, directory?: string): boolean {
+  return useDirectorySync(
+    useCallback((state: State) => {
+      if (!sessionID) return false
+      return Object.prototype.hasOwnProperty.call(state.message, sessionID)
+    }, [sessionID]),
+    directory,
+  )
 }
 
 /** Get parts for a specific message */
@@ -836,24 +1268,42 @@ export function useChildStoreManager() {
   return useSyncSystem().childStores
 }
 
-/**
- * Get messages for a session in the old {info, parts}[] format.
- * Uses visible messages (filtered by revert state).
- *
- * Uses a ref-stable parts lookup that only triggers re-renders when
- * a part array for one of our displayed messages actually changes.
- */
-export function useSessionMessageRecords(sessionID: string, directory?: string) {
-  const messages = useVisibleSessionMessages(sessionID, directory)
-  const store = useDirectoryStore(directory)
+const MESSAGE_PART_SNAPSHOT_THROTTLE_MS = 100
 
-  // Track parts with a ref to avoid subscribing to entire state.part map.
-  // Re-derive only when messages list changes or on store subscription.
+export type SessionTextMessage = {
+  id: string
+  role: string | null
+  text: string
+}
+
+const getPartText = (part: Part): string => {
+  if (part?.type !== "text") return ""
+  const text = (part as { text?: unknown }).text
+  return typeof text === "string" ? text : ""
+}
+
+const getConcatenatedTextFromParts = (parts: Part[]): string => {
+  let text = ""
+  for (const part of parts) {
+    text += getPartText(part)
+  }
+  return text
+}
+
+const getFirstTextFromParts = (parts: Part[]): string => {
+  for (const part of parts) {
+    const text = getPartText(part)
+    if (text.length > 0) return text
+  }
+  return ""
+}
+
+function usePartsSnapshotForMessageIds(messageIds: string[], directory?: string, suspendUpdates = false) {
+  const store = useDirectoryStore(directory)
   const prevPartsRef = useRef<Record<string, Part[]>>({})
   const [partsSnapshot, setPartsSnapshot] = React.useState<Record<string, Part[]>>({})
 
   React.useEffect(() => {
-    const messageIds = messages.map((m) => m.id)
     let timer: ReturnType<typeof setTimeout> | null = null
     let pending = false
 
@@ -866,7 +1316,6 @@ export function useSessionMessageRecords(sessionID: string, directory?: string) 
       const next: Record<string, Part[]> = {}
       for (const id of messageIds) {
         const parts = state.part[id] ?? EMPTY_PARTS
-        // Preserve existing reference if parts haven't changed in the store
         next[id] = prev[id] === parts ? prev[id] : parts
         if (next[id] !== prev[id]) changed = true
       }
@@ -876,10 +1325,14 @@ export function useSessionMessageRecords(sessionID: string, directory?: string) 
       }
     }
 
-    // Initial sync
     flush()
 
-    // Throttled subscription — batch rapid delta events into ~100ms updates
+    if (suspendUpdates) {
+      return () => {
+        if (timer) clearTimeout(timer)
+      }
+    }
+
     const unsub = store.subscribe(() => {
       if (timer) {
         pending = true
@@ -889,24 +1342,117 @@ export function useSessionMessageRecords(sessionID: string, directory?: string) 
         flush()
         if (pending) {
           pending = false
-          timer = setTimeout(flush, 100)
+          timer = setTimeout(flush, MESSAGE_PART_SNAPSHOT_THROTTLE_MS)
         }
-      }, 100)
+      }, MESSAGE_PART_SNAPSHOT_THROTTLE_MS)
     })
 
     return () => {
       unsub()
       if (timer) clearTimeout(timer)
     }
-  }, [messages, store])
+  }, [messageIds, store, suspendUpdates])
+
+  return partsSnapshot
+}
+
+export function useSessionMessageCount(sessionID: string, directory?: string): number {
+  return useDirectorySync(
+    useCallback((state: State) => {
+      if (!sessionID) return 0
+      return state.message[sessionID]?.length ?? 0
+    }, [sessionID]),
+    directory,
+  )
+}
+
+export function useSessionTextMessages(sessionID: string, directory?: string): SessionTextMessage[] {
+  const messages = useVisibleSessionMessages(sessionID, directory)
+  const messageIds = useMemo(() => messages.map((message) => message.id), [messages])
+  const partsSnapshot = usePartsSnapshotForMessageIds(messageIds, directory)
 
   return useMemo(
-    () => messages.map((msg) => ({
-      info: msg,
-      parts: partsSnapshot[msg.id] ?? EMPTY_PARTS,
+    () => messages.map((message) => ({
+      id: message.id,
+      role: typeof message.role === "string" ? message.role : null,
+      text: getConcatenatedTextFromParts(partsSnapshot[message.id] ?? EMPTY_PARTS),
     })),
     [messages, partsSnapshot],
   )
+}
+
+export function useUserMessageHistory(sessionID: string, directory?: string): string[] {
+  const messages = useVisibleSessionMessages(sessionID, directory)
+  const userMessages = useMemo(
+    () => messages.filter((message) => message.role === "user"),
+    [messages],
+  )
+  const userMessageIds = useMemo(() => userMessages.map((message) => message.id), [userMessages])
+  const partsSnapshot = usePartsSnapshotForMessageIds(userMessageIds, directory)
+
+  return useMemo(() => {
+    const history: string[] = []
+    for (let index = userMessages.length - 1; index >= 0; index -= 1) {
+      const message = userMessages[index]
+      const text = getFirstTextFromParts(partsSnapshot[message.id] ?? EMPTY_PARTS)
+      if (text.length > 0) {
+        history.push(text)
+      }
+    }
+    return history
+  }, [partsSnapshot, userMessages])
+}
+
+/**
+ * Get messages for a session in the old {info, parts}[] format.
+ * Uses visible messages (filtered by revert state).
+ *
+ * Uses a ref-stable parts lookup that only triggers re-renders when
+ * a part array for one of our displayed messages actually changes.
+ */
+export function useSessionMessageRecords(
+  sessionID: string,
+  directory?: string,
+  options?: { suspendPartUpdates?: boolean },
+) {
+  const messages = useVisibleSessionMessages(sessionID, directory)
+  const messageIds = useMemo(() => messages.map((message) => message.id), [messages])
+  const partsSnapshot = usePartsSnapshotForMessageIds(messageIds, directory, Boolean(options?.suspendPartUpdates))
+  const previousRecordsRef = useRef<{
+    list: Array<{ info: (typeof messages)[number]; parts: Part[] }>
+    byId: Map<string, { info: (typeof messages)[number]; parts: Part[] }>
+  }>({
+    list: [],
+    byId: new Map(),
+  })
+
+  return useMemo(() => {
+    const previous = previousRecordsRef.current
+    const nextById = new Map<string, { info: (typeof messages)[number]; parts: Part[] }>()
+    const nextList = messages.map((message) => {
+      const parts = partsSnapshot[message.id] ?? EMPTY_PARTS
+      const previousRecord = previous.byId.get(message.id)
+      const record = previousRecord && previousRecord.info === message && previousRecord.parts === parts
+        ? previousRecord
+        : { info: message, parts }
+      nextById.set(message.id, record)
+      return record
+    })
+
+    const unchanged = previous.list.length === nextList.length
+      && previous.list.every((record, index) => record === nextList[index])
+
+    if (unchanged) {
+      return previous.list
+    }
+
+    previousRecordsRef.current = {
+      list: nextList,
+      byId: nextById,
+    }
+
+    return nextList
+  }, [messages, partsSnapshot])
 }
 
 /**

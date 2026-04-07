@@ -305,6 +305,10 @@ export const RemoteInstancesPage: React.FC = () => {
       return;
     }
     const interval = window.setInterval(() => {
+      // Skip polling when tab is hidden to reduce background work
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+        return;
+      }
       void refreshStatuses();
     }, 2_000);
     return () => {
@@ -313,11 +317,41 @@ export const RemoteInstancesPage: React.FC = () => {
   }, [refreshStatuses, selectedId]);
 
   React.useEffect(() => {
-    const interval = window.setInterval(() => {
-      setClockMs(Date.now());
-    }, 1_000);
+    // Use requestAnimationFrame for smoother clock updates without setInterval overhead
+    let rafId: number | null = null;
+    let lastTime = Date.now();
+    
+    const tick = () => {
+      const now = Date.now();
+      // Update only once per second
+      if (now - lastTime >= 1_000) {
+        setClockMs(now);
+        lastTime = now;
+      }
+      rafId = requestAnimationFrame(tick);
+    };
+    
+    // Only run when visible
+    if (typeof document === 'undefined' || document.visibilityState === 'visible') {
+      rafId = requestAnimationFrame(tick);
+    }
+    
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible' && rafId === null) {
+        rafId = requestAnimationFrame(tick);
+      } else if (document.visibilityState !== 'visible' && rafId !== null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
+    };
+    
+    document.addEventListener('visibilitychange', onVisibility);
+    
     return () => {
-      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisibility);
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+      }
     };
   }, []);
 
@@ -525,6 +559,10 @@ export const RemoteInstancesPage: React.FC = () => {
 
     void run();
     const interval = window.setInterval(() => {
+      // Skip polling when tab is hidden
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+        return;
+      }
       void run();
     }, 1_000);
 

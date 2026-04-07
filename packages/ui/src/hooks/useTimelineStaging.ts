@@ -21,6 +21,8 @@ type UseTimelineStagingResult<T> = {
   stagedMessages: T[]
   /** Whether staging is still in progress */
   isStaging: boolean
+  /** Force the current session timeline to render fully now */
+  completeNow: () => boolean
 }
 
 const DEFAULT_CONFIG: StageConfig = { init: 1, batch: 3 }
@@ -44,6 +46,31 @@ export function useTimelineStaging<T>(
   const completedSessions = useRef(new Set<string>())
   const activeSession = useRef("")
   const frameRef = useRef<number | null>(null)
+
+  const completeNow = () => {
+    if (!sessionKey) {
+      return false
+    }
+
+    if (frameRef.current !== null) {
+      cancelAnimationFrame(frameRef.current)
+      frameRef.current = null
+    }
+
+    activeSession.current = ""
+    completedSessions.current.add(sessionKey)
+
+    const total = messages.length
+    let changed = false
+    setStagedCount((previous) => {
+      if (previous === total) {
+        return previous
+      }
+      changed = true
+      return total
+    })
+    return changed
+  }
 
   useEffect(() => {
     // Cancel any pending animation frame
@@ -110,5 +137,5 @@ export function useTimelineStaging<T>(
   const isStaging = activeSession.current === sessionKey &&
     !completedSessions.current.has(sessionKey)
 
-  return { stagedMessages, isStaging }
+  return { stagedMessages, isStaging, completeNow }
 }

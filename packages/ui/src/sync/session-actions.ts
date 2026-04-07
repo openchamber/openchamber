@@ -11,6 +11,7 @@ import type { DirectoryStore } from "./child-store"
 import type { StoreApi } from "zustand"
 import { opencodeClient } from "@/lib/opencode/client"
 import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
+import { registerSessionDirectory } from "./sync-refs"
 
 // Reference set by SyncProvider — allows actions to access SDK and stores
 let _sdk: OpencodeClient | null = null
@@ -93,6 +94,11 @@ export async function createSession(
     if (!session) return null
 
       const sessionDirectory = (session as { directory?: string }).directory ?? directoryOverride ?? null
+      // Pre-populate routing index so SSE events arriving before session.created
+      // can be routed to the correct child store
+      if (sessionDirectory) {
+        registerSessionDirectory(session.id, sessionDirectory)
+      }
       useSessionUIStore.getState().setCurrentSession(session.id, sessionDirectory)
       useSessionUIStore.getState().markSessionAsOpenChamberCreated(session.id)
       useGlobalSessionsStore.getState().upsertSession(session)

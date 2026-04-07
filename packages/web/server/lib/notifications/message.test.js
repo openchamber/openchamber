@@ -56,4 +56,19 @@ describe('notification message helpers', () => {
 
     expect(result).toBe('short summary');
   });
+
+  it('normalizes markdown summary to plain text', async () => {
+    const result = await prepareNotificationLastMessage({
+      message: '0123456789',
+      summarize: async () => "**Committed.**\n\n- Commit: `85924b9d`\n- Message: `fix desktop notifications`",
+      settings: {
+        summarizeLastMessage: true,
+        summaryThreshold: 5,
+        summaryLength: 80,
+        maxLastMessageLength: 200,
+      },
+    });
+
+    expect(result).toBe('Committed. Commit: 85924b9d Message: fix desktop notifications');
+  });
 });

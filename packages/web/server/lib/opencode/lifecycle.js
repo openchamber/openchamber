@@ -310,7 +310,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     }
 
     try {
-      const response = await fetch(`http://127.0.0.1:${state.openCodePort}/session`, {
+      const response = await fetch(buildOpenCodeUrl('/session', ''), {
         method: 'GET',
         headers: getOpenCodeAuthHeaders(),
         signal: AbortSignal.timeout(2000),

@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useSessionMessageRecords, useSessionPermissions } from '@/sync/sync-context';
+import { useSessionPermissions, useSessionTextMessages } from '@/sync/sync-context';
 import { voiceHooks, isVoiceSessionStarted } from '@/lib/voice';
 
 /**
@@ -9,7 +9,7 @@ import { voiceHooks, isVoiceSessionStarted } from '@/lib/voice';
  */
 export function useVoiceContext() {
     const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
-    const messages = useSessionMessageRecords(currentSessionId ?? '');
+    const messages = useSessionTextMessages(currentSessionId ?? '');
     const permissions = useSessionPermissions(currentSessionId ?? '');
 
     // Track last seen message count to only forward new messages
@@ -26,10 +26,9 @@ export function useVoiceContext() {
         const newMessages = messages.slice(lastMessageCountRef.current);
         lastMessageCountRef.current = currentCount;
 
-        // Format for voice hooks (extract role and content)
         const formattedMessages = newMessages.map(m => ({
-            role: m.info.role,
-            content: m.parts.map((p: Record<string, unknown>) => ('text' in p ? p.text : '')).join('')
+            role: m.role ?? '',
+            content: m.text,
         }));
 
         voiceHooks.onMessages(currentSessionId, formattedMessages);

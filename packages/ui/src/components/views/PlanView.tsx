@@ -256,6 +256,7 @@ export const PlanView: React.FC = () => {
   }, [currentTheme, resolvedPath]);
 
   React.useEffect(() => {
+    // Early exit if plan mode is disabled - don't load anything
     if (!planModeEnabled) {
       setResolvedPath(null);
       setContent('');
@@ -278,11 +279,9 @@ export const PlanView: React.FC = () => {
       return response.text();
     };
 
-    const run = async (showLoading: boolean) => {
-      if (showLoading) {
-        setResolvedPath(null);
-        setContent('');
-      }
+    const run = async () => {
+      setResolvedPath(null);
+      setContent('');
 
       if (!session?.slug || !session?.time?.created || !sessionDirectory) {
         setResolvedPath(null);
@@ -290,9 +289,7 @@ export const PlanView: React.FC = () => {
         return;
       }
 
-      if (showLoading) {
-        setLoading(true);
-      }
+      setLoading(true);
 
       try {
         const repoPath = buildRepoPlanPath(sessionDirectory, session.time.created, session.slug);
@@ -332,19 +329,14 @@ export const PlanView: React.FC = () => {
         setResolvedPath(null);
         setContent('');
       } finally {
-        if (!cancelled && showLoading) setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
 
-    void run(true);
-
-    const interval = window.setInterval(() => {
-      void run(false);
-    }, 3000);
+    void run();
 
     return () => {
       cancelled = true;
-      window.clearInterval(interval);
     };
   }, [planModeEnabled, sessionDirectory, session?.slug, session?.time?.created, homeDirectory, runtimeApis.files]);
 

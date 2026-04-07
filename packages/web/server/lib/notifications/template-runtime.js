@@ -138,7 +138,7 @@ export const createNotificationTemplateRuntime = (deps) => {
     if (!text || typeof text !== 'string' || text.trim().length === 0) return text;
 
     try {
-      const prompt = `Summarize the following text in approximately ${targetLength} characters. Be concise and capture the key point. Output ONLY the summary text, nothing else.\n\nText:\n${text}`;
+      const prompt = `Summarize the following text in approximately ${targetLength} characters. Be concise and capture the key point. Output plain text only. Do not use markdown, bullets, headings, code fences, backticks, or quotes. Output only the summary text.\n\nText:\n${text}`;
 
       const completionTimeout = createTimeoutSignal(15000);
       let response;

@@ -9,6 +9,7 @@ type ScrollEngineOptions = {
 type ScrollOptions = {
     instant?: boolean;
     followBottom?: boolean; // Dynamically track bottom during streaming
+    persistFollow?: boolean;
 };
 
 type ScrollEngineResult = {
@@ -55,6 +56,7 @@ export const useScrollEngine = ({
     // Continuous follow-bottom rAF loop (for streaming)
     const followRafRef = React.useRef<number | null>(null);
     const followActiveRef = React.useRef(false);
+    const followPersistRef = React.useRef(false);
 
     const cancelSpring = React.useCallback(() => {
         if (scrollAnimRef.current) {
@@ -69,6 +71,7 @@ export const useScrollEngine = ({
             followRafRef.current = null;
         }
         followActiveRef.current = false;
+        followPersistRef.current = false;
         setIsFollowingBottom(false);
     }, []);
 
@@ -78,7 +81,8 @@ export const useScrollEngine = ({
     }, [cancelSpring, cancelFollow]);
 
     // Continuous lerp loop that chases scrollHeight - clientHeight.
-    const startFollowLoop = React.useCallback(() => {
+    const startFollowLoop = React.useCallback((persist = false) => {
+        followPersistRef.current = persist || followPersistRef.current;
         if (followActiveRef.current) return; // already running
         followActiveRef.current = true;
         setIsFollowingBottom(true);
@@ -99,6 +103,11 @@ export const useScrollEngine = ({
 
             if (Math.abs(delta) <= SNAP_EPSILON) {
                 container.scrollTop = target;
+                if (followPersistRef.current) {
+                    stableFrames = 0;
+                    followRafRef.current = window.requestAnimationFrame(tick);
+                    return;
+                }
                 stableFrames += 1;
                 if (stableFrames >= FOLLOW_STABLE_FRAME_LIMIT) {
                     followActiveRef.current = false;
@@ -126,6 +135,7 @@ export const useScrollEngine = ({
             const target = Math.max(0, position);
             const preferInstant = options?.instant ?? false;
             const followBottom = options?.followBottom ?? false;
+            const persistFollow = options?.persistFollow ?? false;
 
             manualOverrideRef.current = false;
 
@@ -133,6 +143,10 @@ export const useScrollEngine = ({
             if (typeof window === 'undefined' || preferInstant) {
                 cancelAll();
                 container.scrollTop = target;
+
+                if (followBottom && typeof window !== 'undefined') {
+                    startFollowLoop(persistFollow);
+                }
 
                 const atTop = target <= 1;
                 if (atTopRef.current !== atTop) {
@@ -145,7 +159,7 @@ export const useScrollEngine = ({
             // Follow-bottom mode: start the continuous lerp loop
             if (followBottom) {
                 cancelSpring();
-                startFollowLoop();
+                startFollowLoop(persistFollow);
                 return;
             }
 

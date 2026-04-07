@@ -40,6 +40,7 @@ import { ToolRevealOnMount } from './ToolRevealOnMount';
 import { getToolIcon } from './toolPresentation';
 import { useDurationTickerNow } from './useDurationTicker';
 import { resolveFallbackTaskSessionId } from './resolveFallbackTaskSessionId';
+import { areRenderRelevantPartsEqual } from '../renderCompare';
 
 type ToolStateWithMetadata = ToolStateUnion & { metadata?: Record<string, unknown>; input?: Record<string, unknown>; output?: string; error?: string; time?: { start: number; end?: number } };
 
@@ -346,6 +347,146 @@ const getRelativePath = (absolutePath: string, currentDirectory: string): string
     }
 
     return normalizedAbsolutePath;
+};
+
+type ToolDiagnostic = {
+    message: string;
+    line: number;
+    character: number;
+};
+
+type ToolDiagnosticSection = {
+    displayPath: string;
+    diagnostics: ToolDiagnostic[];
+    remaining: number;
+};
+
+const TOOL_DIAGNOSTICS_MAX_PER_FILE = 5;
+
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+    return typeof value === 'object' && value !== null;
+};
+
+const normalizeToolDiagnostic = (value: unknown): ToolDiagnostic | null => {
+    if (!isRecord(value)) {
+        return null;
+    }
+
+    const message = typeof value.message === 'string' ? value.message.trim() : '';
+    if (!message) {
+        return null;
+    }
+
+    const severity = typeof value.severity === 'number' && Number.isFinite(value.severity) ? Math.trunc(value.severity) : undefined;
+    if (severity !== undefined && severity !== 1) {
+        return null;
+    }
+
+    const range = isRecord(value.range) ? value.range : undefined;
+    const start = range && isRecord(range.start) ? range.start : undefined;
+    const rawLine = typeof start?.line === 'number' && Number.isFinite(start.line) ? Math.max(0, Math.trunc(start.line)) : 0;
+    const rawCharacter = typeof start?.character === 'number' && Number.isFinite(start.character)
+        ? Math.max(0, Math.trunc(start.character))
+        : 0;
+
+    return {
+        message,
+        line: rawLine + 1,
+        character: rawCharacter + 1,
+    };
+};
+
+const getPrimaryToolPath = (
+    toolName: string,
+    input: Record<string, unknown> | undefined,
+    metadata: Record<string, unknown> | undefined,
+): string | null => {
+    if (toolName === 'apply_patch') {
+        const files = Array.isArray(metadata?.files) ? metadata.files : [];
+        const first = files.find((entry) => {
+            if (!isRecord(entry)) {
+                return false;
+            }
+            return entry.type !== 'delete';
+        });
+        if (!isRecord(first)) {
+            return null;
+        }
+        return typeof first.movePath === 'string'
+            ? first.movePath
+            : typeof first.filePath === 'string'
+                ? first.filePath
+                : typeof first.relativePath === 'string'
+                    ? first.relativePath
+                    : null;
+    }
+
+    if (toolName === 'edit' || toolName === 'multiedit') {
+        const fileDiff = isRecord(metadata?.filediff) ? metadata.filediff : undefined;
+        if (isRecord(fileDiff) && typeof fileDiff.file === 'string') {
+            return fileDiff.file;
+        }
+        return typeof input?.filePath === 'string'
+            ? input.filePath
+            : typeof input?.file_path === 'string'
+                ? input.file_path
+                : typeof input?.path === 'string'
+                    ? input.path
+                    : null;
+    }
+
+    if (toolName === 'write') {
+        return typeof input?.filePath === 'string'
+            ? input.filePath
+            : typeof input?.file_path === 'string'
+                ? input.file_path
+                : typeof input?.path === 'string'
+                    ? input.path
+                    : null;
+    }
+
+    return null;
+};
+
+const getToolDiagnosticSection = (
+    toolName: string,
+    input: Record<string, unknown> | undefined,
+    metadata: Record<string, unknown> | undefined,
+    currentDirectory: string,
+): ToolDiagnosticSection | null => {
+    if (!['edit', 'multiedit', 'write', 'apply_patch'].includes(toolName)) {
+        return null;
+    }
+
+    const primaryPath = getPrimaryToolPath(toolName, input, metadata);
+    if (!primaryPath || !metadata || !isRecord(metadata.diagnostics)) {
+        return null;
+    }
+
+    const normalizedPath = normalizeDisplayPath(primaryPath);
+    const absolutePath = normalizedPath.startsWith('/')
+        ? normalizedPath
+        : `${normalizeDisplayPath(currentDirectory)}/${normalizedPath}`.replace(/\/+/g, '/');
+
+    const rawDiagnostics = (metadata.diagnostics as Record<string, unknown>)[normalizedPath]
+        ?? (metadata.diagnostics as Record<string, unknown>)[absolutePath];
+    if (!Array.isArray(rawDiagnostics)) {
+        return null;
+    }
+
+    const diagnostics = rawDiagnostics
+        .map((entry) => normalizeToolDiagnostic(entry))
+        .filter((entry): entry is ToolDiagnostic => !!entry);
+    if (diagnostics.length === 0) {
+        return null;
+    }
+
+    const visible = diagnostics.slice(0, TOOL_DIAGNOSTICS_MAX_PER_FILE);
+    return {
+        displayPath: normalizedPath.startsWith('/') ? getRelativePath(normalizedPath, currentDirectory) : normalizedPath,
+        diagnostics: visible,
+        remaining: Math.max(0, diagnostics.length - visible.length),
+    };
 };
 
 const usePierreThemeConfig = () => {
@@ -1344,6 +1485,10 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     const writeDisplayPath = shouldShowWriteInputPreview
         ? (writeFilePath ? getRelativePath(writeFilePath, currentDirectory) : 'New file')
         : null;
+    const diagnosticSection = React.useMemo(
+        () => getToolDiagnosticSection(part.tool, input, metadata, currentDirectory),
+        [currentDirectory, input, metadata, part.tool],
+    );
 
     const inputTextContent = React.useMemo(() => {
         if (!input || typeof input !== 'object' || Object.keys(input).length === 0) {
@@ -1381,6 +1526,50 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     );
 
     const renderResultContent = () => {
+        const renderDiagnosticsSection = () => {
+            if (!diagnosticSection) {
+                return null;
+            }
+
+            return (
+                <div
+                    className="tool-output-surface rounded-xl border p-2 space-y-2"
+                    style={{
+                        borderColor: 'var(--status-error-border)',
+                        backgroundColor: 'var(--status-error-background)',
+                    }}
+                >
+                    <div className="typography-meta font-medium" style={{ color: 'var(--status-error)' }}>
+                        LSP errors
+                    </div>
+                    <div className="space-y-1">
+                        <div className="flex items-center gap-1 min-w-0">
+                            {renderPathLikeGitChanges(diagnosticSection.displayPath, false)}
+                        </div>
+                        <div className="space-y-1">
+                            {diagnosticSection.diagnostics.map((diagnostic, index) => (
+                                <div key={`${diagnosticSection.displayPath}:${diagnostic.line}:${diagnostic.character}:${index}`} className="rounded-md border px-2 py-1" style={{ borderColor: 'var(--status-error-border)', backgroundColor: 'var(--surface-elevated)' }}>
+                                    <div className="flex items-start gap-2 min-w-0">
+                                        <span className="typography-micro shrink-0" style={{ color: 'var(--status-error)' }}>
+                                            [{diagnostic.line}:{diagnostic.character}]
+                                        </span>
+                                        <span className="typography-meta text-foreground whitespace-pre-wrap break-words">
+                                            {diagnostic.message}
+                                        </span>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                        {diagnosticSection.remaining > 0 ? (
+                            <div className="typography-micro text-muted-foreground">
+                                +{diagnosticSection.remaining} more errors
+                            </div>
+                        ) : null}
+                    </div>
+                </div>
+            );
+        };
+
         // Question tool: show parsed Q&A summary
         if (part.tool === 'question') {
             if (state.status === 'completed' && hasStringOutput) {
@@ -1426,7 +1615,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
             );
         }
 
-        if ((part.tool === 'edit' || part.tool === 'multiedit' || part.tool === 'apply_patch') && diffEntries.length > 0) {
+        if ((part.tool === 'edit' || part.tool === 'multiedit' || part.tool === 'apply_patch') && (diffEntries.length > 0 || !!diagnosticSection)) {
             return renderScrollableBlock(
                 <div className="space-y-3">
                     {diffEntries.map((entry) => (
@@ -1444,8 +1633,18 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                             />
                         </div>
                     ))}
+                    {renderDiagnosticsSection()}
                 </div>,
                 { className: 'p-1' }
+            );
+        }
+
+        if (part.tool === 'write' && diagnosticSection) {
+            return renderScrollableBlock(
+                <div className="space-y-3">
+                    {renderDiagnosticsSection()}
+                </div>,
+                { className: 'p-1' },
             );
         }
 
@@ -2274,4 +2473,12 @@ const ToolPart: React.FC<ToolPartProps> = ({
     );
 };
 
-export default ToolPart;
+export default React.memo(ToolPart, (prev, next) => {
+    return areRenderRelevantPartsEqual([prev.part], [next.part])
+        && prev.isExpanded === next.isExpanded
+        && prev.syntaxTheme === next.syntaxTheme
+        && prev.isMobile === next.isMobile
+        && prev.onContentChange === next.onContentChange
+        && prev.onShowPopup === next.onShowPopup
+        && prev.animateTailText === next.animateTailText;
+});

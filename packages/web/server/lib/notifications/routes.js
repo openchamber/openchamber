@@ -26,6 +26,7 @@ export const registerNotificationRoutes = (app, dependencies) => {
   const {
     uiAuthController,
     ensurePushInitialized,
+    ensureGlobalWatcherStarted,
     getOrCreateVapidKeys,
     getUiSessionTokenFromRequest,
     readSettingsFromDiskMigrated,
@@ -34,6 +35,8 @@ export const registerNotificationRoutes = (app, dependencies) => {
     removePushSubscription,
     updateUiVisibility,
     isUiVisible,
+    getUiNotificationClients,
+    writeSseEvent,
     getSessionActivitySnapshot,
     getSessionStateSnapshot,
     getSessionAttentionSnapshot,
@@ -44,6 +47,17 @@ export const registerNotificationRoutes = (app, dependencies) => {
     markUserMessageSent,
     setPushInitialized,
   } = dependencies;
+
+  const ensureSessionWatcher = async () => {
+    if (typeof ensureGlobalWatcherStarted !== 'function') {
+      return;
+    }
+    try {
+      await ensureGlobalWatcherStarted();
+    } catch (error) {
+      console.warn('[OpenCodeWatcher] lazy start failed:', error?.message ?? error);
+    }
+  };
 
   app.get('/api/push/vapid-public-key', async (_req, res) => {
     try {
@@ -58,6 +72,7 @@ export const registerNotificationRoutes = (app, dependencies) => {
 
   app.post('/api/push/subscribe', async (req, res) => {
     await ensurePushInitialized();
+    await ensureSessionWatcher();
 
     const uiToken = uiAuthController?.ensureSessionToken
       ? await uiAuthController.ensureSessionToken(req, res)
@@ -145,11 +160,42 @@ export const registerNotificationRoutes = (app, dependencies) => {
     });
   });
 
+  app.get('/api/notifications/stream', async (req, res) => {
+    const uiToken = uiAuthController?.ensureSessionToken
+      ? await uiAuthController.ensureSessionToken(req, res)
+      : getUiSessionTokenFromRequest(req);
+    if (!uiToken) {
+      return;
+    }
+
+    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders?.();
+
+    const clients = getUiNotificationClients();
+    clients.add(res);
+
+    try {
+      writeSseEvent(res, {
+        type: 'openchamber:notification-stream-ready',
+        properties: { uiToken },
+      });
+    } catch {
+    }
+
+    req.on('close', () => {
+      clients.delete(res);
+    });
+  });
+
   app.get('/api/session-activity', (_req, res) => {
+    void ensureSessionWatcher();
     res.json(getSessionActivitySnapshot());
   });
 
-  app.get('/api/sessions/snapshot', (_req, res) => {
+  app.get('/api/sessions/snapshot', async (_req, res) => {
+    await ensureSessionWatcher();
     res.json({
       statusSessions: getSessionStateSnapshot(),
       attentionSessions: getSessionAttentionSnapshot(),
@@ -157,7 +203,8 @@ export const registerNotificationRoutes = (app, dependencies) => {
     });
   });
 
-  app.get('/api/sessions/status', (_req, res) => {
+  app.get('/api/sessions/status', async (_req, res) => {
+    await ensureSessionWatcher();
     const snapshot = getSessionStateSnapshot();
     res.json({
       sessions: snapshot,
@@ -165,7 +212,8 @@ export const registerNotificationRoutes = (app, dependencies) => {
     });
   });
 
-  app.get('/api/sessions/:id/status', (req, res) => {
+  app.get('/api/sessions/:id/status', async (req, res) => {
+    await ensureSessionWatcher();
     const sessionId = req.params.id;
     const state = getSessionState(sessionId);
 
@@ -182,7 +230,8 @@ export const registerNotificationRoutes = (app, dependencies) => {
     });
   });
 
-  app.get('/api/sessions/attention', (_req, res) => {
+  app.get('/api/sessions/attention', async (_req, res) => {
+    await ensureSessionWatcher();
     const snapshot = getSessionAttentionSnapshot();
     res.json({
       sessions: snapshot,
@@ -190,7 +239,8 @@ export const registerNotificationRoutes = (app, dependencies) => {
     });
   });
 
-  app.get('/api/sessions/:id/attention', (req, res) => {
+  app.get('/api/sessions/:id/attention', async (req, res) => {
+    await ensureSessionWatcher();
     const sessionId = req.params.id;
     const state = getSessionAttentionState(sessionId);
 

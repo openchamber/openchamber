@@ -168,6 +168,36 @@
     font-family: var(--font-mono, ui-monospace, SFMono-Regular, 'Liberation Mono', Menlo, monospace) !important;
   }
 
+  /* Restore default list styling inside markdown content - override Tailwind preflight */
+  .markdown-content ul,
+  .markdown-content ol {
+    padding-left: 2em !important;
+  }
+
+  .markdown-content ul {
+    list-style-type: none !important;
+  }
+
+  .markdown-content ul > li {
+    position: relative;
+  }
+
+  .markdown-content ul > li::before {
+    content: "–";
+    position: absolute;
+    left: -1.25em;
+    color: inherit;
+  }
+
+  .markdown-content ol {
+    list-style-type: decimal !important;
+    list-style-position: outside !important;
+  }
+
+  .markdown-content li {
+    display: list-item !important;
+  }
+
   /* Remove focus rings globally (except inputs/textareas/dropdowns/selects) */
   *:focus:not(input):not(textarea):not([data-slot="dropdown-menu-content"]):not([data-slot="dropdown-menu-sub-content"]):not([data-slot="select-content"]) {
     outline: none !important;

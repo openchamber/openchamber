@@ -50,7 +50,27 @@ export async function bootstrapGlobal(
     console.error("[bootstrap] global bootstrap failed", errors[0])
   }
 
-  set({ ready: true })
+  // If ALL requests failed, OpenCode is likely down — fetch the OpenChamber
+  // health endpoint (outside the readiness gate) to get the actual error reason.
+  if (errors.length === results.length) {
+    let message = errors[0] instanceof Error ? errors[0].message : String(errors[0])
+    try {
+      const healthRes = await fetch("/health", { signal: AbortSignal.timeout(4000) })
+      if (healthRes.ok) {
+        const health = await healthRes.json()
+        if (health.lastOpenCodeError) {
+          message = health.lastOpenCodeError
+        } else if (!health.openCodeRunning) {
+          message = "OpenCode process is not running"
+        }
+      }
+    } catch {
+      // health endpoint itself unreachable — use the original error
+    }
+    set({ ready: true, error: { type: "init", message } })
+  } else {
+    set({ ready: true, error: undefined })
+  }
 }
 
 // ---------------------------------------------------------------------------

@@ -134,7 +134,6 @@ export const createNotificationTriggerRuntime = (deps) => {
     }
 
     const sessionId = extractSessionIdFromPayload(payload);
-
     if (payload.type === 'message.updated') {
       const info = payload.properties?.info;
       if (info?.role === 'assistant' && info?.finish === 'stop' && sessionId) {

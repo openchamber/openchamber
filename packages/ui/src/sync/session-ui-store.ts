@@ -177,6 +177,10 @@ export type SessionUIState = {
   abortControllers: Map<string, AbortController>
   isLoading: boolean
   lastLoadedDirectory: string | null
+  // Plan mode - per-session plan file availability (set when plan_enter tool creates a plan)
+  sessionPlanAvailable: Map<string, boolean>
+  markSessionPlanAvailable: (sessionId: string) => void
+  isSessionPlanAvailable: (sessionId: string) => boolean
 
   // Actions — UI state management
   setCurrentSession: (id: string | null, directoryHint?: string | null) => void
@@ -378,6 +382,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   abortControllers: new Map(),
   isLoading: false,
   lastLoadedDirectory: null,
+  sessionPlanAvailable: new Map(),
 
   // ---------------------------------------------------------------------------
   // setCurrentSession
@@ -1146,5 +1151,20 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   setSessionDirectory: () => {
     // Session directory is owned by sync child stores via SSE events.
     // This is now a no-op — kept for interface compatibility during migration.
+  },
+
+  // ---------------------------------------------------------------------------
+  // Plan mode availability tracking
+  // ---------------------------------------------------------------------------
+  markSessionPlanAvailable: (sessionId) => {
+    set((state) => {
+      const next = new Map(state.sessionPlanAvailable)
+      next.set(sessionId, true)
+      return { sessionPlanAvailable: next }
+    })
+  },
+
+  isSessionPlanAvailable: (sessionId) => {
+    return get().sessionPlanAvailable.get(sessionId) ?? false
   },
 }))
