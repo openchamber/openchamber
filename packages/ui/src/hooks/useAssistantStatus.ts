@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React from 'react';
 import type { AssistantMessage, Message, Part, ReasoningPart, TextPart, ToolPart } from '@opencode-ai/sdk/v2';
 
 import type { MessageStreamPhase } from '@/stores/types/sessionTypes';
@@ -6,9 +6,6 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useDirectorySync, useSessionPermissions, useSessionStatus } from '@/sync/sync-context';
 import { isFullySyntheticMessage } from '@/lib/messages/synthetic';
 import { useCurrentSessionActivity } from './useSessionActivity';
-
-// Loading timeout to prevent infinite loading state
-const LOADING_TIMEOUT = 30000; // 30 seconds
 
 export type AssistantActivity = 'idle' | 'streaming' | 'tooling' | 'cooldown' | 'permission';
 
@@ -42,9 +39,6 @@ interface FormingSummary {
 export interface AssistantStatusSnapshot {
     forming: FormingSummary;
     working: WorkingSummary;
-    loadingTooLong: boolean;
-    handleRetry: () => void;
-    handleCancel: () => void;
 }
 
 type AssistantMessageWithState = AssistantMessage & {
@@ -130,11 +124,6 @@ const getToolDisplayName = (part: ToolPart): string => {
 export function useAssistantStatus(): AssistantStatusSnapshot {
     const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
 
-    // Track loading timeout
-    const [loadingTooLong, setLoadingTooLong] = useState(false);
-    const workingStartTime = useRef<number | null>(null);
-    const timeoutId = useRef<NodeJS.Timeout | null>(null);
-
     const rawSessionMessages = useDirectorySync(
         React.useCallback((state) => {
             if (!currentSessionId) {
@@ -185,73 +174,6 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
     );
 
     const { phase: activityPhase, isWorking: isPhaseWorking } = useCurrentSessionActivity();
-
-    // Loading timeout logic
-    useEffect(() => {
-        const isWorking = isPhaseWorking;
-
-        if (isWorking && workingStartTime.current === null) {
-            // Start tracking when work begins
-            workingStartTime.current = Date.now();
-
-            timeoutId.current = setTimeout(() => {
-                setLoadingTooLong(true);
-                console.warn(`[Loading Timeout] Loading timeout exceeded (${LOADING_TIMEOUT}ms) for session ${currentSessionId}`);
-            }, LOADING_TIMEOUT);
-        } else if (!isWorking) {
-            // Reset when work completes
-            if (timeoutId.current) {
-                clearTimeout(timeoutId.current);
-                timeoutId.current = null;
-            }
-            workingStartTime.current = null;
-            setLoadingTooLong(false);
-        }
-
-        // Cleanup on unmount
-        return () => {
-            if (timeoutId.current) {
-                clearTimeout(timeoutId.current);
-            }
-        };
-    }, [isPhaseWorking, currentSessionId]);
-
-    // Handler functions
-    const handleRetry = () => {
-        console.log(`[Loading Timeout] User requested retry for session ${currentSessionId}`);
-        setLoadingTooLong(false);
-        workingStartTime.current = Date.now();
-
-        // Reset timeout
-        if (timeoutId.current) {
-            clearTimeout(timeoutId.current);
-        }
-        timeoutId.current = setTimeout(() => {
-            setLoadingTooLong(true);
-        }, LOADING_TIMEOUT);
-
-        // Trigger a retry by refreshing the session state
-        // This will be handled by the sync context
-        window.location.reload();
-    };
-
-    const handleCancel = () => {
-        console.log(`[Loading Timeout] User requested cancel for session ${currentSessionId}`);
-        setLoadingTooLong(false);
-
-        // Clear timeout
-        if (timeoutId.current) {
-            clearTimeout(timeoutId.current);
-            timeoutId.current = null;
-        }
-        workingStartTime.current = null;
-
-        // Cancel the current request (implementation depends on your abort mechanism)
-        const abortRecord = useSessionUIStore.getState().sessionAbortFlags?.get(currentSessionId ?? '');
-        if (abortRecord && !abortRecord.acknowledged) {
-            // Abort is already handled by the existing mechanism
-        }
-    };
 
     const currentSessionStatus = useSessionStatus(currentSessionId ?? '');
 
@@ -522,8 +444,5 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
     return {
         forming,
         working,
-        loadingTooLong,
-        handleRetry,
-        handleCancel,
     };
 }

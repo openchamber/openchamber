@@ -29,6 +29,18 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private readonly _MESSAGE_TIMEOUT = 5000; // 5 seconds
   private readonly _MAX_RETRIES = 3;
 
+  private _createMessageId(): string {
+    return `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  }
+
+  private _clearPendingMessages(): void {
+    for (const timeout of this._messageTimeouts.values()) {
+      clearTimeout(timeout);
+    }
+    this._messageTimeouts.clear();
+    this._pendingMessages.clear();
+  }
+
   constructor(
     private readonly _context: vscode.ExtensionContext,
     private readonly _extensionUri: vscode.Uri,
@@ -40,6 +52,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   public resolveWebviewView(
     webviewView: vscode.WebviewView
   ) {
+    this._clearPendingMessages();
     this._view = webviewView;
 
     const distUri = vscode.Uri.joinPath(this._extensionUri, 'dist');
@@ -56,10 +69,18 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     // Send cached connection status and API URL (may have been set before webview was resolved)
     this._sendCachedState();
 
-    webviewView.webview.onDidReceiveMessage(async (message: BridgeRequest & { _msgId?: string }) => {
-      // Handle message confirmation
-      if (message._msgId) {
+    webviewView.onDidDispose(() => {
+      this._clearPendingMessages();
+    });
+
+    webviewView.webview.onDidReceiveMessage(async (message: (BridgeRequest & { _msgId?: string }) | { type: 'bridge:ack'; _msgId: string }) => {
+      if (message.type === 'bridge:ack' && typeof message._msgId === 'string') {
         this._confirmMessage(message._msgId);
+        return;
+      }
+
+      if (!('id' in message) || typeof message.id !== 'string') {
+        return;
       }
 
       if (message.type === 'restartApi') {
@@ -213,53 +234,58 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   }
 
   // Send message with retry mechanism
-  private async _sendMessageWithRetry(
-    response: BridgeResponse,
-    retryCount: number = 0
-  ): Promise<boolean> {
+  private async _sendMessageWithRetry(response: BridgeResponse, retryCount: number = 0, messageId?: string): Promise<boolean> {
     if (!this._view) {
       return false;
     }
 
-    // Generate unique message ID
-    const messageId = `msg_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+    const pendingMessageId = messageId ?? this._createMessageId();
+    const existingTimeout = this._messageTimeouts.get(pendingMessageId);
+    if (existingTimeout) {
+      clearTimeout(existingTimeout);
+      this._messageTimeouts.delete(pendingMessageId);
+    }
 
     try {
-      // Send message with ID
-      this._view.webview.postMessage({
+      const delivered = await this._view.webview.postMessage({
         ...response,
-        _msgId: messageId,
+        _msgId: pendingMessageId,
       });
+      if (!delivered) {
+        throw new Error('Webview rejected message delivery');
+      }
 
-      // Track as pending
-      this._pendingMessages.add(messageId);
+      this._pendingMessages.add(pendingMessageId);
 
-      // Set timeout for confirmation
       const timeout = setTimeout(() => {
-        if (this._pendingMessages.has(messageId)) {
-          console.warn(`[Message Retry] Message ${messageId} not confirmed, retrying...`);
-
-          // Retry if under max attempts
-          if (retryCount < this._MAX_RETRIES) {
-            void this._sendMessageWithRetry(response, retryCount + 1);
-          } else {
-            console.error(`[Message Retry] Message ${messageId} failed after ${this._MAX_RETRIES} retries`);
-            this._pendingMessages.delete(messageId);
-          }
+        if (!this._pendingMessages.has(pendingMessageId)) {
+          return;
         }
+
+        if (retryCount < this._MAX_RETRIES) {
+          console.warn(`[Message Retry] Message ${pendingMessageId} not confirmed, retrying (${retryCount + 1}/${this._MAX_RETRIES})...`);
+          void this._sendMessageWithRetry(response, retryCount + 1, pendingMessageId);
+          return;
+        }
+
+        console.error(`[Message Retry] Message ${pendingMessageId} failed after ${this._MAX_RETRIES} retries`);
+        this._pendingMessages.delete(pendingMessageId);
+        this._messageTimeouts.delete(pendingMessageId);
       }, this._MESSAGE_TIMEOUT);
 
-      this._messageTimeouts.set(messageId, timeout);
+      this._messageTimeouts.set(pendingMessageId, timeout);
       return true;
 
     } catch (error) {
       console.error(`[Message Retry] Failed to send message:`, error);
 
-      // Retry immediately on error
       if (retryCount < this._MAX_RETRIES) {
-        await new Promise(resolve => setTimeout(resolve, 100 * (retryCount + 1))); // Brief delay
-        return this._sendMessageWithRetry(response, retryCount + 1);
+        await new Promise((resolve) => setTimeout(resolve, 100 * (retryCount + 1)));
+        return this._sendMessageWithRetry(response, retryCount + 1, pendingMessageId);
       }
+
+      this._pendingMessages.delete(pendingMessageId);
+      this._messageTimeouts.delete(pendingMessageId);
 
       return false;
     }

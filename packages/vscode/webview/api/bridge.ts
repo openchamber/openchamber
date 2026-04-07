@@ -47,6 +47,11 @@ window.addEventListener('message', (event: MessageEvent<BridgeResponse>) => {
   const response = event.data;
   if (!response || typeof response.id !== 'string') return;
 
+  const messageId = (response as BridgeResponse & { _msgId?: unknown })._msgId;
+  if (typeof messageId === 'string' && messageId.length > 0) {
+    getVSCodeAPI().postMessage({ type: 'bridge:ack', _msgId: messageId });
+  }
+
   const pending = pendingRequests.get(response.id);
   if (pending) {
     pendingRequests.delete(response.id);
