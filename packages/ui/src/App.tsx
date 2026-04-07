@@ -21,8 +21,18 @@ import { usePwaInstallPrompt } from '@/hooks/usePwaInstallPrompt';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { hasModifier } from '@/lib/utils';
-import { isDesktopLocalOriginActive, isDesktopShell } from '@/lib/desktop';
+import { isDesktopLocalOriginActive, isDesktopShell, isTauriShell, restartDesktopApp } from '@/lib/desktop';
+import {
+  getInjectedBootOutcome,
+  getBootInjectionStatus,
+  resolveDesktopBootView,
+  canDismissInitialLoading,
+  shouldRestartDesktopBootFlow,
+  type BootInjectionStatus,
+  type DesktopBootView,
+} from '@/lib/desktopBoot';
 import { OnboardingScreen } from '@/components/onboarding/OnboardingScreen';
+import type { RecoveryVariant } from '@/components/onboarding/DesktopConnectionRecovery';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { opencodeClient } from '@/lib/opencode/client';
@@ -41,9 +51,6 @@ import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import type { RuntimeAPIs } from '@/lib/api/types';
 import { TooltipProvider } from '@/components/ui/tooltip';
-
-const CLI_MISSING_ERROR_REGEX =
-  /ENOENT|spawn\s+opencode|Unable\s+to\s+locate\s+the\s+opencode\s+CLI|OpenCode\s+CLI\s+not\s+found|opencode(\.exe)?\s+not\s+found|opencode(\.exe)?:\s*command\s+not\s+found|not\s+recognized\s+as\s+an\s+internal\s+or\s+external\s+command|env:\s*['"]?(node|bun)['"]?:\s*No\s+such\s+file\s+or\s+directory|(node|bun):\s*No\s+such\s+file\s+or\s+directory/i;
 
 const AboutDialogWrapper: React.FC = () => {
   const isAboutDialogOpen = useUIStore((s) => s.isAboutDialogOpen);
@@ -168,10 +175,18 @@ function App({ apis }: AppProps) {
   const { uiFont, monoFont } = useFontPreferences();
   const refreshGitHubAuthStatus = useGitHubAuthStore((state) => state.refreshStatus);
   const [isVSCodeRuntime, setIsVSCodeRuntime] = React.useState<boolean>(() => apis.runtime.isVSCode);
-  const [showCliOnboarding, setShowCliOnboarding] = React.useState(false);
   const [isEmbeddedVisible, setIsEmbeddedVisible] = React.useState(true);
   const isDesktopRuntime = React.useMemo(() => isDesktopShell(), []);
   const setPlanModeEnabled = useFeatureFlagsStore((state) => state.setPlanModeEnabled);
+  const [bootInjectionStatus, setBootInjectionStatus] = React.useState<BootInjectionStatus>(() => {
+    return getBootInjectionStatus();
+  });
+  const [bootView, setBootView] = React.useState<DesktopBootView | null>(() => {
+    const outcome = getInjectedBootOutcome();
+    return outcome !== null
+      ? resolveDesktopBootView({ isDesktopShell: true, bootOutcome: outcome })
+      : null;
+  });
   const appReadyDispatchedRef = React.useRef(false);
   const embeddedSessionChat = React.useMemo<EmbeddedSessionChatConfig | null>(() => readEmbeddedSessionChatConfig(), []);
   const embeddedBackgroundWorkEnabled = !embeddedSessionChat || isEmbeddedVisible;
@@ -221,25 +236,55 @@ function App({ apis }: AppProps) {
     }
   }, [uiFont, monoFont]);
 
+  const bootOutcomeKnown = bootInjectionStatus === 'valid';
+  const bootViewIsMain = bootView?.screen === 'main';
+
+  // Splash dismissal: use the authoritative loading gate from desktopBoot.
+  // Desktop shells strictly require a valid boot outcome before dismissing.
+  // Non-main outcomes (chooser/recovery) can dismiss without waiting for init.
   React.useEffect(() => {
-    if (isInitialized) {
-      const hideInitialLoading = () => {
-        const loadingElement = document.getElementById('initial-loading');
-        if (loadingElement) {
-          loadingElement.classList.add('fade-out');
-
-          setTimeout(() => {
-            loadingElement.remove();
-          }, 300);
-        }
-      };
-
-      const timer = setTimeout(hideInitialLoading, 150);
-      return () => clearTimeout(timer);
+    if (!canDismissInitialLoading({
+      isDesktopShell: isDesktopRuntime,
+      isInitialized,
+      bootOutcomeKnown,
+      bootViewIsMain,
+    })) {
+      return;
     }
-  }, [isInitialized]);
 
+    const timer = setTimeout(() => {
+      const loadingElement = document.getElementById('initial-loading');
+      if (loadingElement) {
+        loadingElement.classList.add('fade-out');
+        setTimeout(() => {
+          loadingElement.remove();
+        }, 300);
+      }
+    }, 150);
+
+    return () => clearTimeout(timer);
+  }, [isDesktopRuntime, isInitialized, bootOutcomeKnown, bootViewIsMain]);
+
+  // Deterministic malformed handling: update splash text so the user
+  // sees a specific error instead of a generic spinner, but do NOT
+  // dismiss the splash (that only happens on a valid outcome).
   React.useEffect(() => {
+    if (!isDesktopRuntime || bootInjectionStatus !== 'malformed') {
+      return;
+    }
+
+    const loadingElement = document.getElementById('initial-loading');
+    if (loadingElement) {
+      loadingElement.textContent = 'Desktop startup failed — please restart the app.';
+    }
+  }, [isDesktopRuntime, bootInjectionStatus]);
+
+  // Non-desktop fallback: remove splash after 5 seconds even if init stalls.
+  React.useEffect(() => {
+    if (isDesktopRuntime) {
+      return;
+    }
+
     const fallbackTimer = setTimeout(() => {
       const loadingElement = document.getElementById('initial-loading');
       if (loadingElement && !isInitialized) {
@@ -251,7 +296,7 @@ function App({ apis }: AppProps) {
     }, 5000);
 
     return () => clearTimeout(fallbackTimer);
-  }, [isInitialized]);
+  }, [isDesktopRuntime, isInitialized]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -529,54 +574,119 @@ function App({ apis }: AppProps) {
     }
   }, [clearError, embeddedSessionChat, error]);
 
+  // Poll for the injected boot outcome until it becomes available (desktop only).
+  // The Rust backend sets window.__OPENCHAMBER_DESKTOP_BOOT_OUTCOME__ once the
+  // sidecar reaches a stable state. We poll with exponential backoff to handle
+  // potential race conditions during startup and config writes.
   React.useEffect(() => {
-    if (embeddedSessionChat) {
-      return;
-    }
-
-    if (!isDesktopShell() || !isDesktopLocalOriginActive()) {
+    if (!isDesktopRuntime || bootInjectionStatus !== 'not-injected') {
       return;
     }
 
     let cancelled = false;
-    const run = async () => {
-      const res = await fetch('/health', { method: 'GET' }).catch(() => null);
-      if (!res || !res.ok || cancelled) return;
-      const data = (await res.json().catch(() => null)) as null | {
-        openCodeRunning?: unknown;
-        isOpenCodeReady?: unknown;
-        opencodeBinaryResolved?: unknown;
-        lastOpenCodeError?: unknown;
-      };
-      if (!data || cancelled) return;
-      const openCodeRunning = data.openCodeRunning === true;
-      const isOpenCodeReady = data.isOpenCodeReady === true;
-      const resolvedBinary = typeof data.opencodeBinaryResolved === 'string' ? data.opencodeBinaryResolved.trim() : '';
-      const hasResolvedBinary = resolvedBinary.length > 0;
-      const err = typeof data.lastOpenCodeError === 'string' ? data.lastOpenCodeError : '';
-      const cliMissing =
-        !openCodeRunning &&
-        (CLI_MISSING_ERROR_REGEX.test(err) || (!hasResolvedBinary && !isOpenCodeReady));
-      setShowCliOnboarding(cliMissing);
+    let attempts = 0;
+    const BASE_INTERVAL = 200;
+    const MAX_INTERVAL = 2000;
+    const MAX_ATTEMPTS = 50; // 10 seconds total (200ms * 50 with exponential backoff cap)
+
+    const pollWithBackoff = () => {
+      if (cancelled) return;
+
+      attempts++;
+      const status = getBootInjectionStatus();
+
+      if (status !== 'not-injected') {
+        cancelled = true;
+        setBootInjectionStatus(status);
+
+        if (status === 'valid') {
+          const outcome = getInjectedBootOutcome();
+          if (outcome) {
+            setBootView(resolveDesktopBootView({ isDesktopShell: true, bootOutcome: outcome }));
+          }
+        }
+        // If status is 'malformed', we keep the splash visible with error text
+        // handled by the separate useEffect below
+        return;
+      }
+
+      // Exponential backoff with cap
+      const nextInterval = Math.min(BASE_INTERVAL * Math.pow(1.1, attempts), MAX_INTERVAL);
+
+      if (attempts >= MAX_ATTEMPTS) {
+        // Max attempts reached - keep polling but show error
+        const loadingElement = document.getElementById('initial-loading');
+        if (loadingElement && !loadingElement.textContent?.includes('taking longer')) {
+          loadingElement.textContent = 'Desktop startup is taking longer than expected...';
+        }
+      }
+
+      window.setTimeout(pollWithBackoff, nextInterval);
     };
 
-    void run();
+    // Start polling
+    window.setTimeout(pollWithBackoff, BASE_INTERVAL);
 
     return () => {
       cancelled = true;
     };
-  }, [embeddedSessionChat]);
+  }, [isDesktopRuntime, bootInjectionStatus]);
 
-  const handleCliAvailable = React.useCallback(() => {
-    setShowCliOnboarding(false);
+  const handleDesktopBootDismiss = React.useCallback(async () => {
+    if (shouldRestartDesktopBootFlow({
+      isTauriShell: isTauriShell(),
+      isDesktopLocalOriginActive: isDesktopLocalOriginActive(),
+    })) {
+      await restartDesktopApp();
+      return;
+    }
+
     window.location.reload();
   }, []);
 
-  if (showCliOnboarding) {
+  // Map boot outcome kind to recovery variant
+  const mapBootViewToRecoveryVariant = (view: DesktopBootView): RecoveryVariant | undefined => {
+    if (view.screen === 'recovery') {
+      return view.variant;
+    }
+    return undefined;
+  };
+
+  // Desktop boot view routing.
+  // When the boot outcome resolves to a non-main screen (chooser, recovery),
+  // render OnboardingScreen with appropriate mode/variant.
+  if (isDesktopRuntime && bootView && bootView.screen !== 'main') {
+    // First-launch chooser
+    if (bootView.screen === 'chooser') {
+      return (
+        <ErrorBoundary>
+          <div className="h-full text-foreground bg-transparent">
+            <OnboardingScreen
+              mode="first-launch"
+              onCliAvailable={handleDesktopBootDismiss}
+              onChooseRemote={() => {
+                // Switch to remote tab - handled internally by OnboardingScreen
+              }}
+            />
+          </div>
+        </ErrorBoundary>
+      );
+    }
+
+    // Recovery screens
+    const recoveryVariant = mapBootViewToRecoveryVariant(bootView);
+    const hostUrl = bootView.screen === 'recovery' && 'url' in bootView ? bootView.url : undefined;
+
     return (
       <ErrorBoundary>
         <div className="h-full text-foreground bg-transparent">
-          <OnboardingScreen onCliAvailable={handleCliAvailable} />
+          <OnboardingScreen
+            mode="recovery"
+            recoveryVariant={recoveryVariant}
+            recoveryHostUrl={hostUrl}
+            recoveryHostLabel={undefined}
+            onCliAvailable={handleDesktopBootDismiss}
+          />
         </div>
       </ErrorBoundary>
     );
