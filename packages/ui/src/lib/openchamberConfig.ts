@@ -176,7 +176,7 @@ const readTextFile = async (path: string): Promise<string | null> => {
   }
 
   try {
-    const response = await fetch(`${getBaseUrl()}/fs/read?path=${encodeURIComponent(path)}`);
+    const response = await fetch(`${getBaseUrl()}/fs/read?path=${encodeURIComponent(path)}&allowMissing=true`);
     if (!response.ok) {
       return null;
     }

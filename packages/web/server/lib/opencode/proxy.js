@@ -16,6 +16,10 @@ export const registerOpenCodeProxy = (app, deps) => {
     getOpenCodeAuthHeaders,
     buildOpenCodeUrl,
     ensureOpenCodeApiPrefix,
+    backendRegistry,
+    sessionBindingsRuntime,
+    openCodeBackendRuntime,
+    readSettingsFromDiskMigrated,
   } = deps;
 
   if (app.get('opencodeProxyConfigured')) {
@@ -265,7 +269,7 @@ export const registerOpenCodeProxy = (app, deps) => {
           return bTime - aTime;
         });
         console.log(`[SessionMerge] ${globalSessions.length} global + ${extraSessions.length} extra = ${merged.length} total`);
-        return res.json(merged);
+        return res.json(sessionBindingsRuntime.annotateSessions(merged));
       } catch (error) {
         console.log(`[SessionMerge] Error: ${error.message}, falling through`);
         next();
@@ -275,6 +279,244 @@ export const registerOpenCodeProxy = (app, deps) => {
 
   app.get('/api/global/event', forwardSseRequest);
   app.get('/api/event', forwardSseRequest);
+
+  const sendUnsupportedBackendResponse = (res, backendId) => {
+    res.status(501).json({
+      error: `Backend "${backendId}" is not available yet`,
+      backendId,
+      code: 'BACKEND_UNSUPPORTED',
+    });
+  };
+
+  const resolveRequestedBackendId = async (req) => {
+    const bodyBackendId = typeof req.body?.backendId === 'string' ? req.body.backendId.trim() : '';
+    if (bodyBackendId) {
+      return bodyBackendId;
+    }
+    const settings = await readSettingsFromDiskMigrated();
+    const settingsBackend = typeof settings?.defaultBackend === 'string' ? settings.defaultBackend.trim() : '';
+    return settingsBackend || await backendRegistry.getDefaultBackendId();
+  };
+
+  const encodeJsonBody = (body) => {
+    if (body == null) {
+      return undefined;
+    }
+    if (typeof body === 'string') {
+      return body;
+    }
+    return JSON.stringify(body);
+  };
+
+  const sanitizeCreateBody = (body) => {
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return body;
+    }
+    const next = { ...body };
+    delete next.backendId;
+    return next;
+  };
+
+  const mutateSessionPath = (requestUrl, currentSessionId, nextSessionId) => {
+    if (!currentSessionId || currentSessionId === nextSessionId) {
+      return requestUrl;
+    }
+    const escapedCurrent = encodeURIComponent(currentSessionId);
+    const escapedNext = encodeURIComponent(nextSessionId);
+    return requestUrl.replace(`/session/${escapedCurrent}`, `/session/${escapedNext}`);
+  };
+
+  const readJsonResponse = async (response) => {
+    const contentType = response.headers.get('content-type') || '';
+    if (!contentType.toLowerCase().includes('application/json')) {
+      return null;
+    }
+    return response.json().catch(() => null);
+  };
+
+  const writeJsonResponse = (res, response, payload) => {
+    res.status(response.status);
+    for (const [key, value] of response.headers.entries()) {
+      if (shouldForwardProxyResponseHeader(key)) {
+        res.setHeader(key, value);
+      }
+    }
+    res.json(payload);
+  };
+
+  app.get('/api/session', async (req, res, next) => {
+    const rawUrl = req.originalUrl || req.url || '';
+    if (process.platform === 'win32' && !rawUrl.includes('directory=')) {
+      return next();
+    }
+
+    try {
+      const response = await fetch(buildOpenCodeUrl(rawUrl.replace(/^\/api/, '') || '/session', ''), {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+          ...collectForwardProxyHeaders(req.headers, getOpenCodeAuthHeaders()),
+        },
+        signal: AbortSignal.timeout(10000),
+      });
+      const payload = await readJsonResponse(response);
+      if (!Array.isArray(payload)) {
+        res.status(response.status);
+        res.end(await response.text().catch(() => ''));
+        return;
+      }
+      writeJsonResponse(res, response, sessionBindingsRuntime.annotateSessions(payload));
+    } catch (error) {
+      console.error('[proxy] Failed to annotate session list:', error?.message ?? error);
+      next();
+    }
+  });
+
+  app.post('/api/session', async (req, res) => {
+    try {
+      const backendId = await resolveRequestedBackendId(req);
+      if (!backendRegistry.isBackendSelectable(backendId)) {
+        return sendUnsupportedBackendResponse(res, backendId);
+      }
+
+      const createBody = sanitizeCreateBody(req.body);
+      const payload = await openCodeBackendRuntime.createSession({
+        directory: typeof req.query?.directory === 'string' ? req.query.directory : undefined,
+        title: typeof createBody?.title === 'string' ? createBody.title : undefined,
+        parentID: typeof createBody?.parentID === 'string' ? createBody.parentID : undefined,
+      });
+
+      if (payload && typeof payload === 'object' && typeof payload.id === 'string' && payload.id.trim().length > 0) {
+        await sessionBindingsRuntime.upsertBinding({
+          sessionId: payload.id,
+          backendId,
+          backendSessionId: payload.id,
+          directory: typeof payload.directory === 'string' ? payload.directory : null,
+        });
+      }
+
+      res.status(200).json(sessionBindingsRuntime.annotateSession(payload));
+    } catch (error) {
+      console.error('[proxy] Failed to create session:', error?.message ?? error);
+      const message = error?.body?.error || error?.message || 'Failed to create session';
+      res.status(400).json({ error: message });
+    }
+  });
+
+  app.post('/api/session/:sessionId/prompt_async', async (req, res, next) => {
+    try {
+      const sessionId = typeof req.params?.sessionId === 'string' ? req.params.sessionId : '';
+      if (!sessionId) {
+        return next();
+      }
+
+      const binding = sessionBindingsRuntime.getEffectiveBindingSync(sessionId);
+      if (!binding) {
+        return next();
+      }
+
+      if (!backendRegistry.isBackendSelectable(binding.backendId)) {
+        return sendUnsupportedBackendResponse(res, binding.backendId);
+      }
+
+      await openCodeBackendRuntime.promptAsync({
+        sessionID: binding.backendSessionId,
+        directory: typeof req.query?.directory === 'string' ? req.query.directory : binding.directory,
+        messageID: typeof req.body?.messageID === 'string' ? req.body.messageID : undefined,
+        model: req.body?.model,
+        agent: typeof req.body?.agent === 'string' ? req.body.agent : undefined,
+        variant: typeof req.body?.variant === 'string' ? req.body.variant : undefined,
+        format: req.body?.format,
+        parts: Array.isArray(req.body?.parts) ? req.body.parts : undefined,
+      });
+
+      return res.status(204).end();
+    } catch (error) {
+      console.error('[proxy] Failed to prompt session asynchronously:', error?.message ?? error);
+      const message = error?.body?.error || error?.message || 'Failed to send message';
+      return res.status(400).json({ error: message });
+    }
+  });
+
+  const RESERVED_SESSION_PATHS = new Set([
+    '/api/session',
+    '/api/session/status',
+    '/api/global/event',
+    '/api/event',
+  ]);
+
+  app.use(/^\/api\/session\/([^/]+)(?:\/.*)?$/, async (req, res, next) => {
+    if (RESERVED_SESSION_PATHS.has(req.path)) {
+      return next();
+    }
+
+    try {
+      const sessionId = typeof req.params?.[0] === 'string' ? decodeURIComponent(req.params[0]) : '';
+      if (!sessionId) {
+        return next();
+      }
+
+      const binding = sessionBindingsRuntime.getEffectiveBindingSync(sessionId);
+      if (!binding) {
+        return next();
+      }
+
+      if (!backendRegistry.isBackendSelectable(binding.backendId)) {
+        return sendUnsupportedBackendResponse(res, binding.backendId);
+      }
+
+      const requestUrl = typeof req.originalUrl === 'string' && req.originalUrl.length > 0
+        ? req.originalUrl
+        : (typeof req.url === 'string' ? req.url : '');
+      const upstreamPath = mutateSessionPath(requestUrl.replace(/^\/api/, '') || '/', sessionId, binding.backendSessionId);
+      const response = await fetch(buildOpenCodeUrl(upstreamPath, ''), {
+        method: req.method,
+        headers: {
+          ...collectForwardProxyHeaders(req.headers, getOpenCodeAuthHeaders()),
+          ...(req.method === 'GET' || req.method === 'HEAD' ? {} : { 'Content-Type': 'application/json' }),
+        },
+        body: req.method === 'GET' || req.method === 'HEAD' ? undefined : encodeJsonBody(req.body),
+      });
+
+      const payload = await readJsonResponse(response);
+      if (payload == null) {
+        res.status(response.status);
+        applyForwardProxyResponseHeaders(response.headers, res);
+        res.end(await response.text().catch(() => ''));
+        return;
+      }
+
+      const normalizedPayload = Array.isArray(payload)
+        ? sessionBindingsRuntime.annotateSessions(payload)
+        : sessionBindingsRuntime.annotateSession(payload);
+
+      if (response.ok && req.method === 'DELETE') {
+        await sessionBindingsRuntime.removeBinding(sessionId);
+      }
+
+      if (
+        response.ok &&
+        req.method === 'POST' &&
+        typeof normalizedPayload === 'object' &&
+        normalizedPayload &&
+        typeof normalizedPayload.id === 'string' &&
+        normalizedPayload.id.trim().length > 0 &&
+        normalizedPayload.id !== sessionId
+      ) {
+        await sessionBindingsRuntime.upsertBinding({
+          sessionId: normalizedPayload.id,
+          backendId: binding.backendId,
+          backendSessionId: normalizedPayload.id,
+          directory: typeof normalizedPayload.directory === 'string' ? normalizedPayload.directory : binding.directory,
+        });
+      }
+
+      writeJsonResponse(res, response, normalizedPayload);
+    } catch (error) {
+      console.error('[proxy] Failed to route session request:', error?.message ?? error);
+      next();
+    }
+  });
 
   // Generic proxy for non-SSE OpenCode API routes.
   const apiProxy = createProxyMiddleware({

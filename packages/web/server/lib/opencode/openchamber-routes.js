@@ -12,6 +12,9 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
     readSettingsFromDiskMigrated,
     fetchFreeZenModels,
     getCachedZenModels,
+    backendRegistry,
+    openCodeBackendRuntime,
+    sessionBindingsRuntime,
   } = dependencies;
 
   let cachedModelsMetadata = null;
@@ -297,6 +300,232 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         const statusCode = error?.name === 'AbortError' ? 504 : 502;
         res.status(statusCode).json({ error: 'Failed to retrieve zen models' });
       }
+    }
+  });
+
+  app.get('/api/openchamber/backends', async (_req, res) => {
+    try {
+      const settings = await readSettingsFromDiskMigrated();
+      const defaultBackend = typeof settings?.defaultBackend === 'string' && settings.defaultBackend.trim().length > 0
+        ? settings.defaultBackend.trim()
+        : await backendRegistry.getDefaultBackendId();
+      res.json({
+        defaultBackend,
+        backends: backendRegistry.listBackends(),
+      });
+    } catch (error) {
+      console.error('Failed to list harness backends:', error);
+      res.status(500).json({ error: 'Failed to list harness backends' });
+    }
+  });
+
+  const getRequestedBackendId = async (req) => {
+    const bodyBackendId = typeof req.body?.backendId === 'string' ? req.body.backendId.trim() : '';
+    const queryBackendId = typeof req.query?.backendId === 'string' ? req.query.backendId.trim() : '';
+    if (bodyBackendId) {
+      return bodyBackendId;
+    }
+    if (queryBackendId) {
+      return queryBackendId;
+    }
+    const settings = await readSettingsFromDiskMigrated();
+    return typeof settings?.defaultBackend === 'string' && settings.defaultBackend.trim().length > 0
+      ? settings.defaultBackend.trim()
+      : await backendRegistry.getDefaultBackendId();
+  };
+
+  const sendUnsupportedBackend = (res, backendId) => {
+    return res.status(501).json({
+      error: `Backend "${backendId}" is not available yet`,
+      backendId,
+      code: 'BACKEND_UNSUPPORTED',
+    });
+  };
+
+  const getBoundBackend = (sessionId) => sessionBindingsRuntime.getEffectiveBindingSync(sessionId);
+
+  app.get('/api/openchamber/harness/control-surface', async (req, res) => {
+    try {
+      const sessionId = typeof req.query?.sessionId === 'string' ? req.query.sessionId.trim() : '';
+      const binding = sessionId ? getBoundBackend(sessionId) : null;
+      const backendId = binding?.backendId || await getRequestedBackendId(req);
+
+      if (!backendRegistry.isBackendSelectable(backendId)) {
+        return sendUnsupportedBackend(res, backendId);
+      }
+      if (backendId !== 'opencode') {
+        return sendUnsupportedBackend(res, backendId);
+      }
+
+      const payload = await openCodeBackendRuntime.getControlSurface({
+        directory: binding?.directory
+          || (typeof req.query?.directory === 'string' ? req.query.directory : undefined),
+        providerId: typeof req.query?.providerId === 'string' ? req.query.providerId : undefined,
+        modelId: typeof req.query?.modelId === 'string' ? req.query.modelId : undefined,
+      });
+
+      return res.status(200).json(payload);
+    } catch (error) {
+      console.error('Failed to load harness control surface:', error);
+      const message = error?.body?.error || error?.message || 'Failed to load control surface';
+      return res.status(400).json({ error: message });
+    }
+  });
+
+  app.post('/api/openchamber/harness/session', async (req, res) => {
+    try {
+      const backendId = await getRequestedBackendId(req);
+      if (!backendRegistry.isBackendSelectable(backendId)) {
+        return sendUnsupportedBackend(res, backendId);
+      }
+
+      if (backendId !== 'opencode') {
+        return sendUnsupportedBackend(res, backendId);
+      }
+
+      const payload = await openCodeBackendRuntime.createSession({
+        directory: typeof req.body?.directory === 'string' ? req.body.directory : undefined,
+        title: typeof req.body?.title === 'string' ? req.body.title : undefined,
+        parentID: typeof req.body?.parentID === 'string' ? req.body.parentID : undefined,
+      });
+
+      if (payload?.id) {
+        await sessionBindingsRuntime.upsertBinding({
+          sessionId: payload.id,
+          backendId,
+          backendSessionId: payload.id,
+          directory: typeof payload.directory === 'string' ? payload.directory : null,
+        });
+      }
+
+      return res.status(200).json(sessionBindingsRuntime.annotateSession(payload));
+    } catch (error) {
+      console.error('Failed to create harness session:', error);
+      const message = error?.body?.error || error?.message || 'Failed to create session';
+      return res.status(400).json({ error: message });
+    }
+  });
+
+  app.post('/api/openchamber/harness/session/:sessionId/message', async (req, res) => {
+    try {
+      const sessionId = typeof req.params?.sessionId === 'string' ? req.params.sessionId : '';
+      const binding = getBoundBackend(sessionId);
+      if (!binding) {
+        return res.status(404).json({ error: 'Session not found' });
+      }
+      if (!backendRegistry.isBackendSelectable(binding.backendId)) {
+        return sendUnsupportedBackend(res, binding.backendId);
+      }
+      if (binding.backendId !== 'opencode') {
+        return sendUnsupportedBackend(res, binding.backendId);
+      }
+
+      await openCodeBackendRuntime.promptAsync({
+        sessionID: binding.backendSessionId,
+        directory: typeof req.body?.directory === 'string' ? req.body.directory : binding.directory,
+        messageID: typeof req.body?.messageID === 'string' ? req.body.messageID : undefined,
+        model: req.body?.model,
+        agent: typeof req.body?.agent === 'string' ? req.body.agent : undefined,
+        variant: typeof req.body?.variant === 'string' ? req.body.variant : undefined,
+        format: req.body?.format,
+        parts: Array.isArray(req.body?.parts) ? req.body.parts : undefined,
+      });
+
+      return res.status(204).end();
+    } catch (error) {
+      console.error('Failed to send harness message:', error);
+      const message = error?.body?.error || error?.message || 'Failed to send message';
+      return res.status(400).json({ error: message });
+    }
+  });
+
+  app.post('/api/openchamber/harness/session/:sessionId/command', async (req, res) => {
+    try {
+      const sessionId = typeof req.params?.sessionId === 'string' ? req.params.sessionId : '';
+      const binding = getBoundBackend(sessionId);
+      if (!binding) {
+        return res.status(404).json({ error: 'Session not found' });
+      }
+      if (!backendRegistry.isBackendSelectable(binding.backendId)) {
+        return sendUnsupportedBackend(res, binding.backendId);
+      }
+      if (binding.backendId !== 'opencode') {
+        return sendUnsupportedBackend(res, binding.backendId);
+      }
+
+      const payload = await openCodeBackendRuntime.command({
+        sessionID: binding.backendSessionId,
+        directory: typeof req.body?.directory === 'string' ? req.body.directory : binding.directory,
+        messageID: typeof req.body?.messageID === 'string' ? req.body.messageID : undefined,
+        model: typeof req.body?.model === 'string' ? req.body.model : undefined,
+        agent: typeof req.body?.agent === 'string' ? req.body.agent : undefined,
+        command: typeof req.body?.command === 'string' ? req.body.command : '',
+        arguments: typeof req.body?.arguments === 'string' ? req.body.arguments : '',
+        variant: typeof req.body?.variant === 'string' ? req.body.variant : undefined,
+        parts: Array.isArray(req.body?.parts) ? req.body.parts : undefined,
+      });
+
+      return res.status(200).json(payload ?? {});
+    } catch (error) {
+      console.error('Failed to send harness command:', error);
+      const message = error?.body?.error || error?.message || 'Failed to run command';
+      return res.status(400).json({ error: message });
+    }
+  });
+
+  app.post('/api/openchamber/harness/session/:sessionId/abort', async (req, res) => {
+    try {
+      const sessionId = typeof req.params?.sessionId === 'string' ? req.params.sessionId : '';
+      const binding = getBoundBackend(sessionId);
+      if (!binding) {
+        return res.status(404).json({ error: 'Session not found' });
+      }
+      if (!backendRegistry.isBackendSelectable(binding.backendId)) {
+        return sendUnsupportedBackend(res, binding.backendId);
+      }
+      if (binding.backendId !== 'opencode') {
+        return sendUnsupportedBackend(res, binding.backendId);
+      }
+
+      const ok = await openCodeBackendRuntime.abortSession({
+        sessionID: binding.backendSessionId,
+        directory: typeof req.body?.directory === 'string' ? req.body.directory : binding.directory,
+      });
+
+      return res.status(200).json({ ok: Boolean(ok) });
+    } catch (error) {
+      console.error('Failed to abort harness session:', error);
+      const message = error?.body?.error || error?.message || 'Failed to abort session';
+      return res.status(400).json({ error: message });
+    }
+  });
+
+  app.post('/api/openchamber/harness/session/:sessionId/update', async (req, res) => {
+    try {
+      const sessionId = typeof req.params?.sessionId === 'string' ? req.params.sessionId : '';
+      const binding = getBoundBackend(sessionId);
+      if (!binding) {
+        return res.status(404).json({ error: 'Session not found' });
+      }
+      if (!backendRegistry.isBackendSelectable(binding.backendId)) {
+        return sendUnsupportedBackend(res, binding.backendId);
+      }
+      if (binding.backendId !== 'opencode') {
+        return sendUnsupportedBackend(res, binding.backendId);
+      }
+
+      const payload = await openCodeBackendRuntime.updateSession({
+        sessionID: binding.backendSessionId,
+        directory: typeof req.body?.directory === 'string' ? req.body.directory : binding.directory,
+        title: typeof req.body?.title === 'string' ? req.body.title : undefined,
+        time: req.body?.time && typeof req.body.time === 'object' ? req.body.time : undefined,
+      });
+
+      return res.status(200).json(sessionBindingsRuntime.annotateSession(payload));
+    } catch (error) {
+      console.error('Failed to update harness session:', error);
+      const message = error?.body?.error || error?.message || 'Failed to update session';
+      return res.status(400).json({ error: message });
     }
   });
 };

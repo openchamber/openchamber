@@ -253,6 +253,10 @@ export const createSettingsHelpers = (dependencies) => {
       const trimmed = candidate.defaultModel.trim();
       result.defaultModel = trimmed.length > 0 ? trimmed : undefined;
     }
+    if (typeof candidate.defaultBackend === 'string') {
+      const trimmed = candidate.defaultBackend.trim();
+      result.defaultBackend = trimmed.length > 0 ? trimmed : undefined;
+    }
     if (typeof candidate.defaultVariant === 'string') {
       const trimmed = candidate.defaultVariant.trim();
       result.defaultVariant = trimmed.length > 0 ? trimmed : undefined;

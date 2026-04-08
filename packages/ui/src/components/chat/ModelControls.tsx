@@ -41,6 +41,7 @@ import { TextLoop } from '@/components/ui/TextLoop';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useIsVSCodeRuntime } from '@/hooks/useRuntimeAPIs';
 import { isDesktopShell } from '@/lib/desktop';
+import { opencodeClient } from '@/lib/opencode/client';
 import { getAgentColor } from '@/lib/agentColors';
 import { useDeviceInfo } from '@/lib/device';
 import { getEditModeColors } from '@/lib/permissions/editModeColors';
@@ -54,6 +55,7 @@ import { useSync } from '@/sync/use-sync';
 import { useUIStore } from '@/stores/useUIStore';
 import { useModelLists } from '@/hooks/useModelLists';
 import { useIsTextTruncated } from '@/hooks/useIsTextTruncated';
+import type { BackendControlSurface, BackendControlSurfaceOption, BackendDescriptor } from '@/lib/api/types';
 import type { MobileControlsPanel } from './mobileControlsUtils';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -317,6 +319,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
     const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
     const getDirectoryForSession = useSessionUIStore((s) => s.getDirectoryForSession);
+    const currentSessionDirectory = currentSessionId ? getDirectoryForSession(currentSessionId) : undefined;
     const sync = useSync();
 
     const getSessionModelSelection = useSelectionStore((state) => state.getSessionModelSelection);
@@ -326,6 +329,11 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const getAgentModelForSession = useSelectionStore((state) => state.getAgentModelForSession);
     const saveAgentModelVariantForSession = useSelectionStore((state) => state.saveAgentModelVariantForSession);
     const getAgentModelVariantForSession = useSelectionStore((state) => state.getAgentModelVariantForSession);
+    const saveSessionBackendSelection = useSelectionStore((state) => state.saveSessionBackendSelection);
+    const getSessionBackendSelection = useSelectionStore((state) => state.getSessionBackendSelection);
+    const draftBackendId = useSelectionStore((state) => state.draftBackendId);
+    const lastUsedBackendId = useSelectionStore((state) => state.lastUsedBackendId);
+    const setDraftBackendId = useSelectionStore((state) => state.setDraftBackendId);
 
     const contextHydrated = useContextStore((state) => state.hasHydrated);
 
@@ -370,6 +378,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
     // Separate state for agent selector to avoid conflict with model selector
     const [isAgentSelectorOpen, setIsAgentSelectorOpen] = React.useState(false);
+    const [availableBackends, setAvailableBackends] = React.useState<BackendDescriptor[]>([]);
+    const [backendControlSurface, setBackendControlSurface] = React.useState<BackendControlSurface | null>(null);
+    const [defaultBackendId, setDefaultBackendId] = React.useState('opencode');
     const { favoriteModelsList, recentModelsList } = useModelLists();
 
     const { isMobile } = useDeviceInfo();
@@ -378,6 +389,13 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     // Only use mobile panels on actual mobile devices, VSCode uses desktop dropdowns
     const isCompact = isMobile;
     const [localMobilePanel, setLocalMobilePanel] = React.useState<MobileControlsPanel>(null);
+    const currentBackendId = currentSessionId
+        ? (getSessionBackendSelection(currentSessionId) || defaultBackendId || 'opencode')
+        : (draftBackendId || lastUsedBackendId || defaultBackendId || 'opencode');
+    const currentBackend = React.useMemo(
+        () => availableBackends.find((backend) => backend.id === currentBackendId) || null,
+        [availableBackends, currentBackendId],
+    );
     const usingExternalMobilePanel = mobilePanel !== undefined && typeof onMobilePanelChange === 'function';
     const activeMobilePanel = usingExternalMobilePanel ? mobilePanel : localMobilePanel;
     const setActiveMobilePanel = usingExternalMobilePanel ? onMobilePanelChange : setLocalMobilePanel;
@@ -409,6 +427,54 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const modelItemRefs = React.useRef<(HTMLDivElement | null)[]>([]);
     const [pendingThinkingVariants, setPendingThinkingVariants] = React.useState<Map<string, string | undefined>>(new Map());
     const [adjustedThinkingModels, setAdjustedThinkingModels] = React.useState<Set<string>>(new Set());
+
+    React.useEffect(() => {
+        let cancelled = false;
+
+        void opencodeClient.getHarnessBackends()
+            .then((payload: { defaultBackend: string; backends: BackendDescriptor[] }) => {
+                if (cancelled) {
+                    return;
+                }
+                setAvailableBackends(payload.backends);
+                setDefaultBackendId(payload.defaultBackend || 'opencode');
+                if (!currentSessionId && !draftBackendId && payload.defaultBackend) {
+                    setDraftBackendId(payload.defaultBackend);
+                }
+            })
+            .catch((error: unknown) => {
+                console.warn('[ModelControls] Failed to load harness backends:', error);
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [currentSessionId, draftBackendId, setDraftBackendId]);
+
+    React.useEffect(() => {
+        let cancelled = false;
+
+        void opencodeClient.getHarnessControlSurface({
+            ...(currentSessionId ? { sessionId: currentSessionId } : { backendId: currentBackendId }),
+            ...(currentProviderId ? { providerId: currentProviderId } : {}),
+            ...(currentModelId ? { modelId: currentModelId } : {}),
+        })
+            .then((payload) => {
+                if (!cancelled) {
+                    setBackendControlSurface(payload);
+                }
+            })
+            .catch((error: unknown) => {
+                if (!cancelled) {
+                    console.warn('[ModelControls] Failed to load harness control surface:', error);
+                    setBackendControlSurface(null);
+                }
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [currentBackendId, currentModelId, currentProviderId, currentSessionId, currentSessionDirectory]);
 
     React.useEffect(() => {
         if (activeMobilePanel === 'model') {
@@ -473,26 +539,45 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         return agents.filter((agent) => agent.mode !== 'subagent');
     }, [agents]);
 
+    const backendModeSelector = backendControlSurface?.modeSelector ?? null;
+    const backendModelSelector = backendControlSurface?.modelSelector ?? null;
+    const backendEffortSelector = backendControlSurface?.effortSelector ?? null;
+    const primarySelectorKind = backendModeSelector?.kind ?? 'agent';
+    const primarySelectorLabel = backendModeSelector?.label ?? 'Agent';
+    const modelSelectorLabel = backendModelSelector?.label ?? 'Model';
+    const effortSelectorLabel = backendEffortSelector?.label ?? 'Thinking';
+    const backendModeItems = React.useMemo<BackendControlSurfaceOption[]>(() => {
+        if (backendModeSelector?.items?.length) {
+            return backendModeSelector.items;
+        }
+        return selectableDesktopAgents.map((agent) => ({
+            id: agent.name,
+            label: agent.name.charAt(0).toUpperCase() + agent.name.slice(1),
+            ...(agent.description ? { description: agent.description } : {}),
+            ...(agent.color ? { color: agent.color } : {}),
+        }));
+    }, [backendModeSelector, selectableDesktopAgents]);
+
     const sortedAndFilteredAgents = React.useMemo(() => {
-        const sorted = [...selectableDesktopAgents].sort((a, b) => a.name.localeCompare(b.name));
+        const sorted = [...backendModeItems].sort((a, b) => a.label.localeCompare(b.label));
         if (!agentSearchQuery.trim()) {
             return sorted;
         }
         return sorted.filter((agent) =>
-            fuzzyMatch(agent.name, agentSearchQuery) ||
+            fuzzyMatch(agent.label, agentSearchQuery) ||
             (agent.description && fuzzyMatch(agent.description, agentSearchQuery))
         );
-    }, [selectableDesktopAgents, agentSearchQuery]);
+    }, [agentSearchQuery, backendModeItems]);
 
     const defaultAgentName = React.useMemo(() => {
-        if (settingsDefaultAgent) {
-            const found = selectableDesktopAgents.find(a => a.name === settingsDefaultAgent);
-            if (found) return found.name;
+        if (primarySelectorKind === 'agent' && settingsDefaultAgent) {
+            const found = backendModeItems.find((item) => item.id === settingsDefaultAgent);
+            if (found) return found.id;
         }
-        const buildAgent = selectableDesktopAgents.find(a => a.name === 'build');
-        if (buildAgent) return buildAgent.name;
-        return selectableDesktopAgents[0]?.name;
-    }, [settingsDefaultAgent, selectableDesktopAgents]);
+        const buildAgent = backendModeItems.find((item) => item.id === 'build');
+        if (buildAgent) return buildAgent.id;
+        return backendModeItems[0]?.id;
+    }, [backendModeItems, primarySelectorKind, settingsDefaultAgent]);
 
     const currentAgent = React.useMemo(() => {
         if (uiAgentName) {
@@ -551,7 +636,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
     // Compute from current model each render to avoid stale variants
     // in draft/session transitions.
-    const availableVariants = getCurrentModelVariants();
+    const availableVariants = backendEffortSelector?.options?.length
+        ? backendEffortSelector.options.map((option) => option.id)
+        : getCurrentModelVariants();
     const hasVariants = availableVariants.length > 0;
 
     const costRows = [
@@ -569,7 +656,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const prevAgentNameRef = React.useRef<string | undefined>(undefined);
     const latestLoadedUserChoiceRestoreRef = React.useRef<string | null>(null);
 
-    const currentSessionDirectory = currentSessionId ? getDirectoryForSession(currentSessionId) : undefined;
     const hasCurrentSessionMessagesEntry = useDirectorySync(
         React.useCallback(
             (state) => (currentSessionId ? state.message[currentSessionId] !== undefined : false),
@@ -991,7 +1077,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         setCurrentVariant,
     ]);
 
-    const handleAgentChange = (agentName: string) => {
+    const handleAgentChange = React.useCallback((agentName: string) => {
         try {
             setAgent(agentName);
             addRecentAgent(agentName);
@@ -1012,7 +1098,49 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         } catch (error) {
             console.error('[ModelControls] Handle agent change error:', error);
         }
-    };
+    }, [
+        addRecentAgent,
+        closeMobilePanel,
+        currentSessionId,
+        isCompact,
+        onAgentPanelSelection,
+        onMobilePanelSelection,
+        saveSessionAgentSelection,
+        setAgent,
+        setAgentMenuOpen,
+    ]);
+
+    const handlePrimarySelectorChange = React.useCallback((itemId: string) => {
+        if (primarySelectorKind === 'agent') {
+            handleAgentChange(itemId);
+            return;
+        }
+        console.warn('[ModelControls] Unsupported primary selector kind:', primarySelectorKind, itemId);
+    }, [handleAgentChange, primarySelectorKind]);
+
+    const handleBackendChange = React.useCallback((backendId: string) => {
+        const descriptor = availableBackends.find((backend) => backend.id === backendId);
+        if (!descriptor || !descriptor.available) {
+            return;
+        }
+
+        if (currentSessionId) {
+            saveSessionBackendSelection(currentSessionId, backendId);
+        } else {
+            setDraftBackendId(backendId);
+        }
+
+        if (isCompact) {
+            closeMobilePanel();
+        }
+    }, [
+        availableBackends,
+        closeMobilePanel,
+        currentSessionId,
+        isCompact,
+        saveSessionBackendSelection,
+        setDraftBackendId,
+    ]);
 
     const handleProviderAndModelChange = (providerId: string, modelId: string) => {
         try {
@@ -1073,10 +1201,16 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const isModelLabelTruncated = useIsTextTruncated(modelLabelRef, [currentModelDisplayName, isCompact]);
 
     const getAgentDisplayName = () => {
+        const selectedMode = uiAgentName
+            ? backendModeItems.find((item) => item.id === uiAgentName)
+            : null;
+        if (selectedMode) {
+            return selectedMode.label;
+        }
         if (!uiAgentName) {
-            const buildAgent = primaryAgents.find(agent => agent.name === 'build');
-            const defaultAgent = buildAgent || primaryAgents[0];
-            return defaultAgent ? capitalizeAgentName(defaultAgent.name) : 'Select Agent';
+            const buildAgent = backendModeItems.find((item) => item.id === 'build');
+            const defaultAgent = buildAgent || backendModeItems[0];
+            return defaultAgent ? defaultAgent.label : `Select ${primarySelectorLabel}`;
         }
         const agent = agents.find(a => a.name === uiAgentName);
         return agent ? capitalizeAgentName(agent.name) : capitalizeAgentName(uiAgentName);
@@ -1347,6 +1481,108 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         );
     };
 
+    const renderBackendSelector = () => {
+        const backends = availableBackends.length > 0 ? availableBackends : [{
+            id: 'opencode',
+            label: 'OpenCode',
+            available: true,
+            capabilities: {
+                chat: true,
+                sessions: true,
+                models: true,
+                agents: true,
+                providers: true,
+                commands: true,
+                config: true,
+                skills: true,
+            },
+        } satisfies BackendDescriptor];
+
+        const displayLabel = currentBackend?.label || currentBackendId || 'OpenCode';
+        const isLockedToSession = Boolean(currentSessionId);
+
+        if (isLockedToSession) {
+            return (
+                <div
+                    className={cn(
+                        'model-controls__backend-trigger flex items-center gap-1.5 min-w-0',
+                        buttonHeight,
+                        'cursor-default opacity-70',
+                    )}
+                    aria-label={`Backend: ${displayLabel}`}
+                    title={`Backend: ${displayLabel}`}
+                >
+                    <RiArrowGoBackLine className={cn(controlIconSize, 'flex-shrink-0 text-muted-foreground')} />
+                    <span
+                        className={cn(
+                            'model-controls__backend-label',
+                            controlTextSize,
+                            'font-medium min-w-0 truncate text-foreground',
+                            isDesktop ? 'max-w-[140px]' : undefined,
+                        )}
+                    >
+                        {displayLabel}
+                    </span>
+                </div>
+            );
+        }
+
+        return (
+            <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                    <button
+                        type="button"
+                        className={cn(
+                            'model-controls__backend-trigger flex items-center gap-1.5 transition-colors min-w-0 focus:outline-none',
+                            buttonHeight,
+                            'cursor-pointer hover:bg-transparent hover:opacity-70',
+                        )}
+                    >
+                        <RiArrowGoBackLine className={cn(controlIconSize, 'flex-shrink-0 text-muted-foreground')} />
+                        <span
+                            className={cn(
+                                'model-controls__backend-label',
+                                controlTextSize,
+                                'font-medium min-w-0 truncate text-foreground',
+                                isDesktop ? 'max-w-[140px]' : undefined,
+                            )}
+                        >
+                            {displayLabel}
+                        </span>
+                    </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" alignOffset={-40} className="w-[min(220px,calc(100vw-2rem))]">
+                    <DropdownMenuLabel className="typography-ui-header font-semibold text-foreground">Backend</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    {backends.map((backend) => {
+                        const isSelected = backend.id === currentBackendId;
+                        const isDisabled = !backend.available;
+                        return (
+                            <DropdownMenuItem
+                                key={backend.id}
+                                disabled={isDisabled}
+                                onSelect={() => handleBackendChange(backend.id)}
+                                className="typography-meta"
+                            >
+                                <div className="flex w-full items-center justify-between gap-2 min-w-0">
+                                    <div className="flex min-w-0 flex-col">
+                                        <span className="truncate font-medium text-foreground">{backend.label}</span>
+                                        {backend.comingSoon && (
+                                            <span className="typography-micro uppercase tracking-wide text-muted-foreground">
+                                                Coming soon
+                                            </span>
+                                        )}
+                                    </div>
+                                    {isSelected && <RiCheckLine className="h-4 w-4 text-primary flex-shrink-0" />}
+                                </div>
+                            </DropdownMenuItem>
+                        );
+                    })}
+                </DropdownMenuContent>
+            </DropdownMenu>
+        );
+    };
+
     const normalizeModelSearchValue = React.useCallback((value: string) => {
         const lower = value.toLowerCase().trim();
         const compact = lower.replace(/[^a-z0-9]/g, '');
@@ -1405,7 +1641,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             <MobileOverlayPanel
                 open={activeMobilePanel === 'model'}
                 onClose={closeMobilePanel}
-                title="Select model"
+                title={`Select ${modelSelectorLabel.toLowerCase()}`}
             >
                 <div className="flex flex-col gap-2">
                     <div>
@@ -1679,7 +1915,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             <MobileOverlayPanel
                 open={activeMobilePanel === 'variant'}
                 onClose={closeMobilePanel}
-                title="Thinking"
+                title={effortSelectorLabel}
             >
                 <div className="flex flex-col gap-1.5">
                     <button
@@ -1727,16 +1963,16 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             <MobileOverlayPanel
                 open={activeMobilePanel === 'agent'}
                 onClose={closeMobilePanel}
-                title="Select agent"
+                title={`Select ${primarySelectorLabel.toLowerCase()}`}
                 contentMaxHeightClassName="max-h-[min(52dvh,360px)]"
             >
                 <div className="flex flex-col gap-2">
-                    {selectableDesktopAgents.map((agent) => {
-                        const isSelected = agent.name === uiAgentName;
-                        const agentColor = getAgentColor(agent.name);
+                    {backendModeItems.map((agent) => {
+                        const isSelected = agent.id === uiAgentName;
+                        const agentColor = primarySelectorKind === 'agent' ? getAgentColor(agent.id) : null;
                         return (
                             <button
-                                key={agent.name}
+                                key={agent.id}
                                 type="button"
                                 className={cn(
                                     'flex w-full flex-col gap-1.5 rounded-xl border px-3 py-2.5 text-left',
@@ -1747,15 +1983,15 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                         ? 'border-primary/50 bg-interactive-selection/20' 
                                         : 'border-border/40 hover:bg-interactive-hover/50'
                                 )}
-                                onClick={() => handleAgentChange(agent.name)}
+                                onClick={() => handlePrimarySelectorChange(agent.id)}
                             >
                                 <div className="flex items-center gap-2">
-                                    <div className={cn('h-2.5 w-2.5 rounded-full flex-shrink-0', agentColor.class)} />
+                                    {agentColor ? <div className={cn('h-2.5 w-2.5 rounded-full flex-shrink-0', agentColor.class)} /> : null}
                                     <span
                                         className="typography-ui-label font-semibold"
-                                        style={isSelected ? { color: `var(${agentColor.var})` } : undefined}
+                                        style={isSelected && agentColor ? { color: `var(${agentColor.var})` } : undefined}
                                     >
-                                        {capitalizeAgentName(agent.name)}
+                                        {agent.label}
                                     </span>
                                     {isSelected && (
                                         <RiCheckLine className="h-4 w-4 text-primary ml-auto flex-shrink-0" />
@@ -1901,7 +2137,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 : 'Default';
             thinkingDisplay = (
                 <span key="thinking" className="typography-micro text-muted-foreground whitespace-nowrap">
-                    Thinking: {displayLabel}
+                    {effortSelectorLabel}: {displayLabel}
                 </span>
             );
         }
@@ -2537,7 +2773,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
         const displayVariant = currentVariant ?? 'Default';
         const isDefault = !currentVariant;
-        const colorClass = isDefault ? 'text-muted-foreground' : 'text-[color:var(--status-info)]';
+        const colorClass = isDefault ? 'text-foreground' : 'text-[color:var(--status-info)]';
 
         if (isCompact) {
             return (
@@ -2591,7 +2827,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                         </DropdownMenuTrigger>
                     </TooltipTrigger>
                     <DropdownMenuContent align="end" alignOffset={-40} className="w-[min(180px,calc(100vw-2rem))]">
-                        <DropdownMenuLabel className="typography-ui-header font-semibold text-foreground">Thinking</DropdownMenuLabel>
+                        <DropdownMenuLabel className="typography-ui-header font-semibold text-foreground">{effortSelectorLabel}</DropdownMenuLabel>
                         <DropdownMenuItem className="typography-meta" onSelect={() => handleVariantSelect(undefined)}>
                             <div className="flex items-center justify-between gap-2 w-full min-w-0">
                                 <span className="typography-meta font-medium text-foreground truncate min-w-0">Default</span>
@@ -2618,7 +2854,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                     </DropdownMenuContent>
                 </DropdownMenu>
                 <TooltipContent side="top">
-                    <p className="typography-meta">Thinking: {displayVariant}</p>
+                    <p className="typography-meta">{effortSelectorLabel}: {displayVariant}</p>
                 </TooltipContent>
             </Tooltip>
         );
@@ -2640,9 +2876,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                             className={cn(
                                                 controlIconSize,
                                                 'flex-shrink-0',
-                                        uiAgentName ? '' : 'text-muted-foreground'
+                                        uiAgentName && primarySelectorKind === 'agent' ? '' : 'text-muted-foreground'
                                     )}
-                                    style={uiAgentName ? { color: `var(${getAgentColor(uiAgentName).var})` } : undefined}
+                                    style={uiAgentName && primarySelectorKind === 'agent' ? { color: `var(${getAgentColor(uiAgentName).var})` } : undefined}
                                 />
                                         <span
                                             className={cn(
@@ -2651,7 +2887,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                                 'font-medium min-w-0 truncate',
                                                 isDesktop ? 'max-w-[220px]' : undefined
                                             )}
-                                            style={uiAgentName ? { color: `var(${getAgentColor(uiAgentName).var})` } : undefined}
+                                            style={uiAgentName && primarySelectorKind === 'agent' ? { color: `var(${getAgentColor(uiAgentName).var})` } : undefined}
                                         >
                                             {getAgentDisplayName()}
                                         </span>
@@ -2664,7 +2900,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                         <RiSearchLine className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                                         <Input
                                             type="text"
-                                            placeholder="Search agents"
+                                            placeholder={`Search ${primarySelectorLabel.toLowerCase()}s`}
                                             value={agentSearchQuery}
                                             onChange={(e) => setAgentSearchQuery(e.target.value)}
                                             onKeyDown={(e) => {
@@ -2681,7 +2917,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                             <>
                                                 <DropdownMenuItem
                                                     className="typography-meta"
-                                                    onSelect={() => handleAgentChange(defaultAgentName)}
+                                                    onSelect={() => handlePrimarySelectorChange(defaultAgentName)}
                                                 >
                                                     <div className="flex items-center gap-1.5">
                                                         <RiArrowGoBackLine className="h-3.5 w-3.5 text-muted-foreground" />
@@ -2693,22 +2929,24 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                         )}
                                         {sortedAndFilteredAgents.length === 0 ? (
                                             <div className="px-2 py-4 text-center typography-meta text-muted-foreground">
-                                                No agents found
+                                                No {primarySelectorLabel.toLowerCase()}s found
                                             </div>
                                         ) : (
                                             sortedAndFilteredAgents.map((agent) => (
                                                 <DropdownMenuItem
-                                                    key={agent.name}
+                                                    key={agent.id}
                                                     className="typography-meta"
-                                                    onSelect={() => handleAgentChange(agent.name)}
+                                                    onSelect={() => handlePrimarySelectorChange(agent.id)}
                                                 >
                                                     <div className="flex flex-col gap-0.5">
                                                         <div className="flex items-center gap-1.5">
-                                                            <div className={cn(
-                                                                'h-1 w-1 rounded-full agent-dot',
-                                                                getAgentColor(agent.name).class
-                                                            )} />
-                                                            <span className="font-medium">{capitalizeAgentName(agent.name)}</span>
+                                                            {primarySelectorKind === 'agent' ? (
+                                                                <div className={cn(
+                                                                    'h-1 w-1 rounded-full agent-dot',
+                                                                    getAgentColor(agent.id).class
+                                                                )} />
+                                                            ) : null}
+                                                            <span className="font-medium">{agent.label}</span>
                                                         </div>
                                                         {agent.description && (
                                                             <span className="typography-meta text-muted-foreground max-w-[200px] ml-2.5 break-words">
@@ -2723,7 +2961,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 </ScrollableOverlay>
                             </DropdownMenuContent>
                         </DropdownMenu>
-                        {renderAgentTooltipContent()}
+                        {primarySelectorKind === 'agent' ? renderAgentTooltipContent() : null}
                     </Tooltip>
                 </div>
             );
@@ -2748,7 +2986,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                                 'flex-shrink-0',
                                                 uiAgentName ? '' : 'text-muted-foreground'
                                             )}
-                                            style={uiAgentName ? { color: `var(${getAgentColor(uiAgentName).var})` } : undefined}
+                                            style={uiAgentName && primarySelectorKind === 'agent' ? { color: `var(${getAgentColor(uiAgentName).var})` } : undefined}
                                         />
                 <span
                     className={cn(
@@ -2757,7 +2995,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                         'font-medium truncate min-w-0',
                         isMobile && 'max-w-[60px]'
                     )}
-                                            style={uiAgentName ? { color: `var(${getAgentColor(uiAgentName).var})` } : undefined}
+                                            style={uiAgentName && primarySelectorKind === 'agent' ? { color: `var(${getAgentColor(uiAgentName).var})` } : undefined}
                                         >
                                             {getAgentDisplayName()}
                                         </span>
@@ -2784,6 +3022,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                     )}
                 >
                     {renderVariantSelector()}
+                    {renderBackendSelector()}
                     {renderModelSelector()}
                     {renderAgentSelector()}
                 </div>
@@ -2793,7 +3032,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             {renderMobileVariantPanel()}
             {renderMobileAgentPanel()}
             {renderMobileModelTooltip()}
-            {renderMobileAgentTooltip()}
+            {primarySelectorKind === 'agent' ? renderMobileAgentTooltip() : null}
         </>
     );
 

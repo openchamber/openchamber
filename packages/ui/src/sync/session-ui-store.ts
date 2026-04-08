@@ -216,7 +216,7 @@ export type SessionUIState = {
     inputMode?: "normal" | "shell",
   ) => Promise<void>
 
-  createSession: (title?: string, directoryOverride?: string | null, parentID?: string | null) => Promise<Session | null>
+  createSession: (title?: string, directoryOverride?: string | null, parentID?: string | null, backendId?: string | null) => Promise<Session | null>
   deleteSession: (id: string, options?: Record<string, unknown>) => Promise<boolean>
   deleteSessions: (ids: string[], options?: Record<string, unknown>) => Promise<{ deletedIds: string[]; failedIds: string[] }>
   archiveSession: (id: string) => Promise<boolean>
@@ -701,7 +701,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         get().resolvePendingDraftWorktreeTarget(draft.pendingWorktreeRequestId, draftDirectoryOverride)
       }
 
-      const created = await get().createSession(draft.title, draftDirectoryOverride, draft.parentID ?? null)
+      const draftBackendId = useSelectionStore.getState().draftBackendId || useSelectionStore.getState().lastUsedBackendId || 'opencode'
+      const created = await get().createSession(draft.title, draftDirectoryOverride, draft.parentID ?? null, draftBackendId)
       if (!created?.id) throw new Error("Failed to create session")
 
       persistDraftTarget({
@@ -859,15 +860,18 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   // ---------------------------------------------------------------------------
   // createSession
   // ---------------------------------------------------------------------------
-  createSession: async (title, directoryOverride, parentID) => {
+  createSession: async (title, directoryOverride, parentID, backendId) => {
     const draft = get().newSessionDraft
     const targetFolderId = draft.targetFolderId
     get().closeNewSessionDraft()
 
     try {
       const dir = directoryOverride ?? opencodeClient.getDirectory()
-      const session = await createSessionAction(title, dir, parentID ?? null)
+      const session = await createSessionAction(title, dir, parentID ?? null, backendId ?? null)
       if (!session) return null
+
+      const resolvedBackendId = (session as { backendId?: string }).backendId ?? backendId ?? 'opencode'
+      useSelectionStore.getState().saveSessionBackendSelection(session.id, resolvedBackendId)
 
       if (targetFolderId) {
         const scopeKey = directoryOverride || get().lastLoadedDirectory || session.directory

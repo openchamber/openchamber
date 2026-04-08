@@ -10,8 +10,9 @@ import { useInputStore } from "./input-store"
 import type { DirectoryStore } from "./child-store"
 import type { StoreApi } from "zustand"
 import { opencodeClient } from "@/lib/opencode/client"
-import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
+import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { registerSessionDirectory } from "./sync-refs"
+import { useSelectionStore } from "./selection-store"
 
 // Reference set by SyncProvider — allows actions to access SDK and stores
 let _sdk: OpencodeClient | null = null
@@ -54,8 +55,29 @@ function dir() {
   return _getDirectory() || undefined
 }
 
+function findGlobalSessionDirectory(sessionId: string): string | undefined {
+  const { activeSessions, archivedSessions } = useGlobalSessionsStore.getState()
+  for (const session of activeSessions) {
+    if (session.id !== sessionId) {
+      continue
+    }
+    return resolveGlobalSessionDirectory(session) ?? undefined
+  }
+  for (const session of archivedSessions) {
+    if (session.id !== sessionId) {
+      continue
+    }
+    return resolveGlobalSessionDirectory(session) ?? undefined
+  }
+  return undefined
+}
+
 function getSessionDirectory(sessionId: string): string | undefined {
-  return useSessionUIStore.getState().getDirectoryForSession(sessionId) || dir()
+  return (
+    useSessionUIStore.getState().getDirectoryForSession(sessionId)
+    || findGlobalSessionDirectory(sessionId)
+    || dir()
+  )
 }
 
 function getDirectoryStore(directory?: string) {
@@ -66,9 +88,7 @@ function getDirectoryStore(directory?: string) {
 }
 
 function getSessionReplyClient(sessionId?: string): OpencodeClient {
-  const directory = sessionId
-    ? useSessionUIStore.getState().getDirectoryForSession(sessionId)
-    : null
+  const directory = sessionId ? getSessionDirectory(sessionId) : null
   if (directory) {
     return opencodeClient.getScopedSdkClient(directory)
   }
@@ -83,22 +103,30 @@ export async function createSession(
   title?: string,
   directoryOverride?: string | null,
   parentID?: string | null,
+  backendId?: string | null,
 ): Promise<Session | null> {
   try {
-    const result = await sdk().session.create({
-      directory: directoryOverride ?? dir(),
+    const previousDirectory = opencodeClient.getDirectory()
+    if (directoryOverride ?? dir()) {
+      opencodeClient.setDirectory(directoryOverride ?? dir())
+    }
+    const session = await opencodeClient.createSession({
       title,
       parentID: parentID ?? undefined,
+      backendId: backendId ?? undefined,
+    }).finally(() => {
+      opencodeClient.setDirectory(previousDirectory)
     })
-    const session = result.data
     if (!session) return null
 
       const sessionDirectory = (session as { directory?: string }).directory ?? directoryOverride ?? null
+      const sessionBackendId = (session as { backendId?: string }).backendId ?? backendId ?? 'opencode'
       // Pre-populate routing index so SSE events arriving before session.created
       // can be routed to the correct child store
       if (sessionDirectory) {
         registerSessionDirectory(session.id, sessionDirectory)
       }
+      useSelectionStore.getState().saveSessionBackendSelection(session.id, sessionBackendId)
       useSessionUIStore.getState().setCurrentSession(session.id, sessionDirectory)
       useSessionUIStore.getState().markSessionAsOpenChamberCreated(session.id)
       useGlobalSessionsStore.getState().upsertSession(session)
@@ -179,7 +207,13 @@ export async function archiveSession(sessionId: string): Promise<boolean> {
   }
   try {
     const archivedAt = Date.now()
-    await sdk().session.update({ sessionID: sessionId, directory: sessionDirectory, time: { archived: archivedAt } })
+    const previousDirectory = opencodeClient.getDirectory()
+    if (sessionDirectory) {
+      opencodeClient.setDirectory(sessionDirectory)
+    }
+    await opencodeClient.archiveSession(sessionId, archivedAt).finally(() => {
+      opencodeClient.setDirectory(previousDirectory)
+    })
     useGlobalSessionsStore.getState().archiveSessions([sessionId], archivedAt)
     return true
   } catch (error) {
@@ -341,7 +375,14 @@ export async function optimisticSend(input: {
 
 export async function abortCurrentOperation(sessionId: string): Promise<void> {
   try {
-    await sdk().session.abort({ sessionID: sessionId, directory: dir() })
+    const previousDirectory = opencodeClient.getDirectory()
+    const nextDirectory = getSessionDirectory(sessionId)
+    if (nextDirectory) {
+      opencodeClient.setDirectory(nextDirectory)
+    }
+    await opencodeClient.abortSession(sessionId).finally(() => {
+      opencodeClient.setDirectory(previousDirectory)
+    })
   } catch (error) {
     console.error("[session-actions] abort failed", error)
   }
