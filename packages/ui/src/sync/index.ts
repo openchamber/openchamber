@@ -146,6 +146,7 @@ export {
   shareSession,
   unshareSession,
   optimisticSend,
+  compactSession,
   abortCurrentOperation,
   respondToPermission,
   dismissPermission,
