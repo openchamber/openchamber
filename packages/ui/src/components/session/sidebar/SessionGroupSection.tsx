@@ -188,6 +188,17 @@ export function SessionGroupSection(props: Props): React.ReactNode {
   const shouldKeepFolder = (folderId: string): boolean => {
     const entry = folderMapById.get(folderId);
     if (!entry) return false;
+
+    // For archived buckets, hide folders with no sessions
+    // This prevents showing empty "project root" folders
+    if (group.isArchivedBucket && entry.nodes.length === 0) {
+      // Check if any sub-folders have content
+      const hasContentInChildren = allFoldersForGroupBase
+        .filter(({ folder }) => folder.parentId === folderId)
+        .some((childEntry) => shouldKeepFolder(childEntry.folder.id));
+      return hasContentInChildren;
+    }
+
     if (!hasSessionSearchQuery) return true;
     const folderMatches = entry.folder.name.toLowerCase().includes(normalizedSessionSearchQuery);
     if (folderMatches || entry.nodes.length > 0) return true;
@@ -196,9 +207,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
       .some(({ folder }) => shouldKeepFolder(folder.id));
   };
 
-  const allFoldersForGroup = hasSessionSearchQuery
-    ? allFoldersForGroupBase.filter(({ folder }) => shouldKeepFolder(folder.id))
-    : allFoldersForGroupBase;
+  const allFoldersForGroup = allFoldersForGroupBase.filter(({ folder }) => shouldKeepFolder(folder.id));
 
   const sessionIdsInFolders = new Set(allFoldersForGroup.flatMap((f) => f.folder.sessionIds));
   const ungroupedSessions = sourceGroupNodes.filter((node) => !sessionIdsInFolders.has(node.session.id));
@@ -325,6 +334,8 @@ export function SessionGroupSection(props: Props): React.ReactNode {
             }}
             onDelete={() => {
               if (group.isArchivedBucket) {
+                // Delete sessions in the folder
+                // Empty folders are auto-hidden by useArchivedAutoFolders
                 sessionEvents.requestDelete({
                   sessions: folderSessionsForDelete,
                   mode: 'session',
