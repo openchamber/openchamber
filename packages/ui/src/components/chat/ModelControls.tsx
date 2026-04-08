@@ -581,7 +581,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const latestLoadedUserChoice = React.useMemo(() => {
         for (let i = currentSessionMessagesFromSync.length - 1; i >= 0; i -= 1) {
             const message = currentSessionMessagesFromSync[i] as typeof currentSessionMessagesFromSync[number] & {
-                model?: { providerID?: string; modelID?: string };
+                model?: { providerID?: string; modelID?: string; variant?: string };
                 variant?: string;
                 mode?: string;
             };
@@ -598,8 +598,11 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             const agent = typeof message.agent === 'string' && message.agent.trim().length > 0
                 ? message.agent
                 : (typeof message.mode === 'string' && message.mode.trim().length > 0 ? message.mode : undefined);
-            const variant = typeof message.variant === 'string' && message.variant.trim().length > 0
-                ? message.variant
+            // OpenCode 1.4.0 moved variant from top-level to model.variant.
+            // Prefer the new location, fall back to the legacy one for older servers.
+            const variantCandidate = message.model?.variant ?? message.variant;
+            const variant = typeof variantCandidate === 'string' && variantCandidate.trim().length > 0
+                ? variantCandidate
                 : undefined;
 
             return { id: message.id, agent, providerID, modelID, variant };
