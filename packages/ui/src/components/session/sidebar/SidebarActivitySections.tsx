@@ -81,7 +81,11 @@ export function SidebarActivitySections({ sections, renderSessionNode }: Props):
             </button>
             {!isCollapsed ? (
               <div className={cn('space-y-0.5 pl-7')}>
-                {visibleItems.map((item) => renderSessionNode(item.node, 0, item.groupDirectory, item.projectId, false, item.secondaryMeta, 'recent'))}
+                {visibleItems.map((item) => (
+                  <React.Fragment key={item.node.session.id}>
+                    {renderSessionNode(item.node, 0, item.groupDirectory, item.projectId, false, item.secondaryMeta, 'recent')}
+                  </React.Fragment>
+                ))}
                 {remainingCount > 0 && !isExpanded ? (
                   <button
                     type="button"
