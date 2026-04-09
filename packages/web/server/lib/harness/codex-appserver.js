@@ -691,12 +691,22 @@ export function createCodexAppServerAdapter({ crypto, emitEvent, onTurnCompleted
     let emitPart;
     if (partType === 'tool-output' || partType === 'file-diff') {
       const toolName = partType === 'tool-output' ? 'bash' : 'edit';
-      // Track the start time for this tool part (first delta only)
+      // Track the start time and input metadata for this tool part (first delta only)
       if (!proc.activeMessage.toolStartTimes) {
         proc.activeMessage.toolStartTimes = new Map();
       }
+      if (!proc.activeMessage.toolInputs) {
+        proc.activeMessage.toolInputs = new Map();
+      }
       if (!proc.activeMessage.toolStartTimes.has(partId)) {
         proc.activeMessage.toolStartTimes.set(partId, Date.now());
+        proc.activeMessage.toolInputs.set(partId, {
+          partType,
+          toolName,
+          input: partType === 'tool-output'
+            ? { command: params?.command || '' }
+            : { file_path: params?.filePath || '' },
+        });
       }
       emitPart = {
         id: partId,
@@ -909,8 +919,8 @@ export function createCodexAppServerAdapter({ crypto, emitEvent, onTurnCompleted
   }
 
   /**
-   * Assemble all final parts (text + reasoning) from the active message buffers.
-   * Returns an array of { type, text, time? } objects for persistence.
+   * Assemble all final parts (text, reasoning, tool) from the active message buffers.
+   * Returns an array of part objects for persistence.
    */
   function assembleFinalParts(proc) {
     if (!proc.activeMessage) {
@@ -935,8 +945,24 @@ export function createCodexAppServerAdapter({ crypto, emitEvent, onTurnCompleted
           type: 'text',
           text: value,
         });
+      } else if (key.startsWith(`${msgId}_tool-output_`) || key.startsWith(`${msgId}_file-diff_`)) {
+        const startTime = proc.activeMessage.toolStartTimes?.get(key) || now;
+        const meta = proc.activeMessage.toolInputs?.get(key);
+        const toolName = meta?.toolName || (key.includes('_tool-output_') ? 'bash' : 'edit');
+        parts.push({
+          type: 'tool',
+          callID: key,
+          tool: toolName,
+          state: {
+            status: 'completed',
+            output: value,
+            input: meta?.input || {},
+            title: toolName === 'bash' ? 'Command' : 'File change',
+            metadata: {},
+            time: { start: startTime, end: now },
+          },
+        });
       }
-      // tool-output and file-diff are not persisted as message parts
     }
     return parts;
   }

@@ -668,8 +668,8 @@ export const createCodexBackendRuntime = (dependencies) => {
         if (finalText != null) {
           const messageId = createSortableId('msg', crypto);
 
-          // Build parts array from the structured finalParts (text + reasoning)
-          // so that reasoning traces survive a page refresh.
+          // Build parts array from the structured finalParts (text, reasoning, tool)
+          // so that reasoning traces and tool calls survive a page refresh.
           const recordParts = [];
           if (Array.isArray(finalParts) && finalParts.length > 0) {
             for (const fp of finalParts) {
@@ -684,6 +684,16 @@ export const createCodexBackendRuntime = (dependencies) => {
                 });
               } else if (fp.type === 'text' && fp.text) {
                 recordParts.push(buildTextPart(entry.session.id, messageId, fp.text));
+              } else if (fp.type === 'tool' && fp.state) {
+                recordParts.push({
+                  id: createId(crypto),
+                  sessionID: entry.session.id,
+                  messageID: messageId,
+                  type: 'tool',
+                  callID: fp.callID || createId(crypto),
+                  tool: fp.tool || 'unknown',
+                  state: fp.state,
+                });
               }
             }
           }
@@ -996,7 +1006,8 @@ export const createCodexBackendRuntime = (dependencies) => {
       });
 
       // Update stored threadId if the adapter now has one
-      // (The onTurnCompleted callback handles persisting the assistant record)
+      // (The onTurnCompleted callback handles persisting the assistant record
+      // including text, reasoning, and tool parts)
 
       return { ok: true };
     } catch (error) {
