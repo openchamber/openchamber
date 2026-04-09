@@ -643,6 +643,45 @@ export function createCodexAppServerAdapter({ crypto, emitEvent, onTurnCompleted
     }
   }
 
+  function normalizeCommand(command) {
+    if (typeof command === 'string') {
+      return command;
+    }
+
+    if (Array.isArray(command)) {
+      return command.filter((part) => typeof part === 'string' && part.length > 0).join(' ');
+    }
+
+    return '';
+  }
+
+  function getItemDetails(params) {
+    const item = params?.item && typeof params.item === 'object' ? params.item : null;
+
+    return {
+      id: params?.itemId || params?.id || item?.id || 'default',
+      type: params?.type || params?.itemType || item?.type || '',
+      command: normalizeCommand(params?.command ?? item?.command),
+      filePath: params?.filePath || params?.path || item?.filePath || item?.file_path || item?.path || '',
+    };
+  }
+
+  function getToolInput(partType, itemDetails) {
+    if (partType === 'tool-output') {
+      return { command: itemDetails.command };
+    }
+
+    return { file_path: itemDetails.filePath };
+  }
+
+  function hasToolInputValue(input) {
+    if (!input || typeof input !== 'object') {
+      return false;
+    }
+
+    return Object.values(input).some((value) => typeof value === 'string' && value.trim().length > 0);
+  }
+
   function handleContentDelta(proc, method, params) {
     // Extract delta text — Codex sends it under different fields depending on
     // the notification type.  Match the same fallback chain as t3code:
@@ -668,7 +707,8 @@ export function createCodexAppServerAdapter({ crypto, emitEvent, onTurnCompleted
 
     // Use the Codex itemId to distinguish separate items within a turn
     // (e.g., an agent message before an approval vs after).
-    const itemId = params?.itemId || 'default';
+    const itemDetails = getItemDetails(params);
+    const itemId = itemDetails.id;
 
     // Determine part type based on method
     let partType = 'text';
@@ -698,14 +738,16 @@ export function createCodexAppServerAdapter({ crypto, emitEvent, onTurnCompleted
       if (!proc.activeMessage.toolInputs) {
         proc.activeMessage.toolInputs = new Map();
       }
+      const toolInput = getToolInput(partType, itemDetails);
       if (!proc.activeMessage.toolStartTimes.has(partId)) {
         proc.activeMessage.toolStartTimes.set(partId, Date.now());
+      }
+      const previousToolMeta = proc.activeMessage.toolInputs.get(partId);
+      if (!previousToolMeta || (!hasToolInputValue(previousToolMeta.input) && hasToolInputValue(toolInput))) {
         proc.activeMessage.toolInputs.set(partId, {
           partType,
           toolName,
-          input: partType === 'tool-output'
-            ? { command: params?.command || '' }
-            : { file_path: params?.filePath || '' },
+          input: toolInput,
         });
       }
       emitPart = {
@@ -718,9 +760,7 @@ export function createCodexAppServerAdapter({ crypto, emitEvent, onTurnCompleted
         state: {
           status: 'running',
           output: newText,
-          input: partType === 'tool-output'
-            ? { command: params?.command || '' }
-            : { file_path: params?.filePath || '' },
+          input: toolInput,
           time: { start: proc.activeMessage.toolStartTimes.get(partId) },
         },
       };
@@ -770,8 +810,9 @@ export function createCodexAppServerAdapter({ crypto, emitEvent, onTurnCompleted
   function handleItemCompleted(proc, params) {
     if (!proc.activeMessage) return;
 
-    const itemId = params?.itemId || params?.id || 'default';
-    const itemType = params?.type || params?.itemType || '';
+    const itemDetails = getItemDetails(params);
+    const itemId = itemDetails.id;
+    const itemType = itemDetails.type;
     const now = Date.now();
 
     console.info(`[codex-appserver:${proc.sessionId}] itemCompleted itemId=${itemId} itemType=${itemType}`);
@@ -791,6 +832,20 @@ export function createCodexAppServerAdapter({ crypto, emitEvent, onTurnCompleted
       const output = proc.activeMessage.textBuffers.get(partId) || '';
       const startTime = proc.activeMessage.toolStartTimes?.get(partId) || now;
       const toolName = partType === 'tool-output' ? 'bash' : 'edit';
+      const toolInput = getToolInput(partType, itemDetails);
+      const previousToolMeta = proc.activeMessage.toolInputs?.get(partId);
+      const resolvedToolInput = hasToolInputValue(toolInput)
+        ? toolInput
+        : previousToolMeta?.input || toolInput;
+
+      if (!proc.activeMessage.toolInputs) {
+        proc.activeMessage.toolInputs = new Map();
+      }
+      proc.activeMessage.toolInputs.set(partId, {
+        partType,
+        toolName,
+        input: resolvedToolInput,
+      });
 
       emitEvent(proc.directory, {
         type: 'message.part.updated',
@@ -805,9 +860,7 @@ export function createCodexAppServerAdapter({ crypto, emitEvent, onTurnCompleted
             state: {
               status: 'completed',
               output,
-              input: partType === 'tool-output'
-                ? { command: params?.command || '' }
-                : { file_path: params?.filePath || '' },
+              input: resolvedToolInput,
               title: toolName === 'bash' ? 'Command' : 'File change',
               metadata: {},
               time: { start: startTime, end: now },
