@@ -62,13 +62,35 @@ import type { SessionContextUsage } from '@/stores/types/sessionTypes';
 import { DesktopHostSwitcherDialog } from '@/components/desktop/DesktopHostSwitcher';
 import { OpenInAppButton } from '@/components/desktop/OpenInAppButton';
 import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
+import { BackendIcon } from '@/components/ui/BackendIcon';
 import { isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
 import { desktopHostsGet, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
-import { resolveSessionDiffStats } from '@/components/session/sidebar/utils';
+import { formatSessionDateLabel, resolveSessionDiffStats } from '@/components/session/sidebar/utils';
 import type { Session } from '@opencode-ai/sdk/v2/client';
+import { useSelectionStore } from '@/sync/selection-store';
 
 const DESKTOP_HEADER_ICON_BUTTON_CLASS = 'app-region-no-drag inline-flex h-8 w-8 items-center justify-center gap-2 rounded-md typography-ui-label font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-50 hover:bg-interactive-hover transition-colors';
 const MOBILE_HEADER_ICON_BUTTON_CLASS = 'app-region-no-drag inline-flex h-9 w-9 items-center justify-center gap-2 p-2 rounded-md typography-ui-label font-medium text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-50 hover:text-foreground hover:bg-interactive-hover transition-colors';
+
+const formatBackendLabel = (backendId: string | null | undefined): string | null => {
+  if (typeof backendId !== 'string' || backendId.trim().length === 0) {
+    return null;
+  }
+
+  const normalized = backendId.trim().toLowerCase();
+  if (normalized === 'opencode') {
+    return 'OpenCode';
+  }
+  if (normalized === 'codex') {
+    return 'Codex';
+  }
+
+  return normalized
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+};
 
 type HeaderIconActionButtonProps = {
   visible?: boolean;
@@ -1062,6 +1084,34 @@ export const Header: React.FC<HeaderProps> = ({
 
   const gitBranchForDirectory = useGitBranchLabel(openDirectory || null);
   const currentBranchLabel = gitBranchForDirectory || currentSessionWorktreeBranch || catalogWorktreeBranch;
+  const currentSessionBackendSelection = useSelectionStore((state) =>
+    currentSessionId ? state.sessionBackendSelections.get(currentSessionId) ?? null : null
+  );
+  const currentSessionBackendId = (currentSession as Session & { backendId?: string | null } | null)?.backendId
+    ?? currentSessionBackendSelection
+    ?? null;
+  const currentSessionBackendLabel = React.useMemo(() => {
+    return formatBackendLabel(currentSessionBackendId);
+  }, [currentSessionBackendId]);
+  const currentSessionTimestamp = React.useMemo(() => {
+    if (!currentSession) {
+      return null;
+    }
+    const updated = currentSession.time?.updated;
+    const created = currentSession.time?.created;
+    const resolved = typeof updated === 'number'
+      ? updated
+      : typeof created === 'number'
+        ? created
+        : null;
+    return resolved;
+  }, [currentSession]);
+  const currentSessionUpdatedLabel = React.useMemo(() => {
+    if (currentSessionTimestamp === null) {
+      return null;
+    }
+    return formatSessionDateLabel(currentSessionTimestamp);
+  }, [currentSessionTimestamp]);
 
   const currentSessionTitle = React.useMemo(() => {
     if (!currentSessionId) {
@@ -1717,26 +1767,40 @@ export const Header: React.FC<HeaderProps> = ({
             </TooltipContent>
           </Tooltip>
         ) : null}
-        {projectActionsContext && (
-          <ProjectActionsButton
-            projectRef={projectActionsContext.projectRef}
-            directory={projectActionsContext.directory}
-            className="mr-2"
-          />
-        )}
         {!isNewSessionDraftOpen ? (
           <div className="mr-3 min-w-0">
-            <div className="truncate pl-1 typography-ui-label text-[14px] font-normal leading-tight text-foreground">
+            <div className="truncate pl-1 typography-ui-label text-[14px] font-medium leading-tight text-foreground">
               {currentSessionTitle}
             </div>
-            {(activeProjectLabel || currentBranchLabel || hasNonZeroSessionChanges) ? (
-              <div className="flex min-w-0 items-center gap-1.5 truncate pl-1 typography-micro text-[10.5px] font-normal leading-tight text-muted-foreground/75">
+            {(currentSessionBackendLabel || currentSessionUpdatedLabel || activeProjectLabel || currentBranchLabel || hasNonZeroSessionChanges) ? (
+              <div className="mt-0.5 flex min-w-0 items-center gap-1.5 truncate pl-1 typography-micro text-[10.5px] font-normal leading-tight text-muted-foreground/75">
+                {currentSessionBackendLabel ? (
+                  <span className="inline-flex min-w-0 items-center gap-1">
+                    {currentSessionBackendId ? (
+                      <BackendIcon backendId={currentSessionBackendId} className="h-3 w-3 flex-shrink-0" />
+                    ) : null}
+                    <span className="truncate">{currentSessionBackendLabel}</span>
+                  </span>
+                ) : null}
+                {currentSessionBackendLabel && (currentSessionUpdatedLabel || activeProjectLabel || currentBranchLabel || hasNonZeroSessionChanges) ? (
+                  <span className="flex-shrink-0 text-muted-foreground/45">•</span>
+                ) : null}
+                {currentSessionUpdatedLabel ? <span className="flex-shrink-0">{currentSessionUpdatedLabel}</span> : null}
+                {currentSessionUpdatedLabel && (activeProjectLabel || currentBranchLabel || hasNonZeroSessionChanges) ? (
+                  <span className="flex-shrink-0 text-muted-foreground/45">•</span>
+                ) : null}
                 {activeProjectLabel ? <span className="truncate">{activeProjectLabel}</span> : null}
+                {activeProjectLabel && (currentBranchLabel || hasNonZeroSessionChanges) ? (
+                  <span className="flex-shrink-0 text-muted-foreground/45">•</span>
+                ) : null}
                 {currentBranchLabel ? (
                   <span className="inline-flex min-w-0 items-center gap-0.5">
                     <RiGitBranchLine className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" />
                     <span className="truncate">{currentBranchLabel}</span>
                   </span>
+                ) : null}
+                {currentBranchLabel && hasNonZeroSessionChanges ? (
+                  <span className="flex-shrink-0 text-muted-foreground/45">•</span>
                 ) : null}
                 {hasNonZeroSessionChanges ? (
                   <span className="inline-flex flex-shrink-0 items-center gap-0 text-[0.92em]">
@@ -1759,6 +1823,13 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="flex-1" />
 
         <div className="flex shrink-0 items-center gap-1">
+          {projectActionsContext && (
+            <ProjectActionsButton
+              projectRef={projectActionsContext.projectRef}
+              directory={projectActionsContext.directory}
+              className="mr-2"
+            />
+          )}
           {showDesktopHeaderContextUsage && stableDesktopContextUsage ? (
             <ContextUsageDisplay
               totalTokens={stableDesktopContextUsage.totalTokens}
