@@ -48,8 +48,6 @@ export const createBootstrapRuntime = (dependencies) => {
       fetchFreeZenModels,
       getCachedZenModels,
       backendRegistry,
-      openCodeBackendRuntime,
-      codexBackendRuntime,
       sessionBindingsRuntime,
     } = options;
 
@@ -117,8 +115,6 @@ export const createBootstrapRuntime = (dependencies) => {
       fetchFreeZenModels,
       getCachedZenModels,
       backendRegistry,
-      openCodeBackendRuntime,
-      codexBackendRuntime,
       sessionBindingsRuntime,
     });
 

@@ -3,7 +3,26 @@ export const createSessionBindingsRuntime = ({
   path,
   bindingsFilePath,
   defaultBackendId = 'opencode',
+  getDefaultBackendId,
 }) => {
+  const resolveDefaultBackendId = () => {
+    if (typeof getDefaultBackendId === 'function') {
+      // getDefaultBackendId may be async; for sync callers we fall back to the static default.
+      return defaultBackendId;
+    }
+    return defaultBackendId;
+  };
+
+  const resolveDefaultBackendIdAsync = async () => {
+    if (typeof getDefaultBackendId === 'function') {
+      try {
+        return await getDefaultBackendId();
+      } catch {
+        return defaultBackendId;
+      }
+    }
+    return defaultBackendId;
+  };
   let bindings = new Map();
   let loaded = false;
   let writeLock = Promise.resolve();
@@ -58,7 +77,7 @@ export const createSessionBindingsRuntime = ({
 
     const backendId = typeof binding?.backendId === 'string' && binding.backendId.trim().length > 0
       ? binding.backendId.trim()
-      : defaultBackendId;
+      : resolveDefaultBackendId();
     const backendSessionId =
       typeof binding?.backendSessionId === 'string' && binding.backendSessionId.trim().length > 0
         ? binding.backendSessionId.trim()
@@ -94,7 +113,7 @@ export const createSessionBindingsRuntime = ({
     }
     return {
       sessionId: sessionId.trim(),
-      backendId: defaultBackendId,
+      backendId: await resolveDefaultBackendIdAsync(),
       backendSessionId: sessionId.trim(),
       directory: null,
       createdAt: 0,
@@ -114,7 +133,7 @@ export const createSessionBindingsRuntime = ({
     }
     return {
       sessionId: sessionId.trim(),
-      backendId: defaultBackendId,
+      backendId: resolveDefaultBackendId(),
       backendSessionId: sessionId.trim(),
       directory: null,
       createdAt: 0,

@@ -85,6 +85,11 @@ export const createSettingsHelpers = (dependencies) => {
       const normalized = normalizeDirectoryPath(candidate.opencodeBinary).trim();
       result.opencodeBinary = normalized;
     }
+    // Absolute path to the codex CLI binary (optional override).
+    if (typeof candidate.codexBinary === 'string') {
+      const normalized = normalizeDirectoryPath(candidate.codexBinary).trim();
+      result.codexBinary = normalized;
+    }
     if (Array.isArray(candidate.projects)) {
       const projects = sanitizeProjects(candidate.projects);
       if (projects) {

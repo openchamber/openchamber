@@ -18,8 +18,6 @@ export const registerOpenCodeProxy = (app, deps) => {
     ensureOpenCodeApiPrefix,
     backendRegistry,
     sessionBindingsRuntime,
-    openCodeBackendRuntime,
-    codexBackendRuntime,
     readSettingsFromDiskMigrated,
   } = deps;
 
@@ -37,15 +35,7 @@ export const registerOpenCodeProxy = (app, deps) => {
 
   const isAbortError = (error) => error?.name === 'AbortError';
   const FALLBACK_PROXY_TARGET = 'http://127.0.0.1:3902';
-  const getBackendRuntime = (backendId) => {
-    if (backendId === 'opencode') {
-      return openCodeBackendRuntime;
-    }
-    if (backendId === 'codex') {
-      return codexBackendRuntime;
-    }
-    return null;
-  };
+  const getBackendRuntime = (backendId) => backendRegistry.getRuntime(backendId);
 
   const normalizeProxyTarget = (candidate) => {
     if (typeof candidate !== 'string') {
@@ -205,41 +195,50 @@ export const registerOpenCodeProxy = (app, deps) => {
         res.socket.setNoDelay(true);
       }
 
-      removeCodexClient = codexBackendRuntime?.addEventClient?.(res, parsed.pathname === '/api/event' ? directory : null) || null;
+      const codexRuntime = backendRegistry.getRuntime('codex');
+      removeCodexClient = codexRuntime?.addEventClient?.(res, parsed.pathname === '/api/event' ? directory : null) || null;
 
-      const headers = collectForwardProxyHeaders(req.headers, getOpenCodeAuthHeaders());
-      headers.accept ??= 'text/event-stream';
-      headers['cache-control'] ??= 'no-cache';
+      // Only connect to OpenCode upstream if it is available
+      if (backendRegistry.isBackendAvailable('opencode')) {
+        const headers = collectForwardProxyHeaders(req.headers, getOpenCodeAuthHeaders());
+        headers.accept ??= 'text/event-stream';
+        headers['cache-control'] ??= 'no-cache';
 
-      upstream = await fetch(buildOpenCodeUrl(upstreamPath, ''), {
-        method: 'GET',
-        headers,
-        signal: abortController.signal,
-      });
+        upstream = await fetch(buildOpenCodeUrl(upstreamPath, ''), {
+          method: 'GET',
+          headers,
+          signal: abortController.signal,
+        });
 
-      const contentType = upstream.headers.get('content-type') || 'text/event-stream';
-      const isEventStream = contentType.toLowerCase().includes('text/event-stream');
-      if (!upstream.body || !isEventStream) {
-        if (!res.headersSent) {
-          res.status(upstream.status);
+        const contentType = upstream.headers.get('content-type') || 'text/event-stream';
+        const isEventStream = contentType.toLowerCase().includes('text/event-stream');
+        if (!upstream.body || !isEventStream) {
+          if (!res.headersSent) {
+            res.status(upstream.status);
+          }
+          res.end(await upstream.text().catch(() => ''));
+          return;
         }
-        res.end(await upstream.text().catch(() => ''));
-        return;
-      }
 
-      reader = upstream.body.getReader();
-      while (!abortController.signal.aborted) {
-        const { done, value } = await reader.read();
-        if (done) {
-          break;
+        reader = upstream.body.getReader();
+        while (!abortController.signal.aborted) {
+          const { done, value } = await reader.read();
+          if (done) {
+            break;
+          }
+          if (value && value.length > 0) {
+            res.write(value);
+          }
         }
-        if (value && value.length > 0) {
-          res.write(value);
-        }
+      } else {
+        // No OpenCode upstream; keep connection open for non-OpenCode event clients
+        await new Promise((resolve) => {
+          req.on('close', resolve);
+        });
       }
     } catch (error) {
       if (!isAbortError(error)) {
-        console.error('[proxy] OpenCode merged SSE proxy error:', error?.message ?? error);
+        console.error('[proxy] Merged SSE proxy error:', error?.message ?? error);
       }
     } finally {
       req.off('close', closeUpstream);
@@ -266,7 +265,8 @@ export const registerOpenCodeProxy = (app, deps) => {
     next();
   });
 
-  // Readiness gate — return 503 while OpenCode is starting/restarting
+  // Readiness gate — return 503 while OpenCode is starting/restarting.
+  // Skipped entirely when OpenCode backend is not active.
   app.use('/api', (req, res, next) => {
     if (
       req.path.startsWith('/themes/custom') ||
@@ -277,8 +277,14 @@ export const registerOpenCodeProxy = (app, deps) => {
       req.path.startsWith('/config/skills') ||
       req.path === '/config/reload' ||
       req.path === '/health' ||
-      req.path.startsWith('/openchamber')
+      req.path.startsWith('/openchamber') ||
+      req.path.startsWith('/session')
     ) {
+      return next();
+    }
+
+    // When OpenCode is not available, skip the readiness gate entirely
+    if (!backendRegistry.isBackendAvailable('opencode')) {
       return next();
     }
 
@@ -304,6 +310,10 @@ export const registerOpenCodeProxy = (app, deps) => {
     app.get('/api/session', async (req, res, next) => {
       const rawUrl = req.originalUrl || req.url || '';
       if (rawUrl.includes('directory=')) return next();
+
+      // When OpenCode is not available, skip to the main handler which
+      // already returns non-OpenCode sessions only.
+      if (!backendRegistry.isBackendAvailable('opencode')) return next();
 
       try {
         const authHeaders = getOpenCodeAuthHeaders();
@@ -359,10 +369,11 @@ export const registerOpenCodeProxy = (app, deps) => {
           }
         }
 
-        const codexSessions = await codexBackendRuntime.listSessions({
+        const codexRuntimeWin = backendRegistry.getRuntime('codex');
+        const codexSessions = codexRuntimeWin?.listSessions ? await codexRuntimeWin.listSessions({
           directory: typeof req.query?.directory === 'string' ? req.query.directory : undefined,
           archived: false,
-        });
+        }) : [];
         const merged = mergeSessionLists([...globalSessions, ...extraSessions], codexSessions);
         console.log(`[SessionMerge] ${globalSessions.length} global + ${extraSessions.length} extra = ${merged.length} total`);
         return res.json(sessionBindingsRuntime.annotateSessions(merged));
@@ -462,10 +473,31 @@ export const registerOpenCodeProxy = (app, deps) => {
     return merged;
   };
 
+  const collectNonOpenCodeSessions = async (req) => {
+    const codexRt = backendRegistry.getRuntime('codex');
+    return codexRt?.listSessions ? await codexRt.listSessions({
+      directory: typeof req.query?.directory === 'string' ? req.query.directory : undefined,
+      archived: false,
+      roots: req.query?.roots !== 'false',
+      limit: typeof req.query?.limit === 'string' ? Number(req.query.limit) : undefined,
+    }) : [];
+  };
+
   app.get('/api/session', async (req, res, next) => {
     const rawUrl = req.originalUrl || req.url || '';
     if (process.platform === 'win32' && !rawUrl.includes('directory=')) {
       return next();
+    }
+
+    // When OpenCode is not available, only return non-OpenCode sessions
+    if (!backendRegistry.isBackendAvailable('opencode')) {
+      try {
+        const sessions = await collectNonOpenCodeSessions(req);
+        return res.status(200).json(sessionBindingsRuntime.annotateSessions(sessions));
+      } catch (error) {
+        console.error('[proxy] Failed to list non-OpenCode sessions:', error?.message ?? error);
+        return res.status(200).json([]);
+      }
     }
 
     try {
@@ -479,22 +511,12 @@ export const registerOpenCodeProxy = (app, deps) => {
       });
       const payload = await readJsonResponse(response);
       const opencodeSessions = Array.isArray(payload) ? payload : [];
-      const codexSessions = await codexBackendRuntime.listSessions({
-        directory: typeof req.query?.directory === 'string' ? req.query.directory : undefined,
-        archived: false,
-        roots: req.query?.roots !== 'false',
-        limit: typeof req.query?.limit === 'string' ? Number(req.query.limit) : undefined,
-      });
+      const codexSessions = await collectNonOpenCodeSessions(req);
       writeJsonResponse(res, response, sessionBindingsRuntime.annotateSessions(mergeSessionLists(opencodeSessions, codexSessions)));
     } catch (error) {
       console.error('[proxy] Failed to annotate session list:', error?.message ?? error);
       try {
-        const codexSessions = await codexBackendRuntime.listSessions({
-          directory: typeof req.query?.directory === 'string' ? req.query.directory : undefined,
-          archived: false,
-          roots: req.query?.roots !== 'false',
-          limit: typeof req.query?.limit === 'string' ? Number(req.query.limit) : undefined,
-        });
+        const codexSessions = await collectNonOpenCodeSessions(req);
         return res.status(200).json(sessionBindingsRuntime.annotateSessions(codexSessions));
       } catch {
       }
@@ -502,7 +524,24 @@ export const registerOpenCodeProxy = (app, deps) => {
     }
   });
 
+  const collectNonOpenCodeStatuses = async (req) => {
+    const codexRt = backendRegistry.getRuntime('codex');
+    return codexRt?.getStatusSnapshot ? await codexRt.getStatusSnapshot({
+      directory: typeof req.query?.directory === 'string' ? req.query.directory : undefined,
+    }) : {};
+  };
+
   app.get('/api/session/status', async (req, res, next) => {
+    // When OpenCode is not available, only return non-OpenCode statuses
+    if (!backendRegistry.isBackendAvailable('opencode')) {
+      try {
+        return res.status(200).json(await collectNonOpenCodeStatuses(req));
+      } catch (error) {
+        console.error('[proxy] Failed to get non-OpenCode session status:', error?.message ?? error);
+        return res.status(200).json({});
+      }
+    }
+
     try {
       const response = await fetch(buildOpenCodeUrl((req.originalUrl || req.url || '').replace(/^\/api/, '') || '/session/status', ''), {
         method: 'GET',
@@ -514,9 +553,7 @@ export const registerOpenCodeProxy = (app, deps) => {
       });
       const payload = await readJsonResponse(response);
       const baseStatuses = payload && typeof payload === 'object' ? payload : {};
-      const codexStatuses = await codexBackendRuntime.getStatusSnapshot({
-        directory: typeof req.query?.directory === 'string' ? req.query.directory : undefined,
-      });
+      const codexStatuses = await collectNonOpenCodeStatuses(req);
       writeJsonResponse(res, response, {
         ...baseStatuses,
         ...codexStatuses,
@@ -524,10 +561,7 @@ export const registerOpenCodeProxy = (app, deps) => {
     } catch (error) {
       console.error('[proxy] Failed to merge session status:', error?.message ?? error);
       try {
-        const codexStatuses = await codexBackendRuntime.getStatusSnapshot({
-          directory: typeof req.query?.directory === 'string' ? req.query.directory : undefined,
-        });
-        return res.status(200).json(codexStatuses);
+        return res.status(200).json(await collectNonOpenCodeStatuses(req));
       } catch {
       }
       next();
@@ -647,8 +681,9 @@ export const registerOpenCodeProxy = (app, deps) => {
           ? parsed.pathname.slice(`/api/session/${encodedSessionId}`.length)
           : '';
 
+        const codexRuntimeDetail = backendRegistry.getRuntime('codex');
         if (req.method === 'GET' && (suffix === '' || suffix === '/')) {
-          const payload = await codexBackendRuntime.getSession({
+          const payload = await codexRuntimeDetail.getSession({
             sessionID: binding.backendSessionId,
           });
           if (!payload) {
@@ -658,7 +693,7 @@ export const registerOpenCodeProxy = (app, deps) => {
         }
 
         if (req.method === 'GET' && (suffix === '/message' || suffix === '/messages')) {
-          const payload = await codexBackendRuntime.getMessages({
+          const payload = await codexRuntimeDetail.getMessages({
             sessionID: binding.backendSessionId,
             limit: typeof req.query?.limit === 'string' ? Number(req.query.limit) : undefined,
             before: typeof req.query?.before === 'string' ? req.query.before : undefined,
@@ -667,7 +702,7 @@ export const registerOpenCodeProxy = (app, deps) => {
         }
 
         if (req.method === 'DELETE' && (suffix === '' || suffix === '/')) {
-          const ok = await codexBackendRuntime.deleteSession({
+          const ok = await codexRuntimeDetail.deleteSession({
             sessionID: binding.backendSessionId,
           });
           if (ok) {

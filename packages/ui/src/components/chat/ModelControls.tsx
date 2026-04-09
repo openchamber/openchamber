@@ -393,7 +393,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const [isAgentSelectorOpen, setIsAgentSelectorOpen] = React.useState(false);
     const [availableBackends, setAvailableBackends] = React.useState<BackendDescriptor[]>([]);
     const [backendControlSurface, setBackendControlSurface] = React.useState<BackendControlSurface | null>(null);
-    const [defaultBackendId, setDefaultBackendId] = React.useState('opencode');
+    const [defaultBackendId, setDefaultBackendId] = React.useState('');
     const { favoriteModelsList, recentModelsList } = useModelLists();
 
     const { isMobile } = useDeviceInfo();
@@ -407,8 +407,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         ?? backendControlSurface?.backendId
         ?? null;
     const currentBackendId = currentSessionId
-        ? (authoritativeSessionBackendId || sessionSavedBackendId || defaultBackendId || 'opencode')
-        : (draftBackendId || lastUsedBackendId || defaultBackendId || 'opencode');
+        ? (authoritativeSessionBackendId || sessionSavedBackendId || defaultBackendId || '')
+        : (draftBackendId || lastUsedBackendId || defaultBackendId || '');
     const currentBackend = React.useMemo(
         () => availableBackends.find((backend) => backend.id === currentBackendId) || null,
         [availableBackends, currentBackendId],
@@ -454,7 +454,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                     return;
                 }
                 setAvailableBackends(payload.backends);
-                setDefaultBackendId(payload.defaultBackend || 'opencode');
+                setDefaultBackendId(payload.defaultBackend || '');
                 if (!currentSessionId && !draftBackendId && payload.defaultBackend) {
                     setDraftBackendId(payload.defaultBackend);
                 }
@@ -1689,8 +1689,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
     const renderBackendSelector = () => {
         const backends = availableBackends.length > 0 ? availableBackends : [{
-            id: 'opencode',
-            label: 'OpenCode',
+            id: defaultBackendId || 'default',
+            label: defaultBackendId ? (defaultBackendId.charAt(0).toUpperCase() + defaultBackendId.slice(1)) : 'Backend',
             available: true,
             capabilities: {
                 chat: true,
@@ -1704,7 +1704,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             },
         } satisfies BackendDescriptor];
 
-        const displayLabel = currentBackend?.label || currentBackendId || 'OpenCode';
+        const displayLabel = currentBackend?.label || currentBackendId || 'Backend';
         const isLockedToSession = Boolean(currentSessionId);
 
         if (isLockedToSession) {

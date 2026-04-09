@@ -17,6 +17,9 @@ import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { SettingsProjectSelector } from '@/components/sections/shared/SettingsProjectSelector';
+import { BackendSwitcher } from '@/components/sections/shared/BackendSwitcher';
+import { BackendUnsupported } from '@/components/sections/shared/BackendUnsupported';
+import { useBackendsStore } from '@/stores/useBackendsStore';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -61,11 +64,65 @@ const StatusDot: React.FC<{ tone: StatusTone; enabled: boolean }> = ({ tone, ena
 export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
   const bgClass = 'bg-background';
 
+  const defaultBackendId = useBackendsStore((state) => state.defaultBackendId);
+  const hasCapability = useBackendsStore((state) => state.hasCapability);
+  const getBackend = useBackendsStore((state) => state.getBackend);
+  const [selectedBackendId, setSelectedBackendId] = React.useState('');
+
+  React.useEffect(() => {
+    if (defaultBackendId && !selectedBackendId) {
+      setSelectedBackendId(defaultBackendId);
+    }
+  }, [defaultBackendId, selectedBackendId]);
+
+  const backendSupportsConfig = selectedBackendId ? hasCapability(selectedBackendId, 'config') : true;
+  const selectedBackend = selectedBackendId ? getBackend(selectedBackendId) : undefined;
+
+  // Clear selection when switching backends so the page resets
+  const prevBackendRef = React.useRef(selectedBackendId);
+  React.useEffect(() => {
+    if (prevBackendRef.current && prevBackendRef.current !== selectedBackendId) {
+      useMcpConfigStore.getState().setSelectedMcp(null);
+      useMcpConfigStore.getState().setMcpDraft(null);
+    }
+    prevBackendRef.current = selectedBackendId;
+  }, [selectedBackendId]);
+
   const { mcpServers, selectedMcpName, setSelectedMcp, setMcpDraft, loadMcpConfigs, deleteMcp } =
     useMcpConfigStore();
 
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const mcpStatus = useMcpStore((state) => state.getStatusForDirectory(currentDirectory ?? null));
+
+  const isCodexBackend = selectedBackendId === 'codex';
+
+  // Codex MCP servers loaded from TOML config
+  const [codexMcpServers, setCodexMcpServers] = React.useState<Array<{ name: string; type: string; command?: string[]; url?: string; enabled: boolean }>>([]);
+  const [codexMcpLoading, setCodexMcpLoading] = React.useState(false);
+  const [codexMcpRefreshKey, setCodexMcpRefreshKey] = React.useState(0);
+
+  // Listen for refresh events from the Codex MCP editor
+  React.useEffect(() => {
+    const handler = () => setCodexMcpRefreshKey((k) => k + 1);
+    window.addEventListener('codex-mcp-changed', handler);
+    return () => window.removeEventListener('codex-mcp-changed', handler);
+  }, []);
+
+  React.useEffect(() => {
+    if (!isCodexBackend) { setCodexMcpServers([]); return; }
+    let cancelled = false;
+    setCodexMcpLoading(true);
+    void (async () => {
+      try {
+        const response = await fetch('/api/openchamber/codex/mcp', { headers: { Accept: 'application/json' } });
+        if (!response.ok || cancelled) return;
+        const data = await response.json();
+        if (!cancelled) setCodexMcpServers(Array.isArray(data?.servers) ? data.servers : []);
+      } catch { /* ignore */ }
+      finally { if (!cancelled) setCodexMcpLoading(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [isCodexBackend, codexMcpRefreshKey]);
 
   const [deleteTarget, setDeleteTarget] = React.useState<McpServerConfig | null>(null);
   const [isDeleting, setIsDeleting] = React.useState(false);
@@ -85,6 +142,10 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
   }, [loadMcpConfigs]);
 
   const handleCreateNew = () => {
+    if (isCodexBackend) {
+      handleCreateNewCodex();
+      return;
+    }
     const baseName = 'new-mcp-server';
     let newName = baseName;
     let counter = 1;
@@ -107,6 +168,34 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
     onItemSelect?.();
   };
 
+  const handleCreateNewCodex = async () => {
+    const baseName = 'new-mcp-server';
+    let newName = baseName;
+    let counter = 1;
+    while (codexMcpServers.some((s) => s.name === newName)) {
+      newName = `${baseName}-${counter}`;
+      counter++;
+    }
+    try {
+      await fetch(`/api/openchamber/codex/mcp/${encodeURIComponent(newName)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'local', command: [], environment: [] }),
+      });
+      // Reload Codex MCP list
+      const response = await fetch('/api/openchamber/codex/mcp', { headers: { Accept: 'application/json' } });
+      if (response.ok) {
+        const data = await response.json();
+        setCodexMcpServers(Array.isArray(data?.servers) ? data.servers : []);
+      }
+      setSelectedMcp(newName);
+      setMcpDraft(null);
+      onItemSelect?.();
+    } catch {
+      toast.error('Failed to create Codex MCP server');
+    }
+  };
+
   const handleDelete = async () => {
     if (!deleteTarget) return;
     setIsDeleting(true);
@@ -124,6 +213,12 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
     <div className={cn('flex h-full flex-col', bgClass)}>
       <div className="border-b px-3 pt-4 pb-3">
         <h2 className="text-base font-semibold text-foreground mb-3">MCP Servers</h2>
+        <BackendSwitcher
+          capability="config"
+          selectedBackendId={selectedBackendId}
+          onBackendChange={setSelectedBackendId}
+          className="mb-3"
+        />
         <SettingsProjectSelector className="mb-3" />
         <div className="flex items-center justify-between gap-2">
           <span className="typography-meta text-muted-foreground">
@@ -141,6 +236,60 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
       </div>
 
       {/* List */}
+      {!backendSupportsConfig ? (
+        <div className="flex-1 min-h-0">
+          <BackendUnsupported
+            backendId={selectedBackendId}
+            backendLabel={selectedBackend?.label || selectedBackendId}
+            featureName="MCP Servers"
+            comingSoon={selectedBackend?.comingSoon}
+          />
+        </div>
+      ) : isCodexBackend ? (
+        <ScrollableOverlay outerClassName="flex-1 min-h-0" className="space-y-1 px-3 py-2 overflow-x-hidden">
+          {codexMcpLoading ? (
+            <div className="px-4 py-8 text-center typography-micro text-muted-foreground/60">Loading...</div>
+          ) : codexMcpServers.length === 0 ? (
+            <div className="py-12 px-4 text-center text-muted-foreground">
+              <RiPlugLine className="mx-auto mb-3 h-10 w-10 opacity-50" />
+              <p className="typography-ui-label font-medium">No MCP servers configured</p>
+              <p className="typography-meta mt-1 opacity-75">
+                Add servers to <span className="font-mono">~/.codex/config.toml</span>
+              </p>
+            </div>
+          ) : (
+            <>
+              {codexMcpServers.map((server) => (
+                <div
+                  key={server.name}
+                  className={cn(
+                    'group relative flex items-center rounded-md px-1.5 py-1 transition-all duration-200 select-none',
+                    selectedMcpName === server.name ? 'bg-interactive-selection' : 'hover:bg-interactive-hover',
+                  )}
+                >
+                  <button
+                    onClick={() => { setSelectedMcp(server.name); setMcpDraft(null); onItemSelect?.(); }}
+                    className="flex min-w-0 flex-1 flex-col gap-0 rounded-sm text-left focus-visible:outline-none"
+                  >
+                    <div className="flex items-center gap-2">
+                      <StatusDot tone={server.enabled ? 'idle' : 'idle'} enabled={server.enabled} />
+                      <span className="typography-ui-label font-normal truncate text-foreground">{server.name}</span>
+                      <span className="typography-micro text-muted-foreground bg-muted px-1 rounded flex-shrink-0 leading-none pb-px border border-border/50">
+                        {server.type}
+                      </span>
+                    </div>
+                    <div className="typography-micro text-muted-foreground/60 truncate leading-tight pl-4">
+                      {server.type === 'local'
+                        ? (server.command?.join(' ') ?? '')
+                        : (server.url ?? '')}
+                    </div>
+                  </button>
+                </div>
+              ))}
+            </>
+          )}
+        </ScrollableOverlay>
+      ) : (
       <ScrollableOverlay outerClassName="flex-1 min-h-0" className="space-y-1 px-3 py-2 overflow-x-hidden">
         {mcpServers.length === 0 ? (
           <div className="py-12 px-4 text-center text-muted-foreground">
@@ -292,6 +441,7 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
           </>
         )}
       </ScrollableOverlay>
+      )}
 
       {/* Delete confirm dialog */}
       <Dialog

@@ -24,11 +24,11 @@ const BACKEND_DESCRIPTORS = Object.freeze([
       chat: true,
       sessions: true,
       models: true,
-      agents: false,
+      agents: true,
       providers: false,
-      commands: false,
-      config: false,
-      skills: false,
+      commands: true,
+      config: true,
+      skills: true,
     },
   },
   {
@@ -85,6 +85,8 @@ export const DEFAULT_BACKEND_ID = 'opencode';
 
 export const createBackendRegistry = ({ readSettingsFromDiskMigrated } = {}) => {
   const descriptorById = new Map(BACKEND_DESCRIPTORS.map((descriptor) => [descriptor.id, descriptor]));
+  const runtimeById = new Map();
+  const availabilityById = new Map();
 
   const listBackends = () => BACKEND_DESCRIPTORS.map((descriptor) => ({
     ...descriptor,
@@ -98,6 +100,29 @@ export const createBackendRegistry = ({ readSettingsFromDiskMigrated } = {}) => 
     return descriptorById.get(backendId.trim()) || null;
   };
 
+  const registerRuntime = (backendId, runtime) => {
+    if (!descriptorById.has(backendId)) {
+      console.warn(`[BackendRegistry] Cannot register runtime for unknown backend "${backendId}"`);
+      return;
+    }
+    runtimeById.set(backendId, runtime);
+  };
+
+  const getRuntime = (backendId) => {
+    if (typeof backendId !== 'string' || backendId.trim().length === 0) {
+      return null;
+    }
+    return runtimeById.get(backendId.trim()) || null;
+  };
+
+  const setBackendAvailability = (backendId, isAvailable) => {
+    availabilityById.set(backendId, Boolean(isAvailable));
+  };
+
+  const isBackendAvailable = (backendId) => {
+    return availabilityById.get(backendId) ?? false;
+  };
+
   const getDefaultBackendId = async () => {
     try {
       const settings = await readSettingsFromDiskMigrated?.();
@@ -108,6 +133,16 @@ export const createBackendRegistry = ({ readSettingsFromDiskMigrated } = {}) => 
       }
     } catch {
     }
+
+    // Fall back to the first backend with confirmed runtime availability,
+    // preferring the descriptor order (opencode first for backward compat).
+    for (const descriptor of BACKEND_DESCRIPTORS) {
+      if (descriptor.available && availabilityById.get(descriptor.id)) {
+        return descriptor.id;
+      }
+    }
+
+    // No runtime availability confirmed yet (early startup); use compile-time default.
     return DEFAULT_BACKEND_ID;
   };
 
@@ -121,5 +156,9 @@ export const createBackendRegistry = ({ readSettingsFromDiskMigrated } = {}) => 
     getBackend,
     getDefaultBackendId,
     isBackendSelectable,
+    registerRuntime,
+    getRuntime,
+    setBackendAvailability,
+    isBackendAvailable,
   };
 };

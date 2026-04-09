@@ -277,6 +277,7 @@ const sessionBindingsRuntime = createSessionBindingsRuntime({
   path,
   bindingsFilePath: SESSION_BINDINGS_FILE_PATH,
   defaultBackendId: DEFAULT_BACKEND_ID,
+  getDefaultBackendId: () => backendRegistry.getDefaultBackendId(),
 });
 
 await sessionBindingsRuntime.ensureLoaded();
@@ -500,6 +501,9 @@ const codexBackendRuntime = createCodexBackendRuntime({
   sessionsFilePath: CODEX_SESSIONS_FILE_PATH,
 });
 
+backendRegistry.registerRuntime('opencode', openCodeBackendRuntime);
+backendRegistry.registerRuntime('codex', codexBackendRuntime);
+
 const ENV_CONFIGURED_API_PREFIX = normalizeApiPrefix(
   process.env.OPENCODE_API_PREFIX || process.env.OPENCHAMBER_API_PREFIX || ''
 );
@@ -637,8 +641,6 @@ const serverUtilsRuntime = createServerUtilsRuntime({
   getUiNotificationClients: () => uiNotificationClients,
   backendRegistry,
   sessionBindingsRuntime,
-  openCodeBackendRuntime,
-  codexBackendRuntime,
   readSettingsFromDiskMigrated,
   getOpenCodePort: () => openCodePort,
   setOpenCodePortState: (value) => {
@@ -960,8 +962,6 @@ async function main(options = {}) {
     fetchFreeZenModels,
     getCachedZenModels,
     backendRegistry,
-    openCodeBackendRuntime,
-    codexBackendRuntime,
     sessionBindingsRuntime,
   });
   uiAuthController = bootstrapResult.uiAuthController;
@@ -1018,6 +1018,8 @@ async function main(options = {}) {
     setupProxy,
     scheduleOpenCodeApiDetection,
     bootstrapOpenCodeAtStartup,
+    backendRegistry,
+    getOpenCodeLifecycleState: () => openCodeLifecycleState,
     staticRoutesRuntime,
     process,
     crypto,

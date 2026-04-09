@@ -15,8 +15,6 @@ export const createServerUtilsRuntime = (dependencies) => {
     getUiNotificationClients,
     backendRegistry,
     sessionBindingsRuntime,
-    openCodeBackendRuntime,
-    codexBackendRuntime,
     readSettingsFromDiskMigrated,
     getOpenCodePort,
     setOpenCodePortState,
@@ -159,8 +157,6 @@ export const createServerUtilsRuntime = (dependencies) => {
       getUiNotificationClients,
       backendRegistry,
       sessionBindingsRuntime,
-      openCodeBackendRuntime,
-      codexBackendRuntime,
       readSettingsFromDiskMigrated,
     });
   };
