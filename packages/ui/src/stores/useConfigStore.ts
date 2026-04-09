@@ -1010,9 +1010,28 @@ export const useConfigStore = create<ConfigStore>()(
                         };
 
                         if (!currentProvider) {
-                            nextState.currentProviderId = '';
-                            nextState.currentModelId = '';
-                            nextState.selectedProviderId = '';
+                            const defaultSelection = (() => {
+                                if (state.settingsDefaultModel) {
+                                    const parsed = parseModelString(state.settingsDefaultModel);
+                                    if (parsed && hasProviderModel(effectiveProviders, parsed.providerId, parsed.modelId)) {
+                                        return parsed;
+                                    }
+                                }
+
+                                const firstProvider = effectiveProviders.find((provider) =>
+                                    Array.isArray(provider.models) && provider.models.length > 0
+                                );
+                                const firstModelId = firstProvider?.models[0]?.id;
+                                if (firstProvider?.id && typeof firstModelId === 'string' && firstModelId.length > 0) {
+                                    return { providerId: firstProvider.id, modelId: firstModelId };
+                                }
+
+                                return null;
+                            })();
+
+                            nextState.currentProviderId = defaultSelection?.providerId ?? '';
+                            nextState.currentModelId = defaultSelection?.modelId ?? '';
+                            nextState.selectedProviderId = defaultSelection?.providerId ?? '';
                             nextState.currentVariant = undefined;
                         } else if (!currentModelExists) {
                             nextState.currentModelId = currentProvider.models[0]?.id || '';

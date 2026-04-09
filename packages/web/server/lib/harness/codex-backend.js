@@ -364,6 +364,15 @@ export const createCodexBackendRuntime = (dependencies) => {
     const sessionId = createId(crypto);
     const directory = normalizeDirectory(input.directory);
     const now = Date.now();
+    const mode = typeof input.mode === 'string' && MODE_DEFINITIONS[input.mode]
+      ? input.mode
+      : DEFAULT_MODE_ID;
+    const modelId = typeof input.modelId === 'string' && input.modelId.trim().length > 0
+      ? input.modelId.trim()
+      : DEFAULT_MODEL_ID;
+    const effort = typeof input.effort === 'string' && input.effort.trim().length > 0
+      ? input.effort.trim()
+      : DEFAULT_EFFORT_ID;
 
     return {
       session: {
@@ -379,9 +388,9 @@ export const createCodexBackendRuntime = (dependencies) => {
         share: null,
       },
       threadId: null,
-      mode: DEFAULT_MODE_ID,
-      modelId: DEFAULT_MODEL_ID,
-      effort: DEFAULT_EFFORT_ID,
+      mode,
+      modelId,
+      effort,
       records: [],
     };
   };
@@ -669,6 +678,25 @@ export const createCodexBackendRuntime = (dependencies) => {
     return { ...entry.session };
   };
 
+  const forkSession = async (input = {}) => {
+    const entry = await getEntry(input.sessionID);
+    if (!entry) {
+      throw new Error('Session not found');
+    }
+
+    const forkedEntry = buildSession({
+      directory: entry.session.directory,
+      parentID: entry.session.id,
+      mode: entry.mode,
+      modelId: entry.modelId,
+      effort: entry.effort,
+    });
+
+    await saveEntry(forkedEntry);
+    emitSessionUpdate('session.created', forkedEntry.session);
+    return { ...forkedEntry.session };
+  };
+
   const getSession = async (input = {}) => {
     const entry = await getEntry(input.sessionID);
     return entry ? { ...entry.session } : null;
@@ -954,6 +982,7 @@ export const createCodexBackendRuntime = (dependencies) => {
     ensureLoaded,
     listSessions,
     createSession,
+    forkSession,
     getSession,
     getMessages,
     promptAsync,

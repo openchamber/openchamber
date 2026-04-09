@@ -138,6 +138,7 @@ export type { VoiceStatus, VoiceMode } from "./voice-store"
 export type NewSessionDraftState = {
   open: boolean
   selectedProjectId?: string | null
+  backendId?: string | null
   directoryOverride: string | null
   pendingWorktreeRequestId?: string | null
   bootstrapPendingDirectory?: string | null
@@ -360,6 +361,7 @@ const activateConfigForDirectory = async (directory: string | null | undefined):
 
 const DEFAULT_DRAFT: NewSessionDraftState = {
   open: false,
+  backendId: null,
   directoryOverride: null,
   parentID: null,
 }
@@ -485,6 +487,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       newSessionDraft: {
         open: true,
         selectedProjectId: selectedProject?.id ?? null,
+        backendId: options?.backendId ?? null,
         directoryOverride: directory,
         pendingWorktreeRequestId: options?.pendingWorktreeRequestId ?? null,
         bootstrapPendingDirectory: normalizePath(options?.bootstrapPendingDirectory ?? null),
@@ -514,6 +517,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       newSessionDraft: {
         open: false,
         selectedProjectId: null,
+        backendId: null,
         directoryOverride: null,
         pendingWorktreeRequestId: null,
         bootstrapPendingDirectory: null,
@@ -701,7 +705,11 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         get().resolvePendingDraftWorktreeTarget(draft.pendingWorktreeRequestId, draftDirectoryOverride)
       }
 
-      const draftBackendId = useSelectionStore.getState().draftBackendId || useSelectionStore.getState().lastUsedBackendId || 'opencode'
+      const selectionState = useSelectionStore.getState()
+      const draftBackendId = draft.backendId
+        || selectionState.draftBackendId
+        || selectionState.lastUsedBackendId
+        || "opencode"
       const created = await get().createSession(draft.title, draftDirectoryOverride, draft.parentID ?? null, draftBackendId)
       if (!created?.id) throw new Error("Failed to create session")
 
@@ -1061,23 +1069,22 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       sourceSessionId ?? null,
       (sid) => get().worktreeMetadata.get(sid),
     )
+    const sourceSession = sourceSessionId
+      ? getAllSyncSessions().find((session) => session.id === sourceSessionId) ?? null
+      : null
+    const sourceBackendId = (
+      (sourceSession as { backendId?: string | null } | null)?.backendId
+      ?? (sourceSessionId ? useSelectionStore.getState().getSessionBackendSelection(sourceSessionId) : null)
+      ?? useSelectionStore.getState().lastUsedBackendId
+      ?? "opencode"
+    )
 
-    const session = await get().createSession(undefined, directory ?? null, null)
-    if (!session) return
-
-    const { currentProviderId, currentModelId, currentAgentName } = useConfigStore.getState()
-    const pID = currentProviderId || useSelectionStore.getState().lastUsedProvider?.providerID
-    const mID = currentModelId || useSelectionStore.getState().lastUsedProvider?.modelID
-
-    if (!pID || !mID) return
-
-    await opencodeClient.sendMessage({
-      id: session.id,
-      providerID: pID,
-      modelID: mID,
-      text: assistantPlanText,
-      prefaceText: EXECUTION_FORK_META_TEXT,
-      agent: currentAgentName ?? undefined,
+    useSelectionStore.getState().setDraftBackendId(sourceBackendId)
+    get().openNewSessionDraft({
+      backendId: sourceBackendId,
+      directoryOverride: directory ?? null,
+      initialPrompt: assistantPlanText,
+      syntheticParts: [{ text: EXECUTION_FORK_META_TEXT, synthetic: true }],
     })
   },
 

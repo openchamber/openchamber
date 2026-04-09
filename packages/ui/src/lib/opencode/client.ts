@@ -902,17 +902,35 @@ class OpencodeService {
   }
 
   async forkSession(sessionId: string, messageId?: string): Promise<Session> {
-    const response = await this.client.session.fork({
-      sessionID: sessionId,
-      ...(this.currentDirectory ? { directory: this.currentDirectory } : {}),
-      messageID: messageId
+    const base = this.baseUrl.replace(/\/$/, "");
+    const response = await fetch(`${base}/openchamber/harness/session/${encodeURIComponent(sessionId)}/fork`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify({
+        ...(this.currentDirectory ? { directory: this.currentDirectory } : {}),
+        ...(messageId ? { messageID: messageId } : {}),
+      }),
     });
+    if (!response.ok) {
+      let bodyText = '';
+      try {
+        bodyText = await response.text();
+      } catch (error) {
+        console.warn('[opencodeClient] Failed to read fork session error body:', error);
+      }
+      throw new Error(bodyText || `Failed to fork session (status ${response.status})`);
+    }
 
-    if (!response.data) {
+    const payload = await response.json().catch(() => null) as Session | { error?: string } | null;
+
+    if (!payload || ('error' in payload && typeof payload.error === 'string')) {
       throw new Error('Failed to fork session');
     }
 
-    return response.data;
+    return payload as Session;
   }
 
   async getSessionStatus(): Promise<

@@ -606,10 +606,15 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
     .join("\n")
     .trim()
 
-  const result = await sdk().session.fork({ sessionID: sessionId, directory: dir(), messageID: messageId })
-  if (!result.data) return
-
-  const forkedSession = result.data
+  const previousDirectory = opencodeClient.getDirectory()
+  const sessionDirectory = getSessionDirectory(sessionId) ?? dir() ?? null
+  if (sessionDirectory) {
+    opencodeClient.setDirectory(sessionDirectory)
+  }
+  const forkedSession = await opencodeClient.forkSession(sessionId, messageId).finally(() => {
+    opencodeClient.setDirectory(previousDirectory)
+  })
+  if (!forkedSession) return
 
   // Insert new session into child store so sidebar updates immediately
   const current = store.getState()
@@ -621,6 +626,10 @@ export async function forkFromMessage(sessionId: string, messageId: string): Pro
   }
 
   // Switch to new session
+  const forkedBackendId = (forkedSession as { backendId?: string | null }).backendId;
+  if (typeof forkedBackendId === 'string' && forkedBackendId.trim().length > 0) {
+    useSelectionStore.getState().saveSessionBackendSelection(forkedSession.id, forkedBackendId.trim());
+  }
   useSessionUIStore.getState().setCurrentSession(forkedSession.id)
 
   // Restore forked message text to input

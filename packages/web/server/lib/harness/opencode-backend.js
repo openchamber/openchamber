@@ -129,6 +129,28 @@ export const createOpenCodeBackendRuntime = (dependencies) => {
     return response.data;
   };
 
+  const forkSession = async (input = {}) => {
+    const directory = typeof input?.directory === 'string' && input.directory.trim().length > 0
+      ? input.directory.trim()
+      : undefined;
+    const sessionID = typeof input?.sessionID === 'string' ? input.sessionID : '';
+    if (!sessionID) {
+      throw new Error('Session ID is required');
+    }
+
+    const client = createClient(directory);
+    const response = await client.session.fork({
+      sessionID,
+      ...(typeof input?.messageID === 'string' && input.messageID.trim().length > 0
+        ? { messageID: input.messageID.trim() }
+        : {}),
+    }, {
+      throwOnError: true,
+    });
+
+    return response.data;
+  };
+
   const getControlSurface = async (input = {}) => {
     const directory = typeof input?.directory === 'string' && input.directory.trim().length > 0
       ? input.directory.trim()
@@ -216,6 +238,7 @@ export const createOpenCodeBackendRuntime = (dependencies) => {
     command,
     abortSession,
     updateSession,
+    forkSession,
     getControlSurface,
   };
 };

@@ -543,4 +543,42 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
       return res.status(400).json({ error: message });
     }
   });
+
+  app.post('/api/openchamber/harness/session/:sessionId/fork', async (req, res) => {
+    try {
+      const sessionId = typeof req.params?.sessionId === 'string' ? req.params.sessionId : '';
+      const binding = await getBoundBackend(sessionId);
+      if (!binding) {
+        return res.status(404).json({ error: 'Session not found' });
+      }
+      if (!backendRegistry.isBackendSelectable(binding.backendId)) {
+        return sendUnsupportedBackend(res, binding.backendId);
+      }
+      const runtime = getBackendRuntime(binding.backendId);
+      if (!runtime?.forkSession) {
+        return sendUnsupportedBackend(res, binding.backendId);
+      }
+
+      const payload = await runtime.forkSession({
+        sessionID: binding.backendSessionId,
+        directory: typeof req.body?.directory === 'string' ? req.body.directory : binding.directory,
+        messageID: typeof req.body?.messageID === 'string' ? req.body.messageID : undefined,
+      });
+
+      if (payload?.id) {
+        await sessionBindingsRuntime.upsertBinding({
+          sessionId: payload.id,
+          backendId: binding.backendId,
+          backendSessionId: payload.id,
+          directory: typeof payload.directory === 'string' ? payload.directory : binding.directory ?? null,
+        });
+      }
+
+      return res.status(200).json(sessionBindingsRuntime.annotateSession(payload));
+    } catch (error) {
+      console.error('Failed to fork harness session:', error);
+      const message = error?.body?.error || error?.message || 'Failed to fork session';
+      return res.status(400).json({ error: message });
+    }
+  });
 };

@@ -35,6 +35,7 @@ import {
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
+import { BackendIcon } from '@/components/ui/BackendIcon';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
@@ -117,6 +118,13 @@ interface CapabilityDefinition {
     label: string;
     isActive: (metadata?: ModelMetadata) => boolean;
 }
+
+const BackendMenuLogo: React.FC<{
+    backendId: string;
+    className?: string;
+}> = ({ backendId, className }) => {
+    return <BackendIcon backendId={backendId} className={className} />;
+};
 
 const CAPABILITY_DEFINITIONS: CapabilityDefinition[] = [
     {
@@ -332,7 +340,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const saveAgentModelVariantForSession = useSelectionStore((state) => state.saveAgentModelVariantForSession);
     const getAgentModelVariantForSession = useSelectionStore((state) => state.getAgentModelVariantForSession);
     const saveSessionBackendSelection = useSelectionStore((state) => state.saveSessionBackendSelection);
-    const getSessionBackendSelection = useSelectionStore((state) => state.getSessionBackendSelection);
     const draftBackendId = useSelectionStore((state) => state.draftBackendId);
     const lastUsedBackendId = useSelectionStore((state) => state.lastUsedBackendId);
     const setDraftBackendId = useSelectionStore((state) => state.setDraftBackendId);
@@ -400,7 +407,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         ?? backendControlSurface?.backendId
         ?? null;
     const currentBackendId = currentSessionId
-        ? (authoritativeSessionBackendId || sessionSavedBackendId || getSessionBackendSelection(currentSessionId) || defaultBackendId || 'opencode')
+        ? (authoritativeSessionBackendId || sessionSavedBackendId || defaultBackendId || 'opencode')
         : (draftBackendId || lastUsedBackendId || defaultBackendId || 'opencode');
     const currentBackend = React.useMemo(
         () => availableBackends.find((backend) => backend.id === currentBackendId) || null,
@@ -1764,15 +1771,21 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 className="typography-meta"
                             >
                                 <div className="flex w-full items-center justify-between gap-2 min-w-0">
-                                    <div className="flex min-w-0 flex-col">
+                                    <div className="flex min-w-0 items-center gap-2.5">
+                                        <BackendMenuLogo
+                                            backendId={backend.id}
+                                            className={cn('h-4.5 w-4.5 flex-shrink-0', isDisabled && 'opacity-80')}
+                                        />
                                         <span className="truncate font-medium text-foreground">{backend.label}</span>
+                                    </div>
+                                    <div className="flex flex-shrink-0 items-center gap-1.5">
                                         {backend.comingSoon && (
-                                            <span className="typography-micro uppercase tracking-wide text-muted-foreground">
+                                            <span className="inline-flex items-center rounded-full border border-border/60 bg-muted/35 px-1.5 py-[1px] text-[9px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
                                                 Coming soon
                                             </span>
                                         )}
+                                        {isSelected && <RiCheckLine className="h-4 w-4 text-primary flex-shrink-0" />}
                                     </div>
-                                    {isSelected && <RiCheckLine className="h-4 w-4 text-primary flex-shrink-0" />}
                                 </div>
                             </DropdownMenuItem>
                         );
