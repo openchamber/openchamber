@@ -110,10 +110,10 @@ async function ensureLocalBranch(repoRoot: string, candidate: string): Promise<s
   }
 
   const hasLocal = await execCommand(
-    `git show-ref --verify --quiet ${shellQuote(`refs/heads/${raw}`)} && echo ok || echo missing`,
+    `git show-ref --verify --quiet ${shellQuote(`refs/heads/${raw}`)}`,
     repoRoot
   );
-  if (stdoutText(hasLocal) === 'ok') {
+  if (isOk(hasLocal)) {
     return raw;
   }
 
@@ -131,10 +131,10 @@ async function ensureLocalBranch(repoRoot: string, candidate: string): Promise<s
 
   // Try origin/<raw>
   const remoteCheck = await execCommand(
-    `git show-ref --verify --quiet ${shellQuote(`refs/remotes/origin/${raw}`)} && echo ok || echo missing`,
+    `git show-ref --verify --quiet ${shellQuote(`refs/remotes/origin/${raw}`)}`,
     repoRoot
   );
-  if (stdoutText(remoteCheck) === 'ok') {
+  if (isOk(remoteCheck)) {
     await execCommand(`git branch --track ${shellQuote(raw)} ${shellQuote(`origin/${raw}`)}`, repoRoot);
     return raw;
   }
@@ -177,8 +177,14 @@ export async function computeIntegratePlan(args: {
 }
 
 async function createTempWorktree(repoRoot: string, targetBranch: string): Promise<string> {
+  // Use two separate execCommand calls instead of shell-specific && operator
+  // to support non-POSIX shells like Nushell (see #870)
+  const mkdirResult = await execCommand('mkdir -p "$HOME/.config/openchamber/tmp"', repoRoot);
+  if (!isOk(mkdirResult)) {
+    throw new Error(stderrText(mkdirResult) || 'Failed to create temp directory parent');
+  }
   const tmp = await execCommand(
-    'mkdir -p "$HOME/.config/openchamber/tmp" && mktemp -d "$HOME/.config/openchamber/tmp/oc-integrate-XXXXXX"',
+    'mktemp -d "$HOME/.config/openchamber/tmp/oc-integrate-XXXXXX"',
     repoRoot
   );
   const tmpDir = stdoutText(tmp);
@@ -234,8 +240,8 @@ export async function getIntegrateConflictDetails(tmpDir: string): Promise<Integ
 }
 
 export async function isCherryPickInProgress(tmpDir: string): Promise<boolean> {
-  const head = await execCommand('git rev-parse --verify --quiet CHERRY_PICK_HEAD && echo yes || echo no', tmpDir);
-  return stdoutText(head) === 'yes';
+  const head = await execCommand('git rev-parse --verify --quiet CHERRY_PICK_HEAD', tmpDir);
+  return isOk(head);
 }
 
 export async function integrateWorktreeCommits(plan: IntegratePlan): Promise<IntegrateResult> {
