@@ -83,14 +83,21 @@ export const ChangesSection: React.FC<ChangesSectionProps> = ({
     return () => observer.disconnect();
   }, [shouldVirtualize, rowVirtualizer]);
 
-  // getVirtualItems() must be called on every render, not cached with useMemo.
-  // The virtualizer updates its internal range on measure/scroll, which triggers
-  // a re-render. If we memoize with useMemo([rowVirtualizer, shouldVirtualize]),
-  // the stable rowVirtualizer reference means the cache is never invalidated
-  // after the first empty render, leaving virtualRows permanently empty.
-  const virtualRows = shouldVirtualize
-    ? rowVirtualizer.getVirtualItems()
-    : [];
+  // Compute virtual rows with useMemo. We include totalSize as a dependency so
+  // that when the ResizeObserver calls measure() — which clears the itemSizeCache
+  // and recalculates — the size change invalidates the memo and getVirtualItems()
+  // returns fresh rows. Using useMemo avoids calling getVirtualItems() directly in
+  // the render body, which can trigger maybeNotify() → onChange() → useReducer
+  // dispatch during render (React minified error #185).
+  const totalSize = rowVirtualizer.getTotalSize();
+  const virtualRows = React.useMemo(
+    // totalSize invalidates the memo when the virtualizer recalculates after
+    // measure/scroll, ensuring getVirtualItems() returns up-to-date rows.
+    // Without it, the stable rowVirtualizer ref would never invalidate the memo
+    // and rows would stay empty after measure().
+    () => (shouldVirtualize && totalSize >= 0 ? rowVirtualizer.getVirtualItems() : []),
+    [shouldVirtualize, rowVirtualizer, totalSize],
+  );
 
   React.useEffect(() => {
     if (!onVisiblePathsChange) {
