@@ -458,6 +458,7 @@ const clampContextPanelRoots = (
 interface UIStore {
 
   theme: 'light' | 'dark' | 'system';
+  language: string;
   isMultiRunLauncherOpen: boolean;
   multiRunLauncherPrefillPrompt: string;
   isSidebarOpen: boolean;
@@ -565,6 +566,7 @@ interface UIStore {
   shortcutOverrides: Record<string, ShortcutCombo>;
 
   setTheme: (theme: 'light' | 'dark' | 'system') => void;
+  setLanguage: (language: string) => void;
   toggleSidebar: () => void;
   setSidebarOpen: (open: boolean) => void;
   setSidebarWidth: (width: number) => void;
@@ -689,6 +691,7 @@ export const useUIStore = create<UIStore>()(
       (set, get) => ({
 
         theme: 'system',
+        language: 'en',
         isMultiRunLauncherOpen: false,
         multiRunLauncherPrefillPrompt: '',
         isSidebarOpen: true,
@@ -792,6 +795,13 @@ export const useUIStore = create<UIStore>()(
         setTheme: (theme) => {
           set({ theme });
           get().applyTheme();
+        },
+
+        setLanguage: (language) => {
+          set({ language });
+          void import('../i18n').then((mod) =>
+            mod.default.changeLanguage(language),
+          );
         },
 
         toggleSidebar: () => {
@@ -1746,7 +1756,7 @@ export const useUIStore = create<UIStore>()(
       {
         name: 'ui-store',
         storage: createJSONStorage(() => getSafeStorage()),
-        version: 7,
+        version: 8,
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {
             return persistedState;
@@ -1815,10 +1825,17 @@ export const useUIStore = create<UIStore>()(
             state.contextPanelByDirectory = sanitizeContextPanelByDirectory(state.contextPanelByDirectory);
           }
 
+          if (version < 8) {
+            if (typeof state.language !== 'string' || !state.language) {
+              state.language = 'en';
+            }
+          }
+
           return state;
         },
         partialize: (state) => ({
           theme: state.theme,
+          language: state.language,
           isSidebarOpen: state.isSidebarOpen,
           sidebarWidth: state.sidebarWidth,
           isRightSidebarOpen: state.isRightSidebarOpen,

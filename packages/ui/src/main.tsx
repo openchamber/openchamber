@@ -1,11 +1,13 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+import { I18nextProvider } from 'react-i18next'
 import './styles/fonts'
 import './index.css'
 import App from './App.tsx'
 import { SessionAuthGate } from './components/auth/SessionAuthGate'
 import { ThemeSystemProvider } from './contexts/ThemeSystemContext'
 import { ThemeProvider } from './components/providers/ThemeProvider'
+import i18n from './i18n'
 import './lib/debug'
 import { syncDesktopSettings, initializeAppearancePreferences } from './lib/persistence'
 import { startAppearanceAutoSave } from './lib/appearanceAutoSave'
@@ -41,12 +43,14 @@ if (!rootElement) {
 
 createRoot(rootElement).render(
   <StrictMode>
-    <ThemeSystemProvider>
-      <ThemeProvider>
-        <SessionAuthGate>
-          <App apis={runtimeAPIs} />
-        </SessionAuthGate>
-      </ThemeProvider>
-    </ThemeSystemProvider>
+    <I18nextProvider i18n={i18n}>
+      <ThemeSystemProvider>
+        <ThemeProvider>
+          <SessionAuthGate>
+            <App apis={runtimeAPIs} />
+          </SessionAuthGate>
+        </ThemeProvider>
+      </ThemeSystemProvider>
+    </I18nextProvider>
   </StrictMode>,
 );

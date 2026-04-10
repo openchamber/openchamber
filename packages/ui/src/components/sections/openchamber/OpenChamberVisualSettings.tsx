@@ -1,5 +1,6 @@
 import React from 'react';
 import { RiRestartLine, RiInformationLine } from '@remixicon/react';
+import { useTranslation } from 'react-i18next';
 
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
@@ -30,66 +31,66 @@ import {
 
 interface Option<T extends string> {
     id: T;
-    label: string;
-    description?: string;
+    labelKey: string;
+    descriptionKey?: string;
 }
 
-const THEME_MODE_OPTIONS: Array<{ value: ThemeMode; label: string }> = [
+const THEME_MODE_OPTIONS: Array<{ value: ThemeMode; labelKey: string }> = [
     {
         value: 'system',
-        label: 'System',
+        labelKey: 'appearance.system',
     },
     {
         value: 'light',
-        label: 'Light',
+        labelKey: 'appearance.light',
     },
     {
         value: 'dark',
-        label: 'Dark',
+        labelKey: 'appearance.dark',
     },
 ];
 
 const DIFF_LAYOUT_OPTIONS: Option<'dynamic' | 'inline' | 'side-by-side'>[] = [
     {
         id: 'dynamic',
-        label: 'Dynamic',
-        description: 'New inline, modified side-by-side.',
+        labelKey: 'appearance.dynamic',
+        descriptionKey: 'appearance.dynamicDesc',
     },
     {
         id: 'inline',
-        label: 'Always inline',
-        description: 'Show as a single unified view.',
+        labelKey: 'appearance.alwaysInline',
+        descriptionKey: 'appearance.alwaysInlineDesc',
     },
     {
         id: 'side-by-side',
-        label: 'Always side-by-side',
-        description: 'Compare original and modified files.',
+        labelKey: 'appearance.alwaysSideBySide',
+        descriptionKey: 'appearance.alwaysSideBySideDesc',
     },
 ];
 
 const DIFF_VIEW_MODE_OPTIONS: Option<'single' | 'stacked'>[] = [
     {
         id: 'single',
-        label: 'Single file',
-        description: 'Show one file at a time.',
+        labelKey: 'appearance.singleFile',
+        descriptionKey: 'appearance.singleFileDesc',
     },
     {
         id: 'stacked',
-        label: 'All files',
-        description: 'Stack all changed files together.',
+        labelKey: 'appearance.allFiles',
+        descriptionKey: 'appearance.allFilesDesc',
     },
 ];
 
 const MERMAID_RENDERING_OPTIONS: Option<'svg' | 'ascii'>[] = [
     {
         id: 'svg',
-        label: 'SVG',
-        description: 'Render diagrams as scalable graphics.',
+        labelKey: 'appearance.svg',
+        descriptionKey: 'appearance.svgDesc',
     },
     {
         id: 'ascii',
-        label: 'ASCII',
-        description: 'Render diagrams as text blocks.',
+        labelKey: 'appearance.ascii',
+        descriptionKey: 'appearance.asciiDesc',
     },
 ];
 
@@ -103,39 +104,39 @@ type PwaInstallNameWindow = Window & {
 const USER_MESSAGE_RENDERING_OPTIONS: Option<'markdown' | 'plain'>[] = [
     {
         id: 'markdown',
-        label: 'Markdown',
-        description: 'Render user text with markdown formatting.',
+        labelKey: 'appearance.markdown',
+        descriptionKey: 'appearance.markdownDesc',
     },
     {
         id: 'plain',
-        label: 'Plain text',
-        description: 'Render user text with preserved whitespace and links.',
+        labelKey: 'appearance.plainText',
+        descriptionKey: 'appearance.plainTextDesc',
     },
 ];
 
 const CHAT_RENDER_MODE_OPTIONS: Option<'sorted' | 'live'>[] = [
     {
         id: 'sorted',
-        label: 'Sorted',
-        description: 'Render completed assistant messages without live streaming.',
+        labelKey: 'appearance.chatRenderSorted',
+        descriptionKey: 'appearance.chatRenderSortedDesc',
     },
     {
         id: 'live',
-        label: 'Live',
-        description: 'Stream assistant text and tools as they arrive.',
+        labelKey: 'appearance.chatRenderLive',
+        descriptionKey: 'appearance.chatRenderLiveDesc',
     },
 ];
 
 const ACTIVITY_RENDER_MODE_OPTIONS: Option<'collapsed' | 'summary'>[] = [
     {
         id: 'collapsed',
-        label: 'Collapsed',
-        description: 'Keep Activity collapsed by default.',
+        labelKey: 'appearance.activityCollapsed',
+        descriptionKey: 'appearance.activityCollapsedDesc',
     },
     {
         id: 'summary',
-        label: 'Expanded',
-        description: 'Expand Activity by default.',
+        labelKey: 'appearance.activityExpanded',
+        descriptionKey: 'appearance.activityExpandedDesc',
     },
 ];
 
@@ -151,8 +152,11 @@ interface OpenChamberVisualSettingsProps {
 }
 
 export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps> = ({ visibleSettings }) => {
+    const { t } = useTranslation();
     const { isMobile } = useDeviceInfo();
     const { browserTab } = usePwaDetection();
+    const language = useUIStore(state => state.language);
+    const setLanguage = useUIStore(state => state.setLanguage);
     const directoryShowHidden = useDirectoryShowHidden();
     const showReasoningTraces = useUIStore(state => state.showReasoningTraces);
     const setShowReasoningTraces = useUIStore(state => state.setShowReasoningTraces);
@@ -433,6 +437,22 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     return (
         <div className="space-y-8">
 
+                {/* --- Language --- */}
+                <section className="px-2 pb-2 pt-0">
+                    <div className="flex items-center justify-between py-1">
+                        <span className="typography-ui-header font-medium text-foreground">{t('language.label')}</span>
+                        <Select value={language} onValueChange={setLanguage}>
+                            <SelectTrigger className="w-40" aria-label={t('language.label')}>
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="en">{t('language.en')}</SelectItem>
+                                <SelectItem value="zh-CN">{t('language.zh-CN')}</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
+                </section>
+
                 {/* --- Appearance & Themes --- */}
                 {hasAppearanceSettings && (
                     <div className="mb-8 space-y-3">
@@ -440,7 +460,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
 
                             <div className="pb-1.5">
                                 <div className="flex min-w-0 flex-col gap-1.5">
-                                    <span className="typography-ui-header font-medium text-foreground">Color Mode</span>
+                                    <span className="typography-ui-header font-medium text-foreground">{t('appearance.colorMode')}</span>
                                     <div className="flex flex-wrap items-center gap-1">
                                         {THEME_MODE_OPTIONS.map((option) => (
                                             <Button
@@ -455,7 +475,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 )}
                                                 onClick={() => setThemeMode(option.value)}
                                             >
-                                                {option.label}
+                                                {t(option.labelKey)}
                                             </Button>
                                         ))}
                                     </div>
@@ -464,10 +484,10 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
 
                             <div className="mt-2 grid grid-cols-1 gap-2 py-1.5 md:grid-cols-[14rem_auto] md:gap-x-8 md:gap-y-2">
                                 <div className="flex min-w-0 items-center gap-2">
-                                    <span className="typography-ui-label text-foreground shrink-0">Light Theme</span>
+                                    <span className="typography-ui-label text-foreground shrink-0">{t('appearance.lightTheme')}</span>
                                     <Select value={selectedLightTheme?.metadata.id ?? ''} onValueChange={setLightThemePreference}>
-                                        <SelectTrigger aria-label="Select light theme" className="w-fit">
-                                            <SelectValue placeholder="Select theme" />
+                                        <SelectTrigger aria-label={t('appearance.selectLightTheme')} className="w-fit">
+                                            <SelectValue placeholder={t('appearance.selectTheme')} />
                                         </SelectTrigger>
                                         <SelectContent>
                                             {lightThemes.map((theme) => (
@@ -479,10 +499,10 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     </Select>
                                 </div>
                                 <div className="flex min-w-0 items-center gap-2">
-                                    <span className="typography-ui-label text-foreground shrink-0">Dark Theme</span>
+                                    <span className="typography-ui-label text-foreground shrink-0">{t('appearance.darkTheme')}</span>
                                     <Select value={selectedDarkTheme?.metadata.id ?? ''} onValueChange={setDarkThemePreference}>
-                                        <SelectTrigger aria-label="Select dark theme" className="w-fit">
-                                            <SelectValue placeholder="Select theme" />
+                                        <SelectTrigger aria-label={t('appearance.selectDarkTheme')} className="w-fit">
+                                            <SelectValue placeholder={t('appearance.selectTheme')} />
                                         </SelectTrigger>
                                         <SelectContent>
                                             {darkThemes.map((theme) => (
@@ -514,20 +534,20 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     }}
                                     className="inline-flex items-center typography-ui-label font-normal text-foreground underline decoration-[1px] underline-offset-2 hover:text-foreground/80 disabled:cursor-not-allowed disabled:text-muted-foreground/60"
                                 >
-                                    {themesReloading ? 'Reloading themes...' : 'Reload themes'}
+                                    {themesReloading ? t('appearance.reloadingThemes') : t('appearance.reloadThemes')}
                                 </button>
                                 <Tooltip delayDuration={700}>
                                     <TooltipTrigger asChild>
                                         <button
                                             type="button"
                                             className="flex items-center justify-center rounded-md p-1 text-muted-foreground/70 hover:text-foreground"
-                                            aria-label="Theme import info"
+                                            aria-label={t('appearance.themeImportInfo')}
                                         >
                                             <RiInformationLine className="h-3.5 w-3.5" />
                                         </button>
                                     </TooltipTrigger>
                                     <TooltipContent sideOffset={8}>
-                                        Import custom themes from ~/.config/openchamber/themes/
+                                        {t('appearance.themeImportInfoTooltip')}
                                     </TooltipContent>
                                 </Tooltip>
                             </div>
@@ -535,8 +555,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                             {showPwaInstallNameSetting && (
                                 <div className="py-1.5 space-y-1.5">
                                     <div className="flex min-w-0 flex-col">
-                                        <span className="typography-ui-label text-foreground">Install App Name</span>
-                                        <span className="typography-meta text-muted-foreground">Used by PWA installation process.</span>
+                                        <span className="typography-ui-label text-foreground">{t('appearance.installAppName')}</span>
+                                        <span className="typography-meta text-muted-foreground">{t('appearance.installAppNameDesc')}</span>
                                     </div>
                                     <div className="flex w-full max-w-[28rem] items-center gap-2">
                                         <Input
@@ -555,7 +575,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             }}
                                             className="h-7"
                                             maxLength={64}
-                                            aria-label="PWA install app name"
+                                            aria-label={t('appearance.pwaInstallAppName')}
                                         />
                                         <Button size="sm"
                                             type="button"
@@ -565,8 +585,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                 void applyPwaInstallName('');
                                             }}
                                             className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
-                                            aria-label="Reset install app name"
-                                            title="Reset"
+                                            aria-label={t('appearance.resetInstallAppName')}
+                                            title={t('appearance.reset')}
                                         >
                                             <RiRestartLine className="h-3.5 w-3.5" />
                                         </Button>
@@ -581,13 +601,13 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                 {hasLayoutSettings && (
                     <div className="mb-8 space-y-3">
                         <section className="p-2 space-y-0.5">
-                            <h4 className="typography-ui-header font-medium text-foreground">Spacing & Layout</h4>
+                            <h4 className="typography-ui-header font-medium text-foreground">{t('appearance.spacingLayout')}</h4>
                             <div className="pl-2">
 
                             {shouldShow('fontSize') && !isMobile && (
                                 <div className="flex items-center gap-8 py-1">
                                     <div className="flex min-w-0 flex-col w-56 shrink-0">
-                                        <span className="typography-ui-label text-foreground">Interface Font Size</span>
+                                        <span className="typography-ui-label text-foreground">{t('appearance.interfaceFontSize')}</span>
                                     </div>
                                     <div className="flex items-center gap-2 w-fit">
                                         <NumberInput
@@ -596,7 +616,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             min={50}
                                             max={200}
                                             step={5}
-                                            aria-label="Font size percentage"
+                                            aria-label={t('appearance.fontSizePercentage')}
                                             className="w-16"
                                         />
                                         <Button size="sm"
@@ -605,8 +625,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             onClick={() => setFontSize(100)}
                                             disabled={fontSize === 100}
                                             className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
-                                            aria-label="Reset font size"
-                                            title="Reset"
+                                            aria-label={t('appearance.resetFontSize')}
+                                            title={t('appearance.reset')}
                                         >
                                             <RiRestartLine className="h-3.5 w-3.5" />
                                         </Button>
@@ -617,7 +637,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                             {shouldShow('terminalFontSize') && (
                                 <div className={cn("py-1", isMobile ? "flex flex-col gap-3" : "flex items-center gap-8")}>
                                     <div className={cn("flex min-w-0 flex-col", isMobile ? "w-full" : "w-56 shrink-0")}>
-                                        <span className="typography-ui-label text-foreground">Terminal Font Size</span>
+                                        <span className="typography-ui-label text-foreground">{t('appearance.terminalFontSize')}</span>
                                     </div>
                                     <div className={cn("flex items-center gap-2", isMobile ? "w-full" : "w-fit")}>
                                         <NumberInput
@@ -634,8 +654,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             onClick={() => setTerminalFontSize(13)}
                                             disabled={terminalFontSize === 13}
                                             className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
-                                            aria-label="Reset terminal font size"
-                                            title="Reset"
+                                            aria-label={t('appearance.resetTerminalFontSize')}
+                                            title={t('appearance.reset')}
                                         >
                                             <RiRestartLine className="h-3.5 w-3.5" />
                                         </Button>
@@ -646,7 +666,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                             {shouldShow('spacing') && (
                                 <div className={cn("py-1", isMobile ? "flex flex-col gap-3" : "flex items-center gap-8")}>
                                     <div className={cn("flex min-w-0 flex-col", isMobile ? "w-full" : "w-56 shrink-0")}>
-                                        <span className="typography-ui-label text-foreground">Spacing Density</span>
+                                        <span className="typography-ui-label text-foreground">{t('appearance.spacingDensity')}</span>
                                     </div>
                                     <div className={cn("flex items-center gap-2", isMobile ? "w-full" : "w-fit")}>
                                         <NumberInput
@@ -663,8 +683,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             onClick={() => setPadding(100)}
                                             disabled={padding === 100}
                                             className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
-                                            aria-label="Reset spacing"
-                                            title="Reset"
+                                            aria-label={t('appearance.resetSpacing')}
+                                            title={t('appearance.reset')}
                                         >
                                             <RiRestartLine className="h-3.5 w-3.5" />
                                         </Button>
@@ -676,13 +696,13 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 <div className={cn("py-1", isMobile ? "flex flex-col gap-3" : "flex items-center gap-8")}>
                                     <div className={cn("flex min-w-0 flex-col", isMobile ? "w-full" : "w-56 shrink-0")}>
                                         <div className="flex items-center gap-1.5">
-                                            <span className="typography-ui-label text-foreground">Input Bar Offset</span>
+                                            <span className="typography-ui-label text-foreground">{t('appearance.inputBarOffset')}</span>
                                             <Tooltip delayDuration={1000}>
                                                 <TooltipTrigger asChild>
                                                     <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
                                                 </TooltipTrigger>
                                                 <TooltipContent sideOffset={8} className="max-w-xs">
-                                                    Raise input bar to avoid OS-level screen obstructions like home bars.
+                                                    {t('appearance.inputBarOffsetTooltip')}
                                                 </TooltipContent>
                                             </Tooltip>
                                         </div>
@@ -702,8 +722,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             onClick={() => setInputBarOffset(0)}
                                             disabled={inputBarOffset === 0}
                                             className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
-                                            aria-label="Reset input bar offset"
-                                            title="Reset"
+                                            aria-label={t('appearance.resetInputBarOffset')}
+                                            title={t('appearance.reset')}
                                         >
                                             <RiRestartLine className="h-3.5 w-3.5" />
                                         </Button>
@@ -721,38 +741,32 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                 {hasNavigationSettings && (
                     <div className="space-y-3">
                         <section className="px-2 pb-2 pt-0">
-                            <h4 className="typography-ui-header font-medium text-foreground">Navigation</h4>
+                            <h4 className="typography-ui-header font-medium text-foreground">{t('appearance.navigation')}</h4>
                             {shouldShow('terminalQuickKeys') && !isMobile && (
-                                <div
-                                    className="group flex cursor-pointer items-center gap-2 py-1.5"
-                                    role="button"
-                                    tabIndex={0}
-                                    aria-pressed={showTerminalQuickKeysOnDesktop}
-                                    onClick={() => setShowTerminalQuickKeysOnDesktop(!showTerminalQuickKeysOnDesktop)}
-                                    onKeyDown={(event) => {
-                                        if (event.key === ' ' || event.key === 'Enter') {
-                                            event.preventDefault();
-                                            setShowTerminalQuickKeysOnDesktop(!showTerminalQuickKeysOnDesktop);
-                                        }
-                                    }}
-                                >
-                                    <Checkbox
-                                        checked={showTerminalQuickKeysOnDesktop}
-                                        onChange={setShowTerminalQuickKeysOnDesktop}
-                                        ariaLabel="Terminal quick keys"
-                                    />
-                                    <div className="flex min-w-0 items-center gap-1.5">
-                                        <span className="typography-ui-label text-foreground">Terminal Quick Keys</span>
-                                        <Tooltip delayDuration={1000}>
-                                            <TooltipTrigger asChild>
-                                                <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
-                                            </TooltipTrigger>
-                                            <TooltipContent sideOffset={8} className="max-w-xs">
-                                                Show Esc, Ctrl, Arrows in terminal view
-                                            </TooltipContent>
-                                        </Tooltip>
-                                    </div>
-                                </div>
+                                <button type="button" className="group flex cursor-pointer items-center gap-2 py-1.5" tabIndex={0}
+                                aria-pressed={showTerminalQuickKeysOnDesktop}
+                                onClick={() => setShowTerminalQuickKeysOnDesktop(!showTerminalQuickKeysOnDesktop)}
+                                onKeyDown={(event) => {
+                                    if (event.key === ' ' || event.key === 'Enter') {
+                                        event.preventDefault();
+                                        setShowTerminalQuickKeysOnDesktop(!showTerminalQuickKeysOnDesktop);
+                                    }
+                                }}><Checkbox
+                                    checked={showTerminalQuickKeysOnDesktop}
+                                    onChange={setShowTerminalQuickKeysOnDesktop}
+                                    ariaLabel={t('appearance.terminalQuickKeys')}
+                                />
+                                <div className="flex min-w-0 items-center gap-1.5">
+                                    <span className="typography-ui-label text-foreground">{t('appearance.terminalQuickKeys')}</span>
+                                    <Tooltip delayDuration={1000}>
+                                        <TooltipTrigger asChild>
+                                            <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+                                        </TooltipTrigger>
+                                        <TooltipContent sideOffset={8} className="max-w-xs">
+                                            {t('appearance.terminalQuickKeysTooltip')}
+                                        </TooltipContent>
+                                    </Tooltip>
+                                </div></button>
                             )}
                         </section>
                     </div>
@@ -767,8 +781,8 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 <div className="grid grid-cols-1 gap-y-2 md:grid-cols-[minmax(0,16rem)_minmax(0,16rem)] md:justify-start md:gap-x-2">
                                     {shouldShow('chatRenderMode') && (
                                         <section className="p-2 md:col-span-2">
-                                            <h4 className="typography-ui-header font-medium text-foreground">Chat Render Mode</h4>
-                                            <div role="radiogroup" aria-label="Chat render mode" className="mt-1 grid w-full max-w-[26rem] grid-cols-1 gap-3 sm:grid-cols-2">
+                                            <h4 className="typography-ui-header font-medium text-foreground">{t('appearance.chatRenderMode')}</h4>
+                                            <div role="radiogroup" aria-label={t('appearance.chatRenderMode')} className="mt-1 grid w-full max-w-[26rem] grid-cols-1 gap-3 sm:grid-cols-2">
                                                 {CHAT_RENDER_MODE_OPTIONS.map((option) => {
                                                     const selected = chatRenderMode === option.id;
                                                     const previewPhase = chatRenderPreviewTick % 12;
@@ -786,7 +800,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                             )}
                                                         >
                                                             <span className={cn('typography-ui-label', selected ? 'text-foreground' : 'text-muted-foreground')}>
-                                                                {option.label}
+                                                                {t(option.labelKey)}
                                                             </span>
                                                             <div className="mt-2 w-full rounded-md border border-border/60 bg-muted/30 p-2">
                                                                 {option.id === 'live' ? (
@@ -851,34 +865,28 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
 
                                     {shouldShow('activityRenderMode') && chatRenderMode === 'sorted' && (
                                         <section className="p-2 md:col-span-2">
-                                            <h4 className="typography-ui-header font-medium text-foreground">Activity Default</h4>
-                                            <div role="radiogroup" aria-label="Activity default mode" className="mt-0.5 space-y-0">
+                                            <h4 className="typography-ui-header font-medium text-foreground">{t('appearance.activityRenderMode')}</h4>
+                                            <div role="radiogroup" aria-label={t('appearance.activityRenderMode')} className="mt-0.5 space-y-0">
                                                 {ACTIVITY_RENDER_MODE_OPTIONS.map((option) => {
                                                     const selected = activityRenderMode === option.id;
                                                     return (
-                                                        <div
-                                                            key={option.id}
-                                                            role="button"
-                                                            tabIndex={0}
-                                                            aria-pressed={selected}
-                                                            onClick={() => handleActivityRenderModeChange(option.id)}
-                                                            onKeyDown={(event) => {
-                                                                if (event.key === ' ' || event.key === 'Enter') {
-                                                                    event.preventDefault();
-                                                                    handleActivityRenderModeChange(option.id);
-                                                                }
-                                                            }}
-                                                            className="flex w-full items-center gap-2 py-0 text-left"
-                                                        >
-                                                            <Radio
-                                                                checked={selected}
-                                                                onChange={() => handleActivityRenderModeChange(option.id)}
-                                                                ariaLabel={`Activity default mode: ${option.label}`}
-                                                            />
-                                                            <span className={cn('typography-ui-label font-normal', selected ? 'text-foreground' : 'text-foreground/50')}>
-                                                                {option.label}
-                                                            </span>
-                                                        </div>
+                                                        <button type="button" key={option.id} tabIndex={0}
+                                                        aria-pressed={selected}
+                                                        onClick={() => handleActivityRenderModeChange(option.id)}
+                                                        onKeyDown={(event) => {
+                                                            if (event.key === ' ' || event.key === 'Enter') {
+                                                                event.preventDefault();
+                                                                handleActivityRenderModeChange(option.id);
+                                                            }
+                                                        }}
+                                                        className="flex w-full items-center gap-2 py-0 text-left"><Radio
+                                                            checked={selected}
+                                                            onChange={() => handleActivityRenderModeChange(option.id)}
+                                                            ariaLabel={`${t('appearance.activityRenderMode')}: ${t(option.labelKey)}`}
+                                                        />
+                                                        <span className={cn('typography-ui-label font-normal', selected ? 'text-foreground' : 'text-foreground/50')}>
+                                                            {t(option.labelKey)}
+                                                        </span></button>
                                                     );
                                                 })}
                                             </div>
@@ -887,82 +895,64 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
 
                                     {shouldShow('expandedTools') && (
                                         <section className="p-2 md:col-span-2 space-y-0.5">
-                                            <div className="typography-ui-header font-medium text-foreground py-1.5">Show tools opened by default:</div>
+                                            <div className="typography-ui-header font-medium text-foreground py-1.5">{t('appearance.expandedTools')}</div>
 
-                                            <div
-                                                className="group flex cursor-pointer items-center gap-2 py-0.5"
-                                                role="button"
-                                                tabIndex={0}
-                                                aria-pressed={showExpandedBashTools}
-                                                onClick={() => handleShowExpandedBashToolsChange(!showExpandedBashTools)}
-                                                onKeyDown={(event) => {
-                                                    if (event.key === ' ' || event.key === 'Enter') {
-                                                        event.preventDefault();
-                                                        handleShowExpandedBashToolsChange(!showExpandedBashTools);
-                                                    }
-                                                }}
-                                            >
-                                                <Checkbox
-                                                    checked={showExpandedBashTools}
-                                                    onChange={handleShowExpandedBashToolsChange}
-                                                    ariaLabel="Show expanded bash tools"
-                                                />
-                                                <span className="typography-ui-label text-foreground">Bash</span>
-                                            </div>
+                                            <button type="button" className="group flex cursor-pointer items-center gap-2 py-0.5" tabIndex={0}
+                                            aria-pressed={showExpandedBashTools}
+                                            onClick={() => handleShowExpandedBashToolsChange(!showExpandedBashTools)}
+                                            onKeyDown={(event) => {
+                                                if (event.key === ' ' || event.key === 'Enter') {
+                                                    event.preventDefault();
+                                                    handleShowExpandedBashToolsChange(!showExpandedBashTools);
+                                                }
+                                            }}><Checkbox
+                                                checked={showExpandedBashTools}
+                                                onChange={handleShowExpandedBashToolsChange}
+                                                ariaLabel={t('appearance.showExpandedBashTools')}
+                                            />
+                                            <span className="typography-ui-label text-foreground">{t('appearance.bash')}</span></button>
 
-                                            <div
-                                                className="group flex cursor-pointer items-center gap-2 py-0.5"
-                                                role="button"
-                                                tabIndex={0}
-                                                aria-pressed={showExpandedEditTools}
-                                                onClick={() => handleShowExpandedEditToolsChange(!showExpandedEditTools)}
-                                                onKeyDown={(event) => {
-                                                    if (event.key === ' ' || event.key === 'Enter') {
-                                                        event.preventDefault();
-                                                        handleShowExpandedEditToolsChange(!showExpandedEditTools);
-                                                    }
-                                                }}
-                                            >
-                                                <Checkbox
-                                                    checked={showExpandedEditTools}
-                                                    onChange={handleShowExpandedEditToolsChange}
-                                                    ariaLabel="Show expanded edit tools"
-                                                />
-                                                <span className="typography-ui-label text-foreground">Edit tools</span>
-                                            </div>
+                                            <button type="button" className="group flex cursor-pointer items-center gap-2 py-0.5" tabIndex={0}
+                                            aria-pressed={showExpandedEditTools}
+                                            onClick={() => handleShowExpandedEditToolsChange(!showExpandedEditTools)}
+                                            onKeyDown={(event) => {
+                                                if (event.key === ' ' || event.key === 'Enter') {
+                                                    event.preventDefault();
+                                                    handleShowExpandedEditToolsChange(!showExpandedEditTools);
+                                                }
+                                            }}><Checkbox
+                                                checked={showExpandedEditTools}
+                                                onChange={handleShowExpandedEditToolsChange}
+                                                ariaLabel={t('appearance.showExpandedEditTools')}
+                                            />
+                                            <span className="typography-ui-label text-foreground">{t('appearance.editTools')}</span></button>
                                         </section>
                                     )}
 
                                     {shouldShow('userMessageRendering') && (
                                         <section className="p-2">
-                                            <h4 className="typography-ui-header font-medium text-foreground">User Message Rendering</h4>
-                                            <div role="radiogroup" aria-label="User message rendering mode" className="mt-0.5 space-y-0">
+                                            <h4 className="typography-ui-header font-medium text-foreground">{t('appearance.userMessageRendering')}</h4>
+                                            <div role="radiogroup" aria-label={t('appearance.userMessageRendering')} className="mt-0.5 space-y-0">
                                                 {USER_MESSAGE_RENDERING_OPTIONS.map((option) => {
                                                     const selected = normalizeUserMessageRenderingMode(userMessageRenderingMode) === option.id;
                                                     return (
-                                                        <div
-                                                            key={option.id}
-                                                            role="button"
-                                                            tabIndex={0}
-                                                            aria-pressed={selected}
-                                                            onClick={() => handleUserMessageRenderingModeChange(option.id)}
-                                                            onKeyDown={(event) => {
-                                                                if (event.key === ' ' || event.key === 'Enter') {
-                                                                    event.preventDefault();
-                                                                    handleUserMessageRenderingModeChange(option.id);
-                                                                }
-                                                            }}
-                                                            className="flex w-full items-center gap-2 py-0 text-left"
-                                                        >
-                                                            <Radio
-                                                                checked={selected}
-                                                                onChange={() => handleUserMessageRenderingModeChange(option.id)}
-                                                                ariaLabel={`User message rendering: ${option.label}`}
-                                                            />
-                                                            <span className={cn('typography-ui-label font-normal', selected ? 'text-foreground' : 'text-foreground/50')}>
-                                                                {option.label}
-                                                            </span>
-                                                        </div>
+                                                        <button type="button" key={option.id} tabIndex={0}
+                                                        aria-pressed={selected}
+                                                        onClick={() => handleUserMessageRenderingModeChange(option.id)}
+                                                        onKeyDown={(event) => {
+                                                            if (event.key === ' ' || event.key === 'Enter') {
+                                                                event.preventDefault();
+                                                                handleUserMessageRenderingModeChange(option.id);
+                                                            }
+                                                        }}
+                                                        className="flex w-full items-center gap-2 py-0 text-left"><Radio
+                                                            checked={selected}
+                                                            onChange={() => handleUserMessageRenderingModeChange(option.id)}
+                                                            ariaLabel={`${t('appearance.userMessageRendering')}: ${t(option.labelKey)}`}
+                                                        />
+                                                        <span className={cn('typography-ui-label font-normal', selected ? 'text-foreground' : 'text-foreground/50')}>
+                                                            {t(option.labelKey)}
+                                                        </span></button>
                                                     );
                                                 })}
                                             </div>
@@ -971,34 +961,28 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
 
                                     {shouldShow('mermaidRendering') && (
                                         <section className="p-2">
-                                            <h4 className="typography-ui-header font-medium text-foreground">Mermaid Rendering</h4>
-                                            <div role="radiogroup" aria-label="Mermaid rendering mode" className="mt-0.5 space-y-0">
+                                            <h4 className="typography-ui-header font-medium text-foreground">{t('appearance.mermaidRendering')}</h4>
+                                            <div role="radiogroup" aria-label={t('appearance.mermaidRendering')} className="mt-0.5 space-y-0">
                                                 {MERMAID_RENDERING_OPTIONS.map((option) => {
                                                     const selected = mermaidRenderingMode === option.id;
                                                     return (
-                                                        <div
-                                                            key={option.id}
-                                                            role="button"
-                                                            tabIndex={0}
-                                                            aria-pressed={selected}
-                                                            onClick={() => handleMermaidRenderingModeChange(option.id)}
-                                                            onKeyDown={(event) => {
-                                                                if (event.key === ' ' || event.key === 'Enter') {
-                                                                    event.preventDefault();
-                                                                    handleMermaidRenderingModeChange(option.id);
-                                                                }
-                                                            }}
-                                                            className="flex w-full items-center gap-2 py-0 text-left"
-                                                        >
-                                                            <Radio
-                                                                checked={selected}
-                                                                onChange={() => handleMermaidRenderingModeChange(option.id)}
-                                                                ariaLabel={`Mermaid rendering: ${option.label}`}
-                                                            />
-                                                            <span className={cn('typography-ui-label font-normal', selected ? 'text-foreground' : 'text-foreground/50')}>
-                                                                {option.label}
-                                                            </span>
-                                                        </div>
+                                                        <button type="button" key={option.id} tabIndex={0}
+                                                        aria-pressed={selected}
+                                                        onClick={() => handleMermaidRenderingModeChange(option.id)}
+                                                        onKeyDown={(event) => {
+                                                            if (event.key === ' ' || event.key === 'Enter') {
+                                                                event.preventDefault();
+                                                                handleMermaidRenderingModeChange(option.id);
+                                                            }
+                                                        }}
+                                                        className="flex w-full items-center gap-2 py-0 text-left"><Radio
+                                                            checked={selected}
+                                                            onChange={() => handleMermaidRenderingModeChange(option.id)}
+                                                            ariaLabel={`${t('appearance.mermaidRendering')}: ${t(option.labelKey)}`}
+                                                        />
+                                                        <span className={cn('typography-ui-label font-normal', selected ? 'text-foreground' : 'text-foreground/50')}>
+                                                            {t(option.labelKey)}
+                                                        </span></button>
                                                     );
                                                 })}
                                             </div>
@@ -1007,34 +991,28 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
 
                                     {shouldShow('diffLayout') && !isVSCode && (
                                         <section className="p-2">
-                                            <h4 className="typography-ui-header font-medium text-foreground">Diff Layout</h4>
-                                            <div role="radiogroup" aria-label="Diff layout" className="mt-0.5 space-y-0">
+                                            <h4 className="typography-ui-header font-medium text-foreground">{t('appearance.diffLayout')}</h4>
+                                            <div role="radiogroup" aria-label={t('appearance.diffLayout')} className="mt-0.5 space-y-0">
                                                 {DIFF_LAYOUT_OPTIONS.map((option) => {
                                                     const selected = diffLayoutPreference === option.id;
                                                     return (
-                                                        <div
-                                                            key={option.id}
-                                                            role="button"
-                                                            tabIndex={0}
-                                                            aria-pressed={selected}
-                                                            onClick={() => setDiffLayoutPreference(option.id)}
-                                                            onKeyDown={(event) => {
-                                                                if (event.key === ' ' || event.key === 'Enter') {
-                                                                    event.preventDefault();
-                                                                    setDiffLayoutPreference(option.id);
-                                                                }
-                                                            }}
-                                                            className="flex w-full items-center gap-2 py-0 text-left"
-                                                        >
-                                                            <Radio
-                                                                checked={selected}
-                                                                onChange={() => setDiffLayoutPreference(option.id)}
-                                                                ariaLabel={`Diff layout: ${option.label}`}
-                                                            />
-                                                            <span className={cn('typography-ui-label font-normal', selected ? 'text-foreground' : 'text-foreground/50')}>
-                                                                {option.label}
-                                                            </span>
-                                                        </div>
+                                                        <button type="button" key={option.id} tabIndex={0}
+                                                        aria-pressed={selected}
+                                                        onClick={() => setDiffLayoutPreference(option.id)}
+                                                        onKeyDown={(event) => {
+                                                            if (event.key === ' ' || event.key === 'Enter') {
+                                                                event.preventDefault();
+                                                                setDiffLayoutPreference(option.id);
+                                                            }
+                                                        }}
+                                                        className="flex w-full items-center gap-2 py-0 text-left"><Radio
+                                                            checked={selected}
+                                                            onChange={() => setDiffLayoutPreference(option.id)}
+                                                            ariaLabel={`${t('appearance.diffLayout')}: ${t(option.labelKey)}`}
+                                                        />
+                                                        <span className={cn('typography-ui-label font-normal', selected ? 'text-foreground' : 'text-foreground/50')}>
+                                                            {t(option.labelKey)}
+                                                        </span></button>
                                                     );
                                                 })}
                                             </div>
@@ -1043,34 +1021,28 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
 
                                     {shouldShow('diffLayout') && !isVSCode && (
                                         <section className="p-2">
-                                            <h4 className="typography-ui-header font-medium text-foreground">Diff View Mode</h4>
-                                            <div role="radiogroup" aria-label="Diff view mode" className="mt-0.5 space-y-0">
+                                            <h4 className="typography-ui-header font-medium text-foreground">{t('appearance.diffViewMode')}</h4>
+                                            <div role="radiogroup" aria-label={t('appearance.diffViewMode')} className="mt-0.5 space-y-0">
                                                 {DIFF_VIEW_MODE_OPTIONS.map((option) => {
                                                     const selected = diffViewMode === option.id;
                                                     return (
-                                                        <div
-                                                            key={option.id}
-                                                            role="button"
-                                                            tabIndex={0}
-                                                            aria-pressed={selected}
-                                                            onClick={() => setDiffViewMode(option.id)}
-                                                            onKeyDown={(event) => {
-                                                                if (event.key === ' ' || event.key === 'Enter') {
-                                                                    event.preventDefault();
-                                                                    setDiffViewMode(option.id);
-                                                                }
-                                                            }}
-                                                            className="flex w-full items-center gap-2 py-0 text-left"
-                                                        >
-                                                            <Radio
-                                                                checked={selected}
-                                                                onChange={() => setDiffViewMode(option.id)}
-                                                                ariaLabel={`Diff view mode: ${option.label}`}
-                                                            />
-                                                            <span className={cn('typography-ui-label font-normal', selected ? 'text-foreground' : 'text-foreground/50')}>
-                                                                {option.label}
-                                                            </span>
-                                                        </div>
+                                                        <button type="button" key={option.id} tabIndex={0}
+                                                        aria-pressed={selected}
+                                                        onClick={() => setDiffViewMode(option.id)}
+                                                        onKeyDown={(event) => {
+                                                            if (event.key === ' ' || event.key === 'Enter') {
+                                                                event.preventDefault();
+                                                                setDiffViewMode(option.id);
+                                                            }
+                                                        }}
+                                                        className="flex w-full items-center gap-2 py-0 text-left"><Radio
+                                                            checked={selected}
+                                                            onChange={() => setDiffViewMode(option.id)}
+                                                            ariaLabel={`${t('appearance.diffViewMode')}: ${t(option.labelKey)}`}
+                                                        />
+                                                        <span className={cn('typography-ui-label font-normal', selected ? 'text-foreground' : 'text-foreground/50')}>
+                                                            {t(option.labelKey)}
+                                                        </span></button>
                                                     );
                                                 })}
                                             </div>
@@ -1082,197 +1054,149 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                             {(shouldShow('stickyUserHeader') || (shouldShow('mobileStatusBar') && isMobile) || shouldShow('dotfiles') || shouldShow('queueMode') || shouldShow('persistDraft') || shouldShow('showToolFileIcons') || (!isMobile && shouldShow('inputSpellcheck')) || shouldShow('reasoning')) && (
                                 <section className="p-2 space-y-0.5">
                                     {shouldShow('reasoning') && (
-                                        <div
-                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
-                                            role="button"
-                                            tabIndex={0}
-                                            aria-pressed={showReasoningTraces}
-                                            onClick={() => setShowReasoningTraces(!showReasoningTraces)}
-                                            onKeyDown={(event) => {
-                                                if (event.key === ' ' || event.key === 'Enter') {
-                                                    event.preventDefault();
-                                                    setShowReasoningTraces(!showReasoningTraces);
-                                                }
-                                            }}
-                                        >
-                                            <Checkbox
-                                                checked={showReasoningTraces}
-                                                onChange={setShowReasoningTraces}
-                                                ariaLabel="Show reasoning traces"
-                                            />
-                                            <span className="typography-ui-label text-foreground">Show Reasoning Traces</span>
-                                        </div>
+                                        <button type="button" className="group flex cursor-pointer items-center gap-2 py-0.5" tabIndex={0}
+                                        aria-pressed={showReasoningTraces}
+                                        onClick={() => setShowReasoningTraces(!showReasoningTraces)}
+                                        onKeyDown={(event) => {
+                                            if (event.key === ' ' || event.key === 'Enter') {
+                                                event.preventDefault();
+                                                setShowReasoningTraces(!showReasoningTraces);
+                                            }
+                                        }}><Checkbox
+                                            checked={showReasoningTraces}
+                                            onChange={setShowReasoningTraces}
+                                            ariaLabel={t('appearance.showReasoningTraces')}
+                                        />
+                                        <span className="typography-ui-label text-foreground">{t('appearance.showReasoningTraces')}</span></button>
                                     )}
 
                                     {shouldShow('stickyUserHeader') && (
-                                        <div
-                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
-                                            role="button"
-                                            tabIndex={0}
-                                            aria-pressed={stickyUserHeader}
-                                            onClick={() => handleStickyUserHeaderChange(!stickyUserHeader)}
-                                            onKeyDown={(event) => {
-                                                if (event.key === ' ' || event.key === 'Enter') {
-                                                    event.preventDefault();
-                                                    handleStickyUserHeaderChange(!stickyUserHeader);
-                                                }
-                                            }}
-                                        >
-                                            <Checkbox
-                                                checked={stickyUserHeader}
-                                                onChange={handleStickyUserHeaderChange}
-                                                ariaLabel="Sticky user header"
-                                            />
-                                            <span className="typography-ui-label text-foreground">Sticky User Header</span>
-                                        </div>
+                                        <button type="button" className="group flex cursor-pointer items-center gap-2 py-0.5" tabIndex={0}
+                                        aria-pressed={stickyUserHeader}
+                                        onClick={() => handleStickyUserHeaderChange(!stickyUserHeader)}
+                                        onKeyDown={(event) => {
+                                            if (event.key === ' ' || event.key === 'Enter') {
+                                                event.preventDefault();
+                                                handleStickyUserHeaderChange(!stickyUserHeader);
+                                            }
+                                        }}><Checkbox
+                                            checked={stickyUserHeader}
+                                            onChange={handleStickyUserHeaderChange}
+                                            ariaLabel={t('appearance.stickyUserHeader')}
+                                        />
+                                        <span className="typography-ui-label text-foreground">{t('appearance.stickyUserHeader')}</span></button>
                                     )}
 
                                     {shouldShow('showToolFileIcons') && (
-                                        <div
-                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
-                                            role="button"
-                                            tabIndex={0}
-                                            aria-pressed={showToolFileIcons}
-                                            onClick={() => handleShowToolFileIconsChange(!showToolFileIcons)}
-                                            onKeyDown={(event) => {
-                                                if (event.key === ' ' || event.key === 'Enter') {
-                                                    event.preventDefault();
-                                                    handleShowToolFileIconsChange(!showToolFileIcons);
-                                                }
-                                            }}
-                                        >
-                                            <Checkbox
-                                                checked={showToolFileIcons}
-                                                onChange={handleShowToolFileIconsChange}
-                                                ariaLabel="Show tool file icons"
-                                            />
-                                            <span className="typography-ui-label text-foreground">Show Tool File Icons</span>
-                                        </div>
+                                        <button type="button" className="group flex cursor-pointer items-center gap-2 py-0.5" tabIndex={0}
+                                        aria-pressed={showToolFileIcons}
+                                        onClick={() => handleShowToolFileIconsChange(!showToolFileIcons)}
+                                        onKeyDown={(event) => {
+                                            if (event.key === ' ' || event.key === 'Enter') {
+                                                event.preventDefault();
+                                                handleShowToolFileIconsChange(!showToolFileIcons);
+                                            }
+                                        }}><Checkbox
+                                            checked={showToolFileIcons}
+                                            onChange={handleShowToolFileIconsChange}
+                                            ariaLabel={t('appearance.showToolFileIcons')}
+                                        />
+                                        <span className="typography-ui-label text-foreground">{t('appearance.showToolFileIcons')}</span></button>
                                     )}
 
                                     {shouldShow('mobileStatusBar') && isMobile && (
-                                        <div
-                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
-                                            role="button"
-                                            tabIndex={0}
-                                            aria-pressed={showMobileSessionStatusBar}
-                                            onClick={() => setShowMobileSessionStatusBar(!showMobileSessionStatusBar)}
-                                            onKeyDown={(event) => {
-                                                if (event.key === ' ' || event.key === 'Enter') {
-                                                    event.preventDefault();
-                                                    setShowMobileSessionStatusBar(!showMobileSessionStatusBar);
-                                                }
-                                            }}
-                                        >
-                                            <Checkbox
-                                                checked={showMobileSessionStatusBar}
-                                                onChange={setShowMobileSessionStatusBar}
-                                                ariaLabel="Show mobile status bar"
-                                            />
-                                            <span className="typography-ui-label text-foreground">Show Mobile Status Bar</span>
-                                        </div>
+                                        <button type="button" className="group flex cursor-pointer items-center gap-2 py-0.5" tabIndex={0}
+                                        aria-pressed={showMobileSessionStatusBar}
+                                        onClick={() => setShowMobileSessionStatusBar(!showMobileSessionStatusBar)}
+                                        onKeyDown={(event) => {
+                                            if (event.key === ' ' || event.key === 'Enter') {
+                                                event.preventDefault();
+                                                setShowMobileSessionStatusBar(!showMobileSessionStatusBar);
+                                            }
+                                        }}><Checkbox
+                                            checked={showMobileSessionStatusBar}
+                                            onChange={setShowMobileSessionStatusBar}
+                                            ariaLabel={t('appearance.showMobileStatusBar')}
+                                        />
+                                        <span className="typography-ui-label text-foreground">{t('appearance.showMobileStatusBar')}</span></button>
                                     )}
 
                                     {shouldShow('dotfiles') && !isVSCodeRuntime() && (
-                                        <div
-                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
-                                            role="button"
-                                            tabIndex={0}
-                                            aria-pressed={directoryShowHidden}
-                                            onClick={() => setDirectoryShowHidden(!directoryShowHidden)}
-                                            onKeyDown={(event) => {
-                                                if (event.key === ' ' || event.key === 'Enter') {
-                                                    event.preventDefault();
-                                                    setDirectoryShowHidden(!directoryShowHidden);
-                                                }
-                                            }}
-                                        >
-                                            <Checkbox
-                                                checked={directoryShowHidden}
-                                                onChange={setDirectoryShowHidden}
-                                                ariaLabel="Show dotfiles"
-                                            />
-                                            <span className="typography-ui-label text-foreground">Show Dotfiles</span>
-                                        </div>
+                                        <button type="button" className="group flex cursor-pointer items-center gap-2 py-0.5" tabIndex={0}
+                                        aria-pressed={directoryShowHidden}
+                                        onClick={() => setDirectoryShowHidden(!directoryShowHidden)}
+                                        onKeyDown={(event) => {
+                                            if (event.key === ' ' || event.key === 'Enter') {
+                                                event.preventDefault();
+                                                setDirectoryShowHidden(!directoryShowHidden);
+                                            }
+                                        }}><Checkbox
+                                            checked={directoryShowHidden}
+                                            onChange={setDirectoryShowHidden}
+                                            ariaLabel={t('appearance.showDotfiles')}
+                                        />
+                                        <span className="typography-ui-label text-foreground">{t('appearance.showDotfiles')}</span></button>
                                     )}
 
                                     {shouldShow('queueMode') && (
-                                        <div
-                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
-                                            role="button"
-                                            tabIndex={0}
-                                            aria-pressed={queueModeEnabled}
-                                            onClick={() => setQueueMode(!queueModeEnabled)}
-                                            onKeyDown={(event) => {
-                                                if (event.key === ' ' || event.key === 'Enter') {
-                                                    event.preventDefault();
-                                                    setQueueMode(!queueModeEnabled);
-                                                }
-                                            }}
-                                        >
-                                            <Checkbox
-                                                checked={queueModeEnabled}
-                                                onChange={setQueueMode}
-                                                ariaLabel="Queue messages by default"
-                                            />
-                                            <div className="flex min-w-0 items-center gap-1.5">
-                                                <span className="typography-ui-label text-foreground">Queue Messages by Default</span>
-                                                <Tooltip delayDuration={1000}>
-                                                    <TooltipTrigger asChild>
-                                                        <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
-                                                    </TooltipTrigger>
-                                                    <TooltipContent sideOffset={8} className="max-w-xs">
-                                                        When enabled, Enter queues messages. Use {getModifierLabel()}+Enter to send.
-                                                    </TooltipContent>
-                                                </Tooltip>
-                                            </div>
-                                        </div>
+                                        <button type="button" className="group flex cursor-pointer items-center gap-2 py-0.5" tabIndex={0}
+                                        aria-pressed={queueModeEnabled}
+                                        onClick={() => setQueueMode(!queueModeEnabled)}
+                                        onKeyDown={(event) => {
+                                            if (event.key === ' ' || event.key === 'Enter') {
+                                                event.preventDefault();
+                                                setQueueMode(!queueModeEnabled);
+                                            }
+                                        }}><Checkbox
+                                            checked={queueModeEnabled}
+                                            onChange={setQueueMode}
+                                            ariaLabel={t('appearance.queueMessagesByDefault')}
+                                        />
+                                        <div className="flex min-w-0 items-center gap-1.5">
+                                            <span className="typography-ui-label text-foreground">{t('appearance.queueMessagesByDefault')}</span>
+                                            <Tooltip delayDuration={1000}>
+                                                <TooltipTrigger asChild>
+                                                    <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+                                                </TooltipTrigger>
+                                                <TooltipContent sideOffset={8} className="max-w-xs">
+                                                    {t('appearance.queueMessagesByDefaultTooltip', { modifier: getModifierLabel() })}
+                                                </TooltipContent>
+                                            </Tooltip>
+                                        </div></button>
                                     )}
 
                                     {shouldShow('persistDraft') && (
-                                        <div
-                                            className="group flex cursor-pointer items-center gap-2 py-0.5"
-                                            role="button"
-                                            tabIndex={0}
-                                            aria-pressed={persistChatDraft}
-                                            onClick={() => setPersistChatDraft(!persistChatDraft)}
-                                            onKeyDown={(event) => {
-                                                if (event.key === ' ' || event.key === 'Enter') {
-                                                    event.preventDefault();
-                                                    setPersistChatDraft(!persistChatDraft);
-                                                }
-                                            }}
-                                        >
-                                            <Checkbox
-                                                checked={persistChatDraft}
-                                                onChange={setPersistChatDraft}
-                                                ariaLabel="Persist draft messages"
-                                            />
-                                            <span className="typography-ui-label text-foreground">Persist Draft Messages</span>
-                                        </div>
+                                        <button type="button" className="group flex cursor-pointer items-center gap-2 py-0.5" tabIndex={0}
+                                        aria-pressed={persistChatDraft}
+                                        onClick={() => setPersistChatDraft(!persistChatDraft)}
+                                        onKeyDown={(event) => {
+                                            if (event.key === ' ' || event.key === 'Enter') {
+                                                event.preventDefault();
+                                                setPersistChatDraft(!persistChatDraft);
+                                            }
+                                        }}><Checkbox
+                                            checked={persistChatDraft}
+                                            onChange={setPersistChatDraft}
+                                            ariaLabel={t('appearance.persistDraftMessages')}
+                                        />
+                                        <span className="typography-ui-label text-foreground">{t('appearance.persistDraftMessages')}</span></button>
                                     )}
 
                                     {!isMobile && shouldShow('inputSpellcheck') && (
-                                        <div
-                                            className="group flex cursor-pointer items-center gap-2 py-1.5"
-                                            role="button"
-                                            tabIndex={0}
-                                            aria-pressed={inputSpellcheckEnabled}
-                                            onClick={() => handleInputSpellcheckChange(!inputSpellcheckEnabled)}
-                                            onKeyDown={(event) => {
-                                                if (event.key === ' ' || event.key === 'Enter') {
-                                                    event.preventDefault();
-                                                    handleInputSpellcheckChange(!inputSpellcheckEnabled);
-                                                }
-                                            }}
-                                        >
-                                            <Checkbox
-                                                checked={inputSpellcheckEnabled}
-                                                onChange={handleInputSpellcheckChange}
-                                                ariaLabel="Enable spellcheck in text inputs"
-                                            />
-                                            <span className="typography-ui-label text-foreground">Enable Spellcheck in Text Inputs</span>
-                                        </div>
+                                        <button type="button" className="group flex cursor-pointer items-center gap-2 py-1.5" tabIndex={0}
+                                        aria-pressed={inputSpellcheckEnabled}
+                                        onClick={() => handleInputSpellcheckChange(!inputSpellcheckEnabled)}
+                                        onKeyDown={(event) => {
+                                            if (event.key === ' ' || event.key === 'Enter') {
+                                                event.preventDefault();
+                                                handleInputSpellcheckChange(!inputSpellcheckEnabled);
+                                            }
+                                        }}><Checkbox
+                                            checked={inputSpellcheckEnabled}
+                                            onChange={handleInputSpellcheckChange}
+                                            ariaLabel={t('appearance.enableSpellcheckInTextInputs')}
+                                        />
+                                        <span className="typography-ui-label text-foreground">{t('appearance.enableSpellcheckInTextInputs')}</span></button>
                                     )}
 
                                 </section>
@@ -1285,31 +1209,25 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                 {shouldShow('reportUsage') && (
                     <div className="space-y-3">
                         <section className="px-2 pb-2 pt-0">
-                            <h4 className="typography-ui-header font-medium text-foreground mb-2">Privacy</h4>
+                            <h4 className="typography-ui-header font-medium text-foreground mb-2">{t('appearance.privacy')}</h4>
                             <div className="flex items-start gap-2 py-1.5">
                                 <Checkbox
                                     checked={reportUsage}
                                     onChange={handleReportUsageChange}
-                                    ariaLabel="Send anonymous usage reports"
+                                    ariaLabel={t('appearance.sendAnonymousUsageReports')}
                                 />
                                 <div className="flex min-w-0 flex-col gap-0.5">
-                                    <div
-                                        className="group flex cursor-pointer"
-                                        role="button"
-                                        tabIndex={0}
-                                        aria-pressed={reportUsage}
-                                        onClick={() => handleReportUsageChange(!reportUsage)}
-                                        onKeyDown={(event) => {
-                                            if (event.key === ' ' || event.key === 'Enter') {
-                                                event.preventDefault();
-                                                handleReportUsageChange(!reportUsage);
-                                            }
-                                        }}
-                                    >
-                                        <span className="typography-ui-label text-foreground">Send anonymous usage reports</span>
-                                    </div>
+                                    <button type="button" className="group flex cursor-pointer" tabIndex={0}
+                                    aria-pressed={reportUsage}
+                                    onClick={() => handleReportUsageChange(!reportUsage)}
+                                    onKeyDown={(event) => {
+                                        if (event.key === ' ' || event.key === 'Enter') {
+                                            event.preventDefault();
+                                            handleReportUsageChange(!reportUsage);
+                                        }
+                                    }}><span className="typography-ui-label text-foreground">{t('appearance.sendAnonymousUsageReports')}</span></button>
                                     <span className="typography-meta text-muted-foreground pointer-events-none">
-                                        Helps us understand which app versions are actively used so we can prioritize improvements. Only app version, platform, and runtime are collected - no personal data or code.
+                                        {t('appearance.sendAnonymousUsageReportsDesc')}
                                     </span>
                                 </div>
                             </div>
