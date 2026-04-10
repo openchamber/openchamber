@@ -67,10 +67,30 @@ export const ChangesSection: React.FC<ChangesSectionProps> = ({
     enabled: shouldVirtualize,
   });
 
-  const virtualRows = React.useMemo(
-    () => (shouldVirtualize ? rowVirtualizer.getVirtualItems() : []),
-    [rowVirtualizer, shouldVirtualize],
-  );
+  // Force virtualizer to remeasure when the scroll container transitions
+  // from display:none (hidden tab via keep-alive) back to visible layout.
+  // Without this, the virtualizer uses stale zero-height measurements and
+  // renders no rows until the user scrolls.
+  React.useEffect(() => {
+    if (!shouldVirtualize) return;
+    const el = scrollRef.current;
+    if (!el) return;
+
+    const observer = new ResizeObserver(() => {
+      rowVirtualizer.measure();
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [shouldVirtualize, rowVirtualizer]);
+
+  // getVirtualItems() must be called on every render, not cached with useMemo.
+  // The virtualizer updates its internal range on measure/scroll, which triggers
+  // a re-render. If we memoize with useMemo([rowVirtualizer, shouldVirtualize]),
+  // the stable rowVirtualizer reference means the cache is never invalidated
+  // after the first empty render, leaving virtualRows permanently empty.
+  const virtualRows = shouldVirtualize
+    ? rowVirtualizer.getVirtualItems()
+    : [];
 
   React.useEffect(() => {
     if (!onVisiblePathsChange) {
