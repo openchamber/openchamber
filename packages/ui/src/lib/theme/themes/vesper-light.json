@@ -19,9 +19,9 @@
     "surface": {
       "background": "#FFFFFF",
       "foreground": "#101010",
-      "muted": "#F8F8F890",
+      "muted": "#F8F8F8",
       "mutedForeground": "#908d8d",
-      "elevated": "#F0F0F090",
+      "elevated": "#F0F0F0",
       "elevatedForeground": "#101010",
       "overlay": "#00000020",
       "subtle": "#f5f3f3"

@@ -8,8 +8,6 @@ type Args = {
   isVSCode: boolean;
   sessions: Session[];
   archivedSessions: Session[];
-  sessionsByDirectory: Map<string, Session[]>;
-  getSessionsByDirectory: (directory: string) => Session[];
   availableWorktreesByProject: Map<string, WorktreeMeta[]>;
 };
 
@@ -18,10 +16,24 @@ export const useProjectSessionLists = (args: Args) => {
     isVSCode,
     sessions,
     archivedSessions,
-    sessionsByDirectory,
-    getSessionsByDirectory,
     availableWorktreesByProject,
   } = args;
+
+  const sessionsByDirectory = React.useMemo(() => {
+    const next = new Map<string, Session[]>();
+    sessions.forEach((session) => {
+      const directory = normalizePath((session as Session & { directory?: string | null }).directory ?? null)
+        ?? normalizePath((session as Session & { project?: { worktree?: string | null } | null }).project?.worktree ?? null);
+      if (!directory) {
+        return;
+      }
+
+      const collection = next.get(directory) ?? [];
+      collection.push(session);
+      next.set(directory, collection);
+    });
+    return next;
+  }, [sessions]);
 
   const getSessionsForProject = React.useCallback(
     (project: { normalizedPath: string }) => {
@@ -37,7 +49,7 @@ export const useProjectSessionLists = (args: Args) => {
       const collected: Session[] = [];
 
       directories.forEach((directory) => {
-        const sessionsForDirectory = sessionsByDirectory.get(directory) ?? getSessionsByDirectory(directory);
+        const sessionsForDirectory = sessionsByDirectory.get(directory) ?? [];
         sessionsForDirectory.forEach((session) => {
           if (seen.has(session.id)) {
             return;
@@ -49,7 +61,7 @@ export const useProjectSessionLists = (args: Args) => {
 
       return collected;
     },
-    [availableWorktreesByProject, getSessionsByDirectory, isVSCode, sessionsByDirectory],
+    [availableWorktreesByProject, isVSCode, sessionsByDirectory],
   );
 
   const getArchivedSessionsForProject = React.useCallback(

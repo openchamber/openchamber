@@ -9,7 +9,8 @@ interface MobileModelButtonProps {
 }
 
 export const MobileModelButton: React.FC<MobileModelButtonProps> = ({ onOpenModel, className }) => {
-    const { currentModelId, getCurrentProvider } = useConfigStore();
+    const currentModelId = useConfigStore((state) => state.currentModelId);
+    const getCurrentProvider = useConfigStore((state) => state.getCurrentProvider);
     const currentProvider = getCurrentProvider();
     const modelLabel = getModelDisplayName(currentProvider, currentModelId);
 

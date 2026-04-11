@@ -4,6 +4,47 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.9.4] - 2026-04-07
+
+- Settings/Magic Prompts: added a dedicated Magic Prompts page with editable templates for commit/PR generation, PR and issue reviews, failed-check/comment analysis, and merge/cherry-pick conflict resolution.
+- Chat/Performance: reduced streaming render churn across the app, so long responses stay smoother with less UI jitter during active runs.
+- Chat/Scrolling: fixed jumpy follow behavior and restored stable bottom-resume/live-compaction updates, so staying on the latest output is more reliable.
+- Reliability/Streaming: improved reconnect, retry, and directory-aware event routing to reduce stuck session/subagent states after transient disconnects (thanks to @jwcrystal, @daveotero).
+- Chat/Tool Output: LSP diagnostics now render directly in tool output, making inline error review faster while iterating (thanks to @yulia-ivashko).
+- Models: added defensive handling for missing model pricing/capability metadata so model controls fail less often with incomplete provider data (thanks to @Chi-square-test).
+- Desktop/Performance: removed costly window translucency and reduced duplicate notification triggers for a cooler, less noisy desktop experience.
+- Startup/Remote: restored remote provider startup behavior and tightened host/port detection to reduce false startup failures.
+- Usage: refreshed MiniMax CN coding-plan quota data for more accurate usage reporting (thanks to @nzlov).
+
+## [1.9.3] - 2026-03-01
+
+- Security/Chat: user messages now escape raw HTML by default, so pasted markup is shown safely as text instead of being interpreted by the renderer (thanks to @kalac2232).
+- Desktop/Performance: reduced Tauri shell CPU/GPU overhead to keep the Desktop app cooler and smoother during longer sessions.
+- Sessions/Drafts: draft chat config now stays synced with the selected draft target directory, reducing wrong-model or wrong-agent carryover when switching draft context (thanks to @hkay-dev).
+- VSCode/Files: added file stat support in the extension bridge so markdown-related file checks resolve more reliably before opening or rendering (thanks to @geekifan).
+- Chat/Models: added arrow-key navigation for thinking-mode selection in model controls, making keyboard model tuning faster during prompt setup (thanks to @daveotero).
+- Files: added HTML preview support in the file viewer, so `.html` files can be inspected visually without leaving OpenChamber (thanks to @nguyenngothuong).
+- Chat: improved error message readability with clearer styling and safer word-wrapping, so failures are easier to scan without layout breakage (thanks to @nguyenngothuong).
+- Chat/JSON: added an interactive JSON tree viewer with collapse/expand controls and richer color cues for easier inspection of large structured outputs (thanks to @nguyenngothuong).
+- Mobile/Settings: fixed lingering settings drawers and removed extra top spacing for a cleaner, less obstructed mobile layout (thanks to @Jovines).
+- Git/Worktrees: fixed worktree detection and reset stale integration state when switching contexts, reducing wrong-target behavior in worktree flows (thanks to @jwcrystal).
+- Desktop/Settings: window vibrancy now correctly controls macOS window transparency, and settings copy now clarifies when full transparency changes take effect.
+- Reliability/Proxy: hardened OpenCode proxy header handling (including identity-encoding normalization, compression-header cleanup, hop-by-hop response-header stripping) and suppressed expected SSE close noise, improving stream stability and reducing false proxy errors (thanks to @jwcrystal, @Jovines, @JiwaniZakir, @shekohex).
+- Reliability/Proxy: restored proxied chat event streaming so live responses continue working when OpenChamber is deployed behind a proxy.
+- Terminal/Reliability: switched terminal transport to a pure WebSocket path with fallback handling, improving responsiveness and stability for interactive terminal sessions (thanks to @geekifan).
+- Usage/Providers: added ZhipuAI quota tracking and fixed MiniMax coding-plan and GitHub Copilot overusage calculations for more accurate usage reporting (thanks to @kalac2232, @baruchvitorino, @ebrainte).
+
+## [1.9.2] - 2026-03-31
+
+- Chat/Performance: rebuilt live session sync and streaming updates to cut render churn, reduce CPU spikes, and keep long-running chats smoother and more stable across runtimes.
+- Worktrees/Multi-Run: added instant draft-first worktree creation and redesigned the multi-run launcher with a cleaner, faster flow for parallel runs.
+- VSCode/UI: polished the extension chat and sidebar with improved spacing/tooltips, a resizable sessions pane, and better file-to-chat mention flows from Explorer.
+- Models/Providers: improved custom provider model metadata loading and caching so model details stay more complete and consistent (thanks to @ZeppLu).
+- CLI/Server: added `--foreground` for process-manager deployments, made managed server hostname configurable, and added an explicit `--host` option with safer localhost defaults (thanks to @colinmollenhour, @rapidrabbit76, @yulia-ivashko).
+- Docker/Deployments: improved container defaults for broader compatibility, including UID 1000 user behavior, non-fatal SSH key generation, and better localhost detection in container networking (thanks to @yulia-ivashko).
+- Web/PWA: fixed manifest behavior behind Cloudflare Access so install flows work more reliably in protected environments (thanks to @arthurfiorette).
+
+
 ## [1.9.1] - 2026-03-20
 
 - Sessions/UI: restored Project Notes access in the sidebar, polished notes/todo editing, and fixed project action overlap so project controls stay reachable for non-git directories.
@@ -15,7 +56,6 @@ All notable changes to this project will be documented in this file.
 - Sessions/Worktrees: draft sessions now resolve the correct project when opened from worktree paths (thanks to @yulia-ivashko).
 - Desktop: improved stale server-process cleanup on startup and fixed external link opening behavior for more predictable app interactions (thanks to @jwcrystal).
 - Usage: added MiniMax Weekly quota provider support for broader usage tracking coverage (thanks to @nzlov).
-
 
 ## [1.9.0] - 2026-03-20
 
@@ -33,15 +73,12 @@ All notable changes to this project will be documented in this file.
 - Desktop/macOS: lowered the minimum supported macOS version to Ventura (13.0), expanding compatibility on older systems (thanks to @craigharman).
 - Updates/Reliability: unified update-check behavior across runtimes for more consistent update availability checks.
 
-
 ## [1.8.7] - 2026-03-13
 
 - CLI: fixed a startup regression in global npm/bun installs where wrapper or symlinked `openchamber` entrypoints could exit without output on commands like `--version` or `status`.
 - CLI: hardened entrypoint detection across direct, symlinked, and shim-based launches to keep startup behavior consistent across package managers (thanks to @shekohex).
 - Windows/Web: daemon startup and Git operations no longer flash extra console windows, making background workflows less distracting (thanks to @SergioChan).
 - Deployment/Docker: improved `docker run` startup behavior and entrypoint handling so containerized installs start more reliably (thanks to @nzlov).
-
-
 
 ## [1.8.6] - 2026-03-13
 
@@ -68,7 +105,6 @@ All notable changes to this project will be documented in this file.
 - Tunnel/CLI: fixed one-time Cloudflare tunnel connect links in CLI output for `--try-cf-tunnel`, so remote collaborators can use the printed URL/QR flow successfully (thanks to @plfavreau).
 - Mobile/PWA: respected OS rotation lock by removing forced orientation behavior in the web app shell (thanks to @theluckystrike).
 
-
 ## [1.8.4] - 2026-03-04
 
 - Chat: added clickable file-path links in assistant messages (including line targeting), so you can jump from answer text straight to the exact file location (thanks to @yulia-ivashko).
@@ -89,7 +125,6 @@ All notable changes to this project will be documented in this file.
 - UI: interactive controls now consistently show pointer cursors, improving click affordance and reducing ambiguous hover states (thanks to @KJdotIO).
 - Security/Reliability: hardened terminal auth, tightened skill-file path protections, and reduced sensitive request logging exposure for safer day-to-day usage (thanks to @yulia-ivashko).
 
-
 ## [1.8.3] - 2026-03-02
 
 - Chat: added user-message display controls for plain-text rendering and sticky headers, so you can tune readability to match your preferences.
@@ -103,7 +138,6 @@ All notable changes to this project will be documented in this file.
 - Settings: reorganized chat display settings into a more compact two-column layout, so more new options are easier to navigate.
 - Mobile/UI: fixed session-title overflow in compact headers so running/unread indicators and actions remain visible (thanks to @iamhenry).
 
-
 ## [1.8.2] - 2026-03-01
 
 - Updates: hardened the self-update flow with safer release handling and fallback behavior, reducing failed or stuck updates.
@@ -116,11 +150,9 @@ All notable changes to this project will be documented in this file.
 - Notifications/Voice: consolidated TTS and summarization service wiring for steadier text-to-speech and summary flows (thanks to @nelsonPires5).
 - Deployment: fixed Docker build/runtime issues for more reliable containerized setups (thanks to @nzlov).
 
-
 ## [1.8.1] - 2026-02-28
 
 - Web/Auth: fixed an issue where non-tunnel browser sessions could incorrectly show a tunnel-only lock screen; normal auth flow now appears unless a tunnel is actually active.
-
 
 ## [1.8.0] - 2026-02-28
 
@@ -147,7 +179,6 @@ All notable changes to this project will be documented in this file.
 - Usage: added MiniMax coding-plan quota provider support for broader usage tracking coverage (thanks to @nzlov).
 - Usage: added Ollama Cloud quota provider support for broader usage tracking coverage (thanks to @iamhenry).
 
-
 ## [1.7.5] - 2026-02-25
 
 - UI: moved projects into a dedicated sidebar rail and tightened the layout so switching projects and sessions feels faster.
@@ -158,7 +189,6 @@ All notable changes to this project will be documented in this file.
 - Mobile/Chat: refined message spacing and removed the top scroll shadow for a cleaner small-screen reading experience (thanks to @Jovines).
 - Web: added `OPENCODE_HOST` support so you can connect directly to an external OpenCode server using a full base URL (thanks to @colinmollenhour).
 - Web/Mobile: fixed in-app update flow in containerized setups so updates apply correctly.
-
 
 ## [1.7.4] - 2026-02-24
 
@@ -176,7 +206,6 @@ All notable changes to this project will be documented in this file.
 - Desktop: improved remote instance URL handling for more reliable host/query matching (thanks to @shekohex).
 - Files: added C, C++, and Go language support for syntax-aware rendering in code-heavy workflows (thanks to @fomenks).
 
-
 ## [1.7.3] - 2026-02-21
 
 - Settings: added customizable keyboard shortcuts for chat actions, panel toggles, and services, so you can better match OpenChamber to your workflow (thanks to @nelsonPires5).
@@ -188,7 +217,6 @@ All notable changes to this project will be documented in this file.
 - Reliability: improved startup environment detection by capturing login-shell environment snapshots, reducing missing PATH/tool issues on launch.
 - Reliability: refactored OpenCode config/auth integration into domain modules for steadier provider auth and command loading flows (thanks to @nelsonPires5).
 
-
 ## [1.7.2] - 2026-02-20
 
 - Chat: question prompts now guide you to unanswered items before submit, making tool-question flows faster.
@@ -197,7 +225,6 @@ All notable changes to this project will be documented in this file.
 - UI: added Plan view in the context sidebar panel for quicker access to plan content while you work (thanks to @nelsonPires5).
 - Settings: model variant options now refresh correctly in draft/new-session flows, avoiding stale selections.
 - Reliability: provider auth failures now show clearer re-auth guidance when tokens expire, making recovery faster (thanks to @yulia-ivashko).
-
 
 ## [1.7.1] - 2026-02-18
 
@@ -210,16 +237,14 @@ All notable changes to this project will be documented in this file.
 - Mobile: fixed accidental abort right after tapping Send on touch devices, reducing interrupted responses (thanks to @shekohex).
 - Maintenance: removed deprecated GitHub Actions cloud runtime assets and docs to reduce setup confusion (thanks to @yulia-ivashko).
 
-
 ## [1.7.0] - 2026-02-17
 
 - Chat: improved live streaming with part-delta updates and smarter auto-follow scrolling, so long responses stay readable while they generate.
 - Chat: Mermaid diagrams now render inline in assistant messages, with quick copy/download actions for easier sharing.
 - UI: added a context overview panel with token usage, cost breakdown, and raw message inspection to make session debugging easier.
 - Sessions: project icon and color customizations now persist reliably across restarts.
-**- Reliability: managed local OpenCode runtimes now use rotated secure auth and tighter lifecycle control across runtimes, reducing stale-process and reconnect issues (thanks to @yulia-ivashko).**
+  **- Reliability: managed local OpenCode runtimes now use rotated secure auth and tighter lifecycle control across runtimes, reducing stale-process and reconnect issues (thanks to @yulia-ivashko).**
 - Git/GitHub: improved backend reliability for repository and auth operations, helping branch and PR flows stay more predictable (thanks to @nelsonPires5).
-
 
 ## [1.6.9] - 2026-02-16
 
@@ -237,7 +262,6 @@ All notable changes to this project will be documented in this file.
 - Desktop: improved day-to-day polish with restored desktop window geometry and posiotion (thanks to @yulia-ivashko).
 - Mobile: fixes for small-screen editor, terminal, and layout overlap issues (thanks to @gsxdsm, @nelsonPires5).
 
-
 ## [1.6.8] - 2026-02-12
 
 - Chat: added drag-and-drop attachments with inline image previews, so sharing screenshots and files in prompts feels much faster and more reliable.
@@ -248,7 +272,6 @@ All notable changes to this project will be documented in this file.
 - Usage: when using remaining-quota mode, usage markers now invert direction to better match how remaining capacity is interpreted (thanks to @gsxdsm).
 - Desktop: fixed project selection in opened remote instances.
 - Desktop: fixed opened remote instances that use HTTP (helpful for instances under tunneling).
-
 
 ## [1.6.7] - 2026-02-10
 
@@ -277,7 +300,6 @@ All notable changes to this project will be documented in this file.
 - Mobile: fixed chat input layout issues on small screens (thanks to @nelsonPires5).
 - Reliability: fixed OpenCode auth pass-through and proxy env handling to reduce intermittent connection/auth issues (thanks to @gsxdsm).
 
-
 ## [1.6.5] - 2026-02-6
 
 - Settings: added an OpenCode CLI path override so you can point OpenChamber at a custom/local CLI install.
@@ -289,7 +311,6 @@ All notable changes to this project will be documented in this file.
 - Terminal: improved Android keyboard behavior and removed distracting native caret blink in terminal inputs (thanks to @shekohex).
 - UI: added Vitesse Dark and Vitesse Light theme presets.
 - Reliability: improved OpenCode binary resolution and HOME-path handling across runtimes for steadier local startup.
-
 
 ## [1.6.4] - 2026-02-5
 
@@ -304,14 +325,12 @@ All notable changes to this project will be documented in this file.
 - Web: fixed missing icon when installing the Android PWA (thanks to @nelsonPires5).
 - GitHub: PR description generation supports optional extra context for better summaries (thanks to @nelsonPires5).
 
-
 ## [1.6.3] - 2026-02-2
 
 - Web: improved server readiness check to use the `/global/health` endpoint for more reliable startup detection.
 - Web: added login rate limit protection to prevent brute-force attempts on the authentication endpoint (thanks to @Jovines).
 - VSCode: improved server health check with the proper health API endpoint and increased timeout for steadier startup (thanks to @wienans).
 - Settings: dialog no longer persists open/closed state across app restarts.
-
 
 ## [1.6.2] - 2026-02-1
 
@@ -323,7 +342,6 @@ All notable changes to this project will be documented in this file.
 - Diff: optimized stacked view with worker-pool processing and lazy DOM rendering for smoother scrolling.
 - Worktrees: workspace path now resolves correctly when using git worktrees (thanks to @nelsonPires5).
 - Projects: fixed directory creation outside workspace in the Add Project modal (thanks to @nelsonPires5).
-
 
 ## [1.6.1] - 2026-01-30
 
@@ -337,7 +355,6 @@ All notable changes to this project will be documented in this file.
 - Git: commit message generation now includes untracked files and handles git diff --no-index comparisons more reliably (thanks to @MrLYC).
 - Desktop: improved macOS window chrome and header spacing, including steadier traffic lights on older macOS versions (thanks to @yulia-ivashko).
 
-
 ## [1.6.0] - 2026-01-29
 
 - Chat: added message stall detection with automatic soft resync for more reliable message delivery.
@@ -349,7 +366,6 @@ All notable changes to this project will be documented in this file.
 - Web: session activity tracking now works consistently across browser tabs.
 - Reliability: plans directory no longer errors when missing.
 
-
 ## [1.5.9] - 2026-01-28
 
 - Worktrees: migrated to Opencode SDK worktree implementation; sessions in worktrees are now completely isolated.
@@ -359,7 +375,6 @@ All notable changes to this project will be documented in this file.
 - Plans: switch between markdown preview and edit mode in the Plan view.
 - UI: Files, Diff, Git, and Terminal now follow the active session/worktree directory, including new-session drafts.
 - Web: plan lists no longer error when the plans directory is missing.
-
 
 ## [1.5.8] - 2026-01-26
 
@@ -373,13 +388,11 @@ All notable changes to this project will be documented in this file.
 - Activity: added a text-justification setting for activity summaries (thanks to @iyangdianfeng).
 - Reliability: file lists and message sends handle missing directories and transient errors more gracefully.
 
-
 ## [1.5.7] - 2026-01-24
 
 - GitHub: PR panel supports fork PR detection by branch name.
 - GitHub: Git tab PR panel can send failed checks/comments to chat with hidden context; added check details dialog with Actions step breakdown.
 - Web: GitHub auth flow fixes.
-
 
 ## [1.5.6] - 2026-01-24
 
@@ -389,7 +402,6 @@ All notable changes to this project will be documented in this file.
 - Git: manage pull requests in the Git view with AI-generated descriptions, status checks, ready-for-review, and merge actions.
 - Mobile: fixed CommandAutocomplete dropdown scrolling (thanks to @nelsonPires5).
 
-
 ## [1.5.5] - 2026-01-23
 
 - Navigation: URLs now sync the active session, tab, settings, and diff state for shareable links and reliable back/forward (thanks to @TaylorBeeston).
@@ -397,7 +409,6 @@ All notable changes to this project will be documented in this file.
 - Skills: installs now target plural directories while still recognizing legacy singular folders.
 - Web: push notifications no longer fire when a window is visible, avoiding duplicate alerts.
 - Web: improved push subscription handling across multiple windows for more reliable delivery.
-
 
 ## [1.5.4] - 2026-01-22
 
@@ -408,7 +419,6 @@ All notable changes to this project will be documented in this file.
 - Diff: large diffs now lazy-load to avoid freezes (thanks to @Jovines).
 - Web: added Background notifications for PWA.
 - Reliability: connect to external OpenCode servers without auto-start and fixed subagent crashes (thanks to @TaylorBeeston).
-
 
 ## [1.5.3] - 2026-01-20
 
@@ -422,7 +432,6 @@ All notable changes to this project will be documented in this file.
 - Git: generated commit messages now auto-pick a gitmoji when enabled (thanks to @TheRealAshik).
 - Performance: faster filesystem/search operations and general stability improvements (thanks to @TheRealAshik).
 
-
 ## [1.5.2] - 2026-01-17
 
 - Sessions: added branch picker dialog to start new worktree sessions from local branches (thanks to @nilskroe).
@@ -434,12 +443,10 @@ All notable changes to this project will be documented in this file.
 - VSCode: tuned layout breakpoint and server readiness timeout for steadier startup.
 - Reliability: improved OpenCode process cleanup to reduce orphaned servers.
 
-
 ## [1.5.1] - 2026-01-16
 
 - Desktop: fixed orphaned OpenCode processes not being cleaned up on restart or exit.
 - Opencode: fixed issue with reloading configuration was killing the app
-
 
 ## [1.5.0] - 2026-01-16
 
@@ -453,7 +460,6 @@ All notable changes to this project will be documented in this file.
 - Stability: fixed heartbeat race condition causing session stalls during long tasks (thanks to @tybradle).
 - Desktop: fixed commands for worktree setup access to PATH.
 
-
 ## [1.4.9] - 2026-01-14
 
 - VSCode: added session editor panel to view sessions alongside files.
@@ -461,7 +467,6 @@ All notable changes to this project will be documented in this file.
 - Diff: added stacked/inline diff mode toggle in settings with sidebar file navigation (thanks to @nelsonPires5).
 - Mobile: fixed iOS keyboard safe area padding for home indicator bar (thanks to @Jovines).
 - Upload: increased attachment size limit to 50MB with automatic image compression to 2048px for large files.
-
 
 ## [1.4.8] - 2026-01-14
 
@@ -474,12 +479,10 @@ All notable changes to this project will be documented in this file.
 - Reliability: improved project state preservation on validation failures (thanks to @vio1ator) and refined server health monitoring.
 - Stability: added graceful shutdown handling for the server process (thanks to @vio1ator).
 
-
 ## [1.4.7] - 2026-01-10
 
 - Skills: added ClawdHub integration as built-in market for skills.
 - Web: fixed issues in terminal
-
 
 ## [1.4.6] - 2026-01-09
 
@@ -487,7 +490,6 @@ All notable changes to this project will be documented in this file.
 - Input: removed auto-complete and auto-correction.
 - Shortcuts: switched agent cycling shortcut from Shift + TAB to TAB again.
 - Chat: added question tool support with a rich UI for interaction.
-
 
 ## [1.4.5] - 2026-01-08
 
@@ -498,7 +500,6 @@ All notable changes to this project will be documented in this file.
 - Compact: changed /summarize command to be /compact and use sdk for compaction.
 - MCP: added ability to dynamically enabled/disabled configured MCP.
 - Web: refactored project adding UI with autocomplete.
-
 
 ## [1.4.4] - 2026-01-08
 
@@ -515,14 +516,12 @@ All notable changes to this project will be documented in this file.
 - Tunnel: added QR code and password URL for Cloudflare tunnel (thanks to @martindonadieu).
 - Model selector: fixed dropdowns not responding to viewport size.
 
-
 ## [1.4.3] - 2026-01-04
 
 - VS Code extension: added Agent Manager panel to run the same prompt across up to 5 models in parallel (thanks to @wienans).
 - Added permission prompt UI for tools configured with "ask" in opencode.json, showing requested patterns and "Always Allow" options (thanks to @aptdnfapt).
 - Added "Open subAgent session" button on task tool outputs to quickly navigate to child sessions (thanks to @aptdnfapt).
 - VS Code extension: improved activation reliability and error handling.
-
 
 ## [1.4.2] - 2026-01-02
 
@@ -531,7 +530,6 @@ All notable changes to this project will be documented in this file.
 - Added fork button on user messages to create a new session from any point (thanks to @aptdnfapt).
 - Desktop app: keyboard shortcuts now use Cmd on macOS and Ctrl on web/other platforms (thanks to @sakhnyuk).
 - Migrated to OpenCode SDK v2 with improved API types and streaming.
-
 
 ## [1.4.1] - 2026-01-02
 
@@ -545,7 +543,6 @@ All notable changes to this project will be documented in this file.
 - Terminal: improved terminal performance and stability by switching to the Ghostty-based terminal renderer, while keeping the existing terminal UX and per-directory sessions.
 - Terminal: fixed several issues with terminal session restore and rendering under heavy output, including switching directories and long-running TUI apps.
 
-
 ## [1.4.0] - 2026-01-01
 
 - Added the ability to run multiple agents from a single prompt, with each agent working in an isolated worktree.
@@ -557,13 +554,11 @@ All notable changes to this project will be documented in this file.
 - Chat: now shows clearer error messages when agent messages fail.
 - Sidebar: improved readability for sticky headers with a dynamic background.
 
-
 ## [1.3.9] - 2025-12-30
 
- - Added skills management to settings with the ability to create, edit, and delete skills (make sure you have the latest OpenCode version for skills support).
+- Added skills management to settings with the ability to create, edit, and delete skills (make sure you have the latest OpenCode version for skills support).
 - Added Skills catalog functionality for discovering and installing skills from external sources.
 - VS Code extension: added right-click context menu with "Add to Context," "Explain," and "Improve Code" actions (thanks to @wienans).
-
 
 ## [1.3.8] - 2025-12-29
 
@@ -575,7 +570,6 @@ All notable changes to this project will be documented in this file.
 - Fixed scroll position persistence for active conversation turns across session switches.
 - Refactored Agents/Commands management with ability to configure project/user scopes.
 
-
 ## [1.3.7] - 2025-12-28
 
 - Redesigned Settings as a full-screen view with tabbed navigation.
@@ -585,12 +579,10 @@ All notable changes to this project will be documented in this file.
 - Improved session activity status handling and message step completion logic.
 - Introduced enchanced VSCode extension settings with dynamic layout based on width.
 
-
 ## [1.3.6] - 2025-12-27
 
 - Added the ability to manage (connect/disconnect) providers in settings.
 - Adjusted auto-summarization visuals in chat.
-
 
 ## [1.3.5] - 2025-12-26
 
@@ -603,13 +595,11 @@ All notable changes to this project will be documented in this file.
 - Added Discord links in the about section.
 - Added settings for choosing the default model/agent to start with in a new session.
 
-
 ## [1.3.4] - 2025-12-25
 
 - Diff view now loads reliably even with large files and slow networks.
 - Fixed getting diffs for worktree files.
 - VS Code extension: improved type checking and editor integration.
-
 
 ## [1.3.3] - 2025-12-25
 
@@ -621,12 +611,10 @@ All notable changes to this project will be documented in this file.
 - Chat UI: improved turn grouping/activity rendering and fixed message metadata/agent selection propagation.
 - Chat UI: improved agent activity status behavior and reduced image thumbnail sizes for better readability.
 
-
 ## [1.3.2] - 2025-12-22
 
 - Fixed new bug session when switching directories
 - Updated Opencode SDK to the latest version
-
 
 ## [1.3.1] - 2025-12-22
 
@@ -634,7 +622,6 @@ All notable changes to this project will be documented in this file.
 - The app opens to a new chat by default.
 - Fixed mobile and VSCode sessions handling
 - Updated app identity with new logo and icons across all platforms.
-
 
 ## [1.3.0] - 2025-12-21
 
@@ -646,20 +633,17 @@ All notable changes to this project will be documented in this file.
 - Adjusted VSCode extension theme mapping and model selection view.
 - Polished file autocomplete experience.
 
-
 ## [1.2.9] - 2025-12-20
 
 - Session auto‑cleanup feature with configurable retention for each app version including VSCode extension.
 - Ability to update web package from mobile/PWA view in setting.
 - A lot of different optimization for a long sessions.
 
-
 ## [1.2.8] - 2025-12-19
 
 - Introduced update mechanism for web version that doesn't need any cli interaction.
 - Added installation script for web version with package managed detection.
 - Update and restart of web server now support automatic pick-up of previously set parameters like port or password.
-
 
 ## [1.2.7] - 2025-12-19
 
@@ -668,13 +652,11 @@ All notable changes to this project will be documented in this file.
 - Improved theme consistency across dropdown menus, selects, and command palette.
 - Introduced keyboard shortcuts help menu and quick actions menu.
 
-
 ## [1.2.6] - 2025-12-19
 
 - Added write/create tool preview in permission cards with syntax highlighting.
 - More descriptive assistant status messages with tool-specific and varied idle phrases.
 - Polished Git view layout
-
 
 ## [1.2.5] - 2025-12-19
 
@@ -685,12 +667,10 @@ All notable changes to this project will be documented in this file.
 - Fixed untracked files in new directories not showing individually.
 - Smoother session rename experience.
 
-
 ## [1.2.4] - 2025-12-18
 
 - MacOS app menu entries for Check for update and for creating bug/request in Help section.
 - For Mobile added settings, improved terminal scrolling, fixed app layout positioning.
-
 
 ## [1.2.3] - 2025-12-17
 
@@ -699,19 +679,16 @@ All notable changes to this project will be documented in this file.
 - Optimized git polling and background diff+syntax pre-warm for instant Diff tab open.
 - Optomized reloading unaffected diffs.
 
-
 ## [1.2.2] - 2025-12-17
 
 - Agent Task tool now renders progressively with live duration and completed sub-tools summary.
 - Unified markdown rendering between assistant messages and tool outputs.
 - Reduced markdown header sizes for better visual balance.
 
-
 ## [1.2.1] - 2025-12-16
 
 - Todo task tracking: collapsible status row showing AI's current task and progress.
 - Switched "Detailed" tool output mode to only open the 'task', 'edit', 'multiedit', 'write', 'bash' tools for better performance.
-
 
 ## [1.2.0] - 2025-12-15
 
@@ -719,8 +696,7 @@ All notable changes to this project will be documented in this file.
 - Tool call expansion settings: collapsed, activity, or detailed modes.
 - Font size & spacing controls (50-200% scaling) in Appearance Settings.
 - Settings page access within VSCode extension.
-Thanks to @theblazehen for contributing these features!
-
+  Thanks to @theblazehen for contributing these features!
 
 ## [1.1.6] - 2025-12-15
 
@@ -728,13 +704,11 @@ Thanks to @theblazehen for contributing these features!
 - Improved mobile experience: simplified header, better diff file selector.
 - Redesigned password-protected session unlock screen.
 
-
 ## [1.1.5] - 2025-12-15
 
 - Enhanced file attachment features performance.
 - Added fuzzy search feature for file mentioning with @ in chat.
 - Optimized input area layout.
-
 
 ## [1.1.4] - 2025-12-15
 
@@ -742,12 +716,10 @@ Thanks to @theblazehen for contributing these features!
 - Enchanced VSCode extension theming with editor themes.
 - Fixed mobile view model/agent selection.
 
-
 ## [1.1.3] - 2025-12-14
 
 - Replaced Monaco diff editor with Pierre/diffs for better performance.
 - Added line wrap toggle in diff view with dynamic layout switching (auto-inline when narrow).
-
 
 ## [1.1.2] - 2025-12-13
 
@@ -756,12 +728,10 @@ Thanks to @theblazehen for contributing these features!
 - Removed redundant VS Code commands.
 - Enhanced UserTextPart styling.
 
-
 ## [1.1.1] - 2025-12-13
 
 - Adjusted model/agent selection alignment.
 - Fixed user message rendering issues.
-
 
 ## [1.1.0] - 2025-12-13
 
@@ -770,7 +740,6 @@ Thanks to @theblazehen for contributing these features!
 - Improved scroll performance with force flag and RAF placeholder.
 - Added git polling backoff optimization.
 
-
 ## [1.0.9] - 2025-12-08
 
 - Added directory picker on first launch to reduce macOS permission prompts.
@@ -778,24 +747,20 @@ Thanks to @theblazehen for contributing these features!
 - Improved update dialog UI with inline version display.
 - Added macOS folder access usage descriptions.
 
-
 ## [1.0.8] - 2025-12-08
 
 - Added fallback detection for OpenCode CLI in ~/.opencode/bin.
 - Added window focus after app restart/update.
 - Adapted traffic lights position and corner radius for older macOS versions.
 
-
 ## [1.0.7] - 2025-12-08
 
 - Optimized Opencode binary detection.
 - Adjusted app update experience.
 
-
 ## [1.0.6] - 2025-12-08
 
 - Enhance shell environment detection.
-
 
 ## [1.0.5] - 2025-12-07
 
@@ -803,22 +768,18 @@ Thanks to @theblazehen for contributing these features!
 - Fixed page refresh getting stuck on splash screen.
 - Disabled devtools and page refresh in production builds.
 
-
 ## [1.0.4] - 2025-12-07
 
 - Optimized desktop app start time
-
 
 ## [1.0.3] - 2025-12-07
 
 - Updated onboarding UI.
 - Updated sidebar styles.
 
-
 ## [1.0.2] - 2025-12-07
 
 - Updated MacOS window design to the latest one.
-
 
 ## [1.0.1] - 2025-12-07
 

@@ -6,12 +6,12 @@ import { ChatView } from '@/components/views';
 import { FireworksProvider } from '@/contexts/FireworksContext';
 import { Toaster } from '@/components/ui/sonner';
 import { MemoryDebugPanel } from '@/components/ui/MemoryDebugPanel';
+import { setStreamPerfEnabled } from '@/stores/utils/streamDebug';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
-import { useEventStream } from '@/hooks/useEventStream';
+// useEventStream removed — replaced by SyncProvider + SyncBridge
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { useMenuActions } from '@/hooks/useMenuActions';
 import { useSessionStatusBootstrap } from '@/hooks/useSessionStatusBootstrap';
-import { useServerSessionStatus } from '@/hooks/useServerSessionStatus';
 import { useSessionAutoCleanup } from '@/hooks/useSessionAutoCleanup';
 import { useQueuedMessageAutoSend } from '@/hooks/useQueuedMessageAutoSend';
 import { useRouter } from '@/hooks/useRouter';
@@ -19,15 +19,16 @@ import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
 import { usePwaManifestSync } from '@/hooks/usePwaManifestSync';
 import { usePwaInstallPrompt } from '@/hooks/usePwaInstallPrompt';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
-import { useGitHubPrBackgroundTracking } from '@/hooks/useGitHubPrBackgroundTracking';
-import { GitPollingProvider } from '@/hooks/useGitPolling';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { hasModifier } from '@/lib/utils';
 import { isDesktopLocalOriginActive, isDesktopShell } from '@/lib/desktop';
 import { OnboardingScreen } from '@/components/onboarding/OnboardingScreen';
-import { useSessionStore } from '@/stores/useSessionStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { opencodeClient } from '@/lib/opencode/client';
+import { SyncProvider, useSessions } from '@/sync/sync-context';
+import { useSync } from '@/sync/use-sync';
+import { setOptimisticRefs } from '@/sync/session-actions';
 import { useFontPreferences } from '@/hooks/useFontPreferences';
 import { CODE_FONT_OPTION_MAP, DEFAULT_MONO_FONT, DEFAULT_UI_FONT, UI_FONT_OPTION_MAP } from '@/lib/fontOptions';
 import { ConfigUpdateOverlay } from '@/components/ui/ConfigUpdateOverlay';
@@ -37,15 +38,16 @@ import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { VoiceProvider } from '@/components/voice';
 import { useUIStore } from '@/stores/useUIStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
+import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import type { RuntimeAPIs } from '@/lib/api/types';
 import { TooltipProvider } from '@/components/ui/tooltip';
 
 const CLI_MISSING_ERROR_REGEX =
   /ENOENT|spawn\s+opencode|Unable\s+to\s+locate\s+the\s+opencode\s+CLI|OpenCode\s+CLI\s+not\s+found|opencode(\.exe)?\s+not\s+found|opencode(\.exe)?:\s*command\s+not\s+found|not\s+recognized\s+as\s+an\s+internal\s+or\s+external\s+command|env:\s*['"]?(node|bun)['"]?:\s*No\s+such\s+file\s+or\s+directory|(node|bun):\s*No\s+such\s+file\s+or\s+directory/i;
-const CLI_ONBOARDING_HEALTH_POLL_MS = 1500;
 
 const AboutDialogWrapper: React.FC = () => {
-  const { isAboutDialogOpen, setAboutDialogOpen } = useUIStore();
+  const isAboutDialogOpen = useUIStore((s) => s.isAboutDialogOpen);
+  const setAboutDialogOpen = useUIStore((s) => s.setAboutDialogOpen);
   return (
     <AboutDialog
       open={isAboutDialogOpen}
@@ -94,16 +96,71 @@ const readEmbeddedSessionChatConfig = (): EmbeddedSessionChatConfig | null => {
   };
 };
 
+const EmbeddedSessionSelectionGate: React.FC<{
+  embeddedSessionChat: EmbeddedSessionChatConfig | null;
+  isVSCodeRuntime: boolean;
+}> = ({ embeddedSessionChat, isVSCodeRuntime }) => {
+  const sessions = useSessions();
+  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
+
+  React.useEffect(() => {
+    if (!embeddedSessionChat || isVSCodeRuntime) {
+      return;
+    }
+
+    if (currentSessionId === embeddedSessionChat.sessionId) {
+      return;
+    }
+
+    if (!sessions.some((session) => session.id === embeddedSessionChat.sessionId)) {
+      return;
+    }
+
+    void setCurrentSession(embeddedSessionChat.sessionId);
+  }, [currentSessionId, embeddedSessionChat, isVSCodeRuntime, sessions, setCurrentSession]);
+
+  return null;
+};
+
+const SyncOptimisticBridge: React.FC = () => {
+  const sync = useSync();
+  const addRef = React.useRef(sync.optimistic.add);
+  const removeRef = React.useRef(sync.optimistic.remove);
+  addRef.current = sync.optimistic.add;
+  removeRef.current = sync.optimistic.remove;
+
+  React.useEffect(() => {
+    setOptimisticRefs(
+      (input) => addRef.current(input),
+      (input) => removeRef.current(input),
+    );
+  }, []);
+
+  return null;
+};
+
+function SyncAppEffects({ embeddedBackgroundWorkEnabled }: {
+  embeddedBackgroundWorkEnabled: boolean;
+}) {
+  usePwaManifestSync();
+  useSessionAutoCleanup(embeddedBackgroundWorkEnabled);
+  useQueuedMessageAutoSend(embeddedBackgroundWorkEnabled);
+  useKeyboardShortcuts();
+
+  return <SyncOptimisticBridge />;
+}
+
 function App({ apis }: AppProps) {
-  const { initializeApp, isInitialized, isConnected } = useConfigStore();
+  const initializeApp = useConfigStore((s) => s.initializeApp);
+  const isInitialized = useConfigStore((s) => s.isInitialized);
+  const isConnected = useConfigStore((s) => s.isConnected);
   const providersCount = useConfigStore((state) => state.providers.length);
   const agentsCount = useConfigStore((state) => state.agents.length);
   const loadProviders = useConfigStore((state) => state.loadProviders);
   const loadAgents = useConfigStore((state) => state.loadAgents);
-  const { error, clearError, loadSessions } = useSessionStore();
-  const currentSessionId = useSessionStore((state) => state.currentSessionId);
-  const setCurrentSession = useSessionStore((state) => state.setCurrentSession);
-  const sessions = useSessionStore((state) => state.sessions);
+  const error = useSessionUIStore((s) => s.error);
+  const clearError = useSessionUIStore((s) => s.clearError);
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const setDirectory = useDirectoryStore((state) => state.setDirectory);
   const isSwitchingDirectory = useDirectoryStore((state) => state.isSwitchingDirectory);
@@ -114,9 +171,18 @@ function App({ apis }: AppProps) {
   const [showCliOnboarding, setShowCliOnboarding] = React.useState(false);
   const [isEmbeddedVisible, setIsEmbeddedVisible] = React.useState(true);
   const isDesktopRuntime = React.useMemo(() => isDesktopShell(), []);
+  const setPlanModeEnabled = useFeatureFlagsStore((state) => state.setPlanModeEnabled);
   const appReadyDispatchedRef = React.useRef(false);
   const embeddedSessionChat = React.useMemo<EmbeddedSessionChatConfig | null>(() => readEmbeddedSessionChatConfig(), []);
   const embeddedBackgroundWorkEnabled = !embeddedSessionChat || isEmbeddedVisible;
+  const recentDesktopNotificationTagsRef = React.useRef<Map<string, number>>(new Map());
+
+  React.useEffect(() => {
+    setStreamPerfEnabled(showMemoryDebug);
+    return () => {
+      setStreamPerfEnabled(false);
+    };
+  }, [showMemoryDebug]);
 
   React.useEffect(() => {
     setIsVSCodeRuntime(apis.runtime.isVSCode);
@@ -134,8 +200,6 @@ function App({ apis }: AppProps) {
 
     void refreshGitHubAuthStatus(apis.github, { force: true });
   }, [apis.github, embeddedSessionChat, refreshGitHubAuthStatus]);
-
-  useGitHubPrBackgroundTracking(embeddedBackgroundWorkEnabled ? apis.github : undefined, apis.git);
 
   React.useEffect(() => {
     if (typeof document === 'undefined') {
@@ -190,6 +254,28 @@ function App({ apis }: AppProps) {
   }, [isInitialized]);
 
   React.useEffect(() => {
+    let cancelled = false;
+
+    const run = async () => {
+      const res = await fetch('/health', { method: 'GET' }).catch(() => null);
+      if (!res || !res.ok || cancelled) return;
+      const data = (await res.json().catch(() => null)) as null | {
+        planModeExperimentalEnabled?: unknown;
+      };
+      if (!data || cancelled) return;
+      const raw = data.planModeExperimentalEnabled;
+      const enabled = raw === true || raw === 1 || raw === '1' || raw === 'true';
+      setPlanModeEnabled(enabled);
+    };
+
+    void run();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [setPlanModeEnabled]);
+
+  React.useEffect(() => {
     const init = async () => {
       // VS Code runtime bootstraps config + sessions after the managed OpenCode instance reports "connected".
       // Doing the default initialization here can race with startup and lead to one-shot failures.
@@ -202,70 +288,51 @@ function App({ apis }: AppProps) {
     init();
   }, [initializeApp, isVSCodeRuntime]);
 
-  const startupRecoveryInProgressRef = React.useRef(false);
-  const startupRecoveryLastAttemptRef = React.useRef(0);
-
+  // Startup recovery: poll until providers AND agents are loaded.
+  // loadProviders/loadAgents resolve normally even on failure (errors swallowed),
+  // so a reactive effect can't detect failure — we need an interval.
   React.useEffect(() => {
-    if (isVSCodeRuntime) {
-      return;
-    }
-    if (!isConnected) {
-      return;
-    }
-    if (providersCount > 0 && agentsCount > 0) {
-      return;
-    }
-    if (startupRecoveryInProgressRef.current) {
-      return;
-    }
+    if (isVSCodeRuntime || !isConnected) return;
+    if (providersCount > 0 && agentsCount > 0) return;
 
-    const now = Date.now();
-    if (now - startupRecoveryLastAttemptRef.current < 750) {
-      return;
-    }
-
-    startupRecoveryLastAttemptRef.current = now;
-    startupRecoveryInProgressRef.current = true;
-
-    const repair = async () => {
+    let active = true;
+    let retries = 0;
+    const MAX_RETRIES = 15;
+    const attempt = async () => {
+      const state = useConfigStore.getState();
+      if (state.providers.length > 0 && state.agents.length > 0) return;
       try {
-        if (providersCount === 0) {
-          await loadProviders();
-        }
-        if (agentsCount === 0) {
-          await loadAgents();
-        }
-      } catch {
-        // Keep UI responsive; we'll retry on next cycle.
-      } finally {
-        startupRecoveryInProgressRef.current = false;
-      }
+        if (state.providers.length === 0) await loadProviders();
+        if (useConfigStore.getState().agents.length === 0) await loadAgents();
+      } catch { /* retry next interval */ }
     };
 
-    void repair();
-  }, [agentsCount, isConnected, isVSCodeRuntime, loadAgents, loadProviders, providersCount]);
+    void attempt();
+    const id = setInterval(() => {
+      if (!active) return;
+      if (++retries >= MAX_RETRIES) { clearInterval(id); return; }
+      void attempt();
+    }, 2000);
+    return () => { active = false; clearInterval(id); };
+  }, [isConnected, isVSCodeRuntime, loadAgents, loadProviders, providersCount, agentsCount]);
 
   React.useEffect(() => {
     if (isSwitchingDirectory) {
       return;
     }
 
-    const syncDirectoryAndSessions = async () => {
-      // VS Code runtime loads sessions via VSCodeLayout bootstrap to avoid startup races.
-      if (isVSCodeRuntime) {
-        return;
-      }
+    // VS Code runtime loads sessions via VSCodeLayout bootstrap to avoid startup races.
+    if (isVSCodeRuntime) {
+      return;
+    }
 
-      if (!isConnected) {
-        return;
-      }
-      opencodeClient.setDirectory(currentDirectory);
+    if (!isConnected) {
+      return;
+    }
+    opencodeClient.setDirectory(currentDirectory);
 
-      await loadSessions();
-    };
-
-    syncDirectoryAndSessions();
-  }, [currentDirectory, isSwitchingDirectory, loadSessions, isConnected, isVSCodeRuntime]);
+    // Session loading is handled by the sync system's bootstrap — no manual loadSessions needed.
+  }, [currentDirectory, isSwitchingDirectory, isConnected, isVSCodeRuntime]);
 
   React.useEffect(() => {
     if (!embeddedSessionChat || typeof window === 'undefined') {
@@ -306,6 +373,68 @@ function App({ apis }: AppProps) {
   }, [embeddedSessionChat]);
 
   React.useEffect(() => {
+    if (embeddedSessionChat || !isDesktopRuntime || typeof window === 'undefined' || typeof EventSource === 'undefined') {
+      return;
+    }
+
+    const source = new EventSource('/api/notifications/stream');
+
+    const handleMessage = (event: MessageEvent<string>) => {
+      type DesktopNotificationEvent = {
+        type?: string;
+        properties?: {
+          title?: string;
+          body?: string;
+          tag?: string;
+          desktopStdoutActive?: boolean;
+        };
+      };
+
+      let payload: DesktopNotificationEvent;
+
+      try {
+        payload = JSON.parse(event.data) as DesktopNotificationEvent;
+      } catch {
+        return;
+      }
+
+      if (payload?.type !== 'openchamber:notification') {
+        return;
+      }
+
+      if (payload.properties?.desktopStdoutActive === true) {
+        return;
+      }
+
+      const tag = typeof payload.properties?.tag === 'string' ? payload.properties.tag : '';
+      if (tag) {
+        const now = Date.now();
+        const lastSeenAt = recentDesktopNotificationTagsRef.current.get(tag) ?? 0;
+        if (now - lastSeenAt < 5000) {
+          return;
+        }
+        recentDesktopNotificationTagsRef.current.set(tag, now);
+      }
+
+      void apis.notifications.notifyAgentCompletion({
+        title: payload.properties?.title,
+        body: payload.properties?.body,
+        tag: tag || undefined,
+      });
+    };
+
+    source.addEventListener('message', handleMessage as EventListener);
+    source.onerror = () => {
+      // Let EventSource reconnect automatically.
+    };
+
+    return () => {
+      source.removeEventListener('message', handleMessage as EventListener);
+      source.close();
+    };
+  }, [apis.notifications, embeddedSessionChat, isDesktopRuntime]);
+
+  React.useEffect(() => {
     if (!embeddedSessionChat?.directory || isVSCodeRuntime) {
       return;
     }
@@ -316,22 +445,6 @@ function App({ apis }: AppProps) {
 
     setDirectory(embeddedSessionChat.directory, { showOverlay: false });
   }, [currentDirectory, embeddedSessionChat, isVSCodeRuntime, setDirectory]);
-
-  React.useEffect(() => {
-    if (!embeddedSessionChat || isVSCodeRuntime) {
-      return;
-    }
-
-    if (currentSessionId === embeddedSessionChat.sessionId) {
-      return;
-    }
-
-    if (!sessions.some((session) => session.id === embeddedSessionChat.sessionId)) {
-      return;
-    }
-
-    void setCurrentSession(embeddedSessionChat.sessionId);
-  }, [currentSessionId, embeddedSessionChat, isVSCodeRuntime, sessions, setCurrentSession]);
 
   React.useEffect(() => {
     if (!embeddedSessionChat || typeof window === 'undefined') {
@@ -365,21 +478,16 @@ function App({ apis }: AppProps) {
     window.dispatchEvent(new Event('openchamber:app-ready'));
   }, [isInitialized, isSwitchingDirectory]);
 
-  useEventStream({ enabled: embeddedBackgroundWorkEnabled });
+  // useEventStream replaced by SyncProvider + SyncBridge
 
-  // Server-authoritative session status polling
-  // Replaces SSE-dependent status updates with reliable HTTP polling
-  useServerSessionStatus({ enabled: embeddedBackgroundWorkEnabled });
+  // Session attention now handled by notification-store via SSE events (session.idle/session.error)
 
   usePushVisibilityBeacon({ enabled: embeddedBackgroundWorkEnabled });
-  usePwaManifestSync();
   usePwaInstallPrompt();
 
   useWindowTitle();
 
   useRouter();
-
-  useKeyboardShortcuts();
 
   const handleToggleMemoryDebug = React.useCallback(() => {
     setShowMemoryDebug(prev => !prev);
@@ -388,8 +496,6 @@ function App({ apis }: AppProps) {
   useMenuActions(handleToggleMemoryDebug);
 
   useSessionStatusBootstrap({ enabled: embeddedBackgroundWorkEnabled });
-  useSessionAutoCleanup({ enabled: embeddedBackgroundWorkEnabled });
-  useQueuedMessageAutoSend({ enabled: embeddedBackgroundWorkEnabled });
 
   React.useEffect(() => {
     if (embeddedSessionChat) {
@@ -397,14 +503,19 @@ function App({ apis }: AppProps) {
     }
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (hasModifier(e) && e.shiftKey && e.key === 'D') {
+      const isDebugShortcut = hasModifier(e)
+        && e.shiftKey
+        && !e.altKey
+        && (e.code === 'KeyD' || e.key.toLowerCase() === 'd');
+
+      if (isDebugShortcut) {
         e.preventDefault();
         setShowMemoryDebug(prev => !prev);
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [embeddedSessionChat]);
 
   React.useEffect(() => {
@@ -450,13 +561,9 @@ function App({ apis }: AppProps) {
     };
 
     void run();
-    const interval = window.setInterval(() => {
-      void run();
-    }, CLI_ONBOARDING_HEALTH_POLL_MS);
 
     return () => {
       cancelled = true;
-      window.clearInterval(interval);
     };
   }, [embeddedSessionChat]);
 
@@ -468,7 +575,7 @@ function App({ apis }: AppProps) {
   if (showCliOnboarding) {
     return (
       <ErrorBoundary>
-        <div className="h-full text-foreground bg-transparent">
+        <div className="h-full text-foreground bg-background">
           <OnboardingScreen onCliAvailable={handleCliAvailable} />
         </div>
       </ErrorBoundary>
@@ -478,14 +585,18 @@ function App({ apis }: AppProps) {
   if (embeddedSessionChat) {
     return (
       <ErrorBoundary>
-        <RuntimeAPIProvider apis={apis}>
-          <TooltipProvider delayDuration={700} skipDelayDuration={150}>
-            <div className="h-full text-foreground bg-background">
-              <ChatView />
-              <Toaster />
-            </div>
-          </TooltipProvider>
-        </RuntimeAPIProvider>
+        <SyncProvider sdk={opencodeClient.getSdkClient()} directory={currentDirectory || ''}>
+          <RuntimeAPIProvider apis={apis}>
+            <TooltipProvider delayDuration={700} skipDelayDuration={150}>
+              <div className="h-full text-foreground bg-background">
+                <EmbeddedSessionSelectionGate embeddedSessionChat={embeddedSessionChat} isVSCodeRuntime={isVSCodeRuntime} />
+                <SyncAppEffects embeddedBackgroundWorkEnabled={embeddedBackgroundWorkEnabled} />
+                <ChatView />
+                <Toaster />
+              </div>
+            </TooltipProvider>
+          </RuntimeAPIProvider>
+        </SyncProvider>
       </ErrorBoundary>
     );
   }
@@ -493,49 +604,56 @@ function App({ apis }: AppProps) {
   // VS Code runtime - simplified layout without git/terminal views
   if (isVSCodeRuntime) {
     // Check if this is the Agent Manager panel
-    const panelType = typeof window !== 'undefined' 
-      ? (window as { __OPENCHAMBER_PANEL_TYPE__?: 'chat' | 'agentManager' }).__OPENCHAMBER_PANEL_TYPE__ 
+    const panelType = typeof window !== 'undefined'
+      ? (window as { __OPENCHAMBER_PANEL_TYPE__?: 'chat' | 'agentManager' }).__OPENCHAMBER_PANEL_TYPE__
       : 'chat';
-    
+
     if (panelType === 'agentManager') {
     return (
       <ErrorBoundary>
-        <RuntimeAPIProvider apis={apis}>
-          <TooltipProvider delayDuration={700} skipDelayDuration={150}>
-            <div className="h-full text-foreground bg-background">
-              <AgentManagerView />
-              <Toaster />
-            </div>
-          </TooltipProvider>
-        </RuntimeAPIProvider>
-      </ErrorBoundary>
-    );
-    }
-    
-    return (
-      <ErrorBoundary>
-        <RuntimeAPIProvider apis={apis}>
-          <FireworksProvider>
+        <SyncProvider sdk={opencodeClient.getSdkClient()} directory={currentDirectory || ''}>
+          <RuntimeAPIProvider apis={apis}>
             <TooltipProvider delayDuration={700} skipDelayDuration={150}>
               <div className="h-full text-foreground bg-background">
-                <VSCodeLayout />
+                <SyncAppEffects embeddedBackgroundWorkEnabled={embeddedBackgroundWorkEnabled} />
+                <AgentManagerView />
                 <Toaster />
               </div>
             </TooltipProvider>
-          </FireworksProvider>
-        </RuntimeAPIProvider>
+          </RuntimeAPIProvider>
+        </SyncProvider>
+      </ErrorBoundary>
+    );
+    }
+
+    return (
+      <ErrorBoundary>
+        <SyncProvider sdk={opencodeClient.getSdkClient()} directory={currentDirectory || ''}>
+          <RuntimeAPIProvider apis={apis}>
+            <FireworksProvider>
+              <TooltipProvider delayDuration={700} skipDelayDuration={150}>
+                <div className="h-full text-foreground bg-background">
+                  <SyncAppEffects embeddedBackgroundWorkEnabled={embeddedBackgroundWorkEnabled} />
+                  <VSCodeLayout />
+                  <Toaster />
+                </div>
+              </TooltipProvider>
+            </FireworksProvider>
+          </RuntimeAPIProvider>
+        </SyncProvider>
       </ErrorBoundary>
     );
   }
 
   return (
     <ErrorBoundary>
-      <RuntimeAPIProvider apis={apis}>
-        <GitPollingProvider>
+      <SyncProvider sdk={opencodeClient.getSdkClient()} directory={currentDirectory || ''}>
+        <RuntimeAPIProvider apis={apis}>
           <FireworksProvider>
             <VoiceProvider>
               <TooltipProvider delayDuration={700} skipDelayDuration={150}>
-                <div className={isDesktopRuntime ? 'h-full text-foreground bg-transparent' : 'h-full text-foreground bg-background'}>
+                <div className="h-full text-foreground bg-background">
+                  <SyncAppEffects embeddedBackgroundWorkEnabled={embeddedBackgroundWorkEnabled} />
                   <MainLayout />
                   <Toaster />
                   <ConfigUpdateOverlay />
@@ -547,8 +665,8 @@ function App({ apis }: AppProps) {
               </TooltipProvider>
             </VoiceProvider>
           </FireworksProvider>
-        </GitPollingProvider>
-      </RuntimeAPIProvider>
+        </RuntimeAPIProvider>
+      </SyncProvider>
     </ErrorBoundary>
   );
 }

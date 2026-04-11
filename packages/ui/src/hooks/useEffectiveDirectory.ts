@@ -1,27 +1,25 @@
-import { useSessionStore } from '@/stores/useSessionStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSessionDirectory } from '@/sync/sync-context';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import type { Session } from '@opencode-ai/sdk/v2';
 
 /**
  * Hook that resolves the effective working directory for tabs (Git, Diff, Files, Terminal).
- * 
+ *
  * Priority order:
  * 1. Worktree metadata path (for worktree sessions)
  * 2. Session directory (for active sessions)
  * 3. Draft session directoryOverride (when creating a new session)
  * 4. Fallback directory from DirectoryStore
- * 
+ *
  * This ensures that tabs show content from the correct project directory
  * even when a draft session is being created.
  */
 export const useEffectiveDirectory = (): string | undefined => {
-    const {
-        currentSessionId,
-        sessions,
-        worktreeMetadata: worktreeMap,
-        newSessionDraft,
-    } = useSessionStore();
-    const { currentDirectory: fallbackDirectory } = useDirectoryStore();
+    const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
+    const newSessionDraft = useSessionUIStore((s) => s.newSessionDraft);
+    const currentSessionDirectory = useSessionDirectory(currentSessionId);
+    const worktreeMap = useSessionUIStore((s) => s.worktreeMetadata);
+    const fallbackDirectory = useDirectoryStore((s) => s.currentDirectory);
 
     // If we have an active session, use its directory
     if (currentSessionId) {
@@ -29,12 +27,8 @@ export const useEffectiveDirectory = (): string | undefined => {
         if (worktreeMetadata?.path) {
             return worktreeMetadata.path;
         }
-
-        const currentSession = sessions.find((session) => session.id === currentSessionId);
-        type SessionWithDirectory = Session & { directory?: string };
-        const sessionDirectory = (currentSession as SessionWithDirectory | undefined)?.directory;
-        if (sessionDirectory) {
-            return sessionDirectory;
+        if (currentSessionDirectory) {
+            return currentSessionDirectory;
         }
     }
 

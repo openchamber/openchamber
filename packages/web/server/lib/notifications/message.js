@@ -9,6 +9,26 @@ const resolvePositiveNumber = (value, fallback) => {
   return value;
 };
 
+const normalizeNotificationPlainText = (text) => {
+  if (typeof text !== 'string') {
+    return '';
+  }
+
+  return text
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`([^`]*)`/g, '$1')
+    .replace(/^[\t ]*[-*+]\s+/gm, '')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/__(.*?)__/g, '$1')
+    .replace(/\*(.*?)\*/g, '$1')
+    .replace(/_(.*?)_/g, '$1')
+    .replace(/\[(.*?)\]\((.*?)\)/g, '$1')
+    .replace(/\s*\n\s*/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+};
+
 export const truncateNotificationText = (text, maxLength = DEFAULT_NOTIFICATION_MESSAGE_MAX_LENGTH) => {
   if (typeof text !== 'string') {
     return '';
@@ -45,5 +65,6 @@ export const prepareNotificationLastMessage = async ({ message, settings, summar
     }
   }
 
-  return truncateNotificationText(messageForNotification, maxLastMessageLength);
+  const plainTextMessage = normalizeNotificationPlainText(messageForNotification) || normalizeNotificationPlainText(originalMessage);
+  return truncateNotificationText(plainTextMessage, maxLastMessageLength);
 };

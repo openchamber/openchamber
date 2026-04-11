@@ -1,6 +1,7 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
-import { useSessionStore } from '@/stores/useSessionStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useInputStore } from '@/sync/input-store';
 import { useUIStore } from '@/stores/useUIStore';
 import { RiChatNewLine, RiAddLine, RiFileCopyLine } from '@remixicon/react';
 import { cn } from '@/lib/utils';
@@ -196,8 +197,8 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
   const pendingSelectionRef = React.useRef<SelectionPayload | null>(null);
   const openRafRef = React.useRef<number | null>(null);
   const isMenuVisibleRef = React.useRef(false);
-  const createSession = useSessionStore((state) => state.createSession);
-  const setPendingInputText = useSessionStore((state) => state.setPendingInputText);
+  const createSession = useSessionUIStore((state) => state.createSession);
+  const setPendingInputText = useInputStore((state) => state.setPendingInputText);
   const isMobile = useUIStore((state) => state.isMobile);
 
   React.useEffect(() => {
@@ -473,8 +474,6 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
         )}
         style={{
           paddingBottom: 'calc(0.5rem + env(safe-area-inset-bottom, 0px))',
-          backdropFilter: 'blur(28px)',
-          WebkitBackdropFilter: 'blur(28px)',
         }}
       >
         <button
@@ -546,10 +545,6 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
           'transition-[opacity,transform] duration-200 ease-out will-change-[opacity,transform]',
           isOpening ? 'opacity-0 translate-y-[4px]' : 'opacity-100 translate-y-0'
         )}
-        style={{
-          backdropFilter: 'blur(28px)',
-          WebkitBackdropFilter: 'blur(28px)',
-        }}
       >
         <button
           onClick={handleAddToChat}

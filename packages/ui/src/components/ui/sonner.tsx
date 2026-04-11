@@ -15,8 +15,6 @@ const Toaster = ({ ...props }: ToasterProps) => {
       toastOptions={{
         style: {
           borderRadius: "var(--radius-lg)",
-          backdropFilter: 'blur(28px)',
-          WebkitBackdropFilter: 'blur(28px)',
         },
         classNames: {
           toast: "rounded-[var(--radius-lg)]",

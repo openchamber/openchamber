@@ -820,6 +820,25 @@ const getProjectStoragePath = (projectID) => {
   return path.join(getOpenCodeDataPath(), 'storage', 'project', `${projectID}.json`);
 };
 
+const syncSandboxesToOpenCodeDb = (projectID, sandboxes) => {
+  try {
+    const { Database } = require('bun:sqlite');
+    const dbPath = path.join(getOpenCodeDataPath(), 'opencode.db');
+    if (!fs.existsSync(dbPath)) return;
+    const db = new Database(dbPath);
+    try {
+      const row = db.query('SELECT sandboxes FROM project WHERE id = ?').get(projectID);
+      if (!row) return;
+      const json = JSON.stringify(sandboxes);
+      db.query('UPDATE project SET sandboxes = ?, time_updated = ? WHERE id = ?').run(json, Date.now(), projectID);
+    } finally {
+      db.close();
+    }
+  } catch (error) {
+    console.warn('Failed to sync sandboxes to OpenCode DB:', error instanceof Error ? error.message : String(error));
+  }
+};
+
 const updateProjectSandboxes = async (projectID, primaryWorktree, updater) => {
   const storagePath = getProjectStoragePath(projectID);
   await fsp.mkdir(path.dirname(storagePath), { recursive: true });
@@ -859,6 +878,9 @@ const updateProjectSandboxes = async (projectID, primaryWorktree, updater) => {
   )];
 
   await fsp.writeFile(storagePath, `${JSON.stringify(current, null, 2)}\n`, 'utf8');
+
+  // Sync to OpenCode's SQLite database so project.sandboxes is visible via the SDK
+  syncSandboxesToOpenCodeDb(projectID, current.sandboxes);
 };
 
 const syncProjectSandboxAdd = async (projectID, primaryWorktree, sandboxPath) => {
@@ -1187,18 +1209,22 @@ export async function setLocalIdentity(directory, profile) {
   }
 }
 
-export async function getStatus(directory) {
+export async function getStatus(directory, options = {}) {
   const directoryPath = normalizeDirectoryPath(directory);
   const git = await createGit(directoryPath);
+  const lightMode = options.mode === 'light';
 
   try {
     // Use -uall to show all untracked files individually, not just directories
     const status = await git.status(['-uall']);
 
-    const [stagedStatsRaw, workingStatsRaw] = await Promise.all([
-      git.raw(['diff', '--cached', '--numstat']).catch(() => ''),
-      git.raw(['diff', '--numstat']).catch(() => ''),
-    ]);
+    // Light mode: skip numstat + new-file line counting for faster response
+    const [stagedStatsRaw, workingStatsRaw] = lightMode
+      ? ['', '']
+      : await Promise.all([
+          git.raw(['diff', '--cached', '--numstat']).catch(() => ''),
+          git.raw(['diff', '--numstat']).catch(() => ''),
+        ]);
 
     const diffStatsMap = new Map();
 
@@ -1234,7 +1260,7 @@ export async function getStatus(directory) {
 
     const diffStats = Object.fromEntries(diffStatsMap.entries());
 
-    const newFileStats = await Promise.all(
+    const newFileStats = lightMode ? [] : await Promise.all(
       status.files.map(async (file) => {
         const working = (file.working_dir || '').trim();
         const indexStatus = (file.index || '').trim();
@@ -1333,7 +1359,8 @@ export async function getStatus(directory) {
 
     // When no upstream is configured (common for new worktree branches), Git doesn't report ahead/behind.
     // We still want to show the number of unpublished commits to the user.
-    if (!tracking && status.current) {
+    // Light mode skips this — the basic ahead/behind from git status is sufficient for polling.
+    if (!lightMode && !tracking && status.current) {
       const baseRef = await selectBaseRefForUnpublished();
       if (baseRef) {
         const countRaw = await git
@@ -1411,7 +1438,7 @@ export async function getStatus(directory) {
         working_dir: f.working_dir,
       })),
       isClean: status.isClean(),
-      diffStats,
+      diffStats: lightMode ? undefined : diffStats,
       mergeInProgress,
       rebaseInProgress,
     };

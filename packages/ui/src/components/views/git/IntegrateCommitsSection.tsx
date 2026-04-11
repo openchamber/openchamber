@@ -15,9 +15,11 @@ import {
   CommandList,
 } from '@/components/ui/command';
 import { toast } from '@/components/ui';
-import { useSessionStore } from '@/stores/useSessionStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useInputStore } from '@/sync/input-store';
 import { useUIStore } from '@/stores/useUIStore';
 import { execCommand } from '@/lib/execCommands';
+import { renderMagicPrompt } from '@/lib/magicPrompts';
 import {
   abortIntegrate,
   computeIntegratePlan,
@@ -55,7 +57,7 @@ export const IntegrateCommitsSection: React.FC<{
   refreshKey,
   onRefresh,
 }) => {
-  const currentSessionId = useSessionStore((s) => s.currentSessionId);
+  const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
   const setActiveMainTab = useUIStore((s) => s.setActiveMainTab);
   const [branchDropdownOpen, setBranchDropdownOpen] = React.useState(false);
   const searchInputRef = React.useRef<HTMLInputElement>(null);
@@ -92,6 +94,7 @@ export const IntegrateCommitsSection: React.FC<{
     if (!conflictStorageKey || typeof window === 'undefined') return;
     const raw = window.localStorage.getItem(conflictStorageKey);
     if (!raw) return;
+    let cancelled = false;
     try {
       const parsed = JSON.parse(raw) as IntegrateInProgress;
       if (!parsed?.tempWorktreePath || parsed.repoRoot !== repoRoot) {
@@ -100,11 +103,13 @@ export const IntegrateCommitsSection: React.FC<{
       }
       void (async () => {
         const ok = await isCherryPickInProgress(parsed.tempWorktreePath).catch(() => false);
+        if (cancelled) return;
         if (!ok) {
           window.localStorage.removeItem(conflictStorageKey);
           return;
         }
         const details = await getIntegrateConflictDetails(parsed.tempWorktreePath).catch(() => null);
+        if (cancelled) return;
         if (!details) {
           return;
         }
@@ -113,6 +118,9 @@ export const IntegrateCommitsSection: React.FC<{
     } catch {
       window.localStorage.removeItem(conflictStorageKey);
     }
+    return () => {
+      cancelled = true;
+    };
   }, [conflictStorageKey, repoRoot]);
 
   React.useEffect(() => {
@@ -167,7 +175,7 @@ export const IntegrateCommitsSection: React.FC<{
   const persistTarget = React.useCallback(
     (branch: string) => {
       if (!currentSessionId) return;
-      useSessionStore.getState().setWorktreeMetadata(currentSessionId, {
+      useSessionUIStore.getState().setWorktreeMetadata(currentSessionId, {
         ...worktreeMetadata,
         createdFromBranch: branch,
       });
@@ -175,31 +183,20 @@ export const IntegrateCommitsSection: React.FC<{
     [currentSessionId, worktreeMetadata]
   );
 
-  const openNewSessionDraft = useSessionStore((s) => s.openNewSessionDraft);
+  const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
 
-  const buildConflictContext = React.useCallback((payload: { state: IntegrateInProgress; details: IntegrateConflictDetails }) => {
-    const visibleText = `Resolve cherry-pick conflicts, stage the resolved files, and continue the cherry-pick. Keep intent of commit ${payload.state.currentCommit} onto branch ${payload.state.targetBranch}.`;
-    const instructionsText = `Worktree commit integration (cherry-pick) is in progress with conflicts.
-- Repo root: ${payload.state.repoRoot}
-- Temp target worktree: ${payload.state.tempWorktreePath}
-- Source branch: ${payload.state.sourceBranch}
-- Target branch: ${payload.state.targetBranch}
-- Current commit: ${payload.state.currentCommit}
-
-Required steps:
-1. Read each conflicted file in the temp worktree to understand the conflict markers (<<<<<<< HEAD, =======, >>>>>>> ...)
-2. Edit each file to resolve conflicts by choosing the correct code or merging both changes appropriately
-3. Stage all resolved files with: git add <file>
-4. Complete the cherry-pick with: git cherry-pick --continue
-
-Important:
-- Work inside the temp worktree directory: ${payload.state.tempWorktreePath}
-- Remove ALL conflict markers from files (<<<<<<< HEAD, =======, >>>>>>>)
-- Preserve the intent of the commit being applied
-- Make sure the final code is syntactically correct
-- Do not leave any files with unresolved conflict markers
-- After completing all steps, confirm the cherry-pick was successful
-`;
+  const buildConflictContext = React.useCallback(async (payload: { state: IntegrateInProgress; details: IntegrateConflictDetails }) => {
+    const visibleText = await renderMagicPrompt('git.integrate.cherrypick.resolve.visible', {
+      current_commit: payload.state.currentCommit,
+      target_branch: payload.state.targetBranch,
+    });
+    const instructionsText = await renderMagicPrompt('git.integrate.cherrypick.resolve.instructions', {
+      repo_root: payload.state.repoRoot,
+      temp_worktree_path: payload.state.tempWorktreePath,
+      source_branch: payload.state.sourceBranch,
+      target_branch: payload.state.targetBranch,
+      current_commit: payload.state.currentCommit,
+    });
     const payloadText = `Cherry-pick conflict context (JSON)\n${JSON.stringify({
       repoRoot: payload.state.repoRoot,
       tempWorktreePath: payload.state.tempWorktreePath,
@@ -217,14 +214,14 @@ Important:
     return { visibleText, instructionsText, payloadText };
   }, []);
 
-  const setPendingInputText = useSessionStore((s) => s.setPendingInputText);
-  const setPendingSyntheticParts = useSessionStore((s) => s.setPendingSyntheticParts);
+  const setPendingInputText = useInputStore((s) => s.setPendingInputText);
+  const setPendingSyntheticParts = useInputStore((s) => s.setPendingSyntheticParts);
 
-  const handleResolveWithAi = React.useCallback((
+  const handleResolveWithAi = React.useCallback(async (
     payload: { state: IntegrateInProgress; details: IntegrateConflictDetails },
     useNewSession: boolean
   ) => {
-    const context = buildConflictContext(payload);
+    const context = await buildConflictContext(payload);
 
     if (useNewSession) {
       // Open new session with the conflict context as initial prompt + synthetic parts

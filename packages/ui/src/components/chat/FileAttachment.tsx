@@ -1,6 +1,7 @@
 import React, { useRef, memo } from 'react';
 import { RiAttachment2, RiCloseLine, RiFileImageLine, RiFileLine, RiFilePdfLine, RiGithubLine, RiGitPullRequestLine } from '@remixicon/react';
-import { useSessionStore, type AttachedFile } from '@/stores/useSessionStore';
+import { useInputStore } from '@/sync/input-store';
+import type { AttachedFile } from '@/sync/session-ui-store';
 import { useUIStore } from '@/stores/useUIStore';
 import { toast } from '@/components/ui';
 import { cn } from '@/lib/utils';
@@ -13,8 +14,8 @@ import type { ToolPopupContent } from './message/types';
 
 export const FileAttachmentButton = memo(() => {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { addAttachedFile } = useSessionStore();
-  const { isMobile } = useUIStore();
+  const addAttachedFile = useInputStore((state) => state.addAttachedFile);
+  const isMobile = useUIStore((state) => state.isMobile);
   const isVSCodeRuntime = useIsVSCodeRuntime();
   const buttonSizeClass = isMobile ? 'h-9 w-9' : 'h-7 w-7';
   const iconSizeClass = isMobile ? 'h-5 w-5' : 'h-[18px] w-[18px]';
@@ -255,7 +256,8 @@ const FileChip = memo(({ file, onRemove }: FileChipProps) => {
 FileChip.displayName = 'FileChip';
 
 export const AttachedFilesList = memo(() => {
-  const { attachedFiles, removeAttachedFile } = useSessionStore();
+  const attachedFiles = useInputStore((state) => state.attachedFiles);
+  const removeAttachedFile = useInputStore((state) => state.removeAttachedFile);
 
   const localFiles = attachedFiles.filter((file) => file.source !== 'server');
 

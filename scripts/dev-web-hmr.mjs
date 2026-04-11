@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
+import { existsSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -7,6 +8,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '..');
 const useDetachedChildren = process.platform === 'darwin';
+const webRoot = path.join(repoRoot, 'packages/web');
 
 function run(label, command, args, env = {}, options = {}) {
   return spawn(command, args, {
@@ -81,18 +83,32 @@ async function stopChildTree(child) {
 const uiPort = process.env.OPENCHAMBER_HMR_UI_PORT || '5180';
 const backendPort = process.env.OPENCHAMBER_HMR_API_PORT || '3902';
 
+function clearViteCache() {
+  const cacheDirs = [
+    path.join(webRoot, 'node_modules/.vite'),
+    path.join(webRoot, 'node_modules/.vite-temp'),
+  ];
+
+  for (const cacheDir of cacheDirs) {
+    if (!existsSync(cacheDir)) continue;
+    rmSync(cacheDir, { recursive: true, force: true });
+  }
+}
+
+clearViteCache();
+
 const api = run('api', 'bun', ['run', '--cwd', 'packages/web', 'dev:server:watch'], {
   OPENCHAMBER_PORT: backendPort,
 });
 const vite = run(
   'vite',
   'bun',
-  ['x', 'vite', '--host', '127.0.0.1', '--port', uiPort, '--strictPort'],
+  ['x', 'vite', '--force', '--host', '127.0.0.1', '--port', uiPort, '--strictPort'],
   {
     OPENCHAMBER_PORT: backendPort,
     OPENCHAMBER_DISABLE_PWA_DEV: '1',
   },
-  { cwd: path.join(repoRoot, 'packages/web') },
+  { cwd: webRoot },
 );
 
 console.log(`[dev:web:hmr] UI with HMR: http://127.0.0.1:${uiPort}`);

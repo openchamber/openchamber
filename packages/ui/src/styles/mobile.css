@@ -150,8 +150,8 @@
     -webkit-overflow-scrolling: touch;
   }
 
-  /* Keep Streamdown code blocks horizontally scrollable on mobile. */
-  :root.mobile-pointer:not(.desktop-runtime) .streamdown-content [data-streamdown="code-block-body"] {
+  /* Keep markdown code blocks horizontally scrollable on mobile. */
+  :root.mobile-pointer:not(.desktop-runtime) .markdown-content [data-markdown="code-block-body"] {
     overflow-x: auto !important;
     overflow-y: hidden !important;
     -webkit-overflow-scrolling: touch;
@@ -257,7 +257,7 @@
   /* iOS-specific safe area handling with CSS variable support */
   @supports (-webkit-touch-callout: none) {
     /* Safe area handling for fixed positioned elements */
-    :root {
+    :root.device-mobile:not(.desktop-runtime) {
       --oc-safe-area-top: env(safe-area-inset-top, 0);
       --oc-safe-area-right: env(safe-area-inset-right, 0);
       --oc-safe-area-bottom: env(safe-area-inset-bottom, 0);
@@ -265,11 +265,11 @@
       --oc-safe-area-left: env(safe-area-inset-left, 0);
     }
 
-    .header-safe-area {
+    :root.device-mobile:not(.desktop-runtime) .header-safe-area {
       padding-top: var(--oc-safe-area-top);
     }
 
-    .main-content-safe-area {
+    :root.device-mobile:not(.desktop-runtime) .main-content-safe-area {
       padding-top: 0;
       padding-bottom: 0;
       padding-left: var(--oc-safe-area-left);
@@ -277,23 +277,23 @@
     }
 
     /* Safe area for bottom fixed/bottom-0 elements */
-    .bottom-safe-area {
+    :root.device-mobile:not(.desktop-runtime) .bottom-safe-area {
       padding-bottom: var(--oc-safe-area-bottom-visual) !important;
     }
 
-    /* Drawer safe area - only top/bottom padding, no positioning */
-    .drawer-safe-area {
-      padding-top: var(--oc-safe-area-top);
+    /* Drawer safe area - top already offset by header height */
+    :root.device-mobile:not(.desktop-runtime) .drawer-safe-area {
+      padding-top: 0;
       padding-bottom: var(--oc-safe-area-bottom-visual);
     }
 
     /* iOS keyboard home indicator safe area - used when keyboard is open */
-    .ios-keyboard-safe-area {
+    :root.device-mobile:not(.desktop-runtime) .ios-keyboard-safe-area {
       padding-bottom: calc(var(--oc-keyboard-home-indicator, 34px) + var(--oc-safe-area-bottom-visual, 0px)) !important;
     }
 
     /* Prevent keyboard-induced page scroll on iOS PWA */
-    body {
+    :root.device-mobile:not(.desktop-runtime) body {
       min-height: 100vh;
       min-height: -webkit-fill-available;
       position: fixed;
@@ -304,24 +304,24 @@
     }
 
     /* Fix iOS viewport issues */
-    .flex.flex-col.h-screen {
+    :root.device-mobile:not(.desktop-runtime) .flex.flex-col.h-screen {
       min-height: 100vh;
       min-height: -webkit-fill-available;
     }
 
     /* Prevent content overlap in iOS */
-    .flex-1.overflow-hidden {
+    :root.device-mobile:not(.desktop-runtime) .flex-1.overflow-hidden {
       position: relative;
       overflow-y: auto;
       -webkit-overflow-scrolling: touch;
     }
 
     /* Update header height for iOS */
-    .header-safe-area {
+    :root.device-mobile:not(.desktop-runtime) .header-safe-area {
       --header-height: 4.5rem;
     }
 
-    .mobile-sidebar-top {
+    :root.device-mobile:not(.desktop-runtime) .mobile-sidebar-top {
       --header-height: 4.5rem;
     }
 
@@ -358,7 +358,7 @@
 
   /* Fallback for non-iOS standalone mode */
   @supports not (-webkit-touch-callout: none) {
-    :root {
+    :root.device-mobile:not(.desktop-runtime) {
       --oc-safe-area-top: env(safe-area-inset-top, 0);
       --oc-safe-area-right: env(safe-area-inset-right, 0);
       --oc-safe-area-bottom: env(safe-area-inset-bottom, 0);
@@ -366,18 +366,18 @@
       --oc-safe-area-left: env(safe-area-inset-left, 0);
     }
 
-    .header-safe-area {
+    :root.device-mobile:not(.desktop-runtime) .header-safe-area {
       padding-top: var(--oc-safe-area-top);
     }
 
-    .main-content-safe-area {
+    :root.device-mobile:not(.desktop-runtime) .main-content-safe-area {
       padding-top: 0;
       padding-bottom: 0;
       padding-left: var(--oc-safe-area-left);
       padding-right: var(--oc-safe-area-right);
     }
 
-    .bottom-safe-area {
+    :root.device-mobile:not(.desktop-runtime) .bottom-safe-area {
       padding-bottom: var(--oc-safe-area-bottom-visual) !important;
     }
   }
@@ -438,8 +438,8 @@
 }
 
 @media (display-mode: standalone) {
-  /* Home indicator blur overlay */
-  body::after {
+  /* Home indicator overlay */
+  :root.device-mobile:not(.desktop-runtime) body::after {
     content: '';
     position: fixed;
     bottom: 0;
@@ -454,15 +454,13 @@
       rgba(from var(--background) r g b / 0.3) 85%,
       transparent 100%
     );
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
     z-index: 1000;
     pointer-events: none;
   }
 
   /* Fallback for browsers without rgba(from ...) support */
   @supports not (color: rgba(from white r g b / 0.5)) {
-    body::after {
+    :root.device-mobile:not(.desktop-runtime) body::after {
       background: linear-gradient(
         to top,
         var(--background) 0%,

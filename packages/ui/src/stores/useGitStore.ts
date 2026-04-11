@@ -1,3 +1,4 @@
+import React from 'react';
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import type {
@@ -7,18 +8,16 @@ import type {
   GitIdentitySummary,
 } from '@/lib/api/types';
 
-const GIT_POLL_BASE_INTERVAL = 10000;
-const GIT_POLL_MAX_INTERVAL = 30000;
-const GIT_POLL_BUSY_BASE_INTERVAL = 15000;
-const GIT_POLL_BUSY_MAX_INTERVAL = 40000;
-const GIT_POLL_BACKOFF_STEP = 5000;
 const LOG_STALE_THRESHOLD = 10000;
 const REPO_CHECK_STALE_THRESHOLD = 60_000;
+const STATUS_STALE_THRESHOLD = 5_000;
+const BRANCHES_STALE_THRESHOLD = 30_000;
+const IDENTITY_STALE_THRESHOLD = 60_000;
 const DIFF_PREFETCH_MAX_FILES = 25;
 const DIFF_PREFETCH_FOCUS_MAX_FILES = 40;
-const DIFF_PREFETCH_CONCURRENCY = 4;
+const DIFF_PREFETCH_CONCURRENCY = 2;
 const DIFF_PREFETCH_TIMEOUT_MS = 15000;
-const RECENT_DIRECTORIES_LIMIT = 3;
+const DIFF_PREFETCH_LARGE_FILE_THRESHOLD = 500; // skip prefetch for files with >500 changed lines
 
 // Diff cache limits to prevent memory bloat with many modified files
 const DIFF_CACHE_MAX_ENTRIES = 30;
@@ -35,7 +34,13 @@ interface DirectoryGitState {
   lastStatusFetch: number;
   lastStatusChange: number;
   lastLogFetch: number;
+  lastBranchesFetch: number;
+  lastIdentityFetch: number;
   logMaxCount: number;
+  isLoadingStatus: boolean;
+  isLoadingLog: boolean;
+  isLoadingBranches: boolean;
+  isLoadingIdentity: boolean;
 }
 
 interface GitStore {
@@ -43,25 +48,18 @@ interface GitStore {
   directories: Map<string, DirectoryGitState>;
 
   activeDirectory: string | null;
-  recentDirectories: string[];
-
-  isLoadingStatus: boolean;
-  isLoadingLog: boolean;
-  isLoadingBranches: boolean;
-  isLoadingIdentity: boolean;
-
-  pollIntervalId: ReturnType<typeof setTimeout> | null;
-  currentPollInterval: number;
-  pollingMode: 'normal' | 'busy';
 
   setActiveDirectory: (directory: string | null) => void;
   getDirectoryState: (directory: string) => DirectoryGitState | null;
 
-  fetchStatus: (directory: string, git: GitAPI, options?: { silent?: boolean }) => Promise<boolean>;
+  fetchStatus: (directory: string, git: GitAPI, options?: { silent?: boolean; mode?: 'light' }) => Promise<boolean>;
   fetchBranches: (directory: string, git: GitAPI) => Promise<void>;
   fetchLog: (directory: string, git: GitAPI, maxCount?: number) => Promise<void>;
   fetchIdentity: (directory: string, git: GitAPI) => Promise<void>;
   fetchAll: (directory: string, git: GitAPI, options?: { force?: boolean; silentIfCached?: boolean }) => Promise<void>;
+
+  ensureStatus: (directory: string, git: GitAPI) => Promise<void>;
+  ensureAll: (directory: string, git: GitAPI) => Promise<void>;
 
   getDiff: (directory: string, filePath: string) => { original: string; modified: string; fetchedAt: number; isBinary?: boolean } | null;
   setDiff: (directory: string, filePath: string, diff: { original: string; modified: string; isBinary?: boolean }) => void;
@@ -70,10 +68,6 @@ interface GitStore {
   prefetchDiffs: (directory: string, git: GitAPI, filePaths: string[], options?: { maxFiles?: number }) => Promise<void>;
 
   setLogMaxCount: (directory: string, maxCount: number) => void;
-
-  startPolling: (git: GitAPI) => void;
-  setPollingMode: (mode: 'normal' | 'busy') => void;
-  stopPolling: () => void;
 
   refresh: (git: GitAPI, options?: { force?: boolean }) => Promise<void>;
 }
@@ -87,7 +81,7 @@ interface GitFileDiffResponse {
 
 interface GitAPI {
   checkIsGitRepository: (directory: string) => Promise<boolean>;
-  getGitStatus: (directory: string) => Promise<GitStatus>;
+  getGitStatus: (directory: string, options?: { mode?: 'light' }) => Promise<GitStatus>;
   getGitBranches: (directory: string) => Promise<GitBranch>;
   getGitLog: (directory: string, options?: { maxCount?: number }) => Promise<GitLogResponse>;
   getCurrentGitIdentity: (directory: string) => Promise<GitIdentitySummary | null>;
@@ -97,6 +91,7 @@ interface GitAPI {
 const inFlightDiffFetchesByDirectory = new Map<string, Set<string>>();
 const diffFetchGenerationByDirectory = new Map<string, number>();
 const inFlightStatusFetchesByDirectory = new Map<string, Promise<boolean>>();
+const inFlightEnsureAllByDirectory = new Map<string, Promise<void>>();
 
 const getDiffFetchGeneration = (directory: string): number =>
   diffFetchGenerationByDirectory.get(directory) ?? 0;
@@ -128,7 +123,13 @@ const createEmptyDirectoryState = (): DirectoryGitState => ({
   lastStatusFetch: 0,
   lastStatusChange: 0,
   lastLogFetch: 0,
+  lastBranchesFetch: 0,
+  lastIdentityFetch: 0,
   logMaxCount: 25,
+  isLoadingStatus: false,
+  isLoadingLog: false,
+  isLoadingBranches: false,
+  isLoadingIdentity: false,
 });
 
 // LRU eviction helper for diff cache
@@ -216,7 +217,8 @@ const hasStatusChanged = (oldStatus: GitStatus | null, newStatus: GitStatus | nu
     }
   }
 
-  if (haveDiffStatsChanged(oldStatus.diffStats, newStatus.diffStats)) return true;
+  // Skip diffStats comparison when light mode omits them (undefined)
+  if (newStatus.diffStats !== undefined && haveDiffStatsChanged(oldStatus.diffStats, newStatus.diffStats)) return true;
 
   return false;
 };
@@ -249,39 +251,28 @@ const getChangedFilePaths = (oldStatus: GitStatus | null, newStatus: GitStatus |
     }
   }
 
-  const oldStats = oldStatus?.diffStats ?? {};
-  const newStats = newStatus.diffStats ?? {};
-  const allStatPaths = new Set<string>([...Object.keys(oldStats), ...Object.keys(newStats)]);
+  // Only compare diffStats when light mode provides them (non-undefined)
+  if (newStatus.diffStats !== undefined) {
+    const oldStats = oldStatus?.diffStats ?? {};
+    const newStats = newStatus.diffStats ?? {};
+    const allStatPaths = new Set<string>([...Object.keys(oldStats), ...Object.keys(newStats)]);
 
-  for (const filePath of allStatPaths) {
-    const oldEntry = oldStats[filePath];
-    const newEntry = newStats[filePath];
+    for (const filePath of allStatPaths) {
+      const oldEntry = oldStats[filePath];
+      const newEntry = newStats[filePath];
 
-    if (!oldEntry || !newEntry) {
-      changed.add(filePath);
-      continue;
-    }
+      if (!oldEntry || !newEntry) {
+        changed.add(filePath);
+        continue;
+      }
 
-    if (oldEntry.insertions !== newEntry.insertions || oldEntry.deletions !== newEntry.deletions) {
-      changed.add(filePath);
+      if (oldEntry.insertions !== newEntry.insertions || oldEntry.deletions !== newEntry.deletions) {
+        changed.add(filePath);
+      }
     }
   }
 
   return changed;
-};
-
-const getPollingBounds = (mode: 'normal' | 'busy') => {
-  if (mode === 'busy') {
-    return {
-      base: GIT_POLL_BUSY_BASE_INTERVAL,
-      max: GIT_POLL_BUSY_MAX_INTERVAL,
-    };
-  }
-
-  return {
-    base: GIT_POLL_BASE_INTERVAL,
-    max: GIT_POLL_MAX_INTERVAL,
-  };
 };
 
 export const useGitStore = create<GitStore>()(
@@ -289,17 +280,9 @@ export const useGitStore = create<GitStore>()(
     (set, get) => ({
       directories: new Map(),
       activeDirectory: null,
-      recentDirectories: [],
-      isLoadingStatus: false,
-      isLoadingLog: false,
-      isLoadingBranches: false,
-      isLoadingIdentity: false,
-      pollIntervalId: null,
-      currentPollInterval: GIT_POLL_BASE_INTERVAL,
-      pollingMode: 'normal',
 
       setActiveDirectory: (directory) => {
-        const { activeDirectory, directories, recentDirectories } = get();
+        const { activeDirectory, directories } = get();
         if (activeDirectory === directory) return;
 
         if (activeDirectory) {
@@ -309,16 +292,12 @@ export const useGitStore = create<GitStore>()(
           bumpDiffFetchGeneration(directory);
         }
 
-        const nextRecentDirectories = directory
-          ? [directory, ...recentDirectories.filter((entry) => entry !== directory)].slice(0, RECENT_DIRECTORIES_LIMIT)
-          : recentDirectories;
-
         if (directory && !directories.has(directory)) {
           const newDirectories = new Map(directories);
           newDirectories.set(directory, createEmptyDirectoryState());
-          set({ activeDirectory: directory, recentDirectories: nextRecentDirectories, directories: newDirectories });
+          set({ activeDirectory: directory, directories: newDirectories });
         } else {
-          set({ activeDirectory: directory, recentDirectories: nextRecentDirectories });
+          set({ activeDirectory: directory });
         }
       },
 
@@ -342,7 +321,10 @@ export const useGitStore = create<GitStore>()(
           }
 
           if (!silent) {
-            set({ isLoadingStatus: true });
+            const newDirectories = new Map(get().directories);
+            const d = newDirectories.get(directory) ?? createEmptyDirectoryState();
+            newDirectories.set(directory, { ...d, isLoadingStatus: true });
+            set({ directories: newDirectories });
           }
 
           let statusChanged = false;
@@ -359,19 +341,21 @@ export const useGitStore = create<GitStore>()(
             }
 
             if (!isRepo) {
-              const newDirectories = new Map(directories);
+              const newDirectories = new Map(get().directories);
+              const currentDirState = newDirectories.get(directory) ?? dirState;
               newDirectories.set(directory, {
-                ...dirState,
+                ...currentDirState,
                 isGitRepo: false,
                 status: null,
+                isLoadingStatus: false,
                 lastRepoCheckAt: now,
                 lastStatusFetch: now,
               });
-              set({ directories: newDirectories, isLoadingStatus: false });
+              set({ directories: newDirectories });
               return false;
             }
 
-            const newStatus = await git.getGitStatus(directory);
+            const newStatus = await git.getGitStatus(directory, options.mode ? { mode: options.mode } : undefined);
 
             if (hasStatusChanged(dirState.status, newStatus)) {
               statusChanged = true;
@@ -402,10 +386,15 @@ export const useGitStore = create<GitStore>()(
                 bumpDiffFetchGeneration(directory);
               }
 
+              // Preserve diffStats from previous status when light mode returns none
+              const mergedStatus = newStatus.diffStats === undefined && currentDirState.status?.diffStats
+                ? { ...newStatus, diffStats: currentDirState.status.diffStats }
+                : newStatus;
+
               newDirectories.set(directory, {
                 ...currentDirState,
                 isGitRepo: true,
-                status: newStatus,
+                status: mergedStatus,
                 diffCache: nextDiffCache,
                 lastRepoCheckAt: shouldProbeRepository ? now : currentDirState.lastRepoCheckAt,
                 lastStatusFetch: Date.now(),
@@ -429,7 +418,10 @@ export const useGitStore = create<GitStore>()(
             console.error('Failed to fetch git status:', error);
           } finally {
             if (!silent) {
-              set({ isLoadingStatus: false });
+              const newDirectories = new Map(get().directories);
+              const d = newDirectories.get(directory) ?? createEmptyDirectoryState();
+              newDirectories.set(directory, { ...d, isLoadingStatus: false });
+              set({ directories: newDirectories });
             }
           }
 
@@ -448,18 +440,25 @@ export const useGitStore = create<GitStore>()(
       },
 
       fetchBranches: async (directory, git) => {
-        set({ isLoadingBranches: true });
+        {
+          const newDirectories = new Map(get().directories);
+          const d = newDirectories.get(directory) ?? createEmptyDirectoryState();
+          newDirectories.set(directory, { ...d, isLoadingBranches: true });
+          set({ directories: newDirectories });
+        }
 
         try {
           const branches = await git.getGitBranches(directory);
           const newDirectories = new Map(get().directories);
           const dirState = newDirectories.get(directory) ?? createEmptyDirectoryState();
-          newDirectories.set(directory, { ...dirState, branches });
+          newDirectories.set(directory, { ...dirState, branches, isLoadingBranches: false, lastBranchesFetch: Date.now() });
           set({ directories: newDirectories });
         } catch (error) {
           console.error('Failed to fetch git branches:', error);
-        } finally {
-          set({ isLoadingBranches: false });
+          const newDirectories = new Map(get().directories);
+          const d = newDirectories.get(directory) ?? createEmptyDirectoryState();
+          newDirectories.set(directory, { ...d, isLoadingBranches: false });
+          set({ directories: newDirectories });
         }
       },
 
@@ -468,7 +467,12 @@ export const useGitStore = create<GitStore>()(
         const dirState = directories.get(directory);
         const effectiveMaxCount = maxCount ?? dirState?.logMaxCount ?? 25;
 
-        set({ isLoadingLog: true });
+        {
+          const newDirectories = new Map(get().directories);
+          const d = newDirectories.get(directory) ?? createEmptyDirectoryState();
+          newDirectories.set(directory, { ...d, isLoadingLog: true });
+          set({ directories: newDirectories });
+        }
 
         try {
           const log = await git.getGitLog(directory, { maxCount: effectiveMaxCount });
@@ -477,30 +481,40 @@ export const useGitStore = create<GitStore>()(
           newDirectories.set(directory, {
             ...currentDirState,
             log,
+            isLoadingLog: false,
             lastLogFetch: Date.now(),
             logMaxCount: effectiveMaxCount,
           });
           set({ directories: newDirectories });
         } catch (error) {
           console.error('Failed to fetch git log:', error);
-        } finally {
-          set({ isLoadingLog: false });
+          const newDirectories = new Map(get().directories);
+          const d = newDirectories.get(directory) ?? createEmptyDirectoryState();
+          newDirectories.set(directory, { ...d, isLoadingLog: false });
+          set({ directories: newDirectories });
         }
       },
 
       fetchIdentity: async (directory, git) => {
-        set({ isLoadingIdentity: true });
+        {
+          const newDirectories = new Map(get().directories);
+          const d = newDirectories.get(directory) ?? createEmptyDirectoryState();
+          newDirectories.set(directory, { ...d, isLoadingIdentity: true });
+          set({ directories: newDirectories });
+        }
 
         try {
           const identity = await git.getCurrentGitIdentity(directory);
           const newDirectories = new Map(get().directories);
           const dirState = newDirectories.get(directory) ?? createEmptyDirectoryState();
-          newDirectories.set(directory, { ...dirState, identity });
+          newDirectories.set(directory, { ...dirState, identity, isLoadingIdentity: false, lastIdentityFetch: Date.now() });
           set({ directories: newDirectories });
         } catch (error) {
           console.error('Failed to fetch git identity:', error);
-        } finally {
-          set({ isLoadingIdentity: false });
+          const newDirectories = new Map(get().directories);
+          const d = newDirectories.get(directory) ?? createEmptyDirectoryState();
+          newDirectories.set(directory, { ...d, isLoadingIdentity: false });
+          set({ directories: newDirectories });
         }
       },
 
@@ -534,8 +548,7 @@ export const useGitStore = create<GitStore>()(
 
         await get().fetchIdentity(directory, git);
 
-        // Pre-fetch all diffs so they're ready when user opens Diff tab
-        void get().fetchAllDiffs(directory, git);
+        // Diff prefetch deferred — triggered on-demand when Git tab opens (GitView reactive prefetch)
 
       },
 
@@ -581,6 +594,7 @@ export const useGitStore = create<GitStore>()(
 
         const { maxFiles = DIFF_PREFETCH_FOCUS_MAX_FILES } = options;
         const availablePaths = new Set(dirState.status.files.map((file) => file.path));
+        const diffStats = dirState.status.diffStats;
         const inFlight = getInFlightDiffs(directory);
 
         const dedupedPaths: string[] = [];
@@ -597,6 +611,11 @@ export const useGitStore = create<GitStore>()(
             continue;
           }
           if (inFlight.has(filePath)) {
+            continue;
+          }
+          // Skip large files during prefetch — they'll be fetched on-demand when user clicks
+          const stats = diffStats?.[filePath];
+          if (stats && (stats.insertions + stats.deletions) > DIFF_PREFETCH_LARGE_FILE_THRESHOLD) {
             continue;
           }
           dedupedPaths.push(filePath);
@@ -688,94 +707,54 @@ export const useGitStore = create<GitStore>()(
         set({ directories: newDirectories });
       },
 
-      setPollingMode: (mode) => {
-        const { pollingMode, currentPollInterval } = get();
-        if (pollingMode === mode) {
+      ensureStatus: async (directory, git) => {
+        const dirState = get().directories.get(directory);
+        const now = Date.now();
+        if (dirState?.status && now - dirState.lastStatusFetch < STATUS_STALE_THRESHOLD) {
           return;
         }
+        await get().fetchStatus(directory, git, { silent: Boolean(dirState?.status) });
+      },
 
-        const bounds = getPollingBounds(mode);
-        const nextInterval = Math.min(Math.max(currentPollInterval, bounds.base), bounds.max);
+      ensureAll: (directory, git) => {
+        const existing = inFlightEnsureAllByDirectory.get(directory);
+        if (existing) return existing;
 
-        set({
-          pollingMode: mode,
-          currentPollInterval: nextInterval,
+        const promise = (async () => {
+          const dirState = get().directories.get(directory);
+          const now = Date.now();
+          const needsFullStatus = !dirState?.status || dirState.status.diffStats === undefined;
+
+          if (needsFullStatus || now - (dirState?.lastStatusFetch ?? 0) >= STATUS_STALE_THRESHOLD) {
+            await get().fetchStatus(directory, git, { silent: Boolean(dirState?.status) });
+          }
+
+          const updatedState = get().directories.get(directory);
+          if (!updatedState?.isGitRepo) return;
+
+          const fetches: Promise<void>[] = [];
+
+          if (!updatedState.branches || now - updatedState.lastBranchesFetch >= BRANCHES_STALE_THRESHOLD) {
+            fetches.push(get().fetchBranches(directory, git));
+          }
+          if (!updatedState.log || now - updatedState.lastLogFetch >= LOG_STALE_THRESHOLD) {
+            fetches.push(get().fetchLog(directory, git));
+          }
+          if (!updatedState.identity || now - updatedState.lastIdentityFetch >= IDENTITY_STALE_THRESHOLD) {
+            fetches.push(get().fetchIdentity(directory, git));
+          }
+
+          if (fetches.length > 0) await Promise.all(fetches);
+        })();
+
+        inFlightEnsureAllByDirectory.set(directory, promise);
+        promise.finally(() => {
+          if (inFlightEnsureAllByDirectory.get(directory) === promise) {
+            inFlightEnsureAllByDirectory.delete(directory);
+          }
         });
-      },
 
-      startPolling: (git) => {
-        const { pollIntervalId } = get();
-        if (pollIntervalId) return;
-
-        const schedulePoll = () => {
-          const { currentPollInterval } = get();
-          const timeoutId = setTimeout(async () => {
-            // Skip if tab not visible
-            if (typeof document !== 'undefined' && document.hidden) {
-              set({ pollIntervalId: schedulePoll() });
-              return;
-            }
-
-            const { activeDirectory, recentDirectories } = get();
-            if (!activeDirectory) {
-              set({ pollIntervalId: schedulePoll() });
-              return;
-            }
-
-            const pollTargets = [
-              activeDirectory,
-              ...recentDirectories
-                .filter((directory) => directory !== activeDirectory)
-                .slice(0, Math.max(0, RECENT_DIRECTORIES_LIMIT - 1)),
-            ];
-
-            let anyStatusChanged = false;
-
-            for (const targetDirectory of pollTargets) {
-              const statusChanged = await get().fetchStatus(targetDirectory, git, { silent: true });
-              if (statusChanged) {
-                anyStatusChanged = true;
-                if (targetDirectory === activeDirectory) {
-                  await get().fetchLog(activeDirectory, git);
-                  // Pre-fetch all diffs so they're ready when user opens Diff tab
-                  void get().fetchAllDiffs(activeDirectory, git);
-                }
-              }
-            }
-
-            const bounds = getPollingBounds(get().pollingMode);
-            if (anyStatusChanged) {
-              // Reset to base interval on changes
-              set({ currentPollInterval: bounds.base });
-            } else {
-              // Backoff when no changes
-              const newInterval = Math.min(
-                currentPollInterval + GIT_POLL_BACKOFF_STEP,
-                bounds.max
-              );
-              set({ currentPollInterval: newInterval });
-            }
-
-            // Schedule next poll
-            const { pollIntervalId: currentId } = get();
-            if (currentId !== null) {
-              set({ pollIntervalId: schedulePoll() });
-            }
-          }, currentPollInterval);
-
-          return timeoutId;
-        };
-
-        const bounds = getPollingBounds(get().pollingMode);
-        set({ pollIntervalId: schedulePoll(), currentPollInterval: bounds.base });
-      },
-
-      stopPolling: () => {
-        const { pollIntervalId } = get();
-        if (pollIntervalId) {
-          clearTimeout(pollIntervalId);
-          set({ pollIntervalId: null, currentPollInterval: GIT_POLL_BASE_INTERVAL, pollingMode: 'normal' });
-        }
+        return promise;
       },
 
       refresh: async (git, options = {}) => {
@@ -827,5 +806,104 @@ export const useGitFileCount = (directory: string | null) => {
   return useGitStore((state) => {
     if (!directory) return 0;
     return state.directories.get(directory)?.status?.files?.length ?? 0;
+  });
+};
+
+export const useGitBranchLabel = (directory: string | null) => {
+  return useGitStore((state) => {
+    if (!directory) return null;
+    return state.directories.get(directory)?.status?.current?.trim() ?? null;
+  });
+};
+
+const allBranchesCacheRef = { current: new Map<string, string | null>() };
+
+export const useGitAllBranches = () => {
+  return useGitStore((state) => {
+    const prev = allBranchesCacheRef.current;
+    let same = prev.size === state.directories.size;
+    if (same) {
+      for (const [dir, dirState] of state.directories) {
+        if (prev.get(dir) !== (dirState.status?.current ?? null)) { same = false; break; }
+      }
+    }
+    if (same) return prev;
+    const result = new Map<string, string | null>();
+    for (const [dir, dirState] of state.directories) {
+      result.set(dir, dirState.status?.current ?? null);
+    }
+    allBranchesCacheRef.current = result;
+    return result;
+  });
+};
+
+export const useGitBranchMap = (directories: string[]) => {
+  const cacheRef = React.useRef<Map<string, string | null>>(new Map());
+  return useGitStore((state) => {
+    const prev = cacheRef.current;
+    let same = prev.size === directories.length;
+    if (same) {
+      for (const dir of directories) {
+        if (prev.get(dir) !== (state.directories.get(dir)?.status?.current ?? null)) { same = false; break; }
+      }
+    }
+    if (same) return prev;
+    const result = new Map<string, string | null>();
+    for (const dir of directories) {
+      result.set(dir, state.directories.get(dir)?.status?.current ?? null);
+    }
+    cacheRef.current = result;
+    return result;
+  });
+};
+
+export const useGitRepoStatusMap = (directories: string[]) => {
+  const cacheRef = React.useRef<Map<string, { isGitRepo: boolean | null; branch: string | null }>>(new Map());
+  return useGitStore((state) => {
+    const prev = cacheRef.current;
+    let same = prev.size === directories.length;
+    if (same) {
+      for (const dir of directories) {
+        const d = state.directories.get(dir);
+        const pv = prev.get(dir);
+        if (!pv || (d?.isGitRepo ?? null) !== pv.isGitRepo || (d?.status?.current ?? null) !== pv.branch) { same = false; break; }
+      }
+    }
+    if (same) return prev;
+    const result = new Map<string, { isGitRepo: boolean | null; branch: string | null }>();
+    for (const dir of directories) {
+      const d = state.directories.get(dir);
+      result.set(dir, { isGitRepo: d?.isGitRepo ?? null, branch: d?.status?.current ?? null });
+    }
+    cacheRef.current = result;
+    return result;
+  });
+};
+
+export const useGitLoadingStatus = (directory: string | null) => {
+  return useGitStore((state) => {
+    if (!directory) return false;
+    return state.directories.get(directory)?.isLoadingStatus ?? false;
+  });
+};
+
+export const useGitLoadingLog = (directory: string | null) => {
+  return useGitStore((state) => {
+    if (!directory) return false;
+    return state.directories.get(directory)?.isLoadingLog ?? false;
+  });
+};
+
+export const useGitLoadingBranches = (directory: string | null) => {
+  return useGitStore((state) => {
+    if (!directory) return false;
+    return state.directories.get(directory)?.isLoadingBranches ?? false;
+  });
+};
+
+export const useGitLoadingIdentity = (directory: string | null) => {
+  return useGitStore((state) => {
+    if (!directory) return false;
+    return state.directories.get(directory)?.isLoadingIdentity ?? false;
   });
 };

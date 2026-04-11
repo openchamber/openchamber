@@ -64,6 +64,14 @@ const setSessionActivityPhase = (sessionId: string, phase: ActivityPhase): void 
   }
 };
 
+export const getSessionActivitySnapshot = (): Record<string, { type: ActivityPhase }> => {
+  const snapshot: Record<string, { type: ActivityPhase }> = {};
+  for (const [sessionId, data] of sessionActivityPhases.entries()) {
+    snapshot[sessionId] = { type: data.phase };
+  }
+  return snapshot;
+};
+
 const deriveSessionActivity = (payload: Record<string, unknown>): SessionActivity | null => {
   if (!payload || typeof payload !== 'object') {
     return null;

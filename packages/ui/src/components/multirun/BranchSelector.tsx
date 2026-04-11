@@ -9,7 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { useGitStore, useGitBranches } from '@/stores/useGitStore';
+import { useGitStore, useGitBranches, useGitLoadingBranches } from '@/stores/useGitStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 
@@ -52,7 +52,7 @@ export interface BranchSelectorState {
 export function useBranchOptions(directory: string | null): BranchSelectorState {
   const { git } = useRuntimeAPIs();
   const branches = useGitBranches(directory);
-  const isLoading = useGitStore((state) => state.isLoadingBranches);
+  const isLoading = useGitLoadingBranches(directory);
   const fetchBranches = useGitStore((state) => state.fetchBranches);
 
   // Fetch branches if not cached

@@ -119,10 +119,6 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
       fill: var(--vscode-foreground);
       opacity: 0.4;
     }
-    /* Animation on inner logo only, like OpenChamberLogo.tsx */
-    #initial-loading .logo-inner {
-      animation: logoPulse 3s ease-in-out infinite;
-    }
     #initial-loading .status-text {
       font-size: 13px;
       color: var(--vscode-descriptionForeground, var(--vscode-foreground));
@@ -133,10 +129,6 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
       color: var(--vscode-errorForeground, #f48771);
       text-align: center;
       max-width: 280px;
-    }
-    @keyframes logoPulse {
-      0%, 100% { opacity: 0.4; }
-      50% { opacity: 1; }
     }
   </style>
   <title>OpenChamber</title>
@@ -152,7 +144,7 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
       <!-- Top face (no fill, stroke only) -->
       <path class="logo-stroke" d="M50 2 L8.432 26 L50 50 L91.568 26 Z" fill="none" stroke-width="2" stroke-linejoin="round"/>
       
-      <!-- OpenCode logo on top face with pulse animation -->
+      <!-- OpenCode logo on top face -->
       <g class="logo-inner" transform="matrix(0.866, 0.5, -0.866, 0.5, 50, 26) scale(0.75)">
         <path class="logo-fill-solid" fill-rule="evenodd" clip-rule="evenodd" d="M-16 -20 L16 -20 L16 20 L-16 20 Z M-8 -12 L-8 12 L8 12 L8 -12 Z"/>
         <path class="logo-fill-dim" d="M-8 -4 L8 -4 L8 12 L-8 12 Z"/>

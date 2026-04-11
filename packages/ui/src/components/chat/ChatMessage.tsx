@@ -4,10 +4,13 @@ import { useShallow } from 'zustand/react/shallow';
 
 import { defaultCodeDark, defaultCodeLight } from '@/lib/codeTheme';
 import { MessageFreshnessDetector } from '@/lib/messageFreshness';
-import { useSessionStore } from '@/stores/useSessionStore';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useContextStore } from '@/stores/contextStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSelectionStore } from '@/sync/selection-store';
+import * as sessionActions from '@/sync/session-actions';
 import { useDeviceInfo } from '@/lib/device';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { generateSyntaxTheme } from '@/lib/theme/syntaxThemeGenerator';
@@ -26,6 +29,7 @@ import { isLikelyProviderAuthFailure, PROVIDER_AUTH_FAILURE_MESSAGE } from '@/li
 import type { TurnGroupingContext } from './lib/turns/types';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { FadeInOnReveal } from './message/FadeInOnReveal';
+import { streamPerfCount } from '@/stores/utils/streamDebug';
 
 const ToolOutputDialog = React.lazy(() => import('./message/ToolOutputDialog'));
 
@@ -123,6 +127,9 @@ interface ChatMessageProps {
     animationHandlers?: AnimationHandlers;
     scrollToBottom?: (options?: { instant?: boolean; force?: boolean }) => void;
     turnGroupingContext?: TurnGroupingContext;
+    assistantHeaderMessageId?: string;
+    isInActiveTurn?: boolean;
+    activeStreamingPhase?: StreamPhase | null;
     animateUserOnMount?: boolean;
     onUserAnimationConsumed?: (messageId: string) => void;
 }
@@ -134,6 +141,9 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     onContentChange,
     animationHandlers,
     turnGroupingContext,
+    assistantHeaderMessageId,
+    isInActiveTurn = false,
+    activeStreamingPhase = null,
     animateUserOnMount = false,
     onUserAnimationConsumed,
 }) => {
@@ -141,36 +151,19 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     const { currentTheme } = useThemeSystem();
     const messageContainerRef = React.useRef<HTMLDivElement | null>(null);
 
-    const sessionState = useSessionStore(
-        useShallow((state) => ({
-            lifecyclePhase: state.messageStreamStates.get(message.info.id)?.phase ?? null,
-            isStreamingMessage: (() => {
-                const sessionId =
-                    (message.info as { sessionID?: string }).sessionID ??
-                    state.currentSessionId ??
-                    null;
-                if (!sessionId) return false;
-                return (state.streamingMessageIds.get(sessionId) ?? null) === message.info.id;
-            })(),
-            currentSessionId: state.currentSessionId,
-            getAgentModelForSession: state.getAgentModelForSession,
-            getSessionModelSelection: state.getSessionModelSelection,
-            revertToMessage: state.revertToMessage,
-            forkFromMessage: state.forkFromMessage,
-        }))
-    );
+    const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
 
-    const {
-        lifecyclePhase,
-        isStreamingMessage,
-        currentSessionId,
-        getAgentModelForSession,
-        getSessionModelSelection,
-        revertToMessage,
-        forkFromMessage,
-    } = sessionState;
+    const getAgentModelForSession = useSelectionStore((s) => s.getAgentModelForSession);
+    const getSessionModelSelection = useSelectionStore((s) => s.getSessionModelSelection);
+    const revertToMessage = sessionActions.revertToMessage;
+    const forkFromMessage = sessionActions.forkFromMessage;
 
-    const providers = useConfigStore((state) => state.providers);
+    streamPerfCount('ui.chat_message.render');
+    if (isInActiveTurn) {
+        streamPerfCount('ui.chat_message.render.streaming');
+    }
+
+    const providers = useConfigStore.getState().providers;
     const { showReasoningTraces, stickyUserHeader, chatRenderMode, showExpandedBashTools, showExpandedEditTools } = useUIStore(
         useShallow((state) => ({
             showReasoningTraces: state.showReasoningTraces,
@@ -210,12 +203,13 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     const showStickyInlineHoverRow = isUser && !isMobile && stickyUserHeader && !useExternalUserActionsRow;
 
     const sessionId = message.info.sessionID;
+    const planModeEnabled = useFeatureFlagsStore((state) => state.planModeEnabled);
 
-    // Subscribe to context changes so badges update immediately on mode switches.
+    // Keep non-active-turn rows detached from context-store churn.
     const { currentContextAgent, savedSessionAgentSelection } = useContextStore(
         useShallow((state) => ({
-            currentContextAgent: sessionId ? state.currentAgentContext.get(sessionId) : undefined,
-            savedSessionAgentSelection: sessionId ? state.sessionAgentSelections.get(sessionId) : undefined,
+            currentContextAgent: isInActiveTurn && sessionId ? state.currentAgentContext.get(sessionId) : undefined,
+            savedSessionAgentSelection: isInActiveTurn && sessionId ? state.sessionAgentSelections.get(sessionId) : undefined,
         }))
     );
 
@@ -224,8 +218,8 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
             return message.parts;
         }
 
-        return normalizeUserDisplayParts(message.parts);
-    }, [isUser, message.parts]);
+        return normalizeUserDisplayParts(message.parts, { planModeEnabled });
+    }, [isUser, message.parts, planModeEnabled]);
 
     const previousUserMetadata = React.useMemo(() => {
         if (isUser || !previousMessage) {
@@ -265,6 +259,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     }, [isUser, previousMessage]);
 
     const previousIsModeSwitchMessage = React.useMemo(() => {
+        if (!planModeEnabled) return false;
         if (isUser || !previousMessage) return false;
         const parts = Array.isArray(previousMessage.parts) ? previousMessage.parts : [];
         for (let i = 0; i < parts.length; i++) {
@@ -277,7 +272,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
             }
         }
         return false;
-    }, [isUser, previousMessage]);
+    }, [isUser, planModeEnabled, previousMessage]);
 
     const agentName = React.useMemo(() => {
         if (isUser) return undefined;
@@ -589,11 +584,11 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         if (isMessageCompleted) {
             return 'completed';
         }
-        if (lifecyclePhase) {
-            return lifecyclePhase;
+        if (isInActiveTurn) {
+            return activeStreamingPhase ?? 'streaming';
         }
-        return isStreamingMessage ? 'streaming' : 'completed';
-    }, [isMessageCompleted, lifecyclePhase, isStreamingMessage]);
+        return 'completed';
+    }, [activeStreamingPhase, isInActiveTurn, isMessageCompleted]);
 
     React.useEffect(() => {
         if (!isUser || !animateUserOnMount) {
@@ -607,7 +602,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     }, [message.info.id]);
 
     React.useEffect(() => {
-        const headerMessageId = turnGroupingContext?.headerMessageId;
+        const headerMessageId = assistantHeaderMessageId ?? turnGroupingContext?.headerMessageId;
         if (isUser || !headerMessageId || headerMessageId !== message.info.id) {
             return;
         }
@@ -616,13 +611,13 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         if (isCurrentlyStreaming) {
             setHasStartedStreamingHeader(true);
         }
-    }, [isUser, message.info.id, streamPhase, turnGroupingContext?.headerMessageId]);
+    }, [assistantHeaderMessageId, isUser, message.info.id, streamPhase, turnGroupingContext?.headerMessageId]);
 
     const shouldShowHeader = React.useMemo(() => {
         if (isUser) return true;
 
         // Use turn grouping context if available for more precise control
-        const headerMessageId = turnGroupingContext?.headerMessageId;
+        const headerMessageId = assistantHeaderMessageId ?? turnGroupingContext?.headerMessageId;
         if (headerMessageId) {
             // For turn grouping: only show header for the first assistant message in the turn
             const isFirstAssistantInTurn = message.info.id === headerMessageId;
@@ -644,7 +639,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
 
         // Ungrouped fallback path: always show assistant header.
         return true;
-    }, [hasStartedStreamingHeader, isUser, turnGroupingContext, streamPhase, message.info.id]);
+    }, [assistantHeaderMessageId, hasStartedStreamingHeader, isUser, turnGroupingContext, streamPhase, message.info.id]);
 
     const handleCopyCode = React.useCallback((code: string) => {
         void copyTextToClipboard(code).then((result) => {
@@ -1068,7 +1063,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                             />
                                         ) : null}
                                     </div>
-                                    {showStickyInlineHoverRow ? <div aria-hidden="true" className="pointer-events-none absolute left-0 right-0 top-full h-11" /> : null}
+                                    {showStickyInlineHoverRow ? <div aria-hidden="true" className="absolute left-0 right-0 top-full h-11" /> : null}
                                 </div>
                             </FadeInOnReveal>
                         )
@@ -1086,6 +1081,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                             )}
 
                             <MessageBody
+                                sessionId={message.info.sessionID}
                                 messageId={message.info.id}
                                 parts={visibleParts}
                                 isUser={isUser}
@@ -1131,4 +1127,4 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     );
 };
 
-export default React.memo(ChatMessage);
+export default ChatMessage;

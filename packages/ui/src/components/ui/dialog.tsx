@@ -50,7 +50,7 @@ const DialogOverlay = React.forwardRef<
       ref={ref}
       data-slot="dialog-overlay"
       className={cn(
-        "fixed inset-0 z-50 bg-black/50 backdrop-blur-md",
+        "fixed inset-0 z-50 bg-black/50 dark:bg-black/75",
         className
       )}
       {...props}

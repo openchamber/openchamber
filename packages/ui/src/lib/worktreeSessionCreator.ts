@@ -5,7 +5,7 @@
  */
 
 import { toast } from '@/components/ui';
-import { useSessionStore } from '@/stores/useSessionStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useContextStore } from '@/stores/contextStore';
@@ -132,14 +132,13 @@ const initializeSessionForWorktree = (sessionId: string, metadata: {
   createdFromBranch?: string;
   kind?: 'pr' | 'standard';
 }) => {
-  const sessionStore = useSessionStore.getState();
+  const sessionStore = useSessionUIStore.getState();
   const configState = useConfigStore.getState();
   sessionStore.initializeNewOpenChamberSession(sessionId, configState.agents);
   sessionStore.setSessionDirectory(sessionId, metadata.path);
   sessionStore.setWorktreeMetadata(sessionId, metadata);
   applyDefaultAgentAndModelSelection(sessionId, configState);
   useDirectoryStore.getState().setDirectory(metadata.path, { showOverlay: false });
-  void sessionStore.loadSessions().catch(() => undefined);
 };
 
 
@@ -183,7 +182,7 @@ const createInstantWorktreeDraft = async (options?: {
 
     // Lock the draft immediately so no React effect can reset it to the project
     // root while we await the preview / worktree creation below.
-    const sessionStore = useSessionStore.getState();
+    const sessionStore = useSessionUIStore.getState();
     if (sessionStore.newSessionDraft?.open) {
       sessionStore.overrideNewSessionDraftTarget({
         projectId: projectRef.id,
@@ -195,7 +194,7 @@ const createInstantWorktreeDraft = async (options?: {
       });
     } else {
       sessionStore.openNewSessionDraft({
-        projectId: projectRef.id,
+        selectedProjectId: projectRef.id,
         directoryOverride: projectRef.path,
         pendingWorktreeRequestId: pendingRequestId,
         preserveDirectoryOverride: true,
@@ -214,7 +213,7 @@ const createInstantWorktreeDraft = async (options?: {
 
     // Refine draft target once we know the actual worktree path from the preview.
     if (preview?.path) {
-      useSessionStore.getState().overrideNewSessionDraftTarget({
+      useSessionUIStore.getState().overrideNewSessionDraftTarget({
         projectId: projectRef.id,
         directoryOverride: preview.path,
         pendingWorktreeRequestId: pendingRequestId,
@@ -236,7 +235,7 @@ const createInstantWorktreeDraft = async (options?: {
     });
 
     resolvePendingDraftWorktreeRequest(pendingRequestId, metadata.path);
-    useSessionStore.getState().overrideNewSessionDraftTarget({
+    useSessionUIStore.getState().overrideNewSessionDraftTarget({
       projectId: projectRef.id,
       directoryOverride: metadata.path,
       pendingWorktreeRequestId: null,
@@ -246,17 +245,16 @@ const createInstantWorktreeDraft = async (options?: {
       initialPrompt: options?.initialPrompt,
     });
     useDirectoryStore.getState().setDirectory(metadata.path, { showOverlay: false });
-    void useSessionStore.getState().loadSessions().catch(() => undefined);
 
     return metadata.path;
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to create worktree';
-    const requestId = useSessionStore.getState().newSessionDraft.pendingWorktreeRequestId;
+    const requestId = useSessionUIStore.getState().newSessionDraft.pendingWorktreeRequestId;
     if (requestId) {
       rejectPendingDraftWorktreeRequest(requestId, error instanceof Error ? error : new Error(message));
-      useSessionStore.getState().resolvePendingDraftWorktreeTarget(requestId, null);
+      useSessionUIStore.getState().resolvePendingDraftWorktreeTarget(requestId, null);
     }
-    useSessionStore.getState().setDraftBootstrapPendingDirectory(null);
+    useSessionUIStore.getState().setDraftBootstrapPendingDirectory(null);
     toast.error('Failed to create worktree', {
       description: message,
     });
@@ -329,7 +327,6 @@ export async function createWorktreeOnly(): Promise<string | null> {
     });
 
 
-    void useSessionStore.getState().loadSessions().catch(() => undefined);
     return metadata.path;
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to create worktree';
@@ -416,7 +413,7 @@ export async function createWorktreeSessionForBranch(
     };
 
     // Create the session
-    const sessionStore = useSessionStore.getState();
+    const sessionStore = useSessionUIStore.getState();
     const session = await sessionStore.createSession(undefined, metadata.path);
     if (!session) {
       // Clean up the worktree if session creation failed
@@ -516,7 +513,7 @@ export async function createWorktreeSessionForNewBranch(
         kind,
       };
 
-      const sessionStore = useSessionStore.getState();
+      const sessionStore = useSessionUIStore.getState();
       const session = await sessionStore.createSession(undefined, metadata.path);
       if (!session) {
         await removeProjectWorktree(projectRef, metadata, { deleteLocalBranch: true }).catch(() => undefined);

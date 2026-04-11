@@ -5,33 +5,44 @@ import { toast } from '@/components/ui';
 import { NumberInput } from '@/components/ui/number-input';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
+import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionAutoCleanup } from '@/hooks/useSessionAutoCleanup';
 
 const MIN_DAYS = 1;
 const MAX_DAYS = 365;
 const DEFAULT_RETENTION_DAYS = 30;
+const RETENTION_ACTION_OPTIONS = [
+  { value: 'archive', label: 'Archive' },
+  { value: 'delete', label: 'Delete' },
+] as const;
 
 export const SessionRetentionSettings: React.FC = () => {
   const autoDeleteEnabled = useUIStore((state) => state.autoDeleteEnabled);
   const autoDeleteAfterDays = useUIStore((state) => state.autoDeleteAfterDays);
+  const sessionRetentionAction = useUIStore((state) => state.sessionRetentionAction);
   const setAutoDeleteEnabled = useUIStore((state) => state.setAutoDeleteEnabled);
   const setAutoDeleteAfterDays = useUIStore((state) => state.setAutoDeleteAfterDays);
+  const setSessionRetentionAction = useUIStore((state) => state.setSessionRetentionAction);
 
-  const { candidates, isRunning, runCleanup } = useSessionAutoCleanup({ autoRun: false });
+  const { candidates, isRunning, runCleanup, action } = useSessionAutoCleanup({ autoRun: false });
   const pendingCount = candidates.length;
 
   const handleRunCleanup = React.useCallback(async () => {
     const result = await runCleanup({ force: true });
-    if (result.deletedIds.length === 0 && result.failedIds.length === 0) {
-      toast.message('No sessions eligible for deletion');
+    const verb = result.action === 'archive' ? 'archiving' : 'deletion';
+    const pastTense = result.action === 'archive' ? 'Archived' : 'Deleted';
+    const failureVerb = result.action === 'archive' ? 'archive' : 'delete';
+
+    if (result.completedIds.length === 0 && result.failedIds.length === 0) {
+      toast.message(`No sessions eligible for ${verb}`);
       return;
     }
-    if (result.deletedIds.length > 0) {
-      toast.success(`Deleted ${result.deletedIds.length} session${result.deletedIds.length === 1 ? '' : 's'}`);
+    if (result.completedIds.length > 0) {
+      toast.success(`${pastTense} ${result.completedIds.length} session${result.completedIds.length === 1 ? '' : 's'}`);
     }
     if (result.failedIds.length > 0) {
-      toast.error(`Failed to delete ${result.failedIds.length} session${result.failedIds.length === 1 ? '' : 's'}`);
+      toast.error(`Failed to ${failureVerb} ${result.failedIds.length} session${result.failedIds.length === 1 ? '' : 's'}`);
     }
   }, [runCleanup]);
 
@@ -47,7 +58,7 @@ export const SessionRetentionSettings: React.FC = () => {
               <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
             </TooltipTrigger>
             <TooltipContent sideOffset={8} className="max-w-xs">
-              Automatically delete inactive sessions based on their last activity. Keeps recent 5 sessions.
+              Automatically archive or delete inactive sessions based on last activity. Keeps the 5 most recent sessions.
             </TooltipContent>
           </Tooltip>
         </div>
@@ -103,6 +114,31 @@ export const SessionRetentionSettings: React.FC = () => {
             </Button>
           </div>
         </div>
+
+        <div className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
+          <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
+            <span className="typography-ui-label text-foreground">When sessions expire</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-1 sm:w-fit">
+            {RETENTION_ACTION_OPTIONS.map((option) => (
+              <Button
+                key={option.value}
+                type="button"
+                variant="outline"
+                size="xs"
+                className={cn(
+                  '!font-normal',
+                  sessionRetentionAction === option.value
+                    ? 'border-[var(--primary-base)] text-[var(--primary-base)] bg-[var(--primary-base)]/10 hover:text-[var(--primary-base)]'
+                    : 'text-foreground'
+                )}
+                onClick={() => setSessionRetentionAction(option.value)}
+              >
+                {option.label}
+              </Button>
+            ))}
+          </div>
+        </div>
       </section>
 
       <div className="mt-1 px-2 py-1.5 space-y-1">
@@ -124,7 +160,7 @@ export const SessionRetentionSettings: React.FC = () => {
           </div>
         </div>
         <p className="typography-meta text-muted-foreground">
-          Eligible for deletion right now: <span className="tabular-nums">{pendingCount}</span>
+          Eligible for {action === 'archive' ? 'archiving' : 'deletion'} right now: <span className="tabular-nums">{pendingCount}</span>
         </p>
       </div>
     </div>

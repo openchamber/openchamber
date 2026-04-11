@@ -9,9 +9,12 @@ export interface TerminalChunk {
   data: string;
 }
 
+export type TerminalTabLifecycle = 'idle' | 'running' | 'exited';
+
 export type TerminalTab = {
   id: string;
   terminalSessionId: string | null;
+  lifecycle: TerminalTabLifecycle;
   label: string;
   bufferChunks: TerminalChunk[];
   bufferLength: number;
@@ -40,6 +43,7 @@ interface TerminalStore {
   closeTab: (directory: string, tabId: string) => Promise<void>;
 
   setTabSessionId: (directory: string, tabId: string, sessionId: string | null) => void;
+  setTabLifecycle: (directory: string, tabId: string, lifecycle: TerminalTabLifecycle) => void;
   setConnecting: (directory: string, tabId: string, isConnecting: boolean) => void;
   appendToBuffer: (directory: string, tabId: string, chunk: string) => void;
   clearBuffer: (directory: string, tabId: string) => void;
@@ -52,7 +56,7 @@ const TERMINAL_BUFFER_LIMIT = 1_000_000;
 const TERMINAL_STORE_NAME = 'terminal-store';
 let hydrationListenerAttached = false;
 
-type PersistedTerminalTab = Pick<TerminalTab, 'id' | 'label' | 'terminalSessionId' | 'createdAt'>;
+type PersistedTerminalTab = Pick<TerminalTab, 'id' | 'label' | 'terminalSessionId' | 'lifecycle' | 'createdAt'>;
 
 type PersistedDirectoryTerminalState = {
   tabs: PersistedTerminalTab[];
@@ -85,6 +89,7 @@ function normalizeDirectory(dir: string): string {
 const createEmptyTab = (id: string, label: string): TerminalTab => ({
   id,
   terminalSessionId: null,
+  lifecycle: 'idle',
   label,
   bufferChunks: [],
   bufferLength: 0,
@@ -298,15 +303,41 @@ export const useTerminalStore = create<TerminalStore>()(
             const tab = existing.tabs[idx];
             const shouldResetBuffer = sessionId !== null && tab.terminalSessionId !== sessionId;
 
+            const nextLifecycle = sessionId
+              ? 'running'
+              : (tab.terminalSessionId ? 'exited' : tab.lifecycle);
+
             const nextTab: TerminalTab = {
               ...tab,
               terminalSessionId: sessionId,
+              lifecycle: nextLifecycle,
               isConnecting: false,
               ...(shouldResetBuffer ? { bufferChunks: [], bufferLength: 0 } : {}),
             };
 
             const nextTabs = [...existing.tabs];
             nextTabs[idx] = nextTab;
+            newSessions.set(key, { ...existing, tabs: nextTabs });
+            return { sessions: newSessions };
+          });
+        },
+
+        setTabLifecycle: (directory: string, tabId: string, lifecycle: TerminalTabLifecycle) => {
+          const key = normalizeDirectory(directory);
+          set((state) => {
+            const newSessions = new Map(state.sessions);
+            const existing = newSessions.get(key);
+            if (!existing) {
+              return state;
+            }
+
+            const idx = findTabIndex(existing, tabId);
+            if (idx < 0) {
+              return state;
+            }
+
+            const nextTabs = [...existing.tabs];
+            nextTabs[idx] = { ...nextTabs[idx], lifecycle, isConnecting: false };
             newSessions.set(key, { ...existing, tabs: nextTabs });
             return { sessions: newSessions };
           });
@@ -428,6 +459,7 @@ export const useTerminalStore = create<TerminalStore>()(
                 id: tab.id,
                 label: tab.label,
                 terminalSessionId: tab.terminalSessionId,
+                lifecycle: tab.lifecycle,
                 createdAt: tab.createdAt,
               })),
             },
@@ -474,13 +506,21 @@ export const useTerminalStore = create<TerminalStore>()(
                 maxTabNum = Math.max(maxTabNum, num);
               }
 
+              const terminalSessionId =
+                typeof rawTab.terminalSessionId === 'string' || rawTab.terminalSessionId === null
+                  ? (rawTab.terminalSessionId as string | null)
+                  : null;
+              const lifecycleRaw = rawTab.lifecycle;
+              const lifecycle =
+                lifecycleRaw === 'idle' || lifecycleRaw === 'running' || lifecycleRaw === 'exited'
+                  ? lifecycleRaw
+                  : (terminalSessionId ? 'running' : 'idle');
+
               tabs.push({
                 id,
                 label: typeof rawTab.label === 'string' ? rawTab.label : 'Terminal',
-                terminalSessionId:
-                  typeof rawTab.terminalSessionId === 'string' || rawTab.terminalSessionId === null
-                    ? (rawTab.terminalSessionId as string | null)
-                    : null,
+                terminalSessionId,
+                lifecycle,
                 createdAt: typeof rawTab.createdAt === 'number' ? rawTab.createdAt : Date.now(),
                 bufferChunks: [],
                 bufferLength: 0,

@@ -1,39 +1,35 @@
 import React from 'react';
 import type { Part } from '@opencode-ai/sdk/v2';
-import { flushSync } from 'react-dom';
-import { elementScroll, observeElementOffset, observeElementRect, Virtualizer } from '@tanstack/react-virtual';
-import { useShallow } from 'zustand/react/shallow';
-import type { ReactVirtualizerOptions, VirtualItem } from '@tanstack/react-virtual';
+import { measureElement as measureVirtualElement, type VirtualItem, useVirtualizer } from '@tanstack/react-virtual';
 
 import ChatMessage from './ChatMessage';
-import { PermissionCard } from './PermissionCard';
-import { QuestionCard } from './QuestionCard';
+import { areOptionalRenderRelevantMessagesEqual, areRelevantTurnGroupingContextsEqual, areRenderRelevantMessagesEqual } from './message/renderCompare';
 import TurnItem from './components/TurnItem';
-import TurnList from './components/TurnList';
-import type { PermissionRequest } from '@/types/permission';
-import type { QuestionRequest } from '@/types/question';
 import type { AnimationHandlers, ContentChangeReason } from '@/hooks/useChatScrollManager';
-import { useCurrentSessionActivity } from '@/hooks/useSessionActivity';
 import { filterSyntheticParts } from '@/lib/messages/synthetic';
 import type { ChatMessageEntry, TurnRecord, TurnGroupingContext } from './lib/turns/types';
 import { useTurnRecords } from './hooks/useTurnRecords';
-import { useStageTurns } from './lib/turns/stageTurns';
 import { applyRetryOverlay } from './lib/turns/applyRetryOverlay';
-import { useSessionStore } from '@/stores/useSessionStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { useDeviceInfo } from '@/lib/device';
 import { FadeInDisabledProvider } from './message/FadeInOnReveal';
 import { hasPendingUserSendAnimation, consumePendingUserSendAnimation } from '@/lib/userSendAnimation';
-import { useAssistantStatus } from '@/hooks/useAssistantStatus';
-import { useConfigStore } from '@/stores/useConfigStore';
-import { StatusRow } from './StatusRow';
+import { streamPerfCount, streamPerfMeasure } from '@/stores/utils/streamDebug';
+import type { StreamPhase } from './message/types';
 
-const MESSAGE_VIRTUALIZE_THRESHOLD = 40;
-const MESSAGE_VIRTUAL_OVERSCAN_MOBILE = 2;
-const MESSAGE_VIRTUAL_OVERSCAN_DESKTOP = 4;
-const TURN_ESTIMATE_BASE_PX = 120;
-const TURN_ESTIMATE_PER_ASSISTANT_PX = 120;
-const TURN_ESTIMATE_MAX_PX = 1400;
+const MESSAGE_LIST_VIRTUALIZE_THRESHOLD = 40;
+const MESSAGE_LIST_OVERSCAN = 6;
+
+const estimateHistoryEntryHeight = (entry: RenderEntry | undefined): number => {
+    if (!entry) {
+        return 160;
+    }
+
+    if (entry.kind === 'turn') {
+        return 180 + Math.min(entry.turn.assistantMessages.length, 4) * 100;
+    }
+
+    return 140;
+};
 
 const useStableEvent = <TArgs extends unknown[], TResult>(handler: (...args: TArgs) => TResult) => {
     const handlerRef = React.useRef(handler);
@@ -44,49 +40,6 @@ const useStableEvent = <TArgs extends unknown[], TResult>(handler: (...args: TAr
     return React.useCallback((...args: TArgs) => handlerRef.current(...args), []);
 };
 
-type MessageListVirtualizerOptions<TItemElement extends Element> = Omit<
-    ReactVirtualizerOptions<HTMLElement, TItemElement>,
-    'scrollToFn' | 'observeElementRect' | 'observeElementOffset'
->
-
-const useMessageListVirtualizer = <TItemElement extends Element>(
-    options: MessageListVirtualizerOptions<TItemElement>,
-): Virtualizer<HTMLElement, TItemElement> => {
-    const [, forceRender] = React.useReducer(() => ({}), {});
-    const { useFlushSync = true, onChange, ...baseOptions } = options;
-
-    const handleChange = React.useCallback((instance: Virtualizer<HTMLElement, TItemElement>, sync: boolean) => {
-        if (useFlushSync && sync) {
-            flushSync(forceRender);
-        } else {
-            forceRender();
-        }
-
-        onChange?.(instance, sync);
-    }, [onChange, useFlushSync]);
-
-    const [virtualizer] = React.useState(() => new Virtualizer<HTMLElement, TItemElement>({
-        ...baseOptions,
-        onChange: handleChange,
-        observeElementRect,
-        observeElementOffset,
-        scrollToFn: elementScroll,
-    }));
-
-    virtualizer.setOptions({
-        ...baseOptions,
-        onChange: handleChange,
-        observeElementRect,
-        observeElementOffset,
-        scrollToFn: elementScroll,
-    });
-
-    React.useLayoutEffect(() => virtualizer._didMount(), [virtualizer]);
-    React.useLayoutEffect(() => virtualizer._willUpdate(), [virtualizer]);
-
-    return virtualizer;
-};
-
 const USER_SHELL_MARKER = 'The following tool was executed by the user';
 
 const resolveMessageRole = (message: ChatMessageEntry): string | null => {
@@ -94,6 +47,87 @@ const resolveMessageRole = (message: ChatMessageEntry): string | null => {
     return (typeof info.clientRole === 'string' ? info.clientRole : null)
         ?? (typeof info.role === 'string' ? info.role : null)
         ?? null;
+};
+
+const hasCompactionPart = (message: ChatMessageEntry): boolean => {
+    return message.parts.some((part) => {
+        const type = (part as { type?: unknown }).type;
+        return type === 'compaction';
+    });
+};
+
+const getPartText = (part: Part): string => {
+    const text = (part as { text?: unknown }).text;
+    if (typeof text === 'string') {
+        return text;
+    }
+    const content = (part as { content?: unknown }).content;
+    if (typeof content === 'string') {
+        return content;
+    }
+    return '';
+};
+
+const normalizeCompactionCommandMessage = (message: ChatMessageEntry): ChatMessageEntry => {
+    if (!hasCompactionPart(message)) {
+        return message;
+    }
+
+    let changedParts = false;
+    const nextParts = message.parts.map((part) => {
+        const type = (part as { type?: unknown }).type;
+        if (type !== 'compaction') {
+            return part;
+        }
+        changedParts = true;
+        return { type: 'text', text: '/compact' } as Part;
+    });
+
+    const info = message.info as unknown as { clientRole?: string | null | undefined };
+    const needsClientRole = info.clientRole !== 'user';
+
+    if (!changedParts && !needsClientRole) {
+        return message;
+    }
+
+    return {
+        ...message,
+        info: needsClientRole
+            ? ({
+                ...(message.info as unknown as Record<string, unknown>),
+                clientRole: 'user',
+            } as unknown as typeof message.info)
+            : message.info,
+        parts: changedParts ? nextParts : message.parts,
+    };
+};
+
+const normalizeCompactionSummaryMessage = (
+    message: ChatMessageEntry,
+    compactionCommandIds: Set<string>,
+): ChatMessageEntry => {
+    const role = resolveMessageRole(message);
+    if (role !== 'system') {
+        return message;
+    }
+
+    const parentID = getMessageParentId(message);
+    if (!parentID || !compactionCommandIds.has(parentID)) {
+        return message;
+    }
+
+    const info = message.info as unknown as { clientRole?: string | null | undefined };
+    if (info.clientRole === 'assistant') {
+        return message;
+    }
+
+    return {
+        ...message,
+        info: ({
+            ...(message.info as unknown as Record<string, unknown>),
+            clientRole: 'assistant',
+        } as unknown as typeof message.info),
+    };
 };
 
 const isAssistantMessageCompleted = (message: ChatMessageEntry): boolean => {
@@ -326,11 +360,12 @@ const getNormalizedMessageForDisplay = (message: ChatMessageEntry): ChatMessageE
         return cached;
     }
 
-    const filteredParts = filterSyntheticParts(message.parts);
-    const normalized = filteredParts === message.parts
-        ? message
+    const normalizedCompactionMessage = normalizeCompactionCommandMessage(message);
+    const filteredParts = filterSyntheticParts(normalizedCompactionMessage.parts);
+    const normalized = filteredParts === normalizedCompactionMessage.parts
+        ? normalizedCompactionMessage
         : {
-            ...message,
+            ...normalizedCompactionMessage,
             parts: filteredParts,
         };
 
@@ -338,20 +373,20 @@ const getNormalizedMessageForDisplay = (message: ChatMessageEntry): ChatMessageE
     return normalized;
 };
 
-const isAssistantTextOnlyMessage = (message: ChatMessageEntry): boolean => {
-    if (resolveMessageRole(message) !== 'assistant') {
-        return false;
-    }
-    return message.parts.length > 0 && message.parts.every((part) => part?.type === 'text');
-};
-
 interface MessageListProps {
     sessionKey: string;
     turnStart: number;
     disableStaging?: boolean;
     messages: ChatMessageEntry[];
-    permissions: PermissionRequest[];
-    questions: QuestionRequest[];
+    sessionIsWorking?: boolean;
+    activeStreamingMessageId?: string | null;
+    activeStreamingPhase?: StreamPhase | null;
+    retryOverlay?: {
+        sessionId: string;
+        message: string;
+        confirmedAt?: number;
+        fallbackTimestamp?: number;
+    } | null;
     onMessageContentChange: (reason?: ContentChangeReason) => void;
     getAnimationHandlers: (messageId: string) => AnimationHandlers;
     hasMoreAbove: boolean;
@@ -387,6 +422,9 @@ interface MessageRowProps {
     previousMessage?: ChatMessageEntry;
     nextMessage?: ChatMessageEntry;
     turnGroupingContext?: TurnGroupingContext;
+    assistantHeaderMessageId?: string;
+    isInActiveTurn?: boolean;
+    activeStreamingPhase?: StreamPhase | null;
     animateUserOnMount?: boolean;
     onUserAnimationConsumed?: (messageId: string) => void;
     onContentChange: (reason?: ContentChangeReason) => void;
@@ -394,11 +432,14 @@ interface MessageRowProps {
     scrollToBottom?: (options?: { instant?: boolean; force?: boolean }) => void;
 }
 
-const MessageRow = React.memo<MessageRowProps>(({
+const MessageRow = React.memo<MessageRowProps>(({ 
     message,
     previousMessage,
     nextMessage,
     turnGroupingContext,
+    assistantHeaderMessageId,
+    isInActiveTurn,
+    activeStreamingPhase,
     animateUserOnMount,
     onUserAnimationConsumed,
     onContentChange,
@@ -416,8 +457,33 @@ const MessageRow = React.memo<MessageRowProps>(({
             animationHandlers={animationHandlers}
             scrollToBottom={scrollToBottom}
             turnGroupingContext={turnGroupingContext}
+            assistantHeaderMessageId={assistantHeaderMessageId}
+            isInActiveTurn={isInActiveTurn}
+            activeStreamingPhase={activeStreamingPhase}
         />
     );
+}, (prev, next) => {
+    const prevTurn = prev.turnGroupingContext;
+    const nextTurn = next.turnGroupingContext;
+
+    return areRenderRelevantMessagesEqual(prev.message, next.message)
+        && areOptionalRenderRelevantMessagesEqual(prev.previousMessage, next.previousMessage)
+        && areOptionalRenderRelevantMessagesEqual(prev.nextMessage, next.nextMessage)
+        && prev.animateUserOnMount === next.animateUserOnMount
+        && prev.onUserAnimationConsumed === next.onUserAnimationConsumed
+        && prev.onContentChange === next.onContentChange
+        && prev.scrollToBottom === next.scrollToBottom
+        && areRelevantTurnGroupingContextsEqual(prevTurn, nextTurn, prev.message.info.id, resolveMessageRole(prev.message) === 'user')
+        && prev.assistantHeaderMessageId === next.assistantHeaderMessageId
+        && prev.isInActiveTurn === next.isInActiveTurn
+        && prev.activeStreamingPhase === next.activeStreamingPhase
+        && prev.animationHandlers?.onChunk === next.animationHandlers?.onChunk
+        && prev.animationHandlers?.onComplete === next.animationHandlers?.onComplete
+        && prev.animationHandlers?.onStreamingCandidate === next.animationHandlers?.onStreamingCandidate
+        && prev.animationHandlers?.onAnimationStart === next.animationHandlers?.onAnimationStart
+        && prev.animationHandlers?.onReservationCancelled === next.animationHandlers?.onReservationCancelled
+        && prev.animationHandlers?.onReasoningBlock === next.animationHandlers?.onReasoningBlock
+        && prev.animationHandlers?.onAnimatedHeightChange === next.animationHandlers?.onAnimatedHeightChange;
 });
 
 MessageRow.displayName = 'MessageRow';
@@ -436,6 +502,8 @@ interface TurnBlockProps {
     stickyUserHeader?: boolean;
     shouldAnimateUserMessage: (message: ChatMessageEntry) => boolean;
     onUserAnimationConsumed: (messageId: string) => void;
+    activeStreamingMessageId?: string | null;
+    activeStreamingPhase?: StreamPhase | null;
 }
 
 const TurnBlock: React.FC<TurnBlockProps> = ({
@@ -452,8 +520,13 @@ const TurnBlock: React.FC<TurnBlockProps> = ({
     stickyUserHeader = true,
     shouldAnimateUserMessage,
     onUserAnimationConsumed,
+    activeStreamingMessageId,
+    activeStreamingPhase,
 }) => {
     const turnUiState = turnUiStates.get(turn.turnId) ?? { isExpanded: defaultActivityExpanded };
+    const handleToggleTurnGroup = React.useCallback(() => {
+        onToggleTurnGroup(turn.turnId);
+    }, [onToggleTurnGroup, turn.turnId]);
 
     const messageOrder = React.useMemo(() => {
         const ordered = [turn.userMessage, ...turn.assistantMessages];
@@ -464,20 +537,45 @@ const TurnBlock: React.FC<TurnBlockProps> = ({
         return { ordered, lookup };
     }, [turn.assistantMessages, turn.userMessage]);
 
+    const streamingAssistantMessageId = React.useMemo(() => {
+        if (activeStreamingMessageId && turn.assistantMessages.some((assistant) => assistant.info.id === activeStreamingMessageId)) {
+            return activeStreamingMessageId;
+        }
+
+        for (let index = turn.assistantMessages.length - 1; index >= 0; index -= 1) {
+            const assistant = turn.assistantMessages[index];
+            if (!isAssistantMessageCompleted(assistant)) {
+                return assistant.info.id;
+            }
+        }
+
+        return null;
+    }, [activeStreamingMessageId, turn.assistantMessages]);
+
     const visibleAssistantMessages = React.useMemo(() => {
         if (chatRenderMode === 'live') {
             return turn.assistantMessages;
         }
+
         const completed = turn.assistantMessages.filter(isAssistantMessageCompleted);
         if (completed.length === turn.assistantMessages.length) {
             return turn.assistantMessages;
         }
+
+        if (streamingAssistantMessageId) {
+            const completedIds = new Set(completed.map((assistant) => assistant.info.id));
+            return turn.assistantMessages.filter((assistant) => (
+                completedIds.has(assistant.info.id)
+                || assistant.info.id === streamingAssistantMessageId
+            ));
+        }
+
         if (completed.length > 0) {
             return completed;
         }
         const firstAssistant = turn.assistantMessages[0];
         return firstAssistant ? [firstAssistant] : [];
-    }, [chatRenderMode, turn.assistantMessages]);
+    }, [chatRenderMode, streamingAssistantMessageId, turn.assistantMessages]);
 
     const completedAssistantMessages = React.useMemo(() => {
         if (chatRenderMode !== 'sorted') {
@@ -498,30 +596,49 @@ const TurnBlock: React.FC<TurnBlockProps> = ({
         return new Set(completedAssistantMessages.map((assistant) => assistant.info.id));
     }, [completedAssistantMessages]);
 
+    const visibleActivityMessageIdSet = React.useMemo(() => {
+        const ids = new Set(completedAssistantIdSet);
+        if (streamingAssistantMessageId) {
+            ids.add(streamingAssistantMessageId);
+        }
+        return ids;
+    }, [completedAssistantIdSet, streamingAssistantMessageId]);
+
+    const turnIsInActiveStream = React.useMemo(() => {
+        return turnContainsMessageId(turn, streamingAssistantMessageId);
+    }, [turn, streamingAssistantMessageId]);
+
+    const activityOwnerMessageId = React.useMemo(() => {
+        if (turnIsInActiveStream && streamingAssistantMessageId) {
+            return streamingAssistantMessageId;
+        }
+        return visibleAssistantMessages[0]?.info.id;
+    }, [streamingAssistantMessageId, turnIsInActiveStream, visibleAssistantMessages]);
+
     const visibleActivityParts = React.useMemo(() => {
         if (chatRenderMode !== 'sorted') {
             return turn.activityParts;
         }
-        if (completedAssistantMessages.length === turn.assistantMessages.length) {
+        if (visibleActivityMessageIdSet.size === turn.assistantMessages.length) {
             return turn.activityParts;
         }
-        return turn.activityParts.filter((activity) => completedAssistantIdSet.has(activity.messageId));
-    }, [chatRenderMode, completedAssistantIdSet, completedAssistantMessages.length, turn.activityParts, turn.assistantMessages.length]);
+        return turn.activityParts.filter((activity) => visibleActivityMessageIdSet.has(activity.messageId));
+    }, [chatRenderMode, visibleActivityMessageIdSet, turn.activityParts, turn.assistantMessages.length]);
 
     const visibleActivitySegments = React.useMemo(() => {
         if (chatRenderMode !== 'sorted') {
             return turn.activitySegments;
         }
-        if (completedAssistantMessages.length === turn.assistantMessages.length) {
+        if (visibleActivityMessageIdSet.size === turn.assistantMessages.length) {
             return turn.activitySegments;
         }
         return turn.activitySegments
             .map((segment) => {
-                const parts = segment.parts.filter((activity) => completedAssistantIdSet.has(activity.messageId));
+                const parts = segment.parts.filter((activity) => visibleActivityMessageIdSet.has(activity.messageId));
                 if (parts.length === 0) {
                     return null;
                 }
-                const anchorMessageId = completedAssistantIdSet.has(segment.anchorMessageId)
+                const anchorMessageId = visibleActivityMessageIdSet.has(segment.anchorMessageId)
                     ? segment.anchorMessageId
                     : parts[0]?.messageId;
                 if (!anchorMessageId) {
@@ -534,7 +651,7 @@ const TurnBlock: React.FC<TurnBlockProps> = ({
                 };
             })
             .filter((segment): segment is NonNullable<typeof segment> => segment !== null);
-    }, [chatRenderMode, completedAssistantIdSet, completedAssistantMessages.length, turn.activitySegments, turn.assistantMessages.length]);
+    }, [chatRenderMode, visibleActivityMessageIdSet, turn.activitySegments, turn.assistantMessages.length]);
 
     const turnGroupingContextBase = React.useMemo(() => {
         const userCreatedAt = (turn.userMessage.info.time as { created?: number } | undefined)?.created;
@@ -558,24 +675,50 @@ const TurnBlock: React.FC<TurnBlockProps> = ({
 
     const renderMessage = React.useCallback(
         (message: ChatMessageEntry) => {
+            const messageRole = resolveMessageRole(message);
+            const isUserMessage = messageRole === 'user';
             const messageIndex = messageOrder.lookup.get(message.info.id);
-            const previousMessage = typeof messageIndex === 'number' && messageIndex > 0
-                ? messageOrder.ordered[messageIndex - 1]
-                : undefined;
-            const nextMessage = typeof messageIndex === 'number' && messageIndex < messageOrder.ordered.length - 1
-                ? messageOrder.ordered[messageIndex + 1]
-                : undefined;
-
             const assistantIndex = visibleAssistantIds.get(message.info.id) ?? -1;
+            const isAssistantMessage = assistantIndex >= 0;
+            const isFirstAssistant = assistantIndex === 0;
+            const isLastAssistant = assistantIndex === visibleAssistantMessages.length - 1;
+            const isActivityOwner = Boolean(activityOwnerMessageId) && message.info.id === activityOwnerMessageId;
+            const shouldAttachFullTurnContext = chatRenderMode === 'sorted'
+                ? isAssistantMessage
+                : (isActivityOwner || isFirstAssistant || isLastAssistant);
+            const assistantHeaderMessageId = visibleAssistantMessages[0]?.info.id ?? turn.headerMessageId;
 
-            const turnGroupingContext = assistantIndex >= 0
+            const previousMessage = isUserMessage
+                ? undefined
+                : (isAssistantMessage
+                    ? (isFirstAssistant
+                        ? turn.userMessage
+                        : undefined)
+                    : (typeof messageIndex === 'number' && messageIndex > 0
+                        ? messageOrder.ordered[messageIndex - 1]
+                        : undefined));
+            const nextMessage = undefined;
+
+            const turnGroupingContext = isAssistantMessage
                 ? {
-                    ...turnGroupingContextBase,
-                    isFirstAssistantInTurn: assistantIndex === 0,
-                    isLastAssistantInTurn: assistantIndex === visibleAssistantMessages.length - 1,
-                    isWorking: isLastTurn && sessionIsWorking,
-                    isGroupExpanded: turnUiState.isExpanded,
-                    toggleGroup: () => onToggleTurnGroup(turn.turnId),
+                    turnId: turn.turnId,
+                    activityOwnerMessageId,
+                    isFirstAssistantInTurn: isFirstAssistant,
+                    isLastAssistantInTurn: isLastAssistant,
+                    isWorking: isLastTurn && sessionIsWorking && message.info.id === streamingAssistantMessageId,
+                    hasTools: turn.hasTools,
+                    hasReasoning: turn.hasReasoning,
+                    ...(shouldAttachFullTurnContext ? {
+                        summaryBody: turnGroupingContextBase.summaryBody,
+                        activityParts: turnGroupingContextBase.activityParts,
+                        activityGroupSegments: turnGroupingContextBase.activityGroupSegments,
+                        headerMessageId: turnGroupingContextBase.headerMessageId,
+                        diffStats: turnGroupingContextBase.diffStats,
+                        userMessageCreatedAt: turnGroupingContextBase.userMessageCreatedAt,
+                        userMessageVariant: turnGroupingContextBase.userMessageVariant,
+                        isGroupExpanded: turnUiState.isExpanded,
+                        toggleGroup: handleToggleTurnGroup,
+                    } : {}),
                 } satisfies TurnGroupingContext
                 : undefined;
 
@@ -586,6 +729,9 @@ const TurnBlock: React.FC<TurnBlockProps> = ({
                     previousMessage={previousMessage}
                     nextMessage={nextMessage}
                     turnGroupingContext={turnGroupingContext}
+                    assistantHeaderMessageId={assistantHeaderMessageId}
+                    isInActiveTurn={Boolean(streamingAssistantMessageId) && message.info.id === streamingAssistantMessageId}
+                    activeStreamingPhase={message.info.id === streamingAssistantMessageId ? activeStreamingPhase : null}
                     animateUserOnMount={shouldAnimateUserMessage(message)}
                     onUserAnimationConsumed={onUserAnimationConsumed}
                     onContentChange={onMessageContentChange}
@@ -602,14 +748,22 @@ const TurnBlock: React.FC<TurnBlockProps> = ({
             onMessageContentChange,
             scrollToBottom,
             sessionIsWorking,
+            chatRenderMode,
+            turn.headerMessageId,
+            turn.hasReasoning,
+            turn.hasTools,
             turn.turnId,
+            turn.userMessage,
             turnUiState.isExpanded,
             turnGroupingContextBase,
+            streamingAssistantMessageId,
+            activeStreamingPhase,
             visibleAssistantMessages,
             visibleAssistantIds,
+            activityOwnerMessageId,
             shouldAnimateUserMessage,
             onUserAnimationConsumed,
-            onToggleTurnGroup,
+            handleToggleTurnGroup,
         ]
     );
 
@@ -639,9 +793,11 @@ interface UngroupedMessageRowProps {
     scrollToBottom?: (options?: { instant?: boolean; force?: boolean }) => void;
     shouldAnimateUserMessage: (message: ChatMessageEntry) => boolean;
     onUserAnimationConsumed: (messageId: string) => void;
+    activeStreamingMessageId?: string | null;
+    activeStreamingPhase?: StreamPhase | null;
 }
 
-const UngroupedMessageRow: React.FC<UngroupedMessageRowProps> = React.memo(({
+const UngroupedMessageRow: React.FC<UngroupedMessageRowProps> = ({
     message,
     previousMessage,
     nextMessage,
@@ -650,6 +806,8 @@ const UngroupedMessageRow: React.FC<UngroupedMessageRowProps> = React.memo(({
     scrollToBottom,
     shouldAnimateUserMessage,
     onUserAnimationConsumed,
+    activeStreamingMessageId,
+    activeStreamingPhase,
 }) => {
     return (
         <MessageRow
@@ -661,9 +819,11 @@ const UngroupedMessageRow: React.FC<UngroupedMessageRowProps> = React.memo(({
             onContentChange={onMessageContentChange}
             animationHandlers={getAnimationHandlers(message.info.id)}
             scrollToBottom={scrollToBottom}
+            isInActiveTurn={Boolean(activeStreamingMessageId) && message.info.id === activeStreamingMessageId}
+            activeStreamingPhase={message.info.id === activeStreamingMessageId ? activeStreamingPhase : null}
         />
     );
-});
+};
 
 UngroupedMessageRow.displayName = 'UngroupedMessageRow';
 
@@ -680,9 +840,23 @@ interface MessageListEntryProps {
     chatRenderMode: 'sorted' | 'live';
     shouldAnimateUserMessage: (message: ChatMessageEntry) => boolean;
     onUserAnimationConsumed: (messageId: string) => void;
+    activeStreamingMessageId?: string | null;
+    activeStreamingPhase?: StreamPhase | null;
 }
 
-const MessageListEntry: React.FC<MessageListEntryProps> = React.memo(({
+const turnContainsMessageId = (turn: TurnRecord, messageId: string | null | undefined): boolean => {
+    if (!messageId) {
+        return false;
+    }
+
+    if (turn.userMessage.info.id === messageId) {
+        return true;
+    }
+
+    return turn.assistantMessages.some((assistant) => assistant.info.id === messageId);
+};
+
+const MessageListEntry: React.FC<MessageListEntryProps> = ({
     entry,
     onMessageContentChange,
     getAnimationHandlers,
@@ -695,6 +869,8 @@ const MessageListEntry: React.FC<MessageListEntryProps> = React.memo(({
     chatRenderMode,
     shouldAnimateUserMessage,
     onUserAnimationConsumed,
+    activeStreamingMessageId,
+    activeStreamingPhase,
 }) => {
     if (entry.kind === 'ungrouped') {
         return (
@@ -707,6 +883,8 @@ const MessageListEntry: React.FC<MessageListEntryProps> = React.memo(({
                 scrollToBottom={scrollToBottom}
                 shouldAnimateUserMessage={shouldAnimateUserMessage}
                 onUserAnimationConsumed={onUserAnimationConsumed}
+                activeStreamingMessageId={activeStreamingMessageId}
+                activeStreamingPhase={activeStreamingPhase}
             />
         );
     }
@@ -722,58 +900,111 @@ const MessageListEntry: React.FC<MessageListEntryProps> = React.memo(({
             chatRenderMode={chatRenderMode}
             shouldAnimateUserMessage={shouldAnimateUserMessage}
             onUserAnimationConsumed={onUserAnimationConsumed}
+            activeStreamingMessageId={activeStreamingMessageId}
+            activeStreamingPhase={activeStreamingPhase}
             onMessageContentChange={onMessageContentChange}
             getAnimationHandlers={getAnimationHandlers}
             scrollToBottom={scrollToBottom}
             stickyUserHeader={stickyUserHeader}
         />
     );
-}, areMessageListEntryPropsEqual);
+};
 
 MessageListEntry.displayName = 'MessageListEntry';
 
-function areMessageListEntryPropsEqual(prevProps: MessageListEntryProps, nextProps: MessageListEntryProps): boolean {
-    if (prevProps.stickyUserHeader !== nextProps.stickyUserHeader) return false;
-    if (prevProps.chatRenderMode !== nextProps.chatRenderMode) return false;
-    if (prevProps.shouldAnimateUserMessage !== nextProps.shouldAnimateUserMessage) return false;
-
-    const prevEntry = prevProps.entry;
-    const nextEntry = nextProps.entry;
-    if (prevEntry.kind !== nextEntry.kind) return false;
-    if (prevEntry.key !== nextEntry.key) return false;
-
-    if (prevEntry.kind === 'turn' && nextEntry.kind === 'turn') {
-        if (prevEntry.turn !== nextEntry.turn || prevEntry.isLastTurn !== nextEntry.isLastTurn) {
-            return false;
-        }
-
-        const prevExpanded = (prevProps.turnUiStates.get(prevEntry.turn.turnId) ?? { isExpanded: prevProps.defaultActivityExpanded }).isExpanded;
-        const nextExpanded = (nextProps.turnUiStates.get(nextEntry.turn.turnId) ?? { isExpanded: nextProps.defaultActivityExpanded }).isExpanded;
-        if (prevExpanded !== nextExpanded) {
-            return false;
-        }
-
-        if (prevEntry.isLastTurn && prevProps.sessionIsWorking !== nextProps.sessionIsWorking) {
-            return false;
-        }
-
-        return true;
-    }
-
-    if (prevEntry.kind === 'ungrouped' && nextEntry.kind === 'ungrouped') {
+// Inner component that renders staged turn entries.
+const StaticHistoryList: React.FC<{
+    entries: RenderEntry[];
+    shouldVirtualize: boolean;
+    virtualRows: VirtualItem[];
+    totalSize: number;
+    measureElement: (element: HTMLDivElement | null) => void;
+    contentRef: React.RefObject<HTMLDivElement | null>;
+    onMessageContentChange: (reason?: ContentChangeReason) => void;
+    getAnimationHandlers: (messageId: string) => AnimationHandlers;
+    scrollToBottom?: (options?: { instant?: boolean; force?: boolean }) => void;
+    stickyUserHeader: boolean;
+    defaultActivityExpanded: boolean;
+    turnUiStates: Map<string, TurnUiState>;
+    onToggleTurnGroup: (turnId: string) => void;
+    chatRenderMode: 'sorted' | 'live';
+    shouldAnimateUserMessage: (message: ChatMessageEntry) => boolean;
+    onUserAnimationConsumed: (messageId: string) => void;
+    activeStreamingPhase?: StreamPhase | null;
+}> = ({ entries, shouldVirtualize, virtualRows, totalSize, measureElement, contentRef, onMessageContentChange, getAnimationHandlers, scrollToBottom, stickyUserHeader, defaultActivityExpanded, turnUiStates, onToggleTurnGroup, chatRenderMode, shouldAnimateUserMessage, onUserAnimationConsumed, activeStreamingPhase }) => {
+    const renderEntry = React.useCallback((entry: RenderEntry) => {
         return (
-            prevEntry.message === nextEntry.message
-            && prevEntry.previousMessage === nextEntry.previousMessage
-            && prevEntry.nextMessage === nextEntry.nextMessage
+            <MessageListEntry
+                key={entry.key}
+                entry={entry}
+                onMessageContentChange={onMessageContentChange}
+                getAnimationHandlers={getAnimationHandlers}
+                scrollToBottom={scrollToBottom}
+                stickyUserHeader={stickyUserHeader}
+                sessionIsWorking={false}
+                defaultActivityExpanded={defaultActivityExpanded}
+                turnUiStates={turnUiStates}
+                onToggleTurnGroup={onToggleTurnGroup}
+                chatRenderMode={chatRenderMode}
+                shouldAnimateUserMessage={shouldAnimateUserMessage}
+                onUserAnimationConsumed={onUserAnimationConsumed}
+                activeStreamingMessageId={null}
+                activeStreamingPhase={activeStreamingPhase}
+            />
+        );
+    }, [activeStreamingPhase, chatRenderMode, defaultActivityExpanded, getAnimationHandlers, onMessageContentChange, onToggleTurnGroup, onUserAnimationConsumed, scrollToBottom, shouldAnimateUserMessage, stickyUserHeader, turnUiStates]);
+
+    const paddingTop = shouldVirtualize && virtualRows.length > 0
+        ? virtualRows[0]?.start ?? 0
+        : 0;
+    const paddingBottom = shouldVirtualize && virtualRows.length > 0
+        ? Math.max(0, totalSize - (virtualRows[virtualRows.length - 1]?.end ?? 0))
+        : 0;
+
+    if (!shouldVirtualize) {
+        return (
+            <div ref={contentRef} className="relative w-full">
+                {entries.map((entry) => (
+                    <div
+                        key={entry.key}
+                        data-turn-entry={entry.key}
+                    >
+                        {renderEntry(entry)}
+                    </div>
+                ))}
+            </div>
         );
     }
 
-    return false;
-}
+    return (
+        <div ref={contentRef} className="relative w-full">
+            {paddingTop > 0 ? <div aria-hidden="true" style={{ height: `${paddingTop}px` }} /> : null}
+            {virtualRows.map((virtualRow) => {
+                const entry = entries[virtualRow.index];
+                if (!entry) {
+                    return null;
+                }
 
-// Inner component that renders staged turn entries.
-const MessageListContent: React.FC<{
-    entries: RenderEntry[];
+                return (
+                    <div
+                        key={virtualRow.key}
+                        ref={measureElement}
+                        data-index={virtualRow.index}
+                        data-turn-entry={entry.key}
+                    >
+                        {renderEntry(entry)}
+                    </div>
+                );
+            })}
+            {paddingBottom > 0 ? <div aria-hidden="true" style={{ height: `${paddingBottom}px` }} /> : null}
+        </div>
+    );
+};
+
+StaticHistoryList.displayName = 'StaticHistoryList';
+
+const StreamingTailContent: React.FC<{
+    entry: RenderEntry;
     onMessageContentChange: (reason?: ContentChangeReason) => void;
     getAnimationHandlers: (messageId: string) => AnimationHandlers;
     scrollToBottom?: (options?: { instant?: boolean; force?: boolean }) => void;
@@ -785,39 +1016,55 @@ const MessageListContent: React.FC<{
     chatRenderMode: 'sorted' | 'live';
     shouldAnimateUserMessage: (message: ChatMessageEntry) => boolean;
     onUserAnimationConsumed: (messageId: string) => void;
-}> = ({ entries, onMessageContentChange, getAnimationHandlers, scrollToBottom, stickyUserHeader, sessionIsWorking, defaultActivityExpanded, turnUiStates, onToggleTurnGroup, chatRenderMode, shouldAnimateUserMessage, onUserAnimationConsumed }) => {
-    const renderEntry = React.useCallback((entry: RenderEntry) => {
-        return (
-            <MessageListEntry
-                key={entry.key}
-                entry={entry}
-                onMessageContentChange={onMessageContentChange}
-                getAnimationHandlers={getAnimationHandlers}
-                scrollToBottom={scrollToBottom}
-                stickyUserHeader={stickyUserHeader}
-                sessionIsWorking={sessionIsWorking}
-                defaultActivityExpanded={defaultActivityExpanded}
-                turnUiStates={turnUiStates}
-                onToggleTurnGroup={onToggleTurnGroup}
-                chatRenderMode={chatRenderMode}
-                shouldAnimateUserMessage={shouldAnimateUserMessage}
-                onUserAnimationConsumed={onUserAnimationConsumed}
-            />
-        );
-    }, [chatRenderMode, defaultActivityExpanded, getAnimationHandlers, onMessageContentChange, onToggleTurnGroup, onUserAnimationConsumed, scrollToBottom, sessionIsWorking, shouldAnimateUserMessage, stickyUserHeader, turnUiStates]);
-
+    activeStreamingMessageId?: string | null;
+    activeStreamingPhase?: StreamPhase | null;
+}> = ({
+    entry,
+    onMessageContentChange,
+    getAnimationHandlers,
+    scrollToBottom,
+    stickyUserHeader,
+    sessionIsWorking,
+    defaultActivityExpanded,
+    turnUiStates,
+    onToggleTurnGroup,
+    chatRenderMode,
+    shouldAnimateUserMessage,
+    onUserAnimationConsumed,
+    activeStreamingMessageId,
+    activeStreamingPhase,
+}) => {
     return (
-        <TurnList entries={entries} renderEntry={renderEntry} />
+        <MessageListEntry
+            entry={entry}
+            onMessageContentChange={onMessageContentChange}
+            getAnimationHandlers={getAnimationHandlers}
+            scrollToBottom={scrollToBottom}
+            stickyUserHeader={stickyUserHeader}
+            sessionIsWorking={sessionIsWorking}
+            defaultActivityExpanded={defaultActivityExpanded}
+            turnUiStates={turnUiStates}
+            onToggleTurnGroup={onToggleTurnGroup}
+            chatRenderMode={chatRenderMode}
+            shouldAnimateUserMessage={shouldAnimateUserMessage}
+            onUserAnimationConsumed={onUserAnimationConsumed}
+            activeStreamingMessageId={activeStreamingMessageId}
+            activeStreamingPhase={activeStreamingPhase}
+        />
     );
 };
+
+StreamingTailContent.displayName = 'StreamingTailContent';
 
 const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({ 
     sessionKey,
     turnStart,
-    disableStaging,
+    disableStaging: _disableStaging,
     messages,
-    permissions,
-    questions,
+    sessionIsWorking = false,
+    activeStreamingMessageId = null,
+    activeStreamingPhase = null,
+    retryOverlay = null,
     onMessageContentChange,
     getAnimationHandlers,
     hasMoreAbove,
@@ -826,10 +1073,8 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     scrollToBottom,
     scrollRef,
 }, ref) => {
-    const { isMobile } = useDeviceInfo();
-    const { isWorking: sessionIsWorking } = useCurrentSessionActivity();
-    const { working } = useAssistantStatus();
-    const currentAgentName = useConfigStore((state) => state.currentAgentName);
+    streamPerfCount('ui.message_list.render');
+    void _disableStaging;
     const stickyUserHeader = useUIStore(state => state.stickyUserHeader);
     const chatRenderMode = useUIStore((state) => state.chatRenderMode);
     const activityRenderMode = useUIStore((state) => state.activityRenderMode);
@@ -840,25 +1085,11 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         previousOrder: string[];
         animatedIds: Set<string>;
     }>({ sessionKey: undefined, previousOrder: [], animatedIds: new Set() });
-    const baseDisplayCacheRef = React.useRef<{
-        input: ChatMessageEntry[];
-        output: ChatMessageEntry[];
-        outputIndexById: Map<string, number>;
-    } | null>(null);
-
-    const stableOnMessageContentChange = useStableEvent(onMessageContentChange);
     const stableGetAnimationHandlers = useStableEvent(getAnimationHandlers);
     const stableOnLoadOlder = useStableEvent(onLoadOlder);
     const stableScrollToBottom = useStableEvent((options?: { instant?: boolean; force?: boolean }) => {
         scrollToBottom?.(options);
     });
-
-    React.useEffect(() => {
-        if (permissions.length === 0 && questions.length === 0) {
-            return;
-        }
-        stableOnMessageContentChange('permission');
-    }, [permissions, questions, stableOnMessageContentChange]);
 
     React.useEffect(() => {
         setTurnUiStates(new Map());
@@ -874,51 +1105,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     }, [defaultActivityExpanded]);
 
 
-    const baseDisplayMessages = React.useMemo(() => {
-        const cached = baseDisplayCacheRef.current;
-        const lastMessage = messages.length > 0 ? messages[messages.length - 1] : undefined;
-        const canUseTailFastPath = Boolean(lastMessage && isAssistantTextOnlyMessage(lastMessage));
-
-        if (cached && canUseTailFastPath && cached.input.length === messages.length && messages.length > 0) {
-            let changedCount = 0;
-            let changedIndex = -1;
-            let idsStable = true;
-
-            for (let index = 0; index < messages.length; index += 1) {
-                if (messages[index]?.info?.id !== cached.input[index]?.info?.id) {
-                    idsStable = false;
-                    break;
-                }
-                if (messages[index] !== cached.input[index]) {
-                    changedCount += 1;
-                    changedIndex = index;
-                    if (changedCount > 1) {
-                        break;
-                    }
-                }
-            }
-
-            if (idsStable && changedCount === 1 && changedIndex === messages.length - 1) {
-                const changedMessage = messages[changedIndex];
-                const previousMessage = changedIndex > 0 ? messages[changedIndex - 1] : undefined;
-                const bridgeSensitive = isUserSubtaskMessage(previousMessage) || isUserShellMarkerMessage(previousMessage);
-
-                if (changedMessage && isAssistantTextOnlyMessage(changedMessage) && !bridgeSensitive) {
-                    const outputIndex = cached.outputIndexById.get(changedMessage.info.id);
-                    if (outputIndex !== undefined) {
-                        const nextOutput = [...cached.output];
-                        nextOutput[outputIndex] = getNormalizedMessageForDisplay(changedMessage);
-                        baseDisplayCacheRef.current = {
-                            input: messages,
-                            output: nextOutput,
-                            outputIndexById: cached.outputIndexById,
-                        };
-                        return nextOutput;
-                    }
-                }
-            }
-        }
-
+    const baseDisplayMessages = React.useMemo(() => streamPerfMeasure('ui.message_list.base_display_ms', () => {
         const seenIdsFromTail = new Set<string>();
         const dedupedMessages: ChatMessageEntry[] = [];
         for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -935,12 +1122,17 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         dedupedMessages.reverse();
 
         const output: ChatMessageEntry[] = [];
+        const compactionCommandIds = new Set<string>();
         for (let index = 0; index < dedupedMessages.length; index += 1) {
             const current = dedupedMessages[index];
+            const currentWithRole = normalizeCompactionSummaryMessage(current, compactionCommandIds);
+            if (hasCompactionPart(current) || current.parts.some((part) => part.type === 'text' && getPartText(part).trim() === '/compact')) {
+                compactionCommandIds.add(current.info.id);
+            }
             const previous = output.length > 0 ? output[output.length - 1] : undefined;
 
             if (isUserSubtaskMessage(previous)) {
-                const bridge = isSyntheticSubtaskBridgeAssistant(current);
+                const bridge = isSyntheticSubtaskBridgeAssistant(currentWithRole);
                 if (bridge.hide) {
                     output[output.length - 1] = withSubtaskSessionId(previous as ChatMessageEntry, bridge.taskSessionId);
                     continue;
@@ -948,54 +1140,21 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
             }
 
             if (isUserShellMarkerMessage(previous)) {
-                const bridge = getShellBridgeAssistantDetails(current, getMessageId(previous));
+                const bridge = getShellBridgeAssistantDetails(currentWithRole, getMessageId(previous));
                 if (bridge.hide) {
                     output[output.length - 1] = withShellBridgeDetails(previous as ChatMessageEntry, bridge.details);
                     continue;
                 }
             }
 
-            output.push(current);
+            output.push(currentWithRole);
         }
 
-        const outputIndexById = new Map<string, number>();
-        output.forEach((message, index) => {
-            const id = message.info?.id;
-            if (typeof id === 'string' && id.length > 0) {
-                outputIndexById.set(id, index);
-            }
-        });
-        baseDisplayCacheRef.current = {
-            input: messages,
-            output,
-            outputIndexById,
-        };
-
         return output;
-    }, [messages]);
+    }), [messages]);
 
-    const activeRetryStatus = useSessionStore(
-        useShallow((state) => {
-            const sessionId = state.currentSessionId;
-            if (!sessionId) return null;
-            const status = state.sessionStatus?.get(sessionId);
-            if (!status || status.type !== 'retry') return null;
-            const rawMessage = typeof status.message === 'string' ? status.message.trim() : '';
-            return {
-                sessionId,
-                message: rawMessage || 'Quota limit reached. Retrying automatically.',
-                confirmedAt: status.confirmedAt,
-            };
-        })
-    );
-
-    const activeRetrySessionId = activeRetryStatus?.sessionId ?? null;
-    const activeRetryMessage = activeRetryStatus?.message
-        ?? 'Quota limit reached. Retrying automatically.';
-    const activeRetryConfirmedAt = activeRetryStatus?.confirmedAt;
-
-    const [fallbackRetryTimestamp, setFallbackRetryTimestamp] = React.useState<number>(0);
-    const fallbackRetrySessionRef = React.useRef<string | null>(null);
+    const historyContentRef = React.useRef<HTMLDivElement | null>(null);
+    const pendingVirtualMeasureFrameRef = React.useRef<number | null>(null);
     const resolveScrollContainer = React.useCallback((): HTMLDivElement | null => {
         if (scrollRef?.current) {
             return scrollRef.current;
@@ -1006,40 +1165,21 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         return document.querySelector<HTMLDivElement>('[data-scrollbar="chat"]');
     }, [scrollRef]);
 
-    React.useEffect(() => {
-        if (!activeRetryStatus || typeof activeRetryStatus.confirmedAt === 'number') {
-            fallbackRetrySessionRef.current = null;
-            setFallbackRetryTimestamp(0);
-            return;
-        }
-
-        if (fallbackRetrySessionRef.current !== activeRetryStatus.sessionId) {
-            fallbackRetrySessionRef.current = activeRetryStatus.sessionId;
-            setFallbackRetryTimestamp(Date.now());
-        }
-    }, [activeRetryStatus, activeRetryStatus?.sessionId, activeRetryStatus?.confirmedAt]);
-
-    const displayMessages = React.useMemo(() => {
+    const displayMessages = React.useMemo(() => streamPerfMeasure('ui.message_list.retry_overlay_ms', () => {
         return applyRetryOverlay(baseDisplayMessages, {
-            sessionId: activeRetrySessionId,
-            message: activeRetryMessage,
-            confirmedAt: activeRetryConfirmedAt,
-            fallbackTimestamp: fallbackRetryTimestamp,
+            sessionId: retryOverlay?.sessionId ?? null,
+            message: retryOverlay?.message ?? 'Quota limit reached. Retrying automatically.',
+            confirmedAt: retryOverlay?.confirmedAt,
+            fallbackTimestamp: retryOverlay?.fallbackTimestamp ?? 0,
         });
-    }, [activeRetryMessage, activeRetryConfirmedAt, activeRetrySessionId, baseDisplayMessages, fallbackRetryTimestamp]);
+    }), [baseDisplayMessages, retryOverlay]);
 
     const { projection, staticTurns, streamingTurn } = useTurnRecords(displayMessages, {
+        sessionKey,
         showTextJustificationActivity: chatRenderMode === 'sorted',
     });
-    const turns = React.useMemo(() => {
-        if (!streamingTurn) {
-            return staticTurns;
-        }
-        return [...staticTurns, streamingTurn];
-    }, [staticTurns, streamingTurn]);
-
-    const renderEntries = React.useMemo<RenderEntry[]>(() => {
-        const turnEntries = turns.map((turn) => ({
+    const staticRenderEntries = React.useMemo<RenderEntry[]>(() => streamPerfMeasure('ui.message_list.render_entries_ms', () => {
+        const turnEntries = staticTurns.map((turn) => ({
             kind: 'turn' as const,
             key: `turn:${turn.turnId}`,
             turn,
@@ -1077,21 +1217,136 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         });
 
         return orderedEntries;
-    }, [displayMessages, projection.lastTurnId, projection.ungroupedMessageIds, turns]);
+    }), [displayMessages, projection.lastTurnId, projection.ungroupedMessageIds, staticTurns]);
 
-    const staging = useStageTurns({
-        sessionKey,
-        turnStart,
-        totalTurns: renderEntries.length,
-        disabled: disableStaging,
+    const trailingStreamingEntry = React.useMemo<RenderEntry | undefined>(() => {
+        if (streamingTurn) {
+            return {
+                kind: 'turn',
+                key: `turn:${streamingTurn.turnId}`,
+                turn: streamingTurn,
+                isLastTurn: streamingTurn.turnId === projection.lastTurnId,
+            } satisfies RenderEntry;
+        }
+
+        if (projection.ungroupedMessageIds.size === 0) {
+            return undefined;
+        }
+
+        const lastMessage = displayMessages[displayMessages.length - 1];
+        if (!lastMessage || !projection.ungroupedMessageIds.has(lastMessage.info.id)) {
+            return undefined;
+        }
+
+        return {
+            kind: 'ungrouped',
+            key: `msg:${lastMessage.info.id}`,
+            message: lastMessage,
+            previousMessage: displayMessages.length > 1 ? displayMessages[displayMessages.length - 2] : undefined,
+            nextMessage: undefined,
+        } satisfies RenderEntry;
+    }, [displayMessages, projection.lastTurnId, projection.ungroupedMessageIds, streamingTurn]);
+
+    if (trailingStreamingEntry) {
+        streamPerfCount('ui.message_list.render.streaming');
+    }
+
+    const historyEntries = staticRenderEntries;
+    const shouldVirtualizeHistory = historyEntries.length >= MESSAGE_LIST_VIRTUALIZE_THRESHOLD;
+    const [historyWidthPx, setHistoryWidthPx] = React.useState<number | null>(null);
+    const historyMeasurementScopeKey = historyWidthPx === null ? 'width:unknown' : `width:${Math.round(historyWidthPx)}`;
+
+    React.useLayoutEffect(() => {
+        const historyContent = historyContentRef.current;
+        if (!historyContent || !shouldVirtualizeHistory) {
+            setHistoryWidthPx((previous) => (previous === null ? previous : null));
+            return;
+        }
+
+        const updateWidth = (nextWidth: number) => {
+            setHistoryWidthPx((previous) => {
+                if (previous !== null && Math.abs(previous - nextWidth) < 0.5) {
+                    return previous;
+                }
+                return nextWidth;
+            });
+        };
+
+        updateWidth(historyContent.getBoundingClientRect().width);
+
+        if (typeof ResizeObserver === 'undefined') {
+            return;
+        }
+
+        const observer = new ResizeObserver(() => {
+            updateWidth(historyContent.getBoundingClientRect().width);
+        });
+        observer.observe(historyContent);
+        return () => {
+            observer.disconnect();
+        };
+    }, [historyEntries.length, shouldVirtualizeHistory]);
+
+    const historyVirtualizer = useVirtualizer({
+        count: historyEntries.length,
+        getScrollElement: resolveScrollContainer,
+        estimateSize: (index) => estimateHistoryEntryHeight(historyEntries[index]),
+        getItemKey: (index) => `${historyMeasurementScopeKey}:${historyEntries[index]?.key ?? index}`,
+        measureElement: measureVirtualElement,
+        useAnimationFrameWithResizeObserver: true,
+        overscan: MESSAGE_LIST_OVERSCAN,
+        enabled: shouldVirtualizeHistory,
     });
 
-    const stagedEntries = React.useMemo(() => {
-        if (staging.stageStartIndex <= 0) {
-            return renderEntries;
+    React.useEffect(() => {
+        if (!shouldVirtualizeHistory || historyWidthPx === null) {
+            return;
         }
-        return renderEntries.slice(staging.stageStartIndex);
-    }, [renderEntries, staging.stageStartIndex]);
+        historyVirtualizer.measure();
+    }, [historyVirtualizer, historyWidthPx, shouldVirtualizeHistory]);
+
+    const scheduleVirtualMeasure = React.useCallback(() => {
+        if (!shouldVirtualizeHistory) {
+            return;
+        }
+        if (typeof window === 'undefined') {
+            historyVirtualizer.measure();
+            return;
+        }
+        if (pendingVirtualMeasureFrameRef.current !== null) {
+            return;
+        }
+        pendingVirtualMeasureFrameRef.current = window.requestAnimationFrame(() => {
+            pendingVirtualMeasureFrameRef.current = null;
+            historyVirtualizer.measure();
+        });
+    }, [historyVirtualizer, shouldVirtualizeHistory]);
+
+    React.useEffect(() => {
+        return () => {
+            if (pendingVirtualMeasureFrameRef.current !== null && typeof window !== 'undefined') {
+                window.cancelAnimationFrame(pendingVirtualMeasureFrameRef.current);
+            }
+        };
+    }, []);
+
+    const historyVirtualRows = React.useMemo(
+        () => (shouldVirtualizeHistory ? historyVirtualizer.getVirtualItems() : []),
+        [historyVirtualizer, shouldVirtualizeHistory],
+    );
+
+    const allEntries = React.useMemo(() => {
+        return trailingStreamingEntry ? [...historyEntries, trailingStreamingEntry] : historyEntries;
+    }, [historyEntries, trailingStreamingEntry]);
+
+    const stableHistoryContentChange = useStableEvent((reason?: ContentChangeReason) => {
+        scheduleVirtualMeasure();
+        onMessageContentChange(reason);
+    });
+
+    const stableTailContentChange = useStableEvent((reason?: ContentChangeReason) => {
+        onMessageContentChange(reason);
+    });
 
     const currentUserOrder = React.useMemo(() => {
         return messages
@@ -1136,77 +1391,14 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         return userAnimationRef.current.animatedIds.has(message.info.id);
     }, []);
 
-    const onUserAnimationConsumed = React.useCallback(() => {
-        // Animation plays once via ToolRevealOnMount; no cleanup needed.
-        // The ref-based animatedIds set is reset on session switch.
+    const onUserAnimationConsumed = React.useCallback((messageId: string) => {
+        userAnimationRef.current.animatedIds.delete(messageId);
     }, []);
-
-    const shouldVirtualize = Boolean(resolveScrollContainer()) && stagedEntries.length >= MESSAGE_VIRTUALIZE_THRESHOLD;
-
-    const estimateEntrySize = React.useCallback(
-        (index: number): number => {
-            const entry = stagedEntries[index];
-            if (!entry) {
-                return 220;
-            }
-            if (entry.kind === 'turn') {
-                const assistantCount = entry.turn.assistantMessages.length;
-                return Math.min(
-                    TURN_ESTIMATE_MAX_PX,
-                    TURN_ESTIMATE_BASE_PX + assistantCount * TURN_ESTIMATE_PER_ASSISTANT_PX,
-                );
-            }
-            const role = resolveMessageRole(entry.message);
-            return role === 'user' ? 100 : 220;
-        },
-        [stagedEntries]
-    );
-
-    const virtualizer = useMessageListVirtualizer<Element>({
-        count: stagedEntries.length,
-        getScrollElement: resolveScrollContainer,
-        estimateSize: estimateEntrySize,
-        overscan: isMobile ? MESSAGE_VIRTUAL_OVERSCAN_MOBILE : MESSAGE_VIRTUAL_OVERSCAN_DESKTOP,
-        getItemKey: (index: number) => stagedEntries[index]?.key ?? index,
-        enabled: shouldVirtualize,
-        useFlushSync: false,
-    });
-
-    const isVirtualRowInRange = React.useCallback(
-        (row: VirtualItem) => row.index >= 0 && row.index < stagedEntries.length,
-        [stagedEntries.length],
-    );
-
-    const virtualRows = shouldVirtualize ? virtualizer.getVirtualItems().filter(isVirtualRowInRange) : [];
-    const lastNonEmptyVirtualRowsRef = React.useRef<VirtualItem[]>([]);
-    if (shouldVirtualize && virtualRows.length > 0) {
-        lastNonEmptyVirtualRowsRef.current = virtualRows;
-    } else if (!shouldVirtualize && lastNonEmptyVirtualRowsRef.current.length > 0) {
-        lastNonEmptyVirtualRowsRef.current = [];
-    }
-
-    const fallbackVirtualRows = shouldVirtualize
-        ? lastNonEmptyVirtualRowsRef.current.filter(isVirtualRowInRange)
-        : [];
-
-    const effectiveVirtualRows = shouldVirtualize
-        ? (virtualRows.length > 0 ? virtualRows : fallbackVirtualRows)
-        : [];
-
-    const renderVirtualized = shouldVirtualize && effectiveVirtualRows.length > 0;
-
-    const scrollVirtualizerToIndex = React.useCallback((index: number, behavior: ScrollBehavior = 'auto') => {
-        if (!virtualizer) {
-            return;
-        }
-        const normalizedBehavior: 'auto' | 'smooth' = behavior === 'instant' ? 'auto' : behavior;
-        virtualizer.scrollToIndex(index, { align: 'start', behavior: normalizedBehavior });
-    }, [virtualizer]);
 
     const messageIndexMap = React.useMemo(() => {
         const indexMap = new Map<string, number>();
 
-        stagedEntries.forEach((entry, index) => {
+        allEntries.forEach((entry, index) => {
             if (entry.kind === 'ungrouped') {
                 indexMap.set(entry.message.info.id, index);
                 return;
@@ -1218,17 +1410,17 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         });
 
         return indexMap;
-    }, [stagedEntries]);
+    }, [allEntries]);
 
     const turnIndexMap = React.useMemo(() => {
         const indexMap = new Map<string, number>();
-        stagedEntries.forEach((entry, index) => {
+        allEntries.forEach((entry, index) => {
             if (entry.kind === 'turn') {
                 indexMap.set(entry.turn.turnId, index);
             }
         });
         return indexMap;
-    }, [stagedEntries]);
+    }, [allEntries]);
 
     const findMessageElement = React.useCallback((messageId: string): HTMLElement | null => {
         const container = resolveScrollContainer();
@@ -1237,6 +1429,16 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         }
         return container.querySelector(`[data-message-id="${messageId}"]`);
     }, [resolveScrollContainer]);
+
+    const scrollHistoryIndexIntoView = React.useCallback((index: number, behavior: ScrollBehavior = 'auto') => {
+        if (!shouldVirtualizeHistory || index < 0 || index >= historyEntries.length) {
+            return false;
+        }
+
+        const virtualizerBehavior = behavior === 'smooth' ? 'smooth' : 'auto';
+        historyVirtualizer.scrollToIndex(index, { align: 'start', behavior: virtualizerBehavior });
+        return true;
+    }, [historyEntries.length, historyVirtualizer, shouldVirtualizeHistory]);
 
     const scrollMessageElementIntoView = React.useCallback((messageId: string, behavior: ScrollBehavior = 'auto') => {
         const container = resolveScrollContainer();
@@ -1256,7 +1458,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         return true;
     }, [findMessageElement, resolveScrollContainer]);
 
-    React.useLayoutEffect(() => {
+    React.useEffect(() => {
         if (!ref) {
             return;
         }
@@ -1269,21 +1471,9 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                     return false;
                 }
 
-                if (shouldVirtualize) {
-                    scrollVirtualizerToIndex(index, behavior === 'instant' ? 'auto' : behavior);
-                    if (typeof window !== 'undefined') {
-                        window.requestAnimationFrame(() => {
-                            const container = resolveScrollContainer();
-                            if (!container) {
-                                return;
-                            }
-                            const turnElement = container.querySelector<HTMLElement>(`[data-turn-id="${turnId}"]`);
-                            if (turnElement) {
-                                turnElement.scrollIntoView({ behavior, block: 'start' });
-                            }
-                        });
-                    }
-                    return true;
+                const targetIsTail = trailingStreamingEntry !== undefined && index >= historyEntries.length;
+                if (targetIsTail) {
+                    return false;
                 }
 
                 const container = resolveScrollContainer();
@@ -1292,7 +1482,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                 }
                 const turnElement = container.querySelector<HTMLElement>(`[data-turn-id="${turnId}"]`);
                 if (!turnElement) {
-                    return false;
+                    return scrollHistoryIndexIntoView(index, behavior);
                 }
                 turnElement.scrollIntoView({ behavior, block: 'start' });
                 return true;
@@ -1305,28 +1495,13 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                     return false;
                 }
 
-                if (shouldVirtualize) {
-                    scrollVirtualizerToIndex(index, behavior === 'instant' ? 'auto' : behavior);
-                    if (scrollMessageElementIntoView(messageId, behavior)) {
-                        return true;
-                    }
-                    if (typeof window !== 'undefined') {
-                        let attempts = 0;
-                        const retry = () => {
-                            attempts += 1;
-                            if (scrollMessageElementIntoView(messageId, behavior)) {
-                                return;
-                            }
-                            if (attempts < 3) {
-                                window.requestAnimationFrame(retry);
-                            }
-                        };
-                        window.requestAnimationFrame(retry);
-                    }
-                    return true;
+                const targetIsTail = trailingStreamingEntry !== undefined && index >= historyEntries.length;
+                if (targetIsTail) {
+                    return false;
                 }
 
-                return scrollMessageElementIntoView(messageId, behavior);
+                return scrollMessageElementIntoView(messageId, behavior)
+                    || scrollHistoryIndexIntoView(index, behavior);
             },
 
             captureViewportAnchor: () => {
@@ -1337,7 +1512,20 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
 
                 const containerRect = container.getBoundingClientRect();
                 const nodes: HTMLElement[] = Array.from(container.querySelectorAll<HTMLElement>('[data-message-id]'));
-                const firstVisible = nodes.find((node) => node.getBoundingClientRect().bottom > containerRect.top + 1);
+                const firstVisible = nodes.find((node) => {
+                    const rect = node.getBoundingClientRect();
+                    if (rect.bottom <= containerRect.top + 1) {
+                        return false;
+                    }
+
+                    if (typeof window === 'undefined') {
+                        return true;
+                    }
+
+                    const computed = window.getComputedStyle(node);
+                    const isStuckSticky = computed.position === 'sticky' && rect.top <= containerRect.top + 1;
+                    return !isStuckSticky;
+                }) ?? nodes.find((node) => node.getBoundingClientRect().bottom > containerRect.top + 1);
                 if (!firstVisible) {
                     return null;
                 }
@@ -1359,13 +1547,8 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                     return false;
                 }
 
-                const index = messageIndexMap.get(anchor.messageId);
-                if (index === undefined) {
+                if (!messageIndexMap.has(anchor.messageId)) {
                     return false;
-                }
-
-                if (shouldVirtualize) {
-                    scrollVirtualizerToIndex(index, 'auto');
                 }
 
                 const applyAnchor = (): boolean => {
@@ -1382,25 +1565,14 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                     return true;
                 };
 
-                if (applyAnchor()) {
-                    return true;
+                if (!applyAnchor()) {
+                    const index = messageIndexMap.get(anchor.messageId);
+                    if (typeof index === 'number' && index < historyEntries.length) {
+                        scrollHistoryIndexIntoView(index, 'auto');
+                    }
                 }
 
-                if (typeof window !== 'undefined') {
-                    let attempts = 0;
-                    const retry = () => {
-                        attempts += 1;
-                        if (applyAnchor()) {
-                            return;
-                        }
-                        if (attempts < 3) {
-                            window.requestAnimationFrame(retry);
-                        }
-                    };
-                    window.requestAnimationFrame(retry);
-                }
-
-                return true;
+                return applyAnchor();
             },
         };
 
@@ -1416,9 +1588,9 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
         return () => {
             objectRef.current = null;
         };
-    }, [findMessageElement, messageIndexMap, scrollMessageElementIntoView, resolveScrollContainer, scrollVirtualizerToIndex, shouldVirtualize, turnIndexMap, ref]);
+    }, [findMessageElement, historyEntries.length, messageIndexMap, resolveScrollContainer, scrollHistoryIndexIntoView, scrollMessageElementIntoView, trailingStreamingEntry, turnIndexMap, ref]);
 
-    const disableFadeIn = isLoadingOlder || (renderVirtualized && virtualizer.isScrolling);
+    const disableFadeIn = false;
 
     return (
         <div>
@@ -1440,100 +1612,48 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
                     </div>
                 )}
 
-                {staging.isStaging ? (
-                    <div className="flex justify-center py-1">
-                        <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70">
-                            Revealing history…
-                        </span>
-                    </div>
-                ) : null}
-
                 <FadeInDisabledProvider disabled={disableFadeIn}>
-                    {renderVirtualized ? (
-                        <div
-                            className="relative w-full"
-                            style={{ height: `${virtualizer.getTotalSize()}px` }}
-                        >
-                            {effectiveVirtualRows.map((virtualRow: VirtualItem) => {
-                                const entry = stagedEntries[virtualRow.index];
-                                if (!entry) {
-                                    return null;
-                                }
-
-                                return (
-                                    <div
-                                        key={entry.key}
-                                        data-index={virtualRow.index}
-                                        ref={virtualizer.measureElement}
-                                        className="absolute left-0 top-0 w-full [overflow-anchor:none]"
-                                        style={{ transform: `translateY(${virtualRow.start}px)` }}
-                                    >
-                                        <MessageListEntry
-                                            entry={entry}
-                                            onMessageContentChange={stableOnMessageContentChange}
-                                            getAnimationHandlers={stableGetAnimationHandlers}
-                                            scrollToBottom={stableScrollToBottom}
-                                            stickyUserHeader={false}
-                                            sessionIsWorking={sessionIsWorking}
-                                            defaultActivityExpanded={defaultActivityExpanded}
-                                            turnUiStates={turnUiStates}
-                                            onToggleTurnGroup={toggleTurnGroup}
-                                            chatRenderMode={chatRenderMode}
-                                            shouldAnimateUserMessage={shouldAnimateUserMessage}
-                                            onUserAnimationConsumed={onUserAnimationConsumed}
-                                        />
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    ) : (
-                        <div className="relative w-full">
-                        <MessageListContent
-                            entries={stagedEntries}
-                            onMessageContentChange={stableOnMessageContentChange}
+                    <div className="relative w-full">
+                        <StaticHistoryList
+                            entries={historyEntries}
+                            shouldVirtualize={shouldVirtualizeHistory}
+                            virtualRows={historyVirtualRows}
+                            totalSize={historyVirtualizer.getTotalSize()}
+                            measureElement={historyVirtualizer.measureElement}
+                            contentRef={historyContentRef}
+                            onMessageContentChange={stableHistoryContentChange}
                             getAnimationHandlers={stableGetAnimationHandlers}
                             scrollToBottom={stableScrollToBottom}
                             stickyUserHeader={stickyUserHeader}
-                            sessionIsWorking={sessionIsWorking}
                             defaultActivityExpanded={defaultActivityExpanded}
                             turnUiStates={turnUiStates}
                             onToggleTurnGroup={toggleTurnGroup}
                             chatRenderMode={chatRenderMode}
                             shouldAnimateUserMessage={shouldAnimateUserMessage}
                             onUserAnimationConsumed={onUserAnimationConsumed}
+                            activeStreamingPhase={activeStreamingPhase}
                         />
-                        </div>
-                    )}
+                        {trailingStreamingEntry ? (
+                            <StreamingTailContent
+                                entry={trailingStreamingEntry}
+                                onMessageContentChange={stableTailContentChange}
+                                getAnimationHandlers={stableGetAnimationHandlers}
+                                scrollToBottom={stableScrollToBottom}
+                                stickyUserHeader={stickyUserHeader}
+                                sessionIsWorking={sessionIsWorking}
+                                defaultActivityExpanded={defaultActivityExpanded}
+                                turnUiStates={turnUiStates}
+                                onToggleTurnGroup={toggleTurnGroup}
+                                chatRenderMode={chatRenderMode}
+                                shouldAnimateUserMessage={shouldAnimateUserMessage}
+                                onUserAnimationConsumed={onUserAnimationConsumed}
+                                activeStreamingMessageId={activeStreamingMessageId}
+                                activeStreamingPhase={activeStreamingPhase}
+                            />
+                        ) : null}
+                    </div>
                 </FadeInDisabledProvider>
 
-                {(questions.length > 0 || permissions.length > 0) && (
-                    <div>
-                        {questions.map((question) => (
-                            <QuestionCard key={question.id} question={question} />
-                        ))}
-                        {permissions.map((permission) => (
-                            <PermissionCard key={permission.id} permission={permission} />
-                        ))}
-                    </div>
-                )}
-
-                <div className="mb-3">
-                    <StatusRow
-                        isWorking={working.isWorking}
-                        statusText={working.statusText}
-                        isGenericStatus={working.isGenericStatus}
-                        isWaitingForPermission={working.isWaitingForPermission}
-                        wasAborted={working.wasAborted}
-                        abortActive={working.abortActive}
-                        retryInfo={working.retryInfo}
-                        showAssistantStatus
-                        showTodos={false}
-                        agentName={currentAgentName}
-                    />
-                </div>
-
-                {/* Bottom spacer */}
-                <div className="flex-shrink-0" style={{ height: isMobile ? '40px' : '10vh' }} aria-hidden="true" />
         </div>
     );
 });

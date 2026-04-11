@@ -3,7 +3,8 @@ import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { cn } from '@/lib/utils';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { useSessionStore } from '@/stores/useSessionStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSelectionStore } from '@/sync/selection-store';
 import { useContextStore } from '@/stores/contextStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useModelLists } from '@/hooks/useModelLists';
@@ -42,24 +43,22 @@ export const UnifiedControlsDrawer: React.FC<UnifiedControlsDrawerProps> = ({
     onOpenModel,
     onOpenEffort,
 }) => {
-    const {
-        providers,
-        currentProviderId,
-        currentModelId,
-        currentVariant,
-        setProvider,
-        setModel,
-        setCurrentVariant,
-        getCurrentModelVariants,
-        getModelMetadata,
-    } = useConfigStore();
-    const { addRecentModel, addRecentEffort, recentEfforts } = useUIStore();
+    const providers = useConfigStore((state) => state.providers);
+    const currentProviderId = useConfigStore((state) => state.currentProviderId);
+    const currentModelId = useConfigStore((state) => state.currentModelId);
+    const currentVariant = useConfigStore((state) => state.currentVariant);
+    const setProvider = useConfigStore((state) => state.setProvider);
+    const setModel = useConfigStore((state) => state.setModel);
+    const setCurrentVariant = useConfigStore((state) => state.setCurrentVariant);
+    const getCurrentModelVariants = useConfigStore((state) => state.getCurrentModelVariants);
+    const getModelMetadata = useConfigStore((state) => state.getModelMetadata);
+    const addRecentModel = useUIStore((state) => state.addRecentModel);
+    const addRecentEffort = useUIStore((state) => state.addRecentEffort);
+    const recentEfforts = useUIStore((state) => state.recentEfforts);
     const { recentModelsList } = useModelLists();
-    const {
-        currentSessionId,
-        saveAgentModelForSession,
-        saveAgentModelVariantForSession,
-    } = useSessionStore();
+    const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
+    const saveAgentModelForSession = useSelectionStore((state) => state.saveAgentModelForSession);
+    const saveAgentModelVariantForSession = useSelectionStore((state) => state.saveAgentModelVariantForSession);
     const sessionAgentName = useContextStore((state) =>
         currentSessionId ? state.getSessionAgentSelection(currentSessionId) : null
     );

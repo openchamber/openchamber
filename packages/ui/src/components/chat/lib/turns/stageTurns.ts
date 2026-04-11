@@ -20,8 +20,8 @@ export interface StageTurnsResult {
 }
 
 const DEFAULT_STAGE_CONFIG: TurnStageConfig = {
-    init: 1,
-    batch: 3,
+    init: 10,
+    batch: 8,
 };
 
 export const getInitialStageCount = (total: number, config: TurnStageConfig): number => {

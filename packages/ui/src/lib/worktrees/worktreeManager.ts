@@ -177,34 +177,60 @@ const toCreatePayload = (args: {
   };
 };
 
+// Cache worktree listings to avoid repeated git worktree list + rev-parse calls
+const _worktreeListCache = new Map<string, { value: WorktreeMetadata[]; at: number }>();
+const _worktreeListInflight = new Map<string, Promise<WorktreeMetadata[]>>();
+const WORKTREE_LIST_CACHE_TTL = 30_000; // 30 seconds
+
 export async function listProjectWorktrees(project: ProjectRef): Promise<WorktreeMetadata[]> {
   const projectDirectory = normalizePath(project.path);
-  const metadataProjectDirectory = await resolvePrimaryWorktreeDirectory(projectDirectory).catch(() => projectDirectory);
-  const normalizedProjectDirectory = normalizePath(projectDirectory);
 
-  const worktrees = await git.worktree.list(projectDirectory).catch(() => []);
-  const results: WorktreeMetadata[] = worktrees
-    .filter((entry) => typeof entry.path === 'string' && entry.path.trim().length > 0)
-    .map((entry) => {
-      const worktreePath = normalizePath(entry.path);
-      const branch = (entry.branch || '').replace(/^refs\/heads\//, '').trim();
-      const name = (entry.name || '').trim();
-      return {
-        source: 'sdk' as const,
-        name: name || deriveSdkWorktreeNameFromDirectory(worktreePath),
-        path: worktreePath,
-        projectDirectory: metadataProjectDirectory,
-        branch,
-        label: branch || name || deriveSdkWorktreeNameFromDirectory(worktreePath),
-      };
-    })
-    .filter((entry) => normalizePath(entry.path) !== normalizedProjectDirectory);
+  // Return cached if fresh
+  const cached = _worktreeListCache.get(projectDirectory);
+  if (cached && Date.now() - cached.at < WORKTREE_LIST_CACHE_TTL) {
+    return cached.value;
+  }
 
-  return results.sort((a, b) => {
-    const aLabel = (a.label || a.branch || a.path).toLowerCase();
-    const bLabel = (b.label || b.branch || b.path).toLowerCase();
-    return aLabel.localeCompare(bLabel);
+  // Dedup in-flight requests
+  const inflight = _worktreeListInflight.get(projectDirectory);
+  if (inflight) return inflight;
+
+  const promise = (async (): Promise<WorktreeMetadata[]> => {
+    const metadataProjectDirectory = await resolvePrimaryWorktreeDirectory(projectDirectory).catch(() => projectDirectory);
+    const normalizedProjectDirectory = normalizePath(projectDirectory);
+
+    const worktrees = await git.worktree.list(projectDirectory).catch(() => []);
+    const results: WorktreeMetadata[] = worktrees
+      .filter((entry) => typeof entry.path === 'string' && entry.path.trim().length > 0)
+      .map((entry) => {
+        const worktreePath = normalizePath(entry.path);
+        const branch = (entry.branch || '').replace(/^refs\/heads\//, '').trim();
+        const name = (entry.name || '').trim();
+        return {
+          source: 'sdk' as const,
+          name: name || deriveSdkWorktreeNameFromDirectory(worktreePath),
+          path: worktreePath,
+          projectDirectory: metadataProjectDirectory,
+          branch,
+          label: branch || name || deriveSdkWorktreeNameFromDirectory(worktreePath),
+        };
+      })
+      .filter((entry) => normalizePath(entry.path) !== normalizedProjectDirectory);
+
+    const sorted = results.sort((a, b) => {
+      const aLabel = (a.label || a.branch || a.path).toLowerCase();
+      const bLabel = (b.label || b.branch || b.path).toLowerCase();
+      return aLabel.localeCompare(bLabel);
+    });
+
+    _worktreeListCache.set(projectDirectory, { value: sorted, at: Date.now() });
+    return sorted;
+  })().finally(() => {
+    _worktreeListInflight.delete(projectDirectory);
   });
+
+  _worktreeListInflight.set(projectDirectory, promise);
+  return promise;
 }
 
 export type CreateWorktreeArgs = {

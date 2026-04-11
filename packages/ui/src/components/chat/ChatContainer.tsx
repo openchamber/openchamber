@@ -1,23 +1,23 @@
 import React from 'react';
 import { RiArrowLeftLine } from '@remixicon/react';
-import { useShallow } from 'zustand/react/shallow';
-import type { Message, Part } from '@opencode-ai/sdk/v2';
+import type { Message, Part, Session } from '@opencode-ai/sdk/v2';
 
 import { ChatInput } from './ChatInput';
-import { useSessionStore } from '@/stores/useSessionStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { Skeleton } from '@/components/ui/skeleton';
 import ChatEmptyState from './ChatEmptyState';
 import MessageList, { type MessageListHandle } from './MessageList';
+import { PermissionCard } from './PermissionCard';
+import { QuestionCard } from './QuestionCard';
+import { StatusRowContainer } from './StatusRowContainer';
 import ScrollToBottomButton from './components/ScrollToBottomButton';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
-import { useChatScrollManager } from '@/hooks/useChatScrollManager';
+import { useChatScrollManager, type AnimationHandlers, type ContentChangeReason } from '@/hooks/useChatScrollManager';
 import { useChatTimelineController } from './hooks/useChatTimelineController';
 import { useChatTurnNavigation } from './hooks/useChatTurnNavigation';
 import { useDeviceInfo } from '@/lib/device';
 import { Button } from '@/components/ui/button';
 import { OverlayScrollbar } from '@/components/ui/OverlayScrollbar';
-import { TimelineDialog } from './TimelineDialog';
 import type { PermissionRequest } from '@/types/permission';
 import type { QuestionRequest } from '@/types/question';
 import { cn } from '@/lib/utils';
@@ -26,17 +26,177 @@ import {
     flattenBlockingRequests,
 } from './lib/blockingRequests';
 
+// New sync system imports
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useViewportStore } from '@/sync/viewport-store';
+import { useStreamingStore } from '@/sync/streaming';
+import {
+    useSessionMessageCount,
+    useSessionMessageRecords,
+    useSessions,
+    useDirectorySync,
+    useSessionStatus,
+} from '@/sync/sync-context';
+import { useSync } from '@/sync/use-sync';
+import { usePlanDetection } from '@/hooks/usePlanDetection';
+import { getAllSyncSessions } from '@/sync/sync-refs';
+
 const EMPTY_MESSAGES: Array<{ info: Message; parts: Part[] }> = [];
 const EMPTY_PERMISSIONS: PermissionRequest[] = [];
 const EMPTY_QUESTIONS: QuestionRequest[] = [];
 const IDLE_SESSION_STATUS = { type: 'idle' as const };
 const SESSION_RESELECTED_EVENT = 'openchamber:session-reselected';
+const DEFAULT_RETRY_MESSAGE = 'Quota limit reached. Retrying automatically.';
+const CHAT_SCROLL_STYLE = { overflowAnchor: 'none' } as const;
+type SessionMessageRecord = { info: Message; parts: Part[] };
 
 type HydratingToolSkeletonRow = {
     id: string;
     titleWidth: string;
     detailWidth: string;
 };
+
+type ChatViewportProps = {
+    currentSessionId: string;
+    isDesktopExpandedInput: boolean;
+    isMobile: boolean;
+    stickyUserHeader: boolean;
+    scrollRef: React.RefObject<HTMLDivElement | null>;
+    messageListRef: React.RefObject<MessageListHandle | null>;
+    turnStart: number;
+    pendingRevealWork: boolean;
+    renderedMessages: SessionMessageRecord[];
+    hasMoreAboveTurns: boolean;
+    isLoadingOlder: boolean;
+    sessionIsWorking: boolean;
+    streamingMessageId: string | null;
+    activeStreamingPhase: import('./message/types').StreamPhase | null;
+    retryOverlay: {
+        sessionId: string;
+        message: string;
+        confirmedAt?: number;
+        fallbackTimestamp?: number;
+    } | null;
+    handleMessageContentChange: (reason?: ContentChangeReason) => void;
+    getAnimationHandlers: (messageId: string) => AnimationHandlers;
+    handleLoadOlder: () => void;
+    scrollToBottom: (options?: { instant?: boolean; force?: boolean }) => void;
+    sessionQuestions: QuestionRequest[];
+    sessionPermissions: PermissionRequest[];
+    isProgrammaticFollowActive: boolean;
+};
+
+const ChatViewport = React.memo(({
+    currentSessionId,
+    isDesktopExpandedInput,
+    isMobile,
+    stickyUserHeader,
+    scrollRef,
+    messageListRef,
+    turnStart,
+    pendingRevealWork,
+    renderedMessages,
+    hasMoreAboveTurns,
+    isLoadingOlder,
+    sessionIsWorking,
+    streamingMessageId,
+    activeStreamingPhase,
+    retryOverlay,
+    handleMessageContentChange,
+    getAnimationHandlers,
+    handleLoadOlder,
+    scrollToBottom,
+    sessionQuestions,
+    sessionPermissions,
+    isProgrammaticFollowActive,
+}: ChatViewportProps) => {
+    return (
+        <div
+            className={cn(
+                'relative min-h-0',
+                isDesktopExpandedInput
+                    ? 'absolute inset-0 opacity-0 pointer-events-none'
+                    : 'flex-1'
+            )}
+            aria-hidden={isDesktopExpandedInput}
+        >
+            <div className="absolute inset-0">
+                <ScrollShadow
+                    className="absolute inset-0 overflow-y-auto overflow-x-hidden z-0 chat-scroll overlay-scrollbar-target"
+                    ref={scrollRef}
+                    style={CHAT_SCROLL_STYLE}
+                    observeMutations={false}
+                    hideTopShadow={isMobile && stickyUserHeader}
+                    data-scroll-shadow="true"
+                    data-scrollbar="chat"
+                >
+                    <div className="relative z-0 min-h-full">
+                        <MessageList
+                            ref={messageListRef}
+                            sessionKey={currentSessionId}
+                            turnStart={turnStart}
+                            disableStaging={pendingRevealWork}
+                            messages={renderedMessages}
+                            sessionIsWorking={sessionIsWorking}
+                            activeStreamingMessageId={streamingMessageId}
+                            activeStreamingPhase={activeStreamingPhase}
+                            retryOverlay={retryOverlay}
+                            onMessageContentChange={handleMessageContentChange}
+                            getAnimationHandlers={getAnimationHandlers}
+                            hasMoreAbove={hasMoreAboveTurns}
+                            isLoadingOlder={isLoadingOlder}
+                            onLoadOlder={handleLoadOlder}
+                            scrollToBottom={scrollToBottom}
+                            scrollRef={scrollRef}
+                        />
+                        {(sessionQuestions.length > 0 || sessionPermissions.length > 0) && (
+                            <div>
+                                {sessionQuestions.map((question) => (
+                                    <QuestionCard key={question.id} question={question} />
+                                ))}
+                                {sessionPermissions.map((permission) => (
+                                    <PermissionCard key={permission.id} permission={permission} />
+                                ))}
+                            </div>
+                        )}
+
+                        <div className="mb-3">
+                            <StatusRowContainer />
+                        </div>
+
+                        <div className="flex-shrink-0" style={{ height: isMobile ? '40px' : '10vh' }} aria-hidden="true" />
+                    </div>
+                </ScrollShadow>
+                <OverlayScrollbar containerRef={scrollRef} suppressVisibility={isProgrammaticFollowActive} userIntentOnly observeMutations={false} />
+            </div>
+        </div>
+    );
+}, (prev, next) => {
+    return prev.currentSessionId === next.currentSessionId
+        && prev.isDesktopExpandedInput === next.isDesktopExpandedInput
+        && prev.isMobile === next.isMobile
+        && prev.stickyUserHeader === next.stickyUserHeader
+        && prev.scrollRef === next.scrollRef
+        && prev.messageListRef === next.messageListRef
+        && prev.turnStart === next.turnStart
+        && prev.pendingRevealWork === next.pendingRevealWork
+        && prev.renderedMessages === next.renderedMessages
+        && prev.hasMoreAboveTurns === next.hasMoreAboveTurns
+        && prev.isLoadingOlder === next.isLoadingOlder
+        && prev.sessionIsWorking === next.sessionIsWorking
+        && prev.streamingMessageId === next.streamingMessageId
+        && prev.activeStreamingPhase === next.activeStreamingPhase
+        && prev.retryOverlay === next.retryOverlay
+        && prev.handleMessageContentChange === next.handleMessageContentChange
+        && prev.getAnimationHandlers === next.getAnimationHandlers
+        && prev.handleLoadOlder === next.handleLoadOlder
+        && prev.scrollToBottom === next.scrollToBottom
+        && prev.sessionQuestions === next.sessionQuestions
+        && prev.sessionPermissions === next.sessionPermissions
+        && prev.isProgrammaticFollowActive === next.isProgrammaticFollowActive;
+});
+
+ChatViewport.displayName = 'ChatViewport';
 
 const HYDRATING_SKELETON_ITEMS: Array<{
     id: number;
@@ -71,101 +231,174 @@ const HYDRATING_SKELETON_ITEMS: Array<{
 ];
 
 export const ChatContainer: React.FC = () => {
-    const {
-        currentSessionId,
-        loadMessages,
-        loadMoreMessages,
-        updateViewportAnchor,
-        openNewSessionDraft,
-        setCurrentSession,
-        newSessionDraft,
-    } = useSessionStore(
-        useShallow((state) => ({
-            currentSessionId: state.currentSessionId,
-            loadMessages: state.loadMessages,
-            loadMoreMessages: state.loadMoreMessages,
-            updateViewportAnchor: state.updateViewportAnchor,
-            openNewSessionDraft: state.openNewSessionDraft,
-            setCurrentSession: state.setCurrentSession,
-            newSessionDraft: state.newSessionDraft,
-        }))
+    // Session UI state
+    const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
+    const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
+    const setCurrentSession = useSessionUIStore((s) => s.setCurrentSession);
+    const newSessionDraft = useSessionUIStore((s) => s.newSessionDraft);
+    const updateViewportAnchor = useViewportStore((s) => s.updateViewportAnchor);
+    const isSyncing = useViewportStore((s) => s.isSyncing);
+    const sessionMemoryStateMap = useViewportStore((s) => s.sessionMemoryState);
+
+    // Sync actions
+    const sync = useSync();
+    const loadMessages = React.useCallback(
+        (sessionId: string) => sync.syncSession(sessionId),
+        [sync],
+    );
+    const loadMoreMessages = React.useCallback(
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        (sessionId: string, _direction: 'up' | 'down') => sync.loadMore(sessionId),
+        [sync],
     );
 
-    const { isSyncing, messageStreamStates, sessionMemoryStateMap } = useSessionStore(
-        useShallow((state) => ({
-            isSyncing: state.isSyncing,
-            messageStreamStates: state.messageStreamStates,
-            sessionMemoryStateMap: state.sessionMemoryState,
-        }))
-    );
+    // UI store
+    const isExpandedInput = useUIStore((state) => state.isExpandedInput);
+    const stickyUserHeader = useUIStore((state) => state.stickyUserHeader);
+    const chatRenderMode = useUIStore((state) => state.chatRenderMode);
 
-    const {
-        isTimelineDialogOpen,
-        setTimelineDialogOpen,
-        isExpandedInput,
-        stickyUserHeader,
-        chatRenderMode,
-    } = useUIStore();
-
-    const sessionMessages = useSessionStore(
+    // Streaming state
+    const streamingMessageId = useStreamingStore(
         React.useCallback(
-            (state) => (currentSessionId ? state.messages.get(currentSessionId) ?? EMPTY_MESSAGES : EMPTY_MESSAGES),
-            [currentSessionId]
-        )
+            (s) => (currentSessionId ? s.streamingMessageIds.get(currentSessionId) ?? null : null),
+            [currentSessionId],
+        ),
+    );
+    const activeStreamingPhase = useStreamingStore(
+        React.useCallback(
+            (s) => {
+                if (!streamingMessageId) return null;
+                return s.messageStreamStates.get(streamingMessageId)?.phase ?? null;
+            },
+            [streamingMessageId],
+        ),
+    );
+    const sessionMessageCount = useSessionMessageCount(currentSessionId ?? '');
+    // Messages from sync system
+    const sessionMessageRecords = useSessionMessageRecords(currentSessionId ?? '');
+    const sessionMessages = currentSessionId ? sessionMessageRecords : EMPTY_MESSAGES;
+
+    // Sessions from sync system
+    const sessions = useSessions();
+
+    // Plan detection - watches messages for plan creation and signals store
+    usePlanDetection(currentSessionId ?? '');
+
+    // Session status from sync system
+    const sessionStatusForCurrent = useSessionStatus(currentSessionId ?? '') ?? IDLE_SESSION_STATUS;
+
+    // Permissions & questions from sync system
+    const allPermissions = useDirectorySync(
+        React.useCallback((s) => s.permission ?? {}, []),
+    );
+    const allQuestions = useDirectorySync(
+        React.useCallback((s) => s.question ?? {}, []),
     );
 
-    const sessions = useSessionStore((state) => state.sessions);
+    // Convert Record → Map for blockingRequests helpers
+    const permissionsMap = React.useMemo(() => {
+        const m = new Map<string, PermissionRequest[]>();
+        for (const [k, v] of Object.entries(allPermissions)) m.set(k, v as PermissionRequest[]);
+        return m;
+    }, [allPermissions]);
 
-    const blockingRequestState = useSessionStore(
-        useShallow((state) => ({
-            sessions: state.sessions,
-            permissions: state.permissions,
-            questions: state.questions,
-        }))
-    );
+    const questionsMap = React.useMemo(() => {
+        const m = new Map<string, QuestionRequest[]>();
+        for (const [k, v] of Object.entries(allQuestions)) m.set(k, v as QuestionRequest[]);
+        return m;
+    }, [allQuestions]);
 
     const scopedSessionIds = React.useMemo(
         () => collectVisibleSessionIdsForBlockingRequests(
-            blockingRequestState.sessions.map((session) => ({ id: session.id, parentID: session.parentID })),
+            sessions.map((session) => ({ id: session.id, parentID: session.parentID })),
             currentSessionId,
         ),
-        [blockingRequestState.sessions, currentSessionId]
+        [sessions, currentSessionId],
     );
 
     const sessionPermissions = React.useMemo(() => {
         if (scopedSessionIds.length === 0) return EMPTY_PERMISSIONS;
-        return flattenBlockingRequests(blockingRequestState.permissions, scopedSessionIds);
-    }, [blockingRequestState.permissions, scopedSessionIds]);
+        return flattenBlockingRequests(permissionsMap, scopedSessionIds);
+    }, [permissionsMap, scopedSessionIds]);
 
     const sessionQuestions = React.useMemo(() => {
         if (scopedSessionIds.length === 0) return EMPTY_QUESTIONS;
-        return flattenBlockingRequests(blockingRequestState.questions, scopedSessionIds);
-    }, [blockingRequestState.questions, scopedSessionIds]);
+        return flattenBlockingRequests(questionsMap, scopedSessionIds);
+    }, [questionsMap, scopedSessionIds]);
+    const sessionIsWorking = React.useMemo(() => {
+        if (!currentSessionId || sessionPermissions.length > 0) {
+            return false;
+        }
 
-    const historyMeta = useSessionStore(
-        React.useCallback(
-            (state) => (currentSessionId ? state.sessionHistoryMeta.get(currentSessionId) ?? null : null),
-            [currentSessionId]
-        )
-    );
+        if (streamingMessageId || activeStreamingPhase) {
+            return true;
+        }
 
-    const streamingMessageId = useSessionStore(
-        React.useCallback(
-            (state) => (currentSessionId ? state.streamingMessageIds.get(currentSessionId) ?? null : null),
-            [currentSessionId]
-        )
-    );
+        const statusType = sessionStatusForCurrent.type ?? 'idle';
+        if (statusType === 'busy' || statusType === 'retry') {
+            return true;
+        }
 
-    const sessionStatusForCurrent = useSessionStore(
-        React.useCallback(
-            (state) => (currentSessionId ? state.sessionStatus?.get(currentSessionId) ?? IDLE_SESSION_STATUS : IDLE_SESSION_STATUS),
-            [currentSessionId]
-        )
-    );
+        const lastMessage = sessionMessages[sessionMessages.length - 1]?.info as Message | undefined;
+        return Boolean(
+            lastMessage
+            && lastMessage.role === 'assistant'
+            && typeof (lastMessage as { time?: { completed?: number } }).time?.completed !== 'number',
+        );
+    }, [activeStreamingPhase, currentSessionId, sessionMessages, sessionPermissions.length, sessionStatusForCurrent.type, streamingMessageId]);
+    const activeRetryStatus = React.useMemo(() => {
+        if (!currentSessionId || sessionStatusForCurrent.type !== 'retry') {
+            return null;
+        }
 
-    const hasSessionMessagesEntry = useSessionStore(
-        React.useCallback((state) => (currentSessionId ? state.messages.has(currentSessionId) : false), [currentSessionId])
-    );
+        const rawMessage = typeof (sessionStatusForCurrent as { message?: string }).message === 'string'
+            ? (((sessionStatusForCurrent as { message?: string }).message) ?? '').trim()
+            : '';
+
+        return {
+            sessionId: currentSessionId,
+            message: rawMessage || DEFAULT_RETRY_MESSAGE,
+            confirmedAt: (sessionStatusForCurrent as { confirmedAt?: number }).confirmedAt,
+        };
+    }, [currentSessionId, sessionStatusForCurrent]);
+    const [retryFallbackTimestamp, setRetryFallbackTimestamp] = React.useState<number>(0);
+    const retryFallbackSessionRef = React.useRef<string | null>(null);
+
+    React.useEffect(() => {
+        if (!activeRetryStatus || typeof activeRetryStatus.confirmedAt === 'number') {
+            retryFallbackSessionRef.current = null;
+            setRetryFallbackTimestamp(0);
+            return;
+        }
+
+        if (retryFallbackSessionRef.current !== activeRetryStatus.sessionId) {
+            retryFallbackSessionRef.current = activeRetryStatus.sessionId;
+            setRetryFallbackTimestamp(Date.now());
+        }
+    }, [activeRetryStatus]);
+
+    const retryOverlay = React.useMemo(() => {
+        if (!activeRetryStatus) {
+            return null;
+        }
+
+        return {
+            ...activeRetryStatus,
+            fallbackTimestamp: retryFallbackTimestamp,
+        };
+    }, [activeRetryStatus, retryFallbackTimestamp]);
+
+    // History metadata — use sync's hasMore/isLoading
+    const historyMeta = React.useMemo(() => {
+        if (!currentSessionId) return null;
+        return {
+            limit: sessionMessages.length,
+            complete: !sync.hasMore(currentSessionId),
+            loading: sync.isLoading(currentSessionId),
+        };
+    }, [currentSessionId, sessionMessages.length, sync]);
+
+    const hasSessionMessagesEntry = sessionMessages.length > 0 || (currentSessionId ? sync.hasMore(currentSessionId) : false);
 
     const { isMobile } = useDeviceInfo();
     const draftOpen = Boolean(newSessionDraft?.open);
@@ -173,24 +406,19 @@ export const ChatContainer: React.FC = () => {
     const messageListRef = React.useRef<MessageListHandle | null>(null);
 
     const parentSession = React.useMemo(() => {
-        if (!currentSessionId) {
-            return null;
-        }
-
+        if (!currentSessionId) return null;
         const current = sessions.find((session) => session.id === currentSessionId);
         const parentID = current?.parentID;
-        if (!parentID) {
-            return null;
-        }
-
-        return sessions.find((session) => session.id === parentID) ?? null;
+        if (!parentID) return null;
+        return sessions.find((session) => session.id === parentID)
+            ?? getAllSyncSessions().find((session) => session.id === parentID)
+            ?? null;
     }, [currentSessionId, sessions]);
 
     const handleReturnToParentSession = React.useCallback(() => {
-        if (!parentSession) {
-            return;
-        }
-        void setCurrentSession(parentSession.id);
+        if (!parentSession) return;
+        const parentDirectory = (parentSession as Session & { directory?: string | null }).directory ?? null;
+        setCurrentSession(parentSession.id, parentDirectory);
     }, [parentSession, setCurrentSession]);
 
     const returnToParentButton = parentSession ? (
@@ -219,48 +447,74 @@ export const ChatContainer: React.FC = () => {
     }, [sessionPermissions, sessionQuestions]);
 
     const activeTurnChangeRef = React.useRef<(turnId: string | null) => void>(() => {});
+    const handleActiveTurnChange = React.useCallback((turnId: string | null) => {
+        activeTurnChangeRef.current(turnId);
+    }, []);
 
     const {
         scrollRef,
         handleMessageContentChange,
         getAnimationHandlers,
+        prepareForBottomResume,
         scrollToBottom,
-        releasePinnedScroll,
         isPinned,
         isOverflowing,
         isProgrammaticFollowActive,
     } = useChatScrollManager({
         currentSessionId,
-        sessionMessages,
-        streamingMessageId,
+        sessionMessageCount,
+        sessionIsWorking,
         sessionMemoryState: sessionMemoryStateMap,
         updateViewportAnchor,
         isSyncing,
         isMobile,
         chatRenderMode,
-        messageStreamStates,
         sessionPermissions: sessionBlockingCards,
-        onActiveTurnChange: (turnId) => {
-            activeTurnChangeRef.current(turnId);
-        },
+        onActiveTurnChange: handleActiveTurnChange,
     });
+
+    const viewportMessages = sessionMessages;
 
     const timelineController = useChatTimelineController({
         sessionId: currentSessionId,
-        messages: sessionMessages,
+        messages: viewportMessages,
         historyMeta,
         scrollRef,
         messageListRef,
         loadMoreMessages,
+        prepareForBottomResume,
         scrollToBottom,
         isPinned,
         isOverflowing,
     });
-    const { resumeToBottomInstant } = timelineController;
+    const { loadEarlier, resumeToBottomInstant } = timelineController;
+
+    const runLatestInstantResume = React.useCallback(async () => {
+        if (!currentSessionId) {
+            scrollToBottom({ instant: true, force: true });
+            return;
+        }
+        await resumeToBottomInstant();
+    }, [currentSessionId, resumeToBottomInstant, scrollToBottom]);
+
+    const resumeToLatestInstant = React.useCallback(() => {
+        void runLatestInstantResume();
+    }, [runLatestInstantResume]);
 
     React.useEffect(() => {
         activeTurnChangeRef.current = timelineController.handleActiveTurnChange;
     }, [timelineController.handleActiveTurnChange]);
+
+    React.useEffect(() => {
+        if (sessionPermissions.length === 0 && sessionQuestions.length === 0) {
+            return;
+        }
+        handleMessageContentChange('permission');
+    }, [handleMessageContentChange, sessionPermissions, sessionQuestions]);
+
+    const handleLoadOlder = React.useCallback(() => {
+        void loadEarlier();
+    }, [loadEarlier]);
 
     const navigation = useChatTurnNavigation({
         sessionId: currentSessionId,
@@ -268,34 +522,28 @@ export const ChatContainer: React.FC = () => {
         activeTurnId: timelineController.activeTurnId,
         scrollToTurn: timelineController.scrollToTurn,
         scrollToMessage: timelineController.scrollToMessage,
-        resumeToBottom: timelineController.resumeToBottom,
+        resumeToBottom: timelineController.resumeToBottomInstant,
     });
 
     React.useEffect(() => {
-        if (typeof window === 'undefined' || !currentSessionId) {
-            return;
-        }
+        if (typeof window === 'undefined' || !currentSessionId) return;
 
         const handleSessionReselected = (event: Event) => {
             const customEvent = event as CustomEvent<string>;
-            if (customEvent.detail !== currentSessionId) {
-                return;
-            }
-
-            resumeToBottomInstant();
+            if (customEvent.detail !== currentSessionId) return;
+            if (isPinned || !isOverflowing || isProgrammaticFollowActive) return;
+            void resumeToBottomInstant();
         };
 
         window.addEventListener(SESSION_RESELECTED_EVENT, handleSessionReselected as EventListener);
         return () => {
             window.removeEventListener(SESSION_RESELECTED_EVENT, handleSessionReselected as EventListener);
         };
-    }, [currentSessionId, resumeToBottomInstant]);
+    }, [currentSessionId, isOverflowing, isPinned, isProgrammaticFollowActive, resumeToBottomInstant]);
 
     React.useLayoutEffect(() => {
         const container = scrollRef.current;
-        if (!container) {
-            return;
-        }
+        if (!container) return;
 
         const updateChatScrollHeight = () => {
             container.style.setProperty('--chat-scroll-height', `${container.clientHeight}px`);
@@ -329,9 +577,8 @@ export const ChatContainer: React.FC = () => {
         };
     }, [currentSessionId, isDesktopExpandedInput, scrollRef]);
 
-    const hasHistoryMetadata = React.useMemo(() => {
-        return Boolean(historyMeta);
-    }, [historyMeta]);
+    const hasHistoryMetadata = Boolean(historyMeta);
+    const lastScrolledSessionRef = React.useRef<string | null>(null);
 
     const isSessionHydrating =
         Boolean(currentSessionId)
@@ -342,24 +589,45 @@ export const ChatContainer: React.FC = () => {
             return;
         }
 
-        const hasSessionMessages = hasSessionMessagesEntry;
-        if (hasSessionMessages && hasHistoryMetadata) {
+        if (lastScrolledSessionRef.current === currentSessionId) {
             return;
         }
+
+        const hasHashTarget = typeof window !== 'undefined' && window.location.hash.length > 0;
+        if (hasHashTarget) {
+            lastScrolledSessionRef.current = currentSessionId;
+            return;
+        }
+
+        lastScrolledSessionRef.current = currentSessionId;
+
+        if (typeof window === 'undefined') {
+            resumeToLatestInstant();
+            return;
+        }
+
+        window.requestAnimationFrame(() => {
+            resumeToLatestInstant();
+        });
+    }, [currentSessionId, resumeToLatestInstant]);
+
+    React.useEffect(() => {
+        if (!currentSessionId) return;
+        if (hasSessionMessagesEntry && hasHistoryMetadata) return;
 
         const load = async () => {
             await loadMessages(currentSessionId).finally(() => {
                 const statusType = sessionStatusForCurrent.type ?? 'idle';
                 const isActivePhase = statusType === 'busy' || statusType === 'retry';
                 const hasHashTarget = typeof window !== 'undefined' && window.location.hash.length > 0;
-                const shouldSkipScroll = (isActivePhase && isPinned) || hasHashTarget;
+                const shouldSkipScroll = hasHashTarget || (isActivePhase && isPinned);
 
                 if (!shouldSkipScroll) {
                     if (typeof window === 'undefined') {
-                        scrollToBottom({ instant: true });
+                        resumeToLatestInstant();
                     } else {
                         window.requestAnimationFrame(() => {
-                            scrollToBottom({ instant: true });
+                            resumeToLatestInstant();
                         });
                     }
                 }
@@ -367,7 +635,7 @@ export const ChatContainer: React.FC = () => {
         };
 
         void load();
-    }, [currentSessionId, hasHistoryMetadata, hasSessionMessagesEntry, isPinned, loadMessages, scrollToBottom, sessionMessages.length, sessionStatusForCurrent.type]);
+    }, [currentSessionId, hasHistoryMetadata, hasSessionMessagesEntry, isPinned, loadMessages, resumeToLatestInstant, sessionMessages.length, sessionStatusForCurrent.type]);
 
     if (!currentSessionId && !draftOpen) {
         return (
@@ -396,10 +664,10 @@ export const ChatContainer: React.FC = () => {
                         'relative z-10',
                         isDesktopExpandedInput
                             ? 'flex-1 min-h-0 bg-background'
-                            : 'bg-background/95 supports-[backdrop-filter]:bg-background/80'
+                            : 'bg-background'
                     )}
                 >
-                    <ChatInput scrollToBottom={scrollToBottom} />
+                        <ChatInput scrollToBottom={resumeToLatestInstant} />
                 </div>
             </div>
         );
@@ -459,10 +727,10 @@ export const ChatContainer: React.FC = () => {
                         'relative z-10',
                         isDesktopExpandedInput
                             ? 'flex-1 min-h-0 bg-background'
-                            : 'bg-background/95 supports-[backdrop-filter]:bg-background/80'
+                            : 'bg-background'
                     )}
                 >
-                    <ChatInput scrollToBottom={scrollToBottom} />
+                    <ChatInput scrollToBottom={resumeToLatestInstant} />
                 </div>
             </div>
         );
@@ -495,10 +763,10 @@ export const ChatContainer: React.FC = () => {
                         'relative z-10',
                         isDesktopExpandedInput
                             ? 'flex-1 min-h-0 bg-background'
-                            : 'bg-background/95 supports-[backdrop-filter]:bg-background/80'
+                            : 'bg-background'
                     )}
                 >
-                    <ChatInput scrollToBottom={scrollToBottom} />
+                    <ChatInput scrollToBottom={resumeToLatestInstant} />
                 </div>
             </div>
         );
@@ -510,55 +778,37 @@ export const ChatContainer: React.FC = () => {
             style={isMobile ? { paddingBottom: 'var(--oc-keyboard-inset, 0px)' } : undefined}
         >
             {returnToParentButton}
-            <div
-                className={cn(
-                    'relative min-h-0',
-                    isDesktopExpandedInput
-                        ? 'absolute inset-0 opacity-0 pointer-events-none'
-                        : 'flex-1'
-                )}
-                aria-hidden={isDesktopExpandedInput}
-            >
-                <div className="absolute inset-0">
-                        <ScrollShadow
-                            className="absolute inset-0 overflow-y-auto overflow-x-hidden z-0 chat-scroll overlay-scrollbar-target"
-                            ref={scrollRef}
-                            observeMutations={false}
-                            hideTopShadow={isMobile && stickyUserHeader}
-                            data-scroll-shadow="true"
-                            data-scrollbar="chat"
-                        >
-                        <div className="relative z-0 min-h-full">
-                            <MessageList
-                                ref={messageListRef}
-                                sessionKey={currentSessionId}
-                                turnStart={timelineController.turnStart}
-                                disableStaging={timelineController.pendingRevealWork}
-                                messages={timelineController.renderedMessages}
-                                permissions={sessionPermissions}
-                                questions={sessionQuestions}
-                                onMessageContentChange={handleMessageContentChange}
-                                getAnimationHandlers={getAnimationHandlers}
-                                hasMoreAbove={timelineController.historySignals.hasMoreAboveTurns}
-                                isLoadingOlder={timelineController.isLoadingOlder}
-                                onLoadOlder={() => {
-                                    void timelineController.loadEarlier();
-                                }}
-                                scrollToBottom={scrollToBottom}
-                                scrollRef={scrollRef}
-                            />
-                        </div>
-                    </ScrollShadow>
-                    <OverlayScrollbar containerRef={scrollRef} suppressVisibility={isProgrammaticFollowActive} userIntentOnly />
-                </div>
-            </div>
+            <ChatViewport
+                currentSessionId={currentSessionId}
+                isDesktopExpandedInput={isDesktopExpandedInput}
+                isMobile={isMobile}
+                stickyUserHeader={stickyUserHeader}
+                scrollRef={scrollRef}
+                messageListRef={messageListRef}
+                turnStart={timelineController.turnStart}
+                pendingRevealWork={timelineController.pendingRevealWork}
+                renderedMessages={timelineController.renderedMessages}
+                hasMoreAboveTurns={timelineController.historySignals.hasMoreAboveTurns}
+                isLoadingOlder={timelineController.isLoadingOlder}
+                sessionIsWorking={sessionIsWorking}
+                streamingMessageId={streamingMessageId}
+                activeStreamingPhase={activeStreamingPhase}
+                retryOverlay={retryOverlay}
+                handleMessageContentChange={handleMessageContentChange}
+                getAnimationHandlers={getAnimationHandlers}
+                handleLoadOlder={handleLoadOlder}
+                scrollToBottom={scrollToBottom}
+                sessionQuestions={sessionQuestions}
+                sessionPermissions={sessionPermissions}
+                isProgrammaticFollowActive={isProgrammaticFollowActive}
+            />
 
             <div
                 className={cn(
                     'relative z-10',
                     isDesktopExpandedInput
                         ? 'flex-1 min-h-0 bg-background'
-                        : 'bg-background/95 supports-[backdrop-filter]:bg-background/80'
+                        : 'bg-background'
                 )}
             >
                 {!isDesktopExpandedInput && sessionMessages.length > 0 && (
@@ -567,22 +817,8 @@ export const ChatContainer: React.FC = () => {
                         onClick={navigation.resumeToLatest}
                     />
                 )}
-                <ChatInput scrollToBottom={scrollToBottom} />
+                <ChatInput scrollToBottom={resumeToLatestInstant} />
             </div>
-
-            <TimelineDialog
-                open={isTimelineDialogOpen}
-                onOpenChange={setTimelineDialogOpen}
-                onScrollToMessage={(messageId) => {
-                    releasePinnedScroll();
-                    return navigation.scrollToMessageId(messageId, { behavior: 'smooth', updateHash: false });
-                }}
-                onScrollByTurnOffset={(offset) => {
-                    releasePinnedScroll();
-                    void navigation.scrollByTurnOffset(offset);
-                }}
-                onResumeToLatest={navigation.resumeToLatest}
-            />
         </div>
     );
 };

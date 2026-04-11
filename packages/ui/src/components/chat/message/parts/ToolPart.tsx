@@ -11,10 +11,13 @@ import { toolDisplayStyles } from '@/lib/typography';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { useSessionStore } from '@/stores/useSessionStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useDirectorySync, useSessionMessageRecords } from '@/sync/sync-context';
+import { getSyncChildStores } from '@/sync/sync-refs';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionActivity } from '@/hooks/useSessionActivity';
 import { opencodeClient } from '@/lib/opencode/client';
+import { sessionEvents } from '@/lib/sessionEvents';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { Text } from '@/components/ui/text';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
@@ -28,12 +31,16 @@ import {
     formatEditOutput,
     detectLanguageFromOutput,
     formatInputForDisplay,
+    tryParseJsonOutput,
 } from '../toolRenderers';
+import { JsonTreeViewer } from '@/components/ui/JsonTreeViewer';
 import { DiffViewToggle, type DiffViewMode } from '../DiffViewToggle';
 import { MinDurationShineText } from './MinDurationShineText';
 import { ToolRevealOnMount } from './ToolRevealOnMount';
 import { getToolIcon } from './toolPresentation';
 import { useDurationTickerNow } from './useDurationTicker';
+import { resolveFallbackTaskSessionId } from './resolveFallbackTaskSessionId';
+import { areRenderRelevantPartsEqual } from '../renderCompare';
 
 type ToolStateWithMetadata = ToolStateUnion & { metadata?: Record<string, unknown>; input?: Record<string, unknown>; output?: string; error?: string; time?: { start: number; end?: number } };
 
@@ -154,6 +161,14 @@ const TASK_TOOL_ACTIVE_FETCH_LIMIT = 160;
 const TASK_TOOL_IDLE_FETCH_LIMIT = 80;
 const TASK_TOOL_NO_CHANGE_BACKOFF_AFTER_POLLS = 3;
 const TASK_TOOL_SETTLE_GRACE_MS = 2500;
+const GIT_REFRESH_MUTATING_TOOLS = new Set([
+    'bash',
+    'edit',
+    'write',
+    'apply_patch',
+    'patch',
+    'task',
+]);
 
 const formatDuration = (start: number, end?: number, now: number = Date.now()) => {
     const duration = Math.min(Math.max(0, (end ?? now) - start), MAX_DURATION_MS);
@@ -332,6 +347,146 @@ const getRelativePath = (absolutePath: string, currentDirectory: string): string
     }
 
     return normalizedAbsolutePath;
+};
+
+type ToolDiagnostic = {
+    message: string;
+    line: number;
+    character: number;
+};
+
+type ToolDiagnosticSection = {
+    displayPath: string;
+    diagnostics: ToolDiagnostic[];
+    remaining: number;
+};
+
+const TOOL_DIAGNOSTICS_MAX_PER_FILE = 5;
+
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+    return typeof value === 'object' && value !== null;
+};
+
+const normalizeToolDiagnostic = (value: unknown): ToolDiagnostic | null => {
+    if (!isRecord(value)) {
+        return null;
+    }
+
+    const message = typeof value.message === 'string' ? value.message.trim() : '';
+    if (!message) {
+        return null;
+    }
+
+    const severity = typeof value.severity === 'number' && Number.isFinite(value.severity) ? Math.trunc(value.severity) : undefined;
+    if (severity !== undefined && severity !== 1) {
+        return null;
+    }
+
+    const range = isRecord(value.range) ? value.range : undefined;
+    const start = range && isRecord(range.start) ? range.start : undefined;
+    const rawLine = typeof start?.line === 'number' && Number.isFinite(start.line) ? Math.max(0, Math.trunc(start.line)) : 0;
+    const rawCharacter = typeof start?.character === 'number' && Number.isFinite(start.character)
+        ? Math.max(0, Math.trunc(start.character))
+        : 0;
+
+    return {
+        message,
+        line: rawLine + 1,
+        character: rawCharacter + 1,
+    };
+};
+
+const getPrimaryToolPath = (
+    toolName: string,
+    input: Record<string, unknown> | undefined,
+    metadata: Record<string, unknown> | undefined,
+): string | null => {
+    if (toolName === 'apply_patch') {
+        const files = Array.isArray(metadata?.files) ? metadata.files : [];
+        const first = files.find((entry) => {
+            if (!isRecord(entry)) {
+                return false;
+            }
+            return entry.type !== 'delete';
+        });
+        if (!isRecord(first)) {
+            return null;
+        }
+        return typeof first.movePath === 'string'
+            ? first.movePath
+            : typeof first.filePath === 'string'
+                ? first.filePath
+                : typeof first.relativePath === 'string'
+                    ? first.relativePath
+                    : null;
+    }
+
+    if (toolName === 'edit' || toolName === 'multiedit') {
+        const fileDiff = isRecord(metadata?.filediff) ? metadata.filediff : undefined;
+        if (isRecord(fileDiff) && typeof fileDiff.file === 'string') {
+            return fileDiff.file;
+        }
+        return typeof input?.filePath === 'string'
+            ? input.filePath
+            : typeof input?.file_path === 'string'
+                ? input.file_path
+                : typeof input?.path === 'string'
+                    ? input.path
+                    : null;
+    }
+
+    if (toolName === 'write') {
+        return typeof input?.filePath === 'string'
+            ? input.filePath
+            : typeof input?.file_path === 'string'
+                ? input.file_path
+                : typeof input?.path === 'string'
+                    ? input.path
+                    : null;
+    }
+
+    return null;
+};
+
+const getToolDiagnosticSection = (
+    toolName: string,
+    input: Record<string, unknown> | undefined,
+    metadata: Record<string, unknown> | undefined,
+    currentDirectory: string,
+): ToolDiagnosticSection | null => {
+    if (!['edit', 'multiedit', 'write', 'apply_patch'].includes(toolName)) {
+        return null;
+    }
+
+    const primaryPath = getPrimaryToolPath(toolName, input, metadata);
+    if (!primaryPath || !metadata || !isRecord(metadata.diagnostics)) {
+        return null;
+    }
+
+    const normalizedPath = normalizeDisplayPath(primaryPath);
+    const absolutePath = normalizedPath.startsWith('/')
+        ? normalizedPath
+        : `${normalizeDisplayPath(currentDirectory)}/${normalizedPath}`.replace(/\/+/g, '/');
+
+    const rawDiagnostics = (metadata.diagnostics as Record<string, unknown>)[normalizedPath]
+        ?? (metadata.diagnostics as Record<string, unknown>)[absolutePath];
+    if (!Array.isArray(rawDiagnostics)) {
+        return null;
+    }
+
+    const diagnostics = rawDiagnostics
+        .map((entry) => normalizeToolDiagnostic(entry))
+        .filter((entry): entry is ToolDiagnostic => !!entry);
+    if (diagnostics.length === 0) {
+        return null;
+    }
+
+    const visible = diagnostics.slice(0, TOOL_DIAGNOSTICS_MAX_PER_FILE);
+    return {
+        displayPath: normalizedPath.startsWith('/') ? getRelativePath(normalizedPath, currentDirectory) : normalizedPath,
+        diagnostics: visible,
+        remaining: Math.max(0, diagnostics.length - visible.length),
+    };
 };
 
 const usePierreThemeConfig = () => {
@@ -532,6 +687,19 @@ const ToolScrollableTextOutput: React.FC<{
 }> = ({ output, part, metadata, input, syntaxTheme }) => {
     const renderedOutput = getToolOutputText(output, part, metadata);
     const outputLanguage = getToolOutputLanguage(output, part, metadata, input);
+    const jsonResult = React.useMemo(() => tryParseJsonOutput(renderedOutput), [renderedOutput]);
+
+    if (jsonResult.isJson) {
+        return (
+            <div className="tool-output-surface p-2 rounded-xl w-full min-w-0">
+                <JsonTreeViewer
+                    data={jsonResult.data}
+                    initiallyExpandedDepth={1}
+                    maxHeight="400px"
+                />
+            </div>
+        );
+    }
 
     return (
         <div className={part.tool === 'bash' ? 'typography-code text-muted-foreground/90' : undefined}>
@@ -571,8 +739,6 @@ type TaskToolSummaryEntry = {
 };
 
 type SessionMessageWithParts = MessageRecord;
-
-const EMPTY_SESSION_MESSAGES: SessionMessageWithParts[] = [];
 
 const normalizeSessionIdCandidate = (value: unknown): string | undefined => {
     if (typeof value !== 'string') {
@@ -844,7 +1010,7 @@ const TaskToolSummary: React.FC<{
     animateTailText?: boolean;
     isActive?: boolean;
 }> = ({ entries, isExpanded, isMobile, output, sessionId, onShowPopup, input, animateTailText = true, isActive = false }) => {
-    const setCurrentSession = useSessionStore((state) => state.setCurrentSession);
+    const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
     const showToolFileIcons = useUIStore((state) => state.showToolFileIcons);
     const displayEntries = entries;
 
@@ -1319,6 +1485,10 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     const writeDisplayPath = shouldShowWriteInputPreview
         ? (writeFilePath ? getRelativePath(writeFilePath, currentDirectory) : 'New file')
         : null;
+    const diagnosticSection = React.useMemo(
+        () => getToolDiagnosticSection(part.tool, input, metadata, currentDirectory),
+        [currentDirectory, input, metadata, part.tool],
+    );
 
     const inputTextContent = React.useMemo(() => {
         if (!input || typeof input !== 'object' || Object.keys(input).length === 0) {
@@ -1356,6 +1526,50 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     );
 
     const renderResultContent = () => {
+        const renderDiagnosticsSection = () => {
+            if (!diagnosticSection) {
+                return null;
+            }
+
+            return (
+                <div
+                    className="tool-output-surface rounded-xl border p-2 space-y-2"
+                    style={{
+                        borderColor: 'var(--status-error-border)',
+                        backgroundColor: 'var(--status-error-background)',
+                    }}
+                >
+                    <div className="typography-meta font-medium" style={{ color: 'var(--status-error)' }}>
+                        LSP errors
+                    </div>
+                    <div className="space-y-1">
+                        <div className="flex items-center gap-1 min-w-0">
+                            {renderPathLikeGitChanges(diagnosticSection.displayPath, false)}
+                        </div>
+                        <div className="space-y-1">
+                            {diagnosticSection.diagnostics.map((diagnostic, index) => (
+                                <div key={`${diagnosticSection.displayPath}:${diagnostic.line}:${diagnostic.character}:${index}`} className="rounded-md border px-2 py-1" style={{ borderColor: 'var(--status-error-border)', backgroundColor: 'var(--surface-elevated)' }}>
+                                    <div className="flex items-start gap-2 min-w-0">
+                                        <span className="typography-micro shrink-0" style={{ color: 'var(--status-error)' }}>
+                                            [{diagnostic.line}:{diagnostic.character}]
+                                        </span>
+                                        <span className="typography-meta text-foreground whitespace-pre-wrap break-words">
+                                            {diagnostic.message}
+                                        </span>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                        {diagnosticSection.remaining > 0 ? (
+                            <div className="typography-micro text-muted-foreground">
+                                +{diagnosticSection.remaining} more errors
+                            </div>
+                        ) : null}
+                    </div>
+                </div>
+            );
+        };
+
         // Question tool: show parsed Q&A summary
         if (part.tool === 'question') {
             if (state.status === 'completed' && hasStringOutput) {
@@ -1401,7 +1615,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
             );
         }
 
-        if ((part.tool === 'edit' || part.tool === 'multiedit' || part.tool === 'apply_patch') && diffEntries.length > 0) {
+        if ((part.tool === 'edit' || part.tool === 'multiedit' || part.tool === 'apply_patch') && (diffEntries.length > 0 || !!diagnosticSection)) {
             return renderScrollableBlock(
                 <div className="space-y-3">
                     {diffEntries.map((entry) => (
@@ -1419,8 +1633,18 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                             />
                         </div>
                     ))}
+                    {renderDiagnosticsSection()}
                 </div>,
                 { className: 'p-1' }
+            );
+        }
+
+        if (part.tool === 'write' && diagnosticSection) {
+            return renderScrollableBlock(
+                <div className="space-y-3">
+                    {renderDiagnosticsSection()}
+                </div>,
+                { className: 'p-1' },
             );
         }
 
@@ -1546,6 +1770,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
     const state = part.state;
     const showToolFileIcons = useUIStore((s) => s.showToolFileIcons);
     const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
+    const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
 
     const normalizedPartTool = normalizeToolName(part.tool);
     const isTaskTool = normalizedPartTool === 'task';
@@ -1556,12 +1781,14 @@ const ToolPart: React.FC<ToolPartProps> = ({
 
     const [activeLatched, setActiveLatched] = React.useState<boolean>(!isFinalized);
     const previousPartIdRef = React.useRef<string | undefined>(part.id);
+    const lastGitRefreshSignatureRef = React.useRef<string>('');
 
     React.useEffect(() => {
         if (previousPartIdRef.current === part.id) {
             return;
         }
         previousPartIdRef.current = part.id;
+        lastGitRefreshSignatureRef.current = '';
         // Reset latch only when tool identity changes.
         setActiveLatched(!isFinalized);
     }, [isFinalized, part.id]);
@@ -1571,6 +1798,22 @@ const ToolPart: React.FC<ToolPartProps> = ({
             setActiveLatched(true);
         }
     }, [isFinalized]);
+
+    React.useEffect(() => {
+        if (!isFinalized || isError || !currentDirectory) {
+            return;
+        }
+        if (!GIT_REFRESH_MUTATING_TOOLS.has(normalizedPartTool)) {
+            return;
+        }
+
+        const signature = `${part.id}:${status ?? 'unknown'}`;
+        if (lastGitRefreshSignatureRef.current === signature) {
+            return;
+        }
+        lastGitRefreshSignatureRef.current = signature;
+        sessionEvents.requestGitRefresh({ directory: currentDirectory });
+    }, [currentDirectory, isError, isFinalized, normalizedPartTool, part.id, status]);
 
 
 
@@ -1645,6 +1888,16 @@ const ToolPart: React.FC<ToolPartProps> = ({
         return Math.min(...candidates);
     }, [localStartAt, pinnedTime.start, time?.start]);
 
+    const taskSessionResolutionStart = React.useMemo(() => {
+        if (typeof pinnedTime.start === 'number') {
+            return pinnedTime.start;
+        }
+        if (typeof time?.start === 'number') {
+            return time.start;
+        }
+        return localStartAt;
+    }, [localStartAt, pinnedTime.start, time?.start]);
+
     const taskOutputString = React.useMemo(() => {
         return typeof stateWithData.output === 'string' ? stateWithData.output : undefined;
     }, [stateWithData.output]);
@@ -1653,7 +1906,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
         return parseTaskMetadataBlock(taskOutputString);
     }, [taskOutputString]);
 
-    const taskSessionId = React.useMemo<string | undefined>(() => {
+    const explicitTaskSessionId = React.useMemo<string | undefined>(() => {
         if (!isTaskTool) {
             return undefined;
         }
@@ -1674,14 +1927,27 @@ const ToolPart: React.FC<ToolPartProps> = ({
         return readTaskSessionIdFromOutput(taskOutputString);
     }, [isTaskTool, metadata, parsedTaskMetadata.sessionId, partMetadata, taskOutputString]);
 
-    const childSessionMessages = useSessionStore(
-        React.useCallback((store) => {
-            if (!taskSessionId) {
-                return EMPTY_SESSION_MESSAGES;
+    const fallbackTaskSessionId = useDirectorySync(
+        React.useCallback((storeState) => {
+            if (explicitTaskSessionId) {
+                return undefined;
             }
-            return (store.messages.get(taskSessionId) as SessionMessageWithParts[] | undefined) ?? EMPTY_SESSION_MESSAGES;
-        }, [taskSessionId])
+
+            return resolveFallbackTaskSessionId({
+                isTaskTool,
+                parentSessionId: currentSessionId ?? undefined,
+                taskStartTime: taskSessionResolutionStart,
+                isTaskFinalized: isFinalized,
+                sessions: storeState.session,
+                sessionStatusMap: storeState.session_status,
+            });
+        }, [explicitTaskSessionId, isTaskTool, currentSessionId, taskSessionResolutionStart, isFinalized]),
+        currentDirectory,
     );
+
+    const taskSessionId = explicitTaskSessionId ?? fallbackTaskSessionId;
+
+    const childSessionMessages = useSessionMessageRecords(taskSessionId ?? '', currentDirectory);
 
     const metadataTaskSummaryEntries = React.useMemo<TaskToolSummaryEntry[]>(() => {
         if (!isTaskTool) {
@@ -1736,7 +2002,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
         return false;
     }, [childSessionMessages, isTaskTool, taskSessionId]);
 
-    const childSessionActivity = useSessionActivity(taskSessionId);
+    const childSessionActivity = useSessionActivity(taskSessionId, currentDirectory);
     const [taskChildSeenActive, setTaskChildSeenActive] = React.useState(false);
     const [taskChildPollingStopped, setTaskChildPollingStopped] = React.useState(false);
 
@@ -1758,8 +2024,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
         const childSessionIsActive =
             childSessionActivity.phase === 'busy'
             || childSessionActivity.phase === 'retry'
-            || childSessionHasInFlightTools
-            || (!isFinalized && activeLatched);
+            || childSessionHasInFlightTools;
 
         if (childSessionIsActive) {
             if (!taskChildSeenActive) {
@@ -1840,7 +2105,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
         const childSessionActive = childSessionActivity.phase === 'busy' || childSessionActivity.phase === 'retry';
         const shouldPoll =
             !taskChildPollingStopped
-            && (isActive || childSessionHasInFlightTools || childSessionActive || childSessionTaskSummaryEntries.length === 0);
+            && (childSessionHasInFlightTools || childSessionActive || childSessionTaskSummaryEntries.length === 0);
         const shouldFetchSnapshot = childSessionTaskSummaryEntries.length === 0 || shouldPoll;
         if (!shouldFetchSnapshot) {
             return;
@@ -1888,7 +2153,12 @@ const ToolPart: React.FC<ToolPartProps> = ({
 
         const fetchSessionMessages = async (isInitialFetch: boolean) => {
             try {
-                const messages = await opencodeClient.getSessionMessages(taskSessionId, resolveFetchLimit(isInitialFetch));
+                const scopedClient = opencodeClient.getScopedSdkClient(currentDirectory);
+                const response = await scopedClient.session.messages({
+                    sessionID: taskSessionId,
+                    limit: resolveFetchLimit(isInitialFetch),
+                });
+                const messages = response.data ?? [];
                 if (cancelled || !Array.isArray(messages) || messages.length === 0) {
                     return;
                 }
@@ -1901,7 +2171,19 @@ const ToolPart: React.FC<ToolPartProps> = ({
 
                 taskPollLastSignatureRef.current = nextSignature;
                 taskPollNoChangeCountRef.current = 0;
-                useSessionStore.getState().syncMessages(taskSessionId, messages);
+                // Inject fetched subagent messages into sync child store
+                const childStores = getSyncChildStores();
+                childStores.update(currentDirectory, (prev) => {
+                    const records = messages as SessionMessageWithParts[];
+                    const partPatch: Record<string, import('@opencode-ai/sdk/v2').Part[]> = { ...prev.part };
+                    for (const rec of records) {
+                        partPatch[rec.info.id] = rec.parts;
+                    }
+                    return {
+                        message: { ...prev.message, [taskSessionId]: records.map((r) => r.info) as import('@opencode-ai/sdk/v2').Message[] },
+                        part: partPatch,
+                    };
+                });
             } catch {
                 // Ignore transient subagent fetch errors.
             } finally {
@@ -1921,6 +2203,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
         childSessionActivity.phase,
         childSessionHasInFlightTools,
         childSessionTaskSummaryEntries.length,
+        currentDirectory,
         isActive,
         isTaskTool,
         taskChildPollingStopped,
@@ -2189,4 +2472,12 @@ const ToolPart: React.FC<ToolPartProps> = ({
     );
 };
 
-export default ToolPart;
+export default React.memo(ToolPart, (prev, next) => {
+    return areRenderRelevantPartsEqual([prev.part], [next.part])
+        && prev.isExpanded === next.isExpanded
+        && prev.syntaxTheme === next.syntaxTheme
+        && prev.isMobile === next.isMobile
+        && prev.onContentChange === next.onContentChange
+        && prev.onShowPopup === next.onShowPopup
+        && prev.animateTailText === next.animateTailText;
+});

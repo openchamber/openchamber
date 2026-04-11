@@ -18,8 +18,14 @@ type ThumbMetrics = {
 };
 
 const USER_SCROLL_INTENT_WINDOW_MS = 1000;
+const METRIC_EPSILON = 0.5;
+const EMPTY_THUMB: ThumbMetrics = { length: 0, offset: 0 };
 
-export const OverlayScrollbar: React.FC<OverlayScrollbarProps> = ({
+const isSameThumbMetrics = (a: ThumbMetrics, b: ThumbMetrics): boolean => {
+  return Math.abs(a.length - b.length) < METRIC_EPSILON && Math.abs(a.offset - b.offset) < METRIC_EPSILON;
+};
+
+const OverlayScrollbarComponent: React.FC<OverlayScrollbarProps> = ({
   containerRef,
   minThumbSize = 32,
   hideDelayMs = 1000,
@@ -44,6 +50,7 @@ export const OverlayScrollbar: React.FC<OverlayScrollbarProps> = ({
     scrollLeft: number;
   }>({ pointerX: 0, pointerY: 0, scrollTop: 0, scrollLeft: 0 });
   const dragAxisRef = React.useRef<"vertical" | "horizontal" | null>(null);
+  const observedElementsRef = React.useRef<Set<Element>>(new Set());
 
   const updateMetrics = React.useCallback(() => {
     const container = containerRef.current;
@@ -52,6 +59,7 @@ export const OverlayScrollbar: React.FC<OverlayScrollbarProps> = ({
     const { scrollHeight, clientHeight, scrollTop, scrollWidth, clientWidth, scrollLeft } = container;
     const trackInset = 8;
 
+    let nextVertical: ThumbMetrics = EMPTY_THUMB;
     if (scrollHeight > clientHeight) {
       const trackLength = Math.max(clientHeight - trackInset * 2, 0);
       const rawThumb = (clientHeight / scrollHeight) * trackLength;
@@ -59,11 +67,11 @@ export const OverlayScrollbar: React.FC<OverlayScrollbarProps> = ({
       const maxOffset = Math.max(trackLength - length, 0);
       const maxScroll = Math.max(scrollHeight - clientHeight, 1);
       const offset = (scrollTop / maxScroll) * maxOffset;
-      setVertical({ length, offset });
-    } else {
-      setVertical({ length: 0, offset: 0 });
+      nextVertical = { length, offset };
     }
+    setVertical((prev) => (isSameThumbMetrics(prev, nextVertical) ? prev : nextVertical));
 
+    let nextHorizontal: ThumbMetrics = EMPTY_THUMB;
     if (!disableHorizontal && scrollWidth > clientWidth) {
       const trackLength = Math.max(clientWidth - trackInset * 2, 0);
       const rawThumb = (clientWidth / scrollWidth) * trackLength;
@@ -71,10 +79,9 @@ export const OverlayScrollbar: React.FC<OverlayScrollbarProps> = ({
       const maxOffset = Math.max(trackLength - length, 0);
       const maxScroll = Math.max(scrollWidth - clientWidth, 1);
       const offset = (scrollLeft / maxScroll) * maxOffset;
-      setHorizontal({ length, offset });
-    } else {
-      setHorizontal({ length: 0, offset: 0 });
+      nextHorizontal = { length, offset };
     }
+    setHorizontal((prev) => (isSameThumbMetrics(prev, nextHorizontal) ? prev : nextHorizontal));
   }, [containerRef, minThumbSize, disableHorizontal]);
 
   const scheduleMetricsUpdate = React.useCallback(() => {
@@ -84,6 +91,33 @@ export const OverlayScrollbar: React.FC<OverlayScrollbarProps> = ({
       updateMetrics();
     });
   }, [updateMetrics]);
+
+  const syncObservedElements = React.useCallback((container: HTMLElement, resizeObserver: ResizeObserver | null) => {
+    if (!resizeObserver) {
+      observedElementsRef.current.clear();
+      return;
+    }
+
+    const nextObserved = new Set<Element>();
+    nextObserved.add(container);
+    Array.from(container.children).forEach((child) => {
+      nextObserved.add(child);
+    });
+
+    observedElementsRef.current.forEach((element) => {
+      if (!nextObserved.has(element)) {
+        resizeObserver.unobserve(element);
+      }
+    });
+
+    nextObserved.forEach((element) => {
+      if (!observedElementsRef.current.has(element)) {
+        resizeObserver.observe(element);
+      }
+    });
+
+    observedElementsRef.current = nextObserved;
+  }, []);
 
   const scheduleHide = React.useCallback(() => {
     if (hideTimeoutRef.current) {
@@ -154,16 +188,26 @@ export const OverlayScrollbar: React.FC<OverlayScrollbarProps> = ({
             scheduleMetricsUpdate();
           })
         : null;
-    resizeObserver?.observe(container);
+    syncObservedElements(container, resizeObserver);
 
     const mutationObserver =
       observeMutations && typeof MutationObserver !== "undefined"
-        ? new MutationObserver(() => scheduleMetricsUpdate())
+        ? new MutationObserver(() => {
+            syncObservedElements(container, resizeObserver);
+            scheduleMetricsUpdate();
+          })
         : null;
-    mutationObserver?.observe(container, { childList: true, subtree: true, characterData: true });
+    mutationObserver?.observe(container, { childList: true });
+
+    const onInput = () => scheduleMetricsUpdate();
+    const onLoad = () => scheduleMetricsUpdate();
+    container.addEventListener("input", onInput, true);
+    container.addEventListener("load", onLoad, true);
 
     return () => {
       container.removeEventListener("scroll", onScroll);
+      container.removeEventListener("input", onInput, true);
+      container.removeEventListener("load", onLoad, true);
       if (userIntentOnly) {
         container.removeEventListener("wheel", markUserIntent);
         container.removeEventListener("touchstart", markUserIntent);
@@ -172,11 +216,12 @@ export const OverlayScrollbar: React.FC<OverlayScrollbarProps> = ({
       }
       resizeObserver?.disconnect();
       mutationObserver?.disconnect();
+      observedElementsRef.current.clear();
       if (hideTimeoutRef.current) clearTimeout(hideTimeoutRef.current);
       if (frameRef.current) cancelAnimationFrame(frameRef.current);
       if (metricsFrameRef.current) cancelAnimationFrame(metricsFrameRef.current);
     };
-  }, [containerRef, handleScroll, markUserIntent, observeMutations, scheduleMetricsUpdate, updateMetrics, userIntentOnly]);
+  }, [containerRef, handleScroll, markUserIntent, observeMutations, scheduleMetricsUpdate, syncObservedElements, updateMetrics, userIntentOnly]);
 
   React.useEffect(() => {
     if (!suppressVisibility) {
@@ -285,3 +330,7 @@ export const OverlayScrollbar: React.FC<OverlayScrollbarProps> = ({
     </div>
   );
 };
+
+OverlayScrollbarComponent.displayName = "OverlayScrollbar";
+
+export const OverlayScrollbar = OverlayScrollbarComponent;

@@ -85,20 +85,12 @@ type GitHubPrStatusStore = {
   refresh: (key: string, options?: RefreshOptions) => Promise<void>;
   refreshTargets: (targets: PrTrackingTarget[], options?: RefreshOptions) => Promise<void>;
   updateStatus: (key: string, updater: (prev: GitHubPullRequestStatus | null) => GitHubPullRequestStatus | null) => void;
-  syncBackgroundTargets: (args: {
-    targets: PrTrackingTarget[];
-    github?: RuntimeAPIs['github'];
-    githubAuthChecked: boolean;
-    githubConnected: boolean | null;
-  }) => void;
 };
 
 const timers = new Map<string, number>();
 const bootstrapTimers = new Map<string, number[]>();
 const inFlightBySignature = new Set<string>();
 const lastRefreshBySignature = new Map<string, number>();
-const backgroundWatchingKeys = new Set<string>();
-
 const createEntry = (): PrStatusEntry => ({
   status: null,
   isLoading: false,
@@ -607,60 +599,6 @@ export const useGitHubPrStatusStore = create<GitHubPrStatusStore>()(
         });
       },
 
-      syncBackgroundTargets: ({ targets, github, githubAuthChecked, githubConnected }) => {
-        if (!github || targets.length === 0) {
-          Array.from(backgroundWatchingKeys).forEach((key) => {
-            get().stopWatching(key);
-            backgroundWatchingKeys.delete(key);
-          });
-          return;
-        }
-
-        const uniqueTargets = new Map<string, PrTrackingTarget>();
-        targets.forEach((target) => {
-          const directory = target.directory.trim();
-          const branch = target.branch.trim();
-          if (!directory || !branch) {
-            return;
-          }
-          const key = getGitHubPrStatusKey(directory, branch, target.remoteName ?? null);
-          if (!uniqueTargets.has(key)) {
-            uniqueTargets.set(key, {
-              directory,
-              branch,
-              remoteName: target.remoteName ?? null,
-            });
-          }
-        });
-
-        const nextKeys = new Set(uniqueTargets.keys());
-
-        Array.from(backgroundWatchingKeys).forEach((key) => {
-          if (nextKeys.has(key)) {
-            return;
-          }
-          get().stopWatching(key);
-          backgroundWatchingKeys.delete(key);
-        });
-
-        uniqueTargets.forEach((target, key) => {
-          get().ensureEntry(key);
-          get().setParams(key, {
-            directory: target.directory,
-            branch: target.branch,
-            remoteName: target.remoteName ?? null,
-            canShow: true,
-            github,
-            githubAuthChecked,
-            githubConnected,
-          });
-
-          if (!backgroundWatchingKeys.has(key)) {
-            get().startWatching(key);
-            backgroundWatchingKeys.add(key);
-          }
-        });
-      },
     }),
     {
       name: PR_STATUS_STORAGE_KEY,
@@ -692,3 +630,98 @@ export const useGitHubPrStatusStore = create<GitHubPrStatusStore>()(
     },
   ),
 );
+
+export const usePrStatusForDirectoryBranch = (directory: string | null, branch: string | null) => {
+  return useGitHubPrStatusStore((state) => {
+    if (!directory || !branch) return null;
+    const key = getGitHubPrStatusKey(directory, branch);
+    return state.entries[key] ?? null;
+  });
+};
+
+export type PrVisualSummary = {
+  number: number;
+  visualState: string;
+  prState: string;
+  draft: boolean;
+  title: string | null;
+  url: string | null;
+  base: string | null;
+  head: string | null;
+  checks: { state: string; total: number; success: number; failure: number; pending: number } | null;
+  canMerge: boolean | null;
+  mergeableState: string | null;
+  repo: { owner: string; repo: string } | null;
+};
+
+const derivePrVisualState = (status: GitHubPullRequestStatus | null): string | null => {
+  const pr = status?.pr;
+  if (!pr) return null;
+  if (pr.state === 'merged') return 'merged';
+  if (pr.state === 'closed') return 'closed';
+  if (pr.draft) return 'draft';
+  const checksFailed = status?.checks?.state === 'failure';
+  const ms = typeof pr.mergeableState === 'string' ? pr.mergeableState : '';
+  const notMergeable = pr.mergeable === false || ms === 'blocked' || ms === 'dirty';
+  if (checksFailed || notMergeable) return 'blocked';
+  return 'open';
+};
+
+const deriveSummary = (entry: PrStatusEntry): PrVisualSummary | null => {
+  const vs = derivePrVisualState(entry.status ?? null);
+  const pr = entry.status?.pr;
+  if (!vs || !pr?.number) return null;
+  return {
+    number: pr.number,
+    visualState: vs,
+    prState: pr.state,
+    draft: Boolean(pr.draft),
+    title: typeof pr.title === 'string' && pr.title.trim().length > 0 ? pr.title : null,
+    url: typeof pr.url === 'string' && pr.url.trim().length > 0 ? pr.url : null,
+    base: typeof pr.base === 'string' && pr.base.trim().length > 0 ? pr.base : null,
+    head: typeof pr.head === 'string' && pr.head.trim().length > 0 ? pr.head : null,
+    checks: entry.status?.checks
+      ? { state: entry.status.checks.state, total: entry.status.checks.total, success: entry.status.checks.success, failure: entry.status.checks.failure, pending: entry.status.checks.pending }
+      : null,
+    canMerge: typeof entry.status?.canMerge === 'boolean' ? entry.status.canMerge : null,
+    mergeableState: typeof pr.mergeableState === 'string' ? pr.mergeableState : null,
+    repo: entry.status?.repo ? { owner: entry.status.repo.owner, repo: entry.status.repo.repo } : null,
+  };
+};
+
+const summarySignature = (s: PrVisualSummary): string =>
+  `${s.number}:${s.visualState}:${s.prState}:${s.draft}:${s.title ?? ''}:${s.url ?? ''}:${s.base ?? ''}:${s.head ?? ''}:${s.canMerge ?? ''}:${s.mergeableState ?? ''}:${s.checks?.state ?? ''}:${s.checks?.total ?? ''}:${s.checks?.success ?? ''}:${s.checks?.failure ?? ''}:${s.checks?.pending ?? ''}:${s.repo?.owner ?? ''}:${s.repo?.repo ?? ''}`;
+
+let prKeyedCacheSigs = new Map<string, string>();
+let prKeyedCacheResult: Map<string, PrVisualSummary> = new Map();
+
+export const usePrVisualSummaryByKeys = (keys: string[]) => {
+  return useGitHubPrStatusStore((state) => {
+    // Derive summaries for requested keys only
+    const nextSigs = new Map<string, string>();
+    const nextSummaries = new Map<string, PrVisualSummary>();
+
+    for (const key of keys) {
+      const entry = state.entries[key];
+      if (!entry) continue;
+      const summary = deriveSummary(entry);
+      if (!summary) continue;
+      const sig = summarySignature(summary);
+      nextSigs.set(key, sig);
+      nextSummaries.set(key, summary);
+    }
+
+    // Compare with cached signatures
+    if (nextSigs.size === prKeyedCacheSigs.size) {
+      let same = true;
+      for (const [k, sig] of nextSigs) {
+        if (prKeyedCacheSigs.get(k) !== sig) { same = false; break; }
+      }
+      if (same) return prKeyedCacheResult;
+    }
+
+    prKeyedCacheSigs = nextSigs;
+    prKeyedCacheResult = nextSummaries;
+    return nextSummaries;
+  });
+};

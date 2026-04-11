@@ -5,7 +5,6 @@ import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Button } from '@/components/ui/button';
-import { useUIStore } from '@/stores/useUIStore';
 import { buildCodeMirrorCommentWidgets, normalizeLineRange, useInlineCommentController } from '@/components/comments';
 
 import { getLanguageFromExtension } from '@/lib/toolHelpers';
@@ -15,8 +14,10 @@ import { generateSyntaxTheme } from '@/lib/theme/syntaxThemeGenerator';
 import { createFlexokiCodeMirrorTheme } from '@/lib/codemirror/flexokiTheme';
 import { languageByExtension } from '@/lib/codemirror/languageByExtension';
 import { RiCheckLine, RiClipboardLine, RiFileCopy2Line } from '@remixicon/react';
-import { useSessionStore } from '@/stores/useSessionStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSessions } from '@/sync/sync-context';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { EditorView } from '@codemirror/view';
 import { copyTextToClipboard } from '@/lib/clipboard';
@@ -80,11 +81,11 @@ type SelectedLineRange = {
 };
 
 export const PlanView: React.FC = () => {
-  const currentSessionId = useSessionStore((state) => state.currentSessionId);
-  const sessions = useSessionStore((state) => state.sessions);
+  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const sessions = useSessions();
   const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
+  const planModeEnabled = useFeatureFlagsStore((state) => state.planModeEnabled);
   const runtimeApis = useRuntimeAPIs();
-  useUIStore();
   const { isMobile } = useDeviceInfo();
   const { currentTheme } = useThemeSystem();
   React.useMemo(() => generateSyntaxTheme(currentTheme), [currentTheme]);
@@ -255,6 +256,14 @@ export const PlanView: React.FC = () => {
   }, [currentTheme, resolvedPath]);
 
   React.useEffect(() => {
+    // Early exit if plan mode is disabled - don't load anything
+    if (!planModeEnabled) {
+      setResolvedPath(null);
+      setContent('');
+      setLoading(false);
+      return;
+    }
+
     let cancelled = false;
 
     const readText = async (path: string): Promise<string> => {
@@ -270,11 +279,9 @@ export const PlanView: React.FC = () => {
       return response.text();
     };
 
-    const run = async (showLoading: boolean) => {
-      if (showLoading) {
-        setResolvedPath(null);
-        setContent('');
-      }
+    const run = async () => {
+      setResolvedPath(null);
+      setContent('');
 
       if (!session?.slug || !session?.time?.created || !sessionDirectory) {
         setResolvedPath(null);
@@ -282,9 +289,7 @@ export const PlanView: React.FC = () => {
         return;
       }
 
-      if (showLoading) {
-        setLoading(true);
-      }
+      setLoading(true);
 
       try {
         const repoPath = buildRepoPlanPath(sessionDirectory, session.time.created, session.slug);
@@ -324,21 +329,16 @@ export const PlanView: React.FC = () => {
         setResolvedPath(null);
         setContent('');
       } finally {
-        if (!cancelled && showLoading) setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
 
-    void run(true);
-
-    const interval = window.setInterval(() => {
-      void run(false);
-    }, 3000);
+    void run();
 
     return () => {
       cancelled = true;
-      window.clearInterval(interval);
     };
-  }, [sessionDirectory, session?.slug, session?.time?.created, homeDirectory, runtimeApis.files]);
+  }, [planModeEnabled, sessionDirectory, session?.slug, session?.time?.created, homeDirectory, runtimeApis.files]);
 
   React.useEffect(() => {
     return () => {

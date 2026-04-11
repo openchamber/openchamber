@@ -1,146 +1,28 @@
 import React from 'react';
-import { Streamdown } from 'streamdown';
-import { createCodePlugin } from '@streamdown/code';
 import { renderMermaidASCII, renderMermaidSVG } from 'beautiful-mermaid';
-import 'streamdown/styles.css';
+import ReactMarkdown from 'react-markdown';
+import type { Components } from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { marked, type Tokens } from 'marked';
+import remend from 'remend';
 import { FadeInOnReveal } from './message/FadeInOnReveal';
 import type { Part } from '@opencode-ai/sdk/v2';
 import { cn } from '@/lib/utils';
 import { RiFileCopyLine, RiCheckLine, RiDownloadLine } from '@remixicon/react';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
 
-import { isVSCodeRuntime } from '@/lib/desktop';
 import { isExternalHttpUrl, openExternalUrl } from '@/lib/url';
 import { useOptionalThemeSystem } from '@/contexts/useThemeSystem';
-import { getStreamdownThemePair } from '@/lib/shiki/appThemeRegistry';
 import { getDefaultTheme } from '@/lib/theme/themes';
+import { generateSyntaxTheme } from '@/lib/theme/syntaxThemeGenerator';
 import type { ToolPopupContent } from './message/types';
 import { useUIStore } from '@/stores/useUIStore';
 import { useDeviceInfo } from '@/lib/device';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { EditorAPI } from '@/lib/api/types';
-
-const withStableStringId = <T extends object>(value: T, id: string): T => {
-  const existingPrimitive = (value as Record<symbol, unknown>)[Symbol.toPrimitive];
-  if (typeof existingPrimitive === 'function') {
-    try {
-      if ((existingPrimitive as () => unknown)() === id) {
-        return value;
-      }
-    } catch {
-      // Ignore and attempt to define below.
-    }
-  }
-
-  try {
-    Object.defineProperty(value, 'toString', {
-      value: () => id,
-      enumerable: false,
-      configurable: true,
-    });
-  } catch {
-    // Ignore if non-configurable or frozen.
-  }
-
-  try {
-    Object.defineProperty(value, Symbol.toPrimitive, {
-      value: () => id,
-      enumerable: false,
-      configurable: true,
-    });
-  } catch {
-    // Ignore if non-configurable or frozen.
-  }
-
-  return value;
-};
-
-const useMarkdownShikiThemes = (): readonly [string | object, string | object] => {
-  const themeSystem = useOptionalThemeSystem();
-
-  const isVSCode = isVSCodeRuntime() && typeof window !== 'undefined';
-
-  const fallbackLight = getDefaultTheme(false);
-  const fallbackDark = getDefaultTheme(true);
-
-  const lightThemeId = themeSystem?.lightThemeId ?? fallbackLight.metadata.id;
-  const darkThemeId = themeSystem?.darkThemeId ?? fallbackDark.metadata.id;
-
-  const lightTheme =
-    themeSystem?.availableThemes.find((theme) => theme.metadata.id === lightThemeId) ??
-    fallbackLight;
-  const darkTheme =
-    themeSystem?.availableThemes.find((theme) => theme.metadata.id === darkThemeId) ??
-    fallbackDark;
-
-  const fallbackThemes = React.useMemo(
-    () => getStreamdownThemePair(lightTheme, darkTheme),
-    [darkTheme, lightTheme],
-  );
-
-  const getThemes = React.useCallback((): readonly [string | object, string | object] => {
-    if (!isVSCode) {
-      return fallbackThemes;
-    }
-
-    const provided = window.__OPENCHAMBER_VSCODE_SHIKI_THEMES__;
-    if (provided?.light && provided?.dark) {
-      const light = withStableStringId(
-        { ...(provided.light as Record<string, unknown>) },
-        `vscode-shiki-light:${String((provided.light as { name?: unknown })?.name ?? 'theme')}`,
-      );
-      const dark = withStableStringId(
-        { ...(provided.dark as Record<string, unknown>) },
-        `vscode-shiki-dark:${String((provided.dark as { name?: unknown })?.name ?? 'theme')}`,
-      );
-      return [light, dark] as const;
-    }
-
-    return fallbackThemes;
-  }, [fallbackThemes, isVSCode]);
-
-  const [themes, setThemes] = React.useState(getThemes);
-
-  React.useEffect(() => {
-    if (!isVSCode) {
-      return;
-    }
-
-    setThemes(getThemes());
-  }, [getThemes, isVSCode]);
-
-  React.useEffect(() => {
-    if (!isVSCode) return;
-
-    const handler = (event: Event) => {
-      // Rely on the canonical `window.__OPENCHAMBER_VSCODE_SHIKI_THEMES__` that the webview updates
-      // before dispatching this event, so we always apply stable cache keys and avoid stale token reuse.
-      void event;
-      setThemes(getThemes());
-    };
-
-    window.addEventListener('openchamber:vscode-shiki-themes', handler as EventListener);
-    return () => window.removeEventListener('openchamber:vscode-shiki-themes', handler as EventListener);
-  }, [getThemes, isVSCode]);
-
-  return isVSCode ? themes : fallbackThemes;
-};
-
-type StreamdownCodeThemes = NonNullable<Parameters<typeof createCodePlugin>[0]>['themes'];
-
-const useStreamdownPlugins = (shikiThemes: readonly [string | object, string | object]) => {
-  return React.useMemo(
-    () => ({
-      code: createCodePlugin({
-        // Streamdown code plugin runtime accepts theme objects, but current type only models bundled theme names.
-        themes: shikiThemes as unknown as StreamdownCodeThemes,
-      }),
-    }),
-    [shikiThemes],
-  );
-};
 
 const useCurrentMermaidTheme = () => {
   const themeSystem = useOptionalThemeSystem();
@@ -425,39 +307,18 @@ const TableWrapper: React.FC<{ children?: React.ReactNode; className?: string }>
   const tableRef = React.useRef<HTMLDivElement>(null);
 
   return (
-    <div className="group my-4 flex flex-col space-y-2" data-streamdown="table-wrapper" ref={tableRef}>
+    <div className="group my-4 flex flex-col space-y-2" data-markdown="table-wrapper" ref={tableRef}>
       <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
         <TableCopyButton tableRef={tableRef} />
         <TableDownloadButton tableRef={tableRef} />
       </div>
-      <div className="overflow-x-auto">
-        <table className={cn('w-full border-collapse border border-border', className)} data-streamdown="table">
+      <div className="overflow-x-auto rounded-lg border border-border/80 bg-[var(--surface-elevated)]">
+        <table className={cn('w-full border-collapse text-sm', className)} data-markdown="table">
           {children}
         </table>
       </div>
     </div>
   );
-};
-
-type CodeBlockWrapperProps = React.HTMLAttributes<HTMLPreElement> & {
-  children?: React.ReactNode;
-};
-
-const getMermaidInfo = (children: React.ReactNode): { isMermaid: boolean; source: string } => {
-  if (!React.isValidElement(children)) return { isMermaid: false, source: '' };
-  const props = children.props as Record<string, unknown> | undefined;
-  const className = typeof props?.className === 'string' ? props.className : '';
-  if (!className.includes('language-mermaid')) return { isMermaid: false, source: '' };
-  // Extract raw mermaid source from the code element's children
-  const codeChildren = props?.children;
-  let source = '';
-  if (typeof codeChildren === 'string') {
-    source = codeChildren;
-  } else if (React.isValidElement(codeChildren)) {
-    const innerProps = codeChildren.props as Record<string, unknown> | undefined;
-    if (typeof innerProps?.children === 'string') source = innerProps.children;
-  }
-  return { isMermaid: true, source };
 };
 
 const MermaidBlock: React.FC<{ source: string; mode: 'svg' | 'ascii' }> = ({ source, mode }) => {
@@ -537,9 +398,9 @@ const MermaidBlock: React.FC<{ source: string; mode: 'svg' | 'ascii' }> = ({ sou
     const asciiText = ascii || source;
 
     return (
-      <div data-streamdown="mermaid-block" className="group">
-        <div data-streamdown="mermaid-scroll">
-          <pre data-streamdown="mermaid-ascii">{asciiText}</pre>
+      <div data-markdown="mermaid-block" className="group">
+        <div data-markdown="mermaid-scroll">
+          <pre data-markdown="mermaid-ascii">{asciiText}</pre>
         </div>
         <div
           className={cn(
@@ -561,9 +422,9 @@ const MermaidBlock: React.FC<{ source: string; mode: 'svg' | 'ascii' }> = ({ sou
 
   if (!svg) {
     return (
-      <div data-streamdown="mermaid-block" className="group">
-        <div data-streamdown="mermaid-scroll">
-          <pre data-streamdown="mermaid-ascii">{source}</pre>
+      <div data-markdown="mermaid-block" className="group">
+        <div data-markdown="mermaid-scroll">
+          <pre data-markdown="mermaid-ascii">{source}</pre>
         </div>
         <div
           className={cn(
@@ -584,9 +445,9 @@ const MermaidBlock: React.FC<{ source: string; mode: 'svg' | 'ascii' }> = ({ sou
   }
 
   return (
-    <div data-streamdown="mermaid-block" className="group">
-      <div data-streamdown="mermaid-scroll">
-        <div data-streamdown="mermaid" dangerouslySetInnerHTML={{ __html: svg }} />
+    <div data-markdown="mermaid-block" className="group">
+      <div data-markdown="mermaid-scroll">
+        <div data-markdown="mermaid" dangerouslySetInnerHTML={{ __html: svg }} />
       </div>
       <div
         className={cn(
@@ -611,85 +472,6 @@ const MermaidBlock: React.FC<{ source: string; mode: 'svg' | 'ascii' }> = ({ sou
       </div>
     </div>
   );
-};
-
-const CodeBlockWrapper: React.FC<CodeBlockWrapperProps> = ({ children, className, style, ...props }) => {
-  const mermaidInfo = getMermaidInfo(children);
-  const mermaidRenderingMode = useUIStore((state) => state.mermaidRenderingMode);
-  const codeChild = React.useMemo(
-    () => (
-      React.isValidElement(children)
-        ? React.cloneElement(children as React.ReactElement<Record<string, unknown>>, { 'data-block': true })
-        : children
-    ),
-    [children],
-  );
-
-  const normalizedStyle = React.useMemo<React.CSSProperties | undefined>(() => {
-    if (!style) return style;
-
-    const next: React.CSSProperties = { ...style };
-
-    const normalizeDeclarationString = (
-      raw: unknown
-    ): { value?: string; vars: Record<string, string> } => {
-      if (typeof raw !== 'string') return { value: undefined, vars: {} };
-
-      const [valuePart, ...rest] = raw.split(';').map((p) => p.trim()).filter(Boolean);
-      const vars: Record<string, string> = {};
-      for (const decl of rest) {
-        const idx = decl.indexOf(':');
-        if (idx === -1) continue;
-        const prop = decl.slice(0, idx).trim();
-        const value = decl.slice(idx + 1).trim();
-        if (!prop.startsWith('--') || value.length === 0) continue;
-        vars[prop] = value;
-      }
-      return { value: valuePart, vars };
-    };
-
-    const bg = normalizeDeclarationString((style as React.CSSProperties).backgroundColor);
-    if (bg.value) {
-      next.backgroundColor = bg.value;
-    }
-    for (const [k, v] of Object.entries(bg.vars)) {
-      (next as Record<string, string>)[k] = v;
-    }
-
-    const fg = normalizeDeclarationString((style as React.CSSProperties).color);
-    if (fg.value) {
-      next.color = fg.value;
-    }
-    for (const [k, v] of Object.entries(fg.vars)) {
-      (next as Record<string, string>)[k] = v;
-    }
-
-    return next;
-  }, [style]);
-
-  if (mermaidInfo.isMermaid) {
-    return <MermaidBlock source={mermaidInfo.source} mode={mermaidRenderingMode} />;
-  }
-
-  return (
-    <pre
-      {...props}
-      className={cn(className, 'w-full min-w-full')}
-      style={normalizedStyle}
-    >
-      {codeChild}
-    </pre>
-  );
-};
-
-const streamdownComponents = {
-  pre: CodeBlockWrapper,
-  table: TableWrapper,
-};
-
-const streamdownControls = {
-  code: true,
-  table: false,
 };
 
 type MermaidControlOptions = {
@@ -727,6 +509,293 @@ const stripLeadingFrontmatter = (markdown: string): string => {
 
 export type MarkdownVariant = 'assistant' | 'tool' | 'reasoning';
 
+type MarkdownStreamBlock = {
+  key: string;
+  raw: string;
+  src: string;
+  mode: 'full' | 'live';
+};
+
+const hasReferenceDefinitions = (text: string): boolean => {
+  return /^\[[^\]]+\]:\s+\S+/m.test(text) || /^\[\^[^\]]+\]:\s+/m.test(text);
+};
+
+const hasOpenFence = (raw: string): boolean => {
+  const match = raw.match(/^[ \t]{0,3}(`{3,}|~{3,})/);
+  if (!match) return false;
+  const marker = match[1];
+  if (!marker) return false;
+  const char = marker[0];
+  const size = marker.length;
+  const last = raw.trimEnd().split('\n').at(-1)?.trim() ?? '';
+  return !new RegExp(`^[\\t ]{0,3}${char}{${size},}[\\t ]*$`).test(last);
+};
+
+const healMarkdown = (text: string): string => {
+  return remend(text, { linkMode: 'text-only' });
+};
+
+const fnv1a32 = (input: string): string => {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < input.length; i += 1) {
+    hash ^= input.charCodeAt(i);
+    hash = (hash + ((hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24))) >>> 0;
+  }
+  return hash.toString(16);
+};
+
+const buildMarkdownCacheKey = (baseKey: string, raw: string, index: number, mode: 'full' | 'live'): string => {
+  const sample = raw.length > 400 ? `${raw.slice(0, 200)}${raw.slice(-200)}` : raw;
+  return `${baseKey}:${index}:${mode}:${raw.length}:${fnv1a32(sample)}`;
+};
+
+const streamMarkdownBlocks = (text: string, live: boolean, baseKey: string): MarkdownStreamBlock[] => {
+  if (!live) {
+    return [{
+      key: buildMarkdownCacheKey(baseKey, text, 0, 'full'),
+      raw: text,
+      src: text,
+      mode: 'full',
+    }];
+  }
+
+  const healed = healMarkdown(text);
+  if (hasReferenceDefinitions(text)) {
+    return [{
+      key: buildMarkdownCacheKey(baseKey, text, 0, 'live'),
+      raw: text,
+      src: healed,
+      mode: 'live',
+    }];
+  }
+
+  const tokens = marked.lexer(text);
+  const blocks: MarkdownStreamBlock[] = [];
+  let blockIndex = 0;
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index] as Tokens.Generic;
+    if (token.type === 'space') {
+      continue;
+    }
+
+    const raw = token.raw ?? '';
+    const isLast = index === tokens.length - 1 || tokens.slice(index + 1).every((nextToken) => nextToken.type === 'space');
+    const mode: 'full' | 'live' = isLast ? 'live' : 'full';
+    const src = isLast && token.type === 'code' && hasOpenFence(raw)
+      ? raw
+      : healMarkdown(raw);
+
+    blocks.push({
+      key: buildMarkdownCacheKey(baseKey, raw, blockIndex, mode),
+      raw,
+      src,
+      mode,
+    });
+    blockIndex += 1;
+  }
+
+  if (blocks.length === 0) {
+    return [{
+      key: buildMarkdownCacheKey(baseKey, text, 0, 'live'),
+      raw: text,
+      src: healed,
+      mode: 'live',
+    }];
+  }
+
+  return blocks;
+};
+
+const useStableMarkdownBlocks = (text: string, live: boolean, baseKey: string): MarkdownStreamBlock[] => {
+  const previousRef = React.useRef<MarkdownStreamBlock[]>([]);
+
+  return React.useMemo(() => {
+    const nextBlocks = streamMarkdownBlocks(text, live, baseKey);
+    const previousBlocks = previousRef.current;
+    const stabilized = nextBlocks.map((block, index) => {
+      const previous = previousBlocks[index];
+      if (previous && previous.key === block.key && previous.src === block.src) {
+        return previous;
+      }
+      return block;
+    });
+
+    const unchanged = stabilized.length === previousBlocks.length
+      && stabilized.every((block, index) => block === previousBlocks[index]);
+
+    if (unchanged) {
+      return previousBlocks;
+    }
+
+    previousRef.current = stabilized;
+    return stabilized;
+  }, [baseKey, live, text]);
+};
+
+const extractCodeText = (children: React.ReactNode): string => {
+  if (typeof children === 'string') return children;
+  if (Array.isArray(children)) {
+    return children.map((child) => extractCodeText(child)).join('');
+  }
+  if (React.isValidElement(children)) {
+    return extractCodeText((children.props as { children?: React.ReactNode }).children);
+  }
+  return '';
+};
+
+const getCodeLanguage = (className: string | undefined): string => {
+  const match = className?.match(/language-([\w-]+)/);
+  return match?.[1]?.toLowerCase() ?? 'text';
+};
+
+const MarkdownCodeBlock: React.FC<{
+  code: string;
+  language: string;
+  syntaxTheme: { [key: string]: React.CSSProperties };
+}> = ({ code, language, syntaxTheme }) => {
+  const [copied, setCopied] = React.useState(false);
+
+  const handleCopy = React.useCallback(async () => {
+    const result = await copyTextToClipboard(code);
+    if (!result.ok) return;
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 2000);
+  }, [code]);
+
+  return (
+    <div data-component="markdown-code" className="my-4 group overflow-hidden rounded-2xl border border-border/80 bg-[var(--surface-elevated)]">
+      <div className="flex items-center justify-between border-b border-border/70 px-3 py-1.5">
+        <span className="font-mono text-[13px] text-muted-foreground">{language}</span>
+        <div className="opacity-0 transition-opacity group-hover:opacity-100">
+          <button
+            type="button"
+            onClick={() => { void handleCopy(); }}
+            className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
+            title={copied ? 'Copied' : 'Copy code'}
+          >
+            {copied ? <RiCheckLine className="size-3.5" /> : <RiFileCopyLine className="size-3.5" />}
+          </button>
+        </div>
+      </div>
+      <div className="px-3 py-2.5">
+        <SyntaxHighlighter
+          language={language}
+          style={syntaxTheme}
+          customStyle={{ margin: 0, background: 'transparent', padding: 0, fontSize: 'var(--text-code)', lineHeight: 'var(--markdown-code-block-line-height)' }}
+          codeTagProps={{ style: { fontSize: 'var(--text-code)', lineHeight: 'var(--markdown-code-block-line-height)' } }}
+          PreTag="pre"
+        >
+          {code}
+        </SyntaxHighlighter>
+      </div>
+    </div>
+  );
+};
+
+const buildMarkdownComponents = ({
+  syntaxTheme,
+}: {
+  syntaxTheme: { [key: string]: React.CSSProperties };
+}): Components => ({
+  table({ children, ...props }) {
+    return <TableWrapper className={props.className}>{children}</TableWrapper>;
+  },
+  h1({ children, ...props }) {
+    return <h1 {...props} className={cn('typography-markdown-h1 mt-4 mb-2 text-[var(--markdown-heading1,var(--primary))] font-semibold', props.className)}>{children}</h1>;
+  },
+  h2({ children, ...props }) {
+    return <h2 {...props} className={cn('typography-markdown-h2 mt-3.5 mb-1.5 text-[var(--markdown-heading2,var(--primary))] font-semibold', props.className)}>{children}</h2>;
+  },
+  h3({ children, ...props }) {
+    return <h3 {...props} className={cn('typography-markdown-h3 mt-3 mb-1 text-[var(--markdown-heading3,var(--primary))] font-semibold', props.className)}>{children}</h3>;
+  },
+  h4({ children, ...props }) {
+    return <h4 {...props} className={cn('typography-markdown-h4 mt-2.5 mb-1 text-[var(--markdown-heading4,var(--foreground))] font-semibold', props.className)}>{children}</h4>;
+  },
+  h5({ children, ...props }) {
+    return <h5 {...props} className={cn('typography-markdown-h4 mt-2.5 mb-1 text-[var(--markdown-heading4,var(--foreground))] font-semibold', props.className)}>{children}</h5>;
+  },
+  h6({ children, ...props }) {
+    return <h6 {...props} className={cn('typography-markdown-h4 mt-2.5 mb-1 text-[var(--markdown-heading4,var(--foreground))] font-semibold', props.className)}>{children}</h6>;
+  },
+  p({ children, ...props }) {
+    return <p {...props} className={cn('typography-markdown-body my-2 text-foreground/90', props.className)}>{children}</p>;
+  },
+  thead({ children, ...props }) {
+    return <thead {...props} className={cn('[&_tr]:border-b [&_tr]:border-border/80', props.className)}>{children}</thead>;
+  },
+  tbody({ children, ...props }) {
+    return <tbody {...props} className={cn('[&_tr:last-child]:border-0', props.className)}>{children}</tbody>;
+  },
+  tr({ children, ...props }) {
+    return <tr {...props} className={cn('border-b border-border/60', props.className)}>{children}</tr>;
+  },
+  th({ children, ...props }) {
+    return <th {...props} className={cn('border-r border-border/60 px-4 py-2.5 text-left align-middle font-semibold text-foreground last:border-r-0', props.className)}>{children}</th>;
+  },
+  td({ children, ...props }) {
+    return <td {...props} className={cn('border-r border-border/60 px-4 py-2.5 align-middle text-foreground/90 last:border-r-0', props.className)}>{children}</td>;
+  },
+  ul({ children, ...props }) {
+    return <ul {...props} className={cn('typography-markdown-body my-2', props.className)}>{children}</ul>;
+  },
+  ol({ children, ...props }) {
+    return <ol {...props} className={cn('typography-markdown-body my-2', props.className)}>{children}</ol>;
+  },
+  li({ children, ...props }) {
+    return <li {...props} className={cn('typography-markdown-body my-0.5 text-foreground/90', props.className)}>{children}</li>;
+  },
+  blockquote({ children, ...props }) {
+    return <blockquote {...props} className={cn('my-3 border-l-2 border-[var(--markdown-blockquote-border,var(--border))] pl-4 typography-markdown-body text-[var(--markdown-blockquote,var(--muted-foreground))]', props.className)}>{children}</blockquote>;
+  },
+  pre({ children, ...props }) {
+    const child = React.Children.only(children) as React.ReactElement<{ className?: string; children?: React.ReactNode }>;
+    const className = child.props.className;
+    const code = extractCodeText(child.props.children).replace(/\n$/, '');
+    const language = getCodeLanguage(className);
+    if (language === 'mermaid') {
+      return <MermaidBlock source={code} mode={useUIStore.getState().mermaidRenderingMode} />;
+    }
+    return <MarkdownCodeBlock code={code} language={language} syntaxTheme={syntaxTheme} {...props} />;
+  },
+  code({ className, children, ...props }) {
+    return (
+      <code
+        {...props}
+        className={cn('rounded bg-[var(--surface-elevated)] px-1 py-0.5 font-mono text-[0.95em]', className)}
+        data-markdown="inline-code"
+      >
+        {children}
+      </code>
+    );
+  },
+  a({ href, children, ...props }) {
+    return (
+      <a
+        {...props}
+        href={href}
+        target={isExternalHttpUrl(href ?? '') ? '_blank' : undefined}
+        rel={isExternalHttpUrl(href ?? '') ? 'noopener noreferrer' : undefined}
+      >
+        {children}
+      </a>
+    );
+  },
+});
+
+const MarkdownBlockView: React.FC<{
+  block: MarkdownStreamBlock;
+  components: Components;
+}> = React.memo(({ block, components }) => {
+  return (
+    <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+      {block.src}
+    </ReactMarkdown>
+  );
+}, (prev, next) => prev.block === next.block && prev.components === next.components);
+
+MarkdownBlockView.displayName = 'MarkdownBlockView';
+
 interface MarkdownRendererProps {
   content: string;
   part?: Part;
@@ -740,7 +809,7 @@ interface MarkdownRendererProps {
   onShowPopup?: (content: ToolPopupContent) => void;
 }
 
-const MERMAID_BLOCK_SELECTOR = '[data-streamdown="mermaid-block"]';
+const MERMAID_BLOCK_SELECTOR = '[data-markdown="mermaid-block"]';
 const FILE_LINK_SELECTOR = '[data-openchamber-file-link="true"]';
 
 type ParsedFileReference = {
@@ -1022,23 +1091,15 @@ const getContextDirectory = (effectiveDirectory: string, resolvedPath: string): 
 const useFileReferenceInteractions = ({
   containerRef,
   effectiveDirectory,
-  readFile,
   editor,
   preferRuntimeEditor,
-  deferValidationUntilIdle = false,
 }: {
   containerRef: React.RefObject<HTMLDivElement | null>;
   effectiveDirectory: string;
-  readFile?: (path: string) => Promise<{ content: string; path: string }>;
   editor?: EditorAPI;
   preferRuntimeEditor?: boolean;
-  deferValidationUntilIdle?: boolean;
 }) => {
-  const validationCacheRef = React.useRef<Map<string, boolean>>(new Map());
-  const inFlightValidationsRef = React.useRef<Map<string, Promise<boolean>>>(new Map());
-  const annotationPassRef = React.useRef(0);
   const annotationDebounceRef = React.useRef<number | null>(null);
-  const isValidationSweepRunningRef = React.useRef(false);
 
   React.useEffect(() => {
     const container = containerRef.current;
@@ -1046,154 +1107,47 @@ const useFileReferenceInteractions = ({
       return;
     }
 
-    let disposed = false;
-
-    const isPathResolvable = async (resolvedPath: string): Promise<boolean> => {
-      const cache = validationCacheRef.current;
-      if (cache.has(resolvedPath)) {
-        return cache.get(resolvedPath) === true;
-      }
-
-      const inFlight = inFlightValidationsRef.current.get(resolvedPath);
-      if (inFlight) {
-        return inFlight;
-      }
-
-      const checkPromise = (async () => {
-        try {
-          if (!readFile) {
-            return false;
-          }
-          await readFile(resolvedPath);
-          cache.set(resolvedPath, true);
-          return true;
-        } catch {
-          cache.set(resolvedPath, false);
-          return false;
-        } finally {
-          inFlightValidationsRef.current.delete(resolvedPath);
-        }
-      })();
-
-      inFlightValidationsRef.current.set(resolvedPath, checkPromise);
-      return checkPromise;
-    };
-
-    const clearCandidateLinkAttrs = (candidate: HTMLElement) => {
-      candidate.removeAttribute('data-openchamber-file-link');
-      candidate.removeAttribute('data-openchamber-file-ref');
-      candidate.removeAttribute('data-openchamber-file-path');
-      if (candidate.getAttribute('title') === 'Open file') {
-        candidate.removeAttribute('title');
-      }
-      if (candidate.tagName.toLowerCase() !== 'a') {
-        candidate.removeAttribute('role');
-        candidate.removeAttribute('tabindex');
-      }
-    };
-
-    const applyCandidateLinkAttrs = (candidate: HTMLElement, rawCandidate: string, resolvedPath: string) => {
-      candidate.setAttribute('data-openchamber-file-link', 'true');
-      candidate.setAttribute('data-openchamber-file-ref', rawCandidate);
-      candidate.setAttribute('data-openchamber-file-path', resolvedPath);
-      candidate.setAttribute('title', 'Open file');
-      if (candidate.tagName.toLowerCase() !== 'a') {
-        candidate.setAttribute('role', 'button');
-        candidate.setAttribute('tabindex', '0');
-      }
-    };
-
-    const runValidationSweep = async (paths: string[], expectedPassID: number) => {
-      if (deferValidationUntilIdle) {
-        return;
-      }
-      if (isValidationSweepRunningRef.current || paths.length === 0) {
-        return;
-      }
-
-      isValidationSweepRunningRef.current = true;
-      const maxConcurrent = 3;
-      let cursor = 0;
-
-      const worker = async () => {
-        while (!disposed && cursor < paths.length) {
-          const index = cursor;
-          cursor += 1;
-          const pathToCheck = paths[index];
-          if (!pathToCheck) {
-            continue;
-          }
-          await isPathResolvable(pathToCheck);
-        }
-      };
-
-      try {
-        await Promise.all(Array.from({ length: Math.min(maxConcurrent, paths.length) }, () => worker()));
-      } finally {
-        isValidationSweepRunningRef.current = false;
-      }
-
-      if (!disposed && annotationPassRef.current === expectedPassID) {
-        void annotateFileLinks();
-      }
-    };
-
-    const annotateFileLinks = async () => {
-      const passID = annotationPassRef.current + 1;
-      annotationPassRef.current = passID;
-      const candidates = container.querySelectorAll<HTMLElement>('[data-streamdown="inline-code"], a');
-      const unresolvedPaths = new Set<string>();
+    const annotateFileLinks = () => {
+      const candidates = container.querySelectorAll<HTMLElement>('[data-markdown="inline-code"], a');
 
       for (const candidate of Array.from(candidates)) {
         const rawCandidate = extractPathCandidateFromElement(candidate);
         const resolved = getResolvedReference(rawCandidate, effectiveDirectory);
         if (!resolved) {
-          clearCandidateLinkAttrs(candidate);
+          candidate.removeAttribute('data-openchamber-file-link');
+          candidate.removeAttribute('data-openchamber-file-ref');
+          candidate.removeAttribute('data-openchamber-file-path');
+          if (candidate.getAttribute('title') === 'Open file') {
+            candidate.removeAttribute('title');
+          }
+          if (candidate.tagName.toLowerCase() !== 'a') {
+            candidate.removeAttribute('role');
+            candidate.removeAttribute('tabindex');
+          }
           continue;
         }
 
-        if (annotationPassRef.current !== passID) {
-          return;
+        candidate.setAttribute('data-openchamber-file-link', 'true');
+        candidate.setAttribute('data-openchamber-file-ref', rawCandidate);
+        candidate.setAttribute('data-openchamber-file-path', resolved.resolvedPath);
+        candidate.setAttribute('title', 'Open file');
+        if (candidate.tagName.toLowerCase() !== 'a') {
+          candidate.setAttribute('role', 'button');
+          candidate.setAttribute('tabindex', '0');
         }
-
-        const cachedResult = validationCacheRef.current.get(resolved.resolvedPath);
-        if (cachedResult === true) {
-          applyCandidateLinkAttrs(candidate, rawCandidate, resolved.resolvedPath);
-          continue;
-        }
-
-        clearCandidateLinkAttrs(candidate);
-        if (cachedResult !== false) {
-          unresolvedPaths.add(resolved.resolvedPath);
-        }
-      }
-
-      if (unresolvedPaths.size > 0) {
-        void runValidationSweep(Array.from(unresolvedPaths), passID);
       }
     };
 
-    const openFileReference = async (sourceElement: HTMLElement): Promise<boolean> => {
+    const openFileReference = (sourceElement: HTMLElement) => {
       const raw = sourceElement.getAttribute('data-openchamber-file-ref') || extractPathCandidateFromElement(sourceElement);
       const resolved = getResolvedReference(raw, effectiveDirectory);
       if (!resolved) {
-        return false;
-      }
-
-      const isResolvable = await isPathResolvable(resolved.resolvedPath);
-      if (!isResolvable) {
-        sourceElement.removeAttribute('data-openchamber-file-link');
-        sourceElement.removeAttribute('data-openchamber-file-ref');
-        sourceElement.removeAttribute('data-openchamber-file-path');
-        if (sourceElement.getAttribute('title') === 'Open file') {
-          sourceElement.removeAttribute('title');
-        }
-        return false;
+        return;
       }
 
       const contextDirectory = getContextDirectory(effectiveDirectory, resolved.resolvedPath);
       if (preferRuntimeEditor && editor) {
-        await editor.openFile(
+        void editor.openFile(
           resolved.resolvedPath,
           Number.isFinite(resolved.line ?? Number.NaN)
             ? Math.max(1, Math.trunc(resolved.line as number))
@@ -1202,7 +1156,7 @@ const useFileReferenceInteractions = ({
             ? Math.max(1, Math.trunc(resolved.column as number))
             : undefined,
         );
-        return true;
+        return;
       }
 
       const uiStore = useUIStore.getState();
@@ -1218,7 +1172,6 @@ const useFileReferenceInteractions = ({
       } else {
         uiStore.openContextFile(contextDirectory, resolved.resolvedPath);
       }
-      return true;
     };
 
     const handleClick = (event: MouseEvent) => {
@@ -1235,7 +1188,7 @@ const useFileReferenceInteractions = ({
       event.preventDefault();
       event.stopPropagation();
 
-      void openFileReference(fileRefElement);
+      openFileReference(fileRefElement);
     };
 
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -1251,36 +1204,34 @@ const useFileReferenceInteractions = ({
       event.preventDefault();
       event.stopPropagation();
 
-      void openFileReference(target);
+      openFileReference(target);
     };
 
-    void annotateFileLinks();
+    annotateFileLinks();
 
     const observer = new MutationObserver(() => {
       if (annotationDebounceRef.current !== null && typeof window !== 'undefined') {
         window.clearTimeout(annotationDebounceRef.current);
       }
       if (typeof window === 'undefined') {
-        void annotateFileLinks();
+        annotateFileLinks();
         return;
       }
       annotationDebounceRef.current = window.setTimeout(() => {
         annotationDebounceRef.current = null;
-        void annotateFileLinks();
-      }, deferValidationUntilIdle ? 280 : 120);
+        annotateFileLinks();
+      }, 120);
     });
     observer.observe(container, {
       childList: true,
       subtree: true,
-      ...(deferValidationUntilIdle ? {} : { characterData: true }),
+      characterData: true,
     });
 
     container.addEventListener('click', handleClick);
     container.addEventListener('keydown', handleKeyDown);
 
     return () => {
-      disposed = true;
-      annotationPassRef.current += 1;
       if (annotationDebounceRef.current !== null && typeof window !== 'undefined') {
         window.clearTimeout(annotationDebounceRef.current);
       }
@@ -1289,7 +1240,7 @@ const useFileReferenceInteractions = ({
       container.removeEventListener('click', handleClick);
       container.removeEventListener('keydown', handleKeyDown);
     };
-  }, [containerRef, deferValidationUntilIdle, editor, effectiveDirectory, preferRuntimeEditor, readFile]);
+  }, [containerRef, editor, effectiveDirectory, preferRuntimeEditor]);
 };
 
 const useMermaidInlineInteractions = ({
@@ -1397,51 +1348,37 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
   variant = 'assistant',
   onShowPopup,
 }) => {
-  const { files, editor, runtime } = useRuntimeAPIs();
-  const streamdownContainerRef = React.useRef<HTMLDivElement>(null);
+  const currentTheme = useCurrentMermaidTheme();
+  const { editor, runtime } = useRuntimeAPIs();
+  const containerRef = React.useRef<HTMLDivElement>(null);
   const effectiveDirectory = useEffectiveDirectory() ?? '';
   const mermaidBlocks = React.useMemo(() => extractMermaidBlocks(content), [content]);
-  useMermaidInlineInteractions({ containerRef: streamdownContainerRef, mermaidBlocks, onShowPopup });
+  useMermaidInlineInteractions({ containerRef, mermaidBlocks, onShowPopup });
   useFileReferenceInteractions({
-    containerRef: streamdownContainerRef,
+    containerRef,
     effectiveDirectory,
-    readFile: files.readFile,
     editor,
     preferRuntimeEditor: runtime.isVSCode,
-    deferValidationUntilIdle: isStreaming,
   });
-  useExternalLinkInteractions({ containerRef: streamdownContainerRef });
-
-  const shikiThemes = useMarkdownShikiThemes();
-  const streamdownPlugins = useStreamdownPlugins(shikiThemes);
-  const currentMermaidTheme = useCurrentMermaidTheme();
+  useExternalLinkInteractions({ containerRef });
+  const syntaxTheme = React.useMemo(() => generateSyntaxTheme(currentTheme), [currentTheme]);
+  const markdownComponents = React.useMemo(() => buildMarkdownComponents({ syntaxTheme }), [syntaxTheme]);
   const componentKey = `markdown-${part?.id ? `part-${part.id}` : `message-${messageId}`}`;
+  const markdownBlocks = useStableMarkdownBlocks(content, isStreaming && !disableStreamAnimation, componentKey);
 
-  const streamdownClassName = variant === 'tool'
-    ? 'streamdown-content streamdown-tool'
+  const markdownClassName = variant === 'tool'
+    ? 'markdown-content markdown-tool'
     : variant === 'reasoning'
-      ? 'streamdown-content streamdown-reasoning'
-      : 'streamdown-content';
-
-  const streamdownAnimated = undefined;
+      ? 'markdown-content markdown-reasoning'
+      : 'markdown-content leading-relaxed';
 
   const markdownContent = (
-    <div className={cn('break-words w-full min-w-0', className)} ref={streamdownContainerRef}>
-        <Streamdown
-         key={`streamdown-${componentKey}-${currentMermaidTheme.metadata.id}:${currentMermaidTheme.metadata.variant}`}
-         mode={isStreaming && !disableStreamAnimation ? 'streaming' : 'static'}
-         shikiTheme={shikiThemes}
-         className={streamdownClassName}
-          controls={streamdownControls}
-          plugins={streamdownPlugins}
-          components={streamdownComponents}
-          animated={disableStreamAnimation ? undefined : streamdownAnimated}
-          isAnimating={disableStreamAnimation ? false : isStreaming}
-          // @ts-expect-error Streamdown type missing linkSafety in older minor
-          linkSafety={{ enabled: false }}
-         >
-        {content}
-      </Streamdown>
+    <div className={cn('break-words w-full min-w-0', className)} ref={containerRef}>
+      <div className={markdownClassName}>
+        {markdownBlocks.map((block) => (
+          <MarkdownBlockView key={block.key} block={block} components={markdownComponents} />
+        ))}
+      </div>
     </div>
   );
 
@@ -1474,54 +1411,45 @@ export const SimpleMarkdownRenderer: React.FC<{
   onShowPopup,
   allowMermaidWheelZoom = false,
 }) => {
-  const { files, editor, runtime } = useRuntimeAPIs();
+  const { editor, runtime } = useRuntimeAPIs();
   const renderedContent = React.useMemo(
     () => (stripFrontmatter ? stripLeadingFrontmatter(content) : content),
     [content, stripFrontmatter],
   );
-  const streamdownContainerRef = React.useRef<HTMLDivElement>(null);
+  const currentTheme = useCurrentMermaidTheme();
+  const containerRef = React.useRef<HTMLDivElement>(null);
   const effectiveDirectory = useEffectiveDirectory() ?? '';
   const mermaidBlocks = React.useMemo(() => extractMermaidBlocks(renderedContent), [renderedContent]);
   useMermaidInlineInteractions({
-    containerRef: streamdownContainerRef,
+    containerRef,
     mermaidBlocks,
     onShowPopup,
     allowWheelZoom: allowMermaidWheelZoom,
   });
   useFileReferenceInteractions({
-    containerRef: streamdownContainerRef,
+    containerRef,
     effectiveDirectory,
-    readFile: files.readFile,
     editor,
     preferRuntimeEditor: runtime.isVSCode,
   });
-  useExternalLinkInteractions({ containerRef: streamdownContainerRef, enabled: !disableLinkSafety });
+  useExternalLinkInteractions({ containerRef, enabled: !disableLinkSafety });
+  const syntaxTheme = React.useMemo(() => generateSyntaxTheme(currentTheme), [currentTheme]);
+  const markdownComponents = React.useMemo(() => buildMarkdownComponents({ syntaxTheme }), [syntaxTheme]);
+  const markdownBlocks = useStableMarkdownBlocks(renderedContent, false, `simple:${variant}`);
 
-  const shikiThemes = useMarkdownShikiThemes();
-  const streamdownPlugins = useStreamdownPlugins(shikiThemes);
-  const currentMermaidTheme = useCurrentMermaidTheme();
-
-  const streamdownClassName = variant === 'tool'
-    ? 'streamdown-content streamdown-tool'
+  const markdownClassName = variant === 'tool'
+    ? 'markdown-content markdown-tool'
     : variant === 'reasoning'
-      ? 'streamdown-content streamdown-reasoning'
-      : 'streamdown-content';
+      ? 'markdown-content markdown-reasoning'
+      : 'markdown-content leading-relaxed';
 
   return (
-    <div className={cn('break-words w-full min-w-0', className)} ref={streamdownContainerRef}>
-      <Streamdown
-        key={`streamdown-simple-${currentMermaidTheme.metadata.id}:${currentMermaidTheme.metadata.variant}`}
-        mode="static"
-        shikiTheme={shikiThemes}
-        className={streamdownClassName}
-        controls={streamdownControls}
-        plugins={streamdownPlugins}
-        components={streamdownComponents}
-        // @ts-expect-error Streamdown type missing linkSafety in older minor
-        linkSafety={{ enabled: false }}
-      >
-        {renderedContent}
-      </Streamdown>
+    <div className={cn('break-words w-full min-w-0', className)} ref={containerRef}>
+      <div className={markdownClassName}>
+        {markdownBlocks.map((block) => (
+          <MarkdownBlockView key={block.key} block={block} components={markdownComponents} />
+        ))}
+      </div>
     </div>
   );
 };

@@ -45,7 +45,9 @@ const normalizeDirectoryPath = (value: string): string => {
   if (!trimmed) {
     return trimmed;
   }
-  const normalized = trimmed.replace(/\\/g, '/');
+  const normalized = trimmed
+    .replace(/\\/g, '/')
+    .replace(/^([a-z]):/, (_, letter: string) => letter.toUpperCase() + ':');
   if (normalized.length > 1) {
     return normalized.replace(/\/+$/, '');
   }

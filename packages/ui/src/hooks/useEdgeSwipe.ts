@@ -16,11 +16,9 @@ export const useEdgeSwipe = (options: EdgeSwipeOptions = {}) => {
     enabled = true,
   } = options;
 
-  const {
-    isMobile,
-    setSessionSwitcherOpen,
-    isSessionSwitcherOpen,
-  } = useUIStore();
+  const isMobile = useUIStore((state) => state.isMobile);
+  const setSessionSwitcherOpen = useUIStore((state) => state.setSessionSwitcherOpen);
+  const isSessionSwitcherOpen = useUIStore((state) => state.isSessionSwitcherOpen);
   const touchStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
   const touchEndRef = useRef<{ x: number; y: number; time: number } | null>(null);
 

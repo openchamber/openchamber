@@ -125,7 +125,12 @@ export function useServerTTS(options: UseServerTTSOptions = {}): UseServerTTSRet
   const abortControllerRef = useRef<AbortController | null>(null);
   
   // Get current model, threshold, and max length from config store for summarization
-  const { currentProviderId, currentModelId, summarizeCharacterThreshold, summarizeMaxLength, openaiApiKey, settingsZenModel } = useConfigStore();
+  const currentProviderId = useConfigStore((state) => state.currentProviderId);
+  const currentModelId = useConfigStore((state) => state.currentModelId);
+  const summarizeCharacterThreshold = useConfigStore((state) => state.summarizeCharacterThreshold);
+  const summarizeMaxLength = useConfigStore((state) => state.summarizeMaxLength);
+  const openaiApiKey = useConfigStore((state) => state.openaiApiKey);
+  const settingsZenModel = useConfigStore((state) => state.settingsZenModel);
 
   // Check if server TTS is available
   const checkAvailability = useCallback(async (): Promise<boolean> => {

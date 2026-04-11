@@ -27,7 +27,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { browserVoiceService } from '@/lib/voice/browserVoiceService';
-import { useSessionStore } from '@/stores/useSessionStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useInputStore } from '@/sync/input-store';
+import { getSyncMessages, getSyncParts } from '@/sync/sync-refs';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useServerTTS } from './useServerTTS';
 import { useSayTTS } from './useSayTTS';
@@ -120,19 +122,29 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
   const isActiveRef = useRef(false);
   const processingMessageRef = useRef(false);
   const lastTranscriptRef = useRef('');
-  const messagesRef = useRef<Map<string, { info: { role: string }; parts: Array<{ type: string; text?: string }> }>>(new Map());
   const pendingResumeOnVisibleRef = useRef(false);
   const pendingFinalTranscriptRef = useRef('');
   const finalTranscriptTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const deviceChangeRestartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
   // Store access
-  const currentSessionId = useSessionStore((s) => s.currentSessionId);
-  const sendMessage = useSessionStore((s) => s.sendMessage);
-  const setPendingInputText = useSessionStore((s) => s.setPendingInputText);
-  const messages = useSessionStore((s) => s.messages);
-  const createSession = useSessionStore((s) => s.createSession);
-  const { currentProviderId, currentModelId, currentAgentName, voiceModeEnabled, voiceProvider, speechRate, speechPitch, speechVolume, sayVoice, browserVoice, openaiVoice, summarizeVoiceConversation, summarizeCharacterThreshold } = useConfigStore();
+  const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
+  const sendMessage = useSessionUIStore((s) => s.sendMessage);
+  const setPendingInputText = useInputStore((s) => s.setPendingInputText);
+  const createSession = useSessionUIStore((s) => s.createSession);
+  const currentProviderId = useConfigStore((state) => state.currentProviderId);
+  const currentModelId = useConfigStore((state) => state.currentModelId);
+  const currentAgentName = useConfigStore((state) => state.currentAgentName);
+  const voiceModeEnabled = useConfigStore((state) => state.voiceModeEnabled);
+  const voiceProvider = useConfigStore((state) => state.voiceProvider);
+  const speechRate = useConfigStore((state) => state.speechRate);
+  const speechPitch = useConfigStore((state) => state.speechPitch);
+  const speechVolume = useConfigStore((state) => state.speechVolume);
+  const sayVoice = useConfigStore((state) => state.sayVoice);
+  const browserVoice = useConfigStore((state) => state.browserVoice);
+  const openaiVoice = useConfigStore((state) => state.openaiVoice);
+  const summarizeVoiceConversation = useConfigStore((state) => state.summarizeVoiceConversation);
+  const summarizeCharacterThreshold = useConfigStore((state) => state.summarizeCharacterThreshold);
 
   const shouldCheckOpenAIAvailability = voiceModeEnabled && voiceProvider === 'openai';
   const shouldCheckSayAvailability = voiceModeEnabled && voiceProvider === 'say';
@@ -146,16 +158,6 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
   const { speak: speakSayTTS, stop: stopSayTTS, isAvailable: isSayTTSAvailable, unlockAudio: unlockSayTTSAudio } = useSayTTS({
     enabled: shouldCheckSayAvailability,
   });
-  
-  // Update messages ref when messages change
-  useEffect(() => {
-    if (currentSessionId) {
-      const sessionMessages = messages.get(currentSessionId);
-      if (sessionMessages) {
-        messagesRef.current = new Map(sessionMessages.map(m => [m.info.id, m]));
-      }
-    }
-  }, [messages, currentSessionId]);
   
   // Stop voice when session changes to prevent microphone from staying active
   // This ensures voice mode doesn't carry over between sessions
@@ -374,22 +376,23 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
       // Wait for AI response and speak it
       // We'll poll for new assistant messages
       const checkForResponse = async () => {
-        if (!isActiveRef.current) return;
-        
-        const sessionMessages = messagesRef.current;
-        const assistantMessages = Array.from(sessionMessages.values())
-          .filter(m => m.info.role === 'assistant')
+        if (!isActiveRef.current || !sessionId) return;
+
+        const rawMessages = getSyncMessages(sessionId);
+        const assistantMessages = rawMessages
+          .filter(m => m.role === 'assistant')
           .sort((a, b) => {
-            const aTime = (a.info as { time?: { created?: number } }).time?.created ?? 0;
-            const bTime = (b.info as { time?: { created?: number } }).time?.created ?? 0;
+            const aTime = (a as { time?: { created?: number } }).time?.created ?? 0;
+            const bTime = (b as { time?: { created?: number } }).time?.created ?? 0;
             return bTime - aTime;
           });
-        
+
         if (assistantMessages.length > 0) {
           const latestMessage = assistantMessages[0];
-          const textParts = latestMessage.parts
-            .filter(p => p.type === 'text')
-            .map(p => p.text)
+          const parts = getSyncParts(latestMessage.id);
+          const textParts = parts
+            .filter((p: { type: string; text?: string }) => p.type === 'text')
+            .map((p: { type: string; text?: string }) => p.text ?? '')
             .join(' ');
           
           if (textParts.trim()) {

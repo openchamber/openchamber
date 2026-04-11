@@ -453,13 +453,29 @@ export const SidebarFilesTree: React.FC = () => {
   React.useEffect(() => {
     if (!root || expandedPaths.length === 0) return;
 
-    for (const expandedPath of expandedPaths) {
-      const normalized = normalizePath(expandedPath);
-      if (!normalized || normalized === root) continue;
-      if (!normalized.startsWith(`${root}/`)) continue;
-      if (loadedDirsRef.current.has(normalized) || inFlightDirsRef.current.has(normalized)) continue;
-      void loadDirectory(normalized);
-    }
+    // Sort by depth so parent dirs load before children
+    const toLoad = expandedPaths
+      .map((p) => normalizePath(p))
+      .filter((normalized): normalized is string =>
+        !!normalized &&
+        normalized !== root &&
+        normalized.startsWith(`${root}/`) &&
+        !loadedDirsRef.current.has(normalized) &&
+        !inFlightDirsRef.current.has(normalized),
+      )
+      .sort((a, b) => a.split('/').length - b.split('/').length);
+
+    if (toLoad.length === 0) return;
+
+    // Load with concurrency limit to avoid API stampede on startup
+    let cancelled = false;
+    void (async () => {
+      for (let i = 0; i < toLoad.length && !cancelled; i += 3) {
+        const batch = toLoad.slice(i, i + 3);
+        await Promise.all(batch.map((dir) => loadDirectory(dir)));
+      }
+    })();
+    return () => { cancelled = true; };
   }, [expandedPaths, loadDirectory, root]);
 
   // --- Fuzzy search scoring (matching FilesView) ---
@@ -753,7 +769,7 @@ export const SidebarFilesTree: React.FC = () => {
   const hasTree = Boolean(root && childrenByDir[root]);
 
   return (
-    <section className="flex h-full min-h-0 flex-col overflow-hidden bg-transparent">
+    <section className="flex h-full min-h-0 flex-col overflow-hidden bg-sidebar">
       <div className="flex items-center gap-2 border-b border-border/40 px-3 py-2">
         <div className="relative min-w-0 flex-1">
           <RiSearchLine className="pointer-events-none absolute left-2 top-2 h-4 w-4 text-muted-foreground" />

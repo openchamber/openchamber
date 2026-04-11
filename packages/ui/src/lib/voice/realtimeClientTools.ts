@@ -1,7 +1,8 @@
 import { z } from "zod";
-import { useSessionStore } from "@/stores/useSessionStore";
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useConfigStore } from "@/stores/useConfigStore";
-import { usePermissionStore } from "@/stores/permissionStore";
+import { getSyncPermissions } from "@/sync/sync-refs";
+import { respondToPermission } from "@/sync/session-actions";
 
 /**
  * Static client tools for the realtime voice interface.
@@ -25,7 +26,7 @@ export const realtimeClientTools = {
         }
 
         // Get current session ID from store
-        const sessionId = useSessionStore.getState().currentSessionId;
+        const sessionId = useSessionUIStore.getState().currentSessionId;
         if (!sessionId) {
             console.error("[Voice] No active session");
             return "error (no active session)";
@@ -40,7 +41,7 @@ export const realtimeClientTools = {
 
         try {
             console.log("[Voice] Sending message to session:", sessionId);
-            await useSessionStore
+            await useSessionUIStore
                 .getState()
                 .sendMessage(parsed.data.message, currentProviderId, currentModelId, currentAgentName ?? undefined);
             return "sent";
@@ -67,14 +68,14 @@ export const realtimeClientTools = {
         }
 
         // Get current session ID from store
-        const sessionId = useSessionStore.getState().currentSessionId;
+        const sessionId = useSessionUIStore.getState().currentSessionId;
         if (!sessionId) {
             console.error("[Voice] No active session");
             return "error (no active session)";
         }
 
         // Get pending permissions for this session
-        const permissions = usePermissionStore.getState().permissions.get(sessionId);
+        const permissions = getSyncPermissions(sessionId);
         if (!permissions || permissions.length === 0) {
             console.error("[Voice] No pending permission requests");
             return "error (no pending permission request)";
@@ -92,7 +93,7 @@ export const realtimeClientTools = {
 
             // Respond to the permission based on decision
             const response: "once" | "always" | "reject" = decision === "allow" ? "once" : "reject";
-            await usePermissionStore.getState().respondToPermission(sessionId, request.id, response);
+            await respondToPermission(sessionId, request.id, response);
 
             return "done";
         } catch (error) {

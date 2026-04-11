@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import { devtools } from 'zustand/middleware';
 import type { CreateMultiRunParams, CreateMultiRunResult } from '@/types/multirun';
 import { opencodeClient } from '@/lib/opencode/client';
@@ -7,7 +8,7 @@ import type { ProjectRef } from '@/lib/worktrees/worktreeManager';
 import { createWorktreeWithDefaults, resolveRootTrackingRemote } from '@/lib/worktrees/worktreeCreate';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { checkIsGitRepository } from '@/lib/gitApi';
-import { useSessionStore } from './sessionStore';
+// sessionStore removed — sync bootstrap handles session loading
 import { useDirectoryStore } from './useDirectoryStore';
 import { useProjectsStore } from './useProjectsStore';
 
@@ -186,7 +187,7 @@ export const useMultiRunStore = create<MultiRunStore>()(
                 () => opencodeClient.createSession({ title: sessionTitle })
               );
 
-              useSessionStore.getState().setWorktreeMetadata(session.id, enrichedMetadata);
+              useSessionUIStore.getState().setWorktreeMetadata(session.id, enrichedMetadata);
 
               createdRuns.push({
                 sessionId: session.id,
@@ -228,12 +229,7 @@ export const useMultiRunStore = create<MultiRunStore>()(
             url: f.url,
           }));
 
-          // Refresh sessions list so sidebar shows the new sessions immediately
-          try {
-            await useSessionStore.getState().loadSessions();
-          } catch {
-            // Ignore refresh errors
-          }
+          // Session list refresh handled by sync bootstrap via SSE events
 
           // Setup commands run via SDK worktree startCommand.
 

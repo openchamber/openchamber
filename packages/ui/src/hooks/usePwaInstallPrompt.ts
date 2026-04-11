@@ -2,6 +2,7 @@ import React from 'react';
 import { toast } from '@/components/ui';
 import { isWebRuntime } from '@/lib/desktop';
 import { usePwaDetection } from '@/hooks/usePwaDetection';
+import { getSafeSessionStorage } from '@/stores/utils/safeStorage';
 
 type InstallPromptOutcome = 'accepted' | 'dismissed';
 
@@ -9,6 +10,8 @@ type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: InstallPromptOutcome }>;
 };
+
+const INSTALL_TOAST_SESSION_KEY = 'pwa-install-toast-shown';
 
 export const usePwaInstallPrompt = () => {
   const { browserTab } = usePwaDetection();
@@ -54,9 +57,16 @@ export const usePwaInstallPrompt = () => {
       installEvent.preventDefault();
       deferredPrompt = installEvent;
 
+      const sessionStorage = getSafeSessionStorage();
+      if (sessionStorage.getItem(INSTALL_TOAST_SESSION_KEY) === 'true') {
+        return;
+      }
+
       if (installToastId !== null) {
         return;
       }
+
+      sessionStorage.setItem(INSTALL_TOAST_SESSION_KEY, 'true');
 
       installToastId = toast.info('Install OpenChamber for quicker access', {
         duration: Infinity,

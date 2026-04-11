@@ -45,12 +45,10 @@ const keyboardEventToCombo = (event: React.KeyboardEvent<HTMLInputElement>): Sho
 };
 
 export const KeyboardShortcutsSettings: React.FC = () => {
-  const {
-    shortcutOverrides,
-    setShortcutOverride,
-    clearShortcutOverride,
-    resetAllShortcutOverrides,
-  } = useUIStore();
+  const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
+  const setShortcutOverride = useUIStore((state) => state.setShortcutOverride);
+  const clearShortcutOverride = useUIStore((state) => state.clearShortcutOverride);
+  const resetAllShortcutOverrides = useUIStore((state) => state.resetAllShortcutOverrides);
 
   const actions = React.useMemo(() => getCustomizableShortcutActions(), []);
 

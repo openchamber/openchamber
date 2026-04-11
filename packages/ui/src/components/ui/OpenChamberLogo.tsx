@@ -81,7 +81,6 @@ export const OpenChamberLogo: React.FC<OpenChamberLogoProps> = ({
   className = '',
   width = 70,
   height = 70,
-  isAnimated = false,
 }) => {
   const themeContext = useOptionalThemeSystem();
 
@@ -240,17 +239,7 @@ export const OpenChamberLogo: React.FC<OpenChamberLogoProps> = ({
       />
       
       {/* OpenCode logo on top face */}
-      <g opacity={isAnimated ? undefined : 1}>
-        {isAnimated && (
-          <animate
-            attributeName="opacity"
-            values="0.4;1;0.4"
-            dur="3s"
-            repeatCount="indefinite"
-            calcMode="spline"
-            keySplines="0.4 0 0.6 1; 0.4 0 0.6 1"
-          />
-        )}
+      <g opacity={1}>
         {/* 
           Isometric transform for top face:
           OpenCode logo (32x40 viewBox) centered and projected to isometric plane

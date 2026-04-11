@@ -26,8 +26,8 @@ export const RightSidebarTabs: React.FC = () => {
   ], []);
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-transparent">
-      <div className="h-9 bg-transparent pt-1 px-2">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-sidebar">
+      <div className="h-9 bg-sidebar pt-1 px-2">
         <SortableTabsStrip
           items={tabItems}
           activeId={rightSidebarTab}
@@ -39,7 +39,8 @@ export const RightSidebarTabs: React.FC = () => {
       </div>
 
       <div className="min-h-0 flex-1 overflow-hidden">
-        {rightSidebarTab === 'git' ? <GitView /> : <SidebarFilesTree />}
+        {rightSidebarTab === 'git' && <GitView />}
+        {rightSidebarTab === 'files' && <SidebarFilesTree />}
       </div>
     </div>
   );

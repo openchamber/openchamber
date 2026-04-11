@@ -1,3 +1,32 @@
+## [1.9.4] - 2026-04-07
+
+- Reliability/Streaming: added loading timeouts, automatic SSE reconnect, and message retry behavior so temporary connection stalls recover more reliably (thanks to @jwcrystal).
+- Reliability/Windows: normalized workspace path handling in SSE event lookup to keep live session updates working more consistently on Windows (thanks to @widipa).
+- Sessions/Streaming: fixed directory-aware event routing and post-reconnect session resync so subagent/session status is less likely to get stuck after reconnects (thanks to @daveotero, @jwcrystal).
+- Chat/Performance: reduced streaming re-render fanout and status-row churn for smoother long responses in the editor panel.
+- Chat/Scrolling: fixed scroll jumps and stabilized follow-to-latest behavior so live output stays easier to track while generating.
+- Chat/Tool Output: LSP diagnostics now render directly in tool output, making code issue review faster during iterative runs (thanks to @yulia-ivashko).
+- Models: added defensive fallbacks for missing model cost/capability metadata so model controls stay stable with incomplete provider responses (thanks to @Chi-square-test).
+
+## [1.9.3] - 2026-03-01
+
+- Security/Chat: user messages now escape raw HTML by default, so pasted markup is shown as text instead of being interpreted in chat (thanks to @kalac2232).
+- Sessions/Drafts: draft chat config now stays aligned with the active draft target directory, reducing model/agent mismatch when switching draft context (thanks to @hkay-dev).
+- Files/Markdown: added filesystem stat support in the extension bridge to validate markdown targets more reliably before file handling flows (thanks to @geekifan).
+- Chat/Models: added arrow-key navigation for thinking-mode selection in model controls, making keyboard model tuning faster while composing prompts (thanks to @daveotero).
+- Chat: improved error message readability with clearer styling and safer word-wrapping, so failures stay easier to scan in narrow editor panels (thanks to @nguyenngothuong).
+- Chat/JSON: added an interactive JSON tree viewer with collapse/expand controls and richer color cues for easier inspection of large structured outputs (thanks to @nguyenngothuong).
+- Reliability/Streaming: proxy handling now normalizes identity encoding, strips conflicting compression headers and hop-by-hop response headers, and suppresses expected upstream SSE close errors to reduce noisy disconnect failures (thanks to @jwcrystal, @Jovines, @JiwaniZakir, @shekohex).
+- Usage: added ZhipuAI quota tracking and fixed MiniMax coding-plan plus GitHub Copilot overusage calculations for more accurate quota reporting (thanks to @kalac2232, @baruchvitorino, @ebrainte).
+
+## [1.9.2] - 2026-03-31
+
+- Chat/Performance: overhauled live sync and streaming updates to reduce re-render churn and keep long-running chats smoother in the extension.
+- Sessions/UI: refined sidebar behavior with cleaner spacing, better truncation/tooltips, and a resizable sessions pane for tighter workspace control.
+- Chat/Editor integration: improved Explorer file insertion so drag-and-drop and context actions add `@` file mentions more reliably without duplicate path text.
+- Reliability: startup now queues bridge and stream requests until the API is ready, reducing false bootstrap failures and early-session instability.
+- Chat: reasoning content now renders through the markdown pipeline for more consistent readability during live responses.
+
 ## [1.9.1] - 2026-03-20
 
 - Sessions: sidebar lists now keep sessions visible in both Recent and Project sections for easier session discovery (thanks to @nguyenngothuong).

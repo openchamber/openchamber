@@ -1,5 +1,6 @@
 import { createOpencodeClient } from '@opencode-ai/sdk/v2';
 import type { OpenCodeManager } from './opencode';
+import { waitForApiUrl } from './opencode-ready';
 
 type StreamEvent<TData = unknown> = {
   data: TData;
@@ -25,6 +26,10 @@ const SSE_RESPONSE_HEADERS = {
   'content-type': 'text/event-stream',
   'cache-control': 'no-cache',
 } as const;
+
+// SSE reconnect configuration
+const MAX_RECONNECTS = 3;
+const BASE_RECONNECT_DELAY = 1000; // 1 second
 
 const serializeSseEventBlock = (event: StreamEvent<unknown>): string => {
   const lines: string[] = [];
@@ -55,8 +60,8 @@ const resolveDefaultDirectory = (manager: OpenCodeManager): string => {
   return manager.getWorkingDirectory() || 'global';
 };
 
-const createAuthedClient = (manager: OpenCodeManager, headers?: Record<string, string>) => {
-  const baseUrl = manager.getApiUrl();
+const createAuthedClient = async (manager: OpenCodeManager, headers?: Record<string, string>) => {
+  const baseUrl = await waitForApiUrl(manager);
   if (!baseUrl) {
     throw new Error('OpenCode API URL not available');
   }
@@ -98,37 +103,106 @@ export const openSseProxy = async ({
   signal,
   onChunk,
 }: OpenSseProxyOptions): Promise<OpenSseProxyResult> => {
-  const client = createAuthedClient(manager, headers);
+  const client = await createAuthedClient(manager, headers);
   const { pathname, directory } = normalizeSsePath(path);
   const resolvedDirectory = directory || resolveDefaultDirectory(manager);
 
-  const connect = async () => {
-    if (pathname === '/global/event') {
-      try {
-        return await client.global.event(getSseOptions(signal, onChunk));
-      } catch (error) {
-        if ((error as Error)?.name === 'AbortError' || signal.aborted) {
-          throw error;
-        }
-        return client.event.subscribe(
-          { directory: resolvedDirectory },
-          getSseOptions(signal, onChunk, resolvedDirectory),
-        );
-      }
-    }
+  // Reconnect logic with exponential backoff
+  let reconnectAttempts = 0;
 
-    return client.event.subscribe(
-      { directory: resolvedDirectory },
-      getSseOptions(signal, onChunk),
-    );
+  const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+  const connect = async (): Promise<{ stream: AsyncIterable<unknown> }> => {
+    try {
+      console.log(`[SSE] Connecting to ${pathname} (attempt ${reconnectAttempts + 1}/${MAX_RECONNECTS + 1})`);
+
+      if (pathname === '/global/event') {
+        try {
+          const result = await client.global.event(getSseOptions(signal, onChunk));
+          // Reset reconnect counter on successful connection
+          reconnectAttempts = 0;
+          return result;
+        } catch (error) {
+          if ((error as Error)?.name === 'AbortError' || signal.aborted) {
+            throw error;
+          }
+          // Fallback to directory event on error
+          console.warn('[SSE] Global event failed, falling back to directory event', error);
+          const result = client.event.subscribe(
+            { directory: resolvedDirectory },
+            getSseOptions(signal, onChunk, resolvedDirectory),
+          );
+          reconnectAttempts = 0;
+          return result;
+        }
+      }
+
+      const result = client.event.subscribe(
+        { directory: resolvedDirectory },
+        getSseOptions(signal, onChunk),
+      );
+      reconnectAttempts = 0;
+      return result;
+    } catch (error) {
+      // Implement reconnect logic
+      if (!signal.aborted && reconnectAttempts < MAX_RECONNECTS) {
+        reconnectAttempts++;
+        const delay = BASE_RECONNECT_DELAY * Math.pow(2, reconnectAttempts - 1); // Exponential backoff
+
+        console.warn(
+          `[SSE] Connection failed (attempt ${reconnectAttempts}/${MAX_RECONNECTS}), ` +
+          `retrying in ${delay}ms...`,
+          error
+        );
+
+        await sleep(delay);
+        return connect(); // Recursive retry
+      }
+
+      console.error(`[SSE] Connection failed after ${reconnectAttempts} attempts`, error);
+      throw error;
+    }
   };
 
   const result = await connect();
+
   const run = (async () => {
-    for await (const _ of result.stream) {
-      void _;
-      if (signal.aborted) {
-        break;
+    try {
+      for await (const _ of result.stream) {
+        void _;
+        if (signal.aborted) {
+          break;
+        }
+      }
+    } catch (error: unknown) {
+      const cause = (error as { cause?: { code?: string } } | null)?.cause;
+
+      // Attempt reconnect on socket errors
+      if (!signal.aborted) {
+        if (cause?.code === 'UND_ERR_SOCKET' || cause?.code === 'ECONNRESET') {
+          console.warn('[SSE] Socket error detected, attempting reconnect...');
+
+          if (reconnectAttempts < MAX_RECONNECTS) {
+            reconnectAttempts++;
+            const delay = BASE_RECONNECT_DELAY * Math.pow(2, reconnectAttempts - 1);
+            await sleep(delay);
+
+            // Attempt to reconnect
+            try {
+              const newResult = await connect();
+              for await (const _ of newResult.stream) {
+                void _;
+                if (signal.aborted) break;
+              }
+              return; // Successfully reconnected
+            } catch (reconnectError) {
+              console.error('[SSE] Reconnect failed', reconnectError);
+            }
+          }
+        }
+
+        // Re-throw if we couldn't recover
+        throw error;
       }
     }
   })();

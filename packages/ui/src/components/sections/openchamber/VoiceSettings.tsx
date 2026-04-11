@@ -54,36 +54,34 @@ export const VoiceSettings: React.FC = () => {
         language,
         setLanguage,
     } = useBrowserVoice();
-    const {
-        voiceProvider,
-        setVoiceProvider,
-        speechRate,
-        setSpeechRate,
-        speechPitch,
-        setSpeechPitch,
-        speechVolume,
-        setSpeechVolume,
-        sayVoice,
-        setSayVoice,
-        browserVoice,
-        setBrowserVoice,
-        openaiVoice,
-        setOpenaiVoice,
-        openaiApiKey,
-        setOpenaiApiKey,
-        showMessageTTSButtons,
-        setShowMessageTTSButtons,
-        voiceModeEnabled,
-        setVoiceModeEnabled,
-        summarizeMessageTTS,
-        setSummarizeMessageTTS,
-        summarizeVoiceConversation,
-        setSummarizeVoiceConversation,
-        summarizeCharacterThreshold,
-        setSummarizeCharacterThreshold,
-        summarizeMaxLength,
-        setSummarizeMaxLength,
-    } = useConfigStore();
+    const voiceProvider = useConfigStore((state) => state.voiceProvider);
+    const setVoiceProvider = useConfigStore((state) => state.setVoiceProvider);
+    const speechRate = useConfigStore((state) => state.speechRate);
+    const setSpeechRate = useConfigStore((state) => state.setSpeechRate);
+    const speechPitch = useConfigStore((state) => state.speechPitch);
+    const setSpeechPitch = useConfigStore((state) => state.setSpeechPitch);
+    const speechVolume = useConfigStore((state) => state.speechVolume);
+    const setSpeechVolume = useConfigStore((state) => state.setSpeechVolume);
+    const sayVoice = useConfigStore((state) => state.sayVoice);
+    const setSayVoice = useConfigStore((state) => state.setSayVoice);
+    const browserVoice = useConfigStore((state) => state.browserVoice);
+    const setBrowserVoice = useConfigStore((state) => state.setBrowserVoice);
+    const openaiVoice = useConfigStore((state) => state.openaiVoice);
+    const setOpenaiVoice = useConfigStore((state) => state.setOpenaiVoice);
+    const openaiApiKey = useConfigStore((state) => state.openaiApiKey);
+    const setOpenaiApiKey = useConfigStore((state) => state.setOpenaiApiKey);
+    const showMessageTTSButtons = useConfigStore((state) => state.showMessageTTSButtons);
+    const setShowMessageTTSButtons = useConfigStore((state) => state.setShowMessageTTSButtons);
+    const voiceModeEnabled = useConfigStore((state) => state.voiceModeEnabled);
+    const setVoiceModeEnabled = useConfigStore((state) => state.setVoiceModeEnabled);
+    const summarizeMessageTTS = useConfigStore((state) => state.summarizeMessageTTS);
+    const setSummarizeMessageTTS = useConfigStore((state) => state.setSummarizeMessageTTS);
+    const summarizeVoiceConversation = useConfigStore((state) => state.summarizeVoiceConversation);
+    const setSummarizeVoiceConversation = useConfigStore((state) => state.setSummarizeVoiceConversation);
+    const summarizeCharacterThreshold = useConfigStore((state) => state.summarizeCharacterThreshold);
+    const setSummarizeCharacterThreshold = useConfigStore((state) => state.setSummarizeCharacterThreshold);
+    const summarizeMaxLength = useConfigStore((state) => state.summarizeMaxLength);
+    const setSummarizeMaxLength = useConfigStore((state) => state.setSummarizeMaxLength);
 
     const [isSayAvailable, setIsSayAvailable] = useState(false);
     const [sayVoices, setSayVoices] = useState<Array<{ name: string; locale: string }>>([]);

@@ -1,4 +1,5 @@
 import React from "react";
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import {
   RiArrowDownSLine,
   RiArrowUpDoubleLine,
@@ -9,8 +10,13 @@ import {
   RiTimeLine,
 } from "@remixicon/react";
 import { cn } from "@/lib/utils";
-import { useTodoStore, type TodoItem, type TodoPriority, type TodoStatus } from "@/stores/useTodoStore";
-import { useSessionStore } from "@/stores/useSessionStore";
+import { useDirectorySync } from "@/sync/sync-context";
+import type { Todo } from "@opencode-ai/sdk/v2/client";
+
+// Compat aliases for old TodoItem shape
+type TodoItem = Todo & { id?: string };
+type TodoStatus = string;
+type TodoPriority = string;
 import { useUIStore } from "@/stores/useUIStore";
 import { WorkingPlaceholder } from "./message/parts/WorkingPlaceholder";
 import { isVSCodeRuntime } from "@/lib/desktop";
@@ -146,20 +152,14 @@ export const StatusRow: React.FC<StatusRowProps> = ({
   agentName,
 }) => {
   const [isExpanded, setIsExpanded] = React.useState(false);
-  const currentSessionId = useSessionStore((state) => state.currentSessionId);
-  const todos = useTodoStore((state) =>
-    currentSessionId ? state.sessionTodos.get(currentSessionId) ?? EMPTY_TODOS : EMPTY_TODOS
+  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const todosRecord = useDirectorySync((state) => state.todo);
+  const todos: TodoItem[] = React.useMemo(
+    () => (currentSessionId ? todosRecord[currentSessionId] ?? EMPTY_TODOS : EMPTY_TODOS),
+    [todosRecord, currentSessionId],
   );
-  const loadTodos = useTodoStore((state) => state.loadTodos);
-  const { isMobile } = useUIStore();
+  const isMobile = useUIStore((state) => state.isMobile);
   const isCompact = isMobile || isVSCodeRuntime();
-
-  // Load todos when session changes
-  React.useEffect(() => {
-    if (currentSessionId) {
-      void loadTodos(currentSessionId);
-    }
-  }, [currentSessionId, loadTodos]);
 
   // Filter out cancelled todos for display and keep original order.
   // This prevents items from jumping around when status changes.
@@ -313,8 +313,8 @@ export const StatusRow: React.FC<StatusRowProps> = ({
 
               {/* Todo list */}
               <div className="px-3 py-2 max-h-[200px] overflow-y-auto divide-y divide-border">
-                {visibleTodos.map((todo) => (
-                  <TodoItemRow key={todo.id} todo={todo} />
+                {visibleTodos.map((todo, index) => (
+                  <TodoItemRow key={todo.id ?? `todo-${index}`} todo={todo} />
                 ))}
               </div>
             </div>

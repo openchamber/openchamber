@@ -11,11 +11,9 @@ import { useUIStore } from '@/stores/useUIStore';
 import { copyTextToClipboard } from '@/lib/clipboard';
 
 export const OpenCodeStatusDialog: React.FC = () => {
-  const {
-    isOpenCodeStatusDialogOpen,
-    setOpenCodeStatusDialogOpen,
-    openCodeStatusText,
-  } = useUIStore();
+  const isOpenCodeStatusDialogOpen = useUIStore((state) => state.isOpenCodeStatusDialogOpen);
+  const setOpenCodeStatusDialogOpen = useUIStore((state) => state.setOpenCodeStatusDialogOpen);
+  const openCodeStatusText = useUIStore((state) => state.openCodeStatusText);
 
   const handleCopy = React.useCallback(async () => {
     if (!openCodeStatusText) {

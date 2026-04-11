@@ -21,13 +21,15 @@ import {
 import { cn } from '@/lib/utils';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { useSessionStore } from '@/stores/useSessionStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSelectionStore } from '@/sync/selection-store';
+import * as sessionActions from '@/sync/session-actions';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { useMessageStore } from '@/stores/messageStore';
 import { useContextStore } from '@/stores/contextStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { opencodeClient } from '@/lib/opencode/client';
+import { renderMagicPrompt } from '@/lib/magicPrompts';
 import { createWorktreeSessionForNewBranch } from '@/lib/worktreeSessionCreator';
 import { generateBranchSlug } from '@/lib/git/branchNameGenerator';
 import type { GitHubIssue, GitHubIssueComment, GitHubIssuesListResult, GitHubIssueSummary } from '@/lib/api/types';
@@ -377,7 +379,7 @@ export function GitHubIssuePickerDialog({
           return created.id;
         }
 
-        const session = await useSessionStore.getState().createSession(sessionTitle, projectDirectory, null);
+        const session = await sessionActions.createSession(sessionTitle, projectDirectory, null);
         if (!session?.id) {
           throw new Error('Failed to create session');
         }
@@ -385,10 +387,10 @@ export function GitHubIssuePickerDialog({
       })();
 
       // Ensure worktree-based sessions also get the issue title.
-      void useSessionStore.getState().updateSessionTitle(sessionId, sessionTitle).catch(() => undefined);
+      void sessionActions.updateSessionTitle(sessionId, sessionTitle).catch(() => undefined);
 
       try {
-        useSessionStore.getState().initializeNewOpenChamberSession(sessionId, useConfigStore.getState().agents);
+        useSessionUIStore.getState().initializeNewOpenChamberSession(sessionId, useConfigStore.getState().agents);
       } catch {
         // ignore
       }
@@ -397,7 +399,7 @@ export function GitHubIssuePickerDialog({
       onOpenChange(false);
 
       const configState = useConfigStore.getState();
-      const lastUsedProvider = useMessageStore.getState().lastUsedProvider;
+      const lastUsedProvider = useSelectionStore.getState().lastUsedProvider;
 
       const defaultModel = resolveDefaultModelSelection();
       const providerID = defaultModel?.providerID || configState.currentProviderId || lastUsedProvider?.providerID;
@@ -449,42 +451,10 @@ export function GitHubIssuePickerDialog({
         }
       }
 
-      const visiblePromptText = 'Review this issue using the provided issue context: title, body, labels, assignees, comments, metadata.';
-      const instructionsText = `Review this issue using the provided issue context.
-
-Process:
-- First classify the issue type (bug / feature request / question/support / refactor / ops) and state it as: Type: <one label>.
-- Gather any needed repository context (code, config, docs) to validate assumptions.
-- After gathering, if anything is still unclear or cannot be verified, do not speculate—state what’s missing and ask targeted questions.
-
-Output rules:
-- Compact output; pick ONE template below and omit the others.
-- No emojis. No code snippets. No fenced blocks.
-- Short inline code identifiers allowed.
-- Reference evidence with file paths and line ranges when applicable; if exact lines aren’t available, cite the file and say “approx” + why.
-- Keep the entire response under ~300 words.
-
-Templates (choose one):
-Bug:
-- Summary (1-2 sentences)
-- Likely cause (max 2)
-- Repro/diagnostics needed (max 3)
-- Fix approach (max 4 steps)
-- Verification (max 3)
-
-Feature:
-- Summary (1-2 sentences)
-- Requirements (max 4)
-- Unknowns/questions (max 4)
-- Proposed plan (max 5 steps)
-- Verification (max 3)
-
-Question/Support:
-- Summary (1-2 sentences)
-- Answer/guidance (max 6 lines)
-- Missing info (max 4)
-
-Do not implement changes until I confirm; end with: “Next actions: <1 sentence>”.`;
+      const visiblePromptText = await renderMagicPrompt('github.issue.review.visible', {
+        issue_number: String(issue.number),
+      });
+      const instructionsText = await renderMagicPrompt('github.issue.review.instructions');
       const contextText = buildIssueContextText({ repo: issueRes.repo, issue, comments });
 
       void opencodeClient.sendMessage({

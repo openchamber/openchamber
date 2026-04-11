@@ -28,6 +28,7 @@ local-dev*
 *.sw?
 .opencode/plans/*
 .hive
+docs/personal/*
 
 # Build outputs
 build/

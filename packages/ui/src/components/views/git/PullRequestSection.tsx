@@ -45,14 +45,15 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
 import { generatePullRequestDescription } from '@/lib/gitApi';
+import { renderMagicPrompt } from '@/lib/magicPrompts';
 import { openExternalUrl } from '@/lib/url';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useDeviceInfo } from '@/lib/device';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { useUIStore } from '@/stores/useUIStore';
-import { useMessageStore } from '@/stores/messageStore';
-import { useSessionStore } from '@/stores/useSessionStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSelectionStore } from '@/sync/selection-store';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { getGitHubPrStatusKey, useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
@@ -284,7 +285,7 @@ export const PullRequestSection: React.FC<{
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const setActiveMainTab = useUIStore((state) => state.setActiveMainTab);
-  const currentSessionId = useSessionStore((state) => state.currentSessionId);
+  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const { isMobile, hasTouchInput } = useDeviceInfo();
 
   const openGitHubSettings = React.useCallback(() => {
@@ -633,7 +634,7 @@ export const PullRequestSection: React.FC<{
     }
 
     const { currentProviderId, currentModelId, currentAgentName, currentVariant } = useConfigStore.getState();
-    const lastUsedProvider = useMessageStore.getState().lastUsedProvider;
+    const lastUsedProvider = useSelectionStore.getState().lastUsedProvider;
     const providerID = currentProviderId || lastUsedProvider?.providerID;
     const modelID = currentModelId || lastUsedProvider?.modelID;
     if (!providerID || !modelID) {
@@ -656,14 +657,13 @@ export const PullRequestSection: React.FC<{
     instructionsText: string,
     payloadText: string,
   ) => {
-    void useMessageStore.getState().sendMessage(
+    void useSessionUIStore.getState().sendMessage(
       visibleText,
       target.providerID,
       target.modelID,
       target.currentAgentName ?? undefined,
-      target.sessionId,
       undefined,
-      null,
+      undefined,
       [
         { text: instructionsText, synthetic: true },
         { text: payloadText, synthetic: true },
@@ -832,13 +832,8 @@ export const PullRequestSection: React.FC<{
         return;
       }
 
-      const visibleText = 'Review these PR failed checks and propose likely fixes. Do not implement until I confirm.';
-      const instructionsText = `Use the attached checks payload.
-- Summarize what is failing.
-- Prioritize check annotations/errors over generic status text.
-- Identify likely root cause(s).
-- Propose a minimal fix plan and verification steps.
-- No speculation: ask for missing info if needed.`;
+      const visibleText = await renderMagicPrompt('github.pr.checks.review.visible');
+      const instructionsText = await renderMagicPrompt('github.pr.checks.review.instructions');
       const failedAnnotations = failed.flatMap((run) => {
         const annotations = Array.isArray(run.annotations) ? run.annotations : [];
         return annotations.map((annotation) => ({
@@ -889,12 +884,8 @@ export const PullRequestSection: React.FC<{
         return;
       }
 
-      const visibleText = 'Review these PR comments and propose the required changes and next actions. Do not implement until I confirm.';
-      const instructionsText = `Use the attached comments payload.
-- Identify required vs optional changes.
-- Call out intent/implementation mismatch if present.
-- Propose a minimal plan and verification steps.
-- No speculation: ask for missing info if needed.`;
+      const visibleText = await renderMagicPrompt('github.pr.comments.review.visible');
+      const instructionsText = await renderMagicPrompt('github.pr.comments.review.instructions');
       const payloadText = `GitHub PR comments (JSON)\n${JSON.stringify({
         repo: context.repo ?? null,
         pr: context.pr ?? null,
@@ -909,7 +900,7 @@ export const PullRequestSection: React.FC<{
     }
   }, [directory, dispatchSyntheticPrompt, github, pr, resolveChatDispatchTarget, setActiveMainTab]);
 
-  const sendSingleCommentToChat = React.useCallback((comment: TimelineCommentItem) => {
+  const sendSingleCommentToChat = React.useCallback(async (comment: TimelineCommentItem) => {
     setCommentsDialogOpen(false);
     setActiveMainTab('chat');
 
@@ -918,12 +909,8 @@ export const PullRequestSection: React.FC<{
       return;
     }
 
-    const visibleText = 'Address this comment from PR and propose required changes. Do not implement until I confirm.';
-    const instructionsText = `Use the attached single-comment payload.
-- Explain what the reviewer is asking for.
-- Identify exact code areas likely impacted.
-- Propose a minimal implementation plan and verification steps.
-- Call out ambiguity and ask focused follow-up questions if needed.`;
+    const visibleText = await renderMagicPrompt('github.pr.comment.single.visible');
+    const instructionsText = await renderMagicPrompt('github.pr.comment.single.instructions');
     const payloadText = `GitHub PR comment (JSON)\n${JSON.stringify({
       repo: commentsDetails?.repo ?? null,
       pr: commentsDetails?.pr ?? pr ?? null,
@@ -1948,7 +1935,9 @@ export const PullRequestSection: React.FC<{
                                       variant="ghost"
                                       size="sm"
                                       className="h-6 px-0 has-[>svg]:px-0 sm:px-2 sm:has-[>svg]:px-2.5 text-[var(--status-success)] hover:bg-[var(--status-success-background)] hover:text-[var(--status-success)] justify-start"
-                                      onClick={() => sendSingleCommentToChat(comment)}
+                                      onClick={() => {
+                                        void sendSingleCommentToChat(comment);
+                                      }}
                                       aria-label="Send this comment to agent"
                                     >
                                       <RiAiGenerate2 className="size-3.5" />

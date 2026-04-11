@@ -499,6 +499,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      DISCORD_UPDATE_ROLE_ID: ${{ secrets.DISCORD_UPDATE_ROLE_ID }}
     steps:
       - name: Publish release
         uses: softprops/action-gh-release@v2
@@ -514,11 +515,14 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.create-release.outputs.version }}
           REPOSITORY: ${{ github.repository }}
+          UPDATE_ROLE_ID: ${{ env.DISCORD_UPDATE_ROLE_ID }}
         run: |
           node - <<'NODE'
           (async () => {
             const tag = `v${process.env.VERSION}`;
             const repo = process.env.REPOSITORY;
+            const rawRoleId = (process.env.UPDATE_ROLE_ID || '').trim();
+            const updateRoleId = /^\d+$/.test(rawRoleId) ? rawRoleId : '';
 
             const releaseRes = await fetch(`https://api.github.com/repos/${repo}/releases/tags/${tag}`, {
               headers: {
@@ -534,9 +538,18 @@ jobs:
 
             const release = await releaseRes.json();
             const description = (release.body || `OpenChamber ${tag} released.`).slice(0, 4096);
+            const mention = updateRoleId ? `<@&${updateRoleId}>` : '';
 
             const payload = {
               username: 'OpenChamber Releases',
+              ...(mention ? { content: mention } : {}),
+              ...(updateRoleId
+                ? {
+                    allowed_mentions: {
+                      roles: [updateRoleId],
+                    },
+                  }
+                : {}),
               embeds: [
                 {
                   title: release.name || `OpenChamber ${tag}`,

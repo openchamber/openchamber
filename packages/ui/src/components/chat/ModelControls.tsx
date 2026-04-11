@@ -47,7 +47,10 @@ import { getEditModeColors } from '@/lib/permissions/editModeColors';
 import { cn, fuzzyMatch } from '@/lib/utils';
 import { useContextStore } from '@/stores/contextStore';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { useSessionStore } from '@/stores/useSessionStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSelectionStore } from '@/sync/selection-store';
+import { useDirectorySync, useSessionMessages } from '@/sync/sync-context';
+import { useSync } from '@/sync/use-sync';
 import { useUIStore } from '@/stores/useUIStore';
 import { useModelLists } from '@/hooks/useModelLists';
 import { useIsTextTruncated } from '@/hooks/useIsTextTruncated';
@@ -290,44 +293,43 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     onMobilePanelSelection,
     onAgentPanelSelection,
 }) => {
-    const {
-        providers,
-        currentProviderId,
-        currentModelId,
-        currentVariant,
-        currentAgentName,
-        settingsDefaultVariant,
-        settingsDefaultAgent,
-        setProvider,
-        setSelectedProvider,
-        setModel,
-        setCurrentVariant,
-        getCurrentModelVariants,
-        setAgent,
-        getCurrentProvider,
-        getModelMetadata,
-        getCurrentAgent,
-        getVisibleAgents,
-    } = useConfigStore();
+    const providers = useConfigStore((state) => state.providers);
+    const currentProviderId = useConfigStore((state) => state.currentProviderId);
+    const currentModelId = useConfigStore((state) => state.currentModelId);
+    const currentVariant = useConfigStore((state) => state.currentVariant);
+    const currentAgentName = useConfigStore((state) => state.currentAgentName);
+    const settingsDefaultVariant = useConfigStore((state) => state.settingsDefaultVariant);
+    const settingsDefaultAgent = useConfigStore((state) => state.settingsDefaultAgent);
+    const setProvider = useConfigStore((state) => state.setProvider);
+    const setSelectedProvider = useConfigStore((state) => state.setSelectedProvider);
+    const setModel = useConfigStore((state) => state.setModel);
+    const setCurrentVariant = useConfigStore((state) => state.setCurrentVariant);
+    const getCurrentModelVariants = useConfigStore((state) => state.getCurrentModelVariants);
+    const setAgent = useConfigStore((state) => state.setAgent);
+    const getCurrentProvider = useConfigStore((state) => state.getCurrentProvider);
+    const getModelMetadata = useConfigStore((state) => state.getModelMetadata);
+    const getCurrentAgent = useConfigStore((state) => state.getCurrentAgent);
+    const getVisibleAgents = useConfigStore((state) => state.getVisibleAgents);
 
     // Use visible agents (excludes hidden internal agents)
     const agents = getVisibleAgents();
     const primaryAgents = React.useMemo(() => agents.filter((agent) => agent.mode === 'primary'), [agents]);
 
-    const {
-        currentSessionId,
-        messages,
-        saveSessionAgentSelection,
-        saveAgentModelForSession,
-        getAgentModelForSession,
-        saveAgentModelVariantForSession,
-        getAgentModelVariantForSession,
-        analyzeAndSaveExternalSessionChoices,
-    } = useSessionStore();
+    const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
+    const getDirectoryForSession = useSessionUIStore((s) => s.getDirectoryForSession);
+    const sync = useSync();
+
+    const getSessionModelSelection = useSelectionStore((state) => state.getSessionModelSelection);
+    const saveSessionModelSelection = useSelectionStore((state) => state.saveSessionModelSelection);
+    const saveSessionAgentSelection = useSelectionStore((state) => state.saveSessionAgentSelection);
+    const saveAgentModelForSession = useSelectionStore((state) => state.saveAgentModelForSession);
+    const getAgentModelForSession = useSelectionStore((state) => state.getAgentModelForSession);
+    const saveAgentModelVariantForSession = useSelectionStore((state) => state.saveAgentModelVariantForSession);
+    const getAgentModelVariantForSession = useSelectionStore((state) => state.getAgentModelVariantForSession);
 
     const contextHydrated = useContextStore((state) => state.hasHydrated);
 
-    const sessionSavedAgentName = useContextStore((state) =>
+    const sessionSavedAgentName = useSelectionStore((state) =>
         currentSessionId ? state.sessionAgentSelections.get(currentSessionId) ?? null : null
     );
 
@@ -349,19 +351,17 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         ? (sessionSavedAgentName || stickySessionAgentName || currentAgentName)
         : currentAgentName;
 
-    const {
-        toggleFavoriteModel,
-        isFavoriteModel,
-        collapsedModelProviders,
-        toggleModelProviderCollapsed,
-        addRecentModel,
-        addRecentAgent,
-        addRecentEffort,
-        isModelSelectorOpen,
-        setModelSelectorOpen,
-        setSettingsDialogOpen,
-        setSettingsPage,
-    } = useUIStore();
+    const toggleFavoriteModel = useUIStore((state) => state.toggleFavoriteModel);
+    const isFavoriteModel = useUIStore((state) => state.isFavoriteModel);
+    const collapsedModelProviders = useUIStore((state) => state.collapsedModelProviders);
+    const toggleModelProviderCollapsed = useUIStore((state) => state.toggleModelProviderCollapsed);
+    const addRecentModel = useUIStore((state) => state.addRecentModel);
+    const addRecentAgent = useUIStore((state) => state.addRecentAgent);
+    const addRecentEffort = useUIStore((state) => state.addRecentEffort);
+    const isModelSelectorOpen = useUIStore((state) => state.isModelSelectorOpen);
+    const setModelSelectorOpen = useUIStore((state) => state.setModelSelectorOpen);
+    const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
+    const setSettingsPage = useUIStore((state) => state.setSettingsPage);
     const hiddenModels = useUIStore((state) => state.hiddenModels);
     const collapsedProviderSet = React.useMemo(
         () => new Set(collapsedModelProviders.map((providerId) => providerId.trim()).filter(Boolean)),
@@ -407,6 +407,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const [desktopModelQuery, setDesktopModelQuery] = React.useState('');
     const [modelSelectedIndex, setModelSelectedIndex] = React.useState(0);
     const modelItemRefs = React.useRef<(HTMLDivElement | null)[]>([]);
+    const [pendingThinkingVariants, setPendingThinkingVariants] = React.useState<Map<string, string | undefined>>(new Map());
+    const [adjustedThinkingModels, setAdjustedThinkingModels] = React.useState<Set<string>>(new Set());
 
     React.useEffect(() => {
         if (activeMobilePanel === 'model') {
@@ -435,6 +437,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         if (!isModelSelectorOpen) {
             setDesktopModelQuery('');
             setModelSelectedIndex(0);
+            setPendingThinkingVariants(new Map());
+            setAdjustedThinkingModels(new Set());
 
             // Restore focus to chat input when model selector closes
             if (wasOpen && !isCompact) {
@@ -563,31 +567,45 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     ];
 
     const prevAgentNameRef = React.useRef<string | undefined>(undefined);
+    const latestLoadedUserChoiceRestoreRef = React.useRef<string | null>(null);
 
-    const currentSessionMessageCount = currentSessionId ? (messages.get(currentSessionId)?.length ?? -1) : -1;
+    const currentSessionDirectory = currentSessionId ? getDirectoryForSession(currentSessionId) : undefined;
+    const hasCurrentSessionMessagesEntry = useDirectorySync(
+        React.useCallback(
+            (state) => (currentSessionId ? state.message[currentSessionId] !== undefined : false),
+            [currentSessionId],
+        ),
+        currentSessionDirectory ?? undefined,
+    );
+    const currentSessionMessagesFromSync = useSessionMessages(currentSessionId ?? '', currentSessionDirectory ?? undefined);
+    const latestLoadedUserChoice = React.useMemo(() => {
+        for (let i = currentSessionMessagesFromSync.length - 1; i >= 0; i -= 1) {
+            const message = currentSessionMessagesFromSync[i] as typeof currentSessionMessagesFromSync[number] & {
+                model?: { providerID?: string; modelID?: string };
+                variant?: string;
+                mode?: string;
+            };
+            if (message.role !== 'user') {
+                continue;
+            }
 
-    const sessionInitializationRef = React.useRef<{
-        sessionId: string;
-        resolved: boolean;
-        inFlight: boolean;
-    } | null>(null);
+            const providerID = typeof message.model?.providerID === 'string' && message.model.providerID.trim().length > 0
+                ? message.model.providerID
+                : undefined;
+            const modelID = typeof message.model?.modelID === 'string' && message.model.modelID.trim().length > 0
+                ? message.model.modelID
+                : undefined;
+            const agent = typeof message.agent === 'string' && message.agent.trim().length > 0
+                ? message.agent
+                : (typeof message.mode === 'string' && message.mode.trim().length > 0 ? message.mode : undefined);
+            const variant = typeof message.variant === 'string' && message.variant.trim().length > 0
+                ? message.variant
+                : undefined;
 
-    // If we have an explicit per-session agent selection (eg. server-injected mode switch),
-    // treat the session as resolved and don't run inference/fallback that could cause flicker.
-    React.useEffect(() => {
-        if (!currentSessionId) {
-            return;
+            return { id: message.id, agent, providerID, modelID, variant };
         }
-        const refState = sessionInitializationRef.current;
-        if (!refState || refState.sessionId !== currentSessionId) {
-            return;
-        }
-
-        if (sessionSavedAgentName && agents.some((agent) => agent.name === sessionSavedAgentName)) {
-            refState.resolved = true;
-            refState.inFlight = false;
-        }
-    }, [agents, currentSessionId, sessionSavedAgentName]);
+        return null;
+    }, [currentSessionMessagesFromSync]);
 
     const tryApplyModelSelection = React.useCallback(
         (providerId: string, modelId: string, agentName?: string): ModelApplyResult => {
@@ -606,21 +624,93 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 return 'model-missing';
             }
 
+            const providerMatches = currentProviderId === providerId;
+            const modelMatches = currentModelId === modelId;
+            if (providerMatches && modelMatches) {
+                return 'applied';
+            }
+
             setProvider(providerId);
             setModel(modelId);
 
-            if (currentSessionId && agentName) {
-                saveAgentModelForSession(currentSessionId, agentName, providerId, modelId);
+            if (currentSessionId) {
+                saveSessionModelSelection(currentSessionId, providerId, modelId);
+                if (agentName) {
+                    saveAgentModelForSession(currentSessionId, agentName, providerId, modelId);
+                }
             }
 
             return 'applied';
         },
-        [providers, setProvider, setModel, currentSessionId, saveAgentModelForSession],
+        [providers, currentProviderId, currentModelId, setProvider, setModel, currentSessionId, saveAgentModelForSession, saveSessionModelSelection],
     );
 
     React.useEffect(() => {
         if (!currentSessionId) {
-            sessionInitializationRef.current = null;
+            latestLoadedUserChoiceRestoreRef.current = null;
+            return;
+        }
+
+        if (!contextHydrated || providers.length === 0 || !hasCurrentSessionMessagesEntry || !latestLoadedUserChoice?.providerID || !latestLoadedUserChoice.modelID) {
+            return;
+        }
+
+        const restoreKey = [
+            currentSessionId,
+            latestLoadedUserChoice.id,
+            latestLoadedUserChoice.agent ?? '',
+            latestLoadedUserChoice.providerID,
+            latestLoadedUserChoice.modelID,
+            latestLoadedUserChoice.variant ?? '',
+        ].join('|');
+
+        if (latestLoadedUserChoiceRestoreRef.current === restoreKey) {
+            return;
+        }
+
+        if (latestLoadedUserChoice.agent && currentAgentName !== latestLoadedUserChoice.agent) {
+            setAgent(latestLoadedUserChoice.agent);
+        }
+
+        const applyResult = tryApplyModelSelection(
+            latestLoadedUserChoice.providerID,
+            latestLoadedUserChoice.modelID,
+            latestLoadedUserChoice.agent || currentAgentName || undefined,
+        );
+        if (applyResult !== 'applied') {
+            return;
+        }
+
+        if (latestLoadedUserChoice.agent) {
+            saveSessionAgentSelection(currentSessionId, latestLoadedUserChoice.agent);
+            saveAgentModelVariantForSession(
+                currentSessionId,
+                latestLoadedUserChoice.agent,
+                latestLoadedUserChoice.providerID,
+                latestLoadedUserChoice.modelID,
+                latestLoadedUserChoice.variant,
+            );
+        }
+        saveSessionModelSelection(currentSessionId, latestLoadedUserChoice.providerID, latestLoadedUserChoice.modelID);
+        latestLoadedUserChoiceRestoreRef.current = restoreKey;
+
+    }, [
+        currentSessionId,
+        currentAgentName,
+        contextHydrated,
+        providers,
+        hasCurrentSessionMessagesEntry,
+        latestLoadedUserChoice,
+        setAgent,
+        tryApplyModelSelection,
+        saveSessionAgentSelection,
+        saveAgentModelVariantForSession,
+        saveSessionModelSelection,
+    ]);
+
+    React.useEffect(() => {
+        if (!currentSessionId) {
+            latestLoadedUserChoiceRestoreRef.current = null;
             return;
         }
 
@@ -628,31 +718,10 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             return;
         }
 
-        if (!sessionInitializationRef.current || sessionInitializationRef.current.sessionId !== currentSessionId) {
-            sessionInitializationRef.current = { sessionId: currentSessionId, resolved: false, inFlight: false };
-        }
-
-        const state = sessionInitializationRef.current;
-        if (!state || state.resolved || state.inFlight) {
-            return;
-        }
-
-        let isCancelled = false;
-
-        const finalize = () => {
-            if (isCancelled) {
-                return;
-            }
-            const refState = sessionInitializationRef.current;
-            if (refState && refState.sessionId === currentSessionId) {
-                refState.resolved = true;
-                refState.inFlight = false;
-            }
-        };
-
         const applySavedSelections = (): 'resolved' | 'waiting' | 'continue' => {
+            const savedSessionModel = getSessionModelSelection(currentSessionId);
             const savedAgentName = currentSessionId
-                ? (useContextStore.getState().getSessionAgentSelection(currentSessionId) || stickySessionAgentRef.current)
+                ? useSelectionStore.getState().getSessionAgentSelection(currentSessionId)
                 : null;
             if (savedAgentName) {
                 if (currentAgentName !== savedAgentName) {
@@ -668,8 +737,16 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                     if (result === 'provider-missing') {
                         return 'waiting';
                     }
-                } else {
+                }
+            }
+
+            if (savedSessionModel) {
+                const result = tryApplyModelSelection(savedSessionModel.providerId, savedSessionModel.modelId, savedAgentName || currentAgentName || undefined);
+                if (result === 'applied') {
                     return 'resolved';
+                }
+                if (result === 'provider-missing') {
+                    return 'waiting';
                 }
             }
 
@@ -683,7 +760,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                     setAgent(agent.name);
                 }
 
-                const existingSelection = useContextStore.getState().getSessionAgentSelection(currentSessionId) || stickySessionAgentRef.current;
+                const existingSelection = useSelectionStore.getState().getSessionAgentSelection(currentSessionId) || stickySessionAgentRef.current;
                 if (!existingSelection) {
                     saveSessionAgentSelection(currentSessionId, agent.name);
                 }
@@ -705,14 +782,14 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             }
 
             const existingSelection = currentSessionId
-                ? (useContextStore.getState().getSessionAgentSelection(currentSessionId) || stickySessionAgentRef.current)
+                ? (useSelectionStore.getState().getSessionAgentSelection(currentSessionId) || stickySessionAgentRef.current)
                 : null;
 
             // If we already have a valid agent selected (often from server-injected mode switch),
             // don't override it with a fallback.
             const preferred =
                 (currentSessionId
-                    ? (useContextStore.getState().getSessionAgentSelection(currentSessionId) || stickySessionAgentRef.current)
+                    ? (useSelectionStore.getState().getSessionAgentSelection(currentSessionId) || stickySessionAgentRef.current)
                     : null) ||
                 currentAgentName;
             if (preferred && agents.some((agent) => agent.name === preferred)) {
@@ -740,174 +817,38 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             }
         };
 
-        const resolveSessionPreferences = async () => {
-            try {
-                const savedOutcome = applySavedSelections();
-                if (savedOutcome === 'resolved') {
-                    finalize();
-                    return;
-                }
-                if (savedOutcome === 'waiting') {
-                    return;
-                }
+        const savedOutcome = applySavedSelections();
+        if (savedOutcome === 'resolved' || savedOutcome === 'waiting') {
+            return;
+        }
 
-                if (currentSessionMessageCount === -1) {
-                    return;
-                }
-
-                if (currentSessionMessageCount > 0) {
-                    state.inFlight = true;
-                    try {
-                        const discoveredChoices = await analyzeAndSaveExternalSessionChoices(currentSessionId, agents);
-                        if (isCancelled) {
-                            return;
-                        }
-
-                        if (discoveredChoices.size > 0) {
-                            let latestAgent: string | null = null;
-                            let latestTimestamp = -Infinity;
-
-                            for (const [agentName, choice] of discoveredChoices) {
-                                if (choice.timestamp > latestTimestamp) {
-                                    latestTimestamp = choice.timestamp;
-                                    latestAgent = agentName;
-                                }
-                            }
-
-                            if (latestAgent) {
-                                // If server/user already selected an agent for this session, don't override
-                                // with heuristic inference mid-stream.
-                                const latestSaved = useContextStore.getState().getSessionAgentSelection(currentSessionId) || stickySessionAgentRef.current;
-                                if (latestSaved && latestSaved !== latestAgent) {
-                                    finalize();
-                                    return;
-                                }
-
-                                if (!latestSaved) {
-                                    saveSessionAgentSelection(currentSessionId, latestAgent);
-                                }
-                                if (currentAgentName !== latestAgent) {
-                                    setAgent(latestAgent);
-                                }
-
-                                const latestChoice = discoveredChoices.get(latestAgent);
-                                if (latestChoice) {
-                                    const applyResult = tryApplyModelSelection(
-                                        latestChoice.providerId,
-                                        latestChoice.modelId,
-                                        latestAgent,
-                                    );
-
-                                    if (applyResult === 'applied') {
-                                        finalize();
-                                        return;
-                                    }
-
-                                    if (applyResult === 'provider-missing') {
-                                        return;
-                                    }
-                                } else {
-                                    finalize();
-                                    return;
-                                }
-                            }
-                        }
-                    } catch (error) {
-                        if (!isCancelled) {
-                            console.error('[ModelControls] Error resolving session from messages:', error);
-                        }
-                    } finally {
-                        const refState = sessionInitializationRef.current;
-                        if (!isCancelled && refState && refState.sessionId === currentSessionId) {
-                            refState.inFlight = false;
-                        }
-                    }
-                }
-
-                if (isCancelled) {
-                    return;
-                }
-
-                applyFallbackAgent();
-                finalize();
-            } catch (error) {
-                if (!isCancelled) {
-                    console.error('[ModelControls] Error in session switch:', error);
-                }
+        if (!hasCurrentSessionMessagesEntry) {
+            if (!sync.isLoading(currentSessionId)) {
+                void sync.syncSession(currentSessionId);
             }
-        };
+            return;
+        }
 
-        resolveSessionPreferences();
+        if (latestLoadedUserChoice) {
+            return;
+        }
 
-        return () => {
-            isCancelled = true;
-        };
+        applyFallbackAgent();
     }, [
         currentSessionId,
-        currentSessionMessageCount,
+        hasCurrentSessionMessagesEntry,
+        latestLoadedUserChoice,
         agents,
         primaryAgents,
         currentAgentName,
+        getSessionModelSelection,
         getAgentModelForSession,
         setAgent,
         tryApplyModelSelection,
-        analyzeAndSaveExternalSessionChoices,
         saveSessionAgentSelection,
         contextHydrated,
         providers,
-        sessionSavedAgentName,
-    ]);
-
-    React.useEffect(() => {
-        if (!contextHydrated || !currentSessionId || providers.length === 0 || agents.length === 0) {
-            return;
-        }
-
-        const preferredAgent = sessionSavedAgentName || currentAgentName;
-        if (!preferredAgent) {
-            return;
-        }
-
-        const preferredSelection = getAgentModelForSession(currentSessionId, preferredAgent);
-        if (!preferredSelection) {
-            return;
-        }
-
-        const provider = providers.find(p => p.id === preferredSelection.providerId);
-        if (!provider) {
-            return;
-        }
-
-        const modelExists = Array.isArray(provider.models)
-            ? provider.models.some((m: ProviderModel) => m.id === preferredSelection.modelId)
-            : false;
-        if (!modelExists) {
-            return;
-        }
-
-        const providerMatches = currentProviderId === preferredSelection.providerId;
-        const modelMatches = currentModelId === preferredSelection.modelId;
-        if (providerMatches && modelMatches) {
-            return;
-        }
-
-        if (preferredAgent !== currentAgentName) {
-            setAgent(preferredAgent);
-        }
-
-        tryApplyModelSelection(preferredSelection.providerId, preferredSelection.modelId, preferredAgent);
-    }, [
-        contextHydrated,
-        currentSessionId,
-        currentAgentName,
-        currentProviderId,
-        currentModelId,
-        providers,
-        agents,
-        getAgentModelForSession,
-        tryApplyModelSelection,
-        setAgent,
-        sessionSavedAgentName,
+        sync,
     ]);
 
     React.useEffect(() => {
@@ -1944,12 +1885,32 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
         const showProviderLogo = keyPrefix === 'fav' || keyPrefix === 'recent';
 
-        // Build animated metadata slides for desktop
+        // Check if model supports thinking variants - variants are on the model object, not metadata
+        const modelVariants = (model as { variants?: Record<string, unknown> } | undefined)?.variants;
+        const hasThinkingVariants = modelVariants && Object.keys(modelVariants).length > 0;
+        const mapKey = `${providerID}:${modelID}`;
+        const wasAdjusted = adjustedThinkingModels.has(mapKey);
+        const pendingVariant = pendingThinkingVariants.get(mapKey);
+        const effectiveVariant = pendingVariant ?? (isSelected ? currentVariant : undefined);
+
+        // Build thinking variant display - only show for models that were adjusted with arrow keys
+        let thinkingDisplay: React.ReactNode = null;
+        if (hasThinkingVariants && wasAdjusted && (isHighlighted || isSelected)) {
+            const displayLabel = effectiveVariant
+                ? effectiveVariant.charAt(0).toUpperCase() + effectiveVariant.slice(1)
+                : 'Default';
+            thinkingDisplay = (
+                <span key="thinking" className="typography-micro text-muted-foreground whitespace-nowrap">
+                    Thinking: {displayLabel}
+                </span>
+            );
+        }
+
+        // Build animated metadata slides for desktop (price/capabilities) - only shown when not showing thinking
         const priceText = formatCompactPrice(metadata);
         const hasPrice = priceText !== null;
         const hasCapabilities = indicatorIcons.length > 0;
 
-        // Build slides array: price first, then capabilities
         const slides: React.ReactNode[] = [];
         if (hasPrice) {
             slides.push(
@@ -1976,9 +1937,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             );
         }
 
-        // Rotate metadata in interactive desktop-style pickers (web/desktop), keep VS Code static.
         const supportsRotatingMetadata = !isVSCodeRuntime;
-        const shouldAnimate = supportsRotatingMetadata && slides.length > 1 && (isHighlighted || isSelected);
+        const shouldShowThinking = hasThinkingVariants && wasAdjusted;
+        const shouldAnimate = supportsRotatingMetadata && slides.length > 1 && (isHighlighted || isSelected) && !shouldShowThinking;
         const staticSlideIndex = !supportsRotatingMetadata && hasCapabilities && hasPrice ? 1 : 0;
         const staticMetadataSlide = slides[staticSlideIndex];
 
@@ -2007,8 +1968,12 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                     ) : null}
                 </div>
                 <div className="flex items-center gap-1 flex-shrink-0">
-                    {/* Metadata slot: animated TextLoop for desktop highlighted/selected rows, static otherwise */}
-                    {slides.length > 0 && (
+                    {/* Metadata slot: thinking variant for adjusted models, otherwise price/capabilities carousel */}
+                    {shouldShowThinking && (isHighlighted || isSelected) ? (
+                        <div className="flex w-[140px] justify-end items-center">
+                            {thinkingDisplay}
+                        </div>
+                    ) : slides.length > 0 ? (
                         <div className={cn(
                             "items-center",
                             shouldAnimate ? "flex w-[140px] justify-end" : ((isHighlighted || isSelected) ? "flex" : "hidden group-hover:flex")
@@ -2024,7 +1989,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 </>
                             )}
                         </div>
-                    )}
+                    ) : null}
                     {isSelected && (
                         <RiCheckLine className="h-4 w-4 text-primary" />
                     )}
@@ -2128,6 +2093,13 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
         const totalItems = flatModelList.length;
 
+        // Check if currently highlighted model supports thinking variants
+        const highlightedItem = flatModelList[modelSelectedIndex];
+        const highlightedSupportsThinking = highlightedItem ? (() => {
+            const modelVariants = (highlightedItem.model as { variants?: Record<string, unknown> } | undefined)?.variants;
+            return modelVariants && Object.keys(modelVariants).length > 0;
+        })() : false;
+
         // Handle keyboard navigation
         const handleModelKeyDown = (e: React.KeyboardEvent) => {
             e.stopPropagation();
@@ -2148,11 +2120,55 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                     const prevIndex = (modelSelectedIndex - 1 + Math.max(1, totalItems)) % Math.max(1, totalItems);
                     modelItemRefs.current[prevIndex]?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
                 }, 0);
+            } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+                e.preventDefault();
+                const selectedItem = flatModelList[modelSelectedIndex];
+                if (!selectedItem) return;
+
+                const { providerID, modelID, model } = selectedItem;
+                const modelVariants = (model as { variants?: Record<string, unknown> } | undefined)?.variants;
+                if (!modelVariants) return;
+
+                const variantKeys = Object.keys(modelVariants);
+                if (variantKeys.length === 0) return;
+
+                const mapKey = `${providerID}:${modelID}`;
+                const currentPending = pendingThinkingVariants.get(mapKey);
+                const activeModelVariant = currentPending ?? (currentProviderId === providerID && currentModelId === modelID ? currentVariant : undefined);
+
+                const variantsWithDefault: Array<string | undefined> = [undefined, ...variantKeys];
+                const currentVariantIndex = variantsWithDefault.indexOf(activeModelVariant);
+                const safeCurrentIndex = currentVariantIndex >= 0 ? currentVariantIndex : 0;
+                const direction = e.key === 'ArrowRight' ? 1 : -1;
+                const nextVariantIndex = (safeCurrentIndex + direction + variantsWithDefault.length) % variantsWithDefault.length;
+                const nextVariant = variantsWithDefault[nextVariantIndex];
+
+                setPendingThinkingVariants((prev) => {
+                    const next = new Map(prev);
+                    next.set(mapKey, nextVariant);
+                    return next;
+                });
+                setAdjustedThinkingModels((prev) => {
+                    const next = new Set(prev);
+                    next.add(mapKey);
+                    return next;
+                });
             } else if (e.key === 'Enter') {
                 e.preventDefault();
                 const selectedItem = flatModelList[modelSelectedIndex];
                 if (selectedItem) {
-                    handleProviderAndModelChange(selectedItem.providerID, selectedItem.modelID);
+                    const { providerID, modelID } = selectedItem;
+                    const mapKey = `${providerID}:${modelID}`;
+                    const pendingVariant = pendingThinkingVariants.get(mapKey);
+                    const wasAdjusted = adjustedThinkingModels.has(mapKey);
+
+                    handleProviderAndModelChange(providerID, modelID);
+
+                    if (wasAdjusted) {
+                        setTimeout(() => {
+                            handleVariantSelect(pendingVariant);
+                        }, 0);
+                    }
                 }
             } else if (e.key === 'Escape') {
                 e.preventDefault();
@@ -2349,7 +2365,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
                             {/* Keyboard hints footer */}
                             <div className="px-3 pt-1 pb-1.5 border-t border-border/40 typography-micro text-muted-foreground">
-                                ↑↓ navigate • Enter select • Esc close
+                                ↑↓ navigate{highlightedSupportsThinking ? ' • ←→ thinking' : ''} • Enter select • Esc close
                             </div>
                         </DropdownMenuContent>
                     </DropdownMenu>

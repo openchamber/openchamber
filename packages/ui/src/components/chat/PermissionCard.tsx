@@ -2,7 +2,9 @@ import React from 'react';
 import { RiCheckLine, RiCloseLine, RiFileEditLine, RiGlobalLine, RiPencilAiLine, RiQuestionLine, RiTerminalBoxLine, RiTimeLine, RiToolsLine } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import type { PermissionRequest, PermissionResponse } from '@/types/permission';
-import { useSessionStore } from '@/stores/useSessionStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSessions } from '@/sync/sync-context';
+import * as sessionActions from '@/sync/session-actions';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { generateSyntaxTheme } from '@/lib/theme/syntaxThemeGenerator';
@@ -62,15 +64,14 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
 }) => {
   const [isResponding, setIsResponding] = React.useState(false);
   const [hasResponded, setHasResponded] = React.useState(false);
-  const { respondToPermission } = useSessionStore();
-  const isFromSubagent = useSessionStore(
-    React.useCallback((state) => {
-      const currentSessionId = state.currentSessionId;
-      if (!currentSessionId || permission.sessionID === currentSessionId) return false;
-      const sourceSession = state.sessions.find((session) => session.id === permission.sessionID);
-      return Boolean(sourceSession?.parentID && sourceSession.parentID === currentSessionId);
-    }, [permission.sessionID])
-  );
+  const respondToPermission = sessionActions.respondToPermission;;
+  const sessions = useSessions();
+  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const isFromSubagent = React.useMemo(() => {
+    if (!currentSessionId || permission.sessionID === currentSessionId) return false;
+    const sourceSession = sessions.find((session) => session.id === permission.sessionID);
+    return Boolean(sourceSession?.parentID && sourceSession.parentID === currentSessionId);
+  }, [permission.sessionID, currentSessionId, sessions]);
   const { currentTheme } = useThemeSystem();
   const syntaxTheme = React.useMemo(() => generateSyntaxTheme(currentTheme), [currentTheme]);
 

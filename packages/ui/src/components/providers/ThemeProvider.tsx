@@ -6,7 +6,10 @@ interface ThemeProviderProps {
 }
 
 export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
-  const { fontSize, applyTypography, padding, applyPadding } = useUIStore();
+  const fontSize = useUIStore((state) => state.fontSize);
+  const applyTypography = useUIStore((state) => state.applyTypography);
+  const padding = useUIStore((state) => state.padding);
+  const applyPadding = useUIStore((state) => state.applyPadding);
 
   React.useLayoutEffect(() => {
     applyTypography();

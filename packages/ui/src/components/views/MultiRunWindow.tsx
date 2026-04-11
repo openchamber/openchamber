@@ -31,7 +31,7 @@ export const MultiRunWindow: React.FC<MultiRunWindowProps> = ({
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay
-          className="fixed inset-0 z-50 bg-black/50 backdrop-blur-md"
+          className="fixed inset-0 z-50 bg-black/50 dark:bg-black/75"
         />
         <DialogPrimitive.Content
           aria-describedby={descriptionId}

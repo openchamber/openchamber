@@ -19,6 +19,15 @@ const buildMentionUrl = (name: string): string => {
     return `https://opencode.ai/docs/agents/#${encoded}`;
 };
 
+const escapeHtml = (text: string): string => {
+    return text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#x27;');
+};
+
 const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' => {
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
@@ -99,12 +108,18 @@ const UserTextPart: React.FC<UserTextPartProps> = ({ part, messageId, agentMenti
     }, [collapseZoneHeight, hasActiveSelectionInElement, isExpanded, isTruncated]);
 
     const processedMarkdownContent = React.useMemo(() => {
-        if (!agentMention?.token || !textContent.includes(agentMention.token)) {
-            return textContent;
+        let content = textContent;
+
+        // Step 1: First escape HTML to protect against XSS and ensure HTML tags display as text
+        content = escapeHtml(content);
+
+        // Step 2: Then insert agent mention links (after escaping, so <a> tags won't be escaped)
+        if (agentMention?.token && content.includes(agentMention.token)) {
+            const mentionHtml = `<a href="${buildMentionUrl(agentMention.name)}" class="text-primary hover:underline" target="_blank" rel="noopener noreferrer">${agentMention.token}</a>`;
+            content = content.replace(agentMention.token, mentionHtml);
         }
-        
-        const mentionHtml = `<a href="${buildMentionUrl(agentMention.name)}" class="text-primary hover:underline" target="_blank" rel="noopener noreferrer">${agentMention.token}</a>`;
-        return textContent.replace(agentMention.token, mentionHtml);
+
+        return content;
     }, [agentMention, textContent]);
 
     const plainTextContent = React.useMemo(() => {

@@ -16,12 +16,16 @@ import {
     RiSendPlane2Line,
 } from '@remixicon/react';
 import { BrowserVoiceButton } from '@/components/voice';
-import { useSessionStore } from '@/stores/useSessionStore';
-import { useSessionStore as useSessionManagementStore } from '@/stores/sessionStore';
+// sessionStore removed — currentSessionId comes from useSessionUIStore
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useMessageQueueStore, type QueuedMessage } from '@/stores/messageQueueStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSelectionStore } from '@/sync/selection-store';
+import { useInputStore } from '@/sync/input-store';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
+import * as sessionActions from '@/sync/session-actions';
+import { useUserMessageHistory } from '@/sync/sync-context';
 import { useInlineCommentDraftStore, type InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
 import { appendInlineComments } from '@/lib/messages/inlineComments';
 import { AttachedFilesList } from './FileAttachment';
@@ -37,11 +41,9 @@ import { StatusRow } from './StatusRow';
 import { MobileAgentButton } from './MobileAgentButton';
 import { MobileModelButton } from './MobileModelButton';
 import { MobileSessionStatusBar } from './MobileSessionStatusBar';
-import { useAssistantStatus } from '@/hooks/useAssistantStatus';
 import { useCurrentSessionActivity } from '@/hooks/useSessionActivity';
 import { toast } from '@/components/ui';
-import { useFileStore } from '@/stores/fileStore';
-import { useMessageStore } from '@/stores/messageStore';
+// useMessageStore removed — messages now come from sync system
 import { isTauriShell, isVSCodeRuntime } from '@/lib/desktop';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { StopIcon } from '@/components/icons/StopIcon';
@@ -80,6 +82,28 @@ const VS_CODE_DROP_DATA_TYPES = [
 ];
 
 const FILE_URI_PREFIX = 'file://';
+
+const encodeFilePath = (filepath: string): string => {
+    let normalized = filepath.replace(/\\/g, '/');
+    if (/^[A-Za-z]:/.test(normalized)) {
+        normalized = `/${normalized}`;
+    }
+    return normalized
+        .split('/')
+        .map((segment, index) => {
+            if (index === 1 && /^[A-Za-z]:$/.test(segment)) return segment;
+            return encodeURIComponent(segment);
+        })
+        .join('/');
+};
+
+const toServerFileUrl = (filepath: string): string => {
+    const normalized = filepath.replace(/\\/g, '/').trim();
+    if (normalized.toLowerCase().startsWith(FILE_URI_PREFIX)) {
+        return normalized;
+    }
+    return `file://${encodeFilePath(normalized)}`;
+};
 
 const isLikelyAbsolutePath = (value: string): boolean => (
     value.startsWith('/')
@@ -198,6 +222,370 @@ const getProjectIconColor = (projectColor?: string | null): string | undefined =
     return PROJECT_COLOR_MAP[projectColor] ?? undefined;
 };
 
+const MemoModelControls = React.memo(ModelControls);
+const MemoUnifiedControlsDrawer = React.memo(UnifiedControlsDrawer);
+const MemoBrowserVoiceButton = React.memo(BrowserVoiceButton);
+const MemoMobileAgentButton = React.memo(MobileAgentButton);
+const MemoMobileModelButton = React.memo(MobileModelButton);
+const MemoStatusRow = React.memo(StatusRow);
+
+type ComposerAttachmentControlsProps = {
+    isMobile: boolean;
+    isVSCode: boolean;
+    footerIconButtonClass: string;
+    iconSizeClass: string;
+    fileInputRef: React.RefObject<HTMLInputElement | null>;
+    handleLocalFileSelect: (event: React.ChangeEvent<HTMLInputElement>) => void | Promise<void>;
+    handlePickLocalFiles: () => void;
+    handleOpenCommandMenu: () => void;
+    openIssuePicker: () => void;
+    openPrPicker: () => void;
+    onOpenSettings?: () => void;
+};
+
+const ComposerAttachmentControls = React.memo(function ComposerAttachmentControls(props: ComposerAttachmentControlsProps) {
+    const {
+        isMobile,
+        isVSCode,
+        footerIconButtonClass,
+        iconSizeClass,
+        fileInputRef,
+        handleLocalFileSelect,
+        handlePickLocalFiles,
+        handleOpenCommandMenu,
+        openIssuePicker,
+        openPrPicker,
+        onOpenSettings,
+    } = props;
+
+    return (
+        <div className="flex items-center gap-x-1.5">
+            {isMobile ? (
+                <button
+                    type="button"
+                    className={cn(
+                        footerIconButtonClass,
+                        'rounded-md',
+                        'hover:bg-interactive-hover/40'
+                    )}
+                    onPointerDownCapture={(event) => {
+                        if (event.pointerType === 'touch') {
+                            event.preventDefault();
+                            event.stopPropagation();
+                        }
+                    }}
+                    onClick={handleOpenCommandMenu}
+                    title="Commands"
+                    aria-label="Commands"
+                >
+                    <RiCommandLine className={cn(iconSizeClass)} />
+                </button>
+            ) : null}
+            <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={handleLocalFileSelect}
+                accept="*/*"
+            />
+
+            <div className="relative inline-flex">
+                {isVSCode ? (
+                    <button
+                        type="button"
+                        className={footerIconButtonClass}
+                        onClick={handlePickLocalFiles}
+                        title="Attach files"
+                        aria-label="Attach files"
+                    >
+                        <RiAttachment2 className={cn(iconSizeClass, 'text-current')} />
+                    </button>
+                ) : (
+                    <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                            <button
+                                type="button"
+                                className={footerIconButtonClass}
+                                title="Add attachment"
+                                aria-label="Add attachment"
+                            >
+                                <RiAddCircleLine className={cn(iconSizeClass, 'text-current')} />
+                            </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="start">
+                            <DropdownMenuItem
+                                onSelect={() => {
+                                    requestAnimationFrame(handlePickLocalFiles);
+                                }}
+                            >
+                                <RiAttachment2 />
+                                Attach files
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                                onSelect={() => {
+                                    requestAnimationFrame(openIssuePicker);
+                                }}
+                            >
+                                <RiGithubLine />
+                                Link GitHub Issue
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                                onSelect={() => {
+                                    requestAnimationFrame(openPrPicker);
+                                }}
+                            >
+                                <RiGitPullRequestLine />
+                                Link GitHub PR
+                            </DropdownMenuItem>
+                        </DropdownMenuContent>
+                    </DropdownMenu>
+                )}
+            </div>
+
+            {onOpenSettings ? (
+                <button
+                    type="button"
+                    onClick={onOpenSettings}
+                    className={footerIconButtonClass}
+                    title="Model and agent settings"
+                    aria-label="Model and agent settings"
+                >
+                    <RiAiAgentLine className={cn(iconSizeClass, 'text-current')} />
+                </button>
+            ) : null}
+        </div>
+    );
+}, (prev, next) => (
+    prev.isMobile === next.isMobile
+    && prev.isVSCode === next.isVSCode
+    && prev.footerIconButtonClass === next.footerIconButtonClass
+    && prev.iconSizeClass === next.iconSizeClass
+    && prev.onOpenSettings === next.onOpenSettings
+));
+
+type PermissionAutoAcceptButtonProps = {
+    footerIconButtonClass: string;
+    iconSizeClass: string;
+    permissionScopeSessionId: string | null;
+    permissionAutoAcceptEnabled: boolean;
+    handlePermissionAutoAcceptToggle: () => void;
+    withTooltip?: boolean;
+};
+
+const PermissionAutoAcceptButton = React.memo(function PermissionAutoAcceptButton(props: PermissionAutoAcceptButtonProps) {
+    const {
+        footerIconButtonClass,
+        iconSizeClass,
+        permissionScopeSessionId,
+        permissionAutoAcceptEnabled,
+        handlePermissionAutoAcceptToggle,
+        withTooltip = false,
+    } = props;
+
+    const ariaLabel = permissionAutoAcceptEnabled
+        ? 'Disable permission auto-accept'
+        : 'Enable permission auto-accept';
+    const tooltipLabel = permissionAutoAcceptEnabled
+        ? 'Permission auto-accept: on'
+        : 'Permission auto-accept: off';
+
+    const button = (
+        <button
+            type="button"
+            onClick={handlePermissionAutoAcceptToggle}
+            className={cn(
+                footerIconButtonClass,
+                'rounded-md hover:bg-transparent',
+                !permissionScopeSessionId && 'opacity-30',
+            )}
+            onMouseDown={(event) => {
+                event.preventDefault();
+            }}
+            onPointerDownCapture={(event) => {
+                if (event.pointerType === 'touch') {
+                    event.preventDefault();
+                    event.stopPropagation();
+                }
+            }}
+            aria-pressed={permissionAutoAcceptEnabled}
+            aria-label={ariaLabel}
+            title={ariaLabel}
+        >
+            {permissionAutoAcceptEnabled ? (
+                <RiShieldCheckLine className={cn(iconSizeClass)} style={{ color: 'var(--status-info)' }} />
+            ) : (
+                <RiShieldUserLine className={cn(iconSizeClass)} />
+            )}
+        </button>
+    );
+
+    if (!withTooltip) {
+        return button;
+    }
+
+    return (
+        <Tooltip delayDuration={600}>
+            <TooltipTrigger asChild>
+                {button}
+            </TooltipTrigger>
+            <TooltipContent side="top" sideOffset={8}>
+                {tooltipLabel}
+            </TooltipContent>
+        </Tooltip>
+    );
+});
+
+type FocusModeButtonProps = {
+    footerIconButtonClass: string;
+    iconSizeClass: string;
+    isExpandedInput: boolean;
+    onToggle: () => void;
+};
+
+const FocusModeButton = React.memo(function FocusModeButton(props: FocusModeButtonProps) {
+    const { footerIconButtonClass, iconSizeClass, isExpandedInput, onToggle } = props;
+
+    return (
+        <Tooltip delayDuration={600}>
+            <TooltipTrigger asChild>
+                <button
+                    type="button"
+                    className={cn(
+                        footerIconButtonClass,
+                        'rounded-md',
+                        isExpandedInput
+                            ? 'text-primary'
+                            : 'text-foreground hover:bg-[var(--interactive-hover)]/40'
+                    )}
+                    onMouseDown={(event) => {
+                        event.preventDefault();
+                    }}
+                    onClick={onToggle}
+                    aria-label="Toggle focus mode"
+                    aria-pressed={isExpandedInput}
+                >
+                    <RiFullscreenLine className={cn(iconSizeClass)} />
+                </button>
+            </TooltipTrigger>
+            <TooltipContent side="top" sideOffset={8}>
+                <div className="flex flex-col gap-0.5 text-center">
+                    <span>Focus mode</span>
+                    <span className="font-mono opacity-60">
+                        {isMacOS() ? '⌘⇧E' : 'Ctrl+Shift+E'}
+                    </span>
+                </div>
+            </TooltipContent>
+        </Tooltip>
+    );
+});
+
+type ComposerActionButtonsProps = {
+    isMobile: boolean;
+    footerIconButtonClass: string;
+    sendIconSizeClass: string;
+    stopIconSizeClass: string;
+    canSend: boolean;
+    canAbort: boolean;
+    hasContent: boolean;
+    currentSessionId: string | null;
+    newSessionDraftOpen: boolean;
+    onPrimaryAction: () => void;
+    onQueueMessage: () => void;
+    onAbort: () => void;
+};
+
+const ComposerActionButtons = React.memo(function ComposerActionButtons(props: ComposerActionButtonsProps) {
+    const {
+        isMobile,
+        footerIconButtonClass,
+        sendIconSizeClass,
+        stopIconSizeClass,
+        canSend,
+        canAbort,
+        hasContent,
+        currentSessionId,
+        newSessionDraftOpen,
+        onPrimaryAction,
+        onQueueMessage,
+        onAbort,
+    } = props;
+
+    const sendButton = (
+        <button
+            type={isMobile ? 'button' : 'submit'}
+            disabled={!canSend || (!currentSessionId && !newSessionDraftOpen)}
+            onClick={(event) => {
+                if (!isMobile) {
+                    return;
+                }
+
+                event.preventDefault();
+                onPrimaryAction();
+            }}
+            className={cn(
+                footerIconButtonClass,
+                canSend && (currentSessionId || newSessionDraftOpen)
+                    ? 'text-primary hover:text-primary'
+                    : 'opacity-30'
+            )}
+            aria-label="Send message"
+        >
+            <RiSendPlane2Line className={cn(sendIconSizeClass)} />
+        </button>
+    );
+
+    if (!canAbort) {
+        return sendButton;
+    }
+
+    return (
+        <div className="relative">
+            {hasContent ? (
+                <button
+                    type="button"
+                    disabled={!currentSessionId}
+                    onClick={(event) => {
+                        if (isMobile) {
+                            event.preventDefault();
+                        }
+                        onQueueMessage();
+                    }}
+                    className={cn(
+                        footerIconButtonClass,
+                        'absolute z-20 bottom-full left-1/2 -translate-x-1/2 mb-1',
+                        currentSessionId ? 'text-primary hover:text-primary' : 'opacity-30'
+                    )}
+                    aria-label="Queue message"
+                >
+                    <RiSendPlane2Line className={cn(sendIconSizeClass, '-rotate-90')} />
+                </button>
+            ) : null}
+            <button
+                type="button"
+                onClick={onAbort}
+                className={cn(
+                    footerIconButtonClass,
+                    'text-[var(--status-error)] hover:text-[var(--status-error)]'
+                )}
+                aria-label="Stop generating"
+            >
+                <StopIcon className={cn(stopIconSizeClass)} />
+            </button>
+        </div>
+    );
+}, (prev, next) => (
+    prev.isMobile === next.isMobile
+    && prev.footerIconButtonClass === next.footerIconButtonClass
+    && prev.sendIconSizeClass === next.sendIconSizeClass
+    && prev.stopIconSizeClass === next.stopIconSizeClass
+    && prev.canSend === next.canSend
+    && prev.canAbort === next.canAbort
+    && prev.hasContent === next.hasContent
+    && prev.currentSessionId === next.currentSessionId
+    && prev.newSessionDraftOpen === next.newSessionDraftOpen
+));
+
 const appendWithLineBreaks = (base: string, next: string): string => {
     const separator = !base
         ? ''
@@ -266,14 +654,14 @@ const saveStoredDraft = (sessionId: string | null, draft: string): void => {
     }
 };
 
-export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBottom }) => {
+const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBottom }) => {
     // Track if we restored a draft on mount (for text selection)
     const initialDraftRef = React.useRef<string | null>(null);
     // Track initial session ID (captured at mount time for draft restoration)
     const initialSessionIdRef = React.useRef<string | null>(null);
     const [message, setMessage] = React.useState(() => {
         // Read per-session draft at mount time using the current session from the store
-        const sessionId = useSessionStore.getState().currentSessionId;
+        const sessionId = useSessionUIStore.getState().currentSessionId;
         initialSessionIdRef.current = sessionId;
         const draft = getStoredDraft(sessionId);
         if (draft) {
@@ -297,6 +685,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
     const [historyIndex, setHistoryIndex] = React.useState(-1); // -1 = not browsing, 0+ = index from most recent
     const [draftMessage, setDraftMessage] = React.useState(''); // Preserves input when entering history mode
     const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+    const previousMessageLengthRef = React.useRef(message.length);
     const dropZoneRef = React.useRef<HTMLDivElement>(null);
     const suppressNextFileDropTextInsertRef = React.useRef(false);
     const suppressNextFileDropTextInsertTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -313,48 +702,63 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
     const lastPersistedDraftRef = React.useRef<Map<string, string>>(new Map());
     const currentSessionIdForDraftRef = React.useRef<string | null>(null);
 
-    const sendMessage = useSessionStore((state) => state.sendMessage);
-    const currentSessionId = useSessionStore((state) => state.currentSessionId);
-    const newSessionDraft = useSessionStore((state) => state.newSessionDraft);
+    // TODO: port sendMessage to session-actions (complex — creates sessions, handles attachments, etc.)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sendMessage = React.useRef((...args: any[]) =>
+        Promise.resolve((useSessionUIStore.getState().sendMessage as (...a: unknown[]) => unknown)(...args)),
+    ).current;
+    const currentSessionId = useSessionUIStore((s) => s.currentSessionId);
+    const newSessionDraft = useSessionUIStore((s) => s.newSessionDraft);
     const newSessionDraftOpen = Boolean(newSessionDraft?.open);
-    const setNewSessionDraftTarget = useSessionStore((state) => state.setNewSessionDraftTarget);
-    const availableWorktreesByProject = useSessionStore((state) => state.availableWorktreesByProject);
-    const abortCurrentOperation = useSessionStore((state) => state.abortCurrentOperation);
-    const acknowledgeSessionAbort = useSessionStore((state) => state.acknowledgeSessionAbort);
-    const abortPromptSessionId = useSessionStore((state) => state.abortPromptSessionId);
-    const clearAbortPrompt = useSessionStore((state) => state.clearAbortPrompt);
-    const attachedFiles = useSessionStore((state) => state.attachedFiles);
-    const addAttachedFile = useSessionStore((state) => state.addAttachedFile);
-    const clearAttachedFiles = useSessionStore((state) => state.clearAttachedFiles);
-    const saveSessionAgentSelection = useSessionStore((state) => state.saveSessionAgentSelection);
-    const consumePendingInputText = useSessionStore((state) => state.consumePendingInputText);
-    const setPendingInputText = useSessionStore((state) => state.setPendingInputText);
-    const pendingInputText = useSessionStore((state) => state.pendingInputText);
-    const consumePendingSyntheticParts = useSessionStore((state) => state.consumePendingSyntheticParts);
-    const currentManagementSessionId = useSessionManagementStore((state) => state.currentSessionId);
+    const setNewSessionDraftTarget = useSessionUIStore((s) => s.setNewSessionDraftTarget);
+    const availableWorktreesByProject = useSessionUIStore((s) => s.availableWorktreesByProject);
+    const abortPromptSessionId = useSessionUIStore((s) => s.abortPromptSessionId);
+    const clearAbortPrompt = useSessionUIStore((s) => s.clearAbortPrompt);
+    const attachedFiles = useInputStore((s) => s.attachedFiles);
+    const addAttachedFile = useInputStore((s) => s.addAttachedFile);
+    const clearAttachedFiles = useInputStore((s) => s.clearAttachedFiles);
+    const saveSessionAgentSelection = useSelectionStore((s) => s.saveSessionAgentSelection);
+    const consumePendingInputText = useInputStore((s) => s.consumePendingInputText);
+    const setPendingInputText = useInputStore((s) => s.setPendingInputText);
+    const pendingInputText = useInputStore((s) => s.pendingInputText);
+    const consumePendingSyntheticParts = useInputStore((s) => s.consumePendingSyntheticParts);
+    const acknowledgeSessionAbort = useSessionUIStore((s) => s.acknowledgeSessionAbort);
+    const abortCurrentOperation = React.useCallback(
+        (sessionIdOverride?: string) => sessionActions.abortCurrentOperation(sessionIdOverride ?? currentSessionId ?? ''),
+        [currentSessionId],
+    );
+    const currentManagementSessionId = currentSessionId;
     const projects = useProjectsStore((state) => state.projects);
     const activeProjectId = useProjectsStore((state) => state.activeProjectId);
     const setActiveProjectIdOnly = useProjectsStore((state) => state.setActiveProjectIdOnly);
 
-    const { currentProviderId, currentModelId, currentVariant, currentAgentName, setAgent, getVisibleAgents } = useConfigStore();
+    const currentProviderId = useConfigStore((state) => state.currentProviderId);
+    const currentModelId = useConfigStore((state) => state.currentModelId);
+    const currentVariant = useConfigStore((state) => state.currentVariant);
+    const currentAgentName = useConfigStore((state) => state.currentAgentName);
+    const setAgent = useConfigStore((state) => state.setAgent);
+    const getVisibleAgents = useConfigStore((state) => state.getVisibleAgents);
     const agents = getVisibleAgents();
     const primaryAgents = React.useMemo(() => agents.filter((agent) => agent.mode === 'primary'), [agents]);
-    const { isMobile, inputBarOffset, isKeyboardOpen, setTimelineDialogOpen, cornerRadius, persistChatDraft, inputSpellcheckEnabled, isExpandedInput, setExpandedInput } = useUIStore();
-    const { working } = useAssistantStatus();
+    const isMobile = useUIStore((state) => state.isMobile);
+    const inputBarOffset = useUIStore((state) => state.inputBarOffset);
+    const isKeyboardOpen = useUIStore((state) => state.isKeyboardOpen);
+    const cornerRadius = useUIStore((state) => state.cornerRadius);
+    const persistChatDraft = useUIStore((state) => state.persistChatDraft);
+    const inputSpellcheckEnabled = useUIStore((state) => state.inputSpellcheckEnabled);
+    const isExpandedInput = useUIStore((state) => state.isExpandedInput);
+    const setExpandedInput = useUIStore((state) => state.setExpandedInput);
     const { git: runtimeGit } = useRuntimeAPIs();
     const { currentTheme } = useThemeSystem();
     const chatSearchDirectory = useChatSearchDirectory();
     const [showAbortStatus, setShowAbortStatus] = React.useState(false);
-    const [textareaScrollTop, setTextareaScrollTop] = React.useState(0);
     const setSessionAutoAccept = usePermissionStore((state) => state.setSessionAutoAccept);
+    const composerHighlightRef = React.useRef<HTMLDivElement | null>(null);
 
     const isDesktopExpanded = isExpandedInput && !isMobile;
     const chatInputRadius = 'var(--radius-lg)';
 
-    const sendableAttachedFiles = React.useMemo(
-        () => attachedFiles.filter((file) => file.source !== 'server'),
-        [attachedFiles],
-    );
+    const sendableAttachedFiles = attachedFiles;
 
     const hasInlineMentionForHighlight = React.useMemo(() => {
         if (!message || !message.includes('@') || inputMode === 'shell') {
@@ -426,8 +830,12 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
 
     const sanitizeAttachmentsForSend = React.useCallback(
         (files: AttachedFile[] | undefined): AttachedFile[] => (files ?? [])
-            .filter((file) => file.source !== 'server')
-            .map((file) => ({ ...file })),
+            .map((file) => ({
+                ...file,
+                dataUrl: file.source === 'server' && file.serverPath
+                    ? toServerFileUrl(file.serverPath)
+                    : file.dataUrl,
+            })),
         [],
     );
 
@@ -498,7 +906,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                 filename,
                 mimeType: 'text/plain',
                 size: 0,
-                dataUrl: normalizedServerPath,
+                dataUrl: toServerFileUrl(normalizedServerPath),
                 source: 'server',
                 serverPath: normalizedServerPath,
             });
@@ -563,29 +971,9 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
     const consumeDrafts = useInlineCommentDraftStore((state) => state.consumeDrafts);
     const hasDrafts = draftCount > 0;
 
-    // User message history for up/down arrow navigation
-    // Get raw messages from store (stable reference)
-    const sessionMessages = useMessageStore(
-        React.useCallback(
-            (state) => (currentSessionId ? state.messages.get(currentSessionId) : undefined),
-            [currentSessionId]
-        )
-    );
-    // Derive user message history with useMemo to avoid infinite re-renders
-    const userMessageHistory = React.useMemo(() => {
-        if (!sessionMessages) return [];
-        return sessionMessages
-            .filter((m) => m.info.role === 'user')
-            .map((m) => {
-                const textPart = m.parts.find((p) => p.type === 'text');
-                if (textPart && 'text' in textPart) {
-                    return String(textPart.text);
-                }
-                return '';
-            })
-            .filter((text) => text.length > 0)
-            .reverse(); // Most recent first
-    }, [sessionMessages]);
+    // User message history for up/down arrow navigation.
+    // Keep this on a narrow hook instead of full session message records.
+    const userMessageHistory = useUserMessageHistory(currentSessionId ?? "");
 
     // Keep messageRef in sync with message state
     React.useEffect(() => {
@@ -839,11 +1227,11 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
         }
     }, [pendingInputText, consumePendingInputText]);
 
-    const hasContent = message.trim() || sendableAttachedFiles.length > 0 || hasDrafts;
+    const hasContent = message.trim().length > 0 || sendableAttachedFiles.length > 0 || hasDrafts;
     const hasQueuedMessages = queuedMessages.length > 0;
     const canSend = hasContent || hasQueuedMessages;
 
-    const canAbort = working.isWorking;
+    const canAbort = sessionPhase !== 'idle';
 
     // Keep a ref to handleSubmit so callbacks don't depend on it.
     type SubmitOptions = {
@@ -866,6 +1254,12 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
         addToQueue(currentSessionId, {
             content: messageToQueue,
             attachments: attachmentsToQueue.length > 0 ? attachmentsToQueue : undefined,
+            sendConfig: currentProviderId && currentModelId ? {
+                providerID: currentProviderId,
+                modelID: currentModelId,
+                agent: currentAgentName ?? undefined,
+                variant: currentVariant ?? undefined,
+            } : undefined,
         });
 
         // Clear input and attachments
@@ -877,7 +1271,30 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
         if (!isMobile) {
             textareaRef.current?.focus();
         }
-    }, [hasContent, currentSessionId, message, sendableAttachedFiles, sanitizeAttachmentsForSend, addToQueue, clearAttachedFiles, isMobile, consumeDrafts]);
+    }, [hasContent, currentSessionId, message, sendableAttachedFiles, sanitizeAttachmentsForSend, addToQueue, clearAttachedFiles, isMobile, consumeDrafts, currentProviderId, currentModelId, currentAgentName, currentVariant]);
+
+    const handleQueuedMessageEdit = React.useCallback((content: string) => {
+        setMessage(content);
+        setTimeout(() => {
+            textareaRef.current?.focus();
+        }, 0);
+    }, []);
+
+    const handleOpenAgentPanel = React.useCallback(() => {
+        setMobileControlsPanel('agent');
+    }, []);
+
+    const handleToggleExpandedInput = React.useCallback(() => {
+        setExpandedInput(!isExpandedInput);
+    }, [isExpandedInput, setExpandedInput]);
+
+    const openIssuePicker = React.useCallback(() => {
+        setIssuePickerOpen(true);
+    }, []);
+
+    const openPrPicker = React.useCallback(() => {
+        setPrPickerOpen(true);
+    }, []);
 
     const handleSubmit = async (options?: SubmitOptions) => {
         const queuedOnly = options?.queuedOnly ?? false;
@@ -887,9 +1304,6 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
         } else if (!canSend || (!currentSessionId && !newSessionDraftOpen)) {
             return;
         }
-
-        // Re-pin and scroll to bottom when sending
-        scrollToBottom?.({ instant: true, force: true });
 
         if (!currentProviderId || !currentModelId) {
             console.warn('Cannot send message: provider or model not selected');
@@ -1037,25 +1451,26 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                 .split(/\s+/)[0]
                 ?.toLowerCase();
 
-            // NEW: /undo - revert to last message (populates input with reverted message text)
             if (commandName === 'undo' && currentSessionId) {
-                await useSessionStore.getState().handleSlashUndo(currentSessionId);
-                // Don't clear message - pendingInputText will populate it with reverted message
+                await useSessionUIStore.getState().handleSlashUndo(currentSessionId);
                 scrollToBottom?.({ instant: true, force: true });
-                return; // Don't send to assistant
+                return;
             }
-            // NEW: /redo - unrevert or partial redo (populates input with message text)
             else if (commandName === 'redo' && currentSessionId) {
-                await useSessionStore.getState().handleSlashRedo(currentSessionId);
-                // Don't clear message - pendingInputText will populate it
+                await useSessionUIStore.getState().handleSlashRedo(currentSessionId);
                 scrollToBottom?.({ instant: true, force: true });
-                return; // Don't send to assistant
+                return;
             }
-            // NEW: /timeline - open timeline dialog
-            else if (commandName === 'timeline' && currentSessionId) {
-                setTimelineDialogOpen(true);
-                setMessage('');
-                return; // Don't send to assistant
+            else if (commandName === 'compact' && currentSessionId) {
+                const { opencodeClient } = await import('@/lib/opencode/client');
+                const sdk = opencodeClient.getSdkClient();
+                const configState = useConfigStore.getState();
+                await sdk.session.summarize({
+                    sessionID: currentSessionId,
+                    modelID: configState.currentModelId || '',
+                    providerID: configState.currentProviderId || '',
+                });
+                return;
             }
         }
 
@@ -1065,7 +1480,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
             ...additionalParts.flatMap(p => p.attachments ?? []),
         ];
 
-        void sendMessage(
+        const sendPromise = sendMessage(
             primaryText,
             currentProviderId,
             currentModelId,
@@ -1075,7 +1490,17 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
             additionalParts.length > 0 ? additionalParts : undefined,
             currentVariant,
             inputMode
-        ).then(() => {
+        );
+
+        if (typeof window === 'undefined') {
+            scrollToBottom?.({ instant: true, force: true });
+        } else {
+            window.requestAnimationFrame(() => {
+                scrollToBottom?.({ instant: true, force: true });
+            });
+        }
+
+        void sendPromise.then(() => {
             // Clear linked issue after successful message send
             if (linkedIssue) {
                 setLinkedIssue(null);
@@ -1108,21 +1533,21 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
             if (normalized.includes('payload too large') || normalized.includes('413') || normalized.includes('entity too large')) {
                 toast.error('Attachments are too large to send. Please try reducing the number or size of images.');
                 if (allAttachments.length > 0) {
-                    useFileStore.setState({ attachedFiles: allAttachments });
+                    useInputStore.setState({ attachedFiles: allAttachments });
                 }
                 return;
             }
 
             if (isSoftNetworkError) {
                 if (allAttachments.length > 0) {
-                    useFileStore.setState({ attachedFiles: allAttachments });
+                    useInputStore.setState({ attachedFiles: allAttachments });
                     toast.error('Failed to send attachments. Try fewer files or smaller images.');
                 }
                 return;
             }
 
             if (allAttachments.length > 0) {
-                useFileStore.setState({ attachedFiles: allAttachments });
+                useInputStore.setState({ attachedFiles: allAttachments });
             }
             toast.error(rawMessage || 'Message failed to send. Attachments restored.');
         });
@@ -1474,20 +1899,27 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
         }
     }, [primaryAgents, currentAgentName, currentSessionId, setAgent, saveSessionAgentSelection]);
 
-    const adjustTextareaHeight = React.useCallback(() => {
+    const adjustTextareaHeight = React.useCallback((options?: { allowShrink?: boolean }) => {
         const textarea = textareaRef.current;
         if (!textarea) {
             return;
         }
 
+        const previousScrollTop = textarea.scrollTop;
+
         if (isDesktopExpanded) {
             textarea.style.height = '100%';
             textarea.style.maxHeight = 'none';
             setTextareaSize(null);
+            if (textarea.scrollTop !== previousScrollTop) {
+                textarea.scrollTop = previousScrollTop;
+            }
             return;
         }
 
-        textarea.style.height = 'auto';
+        if (options?.allowShrink ?? true) {
+            textarea.style.height = 'auto';
+        }
 
         const view = textarea.ownerDocument?.defaultView;
         const computedStyle = view ? view.getComputedStyle(textarea) : null;
@@ -1506,6 +1938,9 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
 
         textarea.style.height = `${nextHeight}px`;
         textarea.style.maxHeight = `${maxHeight}px`;
+        if (textarea.scrollTop !== previousScrollTop) {
+            textarea.scrollTop = previousScrollTop;
+        }
 
         setTextareaSize((prev) => {
             if (prev && prev.height === nextHeight && prev.maxHeight === maxHeight) {
@@ -1516,7 +1951,9 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
     }, [isDesktopExpanded]);
 
     React.useLayoutEffect(() => {
-        adjustTextareaHeight();
+        const allowShrink = message.length < previousMessageLengthRef.current;
+        previousMessageLengthRef.current = message.length;
+        adjustTextareaHeight({ allowShrink });
     }, [adjustTextareaHeight, message, isMobile]);
 
     const updateAutocompleteState = React.useCallback((value: string, cursorPosition: number) => {
@@ -2560,7 +2997,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
         if (!selectedDraftDirectory || !selectedDraftBranchIsKnown) {
             return;
         }
-        useSessionStore.getState().setDraftPreserveDirectoryOverride(false);
+        useSessionUIStore.getState().setDraftPreserveDirectoryOverride(false);
     }, [newSessionDraft?.open, newSessionDraft?.preserveDirectoryOverride, selectedDraftBranchIsKnown, selectedDraftDirectory]);
 
     const shouldShowDraftBranchSelector = React.useMemo(() => {
@@ -2574,7 +3011,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
     }, [isDiscoveringDraftBranches, projectRootBranchOption, worktreeBranchOptions.length]);
 
     const handleDraftProjectChange = React.useCallback((projectId: string) => {
-        const draft = useSessionStore.getState().newSessionDraft;
+        const draft = useSessionUIStore.getState().newSessionDraft;
         if (draft?.pendingWorktreeRequestId || draft?.bootstrapPendingDirectory || draft?.preserveDirectoryOverride) {
             return;
         }
@@ -2592,7 +3029,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
     }, [activeProjectId, projects, setActiveProjectIdOnly, setNewSessionDraftTarget]);
 
     const handleDraftDirectoryChange = React.useCallback((directory: string) => {
-        const draft = useSessionStore.getState().newSessionDraft;
+        const draft = useSessionUIStore.getState().newSessionDraft;
         if (draft?.pendingWorktreeRequestId || draft?.bootstrapPendingDirectory || draft?.preserveDirectoryOverride) {
             return;
         }
@@ -2688,242 +3125,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
         });
     }, [permissionAutoAcceptEnabled, permissionScopeSessionId, setSessionAutoAccept]);
 
-    const permissionAutoAcceptAriaLabel = permissionAutoAcceptEnabled
-        ? 'Disable permission auto-accept'
-        : 'Enable permission auto-accept';
-    const permissionAutoAcceptTooltipLabel = permissionAutoAcceptEnabled
-        ? 'Permission auto-accept: on'
-        : 'Permission auto-accept: off';
-
-    const permissionAutoAcceptButton = (
-        <button
-            type="button"
-            onClick={handlePermissionAutoAcceptToggle}
-            className={cn(
-                footerIconButtonClass,
-                'rounded-md hover:bg-transparent',
-                !permissionScopeSessionId && 'opacity-30',
-            )}
-            onMouseDown={(event) => {
-                event.preventDefault();
-            }}
-            onPointerDownCapture={(event) => {
-                if (event.pointerType === 'touch') {
-                    event.preventDefault();
-                    event.stopPropagation();
-                }
-            }}
-            aria-pressed={permissionAutoAcceptEnabled}
-            aria-label={permissionAutoAcceptAriaLabel}
-            title={permissionAutoAcceptAriaLabel}
-        >
-            {permissionAutoAcceptEnabled ? (
-                <RiShieldCheckLine className={cn(iconSizeClass)} style={{ color: 'var(--status-info)' }} />
-            ) : (
-                <RiShieldUserLine className={cn(iconSizeClass)} />
-            )}
-        </button>
-    );
-
-    const permissionAutoAcceptButtonWithTooltip = (
-        <Tooltip delayDuration={600}>
-            <TooltipTrigger asChild>
-                {permissionAutoAcceptButton}
-            </TooltipTrigger>
-            <TooltipContent side="top" sideOffset={8}>
-                {permissionAutoAcceptTooltipLabel}
-            </TooltipContent>
-        </Tooltip>
-    );
-
-    // Send button - respects queue mode setting
-    const sendButton = (
-        <button
-            type={isMobile ? 'button' : 'submit'}
-            disabled={!canSend || (!currentSessionId && !newSessionDraftOpen)}
-            onClick={(event) => {
-                if (!isMobile) {
-                    return;
-                }
-
-                event.preventDefault();
-                handlePrimaryAction();
-            }}
-            className={cn(
-                footerIconButtonClass,
-                canSend && (currentSessionId || newSessionDraftOpen)
-                    ? 'text-primary hover:text-primary'
-                    : 'opacity-30'
-            )}
-            aria-label="Send message"
-        >
-            <RiSendPlane2Line className={cn(sendIconSizeClass)} />
-        </button>
-    );
-
-    // Queue button for adding message to queue while working
-    const queueButton = (
-        <button
-            type="button"
-            disabled={!hasContent || !currentSessionId}
-            onClick={(event) => {
-                if (isMobile) {
-                    event.preventDefault();
-                }
-                handleQueueMessage();
-            }}
-            className={cn(
-                footerIconButtonClass,
-                'absolute z-20 bottom-full left-1/2 -translate-x-1/2 mb-1',
-                hasContent && currentSessionId
-                    ? 'text-primary hover:text-primary'
-                    : 'opacity-30'
-            )}
-            aria-label="Queue message"
-        >
-            <RiSendPlane2Line className={cn(sendIconSizeClass, '-rotate-90')} />
-        </button>
-    );
-
-    // Stop button replaces send button when working
-    const stopButton = (
-        <button
-            type="button"
-            onClick={handleAbort}
-            className={cn(
-                footerIconButtonClass,
-                'text-[var(--status-error)] hover:text-[var(--status-error)]'
-            )}
-            aria-label="Stop generating"
-        >
-            <StopIcon className={cn(stopIconSizeClass)} />
-        </button>
-    );
-
-    // Action buttons area: either send button, or stop (+ optional queue button floating above)
-    const actionButtons = canAbort ? (
-        <div className="relative">
-            {hasContent && queueButton}
-            {stopButton}
-        </div>
-    ) : (
-        sendButton
-    );
-
-    const attachmentMenu = (
-        <>
-            <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                className="hidden"
-                onChange={handleLocalFileSelect}
-                accept="*/*"
-            />
-
-            <div className="relative inline-flex">
-                {isVSCode ? (
-                    <button
-                        type="button"
-                        className={footerIconButtonClass}
-                        onClick={() => handlePickLocalFiles()}
-                        title="Attach files"
-                        aria-label="Attach files"
-                    >
-                        <RiAttachment2 className={cn(iconSizeClass, 'text-current')} />
-                    </button>
-                ) : (
-                    <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                            <button
-                                type="button"
-                                className={footerIconButtonClass}
-                                title="Add attachment"
-                                aria-label="Add attachment"
-                            >
-                                <RiAddCircleLine className={cn(iconSizeClass, 'text-current')} />
-                            </button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="start">
-                            <DropdownMenuItem
-                                onSelect={() => {
-                                    requestAnimationFrame(() => handlePickLocalFiles());
-                                }}
-                            >
-                                <RiAttachment2 />
-                                Attach files
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                                onSelect={() => {
-                                    requestAnimationFrame(() => {
-                                        setIssuePickerOpen(true);
-                                    });
-                                }}
-                            >
-                                <RiGithubLine />
-                                Link GitHub Issue
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                                onSelect={() => {
-                                    requestAnimationFrame(() => {
-                                        setPrPickerOpen(true);
-                                    });
-                                }}
-                            >
-                                <RiGitPullRequestLine />
-                                Link GitHub PR
-                            </DropdownMenuItem>
-                        </DropdownMenuContent>
-                    </DropdownMenu>
-                )}
-            </div>
-        </>
-    );
-
-    const settingsButton = onOpenSettings ? (
-        <button
-            type='button'
-            onClick={onOpenSettings}
-            className={footerIconButtonClass}
-            title='Model and agent settings'
-            aria-label='Model and agent settings'
-        >
-            <RiAiAgentLine className={cn(iconSizeClass, 'text-current')} />
-        </button>
-    ) : null;
-
-    const attachmentsControls = (
-        <div className="flex items-center gap-x-1.5">
-            {isMobile ? (
-                <button
-                    type="button"
-                    className={cn(
-                        footerIconButtonClass,
-                        'rounded-md',
-                        'hover:bg-interactive-hover/40'
-                    )}
-                    onPointerDownCapture={(event) => {
-                        if (event.pointerType === 'touch') {
-                            event.preventDefault();
-                            event.stopPropagation();
-                        }
-                    }}
-                    onClick={handleOpenCommandMenu}
-                    title="Commands"
-                    aria-label="Commands"
-                >
-                    <RiCommandLine className={cn(iconSizeClass)} />
-                </button>
-            ) : null}
-            {attachmentMenu}
-            {settingsButton}
-        </div>
-    );
-
-    const workingStatusText = working.statusText;
-
     React.useEffect(() => {
-        const pendingAbortBanner = Boolean(working.wasAborted);
+        const pendingAbortBanner = Boolean(abortPromptSessionId) && abortPromptSessionId === currentSessionId;
         if (!prevWasAbortedRef.current && pendingAbortBanner && !showAbortStatus) {
             startAbortIndicator();
             if (currentSessionId) {
@@ -2932,11 +3135,11 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
         }
         prevWasAbortedRef.current = pendingAbortBanner;
     }, [
+        abortPromptSessionId,
         acknowledgeSessionAbort,
         currentSessionId,
         showAbortStatus,
         startAbortIndicator,
-        working.wasAborted,
     ]);
 
     React.useEffect(() => {
@@ -2955,7 +3158,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
             className={cn(
                 "relative pt-0 pb-4",
                 isDesktopExpanded && 'flex h-full min-h-0 flex-col pt-4',
-                isMobile && isKeyboardOpen ? "ios-keyboard-safe-area" : "bottom-safe-area"
+                isMobile && (isKeyboardOpen ? 'ios-keyboard-safe-area' : 'bottom-safe-area')
             )}
             data-keyboard-avoid="true"
             style={isMobile && inputBarOffset > 0 && !isKeyboardOpen ? { marginBottom: `${inputBarOffset}px` } : undefined}
@@ -2963,12 +3166,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
             <div className={cn('chat-column relative overflow-visible', isDesktopExpanded && 'flex flex-1 min-h-0 flex-col')}>
                 <AttachedFilesList />
                 <QueuedMessageChips
-                    onEditMessage={(content) => {
-                        setMessage(content);
-                        setTimeout(() => {
-                            textareaRef.current?.focus();
-                        }, 0);
-                    }}
+                    onEditMessage={handleQueuedMessageEdit}
                 />
                 {hasDrafts && (
                     <div className="pb-2">
@@ -3087,14 +3285,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                         </button>
                     </div>
                 )}
-                <StatusRow
-                    isWorking={working.isWorking}
-                    statusText={workingStatusText}
-                    isGenericStatus={working.isGenericStatus}
-                    isWaitingForPermission={working.isWaitingForPermission}
-                    wasAborted={working.wasAborted}
-                    abortActive={working.abortActive}
-                    retryInfo={working.retryInfo}
+                <MemoStatusRow
                     showAbortStatus={showAbortStatus}
                     showAssistantStatus={false}
                     showTodos
@@ -3196,7 +3387,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                     onDrop={handleDrop}
                 >
                     {isDragging && (
-                        <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm rounded-xl">
+                        <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/90 rounded-xl">
                             <div className="text-center">
                                 <div className="inline-flex justify-center">
                                     <button
@@ -3291,7 +3482,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                                             : 'pt-4 pb-2',
                                     inputMode === 'shell' ? 'font-mono' : 'typography-markdown md:typography-ui-label',
                                 )}
-                                style={{ transform: `translateY(-${textareaScrollTop}px)` }}
+                                ref={composerHighlightRef}
                             >
                                 {highlightedComposerContent.map((part, index) => (
                                     <span
@@ -3326,7 +3517,10 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                             onClick={updateAutocompleteOverlayPosition}
                             onScroll={(event) => {
                                 updateAutocompleteOverlayPosition();
-                                setTextareaScrollTop(event.currentTarget.scrollTop);
+                                const scrollTop = event.currentTarget.scrollTop;
+                                if (composerHighlightRef.current) {
+                                    composerHighlightRef.current.style.transform = `translateY(-${scrollTop}px)`;
+                                }
                             }}
                             onSelect={updateAutocompleteOverlayPosition}
                             placeholder={currentSessionId || newSessionDraftOpen
@@ -3376,32 +3570,63 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                             <>
                                 <div className="flex w-full items-center justify-between gap-x-1.5">
                                     <div className="flex items-center gap-x-1.5">
-                                        {attachmentsControls}
-                                        {permissionAutoAcceptButton}
+                                        <ComposerAttachmentControls
+                                            isMobile={isMobile}
+                                            isVSCode={isVSCode}
+                                            footerIconButtonClass={footerIconButtonClass}
+                                            iconSizeClass={iconSizeClass}
+                                            fileInputRef={fileInputRef}
+                                            handleLocalFileSelect={handleLocalFileSelect}
+                                            handlePickLocalFiles={handlePickLocalFiles}
+                                            handleOpenCommandMenu={handleOpenCommandMenu}
+                                            openIssuePicker={openIssuePicker}
+                                            openPrPicker={openPrPicker}
+                                            onOpenSettings={onOpenSettings}
+                                        />
+                                        <PermissionAutoAcceptButton
+                                            footerIconButtonClass={footerIconButtonClass}
+                                            iconSizeClass={iconSizeClass}
+                                            permissionScopeSessionId={permissionScopeSessionId}
+                                            permissionAutoAcceptEnabled={permissionAutoAcceptEnabled}
+                                            handlePermissionAutoAcceptToggle={handlePermissionAutoAcceptToggle}
+                                        />
                                     </div>
                                     <div className="flex items-center min-w-0 gap-x-1 justify-end">
                                         <div className="flex items-center gap-x-1 min-w-0 max-w-[60vw] flex-shrink">
-                                            <MobileModelButton onOpenModel={handleOpenMobileControls} className="min-w-0 flex-shrink" />
-                                            <MobileAgentButton
-                                                onOpenAgentPanel={() => setMobileControlsPanel('agent')}
+                                            <MemoMobileModelButton onOpenModel={handleOpenMobileControls} className="min-w-0 flex-shrink" />
+                                            <MemoMobileAgentButton
+                                                onOpenAgentPanel={handleOpenAgentPanel}
                                                 onCycleAgent={handleCycleAgent}
                                                 className="min-w-0 flex-shrink"
                                             />
                                         </div>
                                         <div className="flex items-center gap-x-1 flex-shrink-0">
-                                            <BrowserVoiceButton />
-                                            {actionButtons}
+                                            <MemoBrowserVoiceButton />
+                                            <ComposerActionButtons
+                                                isMobile={isMobile}
+                                                footerIconButtonClass={footerIconButtonClass}
+                                                sendIconSizeClass={sendIconSizeClass}
+                                                stopIconSizeClass={stopIconSizeClass}
+                                                canSend={canSend}
+                                                canAbort={canAbort}
+                                                hasContent={!!hasContent}
+                                                currentSessionId={currentSessionId}
+                                                newSessionDraftOpen={newSessionDraftOpen}
+                                                onPrimaryAction={handlePrimaryAction}
+                                                onQueueMessage={handleQueueMessage}
+                                                onAbort={handleAbort}
+                                            />
                                         </div>
                                     </div>
                                 </div>
-                                <ModelControls
+                                <MemoModelControls
                                     className="hidden"
                                     mobilePanel={mobileControlsPanel}
                                     onMobilePanelChange={setMobileControlsPanel}
                                     onMobilePanelSelection={handleReturnToUnifiedControls}
                                     onAgentPanelSelection={() => setMobileControlsPanel(null)}
                                 />
-                                <UnifiedControlsDrawer
+                                <MemoUnifiedControlsDrawer
                                     open={mobileControlsOpen}
                                     onClose={handleCloseMobileControls}
                                     onOpenModel={() => handleOpenMobilePanel('model')}
@@ -3411,43 +3636,51 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
                         ) : (
                             <>
                                 <div className={cn("flex items-center flex-shrink-0", footerGapClass)}>
-                                    {attachmentsControls}
-                                    <Tooltip delayDuration={600}>
-                                        <TooltipTrigger asChild>
-                                            <button
-                                                type="button"
-                                                className={cn(
-                                                    footerIconButtonClass,
-                                                    'rounded-md',
-                                                    isExpandedInput
-                                                        ? 'text-primary'
-                                                        : 'text-foreground hover:bg-[var(--interactive-hover)]/40'
-                                                )}
-                                                onMouseDown={(event) => {
-                                                    event.preventDefault();
-                                                }}
-                                                onClick={() => setExpandedInput(!isExpandedInput)}
-                                                aria-label="Toggle focus mode"
-                                                aria-pressed={isExpandedInput}
-                                            >
-                                                <RiFullscreenLine className={cn(iconSizeClass)} />
-                                            </button>
-                                        </TooltipTrigger>
-                                        <TooltipContent side="top" sideOffset={8}>
-                                            <div className="flex flex-col gap-0.5 text-center">
-                                                <span>Focus mode</span>
-                                                <span className="font-mono opacity-60">
-                                                    {isMacOS() ? '⌘⇧E' : 'Ctrl+Shift+E'}
-                                                </span>
-                                            </div>
-                                        </TooltipContent>
-                                    </Tooltip>
-                                    {permissionAutoAcceptButtonWithTooltip}
+                                    <ComposerAttachmentControls
+                                        isMobile={isMobile}
+                                        isVSCode={isVSCode}
+                                        footerIconButtonClass={footerIconButtonClass}
+                                        iconSizeClass={iconSizeClass}
+                                        fileInputRef={fileInputRef}
+                                        handleLocalFileSelect={handleLocalFileSelect}
+                                        handlePickLocalFiles={handlePickLocalFiles}
+                                        handleOpenCommandMenu={handleOpenCommandMenu}
+                                        openIssuePicker={openIssuePicker}
+                                        openPrPicker={openPrPicker}
+                                        onOpenSettings={onOpenSettings}
+                                    />
+                                    <FocusModeButton
+                                        footerIconButtonClass={footerIconButtonClass}
+                                        iconSizeClass={iconSizeClass}
+                                        isExpandedInput={isExpandedInput}
+                                        onToggle={handleToggleExpandedInput}
+                                    />
+                                    <PermissionAutoAcceptButton
+                                        footerIconButtonClass={footerIconButtonClass}
+                                        iconSizeClass={iconSizeClass}
+                                        permissionScopeSessionId={permissionScopeSessionId}
+                                        permissionAutoAcceptEnabled={permissionAutoAcceptEnabled}
+                                        handlePermissionAutoAcceptToggle={handlePermissionAutoAcceptToggle}
+                                        withTooltip
+                                    />
                                 </div>
                                 <div className={cn('flex items-center flex-1 justify-end', footerGapClass, 'md:gap-x-3')}>
-                                    <ModelControls className={cn('flex-1 min-w-0 justify-end')} />
-                                    <BrowserVoiceButton />
-                                    {actionButtons}
+                                    <MemoModelControls className={cn('flex-1 min-w-0 justify-end')} />
+                                    <MemoBrowserVoiceButton />
+                                    <ComposerActionButtons
+                                        isMobile={isMobile}
+                                        footerIconButtonClass={footerIconButtonClass}
+                                        sendIconSizeClass={sendIconSizeClass}
+                                        stopIconSizeClass={stopIconSizeClass}
+                                        canSend={canSend}
+                                        canAbort={canAbort}
+                                        hasContent={!!hasContent}
+                                        currentSessionId={currentSessionId}
+                                        newSessionDraftOpen={newSessionDraftOpen}
+                                        onPrimaryAction={handlePrimaryAction}
+                                        onQueueMessage={handleQueueMessage}
+                                        onAbort={handleAbort}
+                                    />
                                 </div>
                             </>
                         )}
@@ -3480,3 +3713,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onOpenSettings, scrollToBo
         </>
     );
 };
+
+ChatInputComponent.displayName = 'ChatInput';
+
+export const ChatInput = React.memo(ChatInputComponent);
