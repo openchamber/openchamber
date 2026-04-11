@@ -276,7 +276,7 @@ export const CommandsPage: React.FC = () => {
               </div>
               <div className="flex min-w-0 flex-1 items-center gap-2 sm:w-fit sm:flex-initial">
                 <ModelSelector
-                  providerId={model ? model.slice(0, model.indexOf('/')) : ''}
+                  providerId={model && model.indexOf('/') !== -1 ? model.slice(0, model.indexOf('/')) : ''}
                   modelId={model && model.indexOf('/') !== -1 ? model.slice(model.indexOf('/') + 1) : ''}
                   onChange={(providerId: string, modelId: string) => {
                     if (providerId && modelId) {
