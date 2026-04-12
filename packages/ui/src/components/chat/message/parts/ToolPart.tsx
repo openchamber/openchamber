@@ -161,6 +161,7 @@ const TASK_TOOL_ACTIVE_FETCH_LIMIT = 160;
 const TASK_TOOL_IDLE_FETCH_LIMIT = 80;
 const TASK_TOOL_NO_CHANGE_BACKOFF_AFTER_POLLS = 3;
 const TASK_TOOL_SETTLE_GRACE_MS = 2500;
+const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"]);
 const GIT_REFRESH_MUTATING_TOOLS = new Set([
     'bash',
     'edit',
@@ -2155,6 +2156,74 @@ const ToolPart: React.FC<ToolPartProps> = ({
         taskSessionId,
     ]);
 
+
+    // When child session polling stops (child completed + settle grace elapsed),
+    // resync the parent session's messages/parts to ensure the task tool part
+    // reflects the final state. This covers the case where SSE
+    // message.part.updated for the parent's task tool part was coalesced,
+    // delayed, or lost after the subagent completed.
+    //
+    // Only updates the specific message that contains this task tool part,
+    // avoiding overwriting in-flight SSE state for other messages.
+    React.useEffect(() => {
+        if (!taskChildPollingStopped || !isTaskTool || !currentSessionId || !currentDirectory || !part.messageID) {
+            return;
+        }
+
+        let cancelled = false;
+        const targetMessageID = part.messageID;
+        const childStores = getSyncChildStores();
+
+        void (async () => {
+            try {
+                const scopedClient = opencodeClient.getScopedSdkClient(currentDirectory);
+                const response = await scopedClient.session.messages({
+                    sessionID: currentSessionId,
+                    limit: TASK_TOOL_ACTIVE_FETCH_LIMIT,
+                });
+                const records = response.data ?? [];
+                if (cancelled || !Array.isArray(records) || records.length === 0) {
+                    return;
+                }
+
+                // Find only the target message record that contains our task tool part
+                const targetRecord = records.find((record) => record?.info?.id === targetMessageID);
+                if (!targetRecord || !targetRecord.parts) return;
+
+                const fetchedParts = targetRecord.parts
+                    .filter((p: { id?: unknown; type?: unknown }) => !!p?.id && typeof p.type === 'string' && !SKIP_PARTS.has(p.type))
+                    .sort((a: { id?: unknown }, b: { id?: unknown }) => {
+                        const aId = String(a.id ?? '');
+                        const bId = String(b.id ?? '');
+                        return aId < bId ? -1 : aId > bId ? 1 : 0;
+                    });
+
+                // Preserve reference identity: only write if parts actually changed
+                const existingParts = childStores.getState(currentDirectory)?.part[targetMessageID];
+                if (existingParts && existingParts.length === fetchedParts.length) {
+                    let identical = true;
+                    for (let i = 0; i < existingParts.length; i++) {
+                        if (existingParts[i] !== fetchedParts[i]) {
+                            identical = false;
+                            break;
+                        }
+                    }
+                    if (identical) return;
+                }
+
+                childStores.update(currentDirectory, (prev) => ({
+                    ...prev,
+                    part: { ...prev.part, [targetMessageID]: fetchedParts },
+                }));
+            } catch {
+                // Ignore transient parent session fetch errors.
+            }
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [taskChildPollingStopped, isTaskTool, currentSessionId, currentDirectory, part.messageID]);
 
     const taskSummaryLenRef = React.useRef<number>(taskSummaryEntries.length);
     React.useEffect(() => {
