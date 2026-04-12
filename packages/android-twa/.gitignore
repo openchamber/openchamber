@@ -1,0 +1,13 @@
+# TWA generated output
+output/
+android-project/
+
+# Keystores and signing keys - NEVER COMMIT
+*.keystore
+*.jks
+keystore.properties
+
+# Secrets
+.env
+.env.local
+node_modules/
