@@ -335,9 +335,8 @@ export const useDirectoryStore = create<DirectoryStore>()(
 
       goToParent: () => {
         const { currentDirectory, setDirectory } = get();
-        const homeDir = cachedHomeDirectory || get().homeDirectory || getHomeDirectory();
 
-        if (currentDirectory === homeDir || currentDirectory === '/') {
+        if (currentDirectory === '/') {
           return;
         }
 
@@ -347,8 +346,7 @@ export const useDirectoryStore = create<DirectoryStore>()(
 
         const lastSlash = cleanPath.lastIndexOf('/');
         if (lastSlash === -1) {
-          const home = cachedHomeDirectory || getHomeDirectory();
-          setDirectory(home);
+          setDirectory('/');
         } else if (lastSlash === 0) {
           setDirectory('/');
         } else {
