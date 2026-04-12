@@ -336,6 +336,111 @@ export async function optimisticSend(input: {
 }
 
 // ---------------------------------------------------------------------------
+// Compact (summarize session)
+// ---------------------------------------------------------------------------
+
+/**
+ * Compacts a session by calling the server's summarize endpoint.
+ *
+ * Unlike optimisticSend (which passes the client messageID to the server so
+ * both share the same ID), the summarize API has no messageID parameter.
+ * The server generates its own IDs for compaction messages.
+ *
+ * Strategy:
+ * 1. Insert an optimistic user message ("/compact") for instant feedback
+ * 2. Set session to "busy" so the UI shows activity
+ * 3. Call sdk.session.summarize() — the server runs the compaction agent
+ * 4. After the API resolves, remove the optimistic message since the server
+ *    will have already emitted SSE events with the real compaction messages
+ * 5. SSE events (message.updated, message.part.updated, session.idle) will
+ *    deliver the actual compaction result and clear the busy status
+ */
+export async function compactSession(input: {
+  sessionId: string
+  providerID: string
+  modelID: string
+}): Promise<void> {
+  if (!_optimisticAdd || !_optimisticRemove) {
+    throw new Error("Optimistic refs not set — is useSync() mounted?")
+  }
+
+  const store = dirStore()
+  const directory = dir()
+  const messageID = ascendingId("msg")
+  const textPartId = ascendingId("prt")
+
+  const optimisticParts: Part[] = [
+    { id: textPartId, type: "text", text: "/compact" } as Part,
+  ]
+
+  const optimisticMessage = {
+    id: messageID,
+    role: "user" as const,
+    sessionID: input.sessionId,
+    parentID: "",
+    modelID: input.modelID,
+    providerID: input.providerID,
+    system: "",
+    agent: "",
+    model: `${input.providerID}/${input.modelID}`,
+    metadata: {} as Record<string, unknown>,
+    time: { created: Date.now(), completed: 0 },
+  } as unknown as Message
+
+  // Insert optimistic message so user sees "/compact" instantly
+  _optimisticAdd({
+    sessionID: input.sessionId,
+    message: optimisticMessage,
+    parts: optimisticParts,
+  })
+
+  // Set busy status so the UI shows the session is working
+  const current = store.getState()
+  store.setState({
+    session_status: {
+      ...current.session_status,
+      [input.sessionId]: { type: "busy" as const },
+    },
+  })
+
+  try {
+    await sdk().session.summarize({
+      sessionID: input.sessionId,
+      directory,
+      providerID: input.providerID,
+      modelID: input.modelID,
+    })
+
+    // The summarize API returned, meaning the server has processed the
+    // compaction request and SSE events with real messages should be in
+    // flight or already delivered. Remove the optimistic placeholder to
+    // avoid a duplicate user message (optimistic + real server message).
+    _optimisticRemove({
+      sessionID: input.sessionId,
+      messageID,
+    })
+
+    // Note: we do NOT reset session_status to idle here. The compaction
+    // agent may still be running in the background. The session.idle SSE
+    // event will clear the busy status when the agent truly finishes.
+  } catch (error) {
+    // Rollback optimistic message on failure
+    _optimisticRemove({
+      sessionID: input.sessionId,
+      messageID,
+    })
+    const s = store.getState()
+    store.setState({
+      session_status: {
+        ...s.session_status,
+        [input.sessionId]: { type: "idle" as const },
+      },
+    })
+    throw error
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Abort
 // ---------------------------------------------------------------------------
 

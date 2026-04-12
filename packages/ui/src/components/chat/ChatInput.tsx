@@ -1462,13 +1462,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 return;
             }
             else if (commandName === 'compact' && currentSessionId) {
-                const { opencodeClient } = await import('@/lib/opencode/client');
-                const sdk = opencodeClient.getSdkClient();
                 const configState = useConfigStore.getState();
-                await sdk.session.summarize({
-                    sessionID: currentSessionId,
-                    modelID: configState.currentModelId || '',
+                await sessionActions.compactSession({
+                    sessionId: currentSessionId,
                     providerID: configState.currentProviderId || '',
+                    modelID: configState.currentModelId || '',
                 });
                 return;
             }
