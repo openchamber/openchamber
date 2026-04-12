@@ -1160,9 +1160,8 @@ class OpencodeService {
     providers: Provider[];
     default: { [key: string]: string };
   }> {
-    const response = await this.client.config.providers(
-      this.currentDirectory ? { directory: this.currentDirectory } : undefined
-    );
+    // Always use global config (no directory parameter)
+    const response = await this.client.config.providers();
     if (!response.data) throw new Error('Failed to get providers');
     return response.data;
   }
@@ -1189,9 +1188,8 @@ class OpencodeService {
   // Agent Management
   async listAgents(): Promise<Agent[]> {
     try {
-      const response = await this.client.app.agents(
-        this.currentDirectory ? { directory: this.currentDirectory } : undefined
-      );
+      // Always use global config (no directory parameter)
+      const response = await this.client.app.agents();
       return response.data || [];
     } catch {
       return [];

@@ -418,35 +418,7 @@ const toDirectoryKey = (directory: string | null | undefined): string => {
     return trimmed.length > 0 ? trimmed : DIRECTORY_KEY_GLOBAL;
 };
 
-const fromDirectoryKey = (key: string): string | null => (key === DIRECTORY_KEY_GLOBAL ? null : key);
-
-const resolveInitialDirectoryKey = (): string => {
-    if (typeof window === 'undefined') {
-        return DIRECTORY_KEY_GLOBAL;
-    }
-
-    const directory = opencodeClient.getDirectory() ?? useDirectoryStore.getState().currentDirectory;
-    return toDirectoryKey(directory);
-};
-
-interface DirectoryScopedConfig {
-
-    providers: ProviderWithModelList[];
-    agents: Agent[];
-    currentProviderId: string;
-    currentModelId: string;
-    currentVariant?: string | undefined;
-    currentAgentName: string | undefined;
-    selectedProviderId: string;
-    agentModelSelections: { [agentName: string]: { providerId: string; modelId: string } };
-    defaultProviders: { [key: string]: string };
-}
-
 interface ConfigStore {
-
-    activeDirectoryKey: string;
-    directoryScoped: Record<string, DirectoryScopedConfig>;
-
     providers: ProviderWithModelList[];
     agents: Agent[];
     currentProviderId: string;
@@ -553,17 +525,10 @@ declare global {
     }
 }
 
-// In-flight dedup: prevent concurrent duplicate loadProviders/loadAgents calls for the same directory
-const _inFlightProviders = new Map<string, Promise<void>>();
-const _inFlightAgents = new Map<string, Promise<boolean>>();
-
 export const useConfigStore = create<ConfigStore>()(
     devtools(
         persist(
             (set, get) => ({
-
-                activeDirectoryKey: resolveInitialDirectoryKey(),
-                directoryScoped: {},
 
                 providers: [],
                 agents: [],
@@ -778,58 +743,20 @@ export const useConfigStore = create<ConfigStore>()(
                     }
                     return 500;
                 })(),
-                activateDirectory: async (directory) => {
-                    const directoryKey = toDirectoryKey(directory);
-
-                    set((state) => {
-                        const snapshot = state.directoryScoped[directoryKey];
-                        if (snapshot) {
-                            return {
-                                activeDirectoryKey: directoryKey,
-                                providers: snapshot.providers,
-                                agents: snapshot.agents,
-                                currentProviderId: snapshot.currentProviderId,
-                                currentModelId: snapshot.currentModelId,
-                                currentVariant: snapshot.currentVariant,
-                                currentAgentName: snapshot.currentAgentName,
-                                selectedProviderId: snapshot.selectedProviderId,
-                                agentModelSelections: snapshot.agentModelSelections,
-                                defaultProviders: snapshot.defaultProviders,
-                            };
-                        }
-
-                        return {
-                            activeDirectoryKey: directoryKey,
-                            providers: [],
-                            agents: [],
-                            currentProviderId: "",
-                            currentModelId: "",
-                            currentAgentName: undefined,
-                            selectedProviderId: "",
-                            agentModelSelections: {},
-                            defaultProviders: {},
-                        };
-                    });
-
+                activateDirectory: async () => {
                     if (!get().isConnected) {
                         return;
                     }
 
-                    await get().loadProviders({ directory: fromDirectoryKey(directoryKey) });
-                    await get().loadAgents({ directory: fromDirectoryKey(directoryKey) });
+                    // Providers and agents are now global (not per-directory)
+                    // Load them once if not already loaded
+                    if (get().providers.length === 0 || get().agents.length === 0) {
+                        await get().loadProviders();
+                        await get().loadAgents();
+                    }
                 },
 
-                loadProviders: async (options) => {
-                    const directoryKey = toDirectoryKey(options?.directory ?? fromDirectoryKey(get().activeDirectoryKey));
-
-                    // Dedup: if a load is already in-flight for this directory, reuse it
-                    const existing = _inFlightProviders.get(directoryKey);
-                    if (existing) return existing;
-
-                    const promise = (async () => {
-                    const existingSnapshot = get().directoryScoped[directoryKey];
-                    const previousProviders = existingSnapshot?.providers ?? (get().activeDirectoryKey === directoryKey ? get().providers : []);
-                    const previousDefaults = existingSnapshot?.defaultProviders ?? (get().activeDirectoryKey === directoryKey ? get().defaultProviders : {});
+                loadProviders: async () => {
                     let lastError: unknown = null;
 
                     for (let attempt = 0; attempt < 3; attempt++) {
@@ -838,10 +765,7 @@ export const useConfigStore = create<ConfigStore>()(
                                 () => get().modelsMetadata,
                                 (metadata) => set({ modelsMetadata: metadata }),
                             );
-                            const apiResult = await opencodeClient.withDirectory(
-                                fromDirectoryKey(directoryKey),
-                                () => opencodeClient.getProviders()
-                            );
+                            const apiResult = await opencodeClient.getProviders();
                             const providers = Array.isArray(apiResult?.providers) ? apiResult.providers : [];
                             const defaults = apiResult?.default || {};
 
@@ -855,54 +779,25 @@ export const useConfigStore = create<ConfigStore>()(
                             });
 
                             set((state) => {
-                                const baseSnapshot: DirectoryScopedConfig = state.directoryScoped[directoryKey] ?? {
-                                    providers: [],
-                                    agents: [],
-                                    currentProviderId: "",
-                                    currentModelId: "",
-                                    currentAgentName: undefined,
-                                    selectedProviderId: "",
-                                    agentModelSelections: {},
-                                    defaultProviders: {},
-                                };
-
-                                const nextSnapshot: DirectoryScopedConfig = {
-                                    ...baseSnapshot,
+                                const nextState: Partial<ConfigStore> = {
                                     providers: processedProviders,
                                     defaultProviders: defaults,
                                 };
 
-                                const nextState: Partial<ConfigStore> = {
-                                    directoryScoped: {
-                                        ...state.directoryScoped,
-                                        [directoryKey]: nextSnapshot,
-                                    },
-                                };
+                                if (!state.currentProviderId && !state.currentModelId && state.settingsDefaultModel) {
+                                    const parsed = parseModelString(state.settingsDefaultModel);
+                                    if (parsed) {
+                                        const settingsProvider = processedProviders.find((p) => p.id === parsed.providerId);
+                                        if (settingsProvider?.models.some((m) => m.id === parsed.modelId)) {
+                                            const model = settingsProvider.models.find((m) => m.id === parsed.modelId);
+                                            const currentVariant = state.settingsDefaultVariant && (model as { variants?: Record<string, unknown> } | undefined)?.variants?.[state.settingsDefaultVariant]
+                                                ? state.settingsDefaultVariant
+                                                : undefined;
 
-                                if (state.activeDirectoryKey === directoryKey) {
-                                    nextState.providers = processedProviders;
-                                    nextState.defaultProviders = defaults;
-
-                                    if (!state.currentProviderId && !state.currentModelId && state.settingsDefaultModel) {
-                                        const parsed = parseModelString(state.settingsDefaultModel);
-                                        if (parsed) {
-                                            const settingsProvider = processedProviders.find((p) => p.id === parsed.providerId);
-                                            if (settingsProvider?.models.some((m) => m.id === parsed.modelId)) {
-                                                const model = settingsProvider.models.find((m) => m.id === parsed.modelId);
-                                                const currentVariant = state.settingsDefaultVariant && (model as { variants?: Record<string, unknown> } | undefined)?.variants?.[state.settingsDefaultVariant]
-                                                    ? state.settingsDefaultVariant
-                                                    : undefined;
-
-                                                nextState.currentProviderId = parsed.providerId;
-                                                nextState.currentModelId = parsed.modelId;
-                                                nextState.currentVariant = currentVariant;
-                                                nextState.selectedProviderId = parsed.providerId;
-
-                                                nextSnapshot.currentProviderId = parsed.providerId;
-                                                nextSnapshot.currentModelId = parsed.modelId;
-                                                nextSnapshot.currentVariant = currentVariant;
-                                                nextSnapshot.selectedProviderId = parsed.providerId;
-                                            }
+                                            nextState.currentProviderId = parsed.providerId;
+                                            nextState.currentModelId = parsed.modelId;
+                                            nextState.currentVariant = currentVariant;
+                                            nextState.selectedProviderId = parsed.providerId;
                                         }
                                     }
                                 }
@@ -919,140 +814,28 @@ export const useConfigStore = create<ConfigStore>()(
                     }
 
                     console.error("Failed to load providers:", lastError);
-
-                    set((state) => {
-                        const baseSnapshot: DirectoryScopedConfig = state.directoryScoped[directoryKey] ?? {
-                            providers: [],
-                            agents: [],
-                            currentProviderId: "",
-                            currentModelId: "",
-                            currentAgentName: undefined,
-                            selectedProviderId: "",
-                            agentModelSelections: {},
-                            defaultProviders: {},
-                        };
-
-                        const nextSnapshot: DirectoryScopedConfig = {
-                            ...baseSnapshot,
-                            providers: previousProviders,
-                            defaultProviders: previousDefaults,
-                        };
-
-                        const nextState: Partial<ConfigStore> = {
-                            directoryScoped: {
-                                ...state.directoryScoped,
-                                [directoryKey]: nextSnapshot,
-                            },
-                        };
-
-                        if (state.activeDirectoryKey === directoryKey) {
-                            nextState.providers = previousProviders;
-                            nextState.defaultProviders = previousDefaults;
-
-                            if (!state.currentProviderId && !state.currentModelId && state.settingsDefaultModel) {
-                                const parsed = parseModelString(state.settingsDefaultModel);
-                                if (parsed) {
-                                    const settingsProvider = previousProviders.find((p) => p.id === parsed.providerId);
-                                    if (settingsProvider?.models.some((m) => m.id === parsed.modelId)) {
-                                        const model = settingsProvider.models.find((m) => m.id === parsed.modelId);
-                                        const currentVariant = state.settingsDefaultVariant && (model as { variants?: Record<string, unknown> } | undefined)?.variants?.[state.settingsDefaultVariant]
-                                            ? state.settingsDefaultVariant
-                                            : undefined;
-
-                                        nextState.currentProviderId = parsed.providerId;
-                                        nextState.currentModelId = parsed.modelId;
-                                        nextState.currentVariant = currentVariant;
-                                        nextState.selectedProviderId = parsed.providerId;
-
-                                        nextSnapshot.currentProviderId = parsed.providerId;
-                                        nextSnapshot.currentModelId = parsed.modelId;
-                                        nextSnapshot.currentVariant = currentVariant;
-                                        nextSnapshot.selectedProviderId = parsed.providerId;
-                                    }
-                                }
-                            }
-                        }
-
-                        return nextState;
-                    });
-                    })().finally(() => _inFlightProviders.delete(directoryKey));
-
-                    _inFlightProviders.set(directoryKey, promise);
-                    return promise;
                 },
 
-                setProvider: (providerId: string) => {
+setProvider: (providerId: string) => {
                     const { providers } = get();
                     const provider = providers.find((p) => p.id === providerId);
- 
+
                     if (!provider) {
                         return;
                     }
- 
+
                     const firstModel = provider.models[0];
                     const newModelId = firstModel?.id || "";
- 
-                    set((state) => {
-                        const directoryKey = state.activeDirectoryKey;
-                        const baseSnapshot: DirectoryScopedConfig = state.directoryScoped[directoryKey] ?? {
-                            providers: state.providers,
-                            agents: state.agents,
-                            currentProviderId: state.currentProviderId,
-                            currentModelId: state.currentModelId,
-                            currentVariant: state.currentVariant,
-                            currentAgentName: state.currentAgentName,
-                            selectedProviderId: state.selectedProviderId,
-                            agentModelSelections: state.agentModelSelections,
-                            defaultProviders: state.defaultProviders,
-                        };
 
-                        const nextSnapshot: DirectoryScopedConfig = {
-                            ...baseSnapshot,
-                            currentProviderId: providerId,
-                            currentModelId: newModelId,
-                            selectedProviderId: providerId,
-                        };
-
-                        return {
-                            currentProviderId: providerId,
-                            currentModelId: newModelId,
-                            selectedProviderId: providerId,
-                            directoryScoped: {
-                                ...state.directoryScoped,
-                                [directoryKey]: nextSnapshot,
-                            },
-                        };
+                    set({
+                        currentProviderId: providerId,
+                        currentModelId: newModelId,
+                        selectedProviderId: providerId,
                     });
                 },
 
                 setModel: (modelId: string) => {
-                    set((state) => {
-                        const directoryKey = state.activeDirectoryKey;
-                        const baseSnapshot: DirectoryScopedConfig = state.directoryScoped[directoryKey] ?? {
-                            providers: state.providers,
-                            agents: state.agents,
-                            currentProviderId: state.currentProviderId,
-                            currentModelId: state.currentModelId,
-                            currentVariant: state.currentVariant,
-                            currentAgentName: state.currentAgentName,
-                            selectedProviderId: state.selectedProviderId,
-                            agentModelSelections: state.agentModelSelections,
-                            defaultProviders: state.defaultProviders,
-                        };
- 
-                        const nextSnapshot: DirectoryScopedConfig = {
-                            ...baseSnapshot,
-                            currentModelId: modelId,
-                        };
- 
-                        return {
-                            currentModelId: modelId,
-                            directoryScoped: {
-                                ...state.directoryScoped,
-                                [directoryKey]: nextSnapshot,
-                            },
-                        };
-                    });
+                    set({ currentModelId: modelId });
                 },
 
                 setCurrentVariant: (variant: string | undefined) => {
@@ -1061,31 +844,7 @@ export const useConfigStore = create<ConfigStore>()(
                             return state;
                         }
 
-                        const directoryKey = state.activeDirectoryKey;
-                        const baseSnapshot: DirectoryScopedConfig = state.directoryScoped[directoryKey] ?? {
-                            providers: state.providers,
-                            agents: state.agents,
-                            currentProviderId: state.currentProviderId,
-                            currentModelId: state.currentModelId,
-                            currentVariant: state.currentVariant,
-                            currentAgentName: state.currentAgentName,
-                            selectedProviderId: state.selectedProviderId,
-                            agentModelSelections: state.agentModelSelections,
-                            defaultProviders: state.defaultProviders,
-                        };
-
-                        const nextSnapshot: DirectoryScopedConfig = {
-                            ...baseSnapshot,
-                            currentVariant: variant,
-                        };
-
-                        return {
-                            currentVariant: variant,
-                            directoryScoped: {
-                                ...state.directoryScoped,
-                                [directoryKey]: nextSnapshot,
-                            },
-                        };
+                        return { currentVariant: variant };
                     });
                 },
 
@@ -1120,66 +879,16 @@ export const useConfigStore = create<ConfigStore>()(
                 },
  
                 setSelectedProvider: (providerId: string) => {
-                    set((state) => {
-                        const directoryKey = state.activeDirectoryKey;
-                        const baseSnapshot: DirectoryScopedConfig = state.directoryScoped[directoryKey] ?? {
-                            providers: state.providers,
-                            agents: state.agents,
-                            currentProviderId: state.currentProviderId,
-                            currentModelId: state.currentModelId,
-                            currentAgentName: state.currentAgentName,
-                            selectedProviderId: state.selectedProviderId,
-                            agentModelSelections: state.agentModelSelections,
-                            defaultProviders: state.defaultProviders,
-                        };
-
-                        const nextSnapshot: DirectoryScopedConfig = {
-                            ...baseSnapshot,
-                            selectedProviderId: providerId,
-                        };
-
-                        return {
-                            selectedProviderId: providerId,
-                            directoryScoped: {
-                                ...state.directoryScoped,
-                                [directoryKey]: nextSnapshot,
-                            },
-                        };
-                    });
+                    set({ selectedProviderId: providerId });
                 },
 
                 saveAgentModelSelection: (agentName: string, providerId: string, modelId: string) => {
-                    set((state) => {
-                        const directoryKey = state.activeDirectoryKey;
-                        const nextSelections = {
-                            ...state.agentModelSelections,
-                            [agentName]: { providerId, modelId },
-                        };
+                    const nextSelections = {
+                        ...get().agentModelSelections,
+                        [agentName]: { providerId, modelId },
+                    };
 
-                        const baseSnapshot: DirectoryScopedConfig = state.directoryScoped[directoryKey] ?? {
-                            providers: state.providers,
-                            agents: state.agents,
-                            currentProviderId: state.currentProviderId,
-                            currentModelId: state.currentModelId,
-                            currentAgentName: state.currentAgentName,
-                            selectedProviderId: state.selectedProviderId,
-                            agentModelSelections: state.agentModelSelections,
-                            defaultProviders: state.defaultProviders,
-                        };
-
-                        const nextSnapshot: DirectoryScopedConfig = {
-                            ...baseSnapshot,
-                            agentModelSelections: nextSelections,
-                        };
-
-                        return {
-                            agentModelSelections: nextSelections,
-                            directoryScoped: {
-                                ...state.directoryScoped,
-                                [directoryKey]: nextSnapshot,
-                            },
-                        };
-                    });
+                    set({ agentModelSelections: nextSelections });
                 },
 
                 getAgentModelSelection: (agentName: string) => {
@@ -1187,31 +896,19 @@ export const useConfigStore = create<ConfigStore>()(
                     return agentModelSelections[agentName] || null;
                 },
 
-                loadAgents: async (options) => {
-                    const directoryKey = toDirectoryKey(options?.directory ?? fromDirectoryKey(get().activeDirectoryKey));
-
-                    // Dedup: if a load is already in-flight for this directory, reuse it
-                    const existing = _inFlightAgents.get(directoryKey);
-                    if (existing) return existing;
-
-                    const promise = (async (): Promise<boolean> => {
-                    const existingSnapshot = get().directoryScoped[directoryKey];
-                    const previousAgents = existingSnapshot?.agents ?? (get().activeDirectoryKey === directoryKey ? get().agents : []);
+                loadAgents: async () => {
                     let lastError: unknown = null;
 
                     for (let attempt = 0; attempt < 3; attempt++) {
                         try {
-                            // Fetch agents and OpenChamber settings in parallel
                             const [agents, openChamberDefaults] = await Promise.all([
-                                opencodeClient.withDirectory(fromDirectoryKey(directoryKey), () => opencodeClient.listAgents()),
+                                opencodeClient.listAgents(),
                                 fetchOpenChamberDefaults(),
                             ]);
 
                             const safeAgents = Array.isArray(agents) ? agents : [];
 
-                            const providers = get().activeDirectoryKey === directoryKey
-                                ? get().providers
-                                : (get().directoryScoped[directoryKey]?.providers ?? []);
+                            const providers = get().providers;
 
                             const existingZenModel = normalizeOptionalString(get().settingsZenModel);
 
@@ -1231,42 +928,14 @@ export const useConfigStore = create<ConfigStore>()(
                             const resolvedGitModelId = resolvedGitSelection?.modelId;
                             const resolvedZenModel = resolvedGitModelId || defaultZenModel || existingZenModel;
 
-                            set((state) => {
-                                const baseSnapshot: DirectoryScopedConfig = state.directoryScoped[directoryKey] ?? {
-                                    providers,
-                                    agents: previousAgents,
-                                    currentProviderId: "",
-                                    currentModelId: "",
-                                    currentAgentName: undefined,
-                                    selectedProviderId: "",
-                                    agentModelSelections: {},
-                                    defaultProviders: {},
-                                };
-
-                                const nextSnapshot: DirectoryScopedConfig = {
-                                    ...baseSnapshot,
-                                    providers,
-                                    agents: safeAgents,
-                                };
-
-                                const nextState: Partial<ConfigStore> = {
-                                    settingsDefaultModel: openChamberDefaults.defaultModel,
-                                    settingsDefaultVariant: openChamberDefaults.defaultVariant,
-                                    settingsDefaultAgent: openChamberDefaults.defaultAgent,
-                                    settingsAutoCreateWorktree: openChamberDefaults.autoCreateWorktree ?? false,
-                                    settingsGitmojiEnabled: openChamberDefaults.gitmojiEnabled ?? false,
-                                    settingsZenModel: resolvedZenModel,
-                                    directoryScoped: {
-                                        ...state.directoryScoped,
-                                        [directoryKey]: nextSnapshot,
-                                    },
-                                };
-
-                                if (state.activeDirectoryKey === directoryKey) {
-                                    nextState.agents = safeAgents;
-                                }
-
-                                return nextState;
+                            set({
+                                agents: safeAgents,
+                                settingsDefaultModel: openChamberDefaults.defaultModel,
+                                settingsDefaultVariant: openChamberDefaults.defaultVariant,
+                                settingsDefaultAgent: openChamberDefaults.defaultAgent,
+                                settingsAutoCreateWorktree: openChamberDefaults.autoCreateWorktree ?? false,
+                                settingsGitmojiEnabled: openChamberDefaults.gitmojiEnabled ?? false,
+                                settingsZenModel: resolvedZenModel,
                             });
 
                             const shouldPersistResolvedZenModel =
@@ -1284,40 +953,7 @@ export const useConfigStore = create<ConfigStore>()(
                             }
 
                             if (safeAgents.length === 0) {
-                                set((state) => {
-                                    const baseSnapshot: DirectoryScopedConfig = state.directoryScoped[directoryKey] ?? {
-                                        providers,
-                                        agents: [],
-                            currentProviderId: "",
-                            currentModelId: "",
-                            currentVariant: undefined,
-                            currentAgentName: undefined,
-                                        selectedProviderId: "",
-                                        agentModelSelections: {},
-                                        defaultProviders: {},
-                                    };
-
-                                    const nextSnapshot: DirectoryScopedConfig = {
-                                        ...baseSnapshot,
-                                        providers,
-                                        agents: [],
-                                        currentAgentName: undefined,
-                                    };
-
-                                    const nextState: Partial<ConfigStore> = {
-                                        directoryScoped: {
-                                            ...state.directoryScoped,
-                                            [directoryKey]: nextSnapshot,
-                                        },
-                                    };
-
-                                    if (state.activeDirectoryKey === directoryKey) {
-                                        nextState.currentAgentName = undefined;
-                                    }
-
-                                    return nextState;
-                                });
-
+                                set({ currentAgentName: undefined });
                                 return true;
                             }
 
@@ -1337,7 +973,7 @@ export const useConfigStore = create<ConfigStore>()(
                             let resolvedAgent: Agent = fallbackAgent;
 
                             // Track invalid settings to clear
-                             const invalidSettings: { defaultModel?: string; defaultVariant?: string; defaultAgent?: string } = {};
+                            const invalidSettings: { defaultModel?: string; defaultVariant?: string; defaultAgent?: string } = {};
 
                             // 1. Check OpenChamber settings for default agent
                             if (openChamberDefaults.defaultAgent) {
@@ -1350,34 +986,34 @@ export const useConfigStore = create<ConfigStore>()(
                                 }
                             }
 
-                             // --- Model Selection ---
-                             // Priority: settings.defaultModel → agent's preferred model → opencode/big-pickle
-                             let resolvedProviderId: string | undefined;
-                             let resolvedModelId: string | undefined;
-                             let resolvedVariant: string | undefined;
+                            // --- Model Selection ---
+                            // Priority: settings.defaultModel → agent's preferred model → opencode/big-pickle
+                            let resolvedProviderId: string | undefined;
+                            let resolvedModelId: string | undefined;
+                            let resolvedVariant: string | undefined;
 
-                             // 1. Check OpenChamber settings for default model
-                             if (openChamberDefaults.defaultModel) {
-                                 const parsed = parseModelString(openChamberDefaults.defaultModel);
-                                 if (parsed && validateModel(parsed.providerId, parsed.modelId)) {
-                                     resolvedProviderId = parsed.providerId;
-                                     resolvedModelId = parsed.modelId;
+                            // 1. Check OpenChamber settings for default model
+                            if (openChamberDefaults.defaultModel) {
+                                const parsed = parseModelString(openChamberDefaults.defaultModel);
+                                if (parsed && validateModel(parsed.providerId, parsed.modelId)) {
+                                    resolvedProviderId = parsed.providerId;
+                                    resolvedModelId = parsed.modelId;
 
-                                     if (openChamberDefaults.defaultVariant) {
-                                         const provider = providers.find((p) => p.id === parsed.providerId);
-                                         const model = provider?.models.find((m) => m.id === parsed.modelId) as { variants?: Record<string, unknown> } | undefined;
-                                         const variants = model?.variants;
-                                         if (variants && Object.prototype.hasOwnProperty.call(variants, openChamberDefaults.defaultVariant)) {
-                                             resolvedVariant = openChamberDefaults.defaultVariant;
-                                         } else {
-                                             invalidSettings.defaultVariant = '';
-                                         }
-                                     }
-                                 } else {
-                                     // Model no longer exists - mark for clearing
-                                     invalidSettings.defaultModel = '';
-                                 }
-                             }
+                                    if (openChamberDefaults.defaultVariant) {
+                                        const provider = providers.find((p) => p.id === parsed.providerId);
+                                        const model = provider?.models.find((m) => m.id === parsed.modelId) as { variants?: Record<string, unknown> } | undefined;
+                                        const variants = model?.variants;
+                                        if (variants && Object.prototype.hasOwnProperty.call(variants, openChamberDefaults.defaultVariant)) {
+                                            resolvedVariant = openChamberDefaults.defaultVariant;
+                                        } else {
+                                            invalidSettings.defaultVariant = '';
+                                        }
+                                    }
+                                } else {
+                                    // Model no longer exists - mark for clearing
+                                    invalidSettings.defaultModel = '';
+                                }
+                            }
 
                             // 2. Fall back to agent's preferred model
                             if (!resolvedProviderId && resolvedAgent?.model?.providerID && resolvedAgent?.model?.modelID) {
@@ -1404,55 +1040,24 @@ export const useConfigStore = create<ConfigStore>()(
                                 }
                             }
 
-                            set((state) => {
-                                const baseSnapshot: DirectoryScopedConfig = state.directoryScoped[directoryKey] ?? {
-                                    providers,
-                                    agents: safeAgents,
-                                    currentProviderId: "",
-                                    currentModelId: "",
-                                    currentAgentName: undefined,
-                                    selectedProviderId: "",
-                                    agentModelSelections: {},
-                                    defaultProviders: {},
-                                };
-
-                                const nextSnapshot: DirectoryScopedConfig = {
-                                    ...baseSnapshot,
-                                    providers,
-                                    agents: safeAgents,
-                                    currentAgentName: resolvedAgent.name,
-                                    currentProviderId: resolvedProviderId ?? baseSnapshot.currentProviderId,
-                                    currentModelId: resolvedModelId ?? baseSnapshot.currentModelId,
-                                    currentVariant: resolvedVariant,
-                                };
-
-                                const nextState: Partial<ConfigStore> = {
-                                    directoryScoped: {
-                                        ...state.directoryScoped,
-                                        [directoryKey]: nextSnapshot,
-                                    },
-                                };
-
-                                if (state.activeDirectoryKey === directoryKey) {
-                                    nextState.currentAgentName = resolvedAgent.name;
-                                    if (resolvedProviderId && resolvedModelId) {
-                                        nextState.currentProviderId = resolvedProviderId;
-                                        nextState.currentModelId = resolvedModelId;
-                                        nextState.currentVariant = resolvedVariant;
+                            set({
+                                currentAgentName: resolvedAgent.name,
+                                ...(resolvedProviderId && resolvedModelId
+                                    ? {
+                                        currentProviderId: resolvedProviderId,
+                                        currentModelId: resolvedModelId,
+                                        currentVariant: resolvedVariant,
                                     }
-                                }
-
-                                return nextState;
+                                    : {}),
                             });
 
                             // Clear invalid settings from storage (best-effort cleanup)
                             if (Object.keys(invalidSettings).length > 0) {
-                                // Also clear from store state
-                                 set({
-                                     settingsDefaultModel: invalidSettings.defaultModel !== undefined ? undefined : get().settingsDefaultModel,
-                                     settingsDefaultVariant: invalidSettings.defaultVariant !== undefined ? undefined : get().settingsDefaultVariant,
-                                     settingsDefaultAgent: invalidSettings.defaultAgent !== undefined ? undefined : get().settingsDefaultAgent,
-                                 });
+                                set({
+                                    settingsDefaultModel: invalidSettings.defaultModel !== undefined ? undefined : get().settingsDefaultModel,
+                                    settingsDefaultVariant: invalidSettings.defaultVariant !== undefined ? undefined : get().settingsDefaultVariant,
+                                    settingsDefaultAgent: invalidSettings.defaultAgent !== undefined ? undefined : get().settingsDefaultAgent,
+                                });
                                 updateDesktopSettings(invalidSettings).catch(() => {
                                     // Ignore errors - best effort cleanup
                                 });
@@ -1467,79 +1072,13 @@ export const useConfigStore = create<ConfigStore>()(
                     }
 
                     console.error("Failed to load agents:", lastError);
-
-                    set((state) => {
-                        const providers = state.activeDirectoryKey === directoryKey
-                            ? state.providers
-                            : (state.directoryScoped[directoryKey]?.providers ?? []);
-
-                        const baseSnapshot: DirectoryScopedConfig = state.directoryScoped[directoryKey] ?? {
-                            providers,
-                            agents: [],
-                            currentProviderId: "",
-                            currentModelId: "",
-                            currentAgentName: undefined,
-                            selectedProviderId: "",
-                            agentModelSelections: {},
-                            defaultProviders: {},
-                        };
-
-                        const nextSnapshot: DirectoryScopedConfig = {
-                            ...baseSnapshot,
-                            providers,
-                            agents: previousAgents,
-                        };
-
-                        const nextState: Partial<ConfigStore> = {
-                            directoryScoped: {
-                                ...state.directoryScoped,
-                                [directoryKey]: nextSnapshot,
-                            },
-                        };
-
-                        if (state.activeDirectoryKey === directoryKey) {
-                            nextState.agents = previousAgents;
-                        }
-
-                        return nextState;
-                    });
-
                     return false;
-                    })().finally(() => _inFlightAgents.delete(directoryKey));
-
-                    _inFlightAgents.set(directoryKey, promise);
-                    return promise;
                 },
 
                 setAgent: (agentName: string | undefined) => {
                     const { agents, providers, settingsDefaultModel, settingsDefaultVariant } = get();
 
-                    set((state) => {
-                        const directoryKey = state.activeDirectoryKey;
-                        const baseSnapshot: DirectoryScopedConfig = state.directoryScoped[directoryKey] ?? {
-                            providers: state.providers,
-                            agents: state.agents,
-                            currentProviderId: state.currentProviderId,
-                            currentModelId: state.currentModelId,
-                            currentAgentName: state.currentAgentName,
-                            selectedProviderId: state.selectedProviderId,
-                            agentModelSelections: state.agentModelSelections,
-                            defaultProviders: state.defaultProviders,
-                        };
-
-                        const nextSnapshot: DirectoryScopedConfig = {
-                            ...baseSnapshot,
-                            currentAgentName: agentName,
-                        };
-
-                        return {
-                            currentAgentName: agentName,
-                            directoryScoped: {
-                                ...state.directoryScoped,
-                                [directoryKey]: nextSnapshot,
-                            },
-                        };
-                    });
+                    set({ currentAgentName: agentName });
 
                     if (agentName) {
                         const { currentSessionId } = useSessionUIStore.getState();
@@ -1573,46 +1112,19 @@ export const useConfigStore = create<ConfigStore>()(
                             if (parsed) {
                                 const settingsProvider = providers.find((p) => p.id === parsed.providerId);
                                 if (settingsProvider?.models.some((m) => m.id === parsed.modelId)) {
-                                    set((state) => {
-                                        const directoryKey = state.activeDirectoryKey;
-                                        const baseSnapshot: DirectoryScopedConfig = state.directoryScoped[directoryKey] ?? {
-                                            providers: state.providers,
-                                            agents: state.agents,
-                                            currentProviderId: state.currentProviderId,
-                                            currentModelId: state.currentModelId,
-                                            currentVariant: state.currentVariant,
-                                            currentAgentName: state.currentAgentName,
-                                            selectedProviderId: state.selectedProviderId,
-                                            agentModelSelections: state.agentModelSelections,
-                                            defaultProviders: state.defaultProviders,
-                                        };
-
-                                        let nextVariant: string | undefined;
-                                        if (settingsDefaultVariant) {
-                                            const settingsProvider = providers.find((p) => p.id === parsed.providerId);
-                                            const model = settingsProvider?.models.find((m) => m.id === parsed.modelId) as { variants?: Record<string, unknown> } | undefined;
-                                            const variants = model?.variants;
-                                            if (variants && Object.prototype.hasOwnProperty.call(variants, settingsDefaultVariant)) {
-                                                nextVariant = settingsDefaultVariant;
-                                            }
+                                    let nextVariant: string | undefined;
+                                    if (settingsDefaultVariant) {
+                                        const model = settingsProvider.models.find((m) => m.id === parsed.modelId) as { variants?: Record<string, unknown> } | undefined;
+                                        const variants = model?.variants;
+                                        if (variants && Object.prototype.hasOwnProperty.call(variants, settingsDefaultVariant)) {
+                                            nextVariant = settingsDefaultVariant;
                                         }
+                                    }
 
-                                        const nextSnapshot: DirectoryScopedConfig = {
-                                            ...baseSnapshot,
-                                            currentProviderId: parsed.providerId,
-                                            currentModelId: parsed.modelId,
-                                            currentVariant: nextVariant,
-                                        };
-
-                                        return {
-                                            currentProviderId: parsed.providerId,
-                                            currentModelId: parsed.modelId,
-                                            currentVariant: nextVariant,
-                                            directoryScoped: {
-                                                ...state.directoryScoped,
-                                                [directoryKey]: nextSnapshot,
-                                            },
-                                        };
+                                    set({
+                                        currentProviderId: parsed.providerId,
+                                        currentModelId: parsed.modelId,
+                                        currentVariant: nextVariant,
                                     });
                                     return;
                                 }
@@ -1628,35 +1140,10 @@ export const useConfigStore = create<ConfigStore>()(
                             const agentModel = agentProvider?.models.find((model) => model.id === modelID);
 
                             if (agentModel) {
-                                set((state) => {
-                                    const directoryKey = state.activeDirectoryKey;
-                                    const baseSnapshot: DirectoryScopedConfig = state.directoryScoped[directoryKey] ?? {
-                                        providers: state.providers,
-                                        agents: state.agents,
-                                        currentProviderId: state.currentProviderId,
-                                        currentModelId: state.currentModelId,
-                                        currentAgentName: state.currentAgentName,
-                                        selectedProviderId: state.selectedProviderId,
-                                        agentModelSelections: state.agentModelSelections,
-                                        defaultProviders: state.defaultProviders,
-                                    };
-
-                                    const nextSnapshot: DirectoryScopedConfig = {
-                                        ...baseSnapshot,
-                                        currentProviderId: providerID,
-                                        currentModelId: modelID,
-                                        selectedProviderId: providerID,
-                                    };
-
-                                    return {
-                                        currentProviderId: providerID,
-                                        currentModelId: modelID,
-                                        selectedProviderId: providerID,
-                                        directoryScoped: {
-                                            ...state.directoryScoped,
-                                            [directoryKey]: nextSnapshot,
-                                        },
-                                    };
+                                set({
+                                    currentProviderId: providerID,
+                                    currentModelId: modelID,
+                                    selectedProviderId: providerID,
                                 });
                             }
                         }
@@ -1968,15 +1455,12 @@ export const useConfigStore = create<ConfigStore>()(
                 name: "config-store",
                 storage: createJSONStorage(() => getSafeStorage()),
                 partialize: (state) => ({
-                    activeDirectoryKey: state.activeDirectoryKey,
-                    directoryScoped: state.directoryScoped,
                     currentProviderId: state.currentProviderId,
                     currentModelId: state.currentModelId,
                     currentVariant: state.currentVariant,
                     currentAgentName: state.currentAgentName,
                     selectedProviderId: state.selectedProviderId,
                     agentModelSelections: state.agentModelSelections,
-                    defaultProviders: state.defaultProviders,
                     settingsDefaultModel: state.settingsDefaultModel,
                     settingsDefaultVariant: state.settingsDefaultVariant,
                     settingsDefaultAgent: state.settingsDefaultAgent,
