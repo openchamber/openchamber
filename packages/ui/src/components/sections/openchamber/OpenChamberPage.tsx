@@ -109,6 +109,7 @@ const VisualSectionContent: React.FC = () => {
     return <OpenChamberVisualSettings visibleSettings={[
         'theme',
         'pwaInstallName',
+        'pwaOrientation',
         'fontSize',
         'terminalFontSize',
         'spacing',
