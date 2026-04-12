@@ -205,6 +205,7 @@ export async function handleFsBridgeMessage(
             path: deps.normalizeFsPath(resolution.resolvedPath),
             isFile: true,
             size: stats.size,
+            mtimeMs: stats.mtimeMs,
           },
         };
       } catch (error) {

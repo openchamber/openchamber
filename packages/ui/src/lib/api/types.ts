@@ -493,7 +493,7 @@ export interface FilesAPI {
   listDirectory(path: string, options?: ListDirectoryOptions): Promise<DirectoryListResult>;
   search(payload: FileSearchQuery): Promise<FileSearchResult[]>;
   createDirectory(path: string): Promise<{ success: boolean; path: string }>;
-  statFile?(path: string): Promise<{ path: string; isFile: boolean; size: number }>;
+  statFile?(path: string): Promise<{ path: string; isFile: boolean; size: number; mtimeMs?: number }>;
   readFile?(path: string): Promise<{ content: string; path: string }>;
   readFileBinary?(path: string): Promise<{ dataUrl: string; path: string }>;
   writeFile?(path: string, content: string): Promise<{ success: boolean; path: string }>;
