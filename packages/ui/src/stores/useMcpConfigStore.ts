@@ -1,6 +1,6 @@
 import { create } from 'zustand';
-import { devtools, persist, createJSONStorage } from 'zustand/middleware';
-import { getSafeStorage } from './utils/safeStorage';
+import { devtools, persist } from 'zustand/middleware';
+import { createDebouncedJSONStorage } from './utils/debouncedStorage';
 import {
   startConfigUpdate,
   finishConfigUpdate,
@@ -283,7 +283,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
       }),
       {
         name: 'mcp-config-store',
-        storage: createJSONStorage(() => getSafeStorage()),
+        storage: createDebouncedJSONStorage(),
         partialize: (state) => ({ selectedMcpName: state.selectedMcpName }),
       },
     ),

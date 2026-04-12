@@ -79,9 +79,8 @@ const DEFAULT_WORKING: WorkingSummary = {
     retryInfo: null,
 };
 
-const EMPTY_MESSAGES: Message[] = [];
-const EMPTY_PARTS: Part[] = [];
-const EMPTY_SESSION_MESSAGES: SessionMessageRecord[] = [];
+import { EMPTY_MESSAGES, EMPTY_PARTS, emptyArray } from '@/constants/empty';
+const EMPTY_SESSION_MESSAGES: SessionMessageRecord[] = emptyArray<SessionMessageRecord>() as SessionMessageRecord[];
 const isAssistantMessage = (message: Message): message is AssistantMessageWithState => message.role === 'assistant';
 
 const isReasoningPart = (part: Part): part is ReasoningPart => part.type === 'reasoning';

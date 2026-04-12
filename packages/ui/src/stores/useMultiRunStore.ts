@@ -85,6 +85,9 @@ export const useMultiRunStore = create<MultiRunStore>()(
         const groupName = params.name.trim();
         const prompt = params.prompt.trim();
         const { models, agent, files, setupCommands } = params;
+        const defaultBackendId = typeof params.backendId === 'string' && params.backendId.trim().length > 0
+          ? params.backendId.trim()
+          : 'opencode';
 
         if (!groupName) {
           set({ error: 'Group name is required' });
@@ -127,12 +130,20 @@ export const useMultiRunStore = create<MultiRunStore>()(
           const rootBranch = await getRootBranch(directory);
           const rootTrackingRemote = await resolveRootTrackingRemote(directory);
 
+          const resolveRunBackendId = (model: CreateMultiRunParams["models"][number]) => {
+            if (typeof model.backendId === 'string' && model.backendId.trim().length > 0) {
+              return model.backendId.trim();
+            }
+            return defaultBackendId;
+          };
+
           const createdRuns: Array<{
             sessionId: string;
             worktreePath: string;
             providerID: string;
             modelID: string;
             variant?: string;
+            backendId: string;
           }> = [];
 
           const commandsToRun = setupCommands?.filter((cmd) => cmd.trim().length > 0) ?? [];
@@ -181,10 +192,11 @@ export const useMultiRunStore = create<MultiRunStore>()(
               const sessionTitle = count > 1
                 ? `${groupSlug}/${model.providerID}/${model.modelID}/${index}`
                 : `${groupSlug}/${model.providerID}/${model.modelID}`;
+              const runBackendId = resolveRunBackendId(model);
 
               const session = await opencodeClient.withDirectory(
                 worktreeMetadata.path,
-                () => opencodeClient.createSession({ title: sessionTitle })
+                () => opencodeClient.createSession({ title: sessionTitle, backendId: runBackendId })
               );
 
               useSessionUIStore.getState().setWorktreeMetadata(session.id, enrichedMetadata);
@@ -195,6 +207,7 @@ export const useMultiRunStore = create<MultiRunStore>()(
                 providerID: model.providerID,
                 modelID: model.modelID,
                 variant: model.variant,
+                backendId: runBackendId,
               });
 
             } catch (error) {

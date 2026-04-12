@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { StoreApi, UseBoundStore } from "zustand";
-import { devtools, persist, createJSONStorage } from "zustand/middleware";
+import { devtools, persist } from "zustand/middleware";
+import { createDebouncedJSONStorage } from "./utils/debouncedStorage";
 import { opencodeClient } from "@/lib/opencode/client";
 import {
   startConfigUpdate,
@@ -8,8 +9,11 @@ import {
   updateConfigUpdateMessage,
 } from "@/lib/configUpdate";
 import { emitConfigChange, scopeMatches, subscribeToConfigChanges } from "@/lib/configSync";
-import { getSafeStorage } from "./utils/safeStorage";
 import { useProjectsStore } from "@/stores/useProjectsStore";
+import { useSessionUIStore } from "@/sync/session-ui-store";
+import { useSelectionStore } from "@/sync/selection-store";
+import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore";
+import type { BackendCommandSurfaceItem, BackendControlSurface } from "@/lib/api/types";
 
 
 export type CommandScope = 'user' | 'project';
@@ -25,6 +29,8 @@ export interface CommandConfig {
 
 export interface Command extends CommandConfig {
   isBuiltIn?: boolean;
+  backendId?: string;
+  executionMode?: 'session-command' | 'prompt-text';
 }
 
 // Built-in commands provided by OpenCode (not defined in user config directories)
@@ -53,6 +59,8 @@ const buildCommandsSignature = (commands: Command[]): string => {
       command.description ?? '',
       command.agent ?? '',
       command.model ?? '',
+      command.backendId ?? '',
+      command.executionMode ?? '',
       String(command.isBuiltIn === true),
     ].join('|'))
     .join('||');
@@ -78,6 +86,81 @@ const getRequestDirectory = (): string | null => {
   }
 
   return null;
+};
+
+const resolveActiveBackendContext = (): { backendId: string; sessionId: string | null } => {
+  const uiState = useSessionUIStore.getState();
+  const selectionState = useSelectionStore.getState();
+  const currentSessionId = uiState.currentSessionId ?? null;
+
+  if (currentSessionId) {
+    const selectedBackendId = selectionState.getSessionBackendSelection(currentSessionId);
+    if (selectedBackendId) {
+      return { backendId: selectedBackendId, sessionId: currentSessionId };
+    }
+
+    const { activeSessions, archivedSessions } = useGlobalSessionsStore.getState();
+    const session = activeSessions.find((candidate) => candidate.id === currentSessionId)
+      ?? archivedSessions.find((candidate) => candidate.id === currentSessionId);
+    const sessionBackendId = typeof (session as { backendId?: string | null } | undefined)?.backendId === 'string'
+      ? (session as { backendId?: string | null }).backendId?.trim()
+      : '';
+
+    if (sessionBackendId) {
+      return { backendId: sessionBackendId, sessionId: currentSessionId };
+    }
+  }
+
+  return {
+    backendId: selectionState.draftBackendId || selectionState.lastUsedBackendId || 'opencode',
+    sessionId: currentSessionId,
+  };
+};
+
+const mapBackendCommandItems = (
+  items: BackendCommandSurfaceItem[],
+  backendId: string,
+): Command[] => items
+  .filter((item) => item && typeof item.name === 'string' && item.name.trim().length > 0)
+  .map((item) => ({
+    name: item.name.trim(),
+    ...(typeof item.description === 'string' && item.description.trim().length > 0
+      ? { description: item.description.trim() }
+      : {}),
+    ...(typeof item.agent === 'string' && item.agent.trim().length > 0
+      ? { agent: item.agent.trim() }
+      : {}),
+    ...(typeof item.model === 'string' && item.model.trim().length > 0
+      ? { model: item.model.trim() }
+      : {}),
+    ...(typeof item.template === 'string' && item.template.length > 0
+      ? { template: item.template }
+      : {}),
+    backendId,
+    executionMode: (item.executionMode ?? 'prompt-text') as 'session-command' | 'prompt-text',
+    isBuiltIn: true,
+    scope: undefined,
+  }));
+
+const getBackendCommandSurface = async (): Promise<{
+  backendId: string;
+  surface: BackendControlSurface | null;
+}> => {
+  const { backendId, sessionId } = resolveActiveBackendContext();
+  try {
+    const surface = await opencodeClient.getHarnessControlSurface(
+      sessionId ? { sessionId } : { backendId }
+    );
+    return {
+      backendId: surface.backendId || backendId,
+      surface,
+    };
+  } catch {
+    return {
+      backendId,
+      surface: null,
+    };
+  }
 };
 
 const MAX_HEALTH_WAIT_MS = 20000;
@@ -138,7 +221,8 @@ export const useCommandsStore = create<CommandsStore>()(
 
         loadCommands: async () => {
           const directory = getRequestDirectory();
-          const cacheKey = getCommandsCacheKey(directory);
+          const { backendId: activeBackendId } = resolveActiveBackendContext();
+          const cacheKey = `${activeBackendId}:${getCommandsCacheKey(directory)}`;
           const now = Date.now();
           const loadedAt = commandsLastLoadedAt.get(cacheKey) ?? 0;
           const hasCachedCommands = get().commands.length > 0;
@@ -161,6 +245,23 @@ export const useCommandsStore = create<CommandsStore>()(
             for (let attempt = 0; attempt < 3; attempt++) {
               try {
                 const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
+
+                const { backendId, surface } = await getBackendCommandSurface();
+                const backendCommandSelector = surface?.commandSelector ?? null;
+                if (backendId !== 'opencode' || backendCommandSelector?.source === 'backend') {
+                  const backendCommands = mapBackendCommandItems(
+                    Array.isArray(backendCommandSelector?.items) ? backendCommandSelector.items : [],
+                    backendId,
+                  );
+                  const nextSignature = buildCommandsSignature(backendCommands);
+                  if (previousSignature !== nextSignature) {
+                    set({ commands: backendCommands, isLoading: false });
+                  } else {
+                    set({ isLoading: false });
+                  }
+                  commandsLastLoadedAt.set(cacheKey, Date.now());
+                  return true;
+                }
 
                 // Ensure the list is scoped to the same directory we use for config source detection.
                 const commands = await opencodeClient.withDirectory(
@@ -195,16 +296,30 @@ export const useCommandsStore = create<CommandsStore>()(
                         }
 
                         if (scope === 'project' || scope === 'user') {
-                          return { ...cmd, scope: scope as CommandScope };
+                          return {
+                            ...cmd,
+                            scope: scope as CommandScope,
+                            executionMode: 'session-command' as const,
+                            backendId: 'opencode',
+                          };
                         }
 
                         // Explicitly set null scope if not found
-                        return { ...cmd, scope: undefined };
+                        return {
+                          ...cmd,
+                          scope: undefined,
+                          executionMode: 'session-command' as const,
+                          backendId: 'opencode',
+                        };
                       }
                     } catch (err) {
                       console.warn(`[CommandsStore] Failed to fetch config for command ${cmd.name}:`, err);
                     }
-                    return cmd;
+                    return {
+                      ...cmd,
+                      executionMode: 'session-command' as const,
+                      backendId: 'opencode',
+                    };
                   })
                 );
 
@@ -417,7 +532,7 @@ export const useCommandsStore = create<CommandsStore>()(
       }),
       {
         name: "commands-store",
-        storage: createJSONStorage(() => getSafeStorage()),
+        storage: createDebouncedJSONStorage(),
         partialize: (state) => ({
           selectedCommandName: state.selectedCommandName,
         }),

@@ -1,11 +1,11 @@
 import { create } from "zustand";
 import type { StoreApi, UseBoundStore } from "zustand";
-import { devtools, persist, createJSONStorage } from "zustand/middleware";
+import { devtools, persist } from "zustand/middleware";
+import { createDebouncedJSONStorage } from "./utils/debouncedStorage";
 import type { Provider, Agent } from "@opencode-ai/sdk/v2";
 import { opencodeClient } from "@/lib/opencode/client";
 import { scopeMatches, subscribeToConfigChanges } from "@/lib/configSync";
 import type { ModelMetadata } from "@/types";
-import { getSafeStorage } from "./utils/safeStorage";
 import { filterVisibleAgents } from "./useAgentsStore";
 import { useSessionUIStore } from "@/sync/session-ui-store";
 import { useSelectionStore } from "@/sync/selection-store";
@@ -448,6 +448,7 @@ interface ConfigStore {
     directoryScoped: Record<string, DirectoryScopedConfig>;
 
     providers: ProviderWithModelList[];
+    virtualProviders: ProviderWithModelList[];
     agents: Agent[];
     currentProviderId: string;
     currentModelId: string;
@@ -523,10 +524,12 @@ interface ConfigStore {
     loadAgents: (options?: { directory?: string | null }) => Promise<boolean>;
     setProvider: (providerId: string) => void;
     setModel: (modelId: string) => void;
+    setVirtualProviders: (providers: ProviderWithModelList[]) => void;
     setCurrentVariant: (variant: string | undefined) => void;
     cycleCurrentVariant: () => void;
     getCurrentModelVariants: () => string[];
     setAgent: (agentName: string | undefined) => void;
+    setCurrentAgentName: (agentName: string | undefined) => void;
     setSelectedProvider: (providerId: string) => void;
     setSettingsDefaultModel: (model: string | undefined) => void;
     setSettingsDefaultVariant: (variant: string | undefined) => void;
@@ -556,6 +559,16 @@ declare global {
 // In-flight dedup: prevent concurrent duplicate loadProviders/loadAgents calls for the same directory
 const _inFlightProviders = new Map<string, Promise<void>>();
 const _inFlightAgents = new Map<string, Promise<boolean>>();
+const getEffectiveProviders = (state: Pick<ConfigStore, 'providers' | 'virtualProviders'>): ProviderWithModelList[] => {
+    if (!Array.isArray(state.virtualProviders) || state.virtualProviders.length === 0) {
+        return state.providers;
+    }
+    const virtualIds = new Set(state.virtualProviders.map((provider) => provider.id));
+    return [
+        ...state.virtualProviders,
+        ...state.providers.filter((provider) => !virtualIds.has(provider.id)),
+    ];
+};
 
 export const useConfigStore = create<ConfigStore>()(
     devtools(
@@ -566,6 +579,7 @@ export const useConfigStore = create<ConfigStore>()(
                 directoryScoped: {},
 
                 providers: [],
+                virtualProviders: [],
                 agents: [],
                 currentProviderId: "",
                 currentModelId: "",
@@ -982,8 +996,7 @@ export const useConfigStore = create<ConfigStore>()(
                 },
 
                 setProvider: (providerId: string) => {
-                    const { providers } = get();
-                    const provider = providers.find((p) => p.id === providerId);
+                    const provider = getEffectiveProviders(get()).find((p) => p.id === providerId);
  
                     if (!provider) {
                         return;
@@ -1052,6 +1065,72 @@ export const useConfigStore = create<ConfigStore>()(
                                 [directoryKey]: nextSnapshot,
                             },
                         };
+                    });
+                },
+
+                setVirtualProviders: (virtualProviders: ProviderWithModelList[]) => {
+                    set((state) => {
+                        const nextVirtualProviders = Array.isArray(virtualProviders) ? virtualProviders : [];
+                        const previousVirtualProviders = state.virtualProviders;
+                        const sameLength = previousVirtualProviders.length === nextVirtualProviders.length;
+                        const unchanged = sameLength && previousVirtualProviders.every((provider, index) => {
+                            const nextProvider = nextVirtualProviders[index];
+                            if (!nextProvider) {
+                                return false;
+                            }
+                            if (provider.id !== nextProvider.id || provider.name !== nextProvider.name) {
+                                return false;
+                            }
+                            const providerModels = Array.isArray(provider.models) ? provider.models : [];
+                            const nextModels = Array.isArray(nextProvider.models) ? nextProvider.models : [];
+                            return providerModels.length === nextModels.length && providerModels.every((model, modelIndex) => model.id === nextModels[modelIndex]?.id);
+                        });
+
+                        if (unchanged) {
+                            return state;
+                        }
+
+                        const effectiveProviders = getEffectiveProviders({
+                            providers: state.providers,
+                            virtualProviders: nextVirtualProviders,
+                        } as Pick<ConfigStore, 'providers' | 'virtualProviders'>);
+                        const currentProvider = effectiveProviders.find((provider) => provider.id === state.currentProviderId);
+                        const currentModelExists = currentProvider?.models.some((model) => model.id === state.currentModelId) ?? false;
+
+                        const nextState: Partial<ConfigStore> = {
+                            virtualProviders: nextVirtualProviders,
+                        };
+
+                        if (!currentProvider) {
+                            const defaultSelection = (() => {
+                                if (state.settingsDefaultModel) {
+                                    const parsed = parseModelString(state.settingsDefaultModel);
+                                    if (parsed && hasProviderModel(effectiveProviders, parsed.providerId, parsed.modelId)) {
+                                        return parsed;
+                                    }
+                                }
+
+                                const firstProvider = effectiveProviders.find((provider) =>
+                                    Array.isArray(provider.models) && provider.models.length > 0
+                                );
+                                const firstModelId = firstProvider?.models[0]?.id;
+                                if (firstProvider?.id && typeof firstModelId === 'string' && firstModelId.length > 0) {
+                                    return { providerId: firstProvider.id, modelId: firstModelId };
+                                }
+
+                                return null;
+                            })();
+
+                            nextState.currentProviderId = defaultSelection?.providerId ?? '';
+                            nextState.currentModelId = defaultSelection?.modelId ?? '';
+                            nextState.selectedProviderId = defaultSelection?.providerId ?? '';
+                            nextState.currentVariant = undefined;
+                        } else if (!currentModelExists) {
+                            nextState.currentModelId = currentProvider.models[0]?.id || '';
+                            nextState.currentVariant = undefined;
+                        }
+
+                        return nextState;
                     });
                 },
 
@@ -1663,6 +1742,36 @@ export const useConfigStore = create<ConfigStore>()(
                     }
                 },
 
+                setCurrentAgentName: (agentName: string | undefined) => {
+                    set((state) => {
+                        const directoryKey = state.activeDirectoryKey;
+                        const baseSnapshot: DirectoryScopedConfig = state.directoryScoped[directoryKey] ?? {
+                            providers: state.providers,
+                            agents: state.agents,
+                            currentProviderId: state.currentProviderId,
+                            currentModelId: state.currentModelId,
+                            currentVariant: state.currentVariant,
+                            currentAgentName: state.currentAgentName,
+                            selectedProviderId: state.selectedProviderId,
+                            agentModelSelections: state.agentModelSelections,
+                            defaultProviders: state.defaultProviders,
+                        };
+
+                        const nextSnapshot: DirectoryScopedConfig = {
+                            ...baseSnapshot,
+                            currentAgentName: agentName,
+                        };
+
+                        return {
+                            currentAgentName: agentName,
+                            directoryScoped: {
+                                ...state.directoryScoped,
+                                [directoryKey]: nextSnapshot,
+                            },
+                        };
+                    });
+                },
+
                  setSettingsDefaultModel: (model: string | undefined) => {
                      set({ settingsDefaultModel: model });
                  },
@@ -1918,8 +2027,8 @@ export const useConfigStore = create<ConfigStore>()(
                 },
 
                 getCurrentProvider: () => {
-                    const { providers, currentProviderId } = get();
-                    return providers.find((p) => p.id === currentProviderId);
+                    const { currentProviderId } = get();
+                    return getEffectiveProviders(get()).find((p) => p.id === currentProviderId);
                 },
 
                 getCurrentModel: () => {
@@ -1941,14 +2050,14 @@ export const useConfigStore = create<ConfigStore>()(
                     if (!key) {
                         return undefined;
                     }
-                    const { modelsMetadata, providers } = get();
+                    const { modelsMetadata } = get();
                     const cached = modelsMetadata.get(key);
                     if (cached) {
                         return cached;
                     }
 
                     // Fallback: derive metadata from provider model data (covers custom providers not in models.dev)
-                    const provider = providers.find((p) => p.id === providerId);
+                    const provider = getEffectiveProviders(get()).find((p) => p.id === providerId);
                     if (!provider) {
                         return undefined;
                     }
@@ -1966,7 +2075,7 @@ export const useConfigStore = create<ConfigStore>()(
             }),
             {
                 name: "config-store",
-                storage: createJSONStorage(() => getSafeStorage()),
+                storage: createDebouncedJSONStorage(),
                 partialize: (state) => ({
                     activeDirectoryKey: state.activeDirectoryKey,
                     directoryScoped: state.directoryScoped,

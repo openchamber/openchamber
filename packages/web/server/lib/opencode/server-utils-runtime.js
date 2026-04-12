@@ -13,6 +13,9 @@ export const createServerUtilsRuntime = (dependencies) => {
     buildOpenCodeUrl,
     ensureOpenCodeApiPrefix,
     getUiNotificationClients,
+    backendRegistry,
+    sessionBindingsRuntime,
+    readSettingsFromDiskMigrated,
     getOpenCodePort,
     setOpenCodePortState,
     syncToHmrState,
@@ -152,6 +155,9 @@ export const createServerUtilsRuntime = (dependencies) => {
       buildOpenCodeUrl,
       ensureOpenCodeApiPrefix,
       getUiNotificationClients,
+      backendRegistry,
+      sessionBindingsRuntime,
+      readSettingsFromDiskMigrated,
     });
   };
 

@@ -1,8 +1,8 @@
 import { create } from 'zustand';
-import { devtools, persist, createJSONStorage } from 'zustand/middleware';
+import { devtools, persist } from 'zustand/middleware';
+import { createDebouncedSessionJSONStorage } from './utils/debouncedStorage';
 
 import { closeTerminal } from '@/lib/terminalApi';
-import { getSafeSessionStorage } from '@/stores/utils/safeStorage';
 
 export interface TerminalChunk {
   id: number;
@@ -449,7 +449,7 @@ export const useTerminalStore = create<TerminalStore>()(
       }),
       {
         name: TERMINAL_STORE_NAME,
-        storage: createJSONStorage(() => getSafeSessionStorage()),
+        storage: createDebouncedSessionJSONStorage(),
         partialize: (state): PersistedTerminalStoreState => ({
           sessions: Array.from(state.sessions.entries()).map(([directory, dirState]) => [
             directory,

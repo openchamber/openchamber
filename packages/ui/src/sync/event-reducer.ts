@@ -278,7 +278,7 @@ export function applyDirectoryEvent(
 
     case "permission.asked": {
       const permission = event.properties as PermissionRequest
-      const permissions = draft.permission[permission.sessionID] ?? []
+      const permissions = [...(draft.permission[permission.sessionID] ?? [])]
       draft.permission[permission.sessionID] = permissions
       const result = Binary.search(permissions, permission.id, (p) => p.id)
       if (result.found) {
@@ -295,7 +295,7 @@ export function applyDirectoryEvent(
       if (!permissions) return false
       const result = Binary.search(permissions, props.requestID, (p) => p.id)
       if (result.found) {
-        permissions.splice(result.index, 1)
+        draft.permission[props.sessionID] = [...permissions.slice(0, result.index), ...permissions.slice(result.index + 1)]
         return true
       }
       return false
@@ -303,7 +303,7 @@ export function applyDirectoryEvent(
 
     case "question.asked": {
       const question = event.properties as QuestionRequest
-      const questions = draft.question[question.sessionID] ?? []
+      const questions = [...(draft.question[question.sessionID] ?? [])]
       draft.question[question.sessionID] = questions
       const result = Binary.search(questions, question.id, (q) => q.id)
       if (result.found) {
@@ -321,7 +321,7 @@ export function applyDirectoryEvent(
       if (!questions) return false
       const result = Binary.search(questions, props.requestID, (q) => q.id)
       if (result.found) {
-        questions.splice(result.index, 1)
+        draft.question[props.sessionID] = [...questions.slice(0, result.index), ...questions.slice(result.index + 1)]
         return true
       }
       return false

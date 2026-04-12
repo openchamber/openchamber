@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/command';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useShallow } from 'zustand/react/shallow';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useDeviceInfo } from '@/lib/device';
@@ -21,25 +22,37 @@ import { isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
 import { SETTINGS_PAGE_METADATA, SETTINGS_GROUP_LABELS, type SettingsRuntimeContext } from '@/lib/settings/metadata';
 
 export const CommandPalette: React.FC = () => {
-  const isCommandPaletteOpen = useUIStore((s) => s.isCommandPaletteOpen);
-  const setCommandPaletteOpen = useUIStore((s) => s.setCommandPaletteOpen);
-  const setHelpDialogOpen = useUIStore((s) => s.setHelpDialogOpen);
-  const setActiveMainTab = useUIStore((s) => s.setActiveMainTab);
-  const setSettingsDialogOpen = useUIStore((s) => s.setSettingsDialogOpen);
-  const setSettingsPage = useUIStore((s) => s.setSettingsPage);
-  const setSessionSwitcherOpen = useUIStore((s) => s.setSessionSwitcherOpen);
-  const toggleSidebar = useUIStore((s) => s.toggleSidebar);
-  const toggleRightSidebar = useUIStore((s) => s.toggleRightSidebar);
-  const setRightSidebarOpen = useUIStore((s) => s.setRightSidebarOpen);
-  const setRightSidebarTab = useUIStore((s) => s.setRightSidebarTab);
-  const toggleBottomTerminal = useUIStore((s) => s.toggleBottomTerminal);
-  const setBottomTerminalExpanded = useUIStore((s) => s.setBottomTerminalExpanded);
-  const isBottomTerminalExpanded = useUIStore((s) => s.isBottomTerminalExpanded);
-  const shortcutOverrides = useUIStore((s) => s.shortcutOverrides);
+  const {
+    isCommandPaletteOpen, setCommandPaletteOpen, setHelpDialogOpen,
+    setActiveMainTab, setSettingsDialogOpen, setSettingsPage,
+    setSessionSwitcherOpen, toggleSidebar, toggleRightSidebar,
+    setRightSidebarOpen, setRightSidebarTab, toggleBottomTerminal,
+    setBottomTerminalExpanded, isBottomTerminalExpanded, shortcutOverrides,
+  } = useUIStore(useShallow((s) => ({
+    isCommandPaletteOpen: s.isCommandPaletteOpen,
+    setCommandPaletteOpen: s.setCommandPaletteOpen,
+    setHelpDialogOpen: s.setHelpDialogOpen,
+    setActiveMainTab: s.setActiveMainTab,
+    setSettingsDialogOpen: s.setSettingsDialogOpen,
+    setSettingsPage: s.setSettingsPage,
+    setSessionSwitcherOpen: s.setSessionSwitcherOpen,
+    toggleSidebar: s.toggleSidebar,
+    toggleRightSidebar: s.toggleRightSidebar,
+    setRightSidebarOpen: s.setRightSidebarOpen,
+    setRightSidebarTab: s.setRightSidebarTab,
+    toggleBottomTerminal: s.toggleBottomTerminal,
+    setBottomTerminalExpanded: s.setBottomTerminalExpanded,
+    isBottomTerminalExpanded: s.isBottomTerminalExpanded,
+    shortcutOverrides: s.shortcutOverrides,
+  })));
 
-  const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
-  const setCurrentSession = useSessionUIStore((s) => s.setCurrentSession);
-  const getSessionsByDirectory = useSessionUIStore((s) => s.getSessionsByDirectory);
+  const { openNewSessionDraft, setCurrentSession, getSessionsByDirectory } = useSessionUIStore(
+    useShallow((s) => ({
+      openNewSessionDraft: s.openNewSessionDraft,
+      setCurrentSession: s.setCurrentSession,
+      getSessionsByDirectory: s.getSessionsByDirectory,
+    })),
+  );
 
   const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
   const { themeMode, setThemeMode } = useThemeSystem();

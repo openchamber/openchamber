@@ -81,6 +81,16 @@ export const normalizePath = (value?: string | null) => {
   return normalized.length === 0 ? '/' : normalized;
 };
 
+export const isPathWithinScope = (
+  value: string | null | undefined,
+  scope: string | null | undefined,
+): boolean => {
+  if (!value || !scope) {
+    return false;
+  }
+  return value === scope || value.startsWith(`${scope}/`);
+};
+
 export const normalizeForBranchComparison = (value: string): string => {
   return value
     .toLowerCase()
@@ -182,17 +192,23 @@ export const isSessionRelatedToProject = (
   const sessionDirectory = normalizePath((session as Session & { directory?: string | null }).directory ?? null);
   const projectWorktree = normalizePath((session as Session & { project?: { worktree?: string | null } | null }).project?.worktree ?? null);
 
-  if (projectWorktree && (projectWorktree === projectRoot || projectWorktree.startsWith(`${projectRoot}/`))) {
+  if (isPathWithinScope(projectWorktree, projectRoot)) {
     return true;
   }
 
   if (!sessionDirectory) {
     return false;
   }
-  if (validDirectories && validDirectories.has(sessionDirectory)) {
-    return true;
+
+  if (validDirectories) {
+    for (const validDirectory of validDirectories) {
+      if (isPathWithinScope(sessionDirectory, validDirectory)) {
+        return true;
+      }
+    }
   }
-  return sessionDirectory === projectRoot || sessionDirectory.startsWith(`${projectRoot}/`);
+
+  return isPathWithinScope(sessionDirectory, projectRoot);
 };
 
 const parseSummaryCount = (value: number | string | null | undefined): number | null => {

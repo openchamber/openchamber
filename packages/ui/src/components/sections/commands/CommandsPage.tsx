@@ -16,6 +16,212 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 
+const CODEX_BUILTIN_COMMANDS = new Set(['compact']);
+
+interface CodexPromptState {
+  description: string;
+  argumentHint: string;
+  template: string;
+}
+
+const CodexPromptEditor: React.FC<{ promptName: string }> = ({ promptName }) => {
+  const isCustomPrompt = promptName.startsWith('prompts:');
+  const fileName = isCustomPrompt ? promptName.replace(/^prompts:/, '') : promptName;
+  const [isLoading, setIsLoading] = React.useState(true);
+  const [isSaving, setIsSaving] = React.useState(false);
+
+  const [description, setDescription] = React.useState('');
+  const [argumentHint, setArgumentHint] = React.useState('');
+  const [template, setTemplate] = React.useState('');
+
+  const initialRef = React.useRef<CodexPromptState | null>(null);
+
+  React.useEffect(() => {
+    setIsLoading(true);
+    setDescription('');
+    setArgumentHint('');
+    setTemplate('');
+    initialRef.current = null;
+
+    if (!isCustomPrompt) {
+      // Built-in commands: fetch from control surface (read-only)
+      void (async () => {
+        try {
+          const response = await fetch('/api/openchamber/harness/control-surface?backendId=codex', {
+            headers: { Accept: 'application/json' },
+          });
+          if (response.ok) {
+            const data = await response.json();
+            const items = Array.isArray(data?.commandSelector?.items) ? data.commandSelector.items : [];
+            const match = items.find((item: { name?: string }) => item.name === promptName);
+            const desc = typeof match?.description === 'string' ? match.description : '';
+            const tpl = typeof match?.template === 'string' ? match.template : '';
+            setDescription(desc);
+            setTemplate(tpl);
+            initialRef.current = { description: desc, argumentHint: '', template: tpl };
+          }
+        } catch { /* ignore */ }
+        finally { setIsLoading(false); }
+      })();
+      return;
+    }
+
+    void (async () => {
+      try {
+        const response = await fetch(`/api/openchamber/codex/prompts/${encodeURIComponent(fileName)}`, {
+          headers: { Accept: 'application/json' },
+        });
+        if (response.ok) {
+          const data = await response.json();
+          const desc = typeof data?.description === 'string' ? data.description : '';
+          const hint = typeof data?.argumentHint === 'string' ? data.argumentHint : '';
+          const tpl = typeof data?.template === 'string' ? data.template : '';
+          setDescription(desc);
+          setArgumentHint(hint);
+          setTemplate(tpl);
+          initialRef.current = { description: desc, argumentHint: hint, template: tpl };
+        }
+      } catch { /* ignore */ }
+      finally { setIsLoading(false); }
+    })();
+  }, [promptName, fileName, isCustomPrompt]);
+
+  const isDirty = React.useMemo(() => {
+    const initial = initialRef.current;
+    if (!initial) return false;
+    return description !== initial.description
+      || argumentHint !== initial.argumentHint
+      || template !== initial.template;
+  }, [description, argumentHint, template]);
+
+  const handleSave = async () => {
+    if (!isCustomPrompt) return;
+    setIsSaving(true);
+    try {
+      const response = await fetch(`/api/openchamber/codex/prompts/${encodeURIComponent(fileName)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ description, argumentHint, template }),
+      });
+      if (response.ok) {
+        initialRef.current = { description, argumentHint, template };
+        toast.success('Prompt saved');
+      } else {
+        toast.error('Failed to save prompt');
+      }
+    } catch {
+      toast.error('Failed to save prompt');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <p className="typography-meta text-muted-foreground">Loading...</p>
+      </div>
+    );
+  }
+
+  return (
+    <ScrollableOverlay keyboardAvoid outerClassName="h-full" className="w-full">
+      <div className="mx-auto w-full max-w-3xl p-3 sm:p-6 sm:pt-8">
+
+        {/* Header */}
+        <div className="mb-4 flex items-center justify-between gap-4">
+          <div className="min-w-0">
+            <h2 className="typography-ui-header font-semibold text-foreground truncate">
+              {isCustomPrompt ? fileName : `/${promptName}`}
+            </h2>
+            <p className="typography-meta text-muted-foreground truncate">
+              {isCustomPrompt
+                ? 'Edit custom prompt'
+                : 'Built-in Codex command (read-only)'}
+            </p>
+          </div>
+        </div>
+
+        {/* Identity */}
+        <div className="mb-8">
+          <div className="mb-1 px-1">
+            <h3 className="typography-ui-header font-medium text-foreground">Identity</h3>
+          </div>
+          <section className="px-2 pb-2 pt-0 space-y-0">
+            <div className="py-1.5">
+              <span className="typography-ui-label text-foreground">Description</span>
+              <div className="mt-1.5">
+                <Textarea
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="What does this prompt do?"
+                  rows={2}
+                  className="w-full resize-none min-h-[60px] bg-transparent"
+                  readOnly={!isCustomPrompt}
+                />
+              </div>
+            </div>
+
+            {(isCustomPrompt || argumentHint) && (
+              <div className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
+                <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
+                  <span className="typography-ui-label text-foreground">Argument Hint</span>
+                </div>
+                <div className="flex min-w-0 flex-1 items-center gap-2 sm:w-fit sm:flex-initial">
+                  <Input
+                    value={argumentHint}
+                    onChange={(e) => setArgumentHint(e.target.value)}
+                    placeholder="e.g., SCOPE=<what changed>"
+                    className="h-7 flex-1 font-mono text-xs"
+                    readOnly={!isCustomPrompt}
+                  />
+                </div>
+              </div>
+            )}
+          </section>
+        </div>
+
+        {/* Prompt Template */}
+        <div className="mb-2">
+          <div className="mb-1 px-1">
+            <h3 className="typography-ui-header font-medium text-foreground">Prompt Template</h3>
+          </div>
+          <section className="px-2 pb-2 pt-0">
+            <Textarea
+              value={template}
+              onChange={(e) => setTemplate(e.target.value)}
+              placeholder={`Your prompt template here...\n\nUse $ARGUMENTS to reference user input.`}
+              rows={12}
+              className="w-full font-mono typography-meta min-h-[160px] max-h-[60vh] bg-transparent resize-y"
+              readOnly={!isCustomPrompt}
+            />
+          </section>
+          <div className="mt-2 px-2">
+            <p className="typography-meta text-muted-foreground">
+              <code className="text-foreground">$ARGUMENTS</code> user input &middot;{' '}
+              <code className="text-foreground">$SCOPE</code>, <code className="text-foreground">$AUDIENCE</code> named args
+            </p>
+          </div>
+        </div>
+
+        {/* Save */}
+        {isCustomPrompt && (
+          <div className="px-2 py-1">
+            <Button
+              onClick={handleSave}
+              disabled={isSaving || !isDirty}
+              size="xs"
+              className="!font-normal"
+            >
+              {isSaving ? 'Saving...' : 'Save Changes'}
+            </Button>
+          </div>
+        )}
+      </div>
+    </ScrollableOverlay>
+  );
+};
+
 export const CommandsPage: React.FC = () => {
   const { selectedCommandName, getCommandByName, createCommand, updateCommand, commands, commandDraft, setCommandDraft } = useCommandsStore();
 
@@ -156,6 +362,11 @@ export const CommandsPage: React.FC = () => {
     }
   };
 
+  // Detect Codex prompts: custom prompts have "prompts:" prefix, built-ins are known names
+  const isCodexPrompt = selectedCommandName
+    ? (selectedCommandName.startsWith('prompts:') || CODEX_BUILTIN_COMMANDS.has(selectedCommandName))
+    : false;
+
   if (!selectedCommandName) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -166,6 +377,10 @@ export const CommandsPage: React.FC = () => {
         </div>
       </div>
     );
+  }
+
+  if (isCodexPrompt) {
+    return <CodexPromptEditor promptName={selectedCommandName} />;
   }
 
   return (

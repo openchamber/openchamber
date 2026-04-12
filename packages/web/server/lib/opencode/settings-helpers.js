@@ -85,6 +85,11 @@ export const createSettingsHelpers = (dependencies) => {
       const normalized = normalizeDirectoryPath(candidate.opencodeBinary).trim();
       result.opencodeBinary = normalized;
     }
+    // Absolute path to the codex CLI binary (optional override).
+    if (typeof candidate.codexBinary === 'string') {
+      const normalized = normalizeDirectoryPath(candidate.codexBinary).trim();
+      result.codexBinary = normalized;
+    }
     if (Array.isArray(candidate.projects)) {
       const projects = sanitizeProjects(candidate.projects);
       if (projects) {
@@ -252,6 +257,10 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.defaultModel === 'string') {
       const trimmed = candidate.defaultModel.trim();
       result.defaultModel = trimmed.length > 0 ? trimmed : undefined;
+    }
+    if (typeof candidate.defaultBackend === 'string') {
+      const trimmed = candidate.defaultBackend.trim();
+      result.defaultBackend = trimmed.length > 0 ? trimmed : undefined;
     }
     if (typeof candidate.defaultVariant === 'string') {
       const trimmed = candidate.defaultVariant.trim();

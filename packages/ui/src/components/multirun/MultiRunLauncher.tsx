@@ -12,6 +12,8 @@ import { cn, formatDirectoryName } from '@/lib/utils';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useMultiRunStore } from '@/stores/useMultiRunStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSelectionStore } from '@/sync/selection-store';
+import { useSession } from '@/sync/sync-context';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { getWorktreeSetupCommands } from '@/lib/openchamberConfig';
 import type { ProjectRef } from '@/lib/openchamberConfig';
@@ -103,6 +105,21 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
 
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory ?? null);
   const homeDirectory = useDirectoryStore((state) => state.homeDirectory ?? null);
+  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+  const getDirectoryForSession = useSessionUIStore((state) => state.getDirectoryForSession);
+  const currentSessionDirectory = currentSessionId ? getDirectoryForSession(currentSessionId) : undefined;
+  const currentSession = useSession(currentSessionId ?? undefined, currentSessionDirectory ?? undefined);
+  const draftBackendId = useSelectionStore((state) => state.draftBackendId);
+  const lastUsedBackendId = useSelectionStore((state) => state.lastUsedBackendId);
+  const sessionBackendSelection = useSelectionStore((state) =>
+    currentSessionId ? state.sessionBackendSelections.get(currentSessionId) ?? null : null
+  );
+  const effectiveBackendId =
+    (currentSession as { backendId?: string | null } | undefined)?.backendId
+    ?? sessionBackendSelection
+    ?? draftBackendId
+    ?? lastUsedBackendId
+    ?? 'opencode';
   
   const vscodeWorkspaceFolder = React.useMemo(() => {
     if (typeof window === 'undefined') {
@@ -428,6 +445,7 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
       const commandsForStore = setupCommands.filter(cmd => cmd.trim().length > 0);
 
       const params: CreateMultiRunParams = {
+        backendId: effectiveBackendId,
         name: name.trim(),
         prompt: prompt.trim(),
         models: modelsForStore,
@@ -452,7 +470,12 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
   };
 
   const isValid = Boolean(
-    name.trim() && prompt.trim() && selectedModels.length >= 2 && worktreeBaseBranch && isGitRepository && !isLoadingWorktreeBaseBranches
+    name.trim()
+      && prompt.trim()
+      && selectedModels.length >= 2
+      && worktreeBaseBranch
+      && isGitRepository
+      && !isLoadingWorktreeBaseBranches
   );
 
   const configuredSetupCount = setupCommands.filter(cmd => cmd.trim()).length;
@@ -496,7 +519,6 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
       <ScrollShadow className="flex-1 min-h-0 overflow-auto" size={64} hideTopShadow>
         <div className="mx-auto w-full max-w-2xl px-4 sm:px-6 py-5">
           <div className="flex flex-col gap-5">
-
             {/* ── Config grid: 2-column on sm+, single column on narrow ── */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
               {/* Project */}
@@ -728,6 +750,7 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
                 onUpdate={handleUpdateModel}
                 minModels={2}
                 maxModels={MAX_MODELS}
+                activeBackendId={effectiveBackendId}
               />
             </div>
 

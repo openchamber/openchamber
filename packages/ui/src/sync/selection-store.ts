@@ -9,7 +9,10 @@ export type SelectionState = {
   sessionModelSelections: Map<string, { providerId: string; modelId: string }>
   sessionAgentSelections: Map<string, string>
   sessionAgentModelSelections: Map<string, Map<string, { providerId: string; modelId: string }>>
+  sessionBackendSelections: Map<string, string>
   lastUsedProvider: { providerID: string; modelID: string } | null
+  draftBackendId: string | null
+  lastUsedBackendId: string | null
 
   saveSessionModelSelection: (sessionId: string, providerId: string, modelId: string) => void
   getSessionModelSelection: (sessionId: string) => { providerId: string; modelId: string } | null
@@ -19,6 +22,9 @@ export type SelectionState = {
   getAgentModelForSession: (sessionId: string, agentName: string) => { providerId: string; modelId: string } | null
   saveAgentModelVariantForSession: (sessionId: string, agentName: string, providerId: string, modelId: string, variant: string | undefined) => void
   getAgentModelVariantForSession: (sessionId: string, agentName: string, providerId: string, modelId: string) => string | undefined
+  saveSessionBackendSelection: (sessionId: string, backendId: string) => void
+  getSessionBackendSelection: (sessionId: string) => string | null
+  setDraftBackendId: (backendId: string | null) => void
 }
 
 // In-memory variant storage (not persisted)
@@ -28,7 +34,10 @@ export const useSelectionStore = create<SelectionState>()((set, get) => ({
   sessionModelSelections: new Map(),
   sessionAgentSelections: new Map(),
   sessionAgentModelSelections: new Map(),
+  sessionBackendSelections: new Map(),
   lastUsedProvider: null,
+  draftBackendId: null,
+  lastUsedBackendId: null,
 
   saveSessionModelSelection: (sessionId, providerId, modelId) =>
     set((s) => {
@@ -83,4 +92,22 @@ export const useSelectionStore = create<SelectionState>()((set, get) => ({
     const key = `${providerId}/${modelId}`
     return agentModelVariantSelections.get(sessionId)?.get(agentName)?.get(key)
   },
+
+  saveSessionBackendSelection: (sessionId, backendId) =>
+    set((s) => {
+      if (!backendId || s.sessionBackendSelections.get(sessionId) === backendId) {
+        return s
+      }
+      const map = new Map(s.sessionBackendSelections)
+      map.set(sessionId, backendId)
+      return { sessionBackendSelections: map, lastUsedBackendId: backendId }
+    }),
+
+  getSessionBackendSelection: (sessionId) => get().sessionBackendSelections.get(sessionId) ?? null,
+
+  setDraftBackendId: (backendId) =>
+    set(() => ({
+      draftBackendId: backendId,
+      lastUsedBackendId: backendId,
+    })),
 }))

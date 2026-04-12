@@ -6,6 +6,7 @@ import {
   compareSessionsByPinnedAndTime,
   dedupeSessionsById,
   getArchivedScopeKey,
+  isPathWithinScope,
   normalizeForBranchComparison,
   normalizePath,
 } from '../utils';
@@ -89,6 +90,7 @@ export const useSessionGrouping = (args: Args) => {
           worktreeByPath.set(normalized, meta);
         }
       });
+      const normalizedWorktreePaths = [...worktreeByPath.keys()];
 
       const getSessionWorktree = (session: Session): WorktreeMetadata | null => {
         const sessionDirectory = normalizePath((session as Session & { directory?: string | null }).directory ?? null);
@@ -127,8 +129,12 @@ export const useSessionGrouping = (args: Args) => {
         const fallbackDirectory = normalizePath((session as Session & { project?: { worktree?: string | null } | null }).project?.worktree ?? null);
         const normalizedDir = metadataPath ?? sessionDirectory ?? fallbackDirectory;
         if (!normalizedDir) return archivedKey;
-        if (normalizedDir !== normalizedProjectRoot && worktreeByPath.has(normalizedDir)) return normalizedDir;
-        if (normalizedDir === normalizedProjectRoot) return normalizedProjectRoot ?? '__project_root__';
+
+        const matchingWorktree = normalizedDir !== normalizedProjectRoot
+          ? normalizedWorktreePaths.find((worktreePath) => isPathWithinScope(normalizedDir, worktreePath))
+          : null;
+        if (matchingWorktree) return matchingWorktree;
+        if (isPathWithinScope(normalizedDir, normalizedProjectRoot)) return normalizedProjectRoot ?? '__project_root__';
         return archivedKey;
       };
 

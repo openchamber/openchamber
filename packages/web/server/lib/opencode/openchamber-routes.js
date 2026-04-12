@@ -1,3 +1,5 @@
+import TOML from '@iarna/toml';
+
 export const registerOpenChamberRoutes = (app, dependencies) => {
   const {
     fs,
@@ -12,6 +14,8 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
     readSettingsFromDiskMigrated,
     fetchFreeZenModels,
     getCachedZenModels,
+    backendRegistry,
+    sessionBindingsRuntime,
   } = dependencies;
 
   let cachedModelsMetadata = null;
@@ -297,6 +301,702 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         const statusCode = error?.name === 'AbortError' ? 504 : 502;
         res.status(statusCode).json({ error: 'Failed to retrieve zen models' });
       }
+    }
+  });
+
+  app.get('/api/openchamber/backends', async (_req, res) => {
+    try {
+      const settings = await readSettingsFromDiskMigrated();
+      const defaultBackend = typeof settings?.defaultBackend === 'string' && settings.defaultBackend.trim().length > 0
+        ? settings.defaultBackend.trim()
+        : await backendRegistry.getDefaultBackendId();
+      res.json({
+        defaultBackend,
+        backends: backendRegistry.listBackends(),
+      });
+    } catch (error) {
+      console.error('Failed to list harness backends:', error);
+      res.status(500).json({ error: 'Failed to list harness backends' });
+    }
+  });
+
+  const getRequestedBackendId = async (req) => {
+    const bodyBackendId = typeof req.body?.backendId === 'string' ? req.body.backendId.trim() : '';
+    const queryBackendId = typeof req.query?.backendId === 'string' ? req.query.backendId.trim() : '';
+    if (bodyBackendId) {
+      return bodyBackendId;
+    }
+    if (queryBackendId) {
+      return queryBackendId;
+    }
+    const settings = await readSettingsFromDiskMigrated();
+    return typeof settings?.defaultBackend === 'string' && settings.defaultBackend.trim().length > 0
+      ? settings.defaultBackend.trim()
+      : await backendRegistry.getDefaultBackendId();
+  };
+
+  const sendUnsupportedBackend = (res, backendId) => {
+    return res.status(501).json({
+      error: `Backend "${backendId}" is not available yet`,
+      backendId,
+      code: 'BACKEND_UNSUPPORTED',
+    });
+  };
+
+  const getBoundBackend = async (sessionId) => sessionBindingsRuntime.getEffectiveBinding(sessionId);
+  const getBackendRuntime = (backendId) => backendRegistry.getRuntime(backendId);
+
+  app.get('/api/openchamber/harness/control-surface', async (req, res) => {
+    try {
+      const sessionId = typeof req.query?.sessionId === 'string' ? req.query.sessionId.trim() : '';
+      const binding = sessionId ? await getBoundBackend(sessionId) : null;
+      const backendId = binding?.backendId || await getRequestedBackendId(req);
+
+      if (!backendRegistry.isBackendSelectable(backendId)) {
+        return sendUnsupportedBackend(res, backendId);
+      }
+      const runtime = getBackendRuntime(backendId);
+      if (!runtime?.getControlSurface) {
+        return sendUnsupportedBackend(res, backendId);
+      }
+
+      const payload = await runtime.getControlSurface({
+        directory: binding?.directory
+          || (typeof req.query?.directory === 'string' ? req.query.directory : undefined),
+        providerId: typeof req.query?.providerId === 'string' ? req.query.providerId : undefined,
+        modelId: typeof req.query?.modelId === 'string' ? req.query.modelId : undefined,
+      });
+
+      return res.status(200).json(payload);
+    } catch (error) {
+      console.error('Failed to load harness control surface:', error);
+      const message = error?.body?.error || error?.message || 'Failed to load control surface';
+      return res.status(400).json({ error: message });
+    }
+  });
+
+  app.post('/api/openchamber/harness/session', async (req, res) => {
+    try {
+      const backendId = await getRequestedBackendId(req);
+      if (!backendRegistry.isBackendSelectable(backendId)) {
+        return sendUnsupportedBackend(res, backendId);
+      }
+      const runtime = getBackendRuntime(backendId);
+      if (!runtime?.createSession) {
+        return sendUnsupportedBackend(res, backendId);
+      }
+
+      const payload = await runtime.createSession({
+        directory: typeof req.body?.directory === 'string' ? req.body.directory : undefined,
+        title: typeof req.body?.title === 'string' ? req.body.title : undefined,
+        parentID: typeof req.body?.parentID === 'string' ? req.body.parentID : undefined,
+      });
+
+      if (payload?.id) {
+        await sessionBindingsRuntime.upsertBinding({
+          sessionId: payload.id,
+          backendId,
+          backendSessionId: payload.id,
+          directory: typeof payload.directory === 'string' ? payload.directory : null,
+        });
+      }
+
+      return res.status(200).json(sessionBindingsRuntime.annotateSession(payload));
+    } catch (error) {
+      console.error('Failed to create harness session:', error);
+      const message = error?.body?.error || error?.message || 'Failed to create session';
+      return res.status(400).json({ error: message });
+    }
+  });
+
+  app.post('/api/openchamber/harness/session/:sessionId/message', async (req, res) => {
+    try {
+      const sessionId = typeof req.params?.sessionId === 'string' ? req.params.sessionId : '';
+      const binding = await getBoundBackend(sessionId);
+      if (!binding) {
+        return res.status(404).json({ error: 'Session not found' });
+      }
+      if (!backendRegistry.isBackendSelectable(binding.backendId)) {
+        return sendUnsupportedBackend(res, binding.backendId);
+      }
+      const runtime = getBackendRuntime(binding.backendId);
+      if (!runtime?.promptAsync) {
+        return sendUnsupportedBackend(res, binding.backendId);
+      }
+
+      await runtime.promptAsync({
+        sessionID: binding.backendSessionId,
+        directory: typeof req.body?.directory === 'string' ? req.body.directory : binding.directory,
+        messageID: typeof req.body?.messageID === 'string' ? req.body.messageID : undefined,
+        model: req.body?.model,
+        agent: typeof req.body?.agent === 'string' ? req.body.agent : undefined,
+        variant: typeof req.body?.variant === 'string' ? req.body.variant : undefined,
+        format: req.body?.format,
+        parts: Array.isArray(req.body?.parts) ? req.body.parts : undefined,
+        sandboxOverride: typeof req.body?.sandboxOverride === 'string' ? req.body.sandboxOverride : undefined,
+      });
+
+      return res.status(204).end();
+    } catch (error) {
+      console.error('Failed to send harness message:', error);
+      const message = error?.body?.error || error?.message || 'Failed to send message';
+      return res.status(400).json({ error: message });
+    }
+  });
+
+  app.post('/api/openchamber/harness/session/:sessionId/prompt', async (req, res) => {
+    try {
+      const sessionId = typeof req.params?.sessionId === 'string' ? req.params.sessionId : '';
+      const binding = await getBoundBackend(sessionId);
+      if (!binding) {
+        return res.status(404).json({ error: 'Session not found' });
+      }
+      if (!backendRegistry.isBackendSelectable(binding.backendId)) {
+        return sendUnsupportedBackend(res, binding.backendId);
+      }
+      const runtime = getBackendRuntime(binding.backendId);
+      if (!runtime?.prompt) {
+        return sendUnsupportedBackend(res, binding.backendId);
+      }
+
+      const payload = await runtime.prompt({
+        sessionID: binding.backendSessionId,
+        directory: typeof req.body?.directory === 'string' ? req.body.directory : binding.directory,
+        messageID: typeof req.body?.messageID === 'string' ? req.body.messageID : undefined,
+        model: req.body?.model,
+        agent: typeof req.body?.agent === 'string' ? req.body.agent : undefined,
+        variant: typeof req.body?.variant === 'string' ? req.body.variant : undefined,
+        format: req.body?.format,
+        parts: Array.isArray(req.body?.parts) ? req.body.parts : undefined,
+      });
+
+      return res.status(200).json(payload ?? {});
+    } catch (error) {
+      console.error('Failed to prompt harness session:', error);
+      const message = error?.body?.error || error?.message || 'Failed to prompt session';
+      return res.status(400).json({ error: message });
+    }
+  });
+
+  app.post('/api/openchamber/harness/session/:sessionId/command', async (req, res) => {
+    try {
+      const sessionId = typeof req.params?.sessionId === 'string' ? req.params.sessionId : '';
+      const binding = await getBoundBackend(sessionId);
+      if (!binding) {
+        return res.status(404).json({ error: 'Session not found' });
+      }
+      if (!backendRegistry.isBackendSelectable(binding.backendId)) {
+        return sendUnsupportedBackend(res, binding.backendId);
+      }
+      const runtime = getBackendRuntime(binding.backendId);
+      if (!runtime?.command) {
+        return sendUnsupportedBackend(res, binding.backendId);
+      }
+
+      const payload = await runtime.command({
+        sessionID: binding.backendSessionId,
+        directory: typeof req.body?.directory === 'string' ? req.body.directory : binding.directory,
+        messageID: typeof req.body?.messageID === 'string' ? req.body.messageID : undefined,
+        model: typeof req.body?.model === 'string' ? req.body.model : undefined,
+        agent: typeof req.body?.agent === 'string' ? req.body.agent : undefined,
+        command: typeof req.body?.command === 'string' ? req.body.command : '',
+        arguments: typeof req.body?.arguments === 'string' ? req.body.arguments : '',
+        variant: typeof req.body?.variant === 'string' ? req.body.variant : undefined,
+        parts: Array.isArray(req.body?.parts) ? req.body.parts : undefined,
+      });
+
+      return res.status(200).json(payload ?? {});
+    } catch (error) {
+      console.error('Failed to send harness command:', error);
+      const message = error?.body?.error || error?.message || 'Failed to run command';
+      return res.status(400).json({ error: message });
+    }
+  });
+
+  app.post('/api/openchamber/harness/session/:sessionId/abort', async (req, res) => {
+    try {
+      const sessionId = typeof req.params?.sessionId === 'string' ? req.params.sessionId : '';
+      const binding = await getBoundBackend(sessionId);
+      if (!binding) {
+        return res.status(404).json({ error: 'Session not found' });
+      }
+      if (!backendRegistry.isBackendSelectable(binding.backendId)) {
+        return sendUnsupportedBackend(res, binding.backendId);
+      }
+      const runtime = getBackendRuntime(binding.backendId);
+      if (!runtime?.abortSession) {
+        return sendUnsupportedBackend(res, binding.backendId);
+      }
+
+      const ok = await runtime.abortSession({
+        sessionID: binding.backendSessionId,
+        directory: typeof req.body?.directory === 'string' ? req.body.directory : binding.directory,
+      });
+
+      return res.status(200).json({ ok: Boolean(ok) });
+    } catch (error) {
+      console.error('Failed to abort harness session:', error);
+      const message = error?.body?.error || error?.message || 'Failed to abort session';
+      return res.status(400).json({ error: message });
+    }
+  });
+
+  app.post('/api/openchamber/harness/session/:sessionId/update', async (req, res) => {
+    try {
+      const sessionId = typeof req.params?.sessionId === 'string' ? req.params.sessionId : '';
+      const binding = await getBoundBackend(sessionId);
+      if (!binding) {
+        return res.status(404).json({ error: 'Session not found' });
+      }
+      if (!backendRegistry.isBackendSelectable(binding.backendId)) {
+        return sendUnsupportedBackend(res, binding.backendId);
+      }
+      const runtime = getBackendRuntime(binding.backendId);
+      if (!runtime?.updateSession) {
+        return sendUnsupportedBackend(res, binding.backendId);
+      }
+
+      const payload = await runtime.updateSession({
+        sessionID: binding.backendSessionId,
+        directory: typeof req.body?.directory === 'string' ? req.body.directory : binding.directory,
+        title: typeof req.body?.title === 'string' ? req.body.title : undefined,
+        time: req.body?.time && typeof req.body.time === 'object' ? req.body.time : undefined,
+      });
+
+      return res.status(200).json(sessionBindingsRuntime.annotateSession(payload));
+    } catch (error) {
+      console.error('Failed to update harness session:', error);
+      const message = error?.body?.error || error?.message || 'Failed to update session';
+      return res.status(400).json({ error: message });
+    }
+  });
+
+  app.post('/api/openchamber/harness/session/:sessionId/fork', async (req, res) => {
+    try {
+      const sessionId = typeof req.params?.sessionId === 'string' ? req.params.sessionId : '';
+      const binding = await getBoundBackend(sessionId);
+      if (!binding) {
+        return res.status(404).json({ error: 'Session not found' });
+      }
+      if (!backendRegistry.isBackendSelectable(binding.backendId)) {
+        return sendUnsupportedBackend(res, binding.backendId);
+      }
+      const runtime = getBackendRuntime(binding.backendId);
+      if (!runtime?.forkSession) {
+        return sendUnsupportedBackend(res, binding.backendId);
+      }
+
+      const payload = await runtime.forkSession({
+        sessionID: binding.backendSessionId,
+        directory: typeof req.body?.directory === 'string' ? req.body.directory : binding.directory,
+        messageID: typeof req.body?.messageID === 'string' ? req.body.messageID : undefined,
+      });
+
+      if (payload?.id) {
+        await sessionBindingsRuntime.upsertBinding({
+          sessionId: payload.id,
+          backendId: binding.backendId,
+          backendSessionId: payload.id,
+          directory: typeof payload.directory === 'string' ? payload.directory : binding.directory ?? null,
+        });
+      }
+
+      return res.status(200).json(sessionBindingsRuntime.annotateSession(payload));
+    } catch (error) {
+      console.error('Failed to fork harness session:', error);
+      const message = error?.body?.error || error?.message || 'Failed to fork session';
+      return res.status(400).json({ error: message });
+    }
+  });
+
+  app.get('/api/openchamber/codex/prompts', async (_req, res) => {
+    try {
+      const codexHome = process.env.OPENCHAMBER_CODEX_HOME
+        || process.env.CODEX_HOME
+        || path.join(os.homedir(), '.codex');
+      const promptsDir = path.join(codexHome, 'prompts');
+
+      let files;
+      try {
+        files = await fs.promises.readdir(promptsDir);
+      } catch (error) {
+        if (error && typeof error === 'object' && error.code === 'ENOENT') {
+          return res.json({ prompts: [] });
+        }
+        throw error;
+      }
+
+      const mdFiles = files.filter((f) => f.endsWith('.md'));
+      const prompts = await Promise.all(
+        mdFiles.map(async (filename) => {
+          const filePath = path.join(promptsDir, filename);
+          const content = await fs.promises.readFile(filePath, 'utf8');
+          const name = filename.replace(/\.md$/, '');
+          return { name, content, path: filePath };
+        }),
+      );
+
+      return res.json({ prompts });
+    } catch (error) {
+      console.error('Failed to list Codex prompts:', error);
+      return res.status(500).json({ error: 'Failed to list Codex prompts' });
+    }
+  });
+
+  const resolveCodexPromptsDir = () => {
+    const codexHome = process.env.OPENCHAMBER_CODEX_HOME
+      || process.env.CODEX_HOME
+      || path.join(os.homedir(), '.codex');
+    return path.join(codexHome, 'prompts');
+  };
+
+  const sanitizePromptName = (name) => {
+    if (typeof name !== 'string') return null;
+    const cleaned = name.trim().replace(/\.md$/i, '').replace(/[/\\]/g, '');
+    return cleaned.length > 0 ? cleaned : null;
+  };
+
+  const parsePromptFile = (raw) => {
+    if (typeof raw !== 'string' || !raw.startsWith('---\n')) {
+      return { metadata: {}, body: raw || '' };
+    }
+    const endIndex = raw.indexOf('\n---\n', 4);
+    if (endIndex === -1) {
+      return { metadata: {}, body: raw };
+    }
+    const frontmatter = raw.slice(4, endIndex);
+    const body = raw.slice(endIndex + 5);
+    const metadata = {};
+    for (const line of frontmatter.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const colonIndex = trimmed.indexOf(':');
+      if (colonIndex === -1) continue;
+      const key = trimmed.slice(0, colonIndex).trim().toLowerCase();
+      let value = trimmed.slice(colonIndex + 1).trim();
+      if (!value) continue;
+      if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+        value = value.slice(1, -1);
+      }
+      metadata[key] = value;
+    }
+    return { metadata, body };
+  };
+
+  const buildPromptFile = (metadata, body) => {
+    const fmEntries = Object.entries(metadata).filter(([, v]) => typeof v === 'string' && v.trim().length > 0);
+    if (fmEntries.length === 0) {
+      return body || '';
+    }
+    const fmLines = fmEntries.map(([key, value]) => `${key}: ${value}`);
+    return `---\n${fmLines.join('\n')}\n---\n\n${body || ''}`;
+  };
+
+  app.get('/api/openchamber/codex/prompts/:name', async (req, res) => {
+    try {
+      const name = sanitizePromptName(req.params.name);
+      if (!name) return res.status(400).json({ error: 'Invalid prompt name' });
+      const filePath = path.join(resolveCodexPromptsDir(), `${name}.md`);
+      const raw = await fs.promises.readFile(filePath, 'utf8');
+      const { metadata, body } = parsePromptFile(raw);
+      return res.json({
+        name,
+        description: metadata.description || '',
+        argumentHint: metadata['argument-hint'] || '',
+        template: body.trim(),
+        path: filePath,
+      });
+    } catch (error) {
+      if (error?.code === 'ENOENT') return res.status(404).json({ error: 'Prompt not found' });
+      return res.status(500).json({ error: 'Failed to read prompt' });
+    }
+  });
+
+  app.put('/api/openchamber/codex/prompts/:name', async (req, res) => {
+    try {
+      const name = sanitizePromptName(req.params.name);
+      if (!name) return res.status(400).json({ error: 'Invalid prompt name' });
+
+      const promptsDir = resolveCodexPromptsDir();
+      await fs.promises.mkdir(promptsDir, { recursive: true });
+      const filePath = path.join(promptsDir, `${name}.md`);
+
+      // Accept either structured fields or raw content
+      const body = req.body || {};
+      let fileContent;
+      if (typeof body.template === 'string') {
+        const metadata = {};
+        if (typeof body.description === 'string' && body.description.trim()) {
+          metadata.description = body.description.trim();
+        }
+        if (typeof body.argumentHint === 'string' && body.argumentHint.trim()) {
+          metadata['argument-hint'] = body.argumentHint.trim();
+        }
+        fileContent = buildPromptFile(metadata, body.template);
+      } else {
+        fileContent = typeof body.content === 'string' ? body.content : '';
+      }
+
+      await fs.promises.writeFile(filePath, fileContent, 'utf8');
+      return res.json({ name, path: filePath });
+    } catch (error) {
+      console.error('Failed to write Codex prompt:', error);
+      return res.status(500).json({ error: 'Failed to save prompt' });
+    }
+  });
+
+  app.delete('/api/openchamber/codex/prompts/:name', async (req, res) => {
+    try {
+      const name = sanitizePromptName(req.params.name);
+      if (!name) return res.status(400).json({ error: 'Invalid prompt name' });
+      const filePath = path.join(resolveCodexPromptsDir(), `${name}.md`);
+      await fs.promises.unlink(filePath);
+      return res.json({ ok: true });
+    } catch (error) {
+      if (error?.code === 'ENOENT') return res.status(404).json({ error: 'Prompt not found' });
+      return res.status(500).json({ error: 'Failed to delete prompt' });
+    }
+  });
+
+  // ── Codex MCP servers (TOML config) ──────────────────────────────────
+
+  const resolveCodexConfigPath = () => {
+    const codexHome = process.env.OPENCHAMBER_CODEX_HOME
+      || process.env.CODEX_HOME
+      || path.join(os.homedir(), '.codex');
+    return path.join(codexHome, 'config.toml');
+  };
+
+  const readCodexConfig = async () => {
+    try {
+      const raw = await fs.promises.readFile(resolveCodexConfigPath(), 'utf8');
+      return TOML.parse(raw);
+    } catch (error) {
+      if (error?.code === 'ENOENT') return {};
+      throw error;
+    }
+  };
+
+  const writeCodexConfig = async (config) => {
+    const configPath = resolveCodexConfigPath();
+    await fs.promises.mkdir(path.dirname(configPath), { recursive: true });
+    await fs.promises.writeFile(configPath, TOML.stringify(config), 'utf8');
+  };
+
+  app.get('/api/openchamber/codex/mcp', async (_req, res) => {
+    try {
+      const config = await readCodexConfig();
+      const mcpServers = config.mcp_servers && typeof config.mcp_servers === 'object'
+        ? config.mcp_servers
+        : {};
+      const servers = Object.entries(mcpServers).map(([name, value]) => {
+        const server = value && typeof value === 'object' ? value : {};
+        return {
+          name,
+          type: typeof server.url === 'string' ? 'remote' : 'local',
+          command: Array.isArray(server.args)
+            ? [server.command, ...server.args].filter(Boolean)
+            : (typeof server.command === 'string' ? [server.command] : []),
+          url: typeof server.url === 'string' ? server.url : undefined,
+          environment: server.env && typeof server.env === 'object'
+            ? Object.entries(server.env).map(([key, val]) => ({ key, value: String(val) }))
+            : [],
+          enabled: server.enabled !== false,
+          scope: 'user',
+        };
+      });
+      return res.json({ servers });
+    } catch (error) {
+      console.error('Failed to list Codex MCP servers:', error);
+      return res.status(500).json({ error: 'Failed to list Codex MCP servers' });
+    }
+  });
+
+  app.put('/api/openchamber/codex/mcp/:name', async (req, res) => {
+    try {
+      const name = typeof req.params.name === 'string' ? req.params.name.trim() : '';
+      if (!name) return res.status(400).json({ error: 'Invalid server name' });
+      const config = await readCodexConfig();
+      if (!config.mcp_servers) config.mcp_servers = {};
+
+      const body = req.body || {};
+      const entry = {};
+      if (body.type === 'remote' && typeof body.url === 'string') {
+        entry.url = body.url;
+      } else {
+        const cmd = Array.isArray(body.command) ? body.command.filter(Boolean) : [];
+        if (cmd.length > 0) {
+          entry.command = cmd[0];
+          if (cmd.length > 1) entry.args = cmd.slice(1);
+        }
+      }
+      if (Array.isArray(body.environment) && body.environment.length > 0) {
+        entry.env = {};
+        for (const { key, value } of body.environment) {
+          if (typeof key === 'string' && key.trim()) entry.env[key.trim()] = String(value ?? '');
+        }
+      }
+      if (body.enabled === false) entry.enabled = false;
+
+      config.mcp_servers[name] = entry;
+      await writeCodexConfig(config);
+      return res.json({ ok: true });
+    } catch (error) {
+      console.error('Failed to save Codex MCP server:', error);
+      return res.status(500).json({ error: 'Failed to save Codex MCP server' });
+    }
+  });
+
+  app.delete('/api/openchamber/codex/mcp/:name', async (req, res) => {
+    try {
+      const name = typeof req.params.name === 'string' ? req.params.name.trim() : '';
+      if (!name) return res.status(400).json({ error: 'Invalid server name' });
+      const config = await readCodexConfig();
+      if (!config.mcp_servers || !config.mcp_servers[name]) {
+        return res.status(404).json({ error: 'Server not found' });
+      }
+      delete config.mcp_servers[name];
+      await writeCodexConfig(config);
+      return res.json({ ok: true });
+    } catch (error) {
+      console.error('Failed to delete Codex MCP server:', error);
+      return res.status(500).json({ error: 'Failed to delete Codex MCP server' });
+    }
+  });
+
+  // ── Codex skills (file-based) ────────────────────────────────────────
+
+  const resolveCodexSkillsDir = () => {
+    const codexHome = process.env.OPENCHAMBER_CODEX_HOME
+      || process.env.CODEX_HOME
+      || path.join(os.homedir(), '.codex');
+    return path.join(codexHome, 'skills');
+  };
+
+  const resolveCodexSkillSearchPaths = (projectDirectory) => {
+    const home = os.homedir();
+    const paths = [];
+    // Project-scoped paths first
+    if (projectDirectory) {
+      paths.push({ dir: path.join(projectDirectory, '.codex', 'skills'), source: 'codex', scope: 'project' });
+      paths.push({ dir: path.join(projectDirectory, '.agents', 'skills'), source: 'agents', scope: 'project' });
+    }
+    // User-scoped paths
+    paths.push({ dir: resolveCodexSkillsDir(), source: 'codex', scope: 'user' });
+    paths.push({ dir: path.join(home, '.agents', 'skills'), source: 'agents', scope: 'user' });
+    return paths;
+  };
+
+  const parseSkillMd = (raw, fallbackName) => {
+    const fmMatch = raw.match(/^---\n([\s\S]*?)\n---/);
+    let name = fallbackName;
+    let description = '';
+    if (fmMatch) {
+      const fmLines = fmMatch[1].split('\n');
+      for (const line of fmLines) {
+        const nameMatch = line.match(/^name:\s*["']?(.+?)["']?\s*$/);
+        const descMatch = line.match(/^description:\s*["']?(.+?)["']?\s*$/);
+        if (nameMatch) name = nameMatch[1];
+        if (descMatch) description = descMatch[1];
+      }
+    }
+    const body = fmMatch ? raw.slice(fmMatch[0].length).trim() : raw.trim();
+    return { name, description, body };
+  };
+
+  app.get('/api/openchamber/codex/skills', async (req, res) => {
+    try {
+      const projectDirectory = typeof req.query?.directory === 'string' ? req.query.directory.trim() : null;
+      const searchPaths = resolveCodexSkillSearchPaths(projectDirectory);
+      const skills = [];
+      const seen = new Set();
+
+      for (const { dir, source, scope } of searchPaths) {
+        let entries;
+        try {
+          entries = await fs.promises.readdir(dir, { withFileTypes: true });
+        } catch (error) {
+          if (error?.code === 'ENOENT') continue;
+          throw error;
+        }
+
+        for (const entry of entries) {
+          if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
+          if (seen.has(entry.name)) continue;
+          const skillDir = path.join(dir, entry.name);
+          const skillMdPath = path.join(skillDir, 'SKILL.md');
+          try {
+            const raw = await fs.promises.readFile(skillMdPath, 'utf8');
+            const parsed = parseSkillMd(raw, entry.name);
+            seen.add(entry.name);
+            // Infer group from parent directory structure (e.g., "domain/skill-name")
+            const parentDir = path.basename(path.dirname(skillDir));
+            const isInSubfolder = parentDir !== 'skills' && parentDir !== '.codex' && parentDir !== '.agents';
+            skills.push({
+              name: parsed.name,
+              description: parsed.description,
+              path: skillDir,
+              source,
+              scope,
+              group: isInSubfolder ? parentDir : undefined,
+              content: parsed.body,
+            });
+          } catch {
+            // Skip skills without SKILL.md
+          }
+        }
+      }
+      return res.json({ skills });
+    } catch (error) {
+      console.error('Failed to list Codex skills:', error);
+      return res.status(500).json({ error: 'Failed to list Codex skills' });
+    }
+  });
+
+  app.get('/api/openchamber/codex/skills/:name', async (req, res) => {
+    try {
+      const name = typeof req.params.name === 'string' ? req.params.name.trim().replace(/[/\\]/g, '') : '';
+      if (!name) return res.status(400).json({ error: 'Invalid skill name' });
+      // Search across all Codex skill paths
+      for (const { dir, source } of resolveCodexSkillSearchPaths()) {
+        const skillMdPath = path.join(dir, name, 'SKILL.md');
+        try {
+          const content = await fs.promises.readFile(skillMdPath, 'utf8');
+          return res.json({ name, content, source, path: path.dirname(skillMdPath) });
+        } catch (error) {
+          if (error?.code !== 'ENOENT') throw error;
+        }
+      }
+      return res.status(404).json({ error: 'Skill not found' });
+    } catch (error) {
+      return res.status(500).json({ error: 'Failed to read skill' });
+    }
+  });
+
+  app.put('/api/openchamber/codex/skills/:name', async (req, res) => {
+    try {
+      const name = typeof req.params.name === 'string' ? req.params.name.trim().replace(/[/\\]/g, '') : '';
+      if (!name) return res.status(400).json({ error: 'Invalid skill name' });
+      const content = typeof req.body?.content === 'string' ? req.body.content : '';
+      const skillDir = path.join(resolveCodexSkillsDir(), name);
+      await fs.promises.mkdir(skillDir, { recursive: true });
+      await fs.promises.writeFile(path.join(skillDir, 'SKILL.md'), content, 'utf8');
+      return res.json({ name, content, path: skillDir });
+    } catch (error) {
+      console.error('Failed to write Codex skill:', error);
+      return res.status(500).json({ error: 'Failed to save skill' });
+    }
+  });
+
+  app.delete('/api/openchamber/codex/skills/:name', async (req, res) => {
+    try {
+      const name = typeof req.params.name === 'string' ? req.params.name.trim().replace(/[/\\]/g, '') : '';
+      if (!name) return res.status(400).json({ error: 'Invalid skill name' });
+      const skillDir = path.join(resolveCodexSkillsDir(), name);
+      await fs.promises.rm(skillDir, { recursive: true, force: true });
+      return res.json({ ok: true });
+    } catch (error) {
+      return res.status(500).json({ error: 'Failed to delete skill' });
     }
   });
 };

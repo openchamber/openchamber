@@ -66,6 +66,10 @@ import { createNotificationTriggerRuntime } from './lib/notifications/runtime.js
 import { createPushRuntime } from './lib/notifications/push-runtime.js';
 import { createNotificationTemplateRuntime } from './lib/notifications/template-runtime.js';
 import { createGracefulShutdownRuntime } from './lib/opencode/shutdown-runtime.js';
+import { createBackendRegistry, DEFAULT_BACKEND_ID } from './lib/harness/backends.js';
+import { createSessionBindingsRuntime } from './lib/harness/session-bindings.js';
+import { createOpenCodeBackendRuntime } from './lib/harness/opencode-backend.js';
+import { createCodexBackendRuntime } from './lib/harness/codex-backend.js';
 import webPush from 'web-push';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -181,6 +185,8 @@ const OPENCHAMBER_DATA_DIR = process.env.OPENCHAMBER_DATA_DIR
   ? path.resolve(process.env.OPENCHAMBER_DATA_DIR)
   : path.join(os.homedir(), '.config', 'openchamber');
 const SETTINGS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'settings.json');
+const SESSION_BINDINGS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'session-bindings.json');
+const CODEX_SESSIONS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'codex-sessions.json');
 const PUSH_SUBSCRIPTIONS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'push-subscriptions.json');
 const CLOUDFLARE_MANAGED_REMOTE_TUNNELS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'cloudflare-managed-remote-tunnels.json');
 const CLOUDFLARE_LEGACY_NAMED_TUNNELS_FILE_PATH = path.join(OPENCHAMBER_DATA_DIR, 'cloudflare-named-tunnels.json');
@@ -262,6 +268,20 @@ const readSettingsFromDiskMigrated = (...args) => settingsRuntime.readSettingsFr
 const readSettingsFromDisk = (...args) => settingsRuntime.readSettingsFromDisk(...args);
 const writeSettingsToDisk = (...args) => settingsRuntime.writeSettingsToDisk(...args);
 const persistSettings = (...args) => settingsRuntime.persistSettings(...args);
+
+const backendRegistry = createBackendRegistry({
+  readSettingsFromDiskMigrated,
+});
+
+const sessionBindingsRuntime = createSessionBindingsRuntime({
+  fsPromises,
+  path,
+  bindingsFilePath: SESSION_BINDINGS_FILE_PATH,
+  defaultBackendId: DEFAULT_BACKEND_ID,
+  getDefaultBackendId: () => backendRegistry.getDefaultBackendId(),
+});
+
+await sessionBindingsRuntime.ensureLoaded();
 
 const requestSecurityRuntime = createRequestSecurityRuntime({
   readSettingsFromDiskMigrated,
@@ -471,6 +491,20 @@ const buildOpenCodeUrl = (...args) => openCodeNetworkRuntime.buildOpenCodeUrl(..
 const ensureOpenCodeApiPrefix = (...args) => openCodeNetworkRuntime.ensureOpenCodeApiPrefix(...args);
 const scheduleOpenCodeApiDetection = (...args) => openCodeNetworkRuntime.scheduleOpenCodeApiDetection(...args);
 
+const openCodeBackendRuntime = createOpenCodeBackendRuntime({
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+});
+
+const codexBackendRuntime = createCodexBackendRuntime({
+  crypto,
+  fsPromises,
+  sessionsFilePath: CODEX_SESSIONS_FILE_PATH,
+});
+
+backendRegistry.registerRuntime('opencode', openCodeBackendRuntime);
+backendRegistry.registerRuntime('codex', codexBackendRuntime);
+
 const ENV_CONFIGURED_API_PREFIX = normalizeApiPrefix(
   process.env.OPENCODE_API_PREFIX || process.env.OPENCHAMBER_API_PREFIX || ''
 );
@@ -606,6 +640,9 @@ const serverUtilsRuntime = createServerUtilsRuntime({
   buildOpenCodeUrl,
   ensureOpenCodeApiPrefix,
   getUiNotificationClients: () => uiNotificationClients,
+  backendRegistry,
+  sessionBindingsRuntime,
+  readSettingsFromDiskMigrated,
   getOpenCodePort: () => openCodePort,
   setOpenCodePortState: (value) => {
     openCodePort = value;
@@ -934,6 +971,8 @@ async function main(options = {}) {
     modelsMetadataCacheTtl: MODELS_METADATA_CACHE_TTL,
     fetchFreeZenModels,
     getCachedZenModels,
+    backendRegistry,
+    sessionBindingsRuntime,
   });
   uiAuthController = bootstrapResult.uiAuthController;
 
@@ -989,6 +1028,8 @@ async function main(options = {}) {
     setupProxy,
     scheduleOpenCodeApiDetection,
     bootstrapOpenCodeAtStartup,
+    backendRegistry,
+    getOpenCodeLifecycleState: () => openCodeLifecycleState,
     staticRoutesRuntime,
     process,
     crypto,

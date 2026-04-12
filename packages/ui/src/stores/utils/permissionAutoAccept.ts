@@ -1,6 +1,25 @@
 import type { Session } from "@opencode-ai/sdk/v2/client";
 
-export type PermissionAutoAcceptMap = Record<string, boolean>;
+export type PermissionLevel = 'manual' | 'auto-accept' | 'full-access';
+
+export type PermissionAutoAcceptMap = Record<string, boolean | PermissionLevel>;
+
+/**
+ * Normalize a stored value (boolean or string) to a PermissionLevel.
+ * Handles backward compatibility with legacy boolean values.
+ */
+export const resolvePermissionLevel = (value: boolean | PermissionLevel | undefined): PermissionLevel => {
+    if (value === true || value === 'auto-accept') return 'auto-accept';
+    if (value === 'full-access') return 'full-access';
+    return 'manual';
+};
+
+/**
+ * Returns true for permission levels that auto-reply to permission requests.
+ */
+export const isAutoAcceptingLevel = (level: PermissionLevel): boolean => {
+    return level === 'auto-accept' || level === 'full-access';
+};
 
 const DIRECTORY_WILDCARD = "*";
 
@@ -53,35 +72,47 @@ const resolveLineage = (sessionID: string, sessions: Session[]): string[] => {
     return result;
 };
 
+/**
+ * Look up the resolved PermissionLevel for a session, walking the lineage.
+ */
+export const getPermissionLevel = (input: {
+    autoAccept: PermissionAutoAcceptMap;
+    sessions: Session[];
+    sessionID: string;
+    directory: string;
+}): PermissionLevel => {
+    const { autoAccept, sessions, sessionID, directory } = input;
+
+    for (const id of resolveLineage(sessionID, sessions)) {
+        const key = sessionAcceptKey(id, directory);
+        if (key in autoAccept) {
+            return resolvePermissionLevel(autoAccept[key]);
+        }
+
+        // Legacy fallback for pre-directory keys.
+        if (id in autoAccept) {
+            return resolvePermissionLevel(autoAccept[id]);
+        }
+    }
+
+    const directoryKey = directoryAcceptKey(directory);
+    if (directoryKey in autoAccept) {
+        return resolvePermissionLevel(autoAccept[directoryKey]);
+    }
+
+    return 'manual';
+};
+
 export const autoRespondsPermission = (input: {
     autoAccept: PermissionAutoAcceptMap;
     sessions: Session[];
     sessionID: string;
     directory: string;
 }): boolean => {
-    const { autoAccept, sessions, sessionID, directory } = input;
-
-    for (const id of resolveLineage(sessionID, sessions)) {
-        const key = sessionAcceptKey(id, directory);
-        if (key in autoAccept) {
-            return autoAccept[key] === true;
-        }
-
-        // Legacy fallback for pre-directory keys.
-        if (id in autoAccept) {
-            return autoAccept[id] === true;
-        }
-    }
-
-    const directoryKey = directoryAcceptKey(directory);
-    if (directoryKey in autoAccept) {
-        return autoAccept[directoryKey] === true;
-    }
-
-    return false;
+    return isAutoAcceptingLevel(getPermissionLevel(input));
 };
 
 export const isDirectoryAutoAccepting = (autoAccept: PermissionAutoAcceptMap, directory: string): boolean => {
     const key = directoryAcceptKey(directory);
-    return autoAccept[key] === true;
+    return isAutoAcceptingLevel(resolvePermissionLevel(autoAccept[key]));
 };

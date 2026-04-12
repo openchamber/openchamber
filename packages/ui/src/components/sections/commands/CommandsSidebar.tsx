@@ -23,12 +23,74 @@ import { useSkillsStore } from '@/stores/useSkillsStore';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { cn } from '@/lib/utils';
 import { SettingsProjectSelector } from '@/components/sections/shared/SettingsProjectSelector';
+import { BackendSwitcher } from '@/components/sections/shared/BackendSwitcher';
+import { BackendUnsupported } from '@/components/sections/shared/BackendUnsupported';
+import { useBackendsStore } from '@/stores/useBackendsStore';
 
 interface CommandsSidebarProps {
   onItemSelect?: () => void;
 }
 
 export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }) => {
+  const defaultBackendId = useBackendsStore((state) => state.defaultBackendId);
+  const hasCapability = useBackendsStore((state) => state.hasCapability);
+  const getBackendFn = useBackendsStore((state) => state.getBackend);
+  const [selectedBackendId, setSelectedBackendId] = React.useState('');
+
+  React.useEffect(() => {
+    if (defaultBackendId && !selectedBackendId) {
+      setSelectedBackendId(defaultBackendId);
+    }
+  }, [defaultBackendId, selectedBackendId]);
+
+  const backendSupportsCommands = selectedBackendId ? hasCapability(selectedBackendId, 'commands') : true;
+  const selectedBackend = selectedBackendId ? getBackendFn(selectedBackendId) : undefined;
+  const isCodexBackend = selectedBackendId === 'codex';
+
+  // Clear selection when switching backends so the page resets
+  const prevBackendRef = React.useRef(selectedBackendId);
+  React.useEffect(() => {
+    if (prevBackendRef.current && prevBackendRef.current !== selectedBackendId) {
+      useCommandsStore.getState().setSelectedCommand(null);
+      useCommandsStore.getState().setCommandDraft(null);
+    }
+    prevBackendRef.current = selectedBackendId;
+  }, [selectedBackendId]);
+
+  // Codex custom prompts loaded from control surface
+  const [codexPrompts, setCodexPrompts] = React.useState<Array<{ name: string; description?: string; template?: string }>>([]);
+  const [codexPromptsLoading, setCodexPromptsLoading] = React.useState(false);
+  React.useEffect(() => {
+    if (!isCodexBackend) {
+      setCodexPrompts([]);
+      return;
+    }
+    let cancelled = false;
+    setCodexPromptsLoading(true);
+    void (async () => {
+      try {
+        const response = await fetch('/api/openchamber/harness/control-surface?backendId=codex', {
+          method: 'GET',
+          headers: { Accept: 'application/json' },
+        });
+        if (!response.ok || cancelled) return;
+        const data = await response.json();
+        if (cancelled) return;
+        const items = Array.isArray(data?.commandSelector?.items) ? data.commandSelector.items : [];
+        setCodexPrompts(items.map((item: { name?: string; description?: string; template?: string }) => ({
+          name: typeof item.name === 'string' ? item.name : '',
+          description: typeof item.description === 'string' ? item.description : undefined,
+          template: typeof item.template === 'string' ? item.template : undefined,
+        })).filter((p: { name: string }) => p.name.length > 0));
+      } catch {
+        // ignore
+      } finally {
+        if (!cancelled) setCodexPromptsLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isCodexBackend]);
+
   const [renameDialogCommand, setRenameDialogCommand] = React.useState<Command | null>(null);
   const [renameNewName, setRenameNewName] = React.useState('');
   const [confirmActionCommand, setConfirmActionCommand] = React.useState<Command | null>(null);
@@ -216,20 +278,120 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
   return (
     <div className={cn('flex h-full flex-col', bgClass)}>
       <div className="border-b px-3 pt-4 pb-3">
-        <h2 className="text-base font-semibold text-foreground mb-3">Commands</h2>
+        <h2 className="text-base font-semibold text-foreground mb-3">
+          {isCodexBackend ? 'Custom Prompts' : 'Commands'}
+        </h2>
+        <BackendSwitcher
+          capability="commands"
+          selectedBackendId={selectedBackendId}
+          onBackendChange={setSelectedBackendId}
+          className="mb-3"
+        />
         <SettingsProjectSelector className="mb-3" />
         <div className="flex items-center justify-between gap-2">
-          <span className="typography-meta text-muted-foreground">Total {commandOnlyItems.length}</span>
-          <Button size="sm"
-            variant="ghost"
-            className="h-7 w-7 px-0 -my-1 text-muted-foreground"
-            onClick={handleCreateNew}
-          >
-            <RiAddLine className="h-3.5 w-3.5" />
-          </Button>
+          <span className="typography-meta text-muted-foreground">
+            Total {isCodexBackend ? codexPrompts.filter((p) => p.name.startsWith('prompts:')).length : commandOnlyItems.length}
+          </span>
+          {isCodexBackend ? (
+            <Button size="sm"
+              variant="ghost"
+              className="h-7 w-7 px-0 -my-1 text-muted-foreground"
+              onClick={async () => {
+                const baseName = 'new-prompt';
+                let name = baseName;
+                let counter = 1;
+                while (codexPrompts.some((p) => p.name === `prompts:${name}`)) {
+                  name = `${baseName}-${counter}`;
+                  counter++;
+                }
+                try {
+                  await fetch(`/api/openchamber/codex/prompts/${encodeURIComponent(name)}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ description: '', argumentHint: '', template: 'Your prompt here.\n' }),
+                  });
+                  // Reload prompts
+                  const response = await fetch('/api/openchamber/harness/control-surface?backendId=codex', {
+                    headers: { Accept: 'application/json' },
+                  });
+                  if (response.ok) {
+                    const data = await response.json();
+                    const items = Array.isArray(data?.commandSelector?.items) ? data.commandSelector.items : [];
+                    setCodexPrompts(items.map((item: { name?: string; description?: string; template?: string }) => ({
+                      name: typeof item.name === 'string' ? item.name : '',
+                      description: typeof item.description === 'string' ? item.description : undefined,
+                      template: typeof item.template === 'string' ? item.template : undefined,
+                    })).filter((p: { name: string }) => p.name.length > 0));
+                  }
+                  setSelectedCommand(`prompts:${name}`);
+                  onItemSelect?.();
+                } catch {
+                  // ignore
+                }
+              }}
+              title="Add custom prompt"
+            >
+              <RiAddLine className="h-3.5 w-3.5" />
+            </Button>
+          ) : (
+            <Button size="sm"
+              variant="ghost"
+              className="h-7 w-7 px-0 -my-1 text-muted-foreground"
+              onClick={handleCreateNew}
+            >
+              <RiAddLine className="h-3.5 w-3.5" />
+            </Button>
+          )}
         </div>
       </div>
 
+      {!backendSupportsCommands ? (
+        <div className="flex-1 min-h-0">
+          <BackendUnsupported
+            backendId={selectedBackendId}
+            backendLabel={selectedBackend?.label || selectedBackendId}
+            featureName={isCodexBackend ? 'Custom Prompts' : 'Commands'}
+            comingSoon={selectedBackend?.comingSoon}
+          />
+        </div>
+      ) : isCodexBackend ? (
+        <ScrollableOverlay outerClassName="flex-1 min-h-0" className="space-y-1 px-3 py-2">
+          {codexPromptsLoading ? (
+            <div className="px-4 py-8 text-center typography-micro text-muted-foreground/60">
+              Loading prompts...
+            </div>
+          ) : codexPrompts.filter((p) => p.name.startsWith('prompts:')).length === 0 ? (
+            <div className="py-12 px-4 text-center text-muted-foreground">
+              <RiTerminalBoxLine className="mx-auto mb-3 h-10 w-10 opacity-50" />
+              <p className="typography-ui-label font-medium">No custom prompts found</p>
+              <p className="typography-meta mt-1 opacity-75">
+                Add <span className="font-mono">.md</span> files to <span className="font-mono">~/.codex/prompts/</span>
+              </p>
+            </div>
+          ) : (
+            <>
+              {codexPrompts.filter((p) => p.name.startsWith('prompts:')).map((prompt) => {
+                const displayName = prompt.name.replace(/^prompts:/, '');
+                return (
+                  <button
+                    key={prompt.name}
+                    onClick={() => { setSelectedCommand(prompt.name); onItemSelect?.(); }}
+                    className={cn(
+                      'flex w-full min-w-0 flex-col gap-0 rounded-md px-1.5 py-1.5 text-left',
+                      selectedCommandName === prompt.name ? 'bg-interactive-selection' : 'hover:bg-interactive-hover',
+                    )}
+                  >
+                    <span className="typography-ui-label font-normal truncate text-foreground">{displayName}</span>
+                    {prompt.description && (
+                      <span className="typography-micro text-muted-foreground/60 truncate">{prompt.description}</span>
+                    )}
+                      </button>
+                    );
+                  })}
+            </>
+          )}
+        </ScrollableOverlay>
+      ) : (
       <ScrollableOverlay outerClassName="flex-1 min-h-0" className="space-y-1 px-3 py-2">
         {commandOnlyItems.length === 0 ? (
           <div className="py-12 px-4 text-center text-muted-foreground">
@@ -290,6 +452,7 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
           </>
         )}
       </ScrollableOverlay>
+      )}
 
       <Dialog
         open={confirmActionCommand !== null && confirmActionType !== null}

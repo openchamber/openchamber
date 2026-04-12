@@ -333,6 +333,7 @@ export const registerFsRoutes = (app, dependencies) => {
 
   app.get('/api/fs/read', async (req, res) => {
     const filePath = typeof req.query.path === 'string' ? req.query.path.trim() : '';
+    const allowMissing = req.query.allowMissing === 'true';
     if (!filePath) {
       return res.status(400).json({ error: 'Path is required' });
     }
@@ -370,6 +371,9 @@ export const registerFsRoutes = (app, dependencies) => {
     } catch (error) {
       const err = error;
       if (err && typeof err === 'object' && err.code === 'ENOENT') {
+        if (allowMissing) {
+          return res.status(204).end();
+        }
         return res.status(404).json({ error: 'File not found' });
       }
       if (err && typeof err === 'object' && err.code === 'EACCES') {
