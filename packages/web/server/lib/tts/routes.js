@@ -1,3 +1,6 @@
+import express from 'express';
+import { normalizeCustomOpenAIBaseURL } from './base-url.js';
+
 export function registerTtsRoutes(app, { resolveZenModel, sayTTSCapability }) {
   let ttsModulePromise = null;
   const getTtsModule = async () => {
@@ -40,9 +43,15 @@ export function registerTtsRoutes(app, { resolveZenModel, sayTTSCapability }) {
   // Server-side TTS endpoint - streams audio from OpenAI TTS API
   app.post('/api/tts/speak', async (req, res) => {
     try {
-      const { text, voice = 'nova', model = 'gpt-4o-mini-tts', speed = 0.9, instructions, summarize = false, providerId, modelId, threshold = 200, maxLength = 500, apiKey } = req.body || {};
+      const { text, voice = 'nova', model = 'gpt-4o-mini-tts', speed = 0.9, instructions, summarize = false, providerId, modelId, threshold = 200, maxLength = 500, apiKey, baseURL } = req.body || {};
 
-      console.log('[TTS] Request received:', { voice, model, speed, textLength: text?.length, hasApiKey: !!apiKey });
+      const normalizedBaseURLResult = normalizeCustomOpenAIBaseURL(baseURL);
+      if (normalizedBaseURLResult.error) {
+        return res.status(400).json({ error: normalizedBaseURLResult.error });
+      }
+      const normalizedBaseURL = normalizedBaseURLResult.value;
+
+      console.log('[TTS] Request received:', { voice, model, speed, textLength: text?.length, hasApiKey: !!apiKey, hasBaseURL: !!baseURL });
 
       if (!text || typeof text !== 'string' || !text.trim()) {
         return res.status(400).json({ error: 'Text is required' });
@@ -51,13 +60,14 @@ export function registerTtsRoutes(app, { resolveZenModel, sayTTSCapability }) {
       // Dynamically import the TTS service (ESM)
       const { ttsService } = await getTtsModule();
 
-      // Check availability - either server-configured or client-provided API key
+      // Check availability - server-configured key, client-provided key, or custom server URL
       const hasServerKey = ttsService.isAvailable();
       const hasClientKey = apiKey && typeof apiKey === 'string' && apiKey.trim().length > 0;
+      const hasCustomBaseURL = typeof normalizedBaseURL === 'string' && normalizedBaseURL.length > 0;
       
-      if (!hasServerKey && !hasClientKey) {
+      if (!hasServerKey && !hasClientKey && !hasCustomBaseURL) {
         return res.status(503).json({ 
-          error: 'TTS service not available. Please configure OpenAI in OpenCode or provide an API key in settings.' 
+          error: 'TTS service not available. Please configure OpenAI in OpenCode, provide an API key, or set a custom server URL in settings.' 
         });
       }
 
@@ -85,44 +95,24 @@ export function registerTtsRoutes(app, { resolveZenModel, sayTTSCapability }) {
         model,
         speed,
         instructions,
-        apiKey: hasClientKey ? apiKey.trim() : undefined
+        apiKey: hasClientKey ? apiKey.trim() : undefined,
+        baseURL: hasCustomBaseURL ? normalizedBaseURL : undefined,
       });
 
-      // Set headers for audio streaming
-      // Note: Don't set Transfer-Encoding manually - Express handles it automatically
       res.setHeader('Content-Type', result.contentType);
       res.setHeader('Cache-Control', 'no-cache');
-
-      // Collect the full audio buffer and send it
-      // This avoids chunked encoding issues with proxies
-      const reader = result.stream.getReader();
-      const chunks = [];
-      
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          chunks.push(Buffer.from(value));
-        }
-        const audioBuffer = Buffer.concat(chunks);
-        res.setHeader('Content-Length', audioBuffer.length);
-        res.send(audioBuffer);
-      } catch (streamError) {
-        console.error('[TTS] Stream error:', streamError);
+      res.setHeader('Content-Length', result.buffer.length);
+      res.send(result.buffer);
+      } catch (error) {
+        console.error('[TTS] Error:', error);
         if (!res.headersSent) {
-          res.status(500).json({ error: 'Stream error' });
-        } else {
-          res.end();
+          const { model: m, voice: v, baseURL: b } = req.body || {};
+          res.status(500).json({ 
+            error: error instanceof Error ? error.message : 'TTS generation failed',
+            detail: { model: m, voice: v, hasBaseURL: !!b },
+          });
         }
       }
-    } catch (error) {
-      console.error('[TTS] Error:', error);
-      if (!res.headersSent) {
-        res.status(500).json({ 
-          error: error instanceof Error ? error.message : 'TTS generation failed' 
-        });
-      }
-    }
   });
 
   app.post('/api/tts/summarize', async (req, res) => {
@@ -222,4 +212,58 @@ export function registerTtsRoutes(app, { resolveZenModel, sayTTSCapability }) {
       });
     }
   });
+
+  // Server-side STT: receive raw audio, proxy to OpenAI-compatible transcription endpoint
+  app.post(
+    '/api/stt/transcribe',
+    express.raw({ type: (req) => (req.headers['content-type'] || '').startsWith('audio/'), limit: '20mb' }),
+    async (req, res) => {
+      try {
+        const { transcribeAudio } = await import('./stt.js');
+
+        const mimeType = (req.headers['content-type'] || 'audio/webm').split(',')[0].trim();
+        const baseURL = typeof req.headers['x-base-url'] === 'string' ? req.headers['x-base-url'].trim() : '';
+        const model = typeof req.headers['x-model'] === 'string' && req.headers['x-model'].trim().length > 0
+          ? req.headers['x-model'].trim()
+          : 'deepdml/faster-whisper-large-v3-turbo-ct2';
+        const language = typeof req.headers['x-language'] === 'string' && req.headers['x-language'].trim().length > 0
+          ? req.headers['x-language'].trim()
+          : undefined;
+
+        if (!req.body || !Buffer.isBuffer(req.body) || req.body.length === 0) {
+          return res.status(400).json({ error: 'Audio data is required' });
+        }
+
+        if (!baseURL) {
+          return res.status(400).json({ error: 'X-Base-URL header is required' });
+        }
+
+        console.log('[STT] Transcribing audio:', {
+          bytes: req.body.length,
+          mimeType,
+          model,
+          baseURL,
+          language,
+        });
+
+        const transcript = await transcribeAudio({
+          audioBuffer: req.body,
+          mimeType,
+          model,
+          baseURL,
+          language,
+        });
+
+        console.log('[STT] Transcript:', transcript?.slice(0, 120));
+        res.json({ transcript: transcript ?? '' });
+      } catch (error) {
+        console.error('[STT] Error:', error);
+        if (!res.headersSent) {
+          res.status(500).json({
+            error: error instanceof Error ? error.message : 'Transcription failed',
+          });
+        }
+      }
+    }
+  );
 }

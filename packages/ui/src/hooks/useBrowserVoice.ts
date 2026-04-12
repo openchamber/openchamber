@@ -27,6 +27,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { browserVoiceService } from '@/lib/voice/browserVoiceService';
+import { audioStreamService } from '@/lib/voice/audioStreamService';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useInputStore } from '@/sync/input-store';
 import { getSyncMessages, getSyncParts } from '@/sync/sync-refs';
@@ -61,7 +62,7 @@ export interface UseBrowserVoiceReturn {
   /** Whether the device is mobile */
   isMobile: boolean;
   /** Current voice provider */
-  voiceProvider: 'browser' | 'openai' | 'say';
+  voiceProvider: 'browser' | 'openai' | 'openai-compatible' | 'say';
 }
 
 // Storage key for persisting language preference
@@ -109,8 +110,6 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
     return false;
   });
   
-  const isSupported = browserVoiceService.isSupported();
-  
   // Mobile detection
   const isMobile = useMemo(() => {
     if (typeof navigator === 'undefined') return false;
@@ -143,15 +142,31 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
   const sayVoice = useConfigStore((state) => state.sayVoice);
   const browserVoice = useConfigStore((state) => state.browserVoice);
   const openaiVoice = useConfigStore((state) => state.openaiVoice);
+  const openaiCompatibleVoice = useConfigStore((state) => state.openaiCompatibleVoice);
+  const openaiCompatibleUrl = useConfigStore((state) => state.openaiCompatibleUrl);
+  const openaiCompatibleTtsModel = useConfigStore((state) => state.openaiCompatibleTtsModel);
   const summarizeVoiceConversation = useConfigStore((state) => state.summarizeVoiceConversation);
   const summarizeCharacterThreshold = useConfigStore((state) => state.summarizeCharacterThreshold);
 
-  const shouldCheckOpenAIAvailability = voiceModeEnabled && voiceProvider === 'openai';
+  const shouldCheckOpenAIAvailability = voiceModeEnabled && (voiceProvider === 'openai' || voiceProvider === 'openai-compatible');
   const shouldCheckSayAvailability = voiceModeEnabled && voiceProvider === 'say';
+
+  // STT provider config
+  const sttProvider = useConfigStore((state) => state.sttProvider);
+  const sttServerUrl = useConfigStore((state) => state.sttServerUrl);
+  const sttModel = useConfigStore((state) => state.sttModel);
+  const sttLanguage = useConfigStore((state) => state.sttLanguage);
+  const sttSilenceThresholdDb = useConfigStore((state) => state.sttSilenceThresholdDb);
+  const sttSilenceHoldMs = useConfigStore((state) => state.sttSilenceHoldMs);
+
+  const isSupported = sttProvider === 'server'
+    ? audioStreamService.isSupported()
+    : browserVoiceService.isSupported();
 
   // Server TTS for mobile (bypasses Safari audio restrictions)
   const { speak: speakServerTTS, stop: stopServerTTS, isAvailable: isServerTTSAvailable, unlockAudio: unlockServerTTSAudio } = useServerTTS({
     enabled: shouldCheckOpenAIAvailability,
+    availabilityMode: voiceProvider === 'openai-compatible' ? 'openai-compatible' : 'openai',
   });
 
   // macOS Say TTS
@@ -170,6 +185,7 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
         isActiveRef.current = false;
         processingMessageRef.current = false;
         browserVoiceService.stopListening();
+        audioStreamService.stopListening();
         browserVoiceService.cancelSpeech();
         setStatus('idle');
         setError(null);
@@ -309,11 +325,15 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
         if (isActiveRef.current) {
           setStatus('listening');
           setError(null);
-          browserVoiceService.startListening(language, handleSpeechResultRef.current!, handleSpeechError);
+          if (sttProvider === 'server') {
+            audioStreamService.startListening(language, handleSpeechResultRef.current!, handleSpeechError).catch(() => {});
+          } else {
+            browserVoiceService.startListening(language, handleSpeechResultRef.current!, handleSpeechError);
+          }
         }
       }, 1000);
     }
-  }, [language, conversationMode]);
+  }, [language, conversationMode, sttProvider]);
 
   // Update the ref when handleSpeechError changes
   useEffect(() => {
@@ -336,6 +356,7 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
 
     // Stop listening while processing
     browserVoiceService.stopListening();
+    audioStreamService.stopListening();
 
     // Non-continuous mode: fill chat input only, do not auto-send.
     if (!conversationMode) {
@@ -423,7 +444,11 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
                   }
 
                   setStatus('listening');
-                  if (isMobile) {
+                  if (sttProvider === 'server') {
+                    audioStreamService.startListening(language, handleSpeechResultRef.current!, handleSpeechErrorRef.current!).catch((err) => {
+                      console.error('[useBrowserVoice] Failed to restart server STT:', err);
+                    });
+                  } else if (isMobile) {
                     try {
                       browserVoiceService.startListeningSync(language, handleSpeechResultRef.current!, handleSpeechErrorRef.current!);
                     } catch (err) {
@@ -439,12 +464,19 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
                 }
               };
 
-              // Use server TTS when OpenAI provider is selected and available
-              if (voiceProvider === 'openai' && isServerTTSAvailable) {
-                console.log('[useBrowserVoice] Using OpenAI server TTS with voice:', openaiVoice);
+              // Use server TTS when OpenAI (or OpenAI-compatible) provider is selected and available
+              if ((voiceProvider === 'openai' || voiceProvider === 'openai-compatible') && isServerTTSAvailable) {
+                const ttsVoice = voiceProvider === 'openai-compatible' ? openaiCompatibleVoice : openaiVoice;
+                const ttsBaseURL = voiceProvider === 'openai-compatible' ? openaiCompatibleUrl : undefined;
+                const ttsModel = voiceProvider === 'openai-compatible' ? openaiCompatibleTtsModel : undefined;
+                console.log('[useBrowserVoice] Using server TTS with voice:', ttsVoice, 'provider:', voiceProvider);
                 await speakServerTTS(textToSpeak, {
-                  voice: openaiVoice,
+                  voice: ttsVoice,
+                  model: ttsModel,
                   speed: speechRate,
+                  pitch: speechPitch,
+                  volume: speechVolume,
+                  baseURL: ttsBaseURL,
                   onStart: () => console.log('[useBrowserVoice] Server TTS started'),
                   onEnd: () => {
                     console.log('[useBrowserVoice] Server TTS ended');
@@ -452,8 +484,7 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
                   },
                   onError: (errorMsg) => {
                     console.error('[useBrowserVoice] Server TTS error:', errorMsg);
-                    // Show error to user when OpenAI voice fails
-                    setError(`OpenAI voice failed: ${errorMsg}. Please check your OpenAI API key or switch to Browser voice.`);
+                    setError(`Voice TTS failed: ${errorMsg}. Please check your settings or switch to Browser voice.`);
                     setStatus('error');
                     restartListening();
                   }
@@ -514,7 +545,11 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
               // Only restart listening if conversation mode is enabled
               if (conversationMode) {
                 setStatus('listening');
-                if (isMobile) {
+                if (sttProvider === 'server') {
+                  audioStreamService.startListening(language, handleSpeechResultRef.current!, handleSpeechErrorRef.current!).catch((err) => {
+                    console.error('[useBrowserVoice] Failed to restart server STT after speech error:', err);
+                  });
+                } else if (isMobile) {
                   try {
                     browserVoiceService.startListeningSync(language, handleSpeechResultRef.current!, handleSpeechErrorRef.current!);
                   } catch (restartErr) {
@@ -546,7 +581,7 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
       setStatus('error');
       processingMessageRef.current = false;
     }
-  }, [currentSessionId, currentProviderId, currentModelId, currentAgentName, language, sendMessage, setPendingInputText, createSession, speechRate, speechPitch, speechVolume, isMobile, isServerTTSAvailable, speakServerTTS, isSayTTSAvailable, speakSayTTS, voiceProvider, sayVoice, browserVoice, openaiVoice, summarizeVoiceConversation, summarizeCharacterThreshold, conversationMode]);
+  }, [currentSessionId, currentProviderId, currentModelId, currentAgentName, language, sendMessage, setPendingInputText, createSession, speechRate, speechPitch, speechVolume, isMobile, isServerTTSAvailable, speakServerTTS, isSayTTSAvailable, speakSayTTS, voiceProvider, sayVoice, browserVoice, openaiVoice, openaiCompatibleVoice, openaiCompatibleUrl, openaiCompatibleTtsModel, summarizeVoiceConversation, summarizeCharacterThreshold, conversationMode, sttProvider]);
 
   // Handle speech recognition result
   const handleSpeechResult = useCallback(async (text: string, isFinal: boolean) => {
@@ -589,7 +624,9 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
       pendingResumeOnVisibleRef.current = false;
       setStatus('listening');
       try {
-        if (isMobile) {
+        if (sttProvider === 'server') {
+          void audioStreamService.startListening(language, handleSpeechResultRef.current!, handleSpeechErrorRef.current!);
+        } else if (isMobile) {
           browserVoiceService.startListeningSync(language, handleSpeechResultRef.current!, handleSpeechErrorRef.current!);
         } else {
           browserVoiceService.startListening(language, handleSpeechResultRef.current!, handleSpeechErrorRef.current!);
@@ -605,7 +642,7 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [conversationMode, isMobile, language]);
+  }, [conversationMode, isMobile, language, sttProvider]);
 
   useEffect(() => {
     if (typeof navigator === 'undefined') {
@@ -640,11 +677,16 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
         }
 
         try {
-          browserVoiceService.stopListening();
-          if (isMobile) {
-            browserVoiceService.startListeningSync(language, handleSpeechResultRef.current!, handleSpeechErrorRef.current!);
+          if (sttProvider === 'server') {
+            audioStreamService.stopListening();
+            void audioStreamService.startListening(language, handleSpeechResultRef.current!, handleSpeechErrorRef.current!);
           } else {
-            void browserVoiceService.startListening(language, handleSpeechResultRef.current!, handleSpeechErrorRef.current!);
+            browserVoiceService.stopListening();
+            if (isMobile) {
+              browserVoiceService.startListeningSync(language, handleSpeechResultRef.current!, handleSpeechErrorRef.current!);
+            } else {
+              void browserVoiceService.startListening(language, handleSpeechResultRef.current!, handleSpeechErrorRef.current!);
+            }
           }
         } catch (err) {
           const errorMsg = err instanceof Error ? err.message : 'Microphone source changed. Tap mic to continue.';
@@ -664,7 +706,7 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
         deviceChangeRestartTimerRef.current = null;
       }
     };
-  }, [isMobile, language, status]);
+  }, [isMobile, language, status, sttProvider]);
 
   // Update the ref when handleSpeechResult changes
   useEffect(() => {
@@ -676,6 +718,10 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
     if (!isSupported) {
       return false;
     }
+    if (sttProvider === 'server') {
+      // getUserMedia permission is requested on startListening; nothing to prepare
+      return true;
+    }
     try {
       await browserVoiceService.prepareListening();
       return true;
@@ -684,12 +730,12 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
       setError(errorMsg);
       return false;
     }
-  }, [isSupported]);
+  }, [isSupported, sttProvider]);
 
   // Start voice mode
   const startVoice = useCallback(async () => {
     if (!isSupported) {
-      setError('Browser voice not supported');
+      setError('Voice input not supported in this browser');
       setStatus('error');
       return;
     }
@@ -704,7 +750,29 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
     lastTranscriptRef.current = '';
     setError(null);
     setStatus('listening');
-    
+
+    if (sttProvider === 'server') {
+      // Server STT: configure the service then start async recording
+      audioStreamService.configure({
+        baseURL: sttServerUrl,
+        model: sttModel,
+        language: sttLanguage || undefined,
+        silenceThresholdDb: sttSilenceThresholdDb,
+        silenceHoldMs: sttSilenceHoldMs,
+      });
+      try {
+        await audioStreamService.startListening(language, handleSpeechResult, handleSpeechError);
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : 'Failed to start voice';
+        console.error('[useBrowserVoice] Server STT start error:', errorMsg);
+        setError(errorMsg);
+        setStatus('error');
+        isActiveRef.current = false;
+      }
+      return;
+    }
+
+    // Browser STT
     // On mobile, use sync path to ensure SpeechRecognition.start() is called
     // within the same user gesture context (required by iOS Safari)
     // Also unlock audio immediately for TTS playback later
@@ -742,7 +810,7 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
         isActiveRef.current = false;
       }
     }
-  }, [isSupported, currentSessionId, language, handleSpeechResult, handleSpeechError, isMobile, unlockServerTTSAudio, unlockSayTTSAudio]);
+  }, [isSupported, currentSessionId, language, handleSpeechResult, handleSpeechError, isMobile, unlockServerTTSAudio, unlockSayTTSAudio, sttProvider, sttServerUrl, sttModel, sttLanguage, sttSilenceThresholdDb, sttSilenceHoldMs]);
 
   // Stop voice mode
   const stopVoice = useCallback(() => {
@@ -759,6 +827,7 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
       finalTranscriptTimerRef.current = null;
     }
     browserVoiceService.stopListening();
+    audioStreamService.stopListening();
     browserVoiceService.cancelSpeech();
     stopServerTTS(); // Also stop server TTS if playing
     stopSayTTS(); // Also stop Say TTS if playing
@@ -781,6 +850,7 @@ export function useBrowserVoice(): UseBrowserVoiceReturn {
       }
       browserVoiceService.setConversationMode(false);
       browserVoiceService.stopListening();
+      audioStreamService.stopListening();
       browserVoiceService.cancelSpeech();
     };
   }, []);

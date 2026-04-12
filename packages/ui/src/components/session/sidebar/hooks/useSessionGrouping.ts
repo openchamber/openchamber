@@ -225,18 +225,21 @@ export const useSessionGrouping = (args: Args) => {
         });
       });
 
-      groups.push({
-        id: 'archived',
-        label: 'archived',
-        branch: null,
-        description: 'Archived and unassigned sessions',
-        isMain: false,
-        isArchivedBucket: true,
-        worktree: null,
-        directory: null,
-        folderScopeKey: !args.isVSCode && normalizedProjectRoot ? getArchivedScopeKey(normalizedProjectRoot) : null,
-        sessions: groupedNodes.get(archivedKey) ?? [],
-      });
+      const archivedSessions = groupedNodes.get(archivedKey) ?? [];
+      if (archivedSessions.length > 0) {
+        groups.push({
+          id: 'archived',
+          label: 'archived',
+          branch: null,
+          description: 'Archived and unassigned sessions',
+          isMain: false,
+          isArchivedBucket: true,
+          worktree: null,
+          directory: null,
+          folderScopeKey: !args.isVSCode && normalizedProjectRoot ? getArchivedScopeKey(normalizedProjectRoot) : null,
+          sessions: archivedSessions,
+        });
+      }
 
       return groups;
     },

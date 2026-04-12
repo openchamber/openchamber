@@ -1123,7 +1123,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     const messages = getSyncMessages(sessionId, directory)
     for (let i = messages.length - 1; i >= 0; i -= 1) {
       const message = messages[i] as Message & {
-        model?: { providerID?: string; modelID?: string }
+        model?: { providerID?: string; modelID?: string; variant?: string }
         variant?: string
         mode?: string
       }
@@ -1140,8 +1140,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       const agent = typeof message.agent === "string" && message.agent.trim().length > 0
         ? message.agent
         : (typeof message.mode === "string" && message.mode.trim().length > 0 ? message.mode : undefined)
-      const variant = typeof message.variant === "string" && message.variant.trim().length > 0
-        ? message.variant
+      const variantCandidate = message.model?.variant ?? message.variant
+      const variant = typeof variantCandidate === "string" && variantCandidate.trim().length > 0
+        ? variantCandidate
         : undefined
 
       return { agent, providerID, modelID, variant }

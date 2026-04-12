@@ -1,5 +1,4 @@
 import type {
-  FileDiff,
   Message,
   Part,
   PermissionRequest,
@@ -7,6 +6,7 @@ import type {
   SessionStatus,
   Todo,
 } from "@opencode-ai/sdk/v2/client"
+import type { FileDiff } from "./types"
 
 type SessionCache = {
   session_status: Record<string, SessionStatus | undefined>

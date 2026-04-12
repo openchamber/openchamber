@@ -15,6 +15,7 @@ import { updateStreamingState } from "./streaming"
 import { setActionRefs } from "./session-actions"
 import { setSyncRefs } from "./sync-refs"
 import { stripMessageDiffSnapshots, stripSessionDiffSnapshots } from "./sanitize"
+import { syncDebug } from "./debug"
 import { opencodeClient } from "@/lib/opencode/client"
 import { usePermissionStore } from "@/stores/permissionStore"
 import { autoRespondsPermission, normalizeDirectory } from "@/stores/utils/permissionAutoAccept"
@@ -99,6 +100,79 @@ const RECONNECT_MESSAGE_LIMIT = 200
 const RECONNECT_SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
+
+// ---------------------------------------------------------------------------
+// Parts-gap recovery — when SSE events arrive but parts are missing,
+// trigger a targeted re-fetch for the affected sessions.
+// Tracked per-directory, deduplicated, and auto-expiring.
+// ---------------------------------------------------------------------------
+
+type PendingRepair = {
+  sessionID: string
+  directory: string
+  enqueuedAt: number
+}
+
+const REPAIR_COOLDOWN_MS = 5_000
+const pendingRepairs = new Map<string, PendingRepair>() // key: directory:sessionID
+
+const repairKey = (directory: string, sessionID: string) => `${directory}:${sessionID}`
+
+function enqueuePartsRepair(directory: string, sessionID: string, childStores: ChildStoreManager) {
+  if (!directory || directory === "global" || !sessionID) return
+  const k = repairKey(directory, sessionID)
+  const existing = pendingRepairs.get(k)
+  if (existing && Date.now() - existing.enqueuedAt < REPAIR_COOLDOWN_MS) return
+
+  pendingRepairs.set(k, { sessionID, directory, enqueuedAt: Date.now() })
+
+  // Defer to next microtask so we don't hold up the current event batch
+  void Promise.resolve().then(async () => {
+    const store = childStores.getChild(directory)
+    if (!store) {
+      pendingRepairs.delete(k)
+      return
+    }
+    try {
+      await repairSessionParts(directory, sessionID, store)
+    } catch {
+      // Transient failure — next SSE event or reconnect will catch up.
+    } finally {
+      pendingRepairs.delete(k)
+    }
+  })
+}
+
+async function repairSessionParts(
+  directory: string,
+  sessionID: string,
+  store: StoreApi<DirectoryStore>,
+) {
+  const scopedClient = opencodeClient.getScopedSdkClient(directory)
+  const result = await retry(() =>
+    scopedClient.session.messages({ sessionID, limit: RECONNECT_MESSAGE_LIMIT }),
+  )
+  const records = (result.data ?? []).filter((record: { info?: { id?: string } }) => !!record?.info?.id)
+  if (records.length === 0) return
+
+  store.setState((state: DirectoryStore) => {
+    const nextPartState = { ...state.part }
+    for (const record of records) {
+      const messageId = record?.info?.id
+      if (!messageId) continue
+      const newParts = (record.parts ?? [])
+        .filter((part: Part) => !!part?.id && !RECONNECT_SKIP_PARTS.has(part.type))
+        .sort((a: Part, b: Part) => cmp(a.id, b.id))
+
+      const existing = nextPartState[messageId]
+      // Only patch if parts were missing or fewer than server has
+      if (!existing || existing.length < newParts.length) {
+        nextPartState[messageId] = newParts
+      }
+    }
+    return { part: nextPartState }
+  })
+}
 
 // Module-level refs for notification viewed check.
 // Used to determine if user is currently viewing the session when a notification arrives.
@@ -804,6 +878,33 @@ function handleEvent(
 
   if (applyDirectoryEvent(draft, payload)) {
     store.setState(draft)
+    const sessionID = getSessionIdFromPayload(payload) ?? undefined
+    const messageID = getMessageIdFromPayload(payload) ?? undefined
+    syncDebug.dispatch.eventApplied(payload.type, sessionID, messageID)
+
+    // Parts-gap recovery on message.updated: if the message was inserted or
+    // replaced but draft.part[messageID] is empty, the parts were lost or
+    // never arrived. Trigger repair so the UI doesn't render a blank bubble.
+    if (sessionID && messageID && payload.type === "message.updated") {
+      const after = store.getState()
+      const info = (payload.properties as { info: Message }).info
+      if (info.role === "assistant" && (!after.part[messageID] || after.part[messageID].length === 0)) {
+        enqueuePartsRepair(resolvedDirectory, sessionID, childStores)
+      }
+    }
+  } else {
+    const sessionID = getSessionIdFromPayload(payload) ?? undefined
+    const messageID = getMessageIdFromPayload(payload) ?? undefined
+    syncDebug.dispatch.eventNoChange(payload.type, sessionID, messageID)
+
+    // Parts-gap recovery: if a part event was dropped because the parts array
+    // was missing (message not yet inserted or parts lost), trigger a repair
+    // fetch for the session.
+    if (sessionID && messageID && (
+      payload.type === "message.part.delta" || payload.type === "message.part.updated"
+    )) {
+      enqueuePartsRepair(resolvedDirectory, sessionID, childStores)
+    }
   }
 
   updateRoutingIndexFromEvent(routingIndex, resolvedDirectory, payload)

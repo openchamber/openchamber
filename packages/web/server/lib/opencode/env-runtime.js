@@ -631,6 +631,194 @@ export const createOpenCodeEnvRuntime = (deps) => {
     return null;
   };
 
+  const WINDOWS_BATCH_EXTENSIONS = new Set(['.cmd', '.bat', '.com']);
+
+  const normalizeExecutableCandidate = (value) => {
+    if (typeof value !== 'string') {
+      return null;
+    }
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return null;
+    }
+    return isExecutable(trimmed) ? trimmed : null;
+  };
+
+  const getWindowsNativeOpencodePackageNames = () => {
+    if (process.arch === 'arm64') {
+      return ['opencode-windows-arm64'];
+    }
+    if (process.arch === 'x64') {
+      // Prefer the baseline build when bypassing package-manager wrappers so the
+      // direct binary still runs on hosts without AVX2 support.
+      return ['opencode-windows-x64-baseline', 'opencode-windows-x64'];
+    }
+    return [];
+  };
+
+  const resolveNativeOpencodeBinaryFromNodeModules = (nodeModulesDir) => {
+    if (typeof nodeModulesDir !== 'string' || nodeModulesDir.trim().length === 0) {
+      return null;
+    }
+
+    for (const packageName of getWindowsNativeOpencodePackageNames()) {
+      const candidate = path.join(nodeModulesDir, packageName, 'bin', 'opencode.exe');
+      if (isExecutable(candidate)) {
+        return candidate;
+      }
+    }
+
+    return null;
+  };
+
+  const resolveOpencodeNodeLaunchSpecFromNodeModules = (nodeModulesDir) => {
+    if (typeof nodeModulesDir !== 'string' || nodeModulesDir.trim().length === 0) {
+      return null;
+    }
+
+    const launcher = path.join(nodeModulesDir, 'opencode-ai', 'bin', 'opencode');
+    if (!isExecutable(launcher) && !fs.existsSync(launcher)) {
+      return null;
+    }
+
+    const nodeBinary = ensureNodeCliEnv() || resolveNodeCliPath() || 'node';
+    return {
+      binary: nodeBinary,
+      args: [launcher],
+      wrapperType: 'node-launcher',
+    };
+  };
+
+  const resolveNodeModulesDirFromCmdWrapper = (wrapperPath) => {
+    if (!wrapperPath || typeof wrapperPath !== 'string') {
+      return null;
+    }
+
+    try {
+      const content = fs.readFileSync(wrapperPath, 'utf8');
+      const launcherMatch = content.match(/node_modules[\\/]+opencode-ai[\\/]+bin[\\/]+opencode/i);
+      if (!launcherMatch) {
+        return null;
+      }
+
+      const launcherPath = path.resolve(path.dirname(wrapperPath), launcherMatch[0]);
+      return path.dirname(path.dirname(path.dirname(launcherPath)));
+    } catch {
+      return null;
+    }
+  };
+
+  const resolveOpencodeNodeModulesDir = (opencodePath) => {
+    if (typeof opencodePath !== 'string' || opencodePath.trim().length === 0) {
+      return null;
+    }
+
+    const normalized = path.resolve(opencodePath);
+    const lower = normalized.toLowerCase();
+    const fileDir = path.dirname(normalized);
+    const nodeModulesCandidates = [];
+    const pushCandidate = (candidate) => {
+      if (typeof candidate !== 'string' || candidate.trim().length === 0) {
+        return;
+      }
+      if (!nodeModulesCandidates.includes(candidate)) {
+        nodeModulesCandidates.push(candidate);
+      }
+    };
+
+    if (lower.includes(`${path.sep}.bun${path.sep}bin${path.sep}opencode`)) {
+      const bunRoot = path.dirname(path.dirname(normalized));
+      pushCandidate(path.join(bunRoot, 'install', 'global', 'node_modules'));
+    }
+
+    if (lower.endsWith(`${path.sep}node_modules${path.sep}.bin${path.sep}opencode`)
+      || lower.endsWith(`${path.sep}node_modules${path.sep}.bin${path.sep}opencode.cmd`)
+      || lower.endsWith(`${path.sep}node_modules${path.sep}.bin${path.sep}opencode.bat`)
+      || lower.endsWith(`${path.sep}node_modules${path.sep}.bin${path.sep}opencode.exe`)) {
+      pushCandidate(path.dirname(fileDir));
+    }
+
+    if (lower.endsWith(`${path.sep}node_modules${path.sep}opencode-ai${path.sep}bin${path.sep}opencode`)) {
+      pushCandidate(path.dirname(path.dirname(fileDir)));
+    }
+
+    if (path.basename(fileDir).toLowerCase() === 'npm') {
+      pushCandidate(path.join(fileDir, 'node_modules'));
+    }
+
+    if (WINDOWS_BATCH_EXTENSIONS.has(path.extname(normalized).toLowerCase())) {
+      pushCandidate(resolveNodeModulesDirFromCmdWrapper(normalized));
+    }
+
+    for (const candidate of nodeModulesCandidates) {
+      if (resolveNativeOpencodeBinaryFromNodeModules(candidate) || resolveOpencodeNodeLaunchSpecFromNodeModules(candidate)) {
+        return candidate;
+      }
+    }
+
+    return null;
+  };
+
+  const resolveManagedOpenCodeLaunchSpec = (opencodePath) => {
+    const fallbackBinary = typeof opencodePath === 'string' && opencodePath.trim().length > 0
+      ? opencodePath.trim()
+      : 'opencode';
+
+    if (process.platform !== 'win32') {
+      return { binary: fallbackBinary, args: [], wrapperType: null };
+    }
+
+    const ext = path.extname(fallbackBinary).toLowerCase();
+    const candidatePaths = [fallbackBinary];
+    if (WINDOWS_BATCH_EXTENSIONS.has(ext)) {
+      candidatePaths.push(fallbackBinary.slice(0, -ext.length) + '.exe');
+    }
+
+    for (const candidate of candidatePaths) {
+      const nodeModulesDir = resolveOpencodeNodeModulesDir(candidate);
+      const nativeBinary = resolveNativeOpencodeBinaryFromNodeModules(nodeModulesDir);
+      if (nativeBinary) {
+        return {
+          binary: nativeBinary,
+          args: [],
+          wrapperType: nativeBinary === fallbackBinary ? null : 'native-wrapper',
+        };
+      }
+
+      const nodeLaunchSpec = resolveOpencodeNodeLaunchSpecFromNodeModules(nodeModulesDir);
+      if (nodeLaunchSpec) {
+        return nodeLaunchSpec;
+      }
+
+      const interpreter = opencodeShimInterpreter(candidate);
+      if (interpreter === 'node') {
+        return {
+          binary: ensureNodeCliEnv() || resolveNodeCliPath() || 'node',
+          args: [candidate],
+          wrapperType: 'node-shebang',
+        };
+      }
+      if (interpreter === 'bun') {
+        return {
+          binary: ensureBunCliEnv() || resolveBunCliPath() || 'bun',
+          args: [candidate],
+          wrapperType: 'bun-shebang',
+        };
+      }
+
+      const directBinary = normalizeExecutableCandidate(candidate);
+      if (directBinary) {
+        return {
+          binary: directBinary,
+          args: [],
+          wrapperType: directBinary === fallbackBinary ? null : 'executable-wrapper',
+        };
+      }
+    }
+
+    return { binary: fallbackBinary, args: [], wrapperType: null };
+  };
+
   const readShebang = (opencodePath) => {
     if (!opencodePath || typeof opencodePath !== 'string') {
       return null;
@@ -897,12 +1085,12 @@ export const createOpenCodeEnvRuntime = (deps) => {
     applyOpencodeBinaryFromSettings,
     getLoginShellEnvSnapshot,
     resolveOpencodeCliPath,
+    resolveManagedOpenCodeLaunchSpec,
     isExecutable,
     searchPathFor,
     resolveGitBinaryForSpawn,
     resolveWslExecutablePath,
     buildWslExecArgs,
-    opencodeShimInterpreter,
     clearResolvedOpenCodeBinary,
   };
 };

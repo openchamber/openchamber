@@ -9,6 +9,7 @@
  */
 
 import type { Event, OpencodeClient } from "@opencode-ai/sdk/v2/client"
+import { syncDebug } from "./debug"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -86,12 +87,8 @@ export function createEventPipeline(input: EventPipelineInput) {
   let queue: QueuedEvent[] = []
   let buffer: QueuedEvent[] = []
   const coalesced = new Map<string, number>()
-  const staleDeltas = new Set<string>()
   let timer: ReturnType<typeof setTimeout> | undefined
   let last = 0
-
-  const deltaKey = (directory: string, messageID: string, partID: string) =>
-    `${directory}:${messageID}:${partID}`
 
   // Coalesce key — same-type events for the same entity replace earlier ones
   const key = (directory: string, payload: Event): string | undefined => {
@@ -109,7 +106,7 @@ export function createEventPipeline(input: EventPipelineInput) {
     return undefined
   }
 
-  // Flush — swap queue, dispatch events, skip stale deltas
+  // Flush — swap queue, dispatch events
   const flush = () => {
     if (timer) clearTimeout(timer)
     timer = undefined
@@ -117,21 +114,16 @@ export function createEventPipeline(input: EventPipelineInput) {
     if (queue.length === 0) return
 
     const events = queue
-    const skip = staleDeltas.size > 0 ? new Set(staleDeltas) : undefined
     queue = buffer
     buffer = events
     queue.length = 0
     coalesced.clear()
-    staleDeltas.clear()
 
     last = Date.now()
+    syncDebug.pipeline.flush(events.length)
     // React 18 batches synchronous setState calls automatically,
     // equivalent to SolidJS batch()
     for (const event of events) {
-      if (skip && event.payload.type === "message.part.delta") {
-        const props = event.payload.properties as { messageID: string; partID: string }
-        if (skip.has(deltaKey(event.directory, props.messageID, props.partID))) continue
-      }
       onEvent(event.directory, event.payload)
     }
 
@@ -214,10 +206,7 @@ export function createEventPipeline(input: EventPipelineInput) {
             const i = coalesced.get(k)
             if (i !== undefined) {
               queue[i] = { directory, payload: normalizedPayload }
-              if (normalizedPayload.type === "message.part.updated") {
-                const part = (normalizedPayload.properties as { part: { messageID: string; id: string } }).part
-                staleDeltas.add(deltaKey(directory, part.messageID, part.id))
-              }
+              syncDebug.pipeline.coalesced(normalizedPayload.type, k)
               continue
             }
             coalesced.set(k, queue.length)

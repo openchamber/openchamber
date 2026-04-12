@@ -71,6 +71,36 @@ type ZaiPayload = {
   };
 };
 
+type ZhipuaiTokensLimit = {
+  type: 'TOKENS_LIMIT';
+  unit?: number;
+  number?: number;
+  nextResetTime?: number;
+  percentage?: number;
+};
+
+type ZhipuaiMcpTimeLimit = {
+  type: 'TIME_LIMIT';
+  unit?: number;
+  number?: number;
+  usage?: number;
+  currentValue?: number;
+  remaining?: number;
+  percentage?: number;
+  nextResetTime?: number;
+  usageDetails?: Array<{
+    modelCode?: string;
+    usage?: number;
+  }>;
+};
+
+type ZhipuaiPayload = {
+  data?: {
+    limits?: Array<ZhipuaiTokensLimit | ZhipuaiMcpTimeLimit>;
+    level?: string;
+  };
+};
+
 export type ProviderResult = {
   providerId: string;
   providerName: string;
@@ -353,6 +383,11 @@ export const listConfiguredQuotaProviders = () => {
   const zaiAuth = normalizeAuthEntry(getAuthEntry(auth, ['zai-coding-plan', 'zai', 'z.ai']));
   if (zaiAuth && ((zaiAuth as Record<string, unknown>).key || (zaiAuth as Record<string, unknown>).token)) {
     configured.add('zai-coding-plan');
+  }
+
+  const zhipuaiAuth = normalizeAuthEntry(getAuthEntry(auth, ['zhipuai-coding-plan']));
+  if (zhipuaiAuth && ((zhipuaiAuth as Record<string, unknown>).key || (zhipuaiAuth as Record<string, unknown>).token)) {
+    configured.add('zhipuai-coding-plan');
   }
 
   const kimiAuth = normalizeAuthEntry(getAuthEntry(auth, ['kimi-for-coding', 'kimi']));
@@ -1259,6 +1294,93 @@ export const fetchZaiQuota = async (): Promise<ProviderResult> => {
   }
 };
 
+export const fetchZhipuaiCodingPlanQuota = async (): Promise<ProviderResult> => {
+  const auth = readAuthFile();
+  const entry = normalizeAuthEntry(getAuthEntry(auth, ['zhipuai-coding-plan'])) as Record<string, unknown> | null;
+  const apiKey = (entry?.key as string | undefined) ?? (entry?.token as string | undefined);
+
+  if (!apiKey) {
+    return buildResult({
+      providerId: 'zhipuai-coding-plan',
+      providerName: 'Zhipu AI Coding Plan',
+      ok: false,
+      configured: false,
+      error: 'Not configured',
+    });
+  }
+
+  try {
+    const response = await fetch('https://open.bigmodel.cn/api/monitor/usage/quota/limit', {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      return buildResult({
+        providerId: 'zhipuai-coding-plan',
+        providerName: 'Zhipu AI Coding Plan',
+        ok: false,
+        configured: true,
+        error: `API error: ${response.status}`,
+      });
+    }
+
+    const payload = await response.json() as ZhipuaiPayload;
+    const limits = Array.isArray(payload?.data?.limits) ? payload.data.limits : [];
+
+    const tokensLimit = limits.find((limit): limit is ZhipuaiTokensLimit => limit?.type === 'TOKENS_LIMIT');
+    const mcpToolsTimeLimit = limits.find((limit): limit is ZhipuaiMcpTimeLimit => limit?.type === 'TIME_LIMIT');
+
+    const windows: Record<string, UsageWindow> = {};
+
+    // Handle TOKENS_LIMIT (5-hour window for token usage)
+    if (tokensLimit) {
+      const windowSeconds = resolveWindowSeconds(tokensLimit);
+      const resetAt = tokensLimit?.nextResetTime ? normalizeTimestamp(tokensLimit.nextResetTime) : null;
+      const usedPercent = typeof tokensLimit?.percentage === 'number' ? tokensLimit.percentage : null;
+
+      windows['Tokens'] = toUsageWindow({
+        usedPercent,
+        windowSeconds,
+        resetAt,
+      });
+    }
+
+    // Handle TIME_LIMIT (MCP tools monthly window)
+    if (mcpToolsTimeLimit) {
+      // TIME_LIMIT unit=5 means 1 month (30 days)
+      const monthSeconds = 30 * 24 * 60 * 60;
+      const resetAt = mcpToolsTimeLimit?.nextResetTime ? normalizeTimestamp(mcpToolsTimeLimit.nextResetTime) : null;
+      const usedPercent = typeof mcpToolsTimeLimit?.percentage === 'number' ? mcpToolsTimeLimit.percentage : null;
+
+      windows['MCP Tools'] = toUsageWindow({
+        usedPercent,
+        windowSeconds: monthSeconds,
+        resetAt,
+      });
+    }
+
+    return buildResult({
+      providerId: 'zhipuai-coding-plan',
+      providerName: 'Zhipu AI Coding Plan',
+      ok: true,
+      configured: true,
+      usage: { windows },
+    });
+  } catch (error) {
+    return buildResult({
+      providerId: 'zhipuai-coding-plan',
+      providerName: 'Zhipu AI Coding Plan',
+      ok: false,
+      configured: true,
+      error: error instanceof Error ? error.message : 'Request failed',
+    });
+  }
+};
+
 const NANO_GPT_DAILY_WINDOW_SECONDS = 86400;
 
 export const fetchNanoGptQuota = async (): Promise<ProviderResult> => {
@@ -1384,6 +1506,8 @@ export const fetchQuotaForProvider = async (providerId: string): Promise<Provide
       return fetchOpenRouterQuota();
     case 'zai-coding-plan':
       return fetchZaiQuota();
+    case 'zhipuai-coding-plan':
+      return fetchZhipuaiCodingPlanQuota();
     default:
       return buildResult({
         providerId,

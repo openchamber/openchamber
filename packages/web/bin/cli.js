@@ -40,7 +40,7 @@ const TUNNEL_BOOTSTRAP_TTL_MIN_MS = 60 * 1000;
 const TUNNEL_BOOTSTRAP_TTL_MAX_MS = 24 * 60 * 60 * 1000;
 const TUNNEL_SESSION_TTL_DEFAULT_MS = 8 * 60 * 60 * 1000;
 const TUNNEL_SESSION_TTL_MIN_MS = 5 * 60 * 1000;
-const TUNNEL_SESSION_TTL_MAX_MS = 24 * 60 * 60 * 1000;
+const TUNNEL_SESSION_TTL_MAX_MS = 30 * 24 * 60 * 60 * 1000;
 const CONNECT_TTL_PICKER_OPTIONS = [
   { value: String(3 * 60 * 1000), label: '3m' },
   { value: String(TUNNEL_BOOTSTRAP_TTL_DEFAULT_MS), label: '30m' },
@@ -54,6 +54,8 @@ const SESSION_TTL_PICKER_OPTIONS = [
   { value: String(TUNNEL_SESSION_TTL_DEFAULT_MS), label: '8h' },
   { value: String(12 * 60 * 60 * 1000), label: '12h' },
   { value: String(24 * 60 * 60 * 1000), label: '24h' },
+  { value: String(7 * 24 * 60 * 60 * 1000), label: '1w' },
+  { value: String(30 * 24 * 60 * 60 * 1000), label: '30d' },
   { value: '__custom__', label: 'Custom' },
 ];
 const PACKAGE_JSON = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
@@ -1784,6 +1786,99 @@ function isProcessRunning(pid) {
   }
 }
 
+function waitForProcessExit(pid, timeoutMs) {
+  if (!Number.isFinite(pid) || pid <= 0) {
+    return Promise.resolve(true);
+  }
+
+  const deadline = Date.now() + timeoutMs;
+  return new Promise((resolve) => {
+    const check = () => {
+      if (!isProcessRunning(pid)) {
+        resolve(true);
+        return;
+      }
+      if (Date.now() >= deadline) {
+        resolve(false);
+        return;
+      }
+      setTimeout(check, 150);
+    };
+    check();
+  });
+}
+
+async function terminateProcessTree(pid, options = {}) {
+  if (!Number.isFinite(pid) || pid <= 0) {
+    return true;
+  }
+
+  const gracefulTimeoutMs = Number.isFinite(options.gracefulTimeoutMs) && options.gracefulTimeoutMs >= 0
+    ? Math.trunc(options.gracefulTimeoutMs)
+    : 2500;
+  const forceTimeoutMs = Number.isFinite(options.forceTimeoutMs) && options.forceTimeoutMs >= 0
+    ? Math.trunc(options.forceTimeoutMs)
+    : 3000;
+
+  if (process.platform === 'win32') {
+    try {
+      spawnSync('taskkill', ['/pid', String(pid), '/t'], {
+        stdio: 'ignore',
+        timeout: 3000,
+        windowsHide: true,
+      });
+    } catch {
+    }
+
+    if (await waitForProcessExit(pid, gracefulTimeoutMs)) {
+      return true;
+    }
+
+    try {
+      spawnSync('taskkill', ['/pid', String(pid), '/f', '/t'], {
+        stdio: 'ignore',
+        timeout: 5000,
+        windowsHide: true,
+      });
+    } catch {
+    }
+
+    return waitForProcessExit(pid, forceTimeoutMs);
+  }
+
+  try {
+    process.kill(pid, 'SIGTERM');
+  } catch {
+  }
+
+  if (await waitForProcessExit(pid, gracefulTimeoutMs)) {
+    return true;
+  }
+
+  try {
+    process.kill(pid, 'SIGKILL');
+  } catch {
+  }
+
+  return waitForProcessExit(pid, forceTimeoutMs);
+}
+
+async function stopInstanceProcess(pid, options = {}) {
+  if (!Number.isFinite(pid) || pid <= 0) {
+    return true;
+  }
+
+  const shutdownWaitMs = Number.isFinite(options.shutdownWaitMs) && options.shutdownWaitMs >= 0
+    ? Math.trunc(options.shutdownWaitMs)
+    : 5000;
+
+  if (await waitForProcessExit(pid, shutdownWaitMs)) {
+    return true;
+  }
+
+  return terminateProcessTree(pid, options);
+}
+
 async function requestServerShutdown(port) {
   if (!Number.isFinite(port) || port <= 0) return false;
   const controller = new AbortController();
@@ -3060,18 +3155,11 @@ const commands = {
           const requested = await requestServerShutdown(options.port);
 
           if (Number.isFinite(systemInfo.pid) && isProcessRunning(systemInfo.pid)) {
-            try {
-              process.kill(systemInfo.pid, 'SIGTERM');
-              let attempts = 0;
-              while (isProcessRunning(systemInfo.pid) && attempts < 20) {
-                await new Promise((resolve) => setTimeout(resolve, 250));
-                attempts++;
-              }
-              if (isProcessRunning(systemInfo.pid)) {
-                process.kill(systemInfo.pid, 'SIGKILL');
-              }
-            } catch {
-            }
+            await stopInstanceProcess(systemInfo.pid, {
+              shutdownWaitMs: requested ? 5000 : 0,
+              gracefulTimeoutMs: 2500,
+              forceTimeoutMs: 3000,
+            }).catch(() => false);
           }
 
           const stopped = await isPortAvailable(options.port);
@@ -3142,15 +3230,14 @@ const commands = {
       }
       stopSpin?.start(`Stopping OpenChamber on port ${instance.port}...`);
       try {
-        await requestServerShutdown(instance.port);
-        process.kill(instance.pid, 'SIGTERM');
-        let attempts = 0;
-        while (isProcessRunning(instance.pid) && attempts < 20) {
-          await new Promise((resolve) => setTimeout(resolve, 250));
-          attempts++;
-        }
-        if (isProcessRunning(instance.pid)) {
-          process.kill(instance.pid, 'SIGKILL');
+        const requested = await requestServerShutdown(instance.port);
+        const stopped = await stopInstanceProcess(instance.pid, {
+          shutdownWaitMs: requested ? 5000 : 0,
+          gracefulTimeoutMs: 2500,
+          forceTimeoutMs: 3000,
+        });
+        if (!stopped && isProcessRunning(instance.pid)) {
+          throw new Error(`Timed out stopping pid ${instance.pid}`);
         }
         removePidFile(instance.pidFilePath);
         removeInstanceFile(instance.instanceFilePath);
@@ -4667,16 +4754,12 @@ const commands = {
       updateSpin?.message(`Stopping ${runningInstances.length} running instance(s)...`);
       for (const instance of runningInstances) {
         try {
-          await requestServerShutdown(instance.port);
-          process.kill(instance.pid, 'SIGTERM');
-          let attempts = 0;
-          while (isProcessRunning(instance.pid) && attempts < 20) {
-            await new Promise((resolve) => setTimeout(resolve, 250));
-            attempts++;
-          }
-          if (isProcessRunning(instance.pid)) {
-            process.kill(instance.pid, 'SIGKILL');
-          }
+          const requested = await requestServerShutdown(instance.port);
+          await stopInstanceProcess(instance.pid, {
+            shutdownWaitMs: requested ? 5000 : 0,
+            gracefulTimeoutMs: 2500,
+            forceTimeoutMs: 3000,
+          });
           removePidFile(instance.pidFilePath);
         } catch {
         }

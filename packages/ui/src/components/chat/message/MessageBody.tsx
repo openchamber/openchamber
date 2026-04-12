@@ -715,7 +715,7 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
         if (isTTSPlaying) {
             return 'Stop speaking';
         }
-        const providerLabel = voiceProvider === 'browser' ? 'Browser' : voiceProvider === 'openai' ? 'OpenAI' : 'Say';
+        const providerLabel = voiceProvider === 'browser' ? 'Browser' : voiceProvider === 'openai' ? 'OpenAI' : voiceProvider === 'openai-compatible' ? 'Custom' : 'Say';
         return `Read aloud (${providerLabel} voice)`;
     }, [isTTSPlaying, voiceProvider]);
 

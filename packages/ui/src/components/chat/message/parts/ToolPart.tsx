@@ -2,10 +2,10 @@
 import React from 'react';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { RiArrowDownSLine, RiArrowRightSLine, RiExternalLinkLine } from '@remixicon/react';
-import { File as PierreFile, PatchDiff } from '@pierre/diffs/react';
+import { PatchDiff } from '@pierre/diffs/react';
 import { cn } from '@/lib/utils';
 import { SimpleMarkdownRenderer } from '../../MarkdownRenderer';
-import { getToolMetadata, getLanguageFromExtension, isImageFile, getImageMimeType } from '@/lib/toolHelpers';
+import { getToolMetadata } from '@/lib/toolHelpers';
 import type { ToolPart as ToolPartType, ToolState as ToolStateUnion } from '@opencode-ai/sdk/v2';
 import { toolDisplayStyles } from '@/lib/typography';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -185,9 +185,11 @@ const LiveDuration: React.FC<{ start: number; end?: number; active: boolean }> =
 };
 
 const parseDiffStats = (metadata?: Record<string, unknown>): { added: number; removed: number } | null => {
-    if (!metadata?.diff || typeof metadata.diff !== 'string') return null;
+    const diffText = getPatchText((metadata as { patch?: unknown } | undefined)?.patch)
+        ?? getPatchText(metadata?.diff);
+    if (!diffText) return null;
 
-    const lines = metadata.diff.split('\n');
+    const lines = diffText.split('\n');
     let added = 0;
     let removed = 0;
 
@@ -254,22 +256,67 @@ const extractFirstChangedLineFromDiff = (diffText: string): number | undefined =
     return firstHunkStart;
 };
 
+const getPatchText = (value: unknown): string | undefined => {
+    if (typeof value === 'string') {
+        const trimmed = value.trim();
+        return trimmed.length > 0 ? trimmed : undefined;
+    }
+
+    if (value && typeof value === 'object') {
+        const patch = (value as { patch?: unknown }).patch;
+        if (typeof patch === 'string') {
+            const trimmed = patch.trim();
+            return trimmed.length > 0 ? trimmed : undefined;
+        }
+    }
+
+    return undefined;
+};
+
+const buildWritePreviewPatch = (filePath: string | undefined, content: string): string | undefined => {
+    const normalizedContent = content.replace(/\r\n/g, '\n');
+    if (!normalizedContent.trim()) {
+        return undefined;
+    }
+
+    const normalizedPath = (() => {
+        const candidate = (filePath ?? '').trim();
+        if (!candidate) {
+            return 'new-file';
+        }
+        return candidate.startsWith('/') ? candidate.slice(1) : candidate;
+    })();
+
+    const lines = normalizedContent.split('\n');
+    const hunkSize = lines.length;
+    const body = lines.map((line) => `+${line}`).join('\n');
+
+    return [
+        '--- /dev/null',
+        `+++ b/${normalizedPath}`,
+        `@@ -0,0 +1,${hunkSize} @@`,
+        body,
+    ].join('\n');
+};
+
 const getFirstChangedLineFromMetadata = (tool: string, metadata?: Record<string, unknown>): number | undefined => {
     if (!metadata || (tool !== 'edit' && tool !== 'multiedit' && tool !== 'apply_patch')) {
         return undefined;
     }
 
-    if (typeof metadata.diff === 'string') {
-        const line = extractFirstChangedLineFromDiff(metadata.diff);
+    const topLevelPatch = getPatchText((metadata as { patch?: unknown }).patch) ?? getPatchText(metadata.diff);
+    if (topLevelPatch) {
+        const line = extractFirstChangedLineFromDiff(topLevelPatch);
         if (Number.isFinite(line)) {
             return line;
         }
     }
 
     const files = Array.isArray(metadata.files) ? metadata.files : [];
-    const firstFile = files[0] as { diff?: unknown } | undefined;
-    if (typeof firstFile?.diff === 'string') {
-        const line = extractFirstChangedLineFromDiff(firstFile.diff);
+    const firstFile = files[0] as { patch?: unknown; diff?: unknown } | undefined;
+    const filePatch = getPatchText(firstFile?.patch) ?? getPatchText(firstFile?.diff);
+    if (filePatch) {
+        const line = extractFirstChangedLineFromDiff(filePatch);
         if (Number.isFinite(line)) {
             return line;
         }
@@ -303,15 +350,17 @@ const getPrimaryDiffFromMetadata = (
             : files[0];
 
         if (matched && typeof matched === 'object') {
-            const patch = (matched as { diff?: unknown }).diff;
-            if (typeof patch === 'string' && patch.trim().length > 0) {
+            const patch = getPatchText((matched as { patch?: unknown; diff?: unknown }).patch)
+                ?? getPatchText((matched as { patch?: unknown; diff?: unknown }).diff);
+            if (patch) {
                 return patch;
             }
         }
     }
 
-    if (typeof metadata.diff === 'string' && metadata.diff.trim().length > 0) {
-        return metadata.diff;
+    const topLevelPatch = getPatchText((metadata as { patch?: unknown }).patch) ?? getPatchText(metadata.diff);
+    if (topLevelPatch) {
+        return topLevelPatch;
     }
 
     return undefined;
@@ -1280,8 +1329,8 @@ const getDiffPatchEntries = (
                 return null;
             }
 
-            const record = file as { relativePath?: unknown; filePath?: unknown; diff?: unknown };
-            const patch = typeof record.diff === 'string' ? record.diff.trim() : '';
+            const record = file as { relativePath?: unknown; filePath?: unknown; patch?: unknown; diff?: unknown };
+            const patch = getPatchText(record.patch) ?? getPatchText(record.diff) ?? '';
             if (!patch) {
                 return null;
             }
@@ -1344,97 +1393,6 @@ const DiffPreview: React.FC<DiffPreviewProps> = React.memo(({ diff, pierreTheme,
 
 DiffPreview.displayName = 'DiffPreview';
 
-interface WriteInputPreviewProps {
-    content: string;
-    filePath?: string;
-    displayPath: string;
-    pierreTheme: { light: string; dark: string };
-    pierreThemeType: 'light' | 'dark';
-}
-
-const WriteInputPreview: React.FC<WriteInputPreviewProps> = React.memo(({
-    content,
-    filePath,
-    displayPath,
-    pierreTheme,
-    pierreThemeType,
-}) => {
-    const language = React.useMemo(
-        () => getLanguageFromExtension(filePath ?? '') || detectLanguageFromOutput(content, 'write', filePath ? { filePath } : undefined),
-        [content, filePath]
-    );
-
-    const lineCount = Math.max(content.split('\n').length, 1);
-    const headerLineLabel = lineCount === 1 ? 'line 1' : `lines 1-${lineCount}`;
-
-    return (
-        <div className="w-full min-w-0">
-            <div className="bg-muted/20 px-2 py-1 rounded-lg mb-1 flex items-center gap-2 min-w-0">
-                {renderPathLikeGitChanges(displayPath)}
-                <span className="typography-meta text-muted-foreground/80 flex-shrink-0">({headerLineLabel})</span>
-            </div>
-            <PierreFile
-                file={{
-                    name: displayPath,
-                    contents: content,
-                    lang: language || undefined,
-                }}
-                options={{
-                    disableFileHeader: true,
-                    overflow: 'wrap',
-                    theme: pierreTheme,
-                    themeType: pierreThemeType,
-                }}
-                className="block w-full"
-            />
-        </div>
-    );
-});
-
-WriteInputPreview.displayName = 'WriteInputPreview';
-
-interface ImagePreviewProps {
-    content: string;
-    filePath: string;
-    displayPath: string;
-}
-
-const ImagePreview: React.FC<ImagePreviewProps> = React.memo(({ content, filePath, displayPath }) => {
-    const mimeType = getImageMimeType(filePath);
-    const isSvg = filePath.toLowerCase().endsWith('.svg');
-
-    // For SVG, content might be raw XML, otherwise assume base64
-    const imageSrc = React.useMemo(() => {
-        if (isSvg && !content.startsWith('data:')) {
-            // Raw SVG content
-            return `data:image/svg+xml;base64,${btoa(content)}`;
-        }
-        if (content.startsWith('data:')) {
-            return content;
-        }
-        // Assume base64 encoded
-        return `data:${mimeType};base64,${content}`;
-    }, [content, mimeType, isSvg]);
-
-    return (
-        <div className="w-full min-w-0">
-            <div className="bg-muted/20 px-2 py-1 rounded-lg mb-2 flex items-center min-w-0">
-                {renderPathLikeGitChanges(displayPath)}
-            </div>
-            <div className="flex justify-center p-4 bg-muted/10 rounded-lg">
-                <img
-                    src={imageSrc}
-                    alt={displayPath}
-                    className="max-w-full max-h-96 object-contain rounded"
-                    style={{ imageRendering: 'auto' }}
-                />
-            </div>
-        </div>
-    );
-});
-
-ImagePreview.displayName = 'ImagePreview';
-
 interface ToolExpandedContentProps {
     part: ToolPartType;
     state: ToolStateUnion;
@@ -1459,32 +1417,16 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     const hasStringOutput = typeof rawOutput === 'string' && rawOutput.length > 0;
     const outputString = typeof rawOutput === 'string' ? rawOutput : '';
 
-    const diffContent = typeof metadata?.diff === 'string' ? (metadata.diff as string) : null;
+    const diffContent = getPatchText((metadata as { patch?: unknown } | undefined)?.patch)
+        ?? getPatchText(metadata?.diff)
+        ?? null;
     const diffEntries = React.useMemo(
         () => (diffContent ? getDiffPatchEntries(metadata, diffContent, currentDirectory) : []),
         [currentDirectory, diffContent, metadata]
     );
-    const writeFilePath = part.tool === 'write'
-        ? typeof input?.filePath === 'string'
-            ? input.filePath
-            : typeof input?.file_path === 'string'
-                ? input.file_path
-                : typeof input?.path === 'string'
-                    ? input.path
-                    : undefined
-        : undefined;
-    const writeInputContent = part.tool === 'write'
-        ? typeof (input as { content?: unknown })?.content === 'string'
-            ? (input as { content?: string }).content
-            : typeof (input as { text?: unknown })?.text === 'string'
-                ? (input as { text?: string }).text
-                : null
-        : null;
-    const shouldShowWriteInputPreview = part.tool === 'write' && !!writeInputContent;
-    const isWriteImageFile = writeFilePath ? isImageFile(writeFilePath) : false;
-    const writeDisplayPath = shouldShowWriteInputPreview
-        ? (writeFilePath ? getRelativePath(writeFilePath, currentDirectory) : 'New file')
-        : null;
+    const hideToolInputPreview = part.tool === 'apply_patch'
+        || part.tool === 'edit'
+        || part.tool === 'multiedit';
     const diagnosticSection = React.useMemo(
         () => getToolDiagnosticSection(part.tool, input, metadata, currentDirectory),
         [currentDirectory, input, metadata, part.tool],
@@ -1505,7 +1447,21 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
 
         return formatInputForDisplay(input, part.tool);
     }, [input, part.tool]);
-    const hasInputText = part.tool !== 'apply_patch' && inputTextContent.trim().length > 0;
+    const hasInputText = !hideToolInputPreview && inputTextContent.trim().length > 0;
+    const isWriteLikeTool = part.tool === 'write' || part.tool === 'create' || part.tool === 'file_write';
+    const writeLikeInputPatch = React.useMemo(() => {
+        if (!isWriteLikeTool || !hasInputText) {
+            return undefined;
+        }
+        const filePath = typeof input?.filePath === 'string'
+            ? input.filePath
+            : typeof input?.file_path === 'string'
+                ? input.file_path
+                : typeof input?.path === 'string'
+                    ? input.path
+                    : undefined;
+        return buildWritePreviewPatch(filePath, inputTextContent);
+    }, [hasInputText, input?.filePath, input?.file_path, input?.path, inputTextContent, isWriteLikeTool]);
 
     React.useEffect(() => {
         setDiffViewMode('unified');
@@ -1615,7 +1571,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
             );
         }
 
-        if ((part.tool === 'edit' || part.tool === 'multiedit' || part.tool === 'apply_patch') && (diffEntries.length > 0 || !!diagnosticSection)) {
+        if ((part.tool === 'edit' || part.tool === 'multiedit' || part.tool === 'apply_patch' || part.tool === 'write') && (diffEntries.length > 0 || !!diagnosticSection)) {
             return renderScrollableBlock(
                 <div className="space-y-3">
                     {diffEntries.map((entry) => (
@@ -1646,6 +1602,10 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                 </div>,
                 { className: 'p-1' },
             );
+        }
+
+        if (isWriteLikeTool) {
+            return null;
         }
 
         if (hasStringOutput && outputString.trim()) {
@@ -1680,35 +1640,20 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                 renderResultContent()
             ) : (
                 <>
-                    {shouldShowWriteInputPreview && isWriteImageFile ? (
-                        <div className="my-1">
-                            {renderScrollableBlock(
-                                <ImagePreview
-                                    content={writeInputContent as string}
-                                    filePath={writeFilePath as string}
-                                    displayPath={writeDisplayPath ?? 'New file'}
-                                />
-                            )}
-                        </div>
-                    ) : shouldShowWriteInputPreview ? (
-                        <div className="my-1">
-                            {renderScrollableBlock(
-                                <WriteInputPreview
-                                    content={writeInputContent as string}
-                                    filePath={writeFilePath}
-                                    displayPath={writeDisplayPath ?? 'New file'}
-                                    pierreTheme={pierreTheme}
-                                    pierreThemeType={pierreThemeType}
-                                />
-                            )}
-                        </div>
-                    ) : hasInputText ? (
+                    {hasInputText ? (
                         <div className="my-1">
                             {renderScrollableBlock(
                                 part.tool === 'bash' ? (
                                     <pre className="tool-input-text whitespace-pre-wrap break-words typography-code text-muted-foreground/90 m-0 p-0">
                                         {inputTextContent}
                                     </pre>
+                                ) : isWriteLikeTool && writeLikeInputPatch ? (
+                                    <DiffPreview
+                                        diff={writeLikeInputPatch}
+                                        pierreTheme={pierreTheme}
+                                        pierreThemeType={pierreThemeType}
+                                        diffViewMode={diffViewMode}
+                                    />
                                 ) : (
                                     <blockquote className="tool-input-text whitespace-pre-wrap break-words typography-meta italic text-muted-foreground/70">
                                         {inputTextContent}
@@ -1722,9 +1667,9 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                         </div>
                     ) : null}
 
-                    {part.tool !== 'write' && state.status === 'completed' && 'output' in state && (
+                    {state.status === 'completed' && 'output' in state && (
                         <div>
-                            {(part.tool === 'edit' || part.tool === 'multiedit' || part.tool === 'apply_patch') && diffContent ? (
+                            {(part.tool === 'edit' || part.tool === 'multiedit' || part.tool === 'apply_patch' || part.tool === 'write') && diffContent ? (
                                 <div className="mb-1 flex items-center justify-end gap-2">
                                     <DiffViewToggle
                                         mode={diffViewMode}
