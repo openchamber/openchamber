@@ -77,71 +77,103 @@ function resolveEventDirectory(event: unknown, payload: Event): string {
   return propertyDirectory && propertyDirectory.length > 0 ? propertyDirectory : "global"
 }
 
+// Per-directory queue state. Each directory owns an independent flush timer
+// so a busy directory's delta storm cannot block another directory's events
+// from reaching the UI (head-of-line blocking across sessions).
+type DirectoryQueue = {
+  queue: Event[]
+  buffer: Event[]
+  coalesced: Map<string, number>
+  staleDeltas: Set<string>
+  timer: ReturnType<typeof setTimeout> | undefined
+  last: number
+}
+
 export function createEventPipeline(input: EventPipelineInput) {
   const { sdk, onEvent, onReconnect } = input
   const abort = new AbortController()
   let hasConnected = false
 
-  // Queue state
-  let queue: QueuedEvent[] = []
-  let buffer: QueuedEvent[] = []
-  const coalesced = new Map<string, number>()
-  const staleDeltas = new Set<string>()
-  let timer: ReturnType<typeof setTimeout> | undefined
-  let last = 0
+  // One queue + one flush timer per directory. Lazily created on first event.
+  const directories = new Map<string, DirectoryQueue>()
 
-  const deltaKey = (directory: string, messageID: string, partID: string) =>
-    `${directory}:${messageID}:${partID}`
+  const getOrCreateDir = (directory: string): DirectoryQueue => {
+    let d = directories.get(directory)
+    if (d) return d
+    d = {
+      queue: [],
+      buffer: [],
+      coalesced: new Map(),
+      staleDeltas: new Set(),
+      timer: undefined,
+      last: 0,
+    }
+    directories.set(directory, d)
+    return d
+  }
 
-  // Coalesce key — same-type events for the same entity replace earlier ones
-  const key = (directory: string, payload: Event): string | undefined => {
+  const deltaKey = (messageID: string, partID: string) => `${messageID}:${partID}`
+
+  // Coalesce key — same-type events for the same entity replace earlier ones.
+  // Keys are scoped to a single directory's queue, so directory is implicit.
+  const key = (payload: Event): string | undefined => {
     if (payload.type === "session.status") {
       const props = payload.properties as { sessionID: string }
-      return `session.status:${directory}:${props.sessionID}`
+      return `session.status:${props.sessionID}`
     }
     if (payload.type === "lsp.updated") {
-      return `lsp.updated:${directory}`
+      return `lsp.updated`
     }
     if (payload.type === "message.part.updated") {
       const part = (payload.properties as { part: { messageID: string; id: string } }).part
-      return `message.part.updated:${directory}:${part.messageID}:${part.id}`
+      return `message.part.updated:${part.messageID}:${part.id}`
     }
     return undefined
   }
 
-  // Flush — swap queue, dispatch events, skip stale deltas
-  const flush = () => {
-    if (timer) clearTimeout(timer)
-    timer = undefined
+  // Flush one directory — swap queue, dispatch events, skip stale deltas.
+  // React 18 auto-batching still collapses the setState calls inside a single
+  // directory's flush into one render pass.
+  const flushDir = (directory: string) => {
+    const d = directories.get(directory)
+    if (!d) return
+    if (d.timer) {
+      clearTimeout(d.timer)
+      d.timer = undefined
+    }
+    if (d.queue.length === 0) return
 
-    if (queue.length === 0) return
+    const events = d.queue
+    const skip = d.staleDeltas.size > 0 ? new Set(d.staleDeltas) : undefined
+    d.queue = d.buffer
+    d.buffer = events
+    d.queue.length = 0
+    d.coalesced.clear()
+    d.staleDeltas.clear()
 
-    const events = queue
-    const skip = staleDeltas.size > 0 ? new Set(staleDeltas) : undefined
-    queue = buffer
-    buffer = events
-    queue.length = 0
-    coalesced.clear()
-    staleDeltas.clear()
-
-    last = Date.now()
-    // React 18 batches synchronous setState calls automatically,
-    // equivalent to SolidJS batch()
-    for (const event of events) {
-      if (skip && event.payload.type === "message.part.delta") {
-        const props = event.payload.properties as { messageID: string; partID: string }
-        if (skip.has(deltaKey(event.directory, props.messageID, props.partID))) continue
+    d.last = Date.now()
+    for (const payload of events) {
+      if (skip && payload.type === "message.part.delta") {
+        const props = payload.properties as { messageID: string; partID: string }
+        if (skip.has(deltaKey(props.messageID, props.partID))) continue
       }
-      onEvent(event.directory, event.payload)
+      onEvent(directory, payload)
     }
 
-    buffer.length = 0
+    d.buffer.length = 0
   }
 
-  const schedule = () => {
-    if (timer) return
-    const elapsed = Date.now() - last
-    timer = setTimeout(flush, Math.max(0, FLUSH_FRAME_MS - elapsed))
+  const flushAll = () => {
+    for (const directory of directories.keys()) {
+      flushDir(directory)
+    }
+  }
+
+  const scheduleDir = (directory: string) => {
+    const d = getOrCreateDir(directory)
+    if (d.timer) return
+    const elapsed = Date.now() - d.last
+    d.timer = setTimeout(() => flushDir(directory), Math.max(0, FLUSH_FRAME_MS - elapsed))
   }
 
   // Helpers
@@ -209,21 +241,22 @@ export function createEventPipeline(input: EventPipelineInput) {
           }
           const normalizedPayload = normalizeEventType(payload)
           const directory = resolveEventDirectory(event, normalizedPayload)
-          const k = key(directory, normalizedPayload)
+          const d = getOrCreateDir(directory)
+          const k = key(normalizedPayload)
           if (k) {
-            const i = coalesced.get(k)
+            const i = d.coalesced.get(k)
             if (i !== undefined) {
-              queue[i] = { directory, payload: normalizedPayload }
+              d.queue[i] = normalizedPayload
               if (normalizedPayload.type === "message.part.updated") {
                 const part = (normalizedPayload.properties as { part: { messageID: string; id: string } }).part
-                staleDeltas.add(deltaKey(directory, part.messageID, part.id))
+                d.staleDeltas.add(deltaKey(part.messageID, part.id))
               }
               continue
             }
-            coalesced.set(k, queue.length)
+            d.coalesced.set(k, d.queue.length)
           }
-          queue.push({ directory, payload: normalizedPayload })
-          schedule()
+          d.queue.push(normalizedPayload)
+          scheduleDir(directory)
 
           if (Date.now() - yielded < STREAM_YIELD_MS) continue
           yielded = Date.now()
@@ -243,7 +276,7 @@ export function createEventPipeline(input: EventPipelineInput) {
       if (abort.signal.aborted) return
       await wait(RECONNECT_DELAY_MS)
     }
-  })().finally(flush)
+  })().finally(flushAll)
 
   // Visibility handler — abort SSE on heartbeat timeout so the loop reconnects.
   // The reconnect triggers onReconnect above, which lets consumers resync state.
@@ -273,7 +306,7 @@ export function createEventPipeline(input: EventPipelineInput) {
       window.removeEventListener("pageshow", onPageShow)
     }
     abort.abort()
-    flush()
+    flushAll()
   }
 
   return { cleanup }
