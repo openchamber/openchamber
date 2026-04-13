@@ -228,11 +228,12 @@ export function GitHubIssuePickerDialog({
       return null;
     }
 
-    const parts = settingsDefaultModel.split('/');
-    if (parts.length !== 2) {
+    const slashIndex = settingsDefaultModel.indexOf('/');
+    if (slashIndex <= 0 || slashIndex === settingsDefaultModel.length - 1) {
       return null;
     }
-    const [providerID, modelID] = parts;
+    const providerID = settingsDefaultModel.slice(0, slashIndex);
+    const modelID = settingsDefaultModel.slice(slashIndex + 1);
     if (!providerID || !modelID) {
       return null;
     }

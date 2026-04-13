@@ -1,12 +1,53 @@
 #!/usr/bin/env node
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
+import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '../../..');
 const desktopDir = path.join(repoRoot, 'packages/desktop');
+
+/**
+ * Resolve the directory that holds node_modules for packages/desktop.
+ * In a git worktree, node_modules live only in the main worktree, not in
+ * each linked worktree checkout. We detect this by checking whether
+ * node_modules/.bin/tauri exists under the current repoRoot's desktop dir.
+ * If not, we climb to the main worktree via `git rev-parse --git-common-dir`.
+ */
+function resolveModulesRoot() {
+  const localBin = path.join(desktopDir, 'node_modules', '.bin', 'tauri');
+  if (fs.existsSync(localBin)) {
+    return repoRoot;
+  }
+
+  // We're in a linked worktree — find the main worktree root.
+  const result = spawnSync('git', ['rev-parse', '--git-common-dir'], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+  });
+  if (result.status !== 0 || !result.stdout) {
+    return repoRoot; // fallback: let bun try and fail with the usual error
+  }
+
+  // --git-common-dir returns the path to the shared .git directory;
+  // its parent is the main worktree root.
+  const gitCommonDir = result.stdout.trim();
+  const mainRoot = path.isAbsolute(gitCommonDir)
+    ? path.dirname(gitCommonDir)
+    : path.dirname(path.resolve(repoRoot, gitCommonDir));
+
+  const mainBin = path.join(mainRoot, 'packages', 'desktop', 'node_modules', '.bin', 'tauri');
+  if (fs.existsSync(mainBin)) {
+    return mainRoot;
+  }
+
+  return repoRoot; // fallback
+}
+
+const modulesRoot = resolveModulesRoot();
+const tauriBin = path.join(modulesRoot, 'packages', 'desktop', 'node_modules', '.bin', 'tauri');
 
 function spawnProcess(command, args, opts = {}) {
   return spawn(command, args, {
@@ -78,16 +119,19 @@ async function stopChildTree(child) {
 }
 
 async function main() {
-  const tauriProcess = spawnProcess('bun', [
-    '--cwd',
-    desktopDir,
-    'tauri',
-    'dev',
-    '--features',
-    'devtools',
-    '--config',
-    './src-tauri/tauri.dev.conf.json',
-  ]);
+  // Invoke the @tauri-apps/cli script directly so the correct binary is used
+  // regardless of whether we're in the main worktree or a linked worktree.
+  const tauriProcess = spawnProcess(
+    tauriBin,
+    [
+      'dev',
+      '--features',
+      'devtools',
+      '--config',
+      './src-tauri/tauri.dev.conf.json',
+    ],
+    { cwd: desktopDir },
+  );
 
   let cleaning = false;
 
