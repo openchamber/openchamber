@@ -4,7 +4,7 @@ export const createOpenCodeResolutionRuntime = (dependencies) => {
     resolveOpencodeCliPath,
     applyOpencodeBinaryFromSettings,
     ensureOpencodeCliEnv,
-    opencodeShimInterpreter,
+    resolveManagedOpenCodeLaunchSpec,
     getResolvedState,
     setResolvedOpencodeBinarySource,
   } = dependencies;
@@ -42,7 +42,9 @@ export const createOpenCodeResolutionRuntime = (dependencies) => {
       source !== 'env'
         ? source
         : rawDetectedSourceNow;
-    const shim = resolved ? opencodeShimInterpreter(resolved) : null;
+    const launchSpec = resolved && !useWslForOpencode
+      ? resolveManagedOpenCodeLaunchSpec(resolved)
+      : null;
 
     return {
       configured,
@@ -51,7 +53,9 @@ export const createOpenCodeResolutionRuntime = (dependencies) => {
       source,
       detectedNow,
       detectedSourceNow,
-      shim,
+      launchBinary: launchSpec?.binary || null,
+      launchArgs: launchSpec?.args || [],
+      launchWrapperType: launchSpec?.wrapperType || null,
       viaWsl: useWslForOpencode,
       wslBinary: resolvedWslBinary || null,
       wslPath: resolvedWslOpencodePath || null,

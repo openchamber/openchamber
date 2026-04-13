@@ -55,7 +55,7 @@ export {
   OPENCODE_DATA_DIR,
 } from './auth.js';
 
-export { createUiAuth } from './ui-auth.js';
+export { createUiAuth } from '../ui-auth/ui-auth.js';
 
 export {
   listMcpConfigs,

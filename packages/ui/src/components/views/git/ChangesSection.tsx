@@ -67,9 +67,36 @@ export const ChangesSection: React.FC<ChangesSectionProps> = ({
     enabled: shouldVirtualize,
   });
 
+  // Force virtualizer to remeasure when the scroll container transitions
+  // from display:none (hidden tab via keep-alive) back to visible layout.
+  // Without this, the virtualizer uses stale zero-height measurements and
+  // renders no rows until the user scrolls.
+  React.useEffect(() => {
+    if (!shouldVirtualize) return;
+    const el = scrollRef.current;
+    if (!el) return;
+
+    const observer = new ResizeObserver(() => {
+      rowVirtualizer.measure();
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [shouldVirtualize, rowVirtualizer]);
+
+  // Compute virtual rows with useMemo. We include totalSize as a dependency so
+  // that when the ResizeObserver calls measure() — which clears the itemSizeCache
+  // and recalculates — the size change invalidates the memo and getVirtualItems()
+  // returns fresh rows. Using useMemo avoids calling getVirtualItems() directly in
+  // the render body, which can trigger maybeNotify() → onChange() → useReducer
+  // dispatch during render (React minified error #185).
+  const totalSize = rowVirtualizer.getTotalSize();
   const virtualRows = React.useMemo(
-    () => (shouldVirtualize ? rowVirtualizer.getVirtualItems() : []),
-    [rowVirtualizer, shouldVirtualize],
+    // totalSize invalidates the memo when the virtualizer recalculates after
+    // measure/scroll, ensuring getVirtualItems() returns up-to-date rows.
+    // Without it, the stable rowVirtualizer ref would never invalidate the memo
+    // and rows would stay empty after measure().
+    () => (shouldVirtualize && totalSize >= 0 ? rowVirtualizer.getVirtualItems() : []),
+    [shouldVirtualize, rowVirtualizer, totalSize],
   );
 
   React.useEffect(() => {

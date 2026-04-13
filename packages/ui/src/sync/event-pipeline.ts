@@ -9,6 +9,7 @@
  */
 
 import type { Event, OpencodeClient } from "@opencode-ai/sdk/v2/client"
+import { syncDebug } from "./debug"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -160,6 +161,7 @@ export function createEventPipeline(input: EventPipelineInput) {
     d.staleDeltas.clear()
 
     d.last = Date.now()
+    syncDebug.pipeline.flush(events.length)
     for (const payload of events) {
       if (skip && payload.type === "message.part.delta") {
         const props = payload.properties as { messageID: string; partID: string }
@@ -274,6 +276,7 @@ export function createEventPipeline(input: EventPipelineInput) {
                   d.staleDeltas.add(deltaKey(part.messageID, part.id))
                 }
               }
+              syncDebug.pipeline.coalesced(normalizedPayload.type, k)
               continue
             }
             d.coalesced.set(k, d.queue.length)

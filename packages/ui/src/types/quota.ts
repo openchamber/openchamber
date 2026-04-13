@@ -9,6 +9,7 @@ export type QuotaProviderId =
   | 'nano-gpt'
   | 'openrouter'
   | 'zai-coding-plan'
+  | 'zhipuai-coding-plan'
   | 'minimax-coding-plan'
   | 'minimax-cn-coding-plan'
   | 'ollama-cloud'

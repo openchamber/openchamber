@@ -25,6 +25,7 @@ export const OPEN_IN_APPS: OpenInApp[] = [
   { id: 'windsurf', label: 'Windsurf', appName: 'Windsurf' },
   { id: 'vscodium', label: 'VSCodium', appName: 'VSCodium' },
   { id: 'rustrover', label: 'RustRover', appName: 'RustRover' },
+  { id: 'kiro', label: 'Kiro', appName: 'Kiro' },
   { id: 'antigravity', label: 'Antigravity', appName: 'Antigravity' },
   { id: 'trae', label: 'Trae', appName: 'Trae' },
 ];

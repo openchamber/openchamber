@@ -14,3 +14,5 @@ export {
   summarizeText,
   sanitizeForTTS,
 } from './summarization.js';
+
+export { transcribeAudio } from './stt.js';

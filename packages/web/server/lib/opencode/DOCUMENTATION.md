@@ -1,7 +1,7 @@
 # OpenCode Module Documentation
 
 ## Purpose
-This module provides OpenCode server integration utilities for the web server runtime, including configuration management, provider authentication, and UI authentication with rate limiting.
+This module provides OpenCode server integration utilities for the web server runtime, including configuration management and provider authentication.
 
 ## Entrypoints and structure
 - `packages/web/server/lib/opencode/index.js`: public entrypoint (currently baseline placeholder).
@@ -40,7 +40,8 @@ This module provides OpenCode server integration utilities for the web server ru
 - `packages/web/server/lib/opencode/session-runtime.js`: session status/attention/activity runtime for OpenCode SSE events.
 - `packages/web/server/lib/opencode/watcher.js`: global SSE watcher runtime for push/session event fanout.
 - `packages/web/server/lib/opencode/shared.js`: shared utilities for config, markdown, skills, and git helpers.
-- `packages/web/server/lib/opencode/ui-auth.js`: UI session authentication with rate limiting.
+- `packages/web/server/lib/ui-auth/ui-auth.js`: UI session authentication runtime (outside OpenCode module).
+- `packages/web/server/lib/ui-auth/ui-passkeys.js`: UI passkey storage and WebAuthn registration/authentication helpers (outside OpenCode module).
 
 ## Public exports (auth.js)
 - `readAuthFile()`: Reads and parses `~/.local/share/opencode/auth.json`.
@@ -66,15 +67,6 @@ This module provides OpenCode server integration utilities for the web server ru
 - `addSkillFromMdFile(skillsMap, skillMdPath, scope, source)`: Parses and indexes a skill file.
 - `resolveSkillSearchDirectories(workingDirectory)`: Returns skill search path order (config, project, home, custom).
 - `listSkillSupportingFiles(skillDir)`, `readSkillSupportingFile(skillDir, relativePath)`, `writeSkillSupportingFile(skillDir, relativePath, content)`, `deleteSkillSupportingFile(skillDir, relativePath)`: Skill supporting file management.
-
-## Public exports (ui-auth.js)
-- `createUiAuth({ password, cookieName, sessionTtlMs })`: Creates UI auth instance with methods:
-  - `enabled`: Boolean indicating if auth is configured.
-  - `requireAuth(req, res, next)`: Express middleware to enforce authentication.
-  - `handleSessionStatus(req, res)`: Returns authentication status.
-  - `handleSessionCreate(req, res)`: Handles login with rate limiting.
-  - `ensureSessionToken(req, res)`: Returns or creates session token.
-  - `dispose()`: Cleans up timers and state.
 
 ## Public exports (routes.js)
 - `registerOpenCodeRoutes(app, dependencies)`: Registers OpenCode-owned HTTP routes and internal module runtime:
@@ -112,6 +104,7 @@ This module provides OpenCode server integration utilities for the web server ru
   - `refreshOpenCodeAfterConfigChange(reason, options?)`
   - `bootstrapOpenCodeAtStartup()`
   - `startHealthMonitoring(healthCheckIntervalMs)`
+  - `waitForPortRelease(port, timeoutMs, hostname?)`
   - `killProcessOnPort(port)`
 
 ## Public exports (env-runtime.js)
@@ -122,10 +115,10 @@ This module provides OpenCode server integration utilities for the web server ru
   - `ensureOpencodeCliEnv()`
   - `applyOpencodeBinaryFromSettings()`
   - `resolveOpencodeCliPath()`
+  - `resolveManagedOpenCodeLaunchSpec(opencodePath)`: resolves the effective managed OpenCode launch target, unwrapping Windows package-manager shims to a direct native binary or explicit runtime+script when possible.
   - `resolveGitBinaryForSpawn()`
   - `resolveWslExecutablePath()`
   - `buildWslExecArgs(execArgs, distroOverride?)`
-  - `opencodeShimInterpreter(opencodePath)`
   - `isExecutable(filePath)`
   - `searchPathFor(binaryName)`
   - `clearResolvedOpenCodeBinary()`
@@ -229,11 +222,19 @@ This module provides OpenCode server integration utilities for the web server ru
   - `GET /health`
   - `POST /api/system/shutdown`
   - `GET /api/system/info`
-- `registerAuthAndAccessRoutes(app, dependencies)`: registers browser auth/session exchange and API access middleware:
-  - `GET /auth/session`
-  - `POST /auth/session`
-  - `GET /connect`
-  - `app.use('/api', ...)` auth/tunnel guard
+ - `registerAuthAndAccessRoutes(app, dependencies)`: registers browser auth/session exchange and API access middleware:
+   - `GET /auth/session`
+   - `POST /auth/session`
+   - `GET /auth/passkey/status`
+   - `POST /auth/passkey/authenticate/options`
+   - `POST /auth/passkey/authenticate/verify`
+   - `POST /auth/passkey/register/options`
+   - `POST /auth/passkey/register/verify`
+   - `GET /api/passkeys`
+   - `DELETE /api/passkeys/:id`
+   - `POST /api/auth/reset`
+   - `GET /connect`
+   - `app.use('/api', ...)` auth/tunnel guard
 - `registerSettingsUtilityRoutes(app, dependencies)`: registers small settings utility endpoints:
   - `GET /api/config/themes`
   - `POST /api/config/reload`
@@ -288,7 +289,7 @@ This module provides OpenCode server integration utilities for the web server ru
 ## Public exports (opencode-resolution-runtime.js)
 - `createOpenCodeResolutionRuntime(dependencies)`: creates runtime for OpenCode binary/source snapshot resolution.
 - Returned API:
-  - `getOpenCodeResolutionSnapshot(settings)`
+  - `getOpenCodeResolutionSnapshot(settings)`: returns configured/resolved OpenCode binary details plus effective managed-launch fields (`launchBinary`, `launchArgs`, `launchWrapperType`) when applicable.
 
 ## Public exports (tunnel-wiring-runtime.js)
 - `createTunnelWiringRuntime(dependencies)`: creates runtime for tunnel service construction and tunnel route registration.

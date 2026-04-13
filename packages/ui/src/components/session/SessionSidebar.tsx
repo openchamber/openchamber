@@ -732,6 +732,23 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       });
   }, [addProject, tauriIpcAvailable]);
 
+  // Auto-expand parent session when navigating to a subagent (child) session
+  React.useEffect(() => {
+    if (!currentSessionId) return;
+    const current = sessions.find((s) => s.id === currentSessionId);
+    const parentID = (current as Session & { parentID?: string | null })?.parentID;
+    if (!parentID) return;
+    setExpandedParents((prev) => {
+      if (prev.has(parentID)) return prev;
+      const next = new Set(prev);
+      next.add(parentID);
+      try {
+        safeStorage.setItem(SESSION_EXPANDED_STORAGE_KEY, JSON.stringify(Array.from(next)));
+      } catch { /* ignored */ }
+      return next;
+    });
+  }, [currentSessionId, sessions, safeStorage]);
+
   const toggleParent = React.useCallback((sessionId: string) => {
     setExpandedParents((prev) => {
       const next = new Set(prev);
