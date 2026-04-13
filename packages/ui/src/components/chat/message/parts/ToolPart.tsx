@@ -1851,6 +1851,10 @@ const ToolPart: React.FC<ToolPartProps> = ({
         return parseTaskMetadataBlock(taskOutputString);
     }, [taskOutputString]);
 
+    // Track whether fallback session resolution has failed at least once.
+    // When true, resolveFallbackTaskSessionId widens its time window (3s → 8s).
+    const [taskFallbackRetried, setTaskFallbackRetried] = React.useState(false);
+
     const explicitTaskSessionId = React.useMemo<string | undefined>(() => {
         if (!isTaskTool) {
             return undefined;
@@ -1885,8 +1889,9 @@ const ToolPart: React.FC<ToolPartProps> = ({
                 isTaskFinalized: isFinalized,
                 sessions: storeState.session,
                 sessionStatusMap: storeState.session_status,
+                hasRetried: taskFallbackRetried,
             });
-        }, [explicitTaskSessionId, isTaskTool, currentSessionId, taskSessionResolutionStart, isFinalized]),
+        }, [explicitTaskSessionId, isTaskTool, currentSessionId, taskSessionResolutionStart, isFinalized, taskFallbackRetried]),
         currentDirectory,
     );
 
@@ -1953,13 +1958,28 @@ const ToolPart: React.FC<ToolPartProps> = ({
 
     const taskPollNoChangeCountRef = React.useRef(0);
     const taskPollLastSignatureRef = React.useRef<string>('');
+    const taskFinalFetchDoneRef = React.useRef(false);
 
     React.useEffect(() => {
         setTaskChildSeenActive(false);
         setTaskChildPollingStopped(false);
         taskPollNoChangeCountRef.current = 0;
         taskPollLastSignatureRef.current = '';
+        taskFinalFetchDoneRef.current = false;
+        setTaskFallbackRetried(false);
     }, [taskSessionId]);
+
+    // Track whether fallback resolution has failed at least once, so the
+    // next attempt widens the time window (3s → 8s).
+    React.useEffect(() => {
+        if (explicitTaskSessionId != null || taskSessionId != null || isFinalized) {
+            // Resolved or finalized — no need for retry widening.
+            return;
+        }
+        // Fallback resolution is unresolved for a non-finalized task —
+        // widen the window for next resolution attempt.
+        setTaskFallbackRetried(true);
+    }, [explicitTaskSessionId, taskSessionId, isFinalized]);
 
     React.useEffect(() => {
         if (!isTaskTool || !taskSessionId) {
@@ -1981,26 +2001,81 @@ const ToolPart: React.FC<ToolPartProps> = ({
             return;
         }
 
-        if (!taskChildSeenActive || taskChildPollingStopped || childSessionTaskSummaryEntries.length === 0) {
+        // Always stop polling if already done.
+        if (taskChildPollingStopped && taskFinalFetchDoneRef.current) {
             return;
         }
 
-        if (typeof window === 'undefined') {
-            setTaskChildPollingStopped(true);
-            return;
+        // Normal settle path: child went idle after we saw it active, and we have entries.
+        // Schedule a grace period before marking polling as stopped.
+        if (taskChildSeenActive && childSessionTaskSummaryEntries.length > 0 && !taskChildPollingStopped) {
+            if (typeof window === 'undefined') {
+                setTaskChildPollingStopped(true);
+                return;
+            }
+
+            const timer = window.setTimeout(() => {
+                setTaskChildPollingStopped(true);
+            }, TASK_TOOL_SETTLE_GRACE_MS);
+
+            return () => {
+                window.clearTimeout(timer);
+            };
         }
 
-        const timer = window.setTimeout(() => {
-            setTaskChildPollingStopped(true);
-        }, TASK_TOOL_SETTLE_GRACE_MS);
+        // Final-fetch path: child went idle before parent saw it active, or we have no
+        // entries yet. Schedule a one-shot delayed fetch to capture any results that
+        // arrived after the child session went idle, then mark polling as stopped.
+        if (!taskChildPollingStopped && !taskFinalFetchDoneRef.current) {
+            if (typeof window === 'undefined') {
+                setTaskChildPollingStopped(true);
+                taskFinalFetchDoneRef.current = true;
+                return;
+            }
 
-        return () => {
-            window.clearTimeout(timer);
-        };
+            const capturedSessionId = taskSessionId;
+            const timer = window.setTimeout(() => {
+                taskFinalFetchDoneRef.current = true;
+                setTaskChildPollingStopped(true);
+
+                // Perform one final fetch to capture any results that arrived
+                // after the child session went idle.
+                if (capturedSessionId) {
+                    const scopedClient = opencodeClient.getScopedSdkClient(currentDirectory);
+                    void scopedClient.session.messages({
+                        sessionID: capturedSessionId,
+                        limit: TASK_TOOL_INITIAL_FETCH_LIMIT,
+                    }).then((response) => {
+                        const messages = response.data ?? [];
+                        if (Array.isArray(messages) && messages.length > 0) {
+                            const childStores = getSyncChildStores();
+                            childStores.update(currentDirectory, (prev) => {
+                                const records = messages as SessionMessageWithParts[];
+                                const partPatch: Record<string, import('@opencode-ai/sdk/v2').Part[]> = { ...prev.part };
+                                for (const rec of records) {
+                                    partPatch[rec.info.id] = rec.parts;
+                                }
+                                return {
+                                    message: { ...prev.message, [capturedSessionId]: records.map((r) => r.info) as import('@opencode-ai/sdk/v2').Message[] },
+                                    part: partPatch,
+                                };
+                            });
+                        }
+                    }).catch(() => {
+                        // Ignore final-fetch errors — polling was already stopping.
+                    });
+                }
+            }, TASK_TOOL_SETTLE_GRACE_MS);
+
+            return () => {
+                window.clearTimeout(timer);
+            };
+        }
     }, [
         childSessionActivity.phase,
         childSessionHasInFlightTools,
         childSessionTaskSummaryEntries.length,
+        currentDirectory,
         activeLatched,
         isFinalized,
         isTaskTool,

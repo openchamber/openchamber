@@ -13,7 +13,12 @@ import type { Session, SessionStatus } from '@opencode-ai/sdk/v2/client';
  * task started are eligible. This avoids binding to earlier or later sibling
  * subagent sessions when explicit task metadata is delayed.
  */
+/**
+ * Narrow initial window avoids binding to wrong sessions on first attempt.
+ * Wide window on retry handles late-appearing child sessions under load.
+ */
 const TASK_SESSION_MATCH_WINDOW_MS = 3000;
+const TASK_SESSION_MATCH_WINDOW_WIDE_MS = 8000;
 
 const LIVE_STATUSES = new Set<string>(['busy', 'retry']);
 
@@ -30,6 +35,8 @@ export interface ResolveFallbackParams {
   sessions: Session[];
   /** Session status map from the sync store */
   sessionStatusMap?: Record<string, SessionStatus>;
+  /** True when a previous resolution attempt has already failed (enables wider window) */
+  hasRetried?: boolean;
 }
 
 /**
@@ -50,13 +57,15 @@ export function resolveFallbackTaskSessionId(params: ResolveFallbackParams): str
     isTaskFinalized = false,
     sessions,
     sessionStatusMap,
+    hasRetried = false,
   } = params;
 
   if (!isTaskTool || isTaskFinalized || !parentSessionId || typeof taskStartTime !== 'number') {
     return undefined;
   }
 
-  const latestAllowed = taskStartTime + TASK_SESSION_MATCH_WINDOW_MS;
+  const windowMs = hasRetried ? TASK_SESSION_MATCH_WINDOW_WIDE_MS : TASK_SESSION_MATCH_WINDOW_MS;
+  const latestAllowed = taskStartTime + windowMs;
 
   // Filter candidate sessions: parentID matches and created shortly after task start.
   const candidates = sessions.filter((session) => {
