@@ -706,6 +706,14 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
     const isLastAssistantInTurn = turnGroupingContext?.isLastAssistantInTurn ?? false;
     const hasStopFinish = messageFinish === 'stop';
 
+    // When the model calls a blocking tool (e.g. question), it's paused waiting for user input.
+    // In sorted mode, we should show deferred text/reasoning content rather than hiding it.
+    const hasBlockingToolCall = React.useMemo(() => {
+        return visibleParts.some(
+            p => p.type === 'tool' && (p as ToolPartType).tool?.toLowerCase() === 'question'
+        );
+    }, [visibleParts]);
+
     // TTS for message playback
     const { isPlaying: isTTSPlaying, play: playTTS, stop: stopTTS } = useMessageTTS();
     const showMessageTTSButtons = useConfigStore((state) => state.showMessageTTSButtons);
@@ -1152,11 +1160,11 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
 
             if (part.type === 'text') {
                 const activity = activityByPart.get(part);
-                if (isSortedRenderMode && !hasStopFinish) {
+                if (isSortedRenderMode && !hasStopFinish && !hasBlockingToolCall) {
                     i += 1;
                     continue;
                 }
-                if (activity?.kind === 'justification') {
+                if (activity?.kind === 'justification' && (shouldRenderActivityGroup || !hasBlockingToolCall)) {
                     i += 1;
                     continue;
                 }
@@ -1177,7 +1185,7 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
 
             if (part.type === 'reasoning') {
                 const activity = activityByPart.get(part);
-                if (isSortedRenderMode && !hasStopFinish) {
+                if (isSortedRenderMode && !hasStopFinish && !hasBlockingToolCall) {
                     i += 1;
                     continue;
                 }
@@ -1291,6 +1299,7 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
         animatedToolIdsLookup,
         animateActivityRows,
         chatRenderMode,
+        hasBlockingToolCall,
         collapsedPreviewCount,
         expandedTools,
         hasStopFinish,
