@@ -30,6 +30,10 @@ import { prepareNotificationLastMessage } from './lib/notifications/index.js';
 import { registerTtsRoutes } from './lib/tts/routes.js';
 import { detectSayTtsCapability } from './lib/tts/capability-runtime.js';
 import { createTerminalRuntime } from './lib/terminal/runtime.js';
+import {
+  createGlobalUiEventBroadcaster,
+  createMessageStreamWsRuntime,
+} from './lib/event-stream/index.js';
 import { createFsSearchRuntime as createFsSearchRuntimeFactory } from './lib/fs/search.js';
 import { createOpenCodeLifecycleRuntime } from './lib/opencode/lifecycle.js';
 import { createOpenCodeEnvRuntime } from './lib/opencode/env-runtime.js';
@@ -74,6 +78,7 @@ const __dirname = path.dirname(__filename);
 const DEFAULT_PORT = 3000;
 const DESKTOP_NOTIFY_PREFIX = '[OpenChamberDesktopNotify] ';
 const uiNotificationClients = new Set();
+const uiNotificationWsClients = new Set();
 const HEALTH_CHECK_INTERVAL = 15000;
 const SHUTDOWN_TIMEOUT = 10000;
 const MODELS_DEV_API_URL = 'https://models.dev/api.json';
@@ -302,15 +307,22 @@ const notificationEmitterRuntime = createNotificationEmitterRuntime({
   getDesktopNotifyEnabled: () => ENV_DESKTOP_NOTIFY,
   desktopNotifyPrefix: DESKTOP_NOTIFY_PREFIX,
   getUiNotificationClients: () => uiNotificationClients,
+  getBroadcastGlobalUiEvent: () => broadcastGlobalUiEvent,
 });
 
 const writeSseEvent = (...args) => notificationEmitterRuntime.writeSseEvent(...args);
 const emitDesktopNotification = (...args) => notificationEmitterRuntime.emitDesktopNotification(...args);
+const broadcastGlobalUiEvent = createGlobalUiEventBroadcaster({
+  sseClients: uiNotificationClients,
+  wsClients: uiNotificationWsClients,
+  writeSseEvent,
+});
 const broadcastUiNotification = (...args) => notificationEmitterRuntime.broadcastUiNotification(...args);
 
 const sessionRuntime = createSessionRuntime({
   writeSseEvent,
   getNotificationClients: () => uiNotificationClients,
+  broadcastEvent: broadcastGlobalUiEvent,
 });
 
 // HMR-persistent state via globalThis
@@ -349,6 +361,7 @@ const tunnelAuthController = createTunnelAuth();
 let runtimeManagedRemoteTunnelToken = '';
 let runtimeManagedRemoteTunnelHostname = '';
 let terminalRuntime = null;
+let messageStreamRuntime = null;
 const userProvidedOpenCodePassword = hmrStateRuntime.getUserProvidedOpenCodePassword(hmrState);
 const initialOpenCodeAuthState = hmrStateRuntime.resolveOpenCodeAuthFromState({
   hmrState,
@@ -587,6 +600,50 @@ const openCodeWatcherRuntime = createOpenCodeWatcherRuntime({
   },
 });
 
+const processForwardedEventPayload = (payload, emitSyntheticEvent) => {
+  if (!payload || typeof payload !== 'object' || typeof emitSyntheticEvent !== 'function') {
+    return;
+  }
+
+  maybeCacheSessionInfoFromEvent(payload);
+
+  if (payload.type !== 'session.status') {
+    return;
+  }
+
+  const properties = payload.properties && typeof payload.properties === 'object' ? payload.properties : {};
+  const info = properties.info && typeof properties.info === 'object' ? properties.info : {};
+  const sessionId = typeof properties.sessionID === 'string' ? properties.sessionID.trim() : '';
+  const status = typeof info.type === 'string' ? info.type.trim() : '';
+
+  if (!sessionId || !status) {
+    return;
+  }
+
+  emitSyntheticEvent({
+    type: 'openchamber:session-status',
+    properties: {
+      sessionId,
+      status,
+      timestamp: Date.now(),
+      metadata: {
+        attempt: typeof info.attempt === 'number' ? info.attempt : undefined,
+        message: typeof info.message === 'string' ? info.message : undefined,
+        next: typeof info.next === 'number' ? info.next : undefined,
+      },
+      needsAttention: false,
+    },
+  });
+
+  emitSyntheticEvent({
+    type: 'openchamber:session-activity',
+    properties: {
+      sessionId,
+      phase: status === 'busy' || status === 'retry' ? 'busy' : 'idle',
+    },
+  });
+};
+
 
 const serverUtilsRuntime = createServerUtilsRuntime({
   fs,
@@ -694,6 +751,7 @@ const tunnelWiringRuntime = createTunnelWiringRuntime({
 });
 const startupPipelineRuntime = createStartupPipelineRuntime({
   createTerminalRuntime,
+  createMessageStreamWsRuntime,
   createServerStartupRuntime,
 });
 
@@ -801,6 +859,10 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   getTerminalRuntime: () => terminalRuntime,
   setTerminalRuntime: (value) => {
     terminalRuntime = value;
+  },
+  getMessageStreamRuntime: () => messageStreamRuntime,
+  setMessageStreamRuntime: (value) => {
+    messageStreamRuntime = value;
   },
   shouldSkipOpenCodeStop: () => ENV_SKIP_OPENCODE_START || isExternalOpenCode,
   getOpenCodePort: () => openCodePort,
@@ -983,6 +1045,10 @@ async function main(options = {}) {
     isExecutable,
     isRequestOriginAllowed,
     rejectWebSocketUpgrade,
+    buildOpenCodeUrl,
+    getOpenCodeAuthHeaders,
+    processForwardedEventPayload,
+    messageStreamWsClients: uiNotificationWsClients,
     terminalHeartbeatIntervalMs: TERMINAL_INPUT_WS_HEARTBEAT_INTERVAL_MS,
     terminalRebindWindowMs: TERMINAL_INPUT_WS_REBIND_WINDOW_MS,
     terminalMaxRebindsPerWindow: TERMINAL_INPUT_WS_MAX_REBINDS_PER_WINDOW,
@@ -1013,6 +1079,7 @@ async function main(options = {}) {
     attachSignals,
   });
   terminalRuntime = startupPipelineResult.terminalRuntime;
+  messageStreamRuntime = startupPipelineResult.messageStreamRuntime;
 
   return {
     expressApp: app,

@@ -18,6 +18,7 @@ import { stripMessageDiffSnapshots, stripSessionDiffSnapshots } from "./sanitize
 import { syncDebug } from "./debug"
 import { opencodeClient } from "@/lib/opencode/client"
 import { usePermissionStore } from "@/stores/permissionStore"
+import { useConfigStore } from "@/stores/useConfigStore"
 import { autoRespondsPermission, normalizeDirectory } from "@/stores/utils/permissionAutoAccept"
 import { appendNotification } from "./notification-store"
 import type { State } from "./types"
@@ -944,6 +945,7 @@ export function SyncProvider(props: {
   directory: string
   children: React.ReactNode
 }) {
+  const messageStreamTransport = useConfigStore((state) => state.settingsMessageStreamTransport)
   const childStoresRef = useRef<ChildStoreManager | null>(null)
   if (!childStoresRef.current) childStoresRef.current = new ChildStoreManager()
   const childStores = childStoresRef.current
@@ -1056,6 +1058,7 @@ export function SyncProvider(props: {
 
     const { cleanup } = createEventPipeline({
       sdk: props.sdk,
+      transport: messageStreamTransport,
       onEvent: (directory, payload) => {
         handleEvent(directory, payload, childStores, routingIndex)
       },
@@ -1076,7 +1079,7 @@ export function SyncProvider(props: {
       },
     })
     return cleanup
-  }, [props.sdk, childStores, routingIndex])
+  }, [props.sdk, childStores, routingIndex, messageStreamTransport])
 
   // Ensure current directory's child store exists
   useEffect(() => {

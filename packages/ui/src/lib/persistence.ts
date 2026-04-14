@@ -297,6 +297,9 @@ const getRuntimeSettingsAPI = () => getRegisteredRuntimeAPIs()?.settings ?? null
 
 const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   const store = useUIStore.getState();
+  const configStore = typeof window !== 'undefined'
+    ? window.__zustand_config_store__?.getState?.() ?? null
+    : null;
   const queueStore = useMessageQueueStore.getState();
 
   if (typeof settings.showReasoningTraces === 'boolean' && settings.showReasoningTraces !== store.showReasoningTraces) {
@@ -393,6 +396,12 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
     && (settings.userMessageRenderingMode === 'markdown' || settings.userMessageRenderingMode === 'plain')) {
     if (settings.userMessageRenderingMode !== store.userMessageRenderingMode) {
       store.setUserMessageRenderingMode(settings.userMessageRenderingMode);
+    }
+  }
+  if (typeof settings.messageStreamTransport === 'string'
+    && (settings.messageStreamTransport === 'auto' || settings.messageStreamTransport === 'ws' || settings.messageStreamTransport === 'sse')) {
+    if (configStore && settings.messageStreamTransport !== configStore.settingsMessageStreamTransport) {
+      configStore.setSettingsMessageStreamTransport(settings.messageStreamTransport);
     }
   }
   if (typeof settings.stickyUserHeader === 'boolean' && settings.stickyUserHeader !== store.stickyUserHeader) {
@@ -777,6 +786,10 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.chatRenderMode === 'string'
     && (candidate.chatRenderMode === 'sorted' || candidate.chatRenderMode === 'live')) {
     result.chatRenderMode = candidate.chatRenderMode;
+  }
+  if (typeof candidate.messageStreamTransport === 'string'
+    && (candidate.messageStreamTransport === 'auto' || candidate.messageStreamTransport === 'ws' || candidate.messageStreamTransport === 'sse')) {
+    result.messageStreamTransport = candidate.messageStreamTransport;
   }
   if (typeof candidate.activityRenderMode === 'string'
     && (candidate.activityRenderMode === 'collapsed' || candidate.activityRenderMode === 'summary')) {

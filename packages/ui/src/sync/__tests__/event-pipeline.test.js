@@ -3,6 +3,7 @@ import { createEventPipeline } from '../event-pipeline';
 
 const originalDocument = globalThis.document;
 const originalWindow = globalThis.window;
+const originalWebSocket = globalThis.WebSocket;
 
 function installDomStubs() {
   globalThis.document = {
@@ -12,14 +13,52 @@ function installDomStubs() {
   };
 
   globalThis.window = {
+    location: {
+      href: 'http://127.0.0.1:3000/',
+      origin: 'http://127.0.0.1:3000',
+    },
     addEventListener() {},
     removeEventListener() {},
   };
 }
 
+class FakeWebSocket {
+  static instances = [];
+
+  constructor(url) {
+    this.url = url;
+    this.readyState = 0;
+    this.onopen = null;
+    this.onmessage = null;
+    this.onerror = null;
+    this.onclose = null;
+    FakeWebSocket.instances.push(this);
+  }
+
+  close() {
+    this.readyState = 3;
+  }
+
+  emitOpen() {
+    this.readyState = 1;
+    this.onopen?.();
+  }
+
+  emitMessage(payload) {
+    this.onmessage?.({ data: JSON.stringify(payload) });
+  }
+
+  emitClose() {
+    this.readyState = 3;
+    this.onclose?.();
+  }
+}
+
 afterEach(() => {
   globalThis.document = originalDocument;
   globalThis.window = originalWindow;
+  globalThis.WebSocket = originalWebSocket;
+  FakeWebSocket.instances = [];
 });
 
 function createSdkWithSingleEvent(event, hold) {
@@ -339,5 +378,111 @@ describe('createEventPipeline', () => {
     // Only 1 event should be delivered (coalesced)
     expect(received.length).toBe(1);
     expect(received[0].payload.type).toBe('message.part.updated');
+  });
+
+  it('consumes websocket message stream frames when transport is ws', async () => {
+    installDomStubs();
+    globalThis.WebSocket = FakeWebSocket;
+
+    const received = [];
+    const sdk = {
+      global: {
+        event: async () => {
+          throw new Error('SSE should not be used in ws mode');
+        },
+      },
+    };
+
+    const delivered = new Promise((resolve) => {
+      const { cleanup } = createEventPipeline({
+        sdk,
+        transport: 'ws',
+        onEvent: (directory, payload) => {
+          received.push({ directory, payload });
+          cleanup();
+          resolve();
+        },
+      });
+    });
+
+    await Promise.resolve();
+
+    const socket = FakeWebSocket.instances[0];
+    expect(socket?.url).toContain('/api/global/event/ws');
+
+    socket.emitOpen();
+    socket.emitMessage({ type: 'ready', scope: 'global' });
+    socket.emitMessage({
+      type: 'event',
+      eventId: 'evt-1',
+      directory: '/tmp/project',
+      payload: {
+        type: 'session.status',
+        properties: {
+          sessionID: 'session-1',
+        },
+      },
+    });
+
+    await delivered;
+
+    expect(received).toEqual([
+      {
+        directory: '/tmp/project',
+        payload: {
+          type: 'session.status',
+          properties: {
+            sessionID: 'session-1',
+          },
+        },
+      },
+    ]);
+  });
+
+  it('falls back to SSE when websocket closes before ready in auto mode', async () => {
+    installDomStubs();
+    globalThis.WebSocket = FakeWebSocket;
+
+    let releaseStream;
+    const hold = new Promise((resolve) => {
+      releaseStream = resolve;
+    });
+
+    const received = [];
+    const sdk = createSdkWithSingleEvent({
+      payload: {
+        type: 'server.connected',
+        properties: {},
+      },
+    }, hold);
+
+    const delivered = new Promise((resolve) => {
+      const { cleanup } = createEventPipeline({
+        sdk,
+        transport: 'auto',
+        onEvent: (directory, payload) => {
+          received.push({ directory, payload });
+          cleanup();
+          releaseStream();
+          resolve();
+        },
+      });
+    });
+
+    await Promise.resolve();
+    const socket = FakeWebSocket.instances[0];
+    socket.emitClose();
+
+    await delivered;
+
+    expect(received).toEqual([
+      {
+        directory: 'global',
+        payload: {
+          type: 'server.connected',
+          properties: {},
+        },
+      },
+    ]);
   });
 });

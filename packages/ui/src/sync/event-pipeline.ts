@@ -1,5 +1,5 @@
 /**
- * Event Pipeline — SSE connection, event coalescing, and batched flush.
+ * Event Pipeline — transport connection, event coalescing, and batched flush.
  *
  * Plain closure API:
  *   const { cleanup } = createEventPipeline({ sdk, onEvent })
@@ -9,6 +9,7 @@
  */
 
 import type { Event, OpencodeClient } from "@opencode-ai/sdk/v2/client"
+import { opencodeClient } from "@/lib/opencode/client"
 import { syncDebug } from "./debug"
 
 // ---------------------------------------------------------------------------
@@ -38,9 +39,22 @@ const HEARTBEAT_TIMEOUT_MS = 15_000
 export type EventPipelineInput = {
   sdk: OpencodeClient
   onEvent: (directory: string, payload: Event) => void
-  /** Called after SSE reconnects (visibility restore or heartbeat timeout). */
+  /** Called after the stream reconnects (visibility restore or heartbeat timeout). */
   onReconnect?: () => void
+  transport?: "auto" | "ws" | "sse"
 }
+
+type MessageStreamWsFrame = {
+  type: "ready" | "event" | "error"
+  payload?: unknown
+  eventId?: string
+  directory?: string
+  message?: string
+  scope?: "global" | "directory"
+}
+
+const ABSOLUTE_URL_PATTERN = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//
+const WS_FALLBACK_WINDOW_MS = 60_000
 
 const normalizeEventType = (payload: Event): Event => {
   const type = (payload as { type?: unknown }).type
@@ -78,10 +92,63 @@ function resolveEventDirectory(event: unknown, payload: Event): string {
   return propertyDirectory && propertyDirectory.length > 0 ? propertyDirectory : "global"
 }
 
+function resolveEventPayload(payload: unknown): Event | null {
+  if (!payload || typeof payload !== "object") {
+    return null
+  }
+
+  const record = payload as { type?: unknown; payload?: unknown }
+  if (typeof record.type === "string") {
+    return payload as Event
+  }
+
+  if (record.payload && typeof record.payload === "object" && typeof (record.payload as { type?: unknown }).type === "string") {
+    return record.payload as Event
+  }
+
+  return null
+}
+
+function resolveAbsoluteUrl(candidate: string): string {
+  const normalized = typeof candidate === "string" && candidate.trim().length > 0 ? candidate.trim() : "/api"
+  if (ABSOLUTE_URL_PATTERN.test(normalized)) {
+    return normalized
+  }
+
+  if (typeof window === "undefined") {
+    return normalized
+  }
+
+  const baseReference = window.location?.href || window.location?.origin
+  if (!baseReference) {
+    return normalized
+  }
+
+  return new URL(normalized, baseReference).toString()
+}
+
+function toWebSocketUrl(candidate: string): string {
+  const url = new URL(resolveAbsoluteUrl(candidate))
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
+  return url.toString()
+}
+
+function buildGlobalEventWsUrl(lastEventId?: string): string {
+  const baseUrl = opencodeClient.getBaseUrl()
+  const normalizedBase = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`
+  const httpUrl = new URL("global/event/ws", resolveAbsoluteUrl(normalizedBase))
+  if (lastEventId && lastEventId.length > 0) {
+    httpUrl.searchParams.set("lastEventId", lastEventId)
+  }
+  return toWebSocketUrl(httpUrl.toString())
+}
+
 export function createEventPipeline(input: EventPipelineInput) {
-  const { sdk, onEvent, onReconnect } = input
+  const { sdk, onEvent, onReconnect, transport = "auto" } = input
   const abort = new AbortController()
   let hasConnected = false
+  let lastEventId: string | undefined
+  let wsFallbackUntil = 0
 
   // Queue state
   let queue: QueuedEvent[] = []
@@ -147,6 +214,30 @@ export function createEventPipeline(input: EventPipelineInput) {
   let lastEventAt = Date.now()
   let heartbeat: ReturnType<typeof setTimeout> | undefined
 
+  const markConnected = () => {
+    if (hasConnected) {
+      onReconnect?.()
+      return
+    }
+    hasConnected = true
+  }
+
+  const enqueueEvent = (directory: string, payload: Event) => {
+    const normalizedPayload = normalizeEventType(payload)
+    const k = key(directory, normalizedPayload)
+    if (k) {
+      const i = coalesced.get(k)
+      if (i !== undefined) {
+        queue[i] = { directory, payload: normalizedPayload }
+        syncDebug.pipeline.coalesced(normalizedPayload.type, k)
+        return
+      }
+      coalesced.set(k, queue.length)
+    }
+    queue.push({ directory, payload: normalizedPayload })
+    schedule()
+  }
+
   const resetHeartbeat = () => {
     lastEventAt = Date.now()
     if (heartbeat) clearTimeout(heartbeat)
@@ -161,65 +252,195 @@ export function createEventPipeline(input: EventPipelineInput) {
     heartbeat = undefined
   }
 
-  // SSE loop — iterate SDK global event stream, enqueue with coalescing
+  const runSseAttempt = async (signal: AbortSignal) => {
+    const events = await sdk.global.event({
+      signal,
+      onSseError: (error: unknown) => {
+        if (isAbortError(error)) return
+        if (streamErrorLogged) return
+        streamErrorLogged = true
+        console.error("[event-pipeline] SSE stream error", error)
+      },
+    })
+
+    markConnected()
+
+    let yielded = Date.now()
+    resetHeartbeat()
+
+    for await (const event of events.stream) {
+      resetHeartbeat()
+      streamErrorLogged = false
+      const payload = resolveEventPayload((event as { payload?: Event }).payload ?? event)
+      if (!payload) {
+        continue
+      }
+      const directory = resolveEventDirectory(event, payload)
+      enqueueEvent(directory, payload)
+
+      if (Date.now() - yielded < STREAM_YIELD_MS) continue
+      yielded = Date.now()
+      await wait(0)
+    }
+  }
+
+  const runWsAttempt = async (signal: AbortSignal) => {
+    await new Promise<void>((resolve, reject) => {
+      let settled = false
+      let opened = false
+      const socket = new WebSocket(buildGlobalEventWsUrl(lastEventId))
+
+      const cleanup = () => {
+        socket.onopen = null
+        socket.onmessage = null
+        socket.onerror = null
+        socket.onclose = null
+      }
+
+      const settleResolve = () => {
+        if (settled) return
+        settled = true
+        signal.removeEventListener("abort", handleAbort)
+        cleanup()
+        resolve()
+      }
+
+      const settleReject = (error: unknown) => {
+        if (settled) return
+        settled = true
+        signal.removeEventListener("abort", handleAbort)
+        cleanup()
+        reject(error)
+      }
+
+      const handleAbort = () => {
+        try {
+          socket.close()
+        } catch {
+          // ignore close failures during abort
+        }
+        settleResolve()
+      }
+
+      signal.addEventListener("abort", handleAbort, { once: true })
+
+      socket.onopen = () => {
+        streamErrorLogged = false
+      }
+
+      socket.onmessage = (messageEvent) => {
+        resetHeartbeat()
+        streamErrorLogged = false
+
+        let frame: MessageStreamWsFrame | null = null
+        try {
+          frame = JSON.parse(String(messageEvent.data)) as MessageStreamWsFrame
+        } catch (error) {
+          console.warn("[event-pipeline] Failed to parse WS frame", error)
+          return
+        }
+
+        if (!frame || typeof frame.type !== "string") {
+          return
+        }
+
+        if (frame.type === "ready") {
+          opened = true
+          markConnected()
+          return
+        }
+
+        if (frame.type === "error") {
+          const error = new Error(frame.message || "Message stream WebSocket error")
+          if (!opened && transport === "auto") {
+            wsFallbackUntil = Date.now() + WS_FALLBACK_WINDOW_MS
+            ;(error as Error & { code?: string }).code = "WS_FALLBACK"
+          }
+          settleReject(error)
+          try {
+            socket.close()
+          } catch {
+            // ignore
+          }
+          return
+        }
+
+        if (frame.type !== "event") {
+          return
+        }
+
+        const payload = resolveEventPayload(frame.payload)
+        if (!payload) {
+          return
+        }
+
+        if (typeof frame.eventId === "string" && frame.eventId.length > 0) {
+          lastEventId = frame.eventId
+        }
+
+        const directory = resolveEventDirectory(
+          { directory: frame.directory, payload },
+          payload,
+        )
+        enqueueEvent(directory, payload)
+      }
+
+      socket.onerror = () => {
+        void 0
+      }
+
+      socket.onclose = () => {
+        if (signal.aborted) {
+          settleResolve()
+          return
+        }
+
+        const error = new Error("Global message stream WebSocket closed")
+        if (!opened && transport === "auto") {
+          wsFallbackUntil = Date.now() + WS_FALLBACK_WINDOW_MS
+          ;(error as Error & { code?: string }).code = "WS_FALLBACK"
+        }
+        settleReject(error)
+      }
+    })
+  }
+
+  const resolveTransport = (): "ws" | "sse" => {
+    if (typeof WebSocket !== "function") {
+      return "sse"
+    }
+    if (transport === "ws") {
+      return "ws"
+    }
+    if (transport === "sse") {
+      return "sse"
+    }
+    return wsFallbackUntil > Date.now() ? "sse" : "ws"
+  }
+
+  // Transport loop — WS in auto/ws mode, SDK SSE as fallback/compat path.
   void (async () => {
     while (!abort.signal.aborted) {
       attempt = new AbortController()
       lastEventAt = Date.now()
+      let retryDelayMs = RECONNECT_DELAY_MS
+      const currentTransport = resolveTransport()
       const onAbort = () => {
         attempt?.abort()
       }
       abort.signal.addEventListener("abort", onAbort)
 
       try {
-        const events = await sdk.global.event({
-          signal: attempt.signal,
-          onSseError: (error: unknown) => {
-            if (isAbortError(error)) return
-            if (streamErrorLogged) return
-            streamErrorLogged = true
-            console.error("[event-pipeline] stream error", error)
-          },
-        })
-
-        if (hasConnected) {
-          onReconnect?.()
+        if (currentTransport === "ws") {
+          await runWsAttempt(attempt.signal)
         } else {
-          hasConnected = true
-        }
-
-        let yielded = Date.now()
-        resetHeartbeat()
-
-        // Enqueue event with coalescing + stale delta tracking
-        for await (const event of events.stream) {
-          resetHeartbeat()
-          streamErrorLogged = false
-          const payload = (event as { payload?: Event }).payload ?? (event as unknown as Event)
-          if (!payload || typeof payload !== "object" || typeof (payload as { type?: unknown }).type !== "string") {
-            continue
-          }
-          const normalizedPayload = normalizeEventType(payload)
-          const directory = resolveEventDirectory(event, normalizedPayload)
-          const k = key(directory, normalizedPayload)
-          if (k) {
-            const i = coalesced.get(k)
-            if (i !== undefined) {
-              queue[i] = { directory, payload: normalizedPayload }
-              syncDebug.pipeline.coalesced(normalizedPayload.type, k)
-              continue
-            }
-            coalesced.set(k, queue.length)
-          }
-          queue.push({ directory, payload: normalizedPayload })
-          schedule()
-
-          if (Date.now() - yielded < STREAM_YIELD_MS) continue
-          yielded = Date.now()
-          await wait(0)
+          await runSseAttempt(attempt.signal)
         }
       } catch (error) {
-        if (!isAbortError(error) && !streamErrorLogged) {
+        const code = typeof error === "object" && error !== null ? (error as { code?: unknown }).code : undefined
+        if (currentTransport === "ws" && code === "WS_FALLBACK") {
+          retryDelayMs = 0
+        } else if (!isAbortError(error) && !streamErrorLogged) {
           streamErrorLogged = true
           console.error("[event-pipeline] stream failed", error)
         }
@@ -230,7 +451,9 @@ export function createEventPipeline(input: EventPipelineInput) {
       }
 
       if (abort.signal.aborted) return
-      await wait(RECONNECT_DELAY_MS)
+      if (retryDelayMs > 0) {
+        await wait(retryDelayMs)
+      }
     }
   })().finally(flush)
 

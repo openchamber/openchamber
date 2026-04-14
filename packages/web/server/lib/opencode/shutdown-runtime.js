@@ -12,6 +12,8 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     clearHealthCheckInterval,
     getTerminalRuntime,
     setTerminalRuntime,
+    getMessageStreamRuntime,
+    setMessageStreamRuntime,
     shouldSkipOpenCodeStop,
     getOpenCodePort,
     getOpenCodeProcess,
@@ -49,6 +51,16 @@ export const createGracefulShutdownRuntime = (dependencies) => {
       } catch {
       } finally {
         setTerminalRuntime(null);
+      }
+    }
+
+    const messageStreamRuntime = getMessageStreamRuntime();
+    if (messageStreamRuntime) {
+      try {
+        await messageStreamRuntime.close();
+      } catch {
+      } finally {
+        setMessageStreamRuntime(null);
       }
     }
 

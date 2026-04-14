@@ -313,6 +313,12 @@ export const createSettingsHelpers = (dependencies) => {
         result.chatRenderMode = mode;
       }
     }
+    if (typeof candidate.messageStreamTransport === 'string') {
+      const mode = candidate.messageStreamTransport.trim();
+      if (mode === 'auto' || mode === 'ws' || mode === 'sse') {
+        result.messageStreamTransport = mode;
+      }
+    }
     if (typeof candidate.activityRenderMode === 'string') {
       const mode = candidate.activityRenderMode.trim();
       if (mode === 'collapsed' || mode === 'summary') {

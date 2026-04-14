@@ -4,6 +4,7 @@ export const createNotificationEmitterRuntime = (dependencies) => {
     getDesktopNotifyEnabled,
     desktopNotifyPrefix,
     getUiNotificationClients,
+    getBroadcastGlobalUiEvent,
   } = dependencies;
 
   const writeSseEvent = (res, payload) => {
@@ -34,6 +35,25 @@ export const createNotificationEmitterRuntime = (dependencies) => {
       return;
     }
 
+    const syntheticPayload = {
+      type: 'openchamber:notification',
+      properties: {
+        ...payload,
+        // Tell the UI whether the sidecar stdout notification channel is active.
+        // When true, the desktop UI should skip this SSE notification to avoid duplicates.
+        // When false (e.g. tauri dev), the UI must handle this SSE notification itself.
+        desktopStdoutActive: desktopNotifyEnabled,
+      },
+    };
+
+    const broadcastGlobalUiEvent = typeof getBroadcastGlobalUiEvent === 'function'
+      ? getBroadcastGlobalUiEvent()
+      : null;
+    if (broadcastGlobalUiEvent) {
+      broadcastGlobalUiEvent(syntheticPayload);
+      return;
+    }
+
     const clients = getUiNotificationClients();
     if (clients.size === 0) {
       return;
@@ -41,16 +61,7 @@ export const createNotificationEmitterRuntime = (dependencies) => {
 
     for (const res of clients) {
       try {
-        writeSseEvent(res, {
-          type: 'openchamber:notification',
-          properties: {
-            ...payload,
-            // Tell the UI whether the sidecar stdout notification channel is active.
-            // When true, the desktop UI should skip this SSE notification to avoid duplicates.
-            // When false (e.g. tauri dev), the UI must handle this SSE notification itself.
-            desktopStdoutActive: desktopNotifyEnabled,
-          },
-        });
+        writeSseEvent(res, syntheticPayload);
       } catch {
         // ignore
       }
