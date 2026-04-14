@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+
+## [1.9.5] - 2026-04-14
+
+- Security/Auth: added passkey sign-in for protected instances and new 1-week/30-day session expiration options, so teams can enforce stronger access controls with flexible login persistence (thanks to @daveotero, @pm0u).
+- Voice: added OpenAI-compatible custom server support for both text-to-speech and speech-to-text, including configurable TTS model/pitch/volume and stricter custom URL validation for safer setup (thanks to @ablepharus).
+- Chat/Tool Output: added an interactive tree viewer for structured outputs and fixed JSON quote rendering, making large payloads easier to inspect and copy accurately (thanks to @yaozhenghangma).
+- Chat/Reliability: fixed question-tool content disappearing after refresh and hardened subagent/session recovery paths, reducing silent failures and stuck task states (thanks to @jwcrystal).
+- Sync/Performance: optimized multi-session streaming with per-directory queues, event coalescing, and parts-gap recovery to keep live updates smoother under heavy activity (thanks to @jwcrystal).
+- Sessions/UI: kept active sessions visible in Recent, auto-expanded parent groups when opening subagent sessions, and hid empty archived/folder sections for cleaner navigation (thanks to @jwcrystal).
+- Git/UI: restored Git changes panel visibility and sidebar sync, so change review stays available and consistent while switching contexts (thanks to @jwcrystal).
+- Desktop/Startup: delivered a more guided first-launch and smart recovery flow, plus startup and remote-window interaction fixes to reduce early-session friction (thanks to @jwcrystal).
+- Usage: added Zhipu AI Coding Plan tracking and restored model-variant compatibility with older OpenCode runtimes for more reliable quota reporting and model selection (thanks to @cainiao1992, @Chi-square-test).
+
 ## [1.9.4] - 2026-04-07
 
 - Settings/Magic Prompts: added a dedicated Magic Prompts page with editable templates for commit/PR generation, PR and issue reviews, failed-check/comment analysis, and merge/cherry-pick conflict resolution.
