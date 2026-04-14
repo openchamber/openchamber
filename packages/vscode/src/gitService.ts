@@ -2903,3 +2903,161 @@ export async function stashPop(directory: string): Promise<{ success: boolean }>
   const result = await execGit(['stash', 'pop'], directory);
   return { success: result.exitCode === 0 };
 }
+
+// ============== Worktree Validation & Canonicalization ==============
+
+/**
+ * Resolve a path to its canonical (real) absolute path.
+ */
+async function canonicalizePath(filePath: string): Promise<string> {
+  try {
+    const realPath = await fs.promises.realpath(filePath);
+    return realPath;
+  } catch {
+    return path.resolve(filePath);
+  }
+}
+
+/**
+ * Validate that a directory is inside a given worktree root.
+ */
+export async function validateWorktreeDirectory(
+  directory: string,
+  worktreeRoot: string
+): Promise<{
+  valid: boolean;
+  insideWorktreeRoot: boolean;
+  resolvedWorktreeRoot: string | null;
+  resolvedCwd: string | null;
+}> {
+  const directoryPath = normalizeDirectoryPath(directory);
+  const rootPath = normalizeDirectoryPath(worktreeRoot);
+
+  if (!directoryPath || !rootPath) {
+    return { valid: false, insideWorktreeRoot: false, resolvedWorktreeRoot: null, resolvedCwd: null };
+  }
+
+  const isRepo = await checkIsGitRepository(directoryPath);
+  if (!isRepo) {
+    return { valid: false, insideWorktreeRoot: false, resolvedWorktreeRoot: null, resolvedCwd: null };
+  }
+
+  const resolvedCwd = await canonicalizePath(directoryPath);
+  const resolvedRoot = await canonicalizePath(rootPath);
+
+  const inside = resolvedCwd.startsWith(resolvedRoot + path.sep) || resolvedCwd === resolvedRoot;
+
+  return {
+    valid: true,
+    insideWorktreeRoot: inside,
+    resolvedWorktreeRoot: resolvedRoot,
+    resolvedCwd,
+  };
+}
+
+/**
+ * Canonicalize the worktree state for a directory, returning branch, headState,
+ * worktreeStatus, and attentionReason (merge/rebase/cherry-pick/revert).
+ */
+export async function canonicalizeWorktreeState(
+  directory: string
+): Promise<{
+  worktreeRoot: string | null;
+  cwd: string | null;
+  branch: string | null;
+  headState: 'branch' | 'detached' | 'unborn';
+  worktreeStatus: 'ready' | 'missing' | 'invalid' | 'not-a-repo';
+  legacy: boolean;
+  degraded: boolean;
+  attentionReason?: 'merge' | 'rebase' | 'cherry-pick' | 'revert' | 'bisect' | null;
+}> {
+  const directoryPath = normalizeDirectoryPath(directory);
+
+  if (!directoryPath) {
+    return {
+      worktreeRoot: null, cwd: null, branch: null,
+      headState: 'detached', worktreeStatus: 'not-a-repo',
+      legacy: false, degraded: false, attentionReason: null,
+    };
+  }
+
+  const isRepo = await checkIsGitRepository(directoryPath);
+  if (!isRepo) {
+    return {
+      worktreeRoot: null, cwd: null, branch: null,
+      headState: 'detached', worktreeStatus: 'not-a-repo',
+      legacy: false, degraded: false, attentionReason: null,
+    };
+  }
+
+  const cwd = await canonicalizePath(directoryPath);
+  const legacy = await isLinkedWorktree(directoryPath);
+
+  let worktreeRoot: string | null = null;
+  let worktreeStatus: 'ready' | 'missing' | 'invalid' = 'ready';
+  let headState: 'branch' | 'detached' | 'unborn' = 'branch';
+  let branch: string | null = null;
+  let attentionReason: 'merge' | 'rebase' | 'cherry-pick' | 'revert' | 'bisect' | null = null;
+
+  // Resolve worktree project context (worktreeRoot)
+  try {
+    const context = await resolveWorktreeProjectContext(directoryPath);
+    worktreeRoot = await canonicalizePath(context.worktreeRoot);
+  } catch {
+    worktreeStatus = 'invalid';
+  }
+
+  // Resolve head state and branch
+  try {
+    const symbolicRef = await execGit(['symbolic-ref', '-q', 'HEAD'], directoryPath);
+    if (symbolicRef.exitCode === 0 && symbolicRef.stdout.trim()) {
+      headState = 'branch';
+      branch = cleanBranchName(symbolicRef.stdout.trim());
+    } else {
+      const revParse = await execGit(['rev-parse', 'HEAD'], directoryPath);
+      if (revParse.exitCode !== 0 || !revParse.stdout.trim()) {
+        headState = 'unborn';
+        branch = null;
+      } else {
+        headState = 'detached';
+        branch = revParse.stdout.trim().slice(0, 7);
+      }
+    }
+  } catch {
+    headState = 'unborn';
+    branch = null;
+  }
+
+  // Detect attention reasons (merge, rebase, cherry-pick, revert)
+  try {
+    const mergeHead = await execGit(['rev-parse', '--verify', 'MERGE_HEAD'], directoryPath);
+    if (mergeHead.exitCode === 0) {
+      attentionReason = 'merge';
+    } else {
+      const fsp = fs.promises;
+      const rebaseMerge = await fsp.stat(path.join(directoryPath, '.git', 'rebase-merge')).then(() => true).catch(() => false);
+      const rebaseApply = await fsp.stat(path.join(directoryPath, '.git', 'rebase-apply')).then(() => true).catch(() => false);
+      if (rebaseMerge || rebaseApply) {
+        attentionReason = 'rebase';
+      } else {
+        const cherryPickHead = await fsp.stat(path.join(directoryPath, '.git', 'CHERRY_PICK_HEAD')).then(() => true).catch(() => false);
+        const revertHead = await fsp.stat(path.join(directoryPath, '.git', 'REVERT_HEAD')).then(() => true).catch(() => false);
+        if (cherryPickHead) attentionReason = 'cherry-pick';
+        else if (revertHead) attentionReason = 'revert';
+      }
+    }
+  } catch {
+    // Status check failed — ignore
+  }
+
+  return {
+    worktreeRoot,
+    cwd,
+    branch,
+    headState,
+    worktreeStatus,
+    legacy,
+    degraded: false,
+    attentionReason,
+  };
+}
