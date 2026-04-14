@@ -1,0 +1,69 @@
+plugins {
+    id 'com.android.application'
+}
+
+def localProperties = new Properties()
+def localPropertiesFile = rootProject.file('local.properties')
+if (localPropertiesFile.exists()) {
+    localProperties.load(new FileInputStream(localPropertiesFile))
+}
+
+android {
+    namespace 'ai.opencode.openchamber.configurable'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId "ai.opencode.openchamber.configurable"
+        minSdk 23
+        targetSdk 35
+        versionCode 1
+        versionName "1.0.0"
+
+        manifestPlaceholders = [
+            hostName   : localProperties.getProperty('twa.hostName', 'opencode.ai'),
+            defaultUrl : localProperties.getProperty('twa.defaultUrl', 'https://opencode.ai')
+        ]
+    }
+
+    signingConfigs {
+        release {
+            storeFile rootProject.file(localProperties.getProperty('keystore.path', '../android.keystore'))
+            storePassword localProperties.getProperty('keystore.password', System.getenv('KEYSTORE_PASSWORD') ?: '')
+            keyAlias localProperties.getProperty('keystore.alias', 'openchamber')
+            keyPassword localProperties.getProperty('keystore.keyPassword', System.getenv('KEY_PASSWORD') ?: '')
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            signingConfig signingConfigs.release
+        }
+        debug {
+            signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    sourceSets {
+        main {
+            java.srcDirs = ['src/main/java']
+        }
+    }
+}
+
+dependencies {
+    implementation 'com.google.android.material:material:1.13.0'
+    implementation 'androidx.webkit:webkit:1.15.0'
+    implementation 'androidx.preference:preference:1.2.1'
+    implementation 'androidx.appcompat:appcompat:1.7.1'
+    implementation 'androidx.activity:activity:1.13.0'
+    implementation 'androidx.browser:browser:1.10.0'
+    implementation 'androidx.core:core-splashscreen:1.2.0'
+}

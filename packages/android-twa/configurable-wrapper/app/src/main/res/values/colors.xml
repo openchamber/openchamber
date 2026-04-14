@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="primary">#EDB449</color>
+    <color name="primary_dark">#C49A30</color>
+    <color name="primary_light">#F5CA72</color>
+    <color name="bg_dark">#151313</color>
+    <color name="bg_darker">#0E0C0C</color>
+    <color name="bg_surface">#1E1C1C</color>
+    <color name="surface_variant">#2A2626</color>
+    <color name="amber_500">#EDB449</color>
+    <color name="amber_700">#C49A30</color>
+    <color name="text_primary">#FFFFFF</color>
+    <color name="text_secondary">#B0B0B0</color>
+    <color name="white">#FFFFFF</color>
+    <color name="error">#FF6B6B</color>
+</resources>

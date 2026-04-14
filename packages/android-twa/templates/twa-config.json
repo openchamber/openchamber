@@ -1,0 +1,26 @@
+{
+  "packageId": "${TWA_PACKAGE_ID:-ai.opencode.openchamber.twa}",
+  "host": "${TWA_HOST}",
+  "name": "OpenChamber",
+  "launcherName": "OpenChamber",
+  "startUrl": "/",
+  "iconUrl": "${TWA_MANIFEST_URL}/../pwa-512.png",
+  "webManifestUrl": "${TWA_MANIFEST_URL}",
+  "themeColor": "#edb449",
+  "backgroundColor": "#151313",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "signingKey": {
+    "path": "${TWA_KEYSTORE_PATH:-./android.keystore}",
+    "alias": "${TWA_KEY_ALIAS:-openchamber}"
+  },
+  "enableNotifications": true,
+  "shortcuts": [
+    {
+      "name": "New Chat",
+      "shortName": "Chat",
+      "url": "/",
+      "chosenIconUrl": "${TWA_MANIFEST_URL}/../pwa-192.png"
+    }
+  ]
+}
