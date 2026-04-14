@@ -43,9 +43,11 @@ import androidx.core.content.ContextCompat;
 
 import com.google.android.material.snackbar.Snackbar;
 
+import java.io.FileInputStream;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Properties;
 import java.util.Set;
 
 public class MainActivity extends AppCompatActivity {
@@ -98,6 +100,35 @@ public class MainActivity extends AppCompatActivity {
     private String getSavedUrl() {
         SharedPreferences prefs = getSharedPreferences(App.PREFS_NAME, MODE_PRIVATE);
         return prefs.getString(App.KEY_SERVER_URL, null);
+    }
+
+    private String loadHostName() {
+        // Try to load from local.properties in the configurable-wrapper directory
+        try {
+            java.io.File propsFile = new java.io.File(getApplicationInfo().dataDir, "../local.properties");
+            if (propsFile.exists()) {
+                Properties props = new Properties();
+                try (FileInputStream fis = new FileInputStream(propsFile)) {
+                    props.load(fis);
+                    String hostName = props.getProperty("twa.hostName");
+                    if (hostName != null && !hostName.isEmpty()) {
+                        return hostName;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Could not load local.properties: " + e.getMessage());
+        }
+        // Fallback: parse host from saved URL
+        String savedUrl = getSavedUrl();
+        if (savedUrl != null && !savedUrl.isEmpty()) {
+            String host = Uri.parse(savedUrl).getHost();
+            if (host != null && !host.isEmpty()) {
+                return host;
+            }
+        }
+        // Ultimate fallback (should not happen in normal operation)
+        return "localhost";
     }
 
     private void launchTwa(String url) {
@@ -181,7 +212,8 @@ public class MainActivity extends AppCompatActivity {
         webView.addJavascriptInterface(new NotificationBridge(), NOTIFICATION_JS_OBJECT);
 
         if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
-            Set<String> allowedOrigins = Collections.singleton("*");
+            String hostName = loadHostName();
+            Set<String> allowedOrigins = Collections.singleton("https://" + hostName);
             WebViewCompat.addDocumentStartJavaScript(webView, getNotificationBridgeJs(), allowedOrigins);
         }
 

@@ -26,9 +26,11 @@ export const createStaticRoutesRuntime = (dependencies) => {
   const registerStaticRoutes = (app) => {
     const distPath = resolveDistPath();
 
+    // Register assetlinks route outside the dist-path check so it works in dev mode too
+    registerAssetlinksRoute(app, { process });
+
     if (fs.existsSync(distPath)) {
       console.log(`Serving static files from ${distPath}`);
-      registerAssetlinksRoute(app, { process });
       app.use(express.static(distPath, {
         setHeaders(res, filePath) {
           // Service workers should never be long-cached; iOS is especially sensitive.

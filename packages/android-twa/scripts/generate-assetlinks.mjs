@@ -10,8 +10,10 @@ const shouldRenderHumanOutput = () => !isJsonMode() && !isQuietMode()
 
 function extractFingerprint(keystorePath, alias) {
   try {
+    const storePass = process.env.BUBBLEWRAP_KEYSTORE_PASSWORD || process.env.TWA_KEYSTORE_PASSWORD
+    const storePassArg = storePass ? ` -storepass "${storePass}"` : ''
     const output = execSync(
-      `keytool -list -v -keystore "${keystorePath}" -alias "${alias}" 2>/dev/null`,
+      `keytool -list -v -keystore "${keystorePath}" -alias "${alias}"${storePassArg} 2>/dev/null`,
       { encoding: 'utf-8' }
     )
     const match = output.match(/SHA256: ([A-F0-9:]+)/)

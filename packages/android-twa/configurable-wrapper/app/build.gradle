@@ -10,7 +10,7 @@ if (localPropertiesFile.exists()) {
 
 android {
     namespace 'ai.opencode.openchamber.configurable'
-    compileSdk 36
+    compileSdk 35
 
     defaultConfig {
         applicationId "ai.opencode.openchamber.configurable"

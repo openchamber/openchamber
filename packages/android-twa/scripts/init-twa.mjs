@@ -135,10 +135,19 @@ async function collectConfig() {
 }
 
 async function runBubblewrapInit(config) {
-  const spin = spinner()
-  if (canPrompt()) {
-    spin.start('Initializing TWA project...')
+  // bubblewrap init requires interactive mode - it prompts for project name,
+  // display name, and other configuration. For CI/CD, use android:build
+  // with the configurable-wrapper directly instead.
+  if (!canPrompt()) {
+    throw new Error(
+      'bubblewrap init requires interactive mode. ' +
+      'For CI/CD, use `bun run android:build` with the configurable-wrapper directly, ' +
+      'or run this command in an interactive terminal.'
+    )
   }
+
+  const spin = spinner()
+  spin.start('Initializing TWA project...')
 
   try {
     const args = [
@@ -163,20 +172,14 @@ async function runBubblewrapInit(config) {
     // Run bubblewrap init
     execSync(`bubblewrap ${args.join(' ')}`, {
       cwd: twaDir,
-      stdio: canPrompt() ? 'inherit' : 'pipe'
+      stdio: 'inherit'
     })
 
     const outputDir = resolve(twaDir, 'output')
-    if (canPrompt()) {
-      spin.stop('TWA project initialized')
-      log.success(`Output directory: ${outputDir}`)
-    } else if (!isQuietMode() && !isJsonMode()) {
-      console.log('TWA project initialized successfully.')
-    }
+    spin.stop('TWA project initialized')
+    log.success(`Output directory: ${outputDir}`)
   } catch (error) {
-    if (canPrompt()) {
-      spin.stop('Initialization failed')
-    }
+    spin.stop('Initialization failed')
     throw error
   }
 }

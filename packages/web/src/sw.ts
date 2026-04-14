@@ -1,5 +1,22 @@
 /// <reference lib="webworker" />
 
+/**
+ * Architectural decision: Workbox service worker for TWA (Android)
+ *
+ * This service worker uses Workbox caching strategies (precacheAndRoute, NetworkFirst,
+ * CacheFirst, ExpirationPlugin) to provide offline support and performance optimization
+ * for the Android TWA (Trusted Web Activity) build of OpenChamber.
+ *
+ * TWA is an Android-only distribution — it runs inside Chrome Custom Tabs, not in iOS Safari.
+ * The upstream codebase previously set `injectionPoint: undefined` and omitted workbox
+ * dependencies to avoid iOS Safari service-worker stability issues. That concern does not
+ * apply here: TWA targets Chrome on Android, where workbox is well-supported.
+ *
+ * When the app is NOT built for TWA (default web/PWA), VitePWA's `injectionPoint` is
+ * `undefined` and `self.__WB_MANIFEST` resolves to an empty array, so this file degrades
+ * gracefully — precacheAndRoute([]) is a no-op and the caching routes simply don't fire.
+ */
+
 import { precacheAndRoute } from 'workbox-precaching';
 import { registerRoute, NavigationRoute } from 'workbox-routing';
 import { NetworkFirst, CacheFirst } from 'workbox-strategies';

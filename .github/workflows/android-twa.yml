@@ -9,9 +9,10 @@ on:
       - '.github/workflows/android-twa.yml'
   pull_request:
     branches:
-      - main
+    - main
     paths:
-      - 'packages/android-twa/**'
+    - 'packages/android-twa/**'
+    - '.github/workflows/android-twa.yml'
   workflow_dispatch:
     inputs:
       build_type:
@@ -81,6 +82,7 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Validate configuration
+        if: github.event_name == 'workflow_dispatch' || github.repository == 'openchamber/openchamber'
         run: |
           if [ -z "${{ secrets.KEYSTORE_PASSWORD }}" ]; then
             echo "::error::KEYSTORE_PASSWORD secret not configured"
@@ -92,6 +94,7 @@ jobs:
           fi
 
       - name: Generate signing key
+        if: github.event_name == 'workflow_dispatch' || github.repository == 'openchamber/openchamber'
         run: |
           if [ ! -f packages/android-twa/android.keystore ]; then
             keytool -genkeypair -alias openchamber \

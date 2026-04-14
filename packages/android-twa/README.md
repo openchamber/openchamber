@@ -18,18 +18,42 @@ This package generates Android applications that wrap your OpenChamber web insta
 
 ## Quick Start
 
+There are **two build paths** available:
+
+1. **Configurable-wrapper (recommended for CI)** — Uses the pre-built Gradle project directly. No Bubblewrap installation needed. Works with environment variables.
+2. **Bubblewrap init (optional)** — Scaffolds a new TWA project from scratch using the Bubblewrap CLI. Requires `@bubblewrap/cli` installed globally.
+
+### Path 1: Configurable-wrapper (Simplest)
+
 ```bash
 # 1. Set your configuration
 export TWA_MANIFEST_URL=https://your-domain.com/site.webmanifest
 export TWA_HOST=your-domain.com
 
-# 2. Initialize TWA project
-bun run android:init
-
-# 3. Build APK
+# 2. Build APK (uses pre-built configurable-wrapper)
 bun run android:build
 
-# 4. Generate assetlinks.json
+# 3. Generate assetlinks.json
+bun run android:assetlinks
+```
+
+### Path 2: Bubblewrap Init (Custom Setups)
+
+```bash
+# 1. Install Bubblewrap CLI (required for this path)
+npm install -g @bubblewrap/cli
+
+# 2. Set your configuration
+export TWA_MANIFEST_URL=https://your-domain.com/site.webmanifest
+export TWA_HOST=your-domain.com
+
+# 3. Initialize TWA project (scaffolds new project)
+bun run android:init
+
+# 4. Build APK
+bun run android:build
+
+# 5. Generate assetlinks.json
 bun run android:assetlinks
 ```
 
@@ -57,13 +81,13 @@ cp .env.example .env
 
 ## Step-by-Step Guide
 
-### 1. Install Bubblewrap CLI
+This guide covers both build paths. Skip the Bubblewrap-specific steps if you're using the configurable-wrapper path.
 
-```bash
-npm install -g @bubblewrap/cli
-```
+### Path A: Configurable-wrapper (No Bubblewrap Required)
 
-### 2. Configure Your Instance
+This path uses the pre-built `configurable-wrapper/` Gradle project. Ideal for CI/CD and automated builds.
+
+#### A1. Configure Your Instance
 
 Set environment variables or create `.env` file with your OpenChamber URL.
 
@@ -73,7 +97,47 @@ export TWA_MANIFEST_URL=https://my-server.com/site.webmanifest
 export TWA_HOST=my-server.com
 ```
 
-### 3. Initialize TWA Project
+#### A2. Build APK
+
+```bash
+bun run android:build
+```
+
+Output: `packages/android-twa/output/app-release-signed.apk`
+
+#### A3. Deploy assetlinks.json
+
+```bash
+bun run android:assetlinks
+```
+
+Upload the generated `assetlinks.json` to your server:
+- Location: `https://your-domain.com/.well-known/assetlinks.json`
+- Content-Type: `application/json`
+
+---
+
+### Path B: Bubblewrap-based Init (Custom Setups)
+
+This path uses the Bubblewrap CLI to scaffold a new TWA project from scratch. Use this if you need to customize the generated Android project structure.
+
+#### B1. Install Bubblewrap CLI
+
+```bash
+npm install -g @bubblewrap/cli
+```
+
+#### B2. Configure Your Instance
+
+Set environment variables or create `.env` file with your OpenChamber URL.
+
+**Example**:
+```bash
+export TWA_MANIFEST_URL=https://my-server.com/site.webmanifest
+export TWA_HOST=my-server.com
+```
+
+#### B3. Initialize TWA Project
 
 ```bash
 bun run android:init
@@ -84,7 +148,7 @@ This will:
 - Create TWA configuration
 - Generate Android project files
 
-### 4. Generate Signing Key
+#### B4. Generate Signing Key
 
 If you don't have a keystore, the init script will offer to create one.
 
@@ -94,7 +158,7 @@ export TWA_KEYSTORE_PATH=/path/to/your.keystore
 export TWA_KEY_ALIAS=your-key-alias
 ```
 
-### 5. Build APK
+#### B5. Build APK
 
 ```bash
 bun run android:build
@@ -102,7 +166,7 @@ bun run android:build
 
 Output: `packages/android-twa/output/app-release-signed.apk`
 
-### 6. Deploy assetlinks.json
+#### B6. Deploy assetlinks.json
 
 ```bash
 bun run android:assetlinks
@@ -112,7 +176,11 @@ Upload the generated `assetlinks.json` to your server:
 - Location: `https://your-domain.com/.well-known/assetlinks.json`
 - Content-Type: `application/json`
 
-### 7. Test on Device
+---
+
+### Common Steps (Both Paths)
+
+#### Test on Device
 
 ```bash
 adb install packages/android-twa/output/app-release-signed.apk
@@ -122,7 +190,7 @@ Verify:
 - App opens full-screen (no URL bar)
 - All features work correctly
 
-### 8. Build for Play Store (Optional)
+#### Build for Play Store (Optional)
 
 ```bash
 bun run android:build:aab
@@ -236,9 +304,9 @@ packages/android-twa/
 
 | Script | Command | Description |
 |--------|---------|-------------|
-| `android:init` | `bun run android:init` | Initialize TWA project |
-| `android:build` | `bun run android:build` | Build signed APK |
-| `android:build:aab` | `bun run android:build:aab` | Build AAB for Play Store |
+| `android:init` | `bun run android:init` | Initialize TWA project (Bubblewrap-based scaffolding) |
+| `android:build` | `bun run android:build` | Build signed APK (uses configurable-wrapper) |
+| `android:build:aab` | `bun run android:build:aab` | Build AAB for Play Store (uses configurable-wrapper) |
 | `android:assetlinks` | `bun run android:assetlinks` | Generate assetlinks.json |
 | `android:fingerprint` | `bun run android:fingerprint` | Extract SHA-256 fingerprint |
 
