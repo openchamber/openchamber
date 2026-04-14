@@ -20,6 +20,7 @@ import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useUIStore } from '@/stores/useUIStore';
 import ReasoningPart from './ReasoningPart';
 import JustificationBlock from './JustificationBlock';
+import { areRenderRelevantPartsEqual } from '../renderCompare';
 
 interface ProgressiveGroupProps {
     parts: TurnActivityPart[];
@@ -380,6 +381,115 @@ type AggregatedRow =
     | { type: 'justification'; activity: TurnActivityPart }
     | { type: 'tool-fallback'; activity: TurnActivityPart };
 
+interface ExpandableToolRowProps {
+    activity: TurnActivityPart;
+    isExpanded: boolean;
+    syntaxTheme: Record<string, React.CSSProperties>;
+    isMobile: boolean;
+    onToggleTool: (toolId: string) => void;
+    onShowPopup: (content: ToolPopupContent) => void;
+    onContentChange?: (reason?: ContentChangeReason) => void;
+    animateTailText: boolean;
+    animateRows: boolean;
+}
+
+const ExpandableToolRow: React.FC<ExpandableToolRowProps> = ({
+    activity,
+    isExpanded,
+    syntaxTheme,
+    isMobile,
+    onToggleTool,
+    onShowPopup,
+    onContentChange,
+    animateTailText,
+    animateRows,
+}) => {
+    const handleToggle = React.useCallback(() => {
+        onToggleTool(activity.id);
+    }, [activity.id, onToggleTool]);
+
+    const content = (
+        <ToolPart
+            part={activity.part as ToolPartType}
+            isExpanded={isExpanded}
+            onToggle={handleToggle}
+            syntaxTheme={syntaxTheme}
+            isMobile={isMobile}
+            onContentChange={onContentChange}
+            onShowPopup={onShowPopup}
+            animateTailText={animateTailText}
+        />
+    );
+
+    const maybeWrapped = animateTailText ? (
+        <ToolRevealOnMount animate={true} wipe>
+            {content}
+        </ToolRevealOnMount>
+    ) : content;
+
+    if (!animateRows) {
+        return maybeWrapped;
+    }
+
+    return <FadeInOnReveal>{maybeWrapped}</FadeInOnReveal>;
+};
+
+const MemoExpandableToolRow = React.memo(ExpandableToolRow, (prev, next) => {
+    return prev.isExpanded === next.isExpanded
+        && prev.syntaxTheme === next.syntaxTheme
+        && prev.isMobile === next.isMobile
+        && prev.onToggleTool === next.onToggleTool
+        && prev.onShowPopup === next.onShowPopup
+        && prev.onContentChange === next.onContentChange
+        && prev.animateTailText === next.animateTailText
+        && prev.animateRows === next.animateRows
+        && prev.activity.id === next.activity.id
+        && prev.activity.kind === next.activity.kind
+        && prev.activity.endedAt === next.activity.endedAt
+        && areRenderRelevantPartsEqual([prev.activity.part], [next.activity.part]);
+});
+
+interface StaticGroupedToolRowProps {
+    toolName: string;
+    activities: TurnActivityPart[];
+    animateTailText: boolean;
+    animateRows: boolean;
+}
+
+const StaticGroupedToolRow: React.FC<StaticGroupedToolRowProps> = ({
+    toolName,
+    activities,
+    animateTailText,
+    animateRows,
+}) => {
+    const content = (
+        <StaticToolRow
+            toolName={toolName}
+            activities={activities}
+            animateTailText={animateTailText}
+        />
+    );
+
+    const maybeWrapped = animateTailText ? (
+        <ToolRevealOnMount animate={true} wipe>
+            {content}
+        </ToolRevealOnMount>
+    ) : content;
+
+    if (!animateRows) {
+        return maybeWrapped;
+    }
+
+    return <FadeInOnReveal>{maybeWrapped}</FadeInOnReveal>;
+};
+
+const MemoStaticGroupedToolRow = React.memo(StaticGroupedToolRow, (prev, next) => {
+    return prev.toolName === next.toolName
+        && prev.animateTailText === next.animateTailText
+        && prev.animateRows === next.animateRows
+        && areActivityListsEqual(prev.activities, next.activities);
+});
+
 /**
  * Aggregate sorted activity parts into display rows.
  * Static tools are rendered as one row per call.
@@ -440,7 +550,36 @@ const aggregateRows = (parts: TurnActivityPart[]): AggregatedRow[] => {
  * Render a static aggregated tool row.
  * Shows: [icon] DisplayName file1.tsx file2.tsx ...
  */
-export const StaticToolRow: React.FC<{
+const areActivityListsEqual = (left: TurnActivityPart[], right: TurnActivityPart[]): boolean => {
+    if (left === right) {
+        return true;
+    }
+
+    if (left.length !== right.length) {
+        return false;
+    }
+
+    for (let index = 0; index < left.length; index += 1) {
+        const leftActivity = left[index];
+        const rightActivity = right[index];
+
+        if (leftActivity.id !== rightActivity.id) {
+            return false;
+        }
+
+        if (leftActivity.kind !== rightActivity.kind || leftActivity.endedAt !== rightActivity.endedAt) {
+            return false;
+        }
+
+        if (!areRenderRelevantPartsEqual([leftActivity.part], [rightActivity.part])) {
+            return false;
+        }
+    }
+
+    return true;
+};
+
+const StaticToolRowInner: React.FC<{
     toolName: string;
     activities: TurnActivityPart[];
     animateTailText: boolean;
@@ -590,6 +729,12 @@ export const StaticToolRow: React.FC<{
     );
 };
 
+export const StaticToolRow = React.memo(StaticToolRowInner, (prev, next) => {
+    return prev.toolName === next.toolName
+        && prev.animateTailText === next.animateTailText
+        && areActivityListsEqual(prev.activities, next.activities);
+});
+
 /**
  * Inline reasoning text block — rendered as dimmed italic markdown.
  */
@@ -683,18 +828,6 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
         return <FadeInOnReveal key={key}>{content}</FadeInOnReveal>;
     };
 
-    const renderToolRow = (key: string, content: React.ReactNode, animate: boolean) => {
-        if (!animate) {
-            return wrapRow(key, content);
-        }
-        return wrapRow(
-            key,
-            <ToolRevealOnMount animate={true} wipe>
-                {content}
-            </ToolRevealOnMount>
-        );
-    };
-
     const renderedRows = shouldRenderRows
         ? visibleRows.map((row, index) => {
         switch (row.type) {
@@ -721,52 +854,46 @@ const ProgressiveGroup: React.FC<ProgressiveGroupProps> = ({
                 );
 
             case 'tool-expandable':
-                return renderToolRow(
-                    row.activity.id,
-                    <>
-                        <ToolPart
-                            part={row.activity.part as ToolPartType}
-                            isExpanded={expandedTools.has(row.activity.id)}
-                            onToggle={() => onToggleTool(row.activity.id)}
-                            syntaxTheme={syntaxTheme}
-                            isMobile={isMobile}
-                            onContentChange={onContentChange}
-                            onShowPopup={onShowPopup}
-                            animateTailText={Boolean(animatedToolIds?.has(row.activity.id))}
-                        />
-                    </>,
-                    Boolean(animatedToolIds?.has(row.activity.id))
+                return (
+                    <MemoExpandableToolRow
+                        key={row.activity.id}
+                        activity={row.activity}
+                        isExpanded={expandedTools.has(row.activity.id)}
+                        syntaxTheme={syntaxTheme}
+                        isMobile={isMobile}
+                        onToggleTool={onToggleTool}
+                        onShowPopup={onShowPopup}
+                        onContentChange={onContentChange}
+                        animateTailText={Boolean(animatedToolIds?.has(row.activity.id))}
+                        animateRows={animateRows}
+                    />
                 );
 
             case 'tool-static-group':
-                return renderToolRow(
-                    `static-${row.toolName}-${row.activities[0]?.id ?? index}`,
-                    <>
-                        <StaticToolRow
-                            toolName={row.toolName}
-                            activities={row.activities}
-                            animateTailText={row.activities.some((activity) => animatedToolIds?.has(activity.id))}
-                        />
-                    </>,
-                    row.activities.some((activity) => animatedToolIds?.has(activity.id))
+                return (
+                    <MemoStaticGroupedToolRow
+                        key={`static-${row.toolName}-${row.activities[0]?.id ?? index}`}
+                        toolName={row.toolName}
+                        activities={row.activities}
+                        animateTailText={row.activities.some((activity) => animatedToolIds?.has(activity.id))}
+                        animateRows={animateRows}
+                    />
                 );
 
             case 'tool-fallback':
-                return renderToolRow(
-                    row.activity.id,
-                    <>
-                        <ToolPart
-                            part={row.activity.part as ToolPartType}
-                            isExpanded={expandedTools.has(row.activity.id)}
-                            onToggle={() => onToggleTool(row.activity.id)}
-                            syntaxTheme={syntaxTheme}
-                            isMobile={isMobile}
-                            onContentChange={onContentChange}
-                            onShowPopup={onShowPopup}
-                            animateTailText={Boolean(animatedToolIds?.has(row.activity.id))}
-                        />
-                    </>,
-                    Boolean(animatedToolIds?.has(row.activity.id))
+                return (
+                    <MemoExpandableToolRow
+                        key={row.activity.id}
+                        activity={row.activity}
+                        isExpanded={expandedTools.has(row.activity.id)}
+                        syntaxTheme={syntaxTheme}
+                        isMobile={isMobile}
+                        onToggleTool={onToggleTool}
+                        onShowPopup={onShowPopup}
+                        onContentChange={onContentChange}
+                        animateTailText={Boolean(animatedToolIds?.has(row.activity.id))}
+                        animateRows={animateRows}
+                    />
                 );
 
             default:

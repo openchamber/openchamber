@@ -15,7 +15,6 @@ import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { useChatScrollManager, type AnimationHandlers, type ContentChangeReason } from '@/hooks/useChatScrollManager';
 import { useChatTimelineController } from './hooks/useChatTimelineController';
 import { useChatTurnNavigation } from './hooks/useChatTurnNavigation';
-import { useTimelineStaging } from '@/hooks/useTimelineStaging';
 import { useDeviceInfo } from '@/lib/device';
 import { Button } from '@/components/ui/button';
 import { OverlayScrollbar } from '@/components/ui/OverlayScrollbar';
@@ -39,6 +38,7 @@ import {
     useSessionStatus,
 } from '@/sync/sync-context';
 import { useSync } from '@/sync/use-sync';
+import { usePlanDetection } from '@/hooks/usePlanDetection';
 import { getAllSyncSessions } from '@/sync/sync-refs';
 
 const EMPTY_MESSAGES: Array<{ info: Message; parts: Part[] }> = [];
@@ -49,42 +49,6 @@ const SESSION_RESELECTED_EVENT = 'openchamber:session-reselected';
 const DEFAULT_RETRY_MESSAGE = 'Quota limit reached. Retrying automatically.';
 const CHAT_SCROLL_STYLE = { overflowAnchor: 'none' } as const;
 type SessionMessageRecord = { info: Message; parts: Part[] };
-
-const getSessionMessageId = (message: SessionMessageRecord | undefined): string | null => {
-    const id = message?.info?.id;
-    return typeof id === 'string' && id.trim().length > 0 ? id : null;
-};
-
-const canFreezeDetachedViewport = (
-    previous: SessionMessageRecord[],
-    next: SessionMessageRecord[],
-    streamingMessageId: string | null,
-): boolean => {
-    if (!streamingMessageId || previous.length === 0 || next.length === 0) {
-        return false;
-    }
-
-    if (next.length < previous.length) {
-        return false;
-    }
-
-    if (next.length === previous.length) {
-        for (let index = 0; index < next.length - 1; index += 1) {
-            if (previous[index] !== next[index]) {
-                return false;
-            }
-        }
-        return getSessionMessageId(previous[previous.length - 1]) === getSessionMessageId(next[next.length - 1]);
-    }
-
-    for (let index = 0; index < previous.length; index += 1) {
-        if (previous[index] !== next[index]) {
-            return false;
-        }
-    }
-
-    return true;
-};
 
 type HydratingToolSkeletonRow = {
     id: string;
@@ -310,15 +274,15 @@ export const ChatContainer: React.FC = () => {
         ),
     );
     const sessionMessageCount = useSessionMessageCount(currentSessionId ?? '');
-    const [suspendDetachedTailUpdates, setSuspendDetachedTailUpdates] = React.useState(false);
     // Messages from sync system
-    const sessionMessageRecords = useSessionMessageRecords(currentSessionId ?? '', undefined, {
-        suspendPartUpdates: suspendDetachedTailUpdates,
-    });
+    const sessionMessageRecords = useSessionMessageRecords(currentSessionId ?? '');
     const sessionMessages = currentSessionId ? sessionMessageRecords : EMPTY_MESSAGES;
 
     // Sessions from sync system
     const sessions = useSessions();
+
+    // Plan detection - watches messages for plan creation and signals store
+    usePlanDetection(currentSessionId ?? '');
 
     // Session status from sync system
     const sessionStatusForCurrent = useSessionStatus(currentSessionId ?? '') ?? IDLE_SESSION_STATUS;
@@ -362,8 +326,12 @@ export const ChatContainer: React.FC = () => {
         return flattenBlockingRequests(questionsMap, scopedSessionIds);
     }, [questionsMap, scopedSessionIds]);
     const sessionIsWorking = React.useMemo(() => {
-        if (!currentSessionId || sessionPermissions.length > 0) {
+        if (!currentSessionId || sessionPermissions.length > 0 || sessionQuestions.length > 0) {
             return false;
+        }
+
+        if (streamingMessageId || activeStreamingPhase) {
+            return true;
         }
 
         const statusType = sessionStatusForCurrent.type ?? 'idle';
@@ -377,7 +345,7 @@ export const ChatContainer: React.FC = () => {
             && lastMessage.role === 'assistant'
             && typeof (lastMessage as { time?: { completed?: number } }).time?.completed !== 'number',
         );
-    }, [currentSessionId, sessionMessages, sessionPermissions.length, sessionStatusForCurrent.type]);
+    }, [activeStreamingPhase, currentSessionId, sessionMessages, sessionPermissions.length, sessionQuestions.length, sessionStatusForCurrent.type, streamingMessageId]);
     const activeRetryStatus = React.useMemo(() => {
         if (!currentSessionId || sessionStatusForCurrent.type !== 'retry') {
             return null;
@@ -487,6 +455,7 @@ export const ChatContainer: React.FC = () => {
         scrollRef,
         handleMessageContentChange,
         getAnimationHandlers,
+        prepareForBottomResume,
         scrollToBottom,
         isPinned,
         isOverflowing,
@@ -504,55 +473,33 @@ export const ChatContainer: React.FC = () => {
         onActiveTurnChange: handleActiveTurnChange,
     });
 
-    React.useEffect(() => {
-        const next = Boolean(currentSessionId && streamingMessageId && !isPinned);
-        setSuspendDetachedTailUpdates((previous) => (previous === next ? previous : next));
-    }, [currentSessionId, isPinned, streamingMessageId]);
-
-    const viewportMessagesRef = React.useRef<SessionMessageRecord[]>(EMPTY_MESSAGES);
-    const viewportSessionIdRef = React.useRef<string | null>(null);
-    const viewportMessages = React.useMemo(() => {
-        if (viewportSessionIdRef.current !== currentSessionId) {
-            viewportSessionIdRef.current = currentSessionId;
-            viewportMessagesRef.current = sessionMessages;
-            return sessionMessages;
-        }
-
-        const shouldFreezeViewport = Boolean(
-            currentSessionId
-            && streamingMessageId
-            && !isPinned
-            && historyMeta?.loading !== true
-            && canFreezeDetachedViewport(viewportMessagesRef.current, sessionMessages, streamingMessageId),
-        );
-
-        if (shouldFreezeViewport) {
-            return viewportMessagesRef.current;
-        }
-
-        viewportMessagesRef.current = sessionMessages;
-        return sessionMessages;
-    }, [currentSessionId, historyMeta?.loading, isPinned, sessionMessages, streamingMessageId]);
-
-    // Deferred timeline staging — renders 1 message on first paint,
-    // adds 3 per rAF frame to avoid blocking.
-    const { stagedMessages } = useTimelineStaging({
-        sessionKey: currentSessionId ?? '',
-        messages: viewportMessages,
-    });
+    const viewportMessages = sessionMessages;
 
     const timelineController = useChatTimelineController({
         sessionId: currentSessionId,
-        messages: stagedMessages,
+        messages: viewportMessages,
         historyMeta,
         scrollRef,
         messageListRef,
         loadMoreMessages,
+        prepareForBottomResume,
         scrollToBottom,
         isPinned,
         isOverflowing,
     });
     const { loadEarlier, resumeToBottomInstant } = timelineController;
+
+    const runLatestInstantResume = React.useCallback(async () => {
+        if (!currentSessionId) {
+            scrollToBottom({ instant: true, force: true });
+            return;
+        }
+        await resumeToBottomInstant();
+    }, [currentSessionId, resumeToBottomInstant, scrollToBottom]);
+
+    const resumeToLatestInstant = React.useCallback(() => {
+        void runLatestInstantResume();
+    }, [runLatestInstantResume]);
 
     React.useEffect(() => {
         activeTurnChangeRef.current = timelineController.handleActiveTurnChange;
@@ -575,7 +522,7 @@ export const ChatContainer: React.FC = () => {
         activeTurnId: timelineController.activeTurnId,
         scrollToTurn: timelineController.scrollToTurn,
         scrollToMessage: timelineController.scrollToMessage,
-        resumeToBottom: timelineController.resumeToBottom,
+        resumeToBottom: timelineController.resumeToBottomInstant,
     });
 
     React.useEffect(() => {
@@ -584,14 +531,15 @@ export const ChatContainer: React.FC = () => {
         const handleSessionReselected = (event: Event) => {
             const customEvent = event as CustomEvent<string>;
             if (customEvent.detail !== currentSessionId) return;
-            resumeToBottomInstant();
+            if (isPinned || !isOverflowing || isProgrammaticFollowActive) return;
+            void resumeToBottomInstant();
         };
 
         window.addEventListener(SESSION_RESELECTED_EVENT, handleSessionReselected as EventListener);
         return () => {
             window.removeEventListener(SESSION_RESELECTED_EVENT, handleSessionReselected as EventListener);
         };
-    }, [currentSessionId, resumeToBottomInstant]);
+    }, [currentSessionId, isOverflowing, isPinned, isProgrammaticFollowActive, resumeToBottomInstant]);
 
     React.useLayoutEffect(() => {
         const container = scrollRef.current;
@@ -630,10 +578,38 @@ export const ChatContainer: React.FC = () => {
     }, [currentSessionId, isDesktopExpandedInput, scrollRef]);
 
     const hasHistoryMetadata = Boolean(historyMeta);
+    const lastScrolledSessionRef = React.useRef<string | null>(null);
 
     const isSessionHydrating =
         Boolean(currentSessionId)
         && (!hasSessionMessagesEntry || !hasHistoryMetadata || historyMeta?.loading === true);
+
+    React.useEffect(() => {
+        if (!currentSessionId) {
+            return;
+        }
+
+        if (lastScrolledSessionRef.current === currentSessionId) {
+            return;
+        }
+
+        const hasHashTarget = typeof window !== 'undefined' && window.location.hash.length > 0;
+        if (hasHashTarget) {
+            lastScrolledSessionRef.current = currentSessionId;
+            return;
+        }
+
+        lastScrolledSessionRef.current = currentSessionId;
+
+        if (typeof window === 'undefined') {
+            resumeToLatestInstant();
+            return;
+        }
+
+        window.requestAnimationFrame(() => {
+            resumeToLatestInstant();
+        });
+    }, [currentSessionId, resumeToLatestInstant]);
 
     React.useEffect(() => {
         if (!currentSessionId) return;
@@ -644,14 +620,14 @@ export const ChatContainer: React.FC = () => {
                 const statusType = sessionStatusForCurrent.type ?? 'idle';
                 const isActivePhase = statusType === 'busy' || statusType === 'retry';
                 const hasHashTarget = typeof window !== 'undefined' && window.location.hash.length > 0;
-                const shouldSkipScroll = (isActivePhase && isPinned) || hasHashTarget;
+                const shouldSkipScroll = hasHashTarget || (isActivePhase && isPinned);
 
                 if (!shouldSkipScroll) {
                     if (typeof window === 'undefined') {
-                        scrollToBottom({ instant: true });
+                        resumeToLatestInstant();
                     } else {
                         window.requestAnimationFrame(() => {
-                            scrollToBottom({ instant: true });
+                            resumeToLatestInstant();
                         });
                     }
                 }
@@ -659,7 +635,7 @@ export const ChatContainer: React.FC = () => {
         };
 
         void load();
-    }, [currentSessionId, hasHistoryMetadata, hasSessionMessagesEntry, isPinned, loadMessages, scrollToBottom, sessionMessages.length, sessionStatusForCurrent.type]);
+    }, [currentSessionId, hasHistoryMetadata, hasSessionMessagesEntry, isPinned, loadMessages, resumeToLatestInstant, sessionMessages.length, sessionStatusForCurrent.type]);
 
     if (!currentSessionId && !draftOpen) {
         return (
@@ -688,10 +664,10 @@ export const ChatContainer: React.FC = () => {
                         'relative z-10',
                         isDesktopExpandedInput
                             ? 'flex-1 min-h-0 bg-background'
-                            : 'bg-background/95 supports-[backdrop-filter]:bg-background/80'
+                            : 'bg-background'
                     )}
                 >
-                    <ChatInput scrollToBottom={scrollToBottom} />
+                        <ChatInput scrollToBottom={resumeToLatestInstant} />
                 </div>
             </div>
         );
@@ -751,10 +727,10 @@ export const ChatContainer: React.FC = () => {
                         'relative z-10',
                         isDesktopExpandedInput
                             ? 'flex-1 min-h-0 bg-background'
-                            : 'bg-background/95 supports-[backdrop-filter]:bg-background/80'
+                            : 'bg-background'
                     )}
                 >
-                    <ChatInput scrollToBottom={scrollToBottom} />
+                    <ChatInput scrollToBottom={resumeToLatestInstant} />
                 </div>
             </div>
         );
@@ -787,10 +763,10 @@ export const ChatContainer: React.FC = () => {
                         'relative z-10',
                         isDesktopExpandedInput
                             ? 'flex-1 min-h-0 bg-background'
-                            : 'bg-background/95 supports-[backdrop-filter]:bg-background/80'
+                            : 'bg-background'
                     )}
                 >
-                    <ChatInput scrollToBottom={scrollToBottom} />
+                    <ChatInput scrollToBottom={resumeToLatestInstant} />
                 </div>
             </div>
         );
@@ -832,7 +808,7 @@ export const ChatContainer: React.FC = () => {
                     'relative z-10',
                     isDesktopExpandedInput
                         ? 'flex-1 min-h-0 bg-background'
-                        : 'bg-background/95 supports-[backdrop-filter]:bg-background/80'
+                        : 'bg-background'
                 )}
             >
                 {!isDesktopExpandedInput && sessionMessages.length > 0 && (
@@ -841,7 +817,7 @@ export const ChatContainer: React.FC = () => {
                         onClick={navigation.resumeToLatest}
                     />
                 )}
-                <ChatInput scrollToBottom={scrollToBottom} />
+                <ChatInput scrollToBottom={resumeToLatestInstant} />
             </div>
         </div>
     );

@@ -1,3 +1,13 @@
+## [1.9.4] - 2026-04-07
+
+- Reliability/Streaming: added loading timeouts, automatic SSE reconnect, and message retry behavior so temporary connection stalls recover more reliably (thanks to @jwcrystal).
+- Reliability/Windows: normalized workspace path handling in SSE event lookup to keep live session updates working more consistently on Windows (thanks to @widipa).
+- Sessions/Streaming: fixed directory-aware event routing and post-reconnect session resync so subagent/session status is less likely to get stuck after reconnects (thanks to @daveotero, @jwcrystal).
+- Chat/Performance: reduced streaming re-render fanout and status-row churn for smoother long responses in the editor panel.
+- Chat/Scrolling: fixed scroll jumps and stabilized follow-to-latest behavior so live output stays easier to track while generating.
+- Chat/Tool Output: LSP diagnostics now render directly in tool output, making code issue review faster during iterative runs (thanks to @yulia-ivashko).
+- Models: added defensive fallbacks for missing model cost/capability metadata so model controls stay stable with incomplete provider responses (thanks to @Chi-square-test).
+
 ## [1.9.3] - 2026-03-01
 
 - Security/Chat: user messages now escape raw HTML by default, so pasted markup is shown as text instead of being interpreted in chat (thanks to @kalac2232).

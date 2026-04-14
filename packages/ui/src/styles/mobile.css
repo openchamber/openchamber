@@ -438,7 +438,7 @@
 }
 
 @media (display-mode: standalone) {
-  /* Home indicator blur overlay */
+  /* Home indicator overlay */
   :root.device-mobile:not(.desktop-runtime) body::after {
     content: '';
     position: fixed;
@@ -454,8 +454,6 @@
       rgba(from var(--background) r g b / 0.3) 85%,
       transparent 100%
     );
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
     z-index: 1000;
     pointer-events: none;
   }

@@ -33,6 +33,8 @@ export const createBootstrapRuntime = (dependencies) => {
       removePushSubscription,
       updateUiVisibility,
       isUiVisible,
+      getUiNotificationClients,
+      writeSseEvent,
       sessionRuntime,
       setPushInitialized,
       fs,
@@ -58,7 +60,10 @@ export const createBootstrapRuntime = (dependencies) => {
 
     registerCommonRequestMiddleware(app, { express });
 
-    const uiAuthController = createUiAuth({ password: uiPassword });
+    const uiAuthController = createUiAuth({
+      password: uiPassword,
+      readSettingsFromDiskMigrated,
+    });
     if (uiAuthController.enabled) {
       console.log('UI password protection enabled for browser sessions');
     }
@@ -84,6 +89,8 @@ export const createBootstrapRuntime = (dependencies) => {
       removePushSubscription,
       updateUiVisibility,
       isUiVisible,
+      getUiNotificationClients,
+      writeSseEvent,
       getSessionActivitySnapshot: sessionRuntime.getSessionActivitySnapshot,
       getSessionStateSnapshot: sessionRuntime.getSessionStateSnapshot,
       getSessionAttentionSnapshot: sessionRuntime.getSessionAttentionSnapshot,

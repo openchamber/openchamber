@@ -52,8 +52,6 @@ function TooltipContent({
           className
         )}
         style={{
-          backdropFilter: 'blur(28px)',
-          WebkitBackdropFilter: 'blur(28px)',
           ...style,
         }}
         {...props}

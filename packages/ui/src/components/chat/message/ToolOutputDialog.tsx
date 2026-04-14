@@ -420,7 +420,7 @@ const ImagePreviewDialog: React.FC<{
             <div
                 aria-hidden="true"
                 className={cn(
-                    'absolute inset-0 bg-black/25 backdrop-blur-md',
+                    'absolute inset-0 bg-black/40',
                     isTransitioning && 'transition-opacity duration-150 ease-out',
                     isVisible ? 'opacity-100' : 'opacity-0'
                 )}
@@ -433,7 +433,7 @@ const ImagePreviewDialog: React.FC<{
                         type="button"
                         onMouseDown={(event) => event.stopPropagation()}
                         onClick={showPrevious}
-                        className="absolute left-3 top-1/2 -translate-y-1/2 z-10 h-10 w-10 flex items-center justify-center rounded-full bg-black/25 text-foreground/90 backdrop-blur-sm hover:bg-black/35 focus:outline-none focus:ring-2 focus:ring-primary/60"
+                        className="absolute left-3 top-1/2 -translate-y-1/2 z-10 h-10 w-10 flex items-center justify-center rounded-full bg-black/40 text-foreground/90 hover:bg-black/55 focus:outline-none focus:ring-2 focus:ring-primary/60"
                         aria-label="Previous image"
                     >
                         <RiArrowLeftSLine className="h-6 w-6" />
@@ -442,7 +442,7 @@ const ImagePreviewDialog: React.FC<{
                         type="button"
                         onMouseDown={(event) => event.stopPropagation()}
                         onClick={showNext}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 z-10 h-10 w-10 flex items-center justify-center rounded-full bg-black/25 text-foreground/90 backdrop-blur-sm hover:bg-black/35 focus:outline-none focus:ring-2 focus:ring-primary/60"
+                        className="absolute right-3 top-1/2 -translate-y-1/2 z-10 h-10 w-10 flex items-center justify-center rounded-full bg-black/40 text-foreground/90 hover:bg-black/55 focus:outline-none focus:ring-2 focus:ring-primary/60"
                         aria-label="Next image"
                     >
                         <RiArrowRightSLine className="h-6 w-6" />
@@ -891,7 +891,7 @@ const MermaidPreviewDialog: React.FC<{
             <div
                 aria-hidden="true"
                 className={cn(
-                    'absolute inset-0 bg-black/25 backdrop-blur-md',
+                    'absolute inset-0 bg-black/40',
                     isTransitioning && 'transition-opacity duration-150 ease-out',
                     isVisible ? 'opacity-100' : 'opacity-0'
                 )}

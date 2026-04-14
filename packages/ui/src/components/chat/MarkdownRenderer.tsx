@@ -648,6 +648,35 @@ const getCodeLanguage = (className: string | undefined): string => {
   return match?.[1]?.toLowerCase() ?? 'text';
 };
 
+const decodeHtmlEntities = (value: string): string => {
+  let decoded = value;
+  for (let i = 0; i < 3; i += 1) {
+    const next = decoded
+      .replace(/&quot;/g, '"')
+      .replace(/&#34;/g, '"')
+      .replace(/&apos;/g, "'")
+      .replace(/&#39;/g, "'")
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&amp;/g, '&');
+    if (next === decoded) {
+      return decoded;
+    }
+    decoded = next;
+  }
+  return decoded;
+};
+
+const normalizeCodeBlockText = (code: string, language: string): string => {
+  if (!['json', 'jsonc', 'json5'].includes(language)) {
+    return code;
+  }
+  if (!/&(quot|#34|amp;quot|lt|gt|amp|apos|#39);/.test(code)) {
+    return code;
+  }
+  return decodeHtmlEntities(code);
+};
+
 const MarkdownCodeBlock: React.FC<{
   code: string;
   language: string;
@@ -737,10 +766,10 @@ const buildMarkdownComponents = ({
     return <td {...props} className={cn('border-r border-border/60 px-4 py-2.5 align-middle text-foreground/90 last:border-r-0', props.className)}>{children}</td>;
   },
   ul({ children, ...props }) {
-    return <ul {...props} className={cn('typography-markdown-body my-2 pl-6', props.className)}>{children}</ul>;
+    return <ul {...props} className={cn('typography-markdown-body my-2', props.className)}>{children}</ul>;
   },
   ol({ children, ...props }) {
-    return <ol {...props} className={cn('typography-markdown-body my-2 pl-6', props.className)}>{children}</ol>;
+    return <ol {...props} className={cn('typography-markdown-body my-2', props.className)}>{children}</ol>;
   },
   li({ children, ...props }) {
     return <li {...props} className={cn('typography-markdown-body my-0.5 text-foreground/90', props.className)}>{children}</li>;
@@ -751,8 +780,8 @@ const buildMarkdownComponents = ({
   pre({ children, ...props }) {
     const child = React.Children.only(children) as React.ReactElement<{ className?: string; children?: React.ReactNode }>;
     const className = child.props.className;
-    const code = extractCodeText(child.props.children).replace(/\n$/, '');
     const language = getCodeLanguage(className);
+    const code = normalizeCodeBlockText(extractCodeText(child.props.children).replace(/\n$/, ''), language);
     if (language === 'mermaid') {
       return <MermaidBlock source={code} mode={useUIStore.getState().mermaidRenderingMode} />;
     }

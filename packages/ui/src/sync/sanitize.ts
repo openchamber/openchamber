@@ -1,8 +1,9 @@
 // ---------------------------------------------------------------------------
 // Payload sanitization — strip oversized diff snapshot fields client-side.
 //
-// OpenCode session objects carry summary.diffs[].before/after with full file
-// contents. The UI never uses these fields but they waste browser memory and
+// OpenCode session/message snapshots may carry large full-content diff fields
+// (legacy before/after or from/to). The UI never uses these fields but they
+// waste browser memory and
 // can crash tabs for large sessions.
 //
 // Applied at two points:
@@ -19,6 +20,8 @@ type DiffEntry = {
   deletions?: number
   before?: string
   after?: string
+  from?: string
+  to?: string
 }
 
 type SessionSummary = {
@@ -26,16 +29,24 @@ type SessionSummary = {
   [key: string]: unknown
 }
 
-/** Strip before/after from summary.diffs on a session object */
+/** Strip oversized snapshot fields from summary.diffs on a session object */
 export function stripSessionDiffSnapshots(session: Session): Session {
   const summary = (session as { summary?: SessionSummary }).summary
   if (!summary?.diffs || !Array.isArray(summary.diffs)) return session
 
   let changed = false
   const stripped = summary.diffs.map((d) => {
-    if (d && (typeof d.before === "string" || typeof d.after === "string")) {
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { before: _before, after: _after, ...rest } = d
+    if (d && (
+      typeof d.before === "string"
+      || typeof d.after === "string"
+      || typeof d.from === "string"
+      || typeof d.to === "string"
+    )) {
+      const rest = { ...d }
+      delete rest.before
+      delete rest.after
+      delete rest.from
+      delete rest.to
       changed = true
       return rest
     }
@@ -46,16 +57,24 @@ export function stripSessionDiffSnapshots(session: Session): Session {
   return { ...session, summary: { ...summary, diffs: stripped } } as Session
 }
 
-/** Strip before/after from summary.diffs on a message object */
+/** Strip oversized snapshot fields from summary.diffs on a message object */
 export function stripMessageDiffSnapshots(message: Message): Message {
   const summary = (message as { summary?: SessionSummary }).summary
   if (!summary?.diffs || !Array.isArray(summary.diffs)) return message
 
   let changed = false
   const stripped = summary.diffs.map((d) => {
-    if (d && (typeof d.before === "string" || typeof d.after === "string")) {
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { before: _before, after: _after, ...rest } = d
+    if (d && (
+      typeof d.before === "string"
+      || typeof d.after === "string"
+      || typeof d.from === "string"
+      || typeof d.to === "string"
+    )) {
+      const rest = { ...d }
+      delete rest.before
+      delete rest.after
+      delete rest.from
+      delete rest.to
       changed = true
       return rest
     }

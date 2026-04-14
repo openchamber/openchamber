@@ -19,7 +19,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
-import { isDesktopShell, isVSCodeRuntime, isWebRuntime, desktopSetVibrancy } from '@/lib/desktop';
+import { isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
 import { useDeviceInfo } from '@/lib/device';
 import { usePwaDetection } from '@/hooks/usePwaDetection';
 import { updateDesktopSettings } from '@/lib/persistence';
@@ -209,7 +209,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     } = useThemeSystem();
 
     const [themesReloading, setThemesReloading] = React.useState(false);
-    const [vibrancyEnabled, setVibrancyEnabled] = React.useState(true);
     const [chatRenderPreviewTick, setChatRenderPreviewTick] = React.useState(0);
     const reportUsage = useUIStore(state => state.reportUsage);
     const setReportUsage = useUIStore(state => state.setReportUsage);
@@ -220,28 +219,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         void updateDesktopSettings({ reportUsage: enabled });
     }, [setReportUsage]);
 
-    const isMacDesktop = React.useMemo(() => {
-        if (!isDesktopShell()) return false;
-        if (typeof navigator === 'undefined') return false;
-        return /Macintosh|Mac OS X/.test(navigator.userAgent || '');
-    }, []);
-
-    React.useEffect(() => {
-        if (!isMacDesktop) return;
-        const stored = localStorage.getItem('desktopVibrancy');
-        if (stored !== null) {
-            setVibrancyEnabled(stored !== 'false');
-        }
-    }, [isMacDesktop]);
-
-    const handleVibrancyChange = React.useCallback((enabled: boolean) => {
-        setVibrancyEnabled(enabled);
-        localStorage.setItem('desktopVibrancy', String(enabled));
-        document.documentElement.classList.toggle('no-vibrancy', !enabled);
-        void desktopSetVibrancy(enabled);
-        void updateDesktopSettings({ desktopVibrancy: enabled });
-    }, []);
-
     const shouldAnimateChatPreview = isSettingsDialogOpen
         && (visibleSettings ? visibleSettings.includes('chatRenderMode') : true);
 
@@ -250,12 +227,41 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
             return;
         }
 
-        const intervalId = setInterval(() => {
-            setChatRenderPreviewTick((prev) => (prev + 1) % 24);
-        }, 420);
+        // Use requestAnimationFrame for smoother animation without setInterval overhead
+        let rafId: number | null = null;
+        let lastTime = Date.now();
+        
+        const tick = () => {
+            const now = Date.now();
+            // Update every ~420ms
+            if (now - lastTime >= 420) {
+                setChatRenderPreviewTick((prev) => (prev + 1) % 24);
+                lastTime = now;
+            }
+            rafId = requestAnimationFrame(tick);
+        };
+        
+        // Only run when visible
+        if (typeof document === 'undefined' || document.visibilityState === 'visible') {
+            rafId = requestAnimationFrame(tick);
+        }
+        
+        const onVisibility = () => {
+            if (document.visibilityState === 'visible' && rafId === null) {
+                rafId = requestAnimationFrame(tick);
+            } else if (document.visibilityState !== 'visible' && rafId !== null) {
+                cancelAnimationFrame(rafId);
+                rafId = null;
+            }
+        };
+        
+        document.addEventListener('visibilitychange', onVisibility);
 
         return () => {
-            clearInterval(intervalId);
+            document.removeEventListener('visibilitychange', onVisibility);
+            if (rafId !== null) {
+                cancelAnimationFrame(rafId);
+            }
         };
     }, [shouldAnimateChatPreview]);
 
@@ -525,24 +531,6 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     </TooltipContent>
                                 </Tooltip>
                             </div>
-
-                            {isMacDesktop && (
-                                <div className="flex items-center gap-2 py-1.5">
-                                    <Checkbox
-                                        checked={vibrancyEnabled}
-                                        onChange={handleVibrancyChange}
-                                        ariaLabel="Toggle window vibrancy"
-                                    />
-                                    <div className="flex min-w-0 flex-col">
-                                        <span className="typography-ui-label text-foreground">
-                                            Window vibrancy
-                                        </span>
-                                        <span className="typography-meta text-muted-foreground">
-                                            Translucent window background. Disabling may reduce energy usage. Existing windows update immediately, but full transparency changes apply to new windows or after restart.
-                                        </span>
-                                    </div>
-                                </div>
-                            )}
 
                             {showPwaInstallNameSetting && (
                                 <div className="py-1.5 space-y-1.5">

@@ -474,8 +474,6 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
         )}
         style={{
           paddingBottom: 'calc(0.5rem + env(safe-area-inset-bottom, 0px))',
-          backdropFilter: 'blur(28px)',
-          WebkitBackdropFilter: 'blur(28px)',
         }}
       >
         <button
@@ -547,10 +545,6 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
           'transition-[opacity,transform] duration-200 ease-out will-change-[opacity,transform]',
           isOpening ? 'opacity-0 translate-y-[4px]' : 'opacity-100 translate-y-0'
         )}
-        style={{
-          backdropFilter: 'blur(28px)',
-          WebkitBackdropFilter: 'blur(28px)',
-        }}
       >
         <button
           onClick={handleAddToChat}

@@ -328,13 +328,9 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
             size="sm"
             className={cn(
               CHIP_HEIGHT_CLASS,
-              '!border-border/80 !bg-[var(--surface-subtle)]/95 !backdrop-blur-sm hover:!bg-[var(--interactive-hover)]/70',
+              '!border-border/80 !bg-[var(--surface-subtle)] hover:!bg-[var(--interactive-hover)]/70',
               addButtonClassName,
             )}
-            style={{
-              backdropFilter: 'blur(10px)',
-              WebkitBackdropFilter: 'blur(10px)',
-            }}
             onClick={() => setIsOpen(!isOpen)}
           >
             <RiAddLine className="h-3.5 w-3.5 mr-1" />
@@ -540,11 +536,7 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
                     >
                       <SelectTrigger
                         size="chip"
-                        className="px-2 gap-1.5 rounded-md !border-border/80 !bg-[var(--surface-subtle)]/95 !backdrop-blur-sm hover:!bg-[var(--interactive-hover)]/70 typography-meta font-medium text-foreground"
-                        style={{
-                          backdropFilter: 'blur(10px)',
-                          WebkitBackdropFilter: 'blur(10px)',
-                        }}
+                        className="px-2 gap-1.5 rounded-md !border-border/80 !bg-[var(--surface-subtle)] hover:!bg-[var(--interactive-hover)]/70 typography-meta font-medium text-foreground"
                       >
                         <RiBrainAi3Line
                           className={cn(

@@ -1,16 +1,14 @@
 import React from 'react';
 
-import { useCurrentSessionActivity } from '@/hooks/useSessionActivity';
+import { useAssistantStatus } from '@/hooks/useAssistantStatus';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { useSessionPermissions, useSessionStatus } from '@/sync/sync-context';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { StatusRow } from './StatusRow';
 
-const DEFAULT_WORKING_STATUS = 'working';
-
 /**
- * Coarse status wrapper.
- * Avoids subscribing to live assistant parts so the row doesn't rerender on every text delta.
+ * Status row wrapper.
+ * Uses the dedicated assistant status hook so the row keeps accurate live activity
+ * labels while still limiting subscriptions to the active assistant message.
  */
 export const StatusRowContainer: React.FC = React.memo(() => {
     const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
@@ -22,50 +20,20 @@ export const StatusRowContainer: React.FC = React.memo(() => {
             return state.sessionAbortFlags?.get(currentSessionId) ?? null;
         }, [currentSessionId]),
     );
-    const permissions = useSessionPermissions(currentSessionId ?? '');
-    const sessionStatus = useSessionStatus(currentSessionId ?? '');
-    const { phase, isWorking } = useCurrentSessionActivity();
+    const { working } = useAssistantStatus();
     const currentAgentName = useConfigStore((state) => state.currentAgentName);
 
     const wasAborted = Boolean(abortRecord && !abortRecord.acknowledged);
-    const isWaitingForPermission = permissions.length > 0;
-    const isRetry = sessionStatus?.type === 'retry';
-
-    const statusText = React.useMemo(() => {
-        if (isWaitingForPermission) {
-            return 'waiting for permission';
-        }
-        if (isRetry) {
-            return 'retrying';
-        }
-        if (!isWorking) {
-            return null;
-        }
-        if (phase === 'busy') {
-            return 'composing';
-        }
-        return DEFAULT_WORKING_STATUS;
-    }, [isRetry, isWaitingForPermission, isWorking, phase]);
-
-    const retryInfo = React.useMemo(() => {
-        if (!isRetry) {
-            return null;
-        }
-        return {
-            attempt: (sessionStatus as { attempt?: number } | undefined)?.attempt,
-            next: (sessionStatus as { next?: number } | undefined)?.next,
-        };
-    }, [isRetry, sessionStatus]);
 
     return (
         <StatusRow
-            isWorking={isWorking}
-            statusText={statusText}
-            isGenericStatus={true}
-            isWaitingForPermission={isWaitingForPermission}
-            wasAborted={wasAborted}
-            abortActive={wasAborted}
-            retryInfo={retryInfo}
+            isWorking={working.isWorking}
+            statusText={working.statusText}
+            isGenericStatus={working.isGenericStatus}
+            isWaitingForPermission={working.isWaitingForPermission}
+            wasAborted={wasAborted || working.wasAborted}
+            abortActive={wasAborted || working.abortActive}
+            retryInfo={working.retryInfo}
             showAssistantStatus
             showTodos={false}
             agentName={currentAgentName}

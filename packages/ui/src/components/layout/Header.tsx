@@ -25,7 +25,6 @@ import { useSession, useSessionMessagesResolved } from '@/sync/sync-context';
 import { getAllSyncSessions } from '@/sync/sync-refs';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
-import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { useGitBranchLabel } from '@/stores/useGitStore';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
@@ -63,7 +62,7 @@ import type { SessionContextUsage } from '@/stores/types/sessionTypes';
 import { DesktopHostSwitcherDialog } from '@/components/desktop/DesktopHostSwitcher';
 import { OpenInAppButton } from '@/components/desktop/OpenInAppButton';
 import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
-import { isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
+import { isDesktopShell, isVSCodeRuntime, startDesktopWindowDrag } from '@/lib/desktop';
 import { desktopHostsGet, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
 import { resolveSessionDiffStats } from '@/components/session/sidebar/utils';
 import type { Session } from '@opencode-ai/sdk/v2/client';
@@ -569,33 +568,6 @@ const normalize = (value: string): string => {
   return replaced === '/' ? '/' : replaced.replace(/\/+$/, '');
 };
 
-const joinPath = (base: string, segment: string): string => {
-  const normalizedBase = normalize(base);
-  const cleanSegment = segment.replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+$/, '');
-  if (!normalizedBase || normalizedBase === '/') {
-    return `/${cleanSegment}`;
-  }
-  return `${normalizedBase}/${cleanSegment}`;
-};
-
-const buildRepoPlansDirectory = (directory: string): string => {
-  return joinPath(joinPath(directory, '.opencode'), 'plans');
-};
-
-const buildHomePlansDirectory = (): string => {
-  return '~/.opencode/plans';
-};
-
-const resolveTilde = (path: string, homeDir: string | null): string => {
-  const trimmed = path.trim();
-  if (!trimmed.startsWith('~')) return trimmed;
-  if (trimmed === '~') return homeDir || trimmed;
-  if (trimmed.startsWith('~/') || trimmed.startsWith('~\\')) {
-    return homeDir ? `${homeDir}${trimmed.slice(1)}` : trimmed;
-  }
-  return trimmed;
-};
-
 const getActiveContextMode = (panelState: {
   isOpen: boolean;
   activeTabId: string | null;
@@ -695,7 +667,6 @@ export const Header: React.FC<HeaderProps> = ({
   const dropdownProviderIds = useQuotaStore((state) => state.dropdownProviderIds);
   const loadQuotaSettings = useQuotaStore((state) => state.loadSettings);
   const setQuotaDisplayMode = useQuotaStore((state) => state.setDisplayMode);
-  const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
 
   const { isMobile } = useDeviceInfo();
   const githubAuthStatus = useGitHubAuthStore((state) => state.status);
@@ -1154,10 +1125,40 @@ export const Header: React.FC<HeaderProps> = ({
   }, [actionDirectory, activeProjectRef]);
 
 
-  const [planTabAvailable, setPlanTabAvailable] = React.useState(false);
   const planModeEnabled = useFeatureFlagsStore((state) => state.planModeEnabled);
-  const showPlanTab = planModeEnabled && planTabAvailable;
+  const isSessionPlanAvailable = useSessionUIStore((state) => state.isSessionPlanAvailable);
+  const planTabAvailable = planModeEnabled && currentSessionId ? isSessionPlanAvailable(currentSessionId) : false;
+  const showPlanTab = planTabAvailable;
   const lastPlanSessionKeyRef = React.useRef<string>('');
+
+  // Reset plan tab availability when session changes
+  React.useEffect(() => {
+    if (!planModeEnabled) {
+      if (useUIStore.getState().activeMainTab === 'plan') {
+        useUIStore.getState().setActiveMainTab('chat');
+      }
+      return;
+    }
+
+    if (!currentSessionId) return;
+
+    const sessionKey = `${currentSessionId || 'none'}:${sessionDirectory || 'none'}:${currentSession?.time?.created || 0}:${currentSession?.slug || 'none'}`;
+    if (lastPlanSessionKeyRef.current !== sessionKey) {
+      lastPlanSessionKeyRef.current = sessionKey;
+    }
+
+    // If plan is not available but user is on plan tab, switch them back to chat
+    if (!planTabAvailable && useUIStore.getState().activeMainTab === 'plan') {
+      useUIStore.getState().setActiveMainTab('chat');
+    }
+  }, [
+    planModeEnabled,
+    planTabAvailable,
+    currentSession?.slug,
+    currentSession?.time?.created,
+    currentSessionId,
+    sessionDirectory,
+  ]);
 
   const handleGitHubAccountSwitch = React.useCallback(async (accountId: string) => {
     if (!accountId || isSwitchingGitHubAccount) return;
@@ -1190,84 +1191,6 @@ export const Header: React.FC<HeaderProps> = ({
       setIsSwitchingGitHubAccount(false);
     }
   }, [isSwitchingGitHubAccount, runtimeApis.github, setGitHubAuthStatus]);
-
-  React.useEffect(() => {
-    if (!planModeEnabled) {
-      setPlanTabAvailable(false);
-      if (useUIStore.getState().activeMainTab === 'plan') {
-        useUIStore.getState().setActiveMainTab('chat');
-      }
-      return;
-    }
-
-    let cancelled = false;
-
-    const checkExists = async (directory: string, fileName: string): Promise<boolean> => {
-      if (!directory || !fileName) return false;
-      if (!runtimeApis.files?.listDirectory) return false;
-
-      try {
-        const listing = await runtimeApis.files.listDirectory(directory);
-        const entries = Array.isArray(listing?.entries) ? listing.entries : [];
-        return entries.some((entry) => entry?.name === fileName && !entry?.isDirectory);
-      } catch {
-        return false;
-      }
-    };
-
-    const runOnce = async () => {
-      if (cancelled) return;
-
-      if (!currentSession?.slug || !currentSession?.time?.created || !sessionDirectory) {
-        setPlanTabAvailable(false);
-        if (useUIStore.getState().activeMainTab === 'plan') {
-          useUIStore.getState().setActiveMainTab('chat');
-        }
-        return;
-      }
-
-      const fileName = `${currentSession.time.created}-${currentSession.slug}.md`;
-      const repoDir = buildRepoPlansDirectory(sessionDirectory);
-      const homeDir = resolveTilde(buildHomePlansDirectory(), homeDirectory || null);
-
-      const [repoExists, homeExists] = await Promise.all([
-        checkExists(repoDir, fileName),
-        checkExists(homeDir, fileName),
-      ]);
-
-      if (cancelled) return;
-
-      const available = repoExists || homeExists;
-      setPlanTabAvailable(available);
-      if (!available && useUIStore.getState().activeMainTab === 'plan') {
-        useUIStore.getState().setActiveMainTab('chat');
-      }
-    };
-
-    const sessionKey = `${currentSessionId || 'none'}:${sessionDirectory || 'none'}:${currentSession?.time?.created || 0}:${currentSession?.slug || 'none'}`;
-    if (lastPlanSessionKeyRef.current !== sessionKey) {
-      lastPlanSessionKeyRef.current = sessionKey;
-      setPlanTabAvailable(false);
-    }
-    void runOnce();
-
-    const interval = window.setInterval(() => {
-      void runOnce();
-    }, 3000);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [
-    planModeEnabled,
-    sessionDirectory,
-    currentSession?.slug,
-    currentSession?.time?.created,
-    currentSessionId,
-    homeDirectory,
-    runtimeApis.files,
-  ]);
 
   const blurActiveElement = React.useCallback(() => {
     if (typeof document === 'undefined') {
@@ -1482,13 +1405,7 @@ export const Header: React.FC<HeaderProps> = ({
       return;
     }
     if (isDesktopApp) {
-      try {
-        const { getCurrentWindow } = await import('@tauri-apps/api/window');
-        const window = getCurrentWindow();
-        await window.startDragging();
-      } catch (error) {
-        console.error('Failed to start window dragging:', error);
-      }
+      await startDesktopWindowDrag();
     }
   }, [isDesktopApp]);
 
@@ -2271,9 +2188,7 @@ export const Header: React.FC<HeaderProps> = ({
   const headerClassName = cn(
     'header-safe-area relative z-10',
     isMobile && 'border-b border-border/50',
-    isMobile
-      ? 'bg-background'
-      : (isDesktopApp ? 'bg-background' : 'bg-background/95 supports-[backdrop-filter]:bg-background/80')
+    'bg-background'
   );
 
   return (

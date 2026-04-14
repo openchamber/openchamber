@@ -7,6 +7,11 @@ import type { BridgeContext } from './bridge';
 
 const SETTINGS_KEY = 'openchamber.settings';
 const OPENCHAMBER_SHARED_SETTINGS_PATH = path.join(os.homedir(), '.config', 'openchamber', 'settings.json');
+const OPENCHAMBER_MAGIC_PROMPTS_PATH = path.join(os.homedir(), '.config', 'openchamber', 'magic-prompts.json');
+const MAGIC_PROMPTS_FILE_VERSION = 1;
+const MAGIC_PROMPT_ID_PATTERN = /^[a-z0-9._-]{1,160}$/;
+const MAGIC_PROMPT_TEXT_MAX_LENGTH = 200_000;
+const isVisiblePromptId = (id: string): boolean => id.endsWith('.visible');
 
 const isPathInside = (candidatePath: string, parentPath: string): boolean => {
   const relative = path.relative(parentPath, candidatePath);
@@ -166,6 +171,42 @@ const writeSharedSettingsToDisk = async (changes: Record<string, unknown>): Prom
   }
 };
 
+const sanitizeMagicPromptOverrides = (input: unknown): Record<string, string> => {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    return {};
+  }
+
+  const next: Record<string, string> = {};
+  for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
+    if (!MAGIC_PROMPT_ID_PATTERN.test(key) || typeof value !== 'string') {
+      continue;
+    }
+    next[key] = value;
+  }
+  return next;
+};
+
+const readMagicPromptFile = (): { version: number; overrides: Record<string, string> } => {
+  try {
+    const raw = fs.readFileSync(OPENCHAMBER_MAGIC_PROMPTS_PATH, 'utf8');
+    const parsed = JSON.parse(raw) as { overrides?: unknown };
+    return {
+      version: MAGIC_PROMPTS_FILE_VERSION,
+      overrides: sanitizeMagicPromptOverrides(parsed?.overrides),
+    };
+  } catch {
+    return {
+      version: MAGIC_PROMPTS_FILE_VERSION,
+      overrides: {},
+    };
+  }
+};
+
+const writeMagicPromptFile = async (state: { version: number; overrides: Record<string, string> }): Promise<void> => {
+  await fs.promises.mkdir(path.dirname(OPENCHAMBER_MAGIC_PROMPTS_PATH), { recursive: true });
+  await fs.promises.writeFile(OPENCHAMBER_MAGIC_PROMPTS_PATH, JSON.stringify(state, null, 2), 'utf8');
+};
+
 export const readSettings = (ctx?: BridgeContext): Record<string, unknown> => {
   const stored = ctx?.context?.globalState.get<Record<string, unknown>>(SETTINGS_KEY) || {};
   const restStored = { ...stored };
@@ -228,4 +269,64 @@ export const persistSettings = async (changes: Record<string, unknown>, ctx?: Br
   }
 
   return merged;
+};
+
+export const readMagicPromptOverrides = (): { version: number; overrides: Record<string, string> } => {
+  return readMagicPromptFile();
+};
+
+export const saveMagicPromptOverride = async (id: string, text: string): Promise<{ version: number; overrides: Record<string, string> }> => {
+  const normalizedId = typeof id === 'string' ? id.trim() : '';
+  if (!MAGIC_PROMPT_ID_PATTERN.test(normalizedId)) {
+    throw new Error('Invalid prompt id');
+  }
+  if (typeof text !== 'string') {
+    throw new Error('Prompt text must be a string');
+  }
+  if (isVisiblePromptId(normalizedId) && text.trim().length === 0) {
+    throw new Error('Visible prompt text cannot be empty');
+  }
+  if (text.length > MAGIC_PROMPT_TEXT_MAX_LENGTH) {
+    throw new Error('Prompt text is too long');
+  }
+
+  const current = readMagicPromptFile();
+  const next = {
+    version: MAGIC_PROMPTS_FILE_VERSION,
+    overrides: {
+      ...current.overrides,
+      [normalizedId]: text,
+    },
+  };
+  await writeMagicPromptFile(next);
+  return next;
+};
+
+export const resetMagicPromptOverride = async (id: string): Promise<{ version: number; overrides: Record<string, string> }> => {
+  const normalizedId = typeof id === 'string' ? id.trim() : '';
+  if (!MAGIC_PROMPT_ID_PATTERN.test(normalizedId)) {
+    throw new Error('Invalid prompt id');
+  }
+
+  const current = readMagicPromptFile();
+  if (!Object.prototype.hasOwnProperty.call(current.overrides, normalizedId)) {
+    return current;
+  }
+  const nextOverrides = { ...current.overrides };
+  delete nextOverrides[normalizedId];
+  const next = {
+    version: MAGIC_PROMPTS_FILE_VERSION,
+    overrides: nextOverrides,
+  };
+  await writeMagicPromptFile(next);
+  return next;
+};
+
+export const resetAllMagicPromptOverrides = async (): Promise<{ version: number; overrides: Record<string, string> }> => {
+  const next = {
+    version: MAGIC_PROMPTS_FILE_VERSION,
+    overrides: {},
+  };
+  await writeMagicPromptFile(next);
+  return next;
 };

@@ -35,7 +35,6 @@ import { ToolRevealOnMount } from './parts/ToolRevealOnMount';
 import { StaticToolRow } from './parts/ProgressiveGroup';
 import { isExpandableTool, isStandaloneTool } from './parts/toolRenderUtils';
 import TurnActivity from '../components/TurnActivity';
-import { areRenderRelevantPartsEqual } from './renderCompare';
 
 type SubtaskPartLike = Part & {
     type: 'subtask';
@@ -716,7 +715,7 @@ const AssistantMessageBody: React.FC<Omit<MessageBodyProps, 'isUser'>> = ({
         if (isTTSPlaying) {
             return 'Stop speaking';
         }
-        const providerLabel = voiceProvider === 'browser' ? 'Browser' : voiceProvider === 'openai' ? 'OpenAI' : 'Say';
+        const providerLabel = voiceProvider === 'browser' ? 'Browser' : voiceProvider === 'openai' ? 'OpenAI' : voiceProvider === 'openai-compatible' ? 'Custom' : 'Say';
         return `Read aloud (${providerLabel} voice)`;
     }, [isTTSPlaying, voiceProvider]);
 
@@ -1549,37 +1548,4 @@ const MessageBody: React.FC<MessageBodyProps> = ({ isUser, ...props }) => {
     return <AssistantMessageBody {...props} />;
 };
 
-export default React.memo(MessageBody, (prev, next) => {
-    return prev.sessionId === next.sessionId
-        && prev.messageId === next.messageId
-        && prev.isUser === next.isUser
-        && areRenderRelevantPartsEqual(prev.parts, next.parts)
-        && prev.isMessageCompleted === next.isMessageCompleted
-        && prev.messageFinish === next.messageFinish
-        && prev.messageCompletedAt === next.messageCompletedAt
-        && prev.messageCreatedAt === next.messageCreatedAt
-        && prev.syntaxTheme === next.syntaxTheme
-        && prev.isMobile === next.isMobile
-        && prev.hasTouchInput === next.hasTouchInput
-        && prev.copiedCode === next.copiedCode
-        && prev.expandedTools === next.expandedTools
-        && prev.streamPhase === next.streamPhase
-        && prev.allowAnimation === next.allowAnimation
-        && prev.shouldShowHeader === next.shouldShowHeader
-        && prev.hasTextContent === next.hasTextContent
-        && prev.copiedMessage === next.copiedMessage
-        && prev.showReasoningTraces === next.showReasoningTraces
-        && prev.agentMention === next.agentMention
-        && prev.turnGroupingContext === next.turnGroupingContext
-        && prev.errorMessage === next.errorMessage
-        && prev.userActionsMode === next.userActionsMode
-        && prev.stickyUserHeaderEnabled === next.stickyUserHeaderEnabled
-        && prev.onCopyCode === next.onCopyCode
-        && prev.onToggleTool === next.onToggleTool
-        && prev.onShowPopup === next.onShowPopup
-        && prev.onContentChange === next.onContentChange
-        && prev.onCopyMessage === next.onCopyMessage
-        && prev.onAuxiliaryContentComplete === next.onAuxiliaryContentComplete
-        && prev.onRevert === next.onRevert
-        && prev.onFork === next.onFork;
-});
+export default MessageBody;

@@ -49,7 +49,7 @@ export const SidebarContextSummary: React.FC<SidebarContextSummaryProps> = ({ cl
     }, [directoryFull]);
 
     return (
-        <div className={cn('hidden min-h-[48px] flex-col justify-center gap-0.5 border-b bg-sidebar/60 px-3 py-2 backdrop-blur md:flex md:pb-2', className)}>
+        <div className={cn('hidden min-h-[48px] flex-col justify-center gap-0.5 border-b bg-sidebar px-3 py-2 md:flex md:pb-2', className)}>
             <span className="typography-meta text-muted-foreground">Session</span>
             <span className="typography-ui-label font-semibold text-foreground truncate" title={activeSessionTitle}>
                 {activeSessionTitle}

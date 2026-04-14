@@ -626,7 +626,7 @@ export const MainLayout: React.FC = () => {
                 className={cn(
                     'main-content-safe-area h-[100dvh]',
                     isMobile ? 'flex flex-col' : 'flex',
-                    isDesktopShellRuntime ? 'bg-transparent' : 'bg-background'
+                    'bg-background'
                 )}
             >
                 <CommandPalette />
@@ -725,7 +725,7 @@ export const MainLayout: React.FC = () => {
                             }
                         }}
                         className={cn(
-                            'fixed left-0 top-[var(--oc-header-height,56px)] z-50 h-[calc(100%-var(--oc-header-height,56px))] bg-transparent',
+                            'fixed left-0 top-[var(--oc-header-height,56px)] z-50 h-[calc(100%-var(--oc-header-height,56px))] bg-background',
                             'cursor-grab active:cursor-grabbing'
                         )}
                         aria-hidden={!mobileLeftDrawerOpen}
@@ -776,7 +776,7 @@ export const MainLayout: React.FC = () => {
                             }
                         }}
                         className={cn(
-                            'fixed right-0 top-[var(--oc-header-height,56px)] z-50 h-[calc(100%-var(--oc-header-height,56px))] bg-transparent',
+                            'fixed right-0 top-[var(--oc-header-height,56px)] z-50 h-[calc(100%-var(--oc-header-height,56px))] bg-background',
                             'cursor-grab active:cursor-grabbing'
                         )}
                         aria-hidden={!isRightSidebarOpen}
@@ -834,9 +834,7 @@ export const MainLayout: React.FC = () => {
                     <div className="flex flex-1 overflow-hidden relative">
                         <div className={cn(
                             'absolute inset-0 flex overflow-hidden',
-                            isDesktopShellRuntime
-                                ? 'bg-[color:var(--sidebar-overlay-strong)] backdrop-blur supports-[backdrop-filter]:bg-[color:var(--sidebar-overlay-soft)]'
-                                : 'bg-sidebar'
+                            isDesktopShellRuntime ? 'bg-sidebar' : 'bg-sidebar'
                         )}>
                             {isSidebarOpen ? (
                                 <>
@@ -844,9 +842,7 @@ export const MainLayout: React.FC = () => {
                                         aria-hidden
                                         className={cn(
                                             'pointer-events-none absolute top-0 z-0',
-                                            isDesktopShellRuntime
-                                                ? 'bg-[color:var(--sidebar-overlay-strong)] backdrop-blur supports-[backdrop-filter]:bg-[color:var(--sidebar-overlay-soft)]'
-                                                : 'bg-sidebar'
+                                            isDesktopShellRuntime ? 'bg-sidebar' : 'bg-sidebar'
                                         )}
                                         style={{
                                             left: `${visibleSidebarWidth}px`,
@@ -860,9 +856,7 @@ export const MainLayout: React.FC = () => {
                                         aria-hidden
                                         className={cn(
                                             'pointer-events-none absolute bottom-0 z-0',
-                                            isDesktopShellRuntime
-                                                ? 'bg-[color:var(--sidebar-overlay-strong)] backdrop-blur supports-[backdrop-filter]:bg-[color:var(--sidebar-overlay-soft)]'
-                                                : 'bg-sidebar'
+                                            isDesktopShellRuntime ? 'bg-sidebar' : 'bg-sidebar'
                                         )}
                                         style={{
                                             left: `${visibleSidebarWidth}px`,
@@ -880,9 +874,7 @@ export const MainLayout: React.FC = () => {
                                         aria-hidden
                                         className={cn(
                                             'pointer-events-none absolute top-0 z-0',
-                                            isDesktopShellRuntime
-                                                ? 'bg-[color:var(--sidebar-overlay-strong)] backdrop-blur supports-[backdrop-filter]:bg-[color:var(--sidebar-overlay-soft)]'
-                                                : 'bg-sidebar'
+                                            isDesktopShellRuntime ? 'bg-sidebar' : 'bg-sidebar'
                                         )}
                                         style={{
                                             right: `${visibleRightSidebarWidth}px`,
@@ -896,9 +888,7 @@ export const MainLayout: React.FC = () => {
                                         aria-hidden
                                         className={cn(
                                             'pointer-events-none absolute bottom-0 z-0',
-                                            isDesktopShellRuntime
-                                                ? 'bg-[color:var(--sidebar-overlay-strong)] backdrop-blur supports-[backdrop-filter]:bg-[color:var(--sidebar-overlay-soft)]'
-                                                : 'bg-sidebar'
+                                            isDesktopShellRuntime ? 'bg-sidebar' : 'bg-sidebar'
                                         )}
                                         style={{
                                             right: `${visibleRightSidebarWidth}px`,
@@ -919,9 +909,7 @@ export const MainLayout: React.FC = () => {
                             </Sidebar>
                             <div className={cn(
                                 'relative flex flex-1 min-w-0 flex-col overflow-hidden',
-                                isDesktopShellRuntime
-                                    ? 'bg-[color:var(--sidebar-overlay-strong)] backdrop-blur supports-[backdrop-filter]:bg-[color:var(--sidebar-overlay-soft)]'
-                                    : 'bg-sidebar',
+                                'bg-sidebar',
                                 isSidebarOpen && 'border-l border-border/50 rounded-tl-md rounded-bl-md',
                                 isRightSidebarOpen && 'border-r border-border/50 rounded-tr-md rounded-br-md'
                             )}>

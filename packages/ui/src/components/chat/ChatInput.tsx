@@ -1305,9 +1305,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             return;
         }
 
-        // Re-pin and scroll to bottom when sending
-        scrollToBottom?.({ instant: true, force: true });
-
         if (!currentProviderId || !currentModelId) {
             console.warn('Cannot send message: provider or model not selected');
             return;
@@ -1483,7 +1480,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             ...additionalParts.flatMap(p => p.attachments ?? []),
         ];
 
-        void sendMessage(
+        const sendPromise = sendMessage(
             primaryText,
             currentProviderId,
             currentModelId,
@@ -1493,7 +1490,17 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             additionalParts.length > 0 ? additionalParts : undefined,
             currentVariant,
             inputMode
-        ).then(() => {
+        );
+
+        if (typeof window === 'undefined') {
+            scrollToBottom?.({ instant: true, force: true });
+        } else {
+            window.requestAnimationFrame(() => {
+                scrollToBottom?.({ instant: true, force: true });
+            });
+        }
+
+        void sendPromise.then(() => {
             // Clear linked issue after successful message send
             if (linkedIssue) {
                 setLinkedIssue(null);
@@ -3380,7 +3387,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     onDrop={handleDrop}
                 >
                     {isDragging && (
-                        <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm rounded-xl">
+                        <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/90 rounded-xl">
                             <div className="text-center">
                                 <div className="inline-flex justify-center">
                                     <button

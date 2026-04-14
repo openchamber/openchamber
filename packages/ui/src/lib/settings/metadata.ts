@@ -16,6 +16,7 @@ export type SettingsPageSlug =
   | 'chat'
   | 'shortcuts'
   | 'sessions'
+  | 'magic-prompts'
   | 'notifications'
   | 'voice'
   | 'tunnel';
@@ -166,6 +167,14 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     group: 'general',
     kind: 'single',
     keywords: ['defaults', 'default agent', 'default model', 'retention', 'memory', 'limits', 'zen'],
+  },
+  {
+    slug: 'magic-prompts',
+    title: 'Magic Prompts',
+    group: 'general',
+    kind: 'split',
+    keywords: ['prompts', 'templates', 'git', 'github', 'review', 'commit', 'pull request'],
+    isAvailable: (ctx) => !ctx.isVSCode,
   },
 
   { slug: 'notifications', title: 'Notifications', group: 'general', kind: 'single', keywords: ['alerts', 'native', 'summary', 'summarization'], },

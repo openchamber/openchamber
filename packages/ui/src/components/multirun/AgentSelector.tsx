@@ -87,13 +87,9 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
         id={id}
         size="lg"
         className={cn(
-          'max-w-full typography-meta text-foreground !border-border/80 !bg-[var(--surface-subtle)]/95 !backdrop-blur-sm hover:!bg-[var(--interactive-hover)]/70 data-[state=open]:!bg-[var(--interactive-active)]/70',
+          'max-w-full typography-meta text-foreground !border-border/80 !bg-[var(--surface-subtle)] hover:!bg-[var(--interactive-hover)]/70 data-[state=open]:!bg-[var(--interactive-active)]/70',
           className,
         )}
-        style={{
-          backdropFilter: 'blur(10px)',
-          WebkitBackdropFilter: 'blur(10px)',
-        }}
       >
         <SelectValue placeholder="Select an agent" />
       </SelectTrigger>

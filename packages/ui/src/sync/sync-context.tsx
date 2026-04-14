@@ -15,6 +15,7 @@ import { updateStreamingState } from "./streaming"
 import { setActionRefs } from "./session-actions"
 import { setSyncRefs } from "./sync-refs"
 import { stripMessageDiffSnapshots, stripSessionDiffSnapshots } from "./sanitize"
+import { syncDebug } from "./debug"
 import { opencodeClient } from "@/lib/opencode/client"
 import { usePermissionStore } from "@/stores/permissionStore"
 import { autoRespondsPermission, normalizeDirectory } from "@/stores/utils/permissionAutoAccept"
@@ -97,8 +98,88 @@ let bootedAt = 0
 const BOOT_DEBOUNCE_MS = 1500
 const RECONNECT_MESSAGE_LIMIT = 200
 const RECONNECT_SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
+const requestSignature = (items: Array<{ id: string }> | undefined): string => {
+  if (!items || items.length === 0) return ""
+  return items
+    .map((item) => item.id)
+    .sort(cmp)
+    .join("|")
+}
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
+
+// ---------------------------------------------------------------------------
+// Parts-gap recovery — when SSE events arrive but parts are missing,
+// trigger a targeted re-fetch for the affected sessions.
+// Tracked per-directory, deduplicated, and auto-expiring.
+// ---------------------------------------------------------------------------
+
+type PendingRepair = {
+  sessionID: string
+  directory: string
+  enqueuedAt: number
+}
+
+const REPAIR_COOLDOWN_MS = 5_000
+const pendingRepairs = new Map<string, PendingRepair>() // key: directory:sessionID
+
+const repairKey = (directory: string, sessionID: string) => `${directory}:${sessionID}`
+
+function enqueuePartsRepair(directory: string, sessionID: string, childStores: ChildStoreManager) {
+  if (!directory || directory === "global" || !sessionID) return
+  const k = repairKey(directory, sessionID)
+  const existing = pendingRepairs.get(k)
+  if (existing && Date.now() - existing.enqueuedAt < REPAIR_COOLDOWN_MS) return
+
+  pendingRepairs.set(k, { sessionID, directory, enqueuedAt: Date.now() })
+
+  // Defer to next microtask so we don't hold up the current event batch
+  void Promise.resolve().then(async () => {
+    const store = childStores.getChild(directory)
+    if (!store) {
+      pendingRepairs.delete(k)
+      return
+    }
+    try {
+      await repairSessionParts(directory, sessionID, store)
+    } catch {
+      // Transient failure — next SSE event or reconnect will catch up.
+    } finally {
+      pendingRepairs.delete(k)
+    }
+  })
+}
+
+async function repairSessionParts(
+  directory: string,
+  sessionID: string,
+  store: StoreApi<DirectoryStore>,
+) {
+  const scopedClient = opencodeClient.getScopedSdkClient(directory)
+  const result = await retry(() =>
+    scopedClient.session.messages({ sessionID, limit: RECONNECT_MESSAGE_LIMIT }),
+  )
+  const records = (result.data ?? []).filter((record: { info?: { id?: string } }) => !!record?.info?.id)
+  if (records.length === 0) return
+
+  store.setState((state: DirectoryStore) => {
+    const nextPartState = { ...state.part }
+    for (const record of records) {
+      const messageId = record?.info?.id
+      if (!messageId) continue
+      const newParts = (record.parts ?? [])
+        .filter((part: Part) => !!part?.id && !RECONNECT_SKIP_PARTS.has(part.type))
+        .sort((a: Part, b: Part) => cmp(a.id, b.id))
+
+      const existing = nextPartState[messageId]
+      // Only patch if parts were missing or fewer than server has
+      if (!existing || existing.length < newParts.length) {
+        nextPartState[messageId] = newParts
+      }
+    }
+    return { part: nextPartState }
+  })
+}
 
 // Module-level refs for notification viewed check.
 // Used to determine if user is currently viewing the session when a notification arrives.
@@ -194,7 +275,9 @@ const normalizeEventDirectory = (rawDirectory: string): string => {
   if (!rawDirectory || rawDirectory === "global") {
     return rawDirectory
   }
-  return rawDirectory.replace(/\\/g, "/").replace(/^([a-z]):/, (_, l: string) => l.toUpperCase() + ":")
+  const normalized = rawDirectory.replace(/\\/g, "/").replace(/^([a-z]):/, (_, l: string) => l.toUpperCase() + ":")
+  // Strip trailing slashes to match child store keys (normalizeDirectoryPath in useDirectoryStore)
+  return normalized.length > 1 ? normalized.replace(/\/+$/, "") : normalized
 }
 
 const getSessionIdFromPayload = (event: Event): string | null => {
@@ -419,6 +502,26 @@ const ingestDirectoryStateIntoRoutingIndex = (
   }
 }
 
+const findSessionInChildStores = (
+  sessionID: string,
+  childStores: ChildStoreManager,
+  routingIndex: EventRoutingIndex,
+): string | null => {
+  for (const [dir, store] of childStores.children) {
+    const state = store.getState()
+    if (
+      state.session.some((s) => s.id === sessionID)
+      || Object.prototype.hasOwnProperty.call(state.message, sessionID)
+      || Object.prototype.hasOwnProperty.call(state.session_status ?? {}, sessionID)
+    ) {
+      // Self-heal: populate the routing index so future events resolve instantly
+      setIndexedSessionDirectory(routingIndex, sessionID, dir)
+      return dir
+    }
+  }
+  return null
+}
+
 const resolveDirectoryFromRoutingIndex = (
   routingIndex: EventRoutingIndex,
   rawDirectory: string,
@@ -433,6 +536,13 @@ const resolveDirectoryFromRoutingIndex = (
     if (indexedDirectory) {
       return indexedDirectory
     }
+
+    // Routing index miss — scan child stores for this session.
+    // Covers optimistic sessions not yet indexed and events with wrong/empty directory.
+    const found = findSessionInChildStores(sessionID, childStores, routingIndex)
+    if (found) {
+      return found
+    }
   }
 
   const messageID = getMessageIdFromPayload(payload)
@@ -444,8 +554,16 @@ const resolveDirectoryFromRoutingIndex = (
         return indexedDirectory
       }
     }
+
+    // Scan child stores for a store that has parts for this message
+    for (const [dir, store] of childStores.children) {
+      if (Object.prototype.hasOwnProperty.call(store.getState().part, messageID)) {
+        return dir
+      }
+    }
   }
 
+  // Single-store fallback: if there's only one directory, use it
   if (
     (sessionID || messageID)
     && (!normalizedDirectory || normalizedDirectory === "global")
@@ -608,6 +726,46 @@ async function resyncDirectoryAfterReconnect(
     setIndexedSessionMessages(routingIndex, sessionId, directory, nextMessages)
   }))
 
+  // Re-fetch pending questions on reconnect — they may have been asked
+  // during the SSE disconnection window and will not arrive via SSE events.
+  // Overwrite sessions covered by API response, and clear reconnect candidates
+  // that remain unchanged during the request but are absent from the response.
+  // If SSE changed a session while the request was in-flight, keep that data.
+  try {
+    const before = store.getState()
+    const beforeSignatures = new Map(
+      candidateSessionIds.map((sessionId) => [sessionId, requestSignature(before.question[sessionId])]),
+    )
+    const pendingQuestions = await opencodeClient.listPendingQuestions({ directories: [directory] })
+    const grouped: Record<string, QuestionRequest[]> = {}
+    for (const q of pendingQuestions) {
+      if (!q?.id || !q.sessionID) continue
+      const list = grouped[q.sessionID]
+      if (list) list.push(q)
+      else grouped[q.sessionID] = [q]
+    }
+    // Sort each group by id for binary-search compatibility
+    for (const sessionId of Object.keys(grouped)) {
+      grouped[sessionId].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    }
+    store.setState((state: DirectoryStore) => {
+      const merged = { ...state.question }
+      for (const [sessionId, questions] of Object.entries(grouped)) {
+        merged[sessionId] = questions
+      }
+      for (const sessionId of candidateSessionIds) {
+        if (grouped[sessionId]) continue
+        const beforeSignature = beforeSignatures.get(sessionId) ?? ""
+        const currentSignature = requestSignature(state.question[sessionId])
+        if (currentSignature !== beforeSignature) continue
+        delete merged[sessionId]
+      }
+      return { question: merged }
+    })
+  } catch {
+    // Non-fatal: question resync best-effort
+  }
+
   ingestDirectoryStateIntoRoutingIndex(routingIndex, directory, store.getState())
 }
 
@@ -653,7 +811,22 @@ function handleEvent(
   }
 
   // Directory events
-  const store = childStores.getChild(directory)
+  let store = childStores.getChild(directory)
+  let resolvedDirectory = directory
+
+  if (!store) {
+    // Store not found for this directory — attempt recovery by scanning
+    // child stores for the session. This handles directory mismatches
+    // (trailing slashes, case differences, events with wrong directory).
+    const sessionID = getSessionIdFromPayload(payload)
+    if (sessionID) {
+      const fallbackDir = findSessionInChildStores(sessionID, childStores, routingIndex)
+      if (fallbackDir) {
+        store = childStores.getChild(fallbackDir)
+        resolvedDirectory = fallbackDir
+      }
+    }
+  }
 
   if (!store) {
     // Try as global event for unknown directories
@@ -669,7 +842,7 @@ function handleEvent(
     return
   }
 
-  childStores.mark(directory)
+  childStores.mark(resolvedDirectory)
 
   // Notification dispatch for session turn-complete and error events.
   // These are NOT handled by the event reducer — only the notification store.
@@ -683,10 +856,10 @@ function handleEvent(
       // subtask — skip notification
     } else if (sessionID) {
       appendNotification({
-        directory,
+        directory: resolvedDirectory,
         session: sessionID,
         time: Date.now(),
-        viewed: isViewedInCurrentSession(directory, sessionID),
+        viewed: isViewedInCurrentSession(resolvedDirectory, sessionID),
         ...(payload.type === "session.error"
           ? { type: "error" as const, error: props.error }
           : { type: "turn-complete" as const }),
@@ -713,6 +886,8 @@ function handleEvent(
       draft.session_diff = { ...current.session_diff }
       break
     case "session.status":
+    case "session.idle":
+    case "session.error":
       draft.session_status = { ...(current.session_status ?? {}) }
       break
     case "todo.updated":
@@ -750,9 +925,36 @@ function handleEvent(
 
   if (applyDirectoryEvent(draft, payload)) {
     store.setState(draft)
+    const sessionID = getSessionIdFromPayload(payload) ?? undefined
+    const messageID = getMessageIdFromPayload(payload) ?? undefined
+    syncDebug.dispatch.eventApplied(payload.type, sessionID, messageID)
+
+    // Parts-gap recovery on message.updated: if the message was inserted or
+    // replaced but draft.part[messageID] is empty, the parts were lost or
+    // never arrived. Trigger repair so the UI doesn't render a blank bubble.
+    if (sessionID && messageID && payload.type === "message.updated") {
+      const after = store.getState()
+      const info = (payload.properties as { info: Message }).info
+      if (info.role === "assistant" && (!after.part[messageID] || after.part[messageID].length === 0)) {
+        enqueuePartsRepair(resolvedDirectory, sessionID, childStores)
+      }
+    }
+  } else {
+    const sessionID = getSessionIdFromPayload(payload) ?? undefined
+    const messageID = getMessageIdFromPayload(payload) ?? undefined
+    syncDebug.dispatch.eventNoChange(payload.type, sessionID, messageID)
+
+    // Parts-gap recovery: if a part event was dropped because the parts array
+    // was missing (message not yet inserted or parts lost), trigger a repair
+    // fetch for the session.
+    if (sessionID && messageID && (
+      payload.type === "message.part.delta" || payload.type === "message.part.updated"
+    )) {
+      enqueuePartsRepair(resolvedDirectory, sessionID, childStores)
+    }
   }
 
-  updateRoutingIndexFromEvent(routingIndex, directory, payload)
+  updateRoutingIndexFromEvent(routingIndex, resolvedDirectory, payload)
 
   // Update global session status for cross-directory sidebar visibility
   if (payload.type === "session.status") {
@@ -760,16 +962,21 @@ function handleEvent(
     setGlobalSessionStatus(props.sessionID, props.status)
   }
 
+  if (payload.type === "session.idle" || payload.type === "session.error") {
+    const props = payload.properties as { sessionID: string }
+    setGlobalSessionStatus(props.sessionID, { type: "idle" })
+  }
+
   if (payload.type === "permission.asked") {
-    const normalizedDirectory = normalizeDirectory(directory)
-    if (!normalizedDirectory) {
+    const nd = normalizeDirectory(resolvedDirectory)
+    if (!nd) {
       return
     }
 
     const permission = payload.properties as PermissionRequest
     const sessions = store.getState().session
     const autoAccept = usePermissionStore.getState().autoAccept
-    if (autoRespondsPermission({ autoAccept, sessions, sessionID: permission.sessionID, directory: normalizedDirectory })) {
+    if (autoRespondsPermission({ autoAccept, sessions, sessionID: permission.sessionID, directory: nd })) {
       void sessionActions.respondToPermission(permission.sessionID, permission.id, "once").catch(() => undefined)
     }
   }
@@ -928,13 +1135,15 @@ export function SyncProvider(props: {
 
   // Set refs so non-React code (session-actions, session-ui-store) can access sync state
   useEffect(() => {
-    setSyncRefs(props.sdk, childStores, props.directory)
+    setSyncRefs(props.sdk, childStores, props.directory, (sessionID, dir) => {
+      setIndexedSessionDirectory(routingIndex, sessionID, dir)
+    })
     setActionRefs(
       props.sdk,
       childStores,
       () => opencodeClient.getDirectory() || props.directory,
     )
-  }, [props.sdk, props.directory, childStores])
+  }, [props.sdk, props.directory, childStores, routingIndex])
 
   // Subscribe to child store for streaming state derivation
   useEffect(() => {
@@ -1214,8 +1423,6 @@ export function useChildStoreManager() {
   return useSyncSystem().childStores
 }
 
-const MESSAGE_PART_SNAPSHOT_THROTTLE_MS = 100
-
 export type SessionTextMessage = {
   id: string
   role: string | null
@@ -1250,12 +1457,7 @@ function usePartsSnapshotForMessageIds(messageIds: string[], directory?: string,
   const [partsSnapshot, setPartsSnapshot] = React.useState<Record<string, Part[]>>({})
 
   React.useEffect(() => {
-    let timer: ReturnType<typeof setTimeout> | null = null
-    let pending = false
-
     const flush = () => {
-      timer = null
-      pending = false
       const state = store.getState()
       const prev = prevPartsRef.current
       let changed = false
@@ -1274,28 +1476,13 @@ function usePartsSnapshotForMessageIds(messageIds: string[], directory?: string,
     flush()
 
     if (suspendUpdates) {
-      return () => {
-        if (timer) clearTimeout(timer)
-      }
+      return
     }
 
-    const unsub = store.subscribe(() => {
-      if (timer) {
-        pending = true
-        return
-      }
-      timer = setTimeout(() => {
-        flush()
-        if (pending) {
-          pending = false
-          timer = setTimeout(flush, MESSAGE_PART_SNAPSHOT_THROTTLE_MS)
-        }
-      }, MESSAGE_PART_SNAPSHOT_THROTTLE_MS)
-    })
+    const unsub = store.subscribe(flush)
 
     return () => {
       unsub()
-      if (timer) clearTimeout(timer)
     }
   }, [messageIds, store, suspendUpdates])
 

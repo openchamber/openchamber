@@ -2,7 +2,6 @@ import type {
   Agent,
   Command,
   Config,
-  FileDiff,
   LspStatus,
   McpStatus,
   Message,
@@ -18,6 +17,15 @@ import type {
   Todo,
   VcsInfo,
 } from "@opencode-ai/sdk/v2/client"
+
+export type FileDiff = {
+  file?: string
+  status?: string
+  additions?: number
+  deletions?: number
+  patch?: string
+  [key: string]: unknown
+}
 
 export type ProjectMeta = {
   name?: string

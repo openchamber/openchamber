@@ -50,6 +50,7 @@ import { getWorktreeSetupCommands } from '@/lib/openchamberConfig';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { generateBranchSlug } from '@/lib/git/branchNameGenerator';
 import { opencodeClient } from '@/lib/opencode/client';
+import { renderMagicPrompt } from '@/lib/magicPrompts';
 import { rankBranchesForQuery } from '@/lib/worktrees/branchSearch';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useGitBranches, useGitStore, useGitLoadingBranches } from '@/stores/useGitStore';
@@ -547,42 +548,10 @@ export function NewWorktreeDialog({
         throw new Error('Failed to load issue comments');
       }
 
-      const visiblePromptText = `Review this issue #${args.issue.number} using the provided issue context`;
-      const instructionsText = `Review this issue using the provided issue context: title, body, labels, assignees, comments, metadata.
-
-Process:
-- First classify the issue type (bug / feature request / question/support / refactor / ops) and state it as: Type: <one label>.
-- Gather any needed repository context (code, config, docs) to validate assumptions.
-- After gathering, if anything is still unclear or cannot be verified, do not speculate-state what's missing and ask targeted questions.
-
-Output rules:
-- Compact output; pick ONE template below and omit the others.
-- No emojis. No code snippets. No fenced blocks.
-- Short inline code identifiers allowed.
-- Reference evidence with file paths and line ranges when applicable; if exact lines aren't available, cite the file and say "approx" + why.
-- Keep the entire response under ~300 words.
-
-Templates (choose one):
-Bug:
-- Summary (1-2 sentences)
-- Likely cause (max 2)
-- Repro/diagnostics needed (max 3)
-- Fix approach (max 4 steps)
-- Verification (max 3)
-
-Feature:
-- Summary (1-2 sentences)
-- Requirements (max 4)
-- Unknowns/questions (max 4)
-- Proposed plan (max 5 steps)
-- Verification (max 3)
-
-Question/Support:
-- Summary (1-2 sentences)
-- Answer/guidance (max 6 lines)
-- Missing info (max 4)
-
-Do not implement changes until I confirm; end with: "Next actions: <1 sentence>".`;
+      const visiblePromptText = await renderMagicPrompt('github.issue.review.visible', {
+        issue_number: String(args.issue.number),
+      });
+      const instructionsText = await renderMagicPrompt('github.issue.review.instructions');
       const contextText = buildIssueContextText({
         repo: issueRes.repo,
         issue: issueRes.issue,
@@ -619,50 +588,10 @@ Do not implement changes until I confirm; end with: "Next actions: <1 sentence>"
         throw new Error('Failed to load PR context');
       }
 
-      const visiblePromptText = `Review this pull request #${args.pr.number} using the provided PR context`;
-      const instructionsText = `Before reporting issues:
-- First identify the PR intent (what it's trying to achieve) from title/body/diff, then evaluate whether the implementation matches that intent; call out missing pieces, incorrect behavior vs intent, and scope creep.
-- Gather any needed repository context (code, config, docs) to validate assumptions.
-- No speculation: if something is unclear or cannot be verified, say what's missing and ask for it instead of guessing.
-
-Output rules:
-- Start with a 1-2 sentence summary.
-- Provide a single concise PR review comment.
-- No emojis. No code snippets. No fenced blocks.
-- Short inline code identifiers allowed, but no snippets or fenced blocks.
-- Reference evidence with file paths and line ranges (e.g., path/to/file.ts:120-138). If exact lines aren't available, cite the file and say "approx" + why.
-- Keep the entire comment under ~300 words.
-
-Report:
-- Must-fix issues (blocking)-brief why and a one-line action each.
-- Nice-to-have improvements (optional)-brief why and a one-line action each.
-
-Quality & safety (general):
-- Call out correctness risks, edge cases, performance regressions, security/privacy concerns, and backwards-compatibility risks.
-- Call out missing tests/verification steps and suggest the minimal validation needed.
-- Note readability/maintainability issues when they materially affect future changes.
-
-Applicability (only if relevant):
-- If changes affect multiple components/targets/environments (e.g., client/server, OSs, deployments), state what is affected vs not, and why.
-
-Architecture:
-- Call out breakages, missing implementations across modules/targets, boundary violations, and cross-cutting concerns (errors, logging/observability, accessibility).
-
-Precedence:
-- If local precedent conflicts with best practices, state it and suggest a follow-up task.
-
-Do not implement changes until I confirm; end with a short "Next actions" sentence describing the recommended plan.
-
-Format exactly:
-Must-fix:
-- <issue> - <brief why> - <file:line-range> - Action: <one-line action>
-Nice-to-have:
-- <issue> - <brief why> - <file:line-range> - Action: <one-line action>
-If no issues, write:
-Must-fix:
-- None
-Nice-to-have:
-- None`;
+      const visiblePromptText = await renderMagicPrompt('github.pr.review.visible', {
+        pr_number: String(args.pr.number),
+      });
+      const instructionsText = await renderMagicPrompt('github.pr.review.instructions');
       const contextText = buildPullRequestContextText(prContext);
 
       await opencodeClient.sendMessage({

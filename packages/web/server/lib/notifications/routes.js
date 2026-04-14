@@ -35,6 +35,8 @@ export const registerNotificationRoutes = (app, dependencies) => {
     removePushSubscription,
     updateUiVisibility,
     isUiVisible,
+    getUiNotificationClients,
+    writeSseEvent,
     getSessionActivitySnapshot,
     getSessionStateSnapshot,
     getSessionAttentionSnapshot,
@@ -155,6 +157,35 @@ export const registerNotificationRoutes = (app, dependencies) => {
     return res.json({
       ok: true,
       visible: isUiVisible(uiToken),
+    });
+  });
+
+  app.get('/api/notifications/stream', async (req, res) => {
+    const uiToken = uiAuthController?.ensureSessionToken
+      ? await uiAuthController.ensureSessionToken(req, res)
+      : getUiSessionTokenFromRequest(req);
+    if (!uiToken) {
+      return;
+    }
+
+    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders?.();
+
+    const clients = getUiNotificationClients();
+    clients.add(res);
+
+    try {
+      writeSseEvent(res, {
+        type: 'openchamber:notification-stream-ready',
+        properties: { uiToken },
+      });
+    } catch {
+    }
+
+    req.on('close', () => {
+      clients.delete(res);
     });
   });
 

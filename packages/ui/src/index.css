@@ -1093,23 +1093,6 @@ html:not(.dark) .chat-scroll {
   background-color: var(--shiki-dark-bg) !important;
 }
 
-/* Fix list styling - override Tailwind reset */
-.markdown-content ul {
-  list-style-type: disc;
-  list-style-position: outside;
-  padding-left: 1.5em;
-}
-
-.markdown-content ol {
-  list-style-type: decimal;
-  list-style-position: outside;
-  padding-left: 1.5em;
-}
-
-.markdown-content li {
-  display: list-item;
-}
-
 /* Reduce code block header height */
 [data-markdown="code-block-header"] {
   margin: 0;

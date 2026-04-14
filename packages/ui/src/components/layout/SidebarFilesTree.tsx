@@ -769,7 +769,7 @@ export const SidebarFilesTree: React.FC = () => {
   const hasTree = Boolean(root && childrenByDir[root]);
 
   return (
-    <section className="flex h-full min-h-0 flex-col overflow-hidden bg-transparent">
+    <section className="flex h-full min-h-0 flex-col overflow-hidden bg-sidebar">
       <div className="flex items-center gap-2 border-b border-border/40 px-3 py-2">
         <div className="relative min-w-0 flex-1">
           <RiSearchLine className="pointer-events-none absolute left-2 top-2 h-4 w-4 text-muted-foreground" />

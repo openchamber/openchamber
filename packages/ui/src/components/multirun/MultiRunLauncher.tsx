@@ -19,7 +19,7 @@ import type { CreateMultiRunParams, MultiRunModelSelection } from '@/types/multi
 import { ModelMultiSelect, generateInstanceId, type ModelSelectionWithId } from './ModelMultiSelect';
 import { BranchSelector, useBranchOptions } from './BranchSelector';
 import { AgentSelector } from './AgentSelector';
-import { isDesktopShell } from '@/lib/desktop';
+import { isDesktopShell, startDesktopWindowDrag } from '@/lib/desktop';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { PROJECT_ICON_MAP, PROJECT_COLOR_MAP, getProjectIconImageUrl } from '@/lib/projectMeta';
 import type { ProjectEntry } from '@/lib/api/types';
@@ -266,13 +266,7 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
       return;
     }
     if (isDesktopApp) {
-      try {
-        const { getCurrentWindow } = await import('@tauri-apps/api/window');
-        const window = getCurrentWindow();
-        await window.startDragging();
-      } catch {
-        // ignore
-      }
+      await startDesktopWindowDrag();
     }
   }, [isDesktopApp]);
 

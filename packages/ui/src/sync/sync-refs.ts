@@ -12,15 +12,27 @@ import type { State } from "./types"
 let _sdk: OpencodeClient | null = null
 let _childStores: ChildStoreManager | null = null
 let _directory: string = ""
+let _registerSessionDirectory: ((sessionID: string, directory: string) => void) | null = null
 
 export function setSyncRefs(
   sdk: OpencodeClient,
   childStores: ChildStoreManager,
   directory: string,
+  registerSessionDirectory?: (sessionID: string, directory: string) => void,
 ) {
   _sdk = sdk
   _childStores = childStores
   _directory = directory
+  if (registerSessionDirectory) {
+    _registerSessionDirectory = registerSessionDirectory
+  }
+}
+
+/** Pre-register a session→directory mapping in the routing index.
+ *  Called from session-actions when creating sessions so SSE events
+ *  arriving before session.created can be routed correctly. */
+export function registerSessionDirectory(sessionID: string, directory: string) {
+  _registerSessionDirectory?.(sessionID, directory)
 }
 
 export function getSyncSDK(): OpencodeClient {

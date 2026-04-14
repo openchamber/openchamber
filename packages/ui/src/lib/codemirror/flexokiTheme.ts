@@ -149,8 +149,6 @@ export function createFlexokiCodeMirrorTheme(theme: Theme): Extension {
       pointerEvents: 'auto',
       padding: '4px',
       backgroundColor: `color-mix(in srgb, ${theme.colors.surface.elevated} 85%, transparent)`,
-      backdropFilter: 'blur(12px)',
-      WebkitBackdropFilter: 'blur(12px)',
       border: `1px solid ${theme.colors.interactive.border}`,
       borderRadius: '10px',
       boxShadow: `0 2px 8px color-mix(in srgb, ${theme.colors.surface.background} 60%, transparent)`,

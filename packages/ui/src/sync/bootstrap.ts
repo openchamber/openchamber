@@ -4,6 +4,14 @@ import type { GlobalState, State } from "./types"
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 
+const requestSignature = (items: Array<{ id: string }> | undefined): string => {
+  if (!items || items.length === 0) return ""
+  return items
+    .map((item) => item.id)
+    .sort(cmp)
+    .join("|")
+}
+
 function groupBySession<T extends { id: string; sessionID: string }>(input: T[]) {
   return input.reduce<Record<string, T[]>>((acc, item) => {
     if (!item?.id || !item.sessionID) return acc
@@ -50,7 +58,27 @@ export async function bootstrapGlobal(
     console.error("[bootstrap] global bootstrap failed", errors[0])
   }
 
-  set({ ready: true })
+  // If ALL requests failed, OpenCode is likely down — fetch the OpenChamber
+  // health endpoint (outside the readiness gate) to get the actual error reason.
+  if (errors.length === results.length) {
+    let message = errors[0] instanceof Error ? errors[0].message : String(errors[0])
+    try {
+      const healthRes = await fetch("/health", { signal: AbortSignal.timeout(4000) })
+      if (healthRes.ok) {
+        const health = await healthRes.json()
+        if (health.lastOpenCodeError) {
+          message = health.lastOpenCodeError
+        } else if (!health.openCodeRunning) {
+          message = "OpenCode process is not running"
+        }
+      }
+    } catch {
+      // health endpoint itself unreachable — use the original error
+    }
+    set({ ready: true, error: { type: "init", message } })
+  } else {
+    set({ ready: true, error: undefined })
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -109,44 +137,56 @@ export async function bootstrapDirectory(input: {
         set({ vcs: x.data ?? current.vcs })
       }),
     ),
-    retry(() =>
-      sdk.permission.list().then((x) => {
-        const grouped = groupBySession(
-          (x.data ?? []).filter((perm): perm is PermissionRequest => !!perm?.id && !!perm.sessionID),
-        )
-        const permission: Record<string, PermissionRequest[]> = {}
-        // Clear sessions no longer having permissions
-        const current = getState()
-        for (const sessionID of Object.keys(current.permission ?? {})) {
-          if (!grouped[sessionID]) permission[sessionID] = []
-        }
-        // Set grouped permissions sorted by id
-        for (const [sessionID, perms] of Object.entries(grouped)) {
-          permission[sessionID] = perms
-            .filter((p) => !!p?.id)
-            .sort((a, b) => cmp(a.id, b.id))
-        }
-        set({ permission })
-      }),
-    ),
-    retry(() =>
-      sdk.question.list().then((x) => {
+    retry(async () => {
+      const before = getState()
+      const beforeSignatures = new Map(
+        Object.entries(before.question ?? {}).map(([sessionID, questions]) => [sessionID, requestSignature(questions)]),
+      )
+      const x = await sdk.question.list(directory ? { directory } : undefined)
         const grouped = groupBySession(
           (x.data ?? []).filter((q): q is QuestionRequest => !!q?.id && !!q.sessionID),
         )
-        const question: Record<string, QuestionRequest[]> = {}
         const current = getState()
-        for (const sessionID of Object.keys(current.question ?? {})) {
-          if (!grouped[sessionID]) question[sessionID] = []
-        }
+        const merged = { ...current.question }
         for (const [sessionID, questions] of Object.entries(grouped)) {
-          question[sessionID] = questions
+          merged[sessionID] = questions
             .filter((q) => !!q?.id)
             .sort((a, b) => cmp(a.id, b.id))
         }
-        set({ question })
-      }),
-    ),
+        for (const sessionID of beforeSignatures.keys()) {
+          if (grouped[sessionID]) continue
+          const beforeSignature = beforeSignatures.get(sessionID) ?? ""
+          const currentSignature = requestSignature(current.question[sessionID])
+          if (currentSignature !== beforeSignature) continue
+          delete merged[sessionID]
+        }
+        set({ question: merged })
+    }),
+    retry(async () => {
+      const before = getState()
+      const beforeSignatures = new Map(
+        Object.entries(before.permission ?? {}).map(([sessionID, permissions]) => [sessionID, requestSignature(permissions)]),
+      )
+      const x = await sdk.permission.list(directory ? { directory } : undefined)
+        const grouped = groupBySession(
+          (x.data ?? []).filter((perm): perm is PermissionRequest => !!perm?.id && !!perm?.sessionID),
+        )
+        const current = getState()
+        const merged = { ...current.permission }
+        for (const [sessionID, perms] of Object.entries(grouped)) {
+          merged[sessionID] = perms
+            .filter((p) => !!p?.id)
+            .sort((a, b) => cmp(a.id, b.id))
+        }
+        for (const sessionID of beforeSignatures.keys()) {
+          if (grouped[sessionID]) continue
+          const beforeSignature = beforeSignatures.get(sessionID) ?? ""
+          const currentSignature = requestSignature(current.permission[sessionID])
+          if (currentSignature !== beforeSignature) continue
+          delete merged[sessionID]
+        }
+        set({ permission: merged })
+    }),
   ])
 
   const errors = results

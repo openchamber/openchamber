@@ -1,6 +1,24 @@
 import { projectTurnIndexes } from './projectTurnIndexes';
 import type { TurnProjectionResult, TurnRecord } from './types';
 
+const areTurnMessagesReferenceStable = (previousTurn: TurnRecord, nextTurn: TurnRecord): boolean => {
+    if (previousTurn.userMessage !== nextTurn.userMessage) {
+        return false;
+    }
+
+    if (previousTurn.assistantMessages.length !== nextTurn.assistantMessages.length) {
+        return false;
+    }
+
+    for (let index = 0; index < previousTurn.assistantMessages.length; index += 1) {
+        if (previousTurn.assistantMessages[index] !== nextTurn.assistantMessages[index]) {
+            return false;
+        }
+    }
+
+    return true;
+};
+
 const buildTurnSignature = (turn: TurnRecord): string => {
     const assistantIds = turn.assistantMessageIds.join(',');
     return [
@@ -37,6 +55,10 @@ export const stabilizeTurnProjection = (
         }
 
         if (buildTurnSignature(previousTurn) !== buildTurnSignature(turn)) {
+            return turn;
+        }
+
+        if (!areTurnMessagesReferenceStable(previousTurn, turn)) {
             return turn;
         }
 

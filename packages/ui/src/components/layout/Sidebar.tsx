@@ -2,7 +2,6 @@ import React from 'react';
 import { cn } from '@/lib/utils';
 import { ErrorBoundary } from '../ui/ErrorBoundary';
 import { useUIStore } from '@/stores/useUIStore';
-import { isDesktopShell } from '@/lib/desktop';
 
 export const SIDEBAR_CONTENT_WIDTH = 250;
 const SIDEBAR_MIN_WIDTH = 250;
@@ -18,7 +17,6 @@ interface SidebarProps {
 export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, className }) => {
     const sidebarWidth = useUIStore((state) => state.sidebarWidth);
     const setSidebarWidth = useUIStore((state) => state.setSidebarWidth);
-    const isDesktopApp = React.useMemo(() => isDesktopShell(), []);
     const [isResizing, setIsResizing] = React.useState(false);
     const startXRef = React.useRef(0);
     const startWidthRef = React.useRef(sidebarWidth || SIDEBAR_CONTENT_WIDTH);
@@ -119,9 +117,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
             ref={sidebarRef}
             className={cn(
                 'relative flex h-full overflow-hidden border-r border-border/40',
-                isDesktopApp
-                    ? 'bg-[color:var(--sidebar-overlay-strong)] backdrop-blur supports-[backdrop-filter]:bg-[color:var(--sidebar-overlay-soft)]'
-                    : 'bg-sidebar',
+                'bg-sidebar',
                 isResizing ? 'transition-none' : 'transition-[width] duration-300 ease-in-out',
                 !isOpen && 'border-r-0',
                 className,

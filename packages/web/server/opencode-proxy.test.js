@@ -80,4 +80,39 @@ describe('OpenCode proxy SSE forwarding', () => {
     expect(await response.text()).toBe('data: {"ok":true}\n\n');
     expect(seenAuthorization).toBe('Bearer test-token');
   });
+
+  it('routes generic API requests through external OpenCode base URL', async () => {
+    const upstream = express();
+    upstream.get('/config/providers', (_req, res) => {
+      res.json({ ok: true, source: 'external-host' });
+    });
+    upstreamServer = await listen(upstream);
+    const upstreamPort = upstreamServer.address().port;
+    const externalBaseUrl = `http://127.0.0.1:${upstreamPort}`;
+
+    const app = express();
+    registerOpenCodeProxy(app, {
+      fs: {},
+      os: {},
+      path,
+      OPEN_CODE_READY_GRACE_MS: 0,
+      getRuntime: () => ({
+        openCodePort: 3902,
+        openCodeBaseUrl: externalBaseUrl,
+        isOpenCodeReady: true,
+        openCodeNotReadySince: 0,
+        isRestartingOpenCode: false,
+      }),
+      getOpenCodeAuthHeaders: () => ({}),
+      buildOpenCodeUrl: (requestPath) => `${externalBaseUrl}${requestPath}`,
+      ensureOpenCodeApiPrefix: () => {},
+    });
+    proxyServer = await listen(app);
+    const proxyPort = proxyServer.address().port;
+
+    const response = await fetch(`http://127.0.0.1:${proxyPort}/api/config/providers`);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, source: 'external-host' });
+  });
 });

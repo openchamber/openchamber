@@ -31,6 +31,45 @@ export const registerOpenCodeProxy = (app, deps) => {
   app.set('opencodeProxyConfigured', true);
 
   const isAbortError = (error) => error?.name === 'AbortError';
+  const FALLBACK_PROXY_TARGET = 'http://127.0.0.1:3902';
+
+  const normalizeProxyTarget = (candidate) => {
+    if (typeof candidate !== 'string') {
+      return null;
+    }
+
+    const trimmed = candidate.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    return trimmed.replace(/\/+$/, '');
+  };
+
+  // Keep generic proxy requests on the same upstream base URL that health checks
+  // and direct fetch helpers use. This avoids split-brain state where /health
+  // succeeds against an external host but /api/* still proxies to 127.0.0.1.
+  const resolveProxyTarget = () => {
+    try {
+      const resolved = normalizeProxyTarget(buildOpenCodeUrl('/', ''));
+      if (resolved) {
+        return resolved;
+      }
+    } catch {
+    }
+
+    const runtimeState = getRuntime();
+    const externalBase = normalizeProxyTarget(runtimeState.openCodeBaseUrl);
+    if (externalBase) {
+      return externalBase;
+    }
+
+    if (runtimeState.openCodePort) {
+      return `http://localhost:${runtimeState.openCodePort}`;
+    }
+
+    return FALLBACK_PROXY_TARGET;
+  };
 
   const forwardSseRequest = async (req, res) => {
     const abortController = new AbortController();
@@ -77,6 +116,12 @@ export const registerOpenCodeProxy = (app, deps) => {
       res.setHeader('X-Accel-Buffering', 'no');
       if (typeof res.flushHeaders === 'function') {
         res.flushHeaders();
+      }
+
+      // Disable TCP Nagle's algorithm so small SSE chunks are sent immediately
+      // instead of being buffered up to ~200ms by the TCP stack.
+      if (res.socket && typeof res.socket.setNoDelay === 'function') {
+        res.socket.setNoDelay(true);
       }
 
       reader = upstream.body.getReader();
@@ -233,14 +278,11 @@ export const registerOpenCodeProxy = (app, deps) => {
 
   // Generic proxy for non-SSE OpenCode API routes.
   const apiProxy = createProxyMiddleware({
-    target: `http://127.0.0.1:${runtime.openCodePort || 3902}`,
+    target: resolveProxyTarget(),
     changeOrigin: true,
     pathRewrite: { '^/api': '' },
     // Dynamic target — port can change after restart
-    router: () => {
-      const rt = getRuntime();
-      return `http://127.0.0.1:${rt.openCodePort || 3902}`;
-    },
+    router: () => resolveProxyTarget(),
     on: {
       proxyReq: (proxyReq) => {
         // Inject OpenCode auth headers

@@ -82,9 +82,6 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
       localStorage.removeItem('openchamber.pwaName');
     }
   }
-  if (typeof settings.desktopVibrancy === 'boolean') {
-    localStorage.setItem('desktopVibrancy', String(settings.desktopVibrancy));
-  }
 };
 
 type PersistApi = {
@@ -451,6 +448,12 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
     && (settings.diffViewMode === 'single' || settings.diffViewMode === 'stacked')) {
     if (settings.diffViewMode !== store.diffViewMode) {
       store.setDiffViewMode(settings.diffViewMode);
+    }
+  }
+  if (typeof settings.gitChangesViewMode === 'string'
+    && (settings.gitChangesViewMode === 'flat' || settings.gitChangesViewMode === 'tree')) {
+    if (settings.gitChangesViewMode !== store.gitChangesViewMode) {
+      store.setGitChangesViewMode(settings.gitChangesViewMode);
     }
   }
   if (typeof settings.directoryShowHidden === 'boolean') {
@@ -834,6 +837,12 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
     && (candidate.diffViewMode === 'single' || candidate.diffViewMode === 'stacked')
   ) {
     result.diffViewMode = candidate.diffViewMode;
+  }
+  if (
+    typeof candidate.gitChangesViewMode === 'string'
+    && (candidate.gitChangesViewMode === 'flat' || candidate.gitChangesViewMode === 'tree')
+  ) {
+    result.gitChangesViewMode = candidate.gitChangesViewMode;
   }
   if (typeof candidate.directoryShowHidden === 'boolean') {
     result.directoryShowHidden = candidate.directoryShowHidden;

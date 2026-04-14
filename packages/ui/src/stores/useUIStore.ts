@@ -524,6 +524,7 @@ interface UIStore {
   diffFileLayout: Record<string, 'inline' | 'side-by-side'>;
   diffWrapLines: boolean;
   diffViewMode: 'single' | 'stacked';
+  gitChangesViewMode: 'flat' | 'tree';
   isTimelineDialogOpen: boolean;
   isImagePreviewOpen: boolean;
   nativeNotificationsEnabled: boolean;
@@ -645,6 +646,7 @@ interface UIStore {
   setDiffFileLayout: (filePath: string, mode: 'inline' | 'side-by-side') => void;
   setDiffWrapLines: (wrap: boolean) => void;
   setDiffViewMode: (mode: 'single' | 'stacked') => void;
+  setGitChangesViewMode: (mode: 'flat' | 'tree') => void;
   setMultiRunLauncherOpen: (open: boolean) => void;
   setTimelineDialogOpen: (open: boolean) => void;
   setImagePreviewOpen: (open: boolean) => void;
@@ -751,6 +753,7 @@ export const useUIStore = create<UIStore>()(
         diffFileLayout: {},
         diffWrapLines: false,
         diffViewMode: 'stacked',
+        gitChangesViewMode: 'flat',
         isTimelineDialogOpen: false,
         isImagePreviewOpen: false,
         nativeNotificationsEnabled: false,
@@ -1431,6 +1434,10 @@ export const useUIStore = create<UIStore>()(
         setDiffViewMode: (mode) => {
           set({ diffViewMode: mode });
         },
+
+        setGitChangesViewMode: (mode) => {
+          set({ gitChangesViewMode: mode });
+        },
  
         setInputBarOffset: (offset) => {
           set({ inputBarOffset: offset });
@@ -1746,7 +1753,7 @@ export const useUIStore = create<UIStore>()(
       {
         name: 'ui-store',
         storage: createJSONStorage(() => getSafeStorage()),
-        version: 7,
+        version: 8,
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {
             return persistedState;
@@ -1815,6 +1822,12 @@ export const useUIStore = create<UIStore>()(
             state.contextPanelByDirectory = sanitizeContextPanelByDirectory(state.contextPanelByDirectory);
           }
 
+          if (version < 8) {
+            if (state.gitChangesViewMode !== 'flat' && state.gitChangesViewMode !== 'tree') {
+              state.gitChangesViewMode = 'flat';
+            }
+          }
+
           return state;
         },
         partialize: (state) => ({
@@ -1859,6 +1872,7 @@ export const useUIStore = create<UIStore>()(
           diffLayoutPreference: state.diffLayoutPreference,
           diffWrapLines: state.diffWrapLines,
           diffViewMode: state.diffViewMode,
+          gitChangesViewMode: state.gitChangesViewMode,
           nativeNotificationsEnabled: state.nativeNotificationsEnabled,
           notificationMode: state.notificationMode,
           showTerminalQuickKeysOnDesktop: state.showTerminalQuickKeysOnDesktop,

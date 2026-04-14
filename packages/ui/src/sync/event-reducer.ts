@@ -1,6 +1,5 @@
 import type {
   Event,
-  FileDiff,
   Message,
   Part,
   PermissionRequest,
@@ -11,9 +10,10 @@ import type {
   Todo,
 } from "@opencode-ai/sdk/v2/client"
 import { Binary } from "./binary"
-import type { GlobalState, State } from "./types"
+import type { FileDiff, GlobalState, State } from "./types"
 import { dropSessionCaches } from "./session-cache"
 import { stripSessionDiffSnapshots } from "./sanitize"
+import { syncDebug } from "./debug"
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
 
@@ -133,6 +133,18 @@ export function applyDirectoryEvent(
       return true
     }
 
+    case "session.idle": {
+      const props = event.properties as { sessionID: string }
+      draft.session_status[props.sessionID] = { type: "idle" }
+      return true
+    }
+
+    case "session.error": {
+      const props = event.properties as { sessionID: string }
+      draft.session_status[props.sessionID] = { type: "idle" }
+      return true
+    }
+
     case "message.updated": {
       const info = (event.properties as { info: Message }).info
       const messages = draft.message[info.sessionID]
@@ -148,6 +160,7 @@ export function applyDirectoryEvent(
           && (existing as { finish?: unknown }).finish === (info as { finish?: unknown }).finish
           && (existing.time as { completed?: number })?.completed === (info.time as { completed?: number })?.completed
         if (unchanged) {
+          syncDebug.reducer.messageUpdatedUnchanged(info.sessionID, info.id, info.role, (info as { finish?: unknown }).finish, (info.time as { completed?: number })?.completed)
           return false
         }
         const next = [...messages]
@@ -178,10 +191,14 @@ export function applyDirectoryEvent(
 
     case "message.part.updated": {
       const part = (event.properties as { part: Part }).part
-      if (SKIP_PARTS.has(part.type)) return false
+      if (SKIP_PARTS.has(part.type)) {
+        syncDebug.reducer.partSkipped((part as { messageID: string }).messageID, part.id, part.type)
+        return false
+      }
       const messageID = (part as { messageID: string }).messageID
       const parts = draft.part[messageID]
       if (!parts) {
+        syncDebug.reducer.partUpdatedNoExistingParts(messageID, part.id, part.type)
         draft.part[messageID] = [part]
         return true
       }
@@ -234,9 +251,15 @@ export function applyDirectoryEvent(
         delta: string
       }
       const parts = draft.part[props.messageID]
-      if (!parts) return false
+      if (!parts) {
+        syncDebug.reducer.partDeltaNoParts(props.messageID, props.partID)
+        return false
+      }
       const result = Binary.search(parts, props.partID, (p) => p.id)
-      if (!result.found) return false
+      if (!result.found) {
+        syncDebug.reducer.partDeltaNotFound(props.messageID, props.partID)
+        return false
+      }
       const existing = parts[result.index] as Record<string, unknown>
       const existingValue = existing[props.field] as string | undefined
       // Create new Part object + new array so React detects the change

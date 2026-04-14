@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/schema.json",
   "productName": "OpenChamber",
-  "version": "1.9.3",
+  "version": "1.9.4",
   "identifier": "ai.opencode.openchamber",
   "build": {
     "beforeDevCommand": "node ./scripts/dev-web-server.mjs",
@@ -15,7 +15,6 @@
         "label": "main",
         "create": false,
         "title": "OpenChamber",
-        "transparent": true,
         "width": 1280,
         "height": 800,
         "resizable": true,

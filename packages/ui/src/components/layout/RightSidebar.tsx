@@ -1,7 +1,7 @@
 import React from 'react';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
-import { isDesktopShell } from '@/lib/desktop';
+import { isDesktopShell, startDesktopWindowDrag } from '@/lib/desktop';
 
 export const RIGHT_SIDEBAR_CONTENT_WIDTH = 420;
 const RIGHT_SIDEBAR_MIN_WIDTH = 400;
@@ -123,13 +123,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ isOpen, children, cl
       return;
     }
 
-    try {
-      const { getCurrentWindow } = await import('@tauri-apps/api/window');
-      const appWindow = getCurrentWindow();
-      await appWindow.startDragging();
-    } catch (error) {
-      console.error('Failed to start window dragging:', error);
-    }
+    await startDesktopWindowDrag();
   }, [isDesktopApp]);
 
   return (
@@ -137,9 +131,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ isOpen, children, cl
       ref={sidebarRef}
       className={cn(
         'relative flex h-full overflow-hidden border-l border-border/40',
-        isOpen
-          ? 'bg-[color:var(--sidebar-overlay-strong)] backdrop-blur supports-[backdrop-filter]:bg-[color:var(--sidebar-overlay-soft)]'
-          : 'bg-sidebar',
+        'bg-sidebar',
         isResizing ? 'transition-none' : 'transition-[width] duration-300 ease-in-out',
         !isOpen && 'border-l-0',
         className,

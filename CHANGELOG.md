@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.9.4] - 2026-04-07
+
+- Settings/Magic Prompts: added a dedicated Magic Prompts page with editable templates for commit/PR generation, PR and issue reviews, failed-check/comment analysis, and merge/cherry-pick conflict resolution.
+- Chat/Performance: reduced streaming render churn across the app, so long responses stay smoother with less UI jitter during active runs.
+- Chat/Scrolling: fixed jumpy follow behavior and restored stable bottom-resume/live-compaction updates, so staying on the latest output is more reliable.
+- Reliability/Streaming: improved reconnect, retry, and directory-aware event routing to reduce stuck session/subagent states after transient disconnects (thanks to @jwcrystal, @daveotero).
+- Chat/Tool Output: LSP diagnostics now render directly in tool output, making inline error review faster while iterating (thanks to @yulia-ivashko).
+- Models: added defensive handling for missing model pricing/capability metadata so model controls fail less often with incomplete provider data (thanks to @Chi-square-test).
+- Desktop/Performance: removed costly window translucency and reduced duplicate notification triggers for a cooler, less noisy desktop experience.
+- Startup/Remote: restored remote provider startup behavior and tightened host/port detection to reduce false startup failures.
+- Usage: refreshed MiniMax CN coding-plan quota data for more accurate usage reporting (thanks to @nzlov).
 
 ## [1.9.3] - 2026-03-01
 

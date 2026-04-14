@@ -6,7 +6,15 @@ import { handleFsBridgeMessage } from './bridge-fs-runtime';
 import { handleConfigBridgeMessage } from './bridge-config-runtime';
 import { handleSystemBridgeMessage } from './bridge-system-runtime';
 import { handleProxyBridgeMessage } from './bridge-proxy-runtime';
-import { fetchOpenCodeSkillsFromApi, persistSettings, readSettings } from './bridge-settings-runtime';
+import {
+  fetchOpenCodeSkillsFromApi,
+  persistSettings,
+  readSettings,
+  readMagicPromptOverrides,
+  saveMagicPromptOverride,
+  resetMagicPromptOverride,
+  resetAllMagicPromptOverrides,
+} from './bridge-settings-runtime';
 import { execGit } from './bridge-git-process-runtime';
 import {
   parseDroppedFileReference,
@@ -89,6 +97,10 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
       {
         readSettings,
         persistSettings,
+        readMagicPromptOverrides,
+        saveMagicPromptOverride,
+        resetMagicPromptOverride,
+        resetAllMagicPromptOverrides,
         fetchOpenCodeSkillsFromApi,
         clientReloadDelayMs: CLIENT_RELOAD_DELAY_MS,
       },

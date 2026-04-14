@@ -9,6 +9,7 @@ import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useSkillsCatalogStore } from '@/stores/useSkillsCatalogStore';
 import {
   RiAiAgentLine,
+  RiAiGenerate2,
   RiArrowLeftSLine,
   RiBarChart2Line,
   RiBookLine,
@@ -22,9 +23,9 @@ import {
   RiGitBranchLine,
   RiGlobalLine,
   RiMicLine,
+  RiListUnordered,
   RiNotification3Line,
   RiPaletteLine,
-  RiListUnordered,
   RiRobot2Line,
   RiRestartLine,
   RiServerLine,
@@ -48,6 +49,8 @@ import { ProvidersSidebar } from '@/components/sections/providers/ProvidersSideb
 import { ProvidersPage } from '@/components/sections/providers/ProvidersPage';
 import { UsageSidebar } from '@/components/sections/usage/UsageSidebar';
 import { UsagePage } from '@/components/sections/usage/UsagePage';
+import { MagicPromptsSidebar } from '@/components/sections/magic-prompts/MagicPromptsSidebar';
+import { MagicPromptsPage } from '@/components/sections/magic-prompts/MagicPromptsPage';
 import { GitPage } from '@/components/sections/git-identities/GitPage';
 import type { OpenChamberSection } from '@/components/sections/openchamber/types';
 import { OpenChamberPage } from '@/components/sections/openchamber/OpenChamberPage';
@@ -86,6 +89,7 @@ const pageOrder: SettingsPageSlug[] = [
   'sessions',
   'shortcuts',
   'git',
+  'magic-prompts',
   'projects',
   'remote-instances',
   'agents',
@@ -122,6 +126,8 @@ function getSettingsNavIcon(slug: SettingsPageSlug): React.ComponentType<{ class
       return RiPaletteLine;
     case 'chat':
       return RiChatAi3Line;
+    case 'magic-prompts':
+      return RiAiGenerate2;
     case 'notifications':
       return RiNotification3Line;
     case 'shortcuts':
@@ -404,6 +410,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return <ProvidersSidebar onItemSelect={opts.onItemSelect} />;
       case 'usage':
         return <UsageSidebar onItemSelect={opts.onItemSelect} />;
+      case 'magic-prompts':
+        return <MagicPromptsSidebar onItemSelect={opts.onItemSelect} />;
       default:
         return null;
     }
@@ -436,6 +444,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return <ProvidersPage />;
       case 'usage':
         return <UsagePage />;
+      case 'magic-prompts':
+        return <MagicPromptsPage />;
       case 'git':
         return <GitPage />;
       case 'appearance':
@@ -648,7 +658,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         <div
           className={cn(
             'flex items-center gap-2 px-3 py-2 border-b',
-            'bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80'
+            'bg-background'
           )}
           style={{ borderColor: 'var(--interactive-border)' }}
         >
@@ -730,7 +740,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
               className={cn(
                 'relative flex h-full min-h-0 flex-col overflow-hidden border-r',
                 isDesktopApp
-                  ? 'bg-[color:var(--sidebar-overlay-strong)] supports-[backdrop-filter]:bg-[color:var(--sidebar-overlay-soft)]'
+                  ? 'bg-sidebar'
                   : runtimeCtx.isVSCode
                     ? 'bg-background'
                     : 'bg-sidebar',

@@ -135,27 +135,10 @@
     overscroll-behavior-y: none;
   }
 
-  :root.desktop-runtime:not(.no-vibrancy) body,
-  :root.desktop-runtime:not(.no-vibrancy) #root {
-    background: transparent !important;
-    background-color: transparent !important;
-  }
-
-  :root.desktop-runtime.no-vibrancy body,
-  :root.desktop-runtime.no-vibrancy #root {
+  :root.desktop-runtime body,
+  :root.desktop-runtime #root {
     background: var(--background) !important;
     background-color: var(--background) !important;
-  }
-
-  /* When vibrancy is off, force sidebar overlays to solid and disable blur. */
-  :root.desktop-runtime.no-vibrancy {
-    --sidebar-overlay-strong: var(--sidebar) !important;
-    --sidebar-overlay-soft: var(--sidebar) !important;
-  }
-
-  :root.desktop-runtime.no-vibrancy .backdrop-blur {
-    -webkit-backdrop-filter: none !important;
-    backdrop-filter: none !important;
   }
 
   .font-sans {
@@ -166,6 +149,36 @@
   code,
   pre {
     font-family: var(--font-mono, ui-monospace, SFMono-Regular, 'Liberation Mono', Menlo, monospace) !important;
+  }
+
+  /* Restore default list styling inside markdown content - override Tailwind preflight */
+  .markdown-content ul,
+  .markdown-content ol {
+    padding-left: 2em !important;
+  }
+
+  .markdown-content ul {
+    list-style-type: none !important;
+  }
+
+  .markdown-content ul > li {
+    position: relative;
+  }
+
+  .markdown-content ul > li::before {
+    content: "–";
+    position: absolute;
+    left: -1.25em;
+    color: inherit;
+  }
+
+  .markdown-content ol {
+    list-style-type: decimal !important;
+    list-style-position: outside !important;
+  }
+
+  .markdown-content li {
+    display: list-item !important;
   }
 
   /* Remove focus rings globally (except inputs/textareas/dropdowns/selects) */

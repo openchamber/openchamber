@@ -2214,7 +2214,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     }
 
     return (
-      <div className="pointer-events-auto flex items-center gap-1 rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)]/95 p-1 shadow-sm backdrop-blur-sm">
+      <div className="pointer-events-auto flex items-center gap-1 rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)] p-1 shadow-sm">
         {canEdit && textViewMode === 'edit' && (
           isSaving ? (
             <span className="flex items-center gap-1 px-1 text-muted-foreground typography-meta">

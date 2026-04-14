@@ -2,10 +2,10 @@
 import React from 'react';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { RiArrowDownSLine, RiArrowRightSLine, RiExternalLinkLine } from '@remixicon/react';
-import { File as PierreFile, PatchDiff } from '@pierre/diffs/react';
+import { PatchDiff } from '@pierre/diffs/react';
 import { cn } from '@/lib/utils';
 import { SimpleMarkdownRenderer } from '../../MarkdownRenderer';
-import { getToolMetadata, getLanguageFromExtension, isImageFile, getImageMimeType } from '@/lib/toolHelpers';
+import { getToolMetadata } from '@/lib/toolHelpers';
 import type { ToolPart as ToolPartType, ToolState as ToolStateUnion } from '@opencode-ai/sdk/v2';
 import { toolDisplayStyles } from '@/lib/typography';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -40,6 +40,7 @@ import { ToolRevealOnMount } from './ToolRevealOnMount';
 import { getToolIcon } from './toolPresentation';
 import { useDurationTickerNow } from './useDurationTicker';
 import { resolveFallbackTaskSessionId } from './resolveFallbackTaskSessionId';
+import { areRenderRelevantPartsEqual } from '../renderCompare';
 
 type ToolStateWithMetadata = ToolStateUnion & { metadata?: Record<string, unknown>; input?: Record<string, unknown>; output?: string; error?: string; time?: { start: number; end?: number } };
 
@@ -160,6 +161,7 @@ const TASK_TOOL_ACTIVE_FETCH_LIMIT = 160;
 const TASK_TOOL_IDLE_FETCH_LIMIT = 80;
 const TASK_TOOL_NO_CHANGE_BACKOFF_AFTER_POLLS = 3;
 const TASK_TOOL_SETTLE_GRACE_MS = 2500;
+const TASK_TOOL_FALLBACK_RETRY_MS = 3000;
 const GIT_REFRESH_MUTATING_TOOLS = new Set([
     'bash',
     'edit',
@@ -184,9 +186,11 @@ const LiveDuration: React.FC<{ start: number; end?: number; active: boolean }> =
 };
 
 const parseDiffStats = (metadata?: Record<string, unknown>): { added: number; removed: number } | null => {
-    if (!metadata?.diff || typeof metadata.diff !== 'string') return null;
+    const diffText = getPatchText((metadata as { patch?: unknown } | undefined)?.patch)
+        ?? getPatchText(metadata?.diff);
+    if (!diffText) return null;
 
-    const lines = metadata.diff.split('\n');
+    const lines = diffText.split('\n');
     let added = 0;
     let removed = 0;
 
@@ -253,22 +257,67 @@ const extractFirstChangedLineFromDiff = (diffText: string): number | undefined =
     return firstHunkStart;
 };
 
+const getPatchText = (value: unknown): string | undefined => {
+    if (typeof value === 'string') {
+        const trimmed = value.trim();
+        return trimmed.length > 0 ? trimmed : undefined;
+    }
+
+    if (value && typeof value === 'object') {
+        const patch = (value as { patch?: unknown }).patch;
+        if (typeof patch === 'string') {
+            const trimmed = patch.trim();
+            return trimmed.length > 0 ? trimmed : undefined;
+        }
+    }
+
+    return undefined;
+};
+
+const buildWritePreviewPatch = (filePath: string | undefined, content: string): string | undefined => {
+    const normalizedContent = content.replace(/\r\n/g, '\n');
+    if (!normalizedContent.trim()) {
+        return undefined;
+    }
+
+    const normalizedPath = (() => {
+        const candidate = (filePath ?? '').trim();
+        if (!candidate) {
+            return 'new-file';
+        }
+        return candidate.startsWith('/') ? candidate.slice(1) : candidate;
+    })();
+
+    const lines = normalizedContent.split('\n');
+    const hunkSize = lines.length;
+    const body = lines.map((line) => `+${line}`).join('\n');
+
+    return [
+        '--- /dev/null',
+        `+++ b/${normalizedPath}`,
+        `@@ -0,0 +1,${hunkSize} @@`,
+        body,
+    ].join('\n');
+};
+
 const getFirstChangedLineFromMetadata = (tool: string, metadata?: Record<string, unknown>): number | undefined => {
     if (!metadata || (tool !== 'edit' && tool !== 'multiedit' && tool !== 'apply_patch')) {
         return undefined;
     }
 
-    if (typeof metadata.diff === 'string') {
-        const line = extractFirstChangedLineFromDiff(metadata.diff);
+    const topLevelPatch = getPatchText((metadata as { patch?: unknown }).patch) ?? getPatchText(metadata.diff);
+    if (topLevelPatch) {
+        const line = extractFirstChangedLineFromDiff(topLevelPatch);
         if (Number.isFinite(line)) {
             return line;
         }
     }
 
     const files = Array.isArray(metadata.files) ? metadata.files : [];
-    const firstFile = files[0] as { diff?: unknown } | undefined;
-    if (typeof firstFile?.diff === 'string') {
-        const line = extractFirstChangedLineFromDiff(firstFile.diff);
+    const firstFile = files[0] as { patch?: unknown; diff?: unknown } | undefined;
+    const filePatch = getPatchText(firstFile?.patch) ?? getPatchText(firstFile?.diff);
+    if (filePatch) {
+        const line = extractFirstChangedLineFromDiff(filePatch);
         if (Number.isFinite(line)) {
             return line;
         }
@@ -302,15 +351,17 @@ const getPrimaryDiffFromMetadata = (
             : files[0];
 
         if (matched && typeof matched === 'object') {
-            const patch = (matched as { diff?: unknown }).diff;
-            if (typeof patch === 'string' && patch.trim().length > 0) {
+            const patch = getPatchText((matched as { patch?: unknown; diff?: unknown }).patch)
+                ?? getPatchText((matched as { patch?: unknown; diff?: unknown }).diff);
+            if (patch) {
                 return patch;
             }
         }
     }
 
-    if (typeof metadata.diff === 'string' && metadata.diff.trim().length > 0) {
-        return metadata.diff;
+    const topLevelPatch = getPatchText((metadata as { patch?: unknown }).patch) ?? getPatchText(metadata.diff);
+    if (topLevelPatch) {
+        return topLevelPatch;
     }
 
     return undefined;
@@ -1279,8 +1330,8 @@ const getDiffPatchEntries = (
                 return null;
             }
 
-            const record = file as { relativePath?: unknown; filePath?: unknown; diff?: unknown };
-            const patch = typeof record.diff === 'string' ? record.diff.trim() : '';
+            const record = file as { relativePath?: unknown; filePath?: unknown; patch?: unknown; diff?: unknown };
+            const patch = getPatchText(record.patch) ?? getPatchText(record.diff) ?? '';
             if (!patch) {
                 return null;
             }
@@ -1343,97 +1394,6 @@ const DiffPreview: React.FC<DiffPreviewProps> = React.memo(({ diff, pierreTheme,
 
 DiffPreview.displayName = 'DiffPreview';
 
-interface WriteInputPreviewProps {
-    content: string;
-    filePath?: string;
-    displayPath: string;
-    pierreTheme: { light: string; dark: string };
-    pierreThemeType: 'light' | 'dark';
-}
-
-const WriteInputPreview: React.FC<WriteInputPreviewProps> = React.memo(({
-    content,
-    filePath,
-    displayPath,
-    pierreTheme,
-    pierreThemeType,
-}) => {
-    const language = React.useMemo(
-        () => getLanguageFromExtension(filePath ?? '') || detectLanguageFromOutput(content, 'write', filePath ? { filePath } : undefined),
-        [content, filePath]
-    );
-
-    const lineCount = Math.max(content.split('\n').length, 1);
-    const headerLineLabel = lineCount === 1 ? 'line 1' : `lines 1-${lineCount}`;
-
-    return (
-        <div className="w-full min-w-0">
-            <div className="bg-muted/20 px-2 py-1 rounded-lg mb-1 flex items-center gap-2 min-w-0">
-                {renderPathLikeGitChanges(displayPath)}
-                <span className="typography-meta text-muted-foreground/80 flex-shrink-0">({headerLineLabel})</span>
-            </div>
-            <PierreFile
-                file={{
-                    name: displayPath,
-                    contents: content,
-                    lang: language || undefined,
-                }}
-                options={{
-                    disableFileHeader: true,
-                    overflow: 'wrap',
-                    theme: pierreTheme,
-                    themeType: pierreThemeType,
-                }}
-                className="block w-full"
-            />
-        </div>
-    );
-});
-
-WriteInputPreview.displayName = 'WriteInputPreview';
-
-interface ImagePreviewProps {
-    content: string;
-    filePath: string;
-    displayPath: string;
-}
-
-const ImagePreview: React.FC<ImagePreviewProps> = React.memo(({ content, filePath, displayPath }) => {
-    const mimeType = getImageMimeType(filePath);
-    const isSvg = filePath.toLowerCase().endsWith('.svg');
-
-    // For SVG, content might be raw XML, otherwise assume base64
-    const imageSrc = React.useMemo(() => {
-        if (isSvg && !content.startsWith('data:')) {
-            // Raw SVG content
-            return `data:image/svg+xml;base64,${btoa(content)}`;
-        }
-        if (content.startsWith('data:')) {
-            return content;
-        }
-        // Assume base64 encoded
-        return `data:${mimeType};base64,${content}`;
-    }, [content, mimeType, isSvg]);
-
-    return (
-        <div className="w-full min-w-0">
-            <div className="bg-muted/20 px-2 py-1 rounded-lg mb-2 flex items-center min-w-0">
-                {renderPathLikeGitChanges(displayPath)}
-            </div>
-            <div className="flex justify-center p-4 bg-muted/10 rounded-lg">
-                <img
-                    src={imageSrc}
-                    alt={displayPath}
-                    className="max-w-full max-h-96 object-contain rounded"
-                    style={{ imageRendering: 'auto' }}
-                />
-            </div>
-        </div>
-    );
-});
-
-ImagePreview.displayName = 'ImagePreview';
-
 interface ToolExpandedContentProps {
     part: ToolPartType;
     state: ToolStateUnion;
@@ -1458,32 +1418,16 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     const hasStringOutput = typeof rawOutput === 'string' && rawOutput.length > 0;
     const outputString = typeof rawOutput === 'string' ? rawOutput : '';
 
-    const diffContent = typeof metadata?.diff === 'string' ? (metadata.diff as string) : null;
+    const diffContent = getPatchText((metadata as { patch?: unknown } | undefined)?.patch)
+        ?? getPatchText(metadata?.diff)
+        ?? null;
     const diffEntries = React.useMemo(
         () => (diffContent ? getDiffPatchEntries(metadata, diffContent, currentDirectory) : []),
         [currentDirectory, diffContent, metadata]
     );
-    const writeFilePath = part.tool === 'write'
-        ? typeof input?.filePath === 'string'
-            ? input.filePath
-            : typeof input?.file_path === 'string'
-                ? input.file_path
-                : typeof input?.path === 'string'
-                    ? input.path
-                    : undefined
-        : undefined;
-    const writeInputContent = part.tool === 'write'
-        ? typeof (input as { content?: unknown })?.content === 'string'
-            ? (input as { content?: string }).content
-            : typeof (input as { text?: unknown })?.text === 'string'
-                ? (input as { text?: string }).text
-                : null
-        : null;
-    const shouldShowWriteInputPreview = part.tool === 'write' && !!writeInputContent;
-    const isWriteImageFile = writeFilePath ? isImageFile(writeFilePath) : false;
-    const writeDisplayPath = shouldShowWriteInputPreview
-        ? (writeFilePath ? getRelativePath(writeFilePath, currentDirectory) : 'New file')
-        : null;
+    const hideToolInputPreview = part.tool === 'apply_patch'
+        || part.tool === 'edit'
+        || part.tool === 'multiedit';
     const diagnosticSection = React.useMemo(
         () => getToolDiagnosticSection(part.tool, input, metadata, currentDirectory),
         [currentDirectory, input, metadata, part.tool],
@@ -1504,7 +1448,21 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
 
         return formatInputForDisplay(input, part.tool);
     }, [input, part.tool]);
-    const hasInputText = part.tool !== 'apply_patch' && inputTextContent.trim().length > 0;
+    const hasInputText = !hideToolInputPreview && inputTextContent.trim().length > 0;
+    const isWriteLikeTool = part.tool === 'write' || part.tool === 'create' || part.tool === 'file_write';
+    const writeLikeInputPatch = React.useMemo(() => {
+        if (!isWriteLikeTool || !hasInputText) {
+            return undefined;
+        }
+        const filePath = typeof input?.filePath === 'string'
+            ? input.filePath
+            : typeof input?.file_path === 'string'
+                ? input.file_path
+                : typeof input?.path === 'string'
+                    ? input.path
+                    : undefined;
+        return buildWritePreviewPatch(filePath, inputTextContent);
+    }, [hasInputText, input?.filePath, input?.file_path, input?.path, inputTextContent, isWriteLikeTool]);
 
     React.useEffect(() => {
         setDiffViewMode('unified');
@@ -1569,7 +1527,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
             );
         };
 
-        // Question tool: show parsed Q&A summary
+        // Question tool: show parsed Q&A summary or question content from input
         if (part.tool === 'question') {
             if (state.status === 'completed' && hasStringOutput) {
                 const parsedQA = parseQuestionOutput(outputString);
@@ -1603,6 +1561,35 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                 );
             }
 
+            // Show question content from input whenever available, whether the tool is
+            // pending/running or completed without parseable output. This ensures question
+            // text persists across refreshes even if the QuestionCard store data is lost.
+            const questionInput = input as { questions?: Array<{ question?: string; header?: string; options?: Array<{ label: string; description: string }>; multiple?: boolean }> } | undefined;
+            if (questionInput?.questions && Array.isArray(questionInput.questions) && questionInput.questions.length > 0) {
+                return renderScrollableBlock(
+                    <div className="space-y-2">
+                        {questionInput.questions.map((q, index) => (
+                            <div key={index} className="space-y-0.5">
+                                {q.header ? (
+                                    <div className="typography-micro text-muted-foreground">{q.header}</div>
+                                ) : null}
+                                <div className="typography-meta text-foreground">{q.question}</div>
+                                {Array.isArray(q.options) && q.options.length > 0 ? (
+                                    <div className="flex flex-wrap gap-1 mt-0.5">
+                                        {q.options.map((opt) => (
+                                            <span key={opt.label} className="typography-micro px-1.5 py-0.5 rounded bg-muted/30 border border-border/30 text-muted-foreground">
+                                                {opt.label}
+                                            </span>
+                                        ))}
+                                    </div>
+                                ) : null}
+                            </div>
+                        ))}
+                    </div>,
+                    { maxHeightClass: 'max-h-[40vh]' }
+                );
+            }
+
             return <div className="typography-meta text-muted-foreground">Awaiting response...</div>;
         }
 
@@ -1614,7 +1601,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
             );
         }
 
-        if ((part.tool === 'edit' || part.tool === 'multiedit' || part.tool === 'apply_patch') && (diffEntries.length > 0 || !!diagnosticSection)) {
+        if ((part.tool === 'edit' || part.tool === 'multiedit' || part.tool === 'apply_patch' || part.tool === 'write') && (diffEntries.length > 0 || !!diagnosticSection)) {
             return renderScrollableBlock(
                 <div className="space-y-3">
                     {diffEntries.map((entry) => (
@@ -1645,6 +1632,10 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                 </div>,
                 { className: 'p-1' },
             );
+        }
+
+        if (isWriteLikeTool) {
+            return null;
         }
 
         if (hasStringOutput && outputString.trim()) {
@@ -1679,35 +1670,20 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                 renderResultContent()
             ) : (
                 <>
-                    {shouldShowWriteInputPreview && isWriteImageFile ? (
-                        <div className="my-1">
-                            {renderScrollableBlock(
-                                <ImagePreview
-                                    content={writeInputContent as string}
-                                    filePath={writeFilePath as string}
-                                    displayPath={writeDisplayPath ?? 'New file'}
-                                />
-                            )}
-                        </div>
-                    ) : shouldShowWriteInputPreview ? (
-                        <div className="my-1">
-                            {renderScrollableBlock(
-                                <WriteInputPreview
-                                    content={writeInputContent as string}
-                                    filePath={writeFilePath}
-                                    displayPath={writeDisplayPath ?? 'New file'}
-                                    pierreTheme={pierreTheme}
-                                    pierreThemeType={pierreThemeType}
-                                />
-                            )}
-                        </div>
-                    ) : hasInputText ? (
+                    {hasInputText ? (
                         <div className="my-1">
                             {renderScrollableBlock(
                                 part.tool === 'bash' ? (
                                     <pre className="tool-input-text whitespace-pre-wrap break-words typography-code text-muted-foreground/90 m-0 p-0">
                                         {inputTextContent}
                                     </pre>
+                                ) : isWriteLikeTool && writeLikeInputPatch ? (
+                                    <DiffPreview
+                                        diff={writeLikeInputPatch}
+                                        pierreTheme={pierreTheme}
+                                        pierreThemeType={pierreThemeType}
+                                        diffViewMode={diffViewMode}
+                                    />
                                 ) : (
                                     <blockquote className="tool-input-text whitespace-pre-wrap break-words typography-meta italic text-muted-foreground/70">
                                         {inputTextContent}
@@ -1721,9 +1697,9 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                         </div>
                     ) : null}
 
-                    {part.tool !== 'write' && state.status === 'completed' && 'output' in state && (
+                    {state.status === 'completed' && 'output' in state && (
                         <div>
-                            {(part.tool === 'edit' || part.tool === 'multiedit' || part.tool === 'apply_patch') && diffContent ? (
+                            {(part.tool === 'edit' || part.tool === 'multiedit' || part.tool === 'apply_patch' || part.tool === 'write') && diffContent ? (
                                 <div className="mb-1 flex items-center justify-end gap-2">
                                     <DiffViewToggle
                                         mode={diffViewMode}
@@ -1905,6 +1881,10 @@ const ToolPart: React.FC<ToolPartProps> = ({
         return parseTaskMetadataBlock(taskOutputString);
     }, [taskOutputString]);
 
+    // Track whether fallback session resolution has failed at least once.
+    // When true, resolveFallbackTaskSessionId widens its time window (3s → 8s).
+    const [taskFallbackRetried, setTaskFallbackRetried] = React.useState(false);
+
     const explicitTaskSessionId = React.useMemo<string | undefined>(() => {
         if (!isTaskTool) {
             return undefined;
@@ -1939,8 +1919,9 @@ const ToolPart: React.FC<ToolPartProps> = ({
                 isTaskFinalized: isFinalized,
                 sessions: storeState.session,
                 sessionStatusMap: storeState.session_status,
+                hasRetried: taskFallbackRetried,
             });
-        }, [explicitTaskSessionId, isTaskTool, currentSessionId, taskSessionResolutionStart, isFinalized]),
+        }, [explicitTaskSessionId, isTaskTool, currentSessionId, taskSessionResolutionStart, isFinalized, taskFallbackRetried]),
         currentDirectory,
     );
 
@@ -2004,16 +1985,54 @@ const ToolPart: React.FC<ToolPartProps> = ({
     const childSessionActivity = useSessionActivity(taskSessionId, currentDirectory);
     const [taskChildSeenActive, setTaskChildSeenActive] = React.useState(false);
     const [taskChildPollingStopped, setTaskChildPollingStopped] = React.useState(false);
+    const [taskPendingFinalFetch, setTaskPendingFinalFetch] = React.useState(false);
 
     const taskPollNoChangeCountRef = React.useRef(0);
     const taskPollLastSignatureRef = React.useRef<string>('');
+    const taskFinalFetchDoneRef = React.useRef(false);
 
     React.useEffect(() => {
         setTaskChildSeenActive(false);
         setTaskChildPollingStopped(false);
+        setTaskPendingFinalFetch(false);
         taskPollNoChangeCountRef.current = 0;
         taskPollLastSignatureRef.current = '';
+        taskFinalFetchDoneRef.current = false;
+        setTaskFallbackRetried(false);
     }, [taskSessionId]);
+
+    // Widen fallback resolution window only after a real retry boundary.
+    React.useEffect(() => {
+        if (!isTaskTool || taskFallbackRetried || explicitTaskSessionId != null || taskSessionId != null || isFinalized) {
+            return;
+        }
+
+        const sinceStart =
+            typeof taskSessionResolutionStart === 'number'
+                ? Date.now() - taskSessionResolutionStart
+                : 0;
+        const delay = Math.max(0, TASK_TOOL_FALLBACK_RETRY_MS - sinceStart);
+
+        if (typeof window === 'undefined') {
+            setTaskFallbackRetried(true);
+            return;
+        }
+
+        const timer = window.setTimeout(() => {
+            setTaskFallbackRetried(true);
+        }, delay);
+
+        return () => {
+            window.clearTimeout(timer);
+        };
+    }, [
+        explicitTaskSessionId,
+        isFinalized,
+        isTaskTool,
+        taskFallbackRetried,
+        taskSessionId,
+        taskSessionResolutionStart,
+    ]);
 
     React.useEffect(() => {
         if (!isTaskTool || !taskSessionId) {
@@ -2023,8 +2042,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
         const childSessionIsActive =
             childSessionActivity.phase === 'busy'
             || childSessionActivity.phase === 'retry'
-            || childSessionHasInFlightTools
-            || (!isFinalized && activeLatched);
+            || childSessionHasInFlightTools;
 
         if (childSessionIsActive) {
             if (!taskChildSeenActive) {
@@ -2033,34 +2051,126 @@ const ToolPart: React.FC<ToolPartProps> = ({
             if (taskChildPollingStopped) {
                 setTaskChildPollingStopped(false);
             }
+            if (taskPendingFinalFetch) {
+                setTaskPendingFinalFetch(false);
+            }
             return;
         }
 
-        if (!taskChildSeenActive || taskChildPollingStopped || childSessionTaskSummaryEntries.length === 0) {
+        // Always stop polling if already done.
+        if (taskChildPollingStopped && taskFinalFetchDoneRef.current) {
             return;
         }
 
-        if (typeof window === 'undefined') {
-            setTaskChildPollingStopped(true);
-            return;
+        // Normal settle path: child went idle after we saw it active, and we have entries.
+        // Schedule a grace period before marking polling as stopped.
+        if (taskChildSeenActive && childSessionTaskSummaryEntries.length > 0 && !taskChildPollingStopped) {
+            if (typeof window === 'undefined') {
+                setTaskChildPollingStopped(true);
+                return;
+            }
+
+            const timer = window.setTimeout(() => {
+                setTaskChildPollingStopped(true);
+            }, TASK_TOOL_SETTLE_GRACE_MS);
+
+            return () => {
+                window.clearTimeout(timer);
+            };
         }
 
-        const timer = window.setTimeout(() => {
-            setTaskChildPollingStopped(true);
-        }, TASK_TOOL_SETTLE_GRACE_MS);
+        // Final-fetch path: child went idle before parent saw it active, or we have no
+        // entries yet. First stop polling after the settle grace period. A separate
+        // effect performs the final fetch once polling has fully stopped, avoiding
+        // races with any in-flight polling response.
+        if (!taskChildPollingStopped && !taskFinalFetchDoneRef.current) {
+            if (typeof window === 'undefined') {
+                setTaskPendingFinalFetch(true);
+                setTaskChildPollingStopped(true);
+                return;
+            }
 
-        return () => {
-            window.clearTimeout(timer);
-        };
+            const timer = window.setTimeout(() => {
+                setTaskPendingFinalFetch(true);
+                setTaskChildPollingStopped(true);
+            }, TASK_TOOL_SETTLE_GRACE_MS);
+
+            return () => {
+                window.clearTimeout(timer);
+            };
+        }
     }, [
         childSessionActivity.phase,
         childSessionHasInFlightTools,
         childSessionTaskSummaryEntries.length,
+        currentDirectory,
         activeLatched,
         isFinalized,
         isTaskTool,
+        taskPendingFinalFetch,
         taskChildPollingStopped,
         taskChildSeenActive,
+        taskSessionId,
+    ]);
+
+    React.useEffect(() => {
+        if (!isTaskTool || !taskSessionId || !taskChildPollingStopped || !taskPendingFinalFetch || taskFinalFetchDoneRef.current) {
+            return;
+        }
+
+        let cancelled = false;
+        const capturedSessionId = taskSessionId;
+
+        const runFinalFetch = async () => {
+            try {
+                const scopedClient = opencodeClient.getScopedSdkClient(currentDirectory);
+                const response = await scopedClient.session.messages({
+                    sessionID: capturedSessionId,
+                    limit: TASK_TOOL_INITIAL_FETCH_LIMIT,
+                });
+
+                if (cancelled) {
+                    return;
+                }
+
+                const messages = response.data ?? [];
+                if (Array.isArray(messages) && messages.length > 0) {
+                    const childStores = getSyncChildStores();
+                    childStores.update(currentDirectory, (prev) => {
+                        const records = messages as SessionMessageWithParts[];
+                        const partPatch: Record<string, import('@opencode-ai/sdk/v2').Part[]> = { ...prev.part };
+                        for (const rec of records) {
+                            partPatch[rec.info.id] = rec.parts;
+                        }
+                        return {
+                            message: { ...prev.message, [capturedSessionId]: records.map((r) => r.info) as import('@opencode-ai/sdk/v2').Message[] },
+                            part: partPatch,
+                        };
+                    });
+                }
+
+                taskFinalFetchDoneRef.current = true;
+                setTaskPendingFinalFetch(false);
+            } catch {
+                if (cancelled) {
+                    return;
+                }
+
+                setTaskPendingFinalFetch(false);
+                setTaskChildPollingStopped(false);
+            }
+        };
+
+        void runFinalFetch();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [
+        currentDirectory,
+        isTaskTool,
+        taskChildPollingStopped,
+        taskPendingFinalFetch,
         taskSessionId,
     ]);
 
@@ -2105,8 +2215,8 @@ const ToolPart: React.FC<ToolPartProps> = ({
         const childSessionActive = childSessionActivity.phase === 'busy' || childSessionActivity.phase === 'retry';
         const shouldPoll =
             !taskChildPollingStopped
-            && (isActive || childSessionHasInFlightTools || childSessionActive || childSessionTaskSummaryEntries.length === 0);
-        const shouldFetchSnapshot = childSessionTaskSummaryEntries.length === 0 || shouldPoll;
+            && (childSessionHasInFlightTools || childSessionActive || childSessionTaskSummaryEntries.length === 0);
+        const shouldFetchSnapshot = !taskPendingFinalFetch && (childSessionTaskSummaryEntries.length === 0 || shouldPoll);
         if (!shouldFetchSnapshot) {
             return;
         }
@@ -2206,6 +2316,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
         currentDirectory,
         isActive,
         isTaskTool,
+        taskPendingFinalFetch,
         taskChildPollingStopped,
         taskSessionId,
     ]);
@@ -2472,4 +2583,12 @@ const ToolPart: React.FC<ToolPartProps> = ({
     );
 };
 
-export default ToolPart;
+export default React.memo(ToolPart, (prev, next) => {
+    return areRenderRelevantPartsEqual([prev.part], [next.part])
+        && prev.isExpanded === next.isExpanded
+        && prev.syntaxTheme === next.syntaxTheme
+        && prev.isMobile === next.isMobile
+        && prev.onContentChange === next.onContentChange
+        && prev.onShowPopup === next.onShowPopup
+        && prev.animateTailText === next.animateTailText;
+});

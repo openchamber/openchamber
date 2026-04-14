@@ -52,10 +52,6 @@ const setRootDeviceAttributes = (
 
   if (isTauriShellRuntime) {
     root.classList.add('desktop-runtime');
-    // Apply no-vibrancy class early so the first paint uses a solid background
-    // when vibrancy was previously disabled by the user.
-    const vibrancyOff = localStorage.getItem('desktopVibrancy') === 'false';
-    root.classList.toggle('no-vibrancy', vibrancyOff);
     root.style.setProperty('--is-mobile', '0');
     root.style.setProperty('--device-type', 'desktop');
     root.style.setProperty('--font-scale', '1');

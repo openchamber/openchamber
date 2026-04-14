@@ -137,6 +137,7 @@ export type DesktopSettings = {
   recentModels?: Array<{ providerID: string; modelID: string }>;
   diffLayoutPreference?: 'dynamic' | 'inline' | 'side-by-side';
   diffViewMode?: 'single' | 'stacked';
+  gitChangesViewMode?: 'flat' | 'tree';
   directoryShowHidden?: boolean;
   filesViewShowGitignored?: boolean;
 
@@ -147,8 +148,6 @@ export type DesktopSettings = {
   skillCatalogs?: SkillCatalogConfig[];
   // Opt-in to send anonymous usage reports for update checks (default: true)
   reportUsage?: boolean;
-  // macOS window vibrancy effect (default: true)
-  desktopVibrancy?: boolean;
 };
 
 type TauriGlobal = {
@@ -242,6 +241,21 @@ export const isDesktopShell = (): boolean => {
     return true;
   }
   return isTauriShell();
+};
+
+export const startDesktopWindowDrag = async (): Promise<boolean> => {
+  if (!isDesktopShell() || !isTauriShell()) {
+    return false;
+  }
+
+  try {
+    const { getCurrentWindow } = await import('@tauri-apps/api/window');
+    const appWindow = getCurrentWindow();
+    await appWindow.startDragging();
+    return true;
+  } catch {
+    return false;
+  }
 };
 
 export const isVSCodeRuntime = (): boolean => {
@@ -644,21 +658,6 @@ export const clearDesktopCache = async (): Promise<boolean> => {
     return true;
   } catch (error) {
     console.warn('Failed to clear cache', error);
-    return false;
-  }
-};
-
-export const desktopSetVibrancy = async (enabled: boolean): Promise<boolean> => {
-  if (!isTauriShell()) {
-    return false;
-  }
-
-  try {
-    const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
-    await tauri?.core?.invoke?.('desktop_set_vibrancy', { enabled });
-    return true;
-  } catch (error) {
-    console.warn('Failed to set vibrancy', error);
     return false;
   }
 };

@@ -61,7 +61,7 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
       const {
         checkForUpdates,
         getUpdateCommand,
-        detectPackageManager,
+        detectPackageManagerDetails,
       } = await import('../package-manager.js');
 
       const updateInfo = await checkForUpdates();
@@ -69,7 +69,8 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         return res.status(400).json({ error: 'No update available' });
       }
 
-      const pm = detectPackageManager();
+      const pmDetails = detectPackageManagerDetails();
+      const pm = pmDetails.packageManager;
       const updateCmd = getUpdateCommand(pm);
       const isContainer =
         fs.existsSync('/.dockerenv') ||
@@ -119,17 +120,16 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         return `"${stringValue.replace(/"/g, '""')}"`;
       };
 
-      const cliPath = path.resolve(__dirname, '..', '..', 'bin', 'cli.js');
+      const cliPath = path.resolve(__dirname, '..', 'bin', 'cli.js');
       const restartParts = [
         isWindows ? quoteCmd(process.execPath) : quotePosix(process.execPath),
         isWindows ? quoteCmd(cliPath) : quotePosix(cliPath),
         'serve',
         '--port',
         String(storedOptions.port),
-        '--daemon',
       ];
       let restartCmdPrimary = restartParts.join(' ');
-      let restartCmdFallback = `openchamber serve --port ${storedOptions.port} --daemon`;
+      let restartCmdFallback = `openchamber serve --port ${storedOptions.port}`;
       if (storedOptions.uiPassword) {
         if (isWindows) {
           const escapedPw = storedOptions.uiPassword.replace(/"/g, '""');
@@ -142,6 +142,22 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         }
       }
       const restartCmd = `(${restartCmdPrimary}) || (${restartCmdFallback})`;
+      const updateLogPath = path.join(openchamberDataDir, 'update-install.log');
+      const logPreamble = [
+        '',
+        `=== OpenChamber update ${new Date().toISOString()} ===`,
+        `currentVersion=${updateInfo.currentVersion || 'unknown'}`,
+        `targetVersion=${updateInfo.version || 'unknown'}`,
+        `packageManager=${pm}`,
+        `packageManagerReason=${pmDetails.reason || 'unknown'}`,
+        `packageManagerCommand=${pmDetails.packageManagerCommand || 'unknown'}`,
+        `packagePath=${pmDetails.packagePath || 'unknown'}`,
+        `globalNodeModulesRoot=${pmDetails.globalNodeModulesRoot || 'unknown'}`,
+        `mode=${isContainer ? 'container' : 'restart'}`,
+        `updateCommand=${updateCmd}`,
+        `restartCommand=${restartCmd}`,
+        `logPath=${updateLogPath}`,
+      ].join('\n');
 
       res.json({
         success: true,
@@ -151,14 +167,16 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
         autoRestart: true,
       });
 
-      setTimeout(() => {
-        console.log(`\nInstalling update using ${pm}...`);
-        console.log(`Running: ${updateCmd}`);
+        setTimeout(() => {
+          console.log(`\nInstalling update using ${pm}...`);
+          console.log(`Running: ${updateCmd}`);
+          console.log(logPreamble);
 
-        const shell = isWindows ? (process.env.ComSpec || 'cmd.exe') : 'sh';
-        const shellFlag = isWindows ? '/c' : '-c';
-        const script = isWindows
-          ? `
+          const shell = isWindows ? (process.env.ComSpec || 'cmd.exe') : 'sh';
+          const shellFlag = isWindows ? '/c' : '-c';
+          const script = isWindows
+            ? `
+            echo ${quoteCmd(logPreamble)}
             timeout /t 2 /nobreak >nul
             ${updateCmd}
             if %ERRORLEVEL% EQU 0 (
@@ -168,8 +186,9 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
               echo Update failed
               exit /b 1
             )
-          `
+            `
           : `
+            printf '%s\n' ${quotePosix(logPreamble)}
             sleep 2
             ${updateCmd}
             if [ $? -eq 0 ]; then
@@ -181,7 +200,6 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
             fi
           `;
 
-        const updateLogPath = path.join(openchamberDataDir, 'update-install.log');
         let logFd = null;
         try {
           fs.mkdirSync(path.dirname(updateLogPath), { recursive: true });

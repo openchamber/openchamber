@@ -30,7 +30,6 @@ import type { TurnGroupingContext } from './lib/turns/types';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { FadeInOnReveal } from './message/FadeInOnReveal';
 import { streamPerfCount } from '@/stores/utils/streamDebug';
-import { areOptionalRenderRelevantMessagesEqual, areRenderRelevantMessageInfoEqual, areRenderRelevantPartsEqual } from './message/renderCompare';
 
 const ToolOutputDialog = React.lazy(() => import('./message/ToolOutputDialog'));
 
@@ -991,7 +990,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                 respectReducedMotion
                             >
                                 <div className={cn('relative flex justify-end', !isMobile ? 'group/user-shell' : undefined)}>
-                                    <div className="max-w-[85%]">
+                                    <div className={cn('max-w-[85%]', showStickyInlineHoverRow ? 'pb-5' : undefined)}>
                                         <div
                                             style={{
                                                 backgroundColor: 'var(--chat-user-message-bg)',
@@ -1064,8 +1063,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                             />
                                         ) : null}
                                     </div>
-                                    {showStickyInlineHoverRow ? <div aria-hidden="true" className="pointer-events-none absolute left-0 right-0 top-full h-11" /> : null}
-                                </div>
+                                 </div>
                             </FadeInOnReveal>
                         )
                     ) : (
@@ -1128,16 +1126,4 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     );
 };
 
-export default React.memo(ChatMessage, (prev, next) => {
-    return areRenderRelevantMessageInfoEqual(prev.message.info, next.message.info)
-        && areRenderRelevantPartsEqual(prev.message.parts, next.message.parts)
-        && areOptionalRenderRelevantMessagesEqual(prev.previousMessage, next.previousMessage)
-        && areOptionalRenderRelevantMessagesEqual(prev.nextMessage, next.nextMessage)
-        && prev.onContentChange === next.onContentChange
-        && prev.turnGroupingContext === next.turnGroupingContext
-        && prev.assistantHeaderMessageId === next.assistantHeaderMessageId
-        && prev.isInActiveTurn === next.isInActiveTurn
-        && prev.activeStreamingPhase === next.activeStreamingPhase
-        && prev.animateUserOnMount === next.animateUserOnMount
-        && prev.onUserAnimationConsumed === next.onUserAnimationConsumed;
-});
+export default ChatMessage;

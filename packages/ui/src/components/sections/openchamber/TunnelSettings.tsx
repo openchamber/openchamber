@@ -61,6 +61,8 @@ const SESSION_TTL_OPTIONS: TtlOption[] = [
   { value: '28800000', label: '8h', ms: 8 * 60 * 60 * 1000 },
   { value: '43200000', label: '12h', ms: 12 * 60 * 60 * 1000 },
   { value: '86400000', label: '24h', ms: 24 * 60 * 60 * 1000 },
+  { value: '604800000', label: '1w', ms: 7 * 24 * 60 * 60 * 1000 },
+  { value: '2592000000', label: '30d', ms: 30 * 24 * 60 * 60 * 1000 },
 ];
 
 const MANAGED_REMOTE_TUNNEL_DOC_URL = 'https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/get-started/create-remote-tunnel/';
@@ -486,6 +488,9 @@ export const TunnelSettings: React.FC = () => {
       return;
     }
 
+    let rafId: number | null = null;
+    let lastTime = Date.now();
+    
     const updateRemaining = () => {
       const remaining = tunnelInfo.bootstrapExpiresAt ? tunnelInfo.bootstrapExpiresAt - Date.now() : 0;
       if (remaining <= 0) {
@@ -495,14 +500,79 @@ export const TunnelSettings: React.FC = () => {
       }
     };
 
+    const tick = () => {
+      const now = Date.now();
+      // Update only once per second
+      if (now - lastTime >= 1_000) {
+        updateRemaining();
+        lastTime = now;
+      }
+      rafId = requestAnimationFrame(tick);
+    };
+
     updateRemaining();
-    const timer = window.setInterval(updateRemaining, 1000);
-    return () => window.clearInterval(timer);
+    
+    // Only run when visible
+    if (typeof document === 'undefined' || document.visibilityState === 'visible') {
+      rafId = requestAnimationFrame(tick);
+    }
+    
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible' && rafId === null) {
+        rafId = requestAnimationFrame(tick);
+      } else if (document.visibilityState !== 'visible' && rafId !== null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
+    };
+    
+    document.addEventListener('visibilitychange', onVisibility);
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+      }
+    };
   }, [tunnelInfo?.bootstrapExpiresAt]);
 
   React.useEffect(() => {
-    const timer = window.setInterval(() => setNowTs(Date.now()), 1000);
-    return () => window.clearInterval(timer);
+    // Use requestAnimationFrame for smoother updates without setInterval overhead
+    let rafId: number | null = null;
+    let lastTime = Date.now();
+    
+    const tick = () => {
+      const now = Date.now();
+      // Update only once per second
+      if (now - lastTime >= 1_000) {
+        setNowTs(now);
+        lastTime = now;
+      }
+      rafId = requestAnimationFrame(tick);
+    };
+    
+    // Only run when visible
+    if (typeof document === 'undefined' || document.visibilityState === 'visible') {
+      rafId = requestAnimationFrame(tick);
+    }
+    
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible' && rafId === null) {
+        rafId = requestAnimationFrame(tick);
+      } else if (document.visibilityState !== 'visible' && rafId !== null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
+    };
+    
+    document.addEventListener('visibilitychange', onVisibility);
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+      }
+    };
   }, []);
 
   React.useEffect(() => {
@@ -530,6 +600,10 @@ export const TunnelSettings: React.FC = () => {
     };
 
     const timer = window.setInterval(() => {
+      // Skip polling when tab is hidden
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+        return;
+      }
       void refreshSessions();
     }, 5000);
 

@@ -23,6 +23,24 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private _sseStreams = new Map<string, AbortController>();
   private readonly _webviewDevServerUrl: string | null;
 
+  // Message delivery confirmation and retry
+  private readonly _pendingMessages = new Set<string>();
+  private readonly _messageTimeouts = new Map<string, NodeJS.Timeout>();
+  private readonly _MESSAGE_TIMEOUT = 5000; // 5 seconds
+  private readonly _MAX_RETRIES = 3;
+
+  private _createMessageId(): string {
+    return `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  }
+
+  private _clearPendingMessages(): void {
+    for (const timeout of this._messageTimeouts.values()) {
+      clearTimeout(timeout);
+    }
+    this._messageTimeouts.clear();
+    this._pendingMessages.clear();
+  }
+
   constructor(
     private readonly _context: vscode.ExtensionContext,
     private readonly _extensionUri: vscode.Uri,
@@ -34,6 +52,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   public resolveWebviewView(
     webviewView: vscode.WebviewView
   ) {
+    this._clearPendingMessages();
     this._view = webviewView;
 
     const distUri = vscode.Uri.joinPath(this._extensionUri, 'dist');
@@ -46,11 +65,24 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     webviewView.webview.html = this._getHtmlForWebview(webviewView.webview);
     // Send theme payload (including optional Shiki theme JSON) after the webview is set up.
     void this.updateTheme(vscode.window.activeColorTheme.kind);
-    
+
     // Send cached connection status and API URL (may have been set before webview was resolved)
     this._sendCachedState();
 
-    webviewView.webview.onDidReceiveMessage(async (message: BridgeRequest) => {
+    webviewView.onDidDispose(() => {
+      this._clearPendingMessages();
+    });
+
+    webviewView.webview.onDidReceiveMessage(async (message: (BridgeRequest & { _msgId?: string }) | { type: 'bridge:ack'; _msgId: string }) => {
+      if (message.type === 'bridge:ack' && typeof message._msgId === 'string') {
+        this._confirmMessage(message._msgId);
+        return;
+      }
+
+      if (!('id' in message) || typeof message.id !== 'string') {
+        return;
+      }
+
       if (message.type === 'restartApi') {
         await this._openCodeManager?.restart();
         return;
@@ -58,13 +90,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
       if (message.type === 'api:sse:start') {
         const response = await this._startSseProxy(message);
-        webviewView.webview.postMessage(response);
+        void this._sendMessageWithRetry(response);
         return;
       }
 
       if (message.type === 'api:sse:stop') {
         const response = await this._stopSseProxy(message);
-        webviewView.webview.postMessage(response);
+        void this._sendMessageWithRetry(response);
         return;
       }
 
@@ -72,7 +104,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         manager: this._openCodeManager,
         context: this._context,
       });
-      webviewView.webview.postMessage(response);
+      void this._sendMessageWithRetry(response);
 
       if (message.type === 'api:config/settings:save' && response.success) {
         void vscode.commands.executeCommand('openchamber.internal.settingsSynced', response.data);
@@ -190,11 +222,80 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
+  // Message delivery confirmation
+  private _confirmMessage(messageId: string) {
+    this._pendingMessages.delete(messageId);
+
+    const timeout = this._messageTimeouts.get(messageId);
+    if (timeout) {
+      clearTimeout(timeout);
+      this._messageTimeouts.delete(messageId);
+    }
+  }
+
+  // Send message with retry mechanism
+  private async _sendMessageWithRetry(response: BridgeResponse, retryCount: number = 0, messageId?: string): Promise<boolean> {
+    if (!this._view) {
+      return false;
+    }
+
+    const pendingMessageId = messageId ?? this._createMessageId();
+    const existingTimeout = this._messageTimeouts.get(pendingMessageId);
+    if (existingTimeout) {
+      clearTimeout(existingTimeout);
+      this._messageTimeouts.delete(pendingMessageId);
+    }
+
+    try {
+      const delivered = await this._view.webview.postMessage({
+        ...response,
+        _msgId: pendingMessageId,
+      });
+      if (!delivered) {
+        throw new Error('Webview rejected message delivery');
+      }
+
+      this._pendingMessages.add(pendingMessageId);
+
+      const timeout = setTimeout(() => {
+        if (!this._pendingMessages.has(pendingMessageId)) {
+          return;
+        }
+
+        if (retryCount < this._MAX_RETRIES) {
+          console.warn(`[Message Retry] Message ${pendingMessageId} not confirmed, retrying (${retryCount + 1}/${this._MAX_RETRIES})...`);
+          void this._sendMessageWithRetry(response, retryCount + 1, pendingMessageId);
+          return;
+        }
+
+        console.error(`[Message Retry] Message ${pendingMessageId} failed after ${this._MAX_RETRIES} retries`);
+        this._pendingMessages.delete(pendingMessageId);
+        this._messageTimeouts.delete(pendingMessageId);
+      }, this._MESSAGE_TIMEOUT);
+
+      this._messageTimeouts.set(pendingMessageId, timeout);
+      return true;
+
+    } catch (error) {
+      console.error(`[Message Retry] Failed to send message:`, error);
+
+      if (retryCount < this._MAX_RETRIES) {
+        await new Promise((resolve) => setTimeout(resolve, 100 * (retryCount + 1)));
+        return this._sendMessageWithRetry(response, retryCount + 1, pendingMessageId);
+      }
+
+      this._pendingMessages.delete(pendingMessageId);
+      this._messageTimeouts.delete(pendingMessageId);
+
+      return false;
+    }
+  }
+
   private _sendCachedState() {
     if (!this._view) {
       return;
     }
-    
+
     this._view.webview.postMessage({
       type: 'connectionStatus',
       status: this._cachedStatus,

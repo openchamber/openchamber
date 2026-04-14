@@ -1,6 +1,6 @@
 [package]
 name = "openchamber-desktop"
-version = "1.9.3"
+version = "1.9.4"
 edition = "2021"
 publish = false
 
@@ -39,4 +39,3 @@ strip = true
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 objc2-web-kit = "0.3"
-window-vibrancy = "0.7.1"

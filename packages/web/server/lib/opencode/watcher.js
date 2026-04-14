@@ -1,13 +1,26 @@
+import { createOpencodeClient } from '@opencode-ai/sdk/v2';
+
 export const createOpenCodeWatcherRuntime = (deps) => {
   const {
     waitForOpenCodePort,
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
-    parseSseDataPayload,
     onPayload,
   } = deps;
 
   let abortController = null;
+
+  const unwrapGlobalEventPayload = (eventData) => {
+    if (!eventData || typeof eventData !== 'object') {
+      return null;
+    }
+
+    if (eventData.payload && typeof eventData.payload === 'object') {
+      return eventData.payload;
+    }
+
+    return eventData;
+  };
 
   const start = async () => {
     if (abortController) {
@@ -23,45 +36,31 @@ export const createOpenCodeWatcherRuntime = (deps) => {
     const run = async () => {
       while (!signal.aborted) {
         attempt += 1;
-        let upstream;
-        let reader;
         try {
-          const url = buildOpenCodeUrl('/global/event', '');
-          upstream = await fetch(url, {
-            headers: {
-              Accept: 'text/event-stream',
-              'Cache-Control': 'no-cache',
-              Connection: 'keep-alive',
-              ...getOpenCodeAuthHeaders(),
-            },
-            signal,
+          const baseUrl = buildOpenCodeUrl('/', '').replace(/\/$/, '');
+          const client = createOpencodeClient({
+            baseUrl,
+            headers: getOpenCodeAuthHeaders(),
           });
 
-          if (!upstream.ok || !upstream.body) {
-            throw new Error(`bad status ${upstream.status}`);
-          }
+          const result = await client.global.event({
+            signal,
+            sseMaxRetryAttempts: 0,
+            onSseEvent: (event) => {
+              const payload = unwrapGlobalEventPayload(event.data);
+              if (!payload || typeof payload !== 'object') {
+                return;
+              }
+              onPayload(payload);
+            },
+          });
 
           console.log('[PushWatcher] connected');
 
-          const decoder = new TextDecoder();
-          reader = upstream.body.getReader();
-          let buffer = '';
-
-          while (!signal.aborted) {
-            const { value, done } = await reader.read();
-            if (done) {
+          for await (const _ of result.stream) {
+            void _;
+            if (signal.aborted) {
               break;
-            }
-
-            buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n');
-
-            let separatorIndex = buffer.indexOf('\n\n');
-            while (separatorIndex !== -1) {
-              const block = buffer.slice(0, separatorIndex);
-              buffer = buffer.slice(separatorIndex + 2);
-              separatorIndex = buffer.indexOf('\n\n');
-              const payload = parseSseDataPayload(block);
-              onPayload(payload);
             }
           }
         } catch (error) {
@@ -69,16 +68,6 @@ export const createOpenCodeWatcherRuntime = (deps) => {
             return;
           }
           console.warn('[PushWatcher] disconnected', error?.message ?? error);
-        } finally {
-          try {
-            if (reader) {
-              await reader.cancel();
-              reader.releaseLock();
-            } else if (upstream?.body && !upstream.body.locked) {
-              await upstream.body.cancel();
-            }
-          } catch {
-          }
         }
 
         const backoffMs = Math.min(1000 * Math.pow(2, Math.min(attempt, 5)), 30000);
