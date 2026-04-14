@@ -326,7 +326,7 @@ export const ChatContainer: React.FC = () => {
         return flattenBlockingRequests(questionsMap, scopedSessionIds);
     }, [questionsMap, scopedSessionIds]);
     const sessionIsWorking = React.useMemo(() => {
-        if (!currentSessionId || sessionPermissions.length > 0) {
+        if (!currentSessionId || sessionPermissions.length > 0 || sessionQuestions.length > 0) {
             return false;
         }
 
@@ -345,7 +345,7 @@ export const ChatContainer: React.FC = () => {
             && lastMessage.role === 'assistant'
             && typeof (lastMessage as { time?: { completed?: number } }).time?.completed !== 'number',
         );
-    }, [activeStreamingPhase, currentSessionId, sessionMessages, sessionPermissions.length, sessionStatusForCurrent.type, streamingMessageId]);
+    }, [activeStreamingPhase, currentSessionId, sessionMessages, sessionPermissions.length, sessionQuestions.length, sessionStatusForCurrent.type, streamingMessageId]);
     const activeRetryStatus = React.useMemo(() => {
         if (!currentSessionId || sessionStatusForCurrent.type !== 'retry') {
             return null;

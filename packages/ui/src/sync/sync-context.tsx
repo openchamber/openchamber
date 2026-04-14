@@ -719,6 +719,38 @@ async function resyncDirectoryAfterReconnect(
     setIndexedSessionMessages(routingIndex, sessionId, directory, nextMessages)
   }))
 
+  // Re-fetch pending questions on reconnect — they may have been asked
+  // during the SSE disconnection window and will not arrive via SSE events.
+  try {
+    const pendingQuestions = await opencodeClient.listPendingQuestions({ directories: [directory] })
+    const grouped: Record<string, QuestionRequest[]> = {}
+    for (const q of pendingQuestions) {
+      if (!q?.id || !q.sessionID) continue
+      const list = grouped[q.sessionID]
+      if (list) list.push(q)
+      else grouped[q.sessionID] = [q]
+    }
+    // Sort each group by id for binary-search compatibility
+    for (const sessionId of Object.keys(grouped)) {
+      grouped[sessionId].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    }
+    store.setState((state: DirectoryStore) => {
+      const nextQuestion = { ...state.question }
+      // Preserve questions for sessions that were not part of this directory's reconnect
+      for (const sessionId of Object.keys(nextQuestion)) {
+        if (!grouped[sessionId]) {
+          nextQuestion[sessionId] = []
+        }
+      }
+      for (const [sessionId, questions] of Object.entries(grouped)) {
+        nextQuestion[sessionId] = questions
+      }
+      return { question: nextQuestion }
+    })
+  } catch {
+    // Non-fatal: question resync best-effort
+  }
+
   ingestDirectoryStateIntoRoutingIndex(routingIndex, directory, store.getState())
 }
 
