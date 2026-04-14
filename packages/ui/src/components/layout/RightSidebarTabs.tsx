@@ -8,6 +8,7 @@ import { useGitStore } from '@/stores/useGitStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { SidebarFilesTree } from './SidebarFilesTree';
+import { sidebarTabGit, sidebarTabFiles } from '@/lib/i18n/messages';
 
 type RightTab = 'git' | 'files';
 
@@ -46,12 +47,12 @@ export const RightSidebarTabs: React.FC = () => {
   const tabItems = React.useMemo(() => [
     {
       id: 'git',
-      label: 'Git',
+      label: sidebarTabGit(),
       icon: <RiGitBranchLine className="h-3.5 w-3.5" />,
     },
     {
       id: 'files',
-      label: 'Files',
+      label: sidebarTabFiles(),
       icon: <RiFolder3Line className="h-3.5 w-3.5" />,
     },
   ], []);

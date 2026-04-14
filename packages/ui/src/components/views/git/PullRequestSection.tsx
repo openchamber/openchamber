@@ -19,8 +19,9 @@ import {
   RiInformationLine,
   RiLoader4Line,
 } from '@remixicon/react';
-import { toast } from '@/components/ui';
+import { toast } from '@/lib/i18n/toast';
 import { Button } from '@/components/ui/button';
+import { m } from '@/lib/i18n/messages';
 import {
   Dialog,
   DialogContent,
@@ -517,7 +518,7 @@ export const PullRequestSection: React.FC<{
 
   const openChecksDialog = React.useCallback(async () => {
     if (!github?.prContext) {
-      toast.error('GitHub runtime API unavailable');
+      toast.error(m.toastGithubUnavailable());
       return;
     }
     if (!pr) return;
@@ -533,7 +534,7 @@ export const PullRequestSection: React.FC<{
       setCheckDetails(ctx);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      toast.error('Failed to load check details', { description: message });
+      toast.error(m.prToastFailedLoadCheckDetails(), { description: message });
     } finally {
       setIsLoadingCheckDetails(false);
     }
@@ -541,7 +542,7 @@ export const PullRequestSection: React.FC<{
 
   const openCommentsDialog = React.useCallback(async () => {
     if (!github?.prContext) {
-      toast.error('GitHub runtime API unavailable');
+      toast.error(m.toastGithubUnavailable());
       return;
     }
     if (!pr) return;
@@ -556,7 +557,7 @@ export const PullRequestSection: React.FC<{
       setCommentsDetails(ctx);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      toast.error('Failed to load comments', { description: message });
+      toast.error(m.prToastFailedLoadComments(), { description: message });
     } finally {
       setIsLoadingCommentsDetails(false);
     }
@@ -595,11 +596,11 @@ export const PullRequestSection: React.FC<{
     const issue = (commentsDetails?.issueComments ?? []).map((comment) => ({
       id: `issue-${comment.id}`,
       body: comment.body || '',
-      authorName: comment.author?.name || comment.author?.login || 'Unknown author',
+      authorName: comment.author?.name || comment.author?.login || m.prUnknownAuthor(),
       authorLogin: comment.author?.login || null,
       avatarUrl: comment.author?.avatarUrl || null,
       createdAt: comment.createdAt,
-      context: 'General comment',
+      context: m.prGeneralComment(),
       path: null as string | null,
       line: null as number | null,
     }));
@@ -607,11 +608,11 @@ export const PullRequestSection: React.FC<{
     const review = (commentsDetails?.reviewComments ?? []).map((comment) => ({
       id: `review-${comment.id}`,
       body: comment.body || '',
-      authorName: comment.author?.name || comment.author?.login || 'Unknown author',
+      authorName: comment.author?.name || comment.author?.login || m.prUnknownAuthor(),
       authorLogin: comment.author?.login || null,
       avatarUrl: comment.author?.avatarUrl || null,
       createdAt: comment.createdAt,
-      context: 'Code review comment',
+      context: m.prCodeReviewComment(),
       path: comment.path || null,
       line: comment.line ?? null,
     }));
@@ -629,7 +630,7 @@ export const PullRequestSection: React.FC<{
 
   const resolveChatDispatchTarget = React.useCallback((): ChatDispatchTarget | null => {
     if (!currentSessionId) {
-      toast.error('No active session', { description: 'Open a chat session first.' });
+      toast.error(m.prToastNoActiveSession(), { description: m.prToastOpenChatSessionFirst() });
       return null;
     }
 
@@ -638,7 +639,7 @@ export const PullRequestSection: React.FC<{
     const providerID = currentProviderId || lastUsedProvider?.providerID;
     const modelID = currentModelId || lastUsedProvider?.modelID;
     if (!providerID || !modelID) {
-      toast.error('No model selected');
+      toast.error(m.prToastNoModelSelected());
       return null;
     }
 
@@ -671,7 +672,7 @@ export const PullRequestSection: React.FC<{
       target.currentVariant ?? undefined,
     ).catch((e) => {
       const message = e instanceof Error ? e.message : String(e);
-      toast.error('Failed to send message', { description: message });
+      toast.error(m.prToastFailedSendMessage(), { description: message });
     });
   }, []);
 
@@ -694,7 +695,7 @@ export const PullRequestSection: React.FC<{
             <Button variant="outline" size="sm" asChild className="flex-shrink-0">
               <a href={run.detailsUrl} target="_blank" rel="noopener noreferrer">
                 <RiExternalLinkLine className="size-4" />
-                Open
+                {m.prOpen()}
               </a>
             </Button>
           ) : null}
@@ -717,7 +718,7 @@ export const PullRequestSection: React.FC<{
         {Array.isArray(run.annotations) && run.annotations.length > 0 ? (
           <div className="space-y-1">
             <div className="typography-micro text-muted-foreground">
-              Failed annotations{run.annotations.length > 20 ? ` (showing 20/${run.annotations.length})` : ''}
+              {m.prFailedAnnotations()}{run.annotations.length > 20 ? ` (${m.prShowing()} 20/${run.annotations.length})` : ''}
             </div>
             <div className="space-y-1">
               {run.annotations.slice(0, 20).map((annotation, idx) => (
@@ -744,7 +745,7 @@ export const PullRequestSection: React.FC<{
 
         {run.job?.steps && run.job.steps.length > 0 ? (
           <div className="space-y-1">
-            <div className="typography-micro text-muted-foreground">Steps</div>
+            <div className="typography-micro text-muted-foreground">{m.prSteps()}</div>
             <div className="space-y-1">
               {run.job.steps.map((step, idx) => {
                 const c = (step.conclusion || '').toLowerCase();
@@ -788,11 +789,11 @@ export const PullRequestSection: React.FC<{
                     </button>
                     <CollapsibleContent>
                       <div className="ml-6 mt-1 rounded border border-border/40 bg-transparent px-2 py-2 typography-micro text-muted-foreground space-y-1">
-                        {typeof step.number === 'number' ? <div>Step: {step.number}</div> : null}
-                        {step.status ? <div>Status: {step.status}</div> : null}
-                        {step.conclusion ? <div>Conclusion: {step.conclusion}</div> : null}
-                        {step.startedAt ? <div>Started: {formatTimestamp(step.startedAt)}</div> : null}
-                        {step.completedAt ? <div>Completed: {formatTimestamp(step.completedAt)}</div> : null}
+                        {typeof step.number === 'number' ? <div>{m.prStep()}: {step.number}</div> : null}
+                        {step.status ? <div>{m.prStatus()}: {step.status}</div> : null}
+                        {step.conclusion ? <div>{m.prConclusion()}: {step.conclusion}</div> : null}
+                        {step.startedAt ? <div>{m.prStarted()}: {formatTimestamp(step.startedAt)}</div> : null}
+                        {step.completedAt ? <div>{m.prCompleted()}: {formatTimestamp(step.completedAt)}</div> : null}
                       </div>
                     </CollapsibleContent>
                   </Collapsible>
@@ -809,7 +810,7 @@ export const PullRequestSection: React.FC<{
     setActiveMainTab('chat');
 
     if (!github?.prContext) {
-      toast.error('GitHub runtime API unavailable');
+      toast.error(m.toastGithubUnavailable());
       return;
     }
     if (!directory || !pr) return;
@@ -828,7 +829,7 @@ export const PullRequestSection: React.FC<{
       });
 
       if (failed.length === 0) {
-        toast.message('No failed checks');
+        toast.message(m.prToastNoFailedChecks());
         return;
       }
 
@@ -857,7 +858,7 @@ export const PullRequestSection: React.FC<{
       dispatchSyntheticPrompt(target, visibleText, instructionsText, payloadText);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      toast.error('Failed to load checks', { description: message });
+      toast.error(m.prToastFailedLoadChecks(), { description: message });
     }
   }, [directory, dispatchSyntheticPrompt, github, pr, resolveChatDispatchTarget, setActiveMainTab]);
 
@@ -865,7 +866,7 @@ export const PullRequestSection: React.FC<{
     setActiveMainTab('chat');
 
     if (!github?.prContext) {
-      toast.error('GitHub runtime API unavailable');
+      toast.error(m.toastGithubUnavailable());
       return;
     }
     if (!directory || !pr) return;
@@ -880,7 +881,7 @@ export const PullRequestSection: React.FC<{
       const reviewComments = context.reviewComments ?? [];
       const total = issueComments.length + reviewComments.length;
       if (total === 0) {
-        toast.message('No PR comments');
+        toast.message(m.prToastNoPRComments());
         return;
       }
 
@@ -896,7 +897,7 @@ export const PullRequestSection: React.FC<{
       dispatchSyntheticPrompt(target, visibleText, instructionsText, payloadText);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      toast.error('Failed to load PR comments', { description: message });
+      toast.error(m.prToastFailedLoadPRComments(), { description: message });
     }
   }, [directory, dispatchSyntheticPrompt, github, pr, resolveChatDispatchTarget, setActiveMainTab]);
 
@@ -1137,7 +1138,7 @@ export const PullRequestSection: React.FC<{
       onGeneratedDescription?.();
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      toast.error('Failed to generate description', { description: message });
+      toast.error(m.prToastFailedGenerateDescription(), { description: message });
     } finally {
       setIsGenerating(false);
     }
@@ -1145,22 +1146,22 @@ export const PullRequestSection: React.FC<{
 
   const createPr = React.useCallback(async () => {
     if (!github?.prCreate) {
-      toast.error('GitHub runtime API unavailable');
+      toast.error(m.toastGithubUnavailable());
       return;
     }
     const trimmedTitle = title.trim();
     if (!trimmedTitle) {
-      toast.error('Title is required');
+      toast.error(m.prToastTitleRequired());
       return;
     }
 
     const trimmedBase = targetBaseBranch.trim();
     if (!trimmedBase) {
-      toast.error('Base branch is required');
+      toast.error(m.prToastBaseBranchRequired());
       return;
     }
     if (trimmedBase === branch) {
-      toast.error('Base branch must differ from head branch');
+      toast.error(m.prToastBaseBranchMustDiffer());
       return;
     }
 
@@ -1177,13 +1178,13 @@ export const PullRequestSection: React.FC<{
         draft,
         ...(selectedRemote ? { remote: selectedRemote.name } : {}),
       });
-      toast.success('PR created');
+      toast.success(m.prToastPRCreated());
       updatePrStatus(prStatusKey, (prev) => (prev ? { ...prev, pr } : prev));
       await refresh({ force: true });
       scheduleActionRefresh();
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      toast.error('Failed to create PR', { description: message });
+      toast.error(m.prToastFailedCreatePR(), { description: message });
     } finally {
       setIsCreating(false);
     }
@@ -1191,22 +1192,22 @@ export const PullRequestSection: React.FC<{
 
   const mergePr = React.useCallback(async (pr: GitHubPullRequest) => {
     if (!github?.prMerge) {
-      toast.error('GitHub runtime API unavailable');
+      toast.error(m.toastGithubUnavailable());
       return;
     }
     setIsMerging(true);
     try {
       const result = await github.prMerge({ directory, number: pr.number, method: mergeMethod });
       if (result.merged) {
-        toast.success('PR merged');
+        toast.success(m.prToastPRMerged());
       } else {
-        toast.message('PR not merged', { description: result.message || 'Not mergeable' });
+        toast.message(m.prToastPRNotMerged(), { description: result.message || m.prToastNotMergeable() });
       }
       await refresh({ force: true });
       scheduleActionRefresh();
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      toast.error('Merge failed', { description: message });
+      toast.error(m.prToastMergeFailed(), { description: message });
       if (pr.url) {
         void openExternal(pr.url);
       }
@@ -1217,18 +1218,18 @@ export const PullRequestSection: React.FC<{
 
   const markReady = React.useCallback(async (pr: GitHubPullRequest) => {
     if (!github?.prReady) {
-      toast.error('GitHub runtime API unavailable');
+      toast.error(m.toastGithubUnavailable());
       return;
     }
     setIsMarkingReady(true);
     try {
       await github.prReady({ directory, number: pr.number });
-      toast.success('Marked ready for review');
+      toast.success(m.prToastMarkedReady());
       await refresh({ force: true });
       scheduleActionRefresh();
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      toast.error('Failed to mark ready', { description: message });
+      toast.error(m.prToastFailedMarkReady(), { description: message });
       if (pr.url) {
         void openExternal(pr.url);
       }
@@ -1239,13 +1240,13 @@ export const PullRequestSection: React.FC<{
 
   const updatePr = React.useCallback(async (pr: GitHubPullRequest) => {
     if (!github?.prUpdate) {
-      toast.error('GitHub runtime API unavailable');
+      toast.error(m.toastGithubUnavailable());
       return;
     }
 
     const trimmedTitle = editTitle.trim();
     if (!trimmedTitle) {
-      toast.error('Title is required');
+      toast.error(m.prToastTitleRequired());
       return;
     }
 
@@ -1267,12 +1268,12 @@ export const PullRequestSection: React.FC<{
           }
         : prev));
       setIsEditingPr(false);
-      toast.success('PR updated');
+      toast.success(m.prToastPRUpdated());
       await refresh({ force: true });
       scheduleActionRefresh();
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      toast.error('Failed to update PR', { description: message });
+      toast.error(m.prToastFailedUpdatePR(), { description: message });
     } finally {
       setIsUpdating(false);
     }
@@ -1305,29 +1306,29 @@ export const PullRequestSection: React.FC<{
     <section className={containerClassName}>
       <div className={headerClassName}>
         <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0">
-            {pr ? (
-              <Tooltip delayDuration={300}>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    className="inline-flex size-6 shrink-0 items-center justify-center rounded-md border border-border/60 bg-background/70 hover:bg-interactive-hover/60"
-                    onClick={() => void openExternal(pr.url)}
-                    aria-label="Open PR on GitHub"
-                  >
-                    <PrStateIcon className="size-4 shrink-0" style={{ color: prColorVar }} />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent><p>Open PR on GitHub</p></TooltipContent>
-              </Tooltip>
-            ) : (
-              <PrStateIcon className="size-4 shrink-0" style={{ color: 'var(--surface-muted-foreground)' }} />
-            )}
-            <h3 className="typography-ui-header font-semibold text-foreground truncate">Pull Request</h3>
-            {pr ? (
-              <span className="typography-meta text-muted-foreground truncate">#{pr.number}</span>
-            ) : null}
-          </div>
+            <div className="flex items-center gap-2 min-w-0">
+              {pr ? (
+                <Tooltip delayDuration={300}>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      className="inline-flex size-6 shrink-0 items-center justify-center rounded-md border border-border/60 bg-background/70 hover:bg-interactive-hover/60"
+                      onClick={() => void openExternal(pr.url)}
+                      aria-label={m.prOpenPROnGitHub()}
+                    >
+                      <PrStateIcon className="size-4 shrink-0" style={{ color: prColorVar }} />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent><p>{m.prOpenPROnGitHub()}</p></TooltipContent>
+                </Tooltip>
+              ) : (
+                <PrStateIcon className="size-4 shrink-0" style={{ color: 'var(--surface-muted-foreground)' }} />
+              )}
+              <h3 className="typography-ui-header font-semibold text-foreground truncate">{m.prPullRequestLabel()}</h3>
+              {pr ? (
+                <span className="typography-meta text-muted-foreground truncate">#{pr.number}</span>
+              ) : null}
+            </div>
           <div className="flex items-center gap-2">
             {isLoading ? <RiLoader4Line className="size-4 animate-spin text-muted-foreground" /> : null}
             {checks ? (
@@ -1385,23 +1386,23 @@ export const PullRequestSection: React.FC<{
         {shouldShowConnectionNotice ? (
           <div className="space-y-2">
             <div className="typography-meta text-muted-foreground">
-              GitHub not connected. Connect your GitHub account in settings.
+              {m.prGitHubNotConnected()}
             </div>
                 <Button variant="outline" size="sm" onClick={openGitHubSettings} className="w-fit">
-                  Open settings
+                  {m.prOpenSettings()}
                 </Button>
               </div>
             ) : null}
 
             {error ? (
               <div className="space-y-2">
-                <div className="typography-ui-label text-foreground">PR status unavailable</div>
+                <div className="typography-ui-label text-foreground">{m.prPRStatusUnavailable()}</div>
                 <div className="typography-meta text-muted-foreground break-words">{error}</div>
                 {repoUrl ? (
                   <Button variant="outline" size="sm" asChild className="w-fit">
                     <a href={repoUrl} target="_blank" rel="noopener noreferrer">
                       <RiExternalLinkLine className="size-4" />
-                      Open Repo
+                      {m.prOpenRepo()}
                     </a>
                   </Button>
                 ) : null}
@@ -1411,7 +1412,7 @@ export const PullRequestSection: React.FC<{
             {!pr && !isInitialStatusResolved && !error && !shouldShowConnectionNotice ? (
               <div className="flex items-center gap-2 typography-micro text-muted-foreground">
                 <RiLoader4Line className="size-4 animate-spin" />
-                Checking PR status...
+                {m.prCheckingPRStatus()}
               </div>
             ) : pr ? (
               <div className="flex flex-col gap-2">
@@ -1422,7 +1423,7 @@ export const PullRequestSection: React.FC<{
                         <Input
                           value={editTitle}
                           onChange={(e) => setEditTitle(e.target.value)}
-                          placeholder="PR title"
+                          placeholder={m.prPRTitlePlaceholder()}
                           autoCorrect={hasTouchInput ? "on" : "off"}
                           autoCapitalize={hasTouchInput ? "sentences" : "off"}
                           spellCheck={hasTouchInput}
@@ -1431,7 +1432,7 @@ export const PullRequestSection: React.FC<{
                           value={editBody}
                           onChange={(e) => setEditBody(e.target.value)}
                           className="min-h-[120px] bg-background/80"
-                          placeholder="Describe this PR"
+                          placeholder={m.prDescribePRPlaceholder()}
                           autoCorrect={hasTouchInput ? "on" : "off"}
                           autoCapitalize={hasTouchInput ? "sentences" : "off"}
                           spellCheck={hasTouchInput}
@@ -1447,18 +1448,18 @@ export const PullRequestSection: React.FC<{
                           />
                         ) : (
                           <div className="typography-micro text-muted-foreground whitespace-pre-wrap break-words mt-1">
-                            {isHydratingCurrentPrBody ? 'Loading description...' : 'No description provided.'}
+                            {isHydratingCurrentPrBody ? m.prLoadingDescription() : m.prNoDescriptionProvided()}
                           </div>
                         )}
                       </>
                     )}
                     {canMerge && pr.draft ? (
                       <div className="typography-micro text-muted-foreground">
-                        Draft PRs must be marked ready before merge.
+                        {m.prDraftPRsMustBeMarkedReady()}
                       </div>
                     ) : null}
                     {!canMerge ? (
-                      <div className="typography-micro text-muted-foreground">No merge permission; use Open in GitHub.</div>
+                      <div className="typography-micro text-muted-foreground">{m.prNoMergePermission()}</div>
                     ) : null}
                   </div>
 
@@ -1478,46 +1479,129 @@ export const PullRequestSection: React.FC<{
                                     setEditTitle(pr.title || '');
                                     setEditBody(pr.body || '');
                                   }}
-                                  disabled={isUpdating}
-                                  aria-label="Cancel editing"
-                                >
-                                  <RiCloseLine className="size-4" />
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent><p>Cancel editing</p></TooltipContent>
-                            </Tooltip>
-                            <Tooltip delayDuration={300}>
-                              <TooltipTrigger asChild>
-                                <Button
-                                  size="sm"
-                                  className="h-7 w-7 px-0"
-                                  onClick={() => updatePr(pr)}
-                                  disabled={isUpdating || !editTitle.trim()}
-                                  aria-label="Save PR title and description"
-                                >
-                                  {isUpdating ? <RiLoader4Line className="size-4 animate-spin" /> : <RiCheckLine className="size-4" />}
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent><p>Save PR title and description</p></TooltipContent>
-                            </Tooltip>
+                                   disabled={isUpdating}
+                                   aria-label={m.prCancelEditing()}
+                                 >
+                                   <RiCloseLine className="size-4" />
+                                 </Button>
+                               </TooltipTrigger>
+                               <TooltipContent><p>{m.prCancelEditing()}</p></TooltipContent>
+                             </Tooltip>
+                             <Tooltip delayDuration={300}>
+                               <TooltipTrigger asChild>
+                                 <Button
+                                   size="sm"
+                                   className="h-7 w-7 px-0"
+                                   onClick={() => updatePr(pr)}
+                                   disabled={isUpdating || !editTitle.trim()}
+                                   aria-label={m.prSavePRTitleDescription()}
+                                 >
+                                   {isUpdating ? <RiLoader4Line className="size-4 animate-spin" /> : <RiCheckLine className="size-4" />}
+                                 </Button>
+                               </TooltipTrigger>
+                               <TooltipContent><p>{m.prSavePRTitleDescription()}</p></TooltipContent>
+                             </Tooltip>
                           </>
                         ) : (
                           <Tooltip delayDuration={300}>
                             <TooltipTrigger asChild>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="h-7 w-7 px-0"
-                                onClick={() => setIsEditingPr(true)}
-                                aria-label="Edit PR title and description"
-                              >
-                                <RiEditLine className="size-4" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent><p>Edit PR title and description</p></TooltipContent>
-                          </Tooltip>
+                             <Button
+                               variant="outline"
+                               size="sm"
+                               className="h-7 w-7 px-0"
+                               onClick={() => setIsEditingPr(true)}
+                               aria-label={m.prEditPRTitleDescription()}
+                             >
+                               <RiEditLine className="size-4" />
+                             </Button>
+                           </TooltipTrigger>
+                           <TooltipContent><p>{m.prEditPRTitleDescription()}</p></TooltipContent>
+                         </Tooltip>
                         )
                       ) : null}
+
+                      {checks ? (
+                         <Tooltip delayDuration={300}>
+                           <TooltipTrigger asChild>
+                             <Button
+                               variant="outline"
+                               size="sm"
+                               className="h-7 w-7 px-0"
+                               onClick={openChecksDialog}
+                               disabled={isLoadingCheckDetails}
+                               aria-label={m.prOpenChecksDetails()}
+                             >
+                               {isLoadingCheckDetails ? <RiLoader4Line className="size-4 animate-spin" /> : <RiInformationLine className="size-4" />}
+                             </Button>
+                           </TooltipTrigger>
+                           <TooltipContent><p>{m.prOpenChecksDetails()}</p></TooltipContent>
+                         </Tooltip>
+                       ) : null}
+
+                       {checks?.failure ? (
+                         <Tooltip delayDuration={300}>
+                           <TooltipTrigger asChild>
+                             <Button
+                               variant="outline"
+                               size="sm"
+                               className="h-7 w-7 px-0 border-[var(--status-success-border)] bg-[var(--status-success-background)] text-[var(--status-success)]"
+                               onClick={sendFailedChecksToChat}
+                               aria-label={m.prResolveFailedChecksWithAgent()}
+                             >
+                               <RiErrorWarningLine className="size-4" />
+                             </Button>
+                           </TooltipTrigger>
+                           <TooltipContent><p>{m.prResolveFailedChecksWithAgent()}</p></TooltipContent>
+                         </Tooltip>
+                       ) : null}
+
+                       <Tooltip delayDuration={300}>
+                         <TooltipTrigger asChild>
+                           <Button
+                             variant="outline"
+                             size="sm"
+                             className="h-7 w-7 px-0"
+                             onClick={openCommentsDialog}
+                             aria-label={m.prOpenPRComments()}
+                           >
+                             <RiChat4Line className="size-4" />
+                           </Button>
+                         </TooltipTrigger>
+                         <TooltipContent><p>{m.prOpenPRComments()}</p></TooltipContent>
+                       </Tooltip>
+
+                       <Tooltip delayDuration={300}>
+                         <TooltipTrigger asChild>
+                           <Button
+                             variant="outline"
+                             size="sm"
+                             className="h-7 w-7 px-0 border-[var(--status-success-border)] bg-[var(--status-success-background)] text-[var(--status-success)]"
+                             onClick={sendCommentsToChat}
+                             aria-label={m.prShareCommentsWithAgent()}
+                           >
+                             <RiAiGenerate2 className="size-4" />
+                           </Button>
+                         </TooltipTrigger>
+                         <TooltipContent><p>{m.prShareCommentsWithAgent()}</p></TooltipContent>
+                       </Tooltip>
+
+                       {canMerge && pr.draft && pr.state === 'open' ? (
+                         <Tooltip delayDuration={300}>
+                           <TooltipTrigger asChild>
+                             <Button
+                               variant="outline"
+                               size="sm"
+                               className="h-7 w-7 px-0"
+                               onClick={() => markReady(pr)}
+                               disabled={isMarkingReady || isMerging || isUpdating || isEditingPr}
+                               aria-label={m.prMarkPRReadyForReview()}
+                             >
+                               {isMarkingReady ? <RiLoader4Line className="size-4 animate-spin" /> : <RiCheckboxCircleLine className="size-4" />}
+                             </Button>
+                           </TooltipTrigger>
+                           <TooltipContent><p>{m.prMarkPRReadyForReview()}</p></TooltipContent>
+                         </Tooltip>
+                       ) : null}
 
                       {checks ? (
                         <Tooltip delayDuration={300}>
@@ -1526,14 +1610,14 @@ export const PullRequestSection: React.FC<{
                               variant="outline"
                               size="sm"
                               className="h-7 w-7 px-0"
-                              onClick={openChecksDialog}
-                              disabled={isLoadingCheckDetails}
-                              aria-label="Open checks details"
-                            >
-                              {isLoadingCheckDetails ? <RiLoader4Line className="size-4 animate-spin" /> : <RiInformationLine className="size-4" />}
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent><p>Open checks details</p></TooltipContent>
+                               onClick={openChecksDialog}
+                               disabled={isLoadingCheckDetails}
+                               aria-label={m.prOpenChecksDetails()}
+                             >
+                               {isLoadingCheckDetails ? <RiLoader4Line className="size-4 animate-spin" /> : <RiInformationLine className="size-4" />}
+                             </Button>
+                           </TooltipTrigger>
+                           <TooltipContent><p>{m.prOpenChecksDetails()}</p></TooltipContent>
                         </Tooltip>
                       ) : null}
 
@@ -1541,64 +1625,64 @@ export const PullRequestSection: React.FC<{
                         <Tooltip delayDuration={300}>
                           <TooltipTrigger asChild>
                             <Button
-                              variant="outline"
+                               variant="outline"
+                               size="sm"
+                               className="h-7 w-7 px-0 border-[var(--status-success-border)] bg-[var(--status-success-background)] text-[var(--status-success)]"
+                               onClick={sendFailedChecksToChat}
+                               aria-label={m.prResolveFailedChecksWithAgent()}
+                             >
+                               <RiErrorWarningLine className="size-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent><p>{m.prResolveFailedChecksWithAgent()}</p></TooltipContent>
+                         </Tooltip>
+                       ) : null}
+
+                       <Tooltip delayDuration={300}>
+                         <TooltipTrigger asChild>
+                           <Button
+                             variant="outline"
                               size="sm"
-                              className="h-7 w-7 px-0 border-[var(--status-success-border)] bg-[var(--status-success-background)] text-[var(--status-success)]"
-                              onClick={sendFailedChecksToChat}
-                              aria-label="Resolve failed checks with agent"
+                              className="h-7 w-7 px-0"
+                              onClick={openCommentsDialog}
+                              aria-label={m.prOpenPRComments()}
                             >
-                              <RiErrorWarningLine className="size-4" />
+                              <RiChat4Line className="size-4" />
                             </Button>
                           </TooltipTrigger>
-                          <TooltipContent><p>Resolve failed checks with agent</p></TooltipContent>
+                          <TooltipContent><p>{m.prOpenPRComments()}</p></TooltipContent>
                         </Tooltip>
-                      ) : null}
 
-                      <Tooltip delayDuration={300}>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-7 w-7 px-0"
-                            onClick={openCommentsDialog}
-                            aria-label="Open PR comments"
-                          >
-                            <RiChat4Line className="size-4" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent><p>Open PR comments</p></TooltipContent>
-                      </Tooltip>
-
-                      <Tooltip delayDuration={300}>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-7 w-7 px-0 border-[var(--status-success-border)] bg-[var(--status-success-background)] text-[var(--status-success)]"
-                            onClick={sendCommentsToChat}
-                            aria-label="Share comments with agent"
-                          >
-                            <RiAiGenerate2 className="size-4" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent><p>Share comments with agent</p></TooltipContent>
-                      </Tooltip>
-
-                      {canMerge && pr.draft && pr.state === 'open' ? (
                         <Tooltip delayDuration={300}>
                           <TooltipTrigger asChild>
                             <Button
                               variant="outline"
                               size="sm"
-                              className="h-7 w-7 px-0"
-                              onClick={() => markReady(pr)}
-                              disabled={isMarkingReady || isMerging || isUpdating || isEditingPr}
-                              aria-label="Mark PR ready for review"
+                              className="h-7 w-7 px-0 border-[var(--status-success-border)] bg-[var(--status-success-background)] text-[var(--status-success)]"
+                              onClick={sendCommentsToChat}
+                              aria-label={m.prShareCommentsWithAgent()}
                             >
-                              {isMarkingReady ? <RiLoader4Line className="size-4 animate-spin" /> : <RiCheckboxCircleLine className="size-4" />}
+                               <RiAiGenerate2 className="size-4" />
                             </Button>
                           </TooltipTrigger>
-                          <TooltipContent><p>Mark PR ready for review</p></TooltipContent>
+                          <TooltipContent><p>{m.prShareCommentsWithAgent()}</p></TooltipContent>
+                       </Tooltip>
+
+                      {canMerge && pr.draft && pr.state === 'open' ? (
+                        <Tooltip delayDuration={300}>
+                          <TooltipTrigger asChild>
+                            <Button
+                               variant="outline"
+                               size="sm"
+                               className="h-7 w-7 px-0"
+                               onClick={() => markReady(pr)}
+                               disabled={isMarkingReady || isMerging || isUpdating || isEditingPr}
+                               aria-label={m.prMarkPRReadyForReview()}
+                             >
+                               {isMarkingReady ? <RiLoader4Line className="size-4 animate-spin" /> : <RiCheckboxCircleLine className="size-4" />}
+                             </Button>
+                           </TooltipTrigger>
+                           <TooltipContent><p>{m.prMarkPRReadyForReview()}</p></TooltipContent>
                         </Tooltip>
                       ) : null}
                     </div>
@@ -1614,26 +1698,26 @@ export const PullRequestSection: React.FC<{
                             <SelectTrigger size="lg" className="h-7 w-auto min-w-0">
                               <SelectValue />
                             </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="squash">Squash</SelectItem>
-                              <SelectItem value="merge">Merge</SelectItem>
-                              <SelectItem value="rebase">Rebase</SelectItem>
-                            </SelectContent>
+                             <SelectContent>
+                               <SelectItem value="squash">{m.prSquash()}</SelectItem>
+                               <SelectItem value="merge">{m.prMerge()}</SelectItem>
+                               <SelectItem value="rebase">{m.prRebase()}</SelectItem>
+                             </SelectContent>
                           </Select>
                           <Tooltip delayDuration={300}>
                             <TooltipTrigger asChild>
                               <Button
                                 size="sm"
                                 className="h-7 w-7 px-0"
-                                onClick={() => mergePr(pr)}
-                                disabled={isMerging || isMarkingReady || pr.state !== 'open' || pr.draft || isUpdating || isEditingPr}
-                                aria-label="Merge pull request"
-                              >
-                                {isMerging ? <RiLoader4Line className="size-4 animate-spin" /> : <RiGitMergeLine className="size-4" />}
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent><p>Merge pull request</p></TooltipContent>
-                          </Tooltip>
+                                 onClick={() => mergePr(pr)}
+                                 disabled={isMerging || isMarkingReady || pr.state !== 'open' || pr.draft || isUpdating || isEditingPr}
+                                 aria-label={m.prMergePullRequest()}
+                               >
+                                 {isMerging ? <RiLoader4Line className="size-4 animate-spin" /> : <RiGitMergeLine className="size-4" />}
+                               </Button>
+                             </TooltipTrigger>
+                             <TooltipContent><p>{m.prMergePullRequest()}</p></TooltipContent>
+                           </Tooltip>
                         </>
                       ) : null}
                     </div>
@@ -1644,7 +1728,7 @@ export const PullRequestSection: React.FC<{
               <div className="flex flex-col gap-3">
                 <div className="flex items-center justify-between gap-2">
                   <div className="min-w-0">
-                    <div className="typography-ui-label text-foreground">Create PR</div>
+                    <div className="typography-ui-label text-foreground">{m.prCreatePRLabel()}</div>
                     <div className="typography-micro text-muted-foreground truncate">
                       {branch} → {targetBaseBranch}
                     </div>
@@ -1653,18 +1737,18 @@ export const PullRequestSection: React.FC<{
                     <Button variant="outline" size="sm" asChild>
                       <a href={repoUrl} target="_blank" rel="noopener noreferrer">
                         <RiExternalLinkLine className="size-4" />
-                        Repo
+                        {m.prRepo()}
                       </a>
                     </Button>
                   ) : null}
                 </div>
 
                 <label className="space-y-1">
-                  <div className="typography-micro text-muted-foreground">Title</div>
+                  <div className="typography-micro text-muted-foreground">{m.prTitlePlaceholder()}</div>
                   <Input
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
-                    placeholder="PR title"
+                    placeholder={m.prTitlePlaceholder()}
                     autoCorrect={hasTouchInput ? "on" : "off"}
                     autoCapitalize={hasTouchInput ? "sentences" : "off"}
                     spellCheck={hasTouchInput}
@@ -1672,11 +1756,11 @@ export const PullRequestSection: React.FC<{
                 </label>
 
                 <label className="space-y-1">
-                  <div className="typography-micro text-muted-foreground">Base branch</div>
+                  <div className="typography-micro text-muted-foreground">{m.prBaseBranchLabel()}</div>
                   {availableBaseBranches.length > 0 ? (
                     <Select value={targetBaseBranch} onValueChange={setTargetBaseBranch}>
                       <SelectTrigger className="h-9">
-                        <SelectValue placeholder="Select base branch" />
+                        <SelectValue placeholder={m.prSelectBaseBranchPlaceholder()} />
                       </SelectTrigger>
                       <SelectContent>
                         {availableBaseBranches.map((candidate) => (
@@ -1694,12 +1778,12 @@ export const PullRequestSection: React.FC<{
                 </label>
 
                 <label className="space-y-1">
-                  <div className="typography-micro text-muted-foreground">Description</div>
+                  <div className="typography-micro text-muted-foreground">{m.prDescriptionLabel()}</div>
                   <Textarea
                     value={body}
                     onChange={(e) => setBody(e.target.value)}
                     className="min-h-[110px] bg-background/80"
-                    placeholder="What changed and why"
+                    placeholder={m.prWhatChangedPlaceholder()}
                     autoCorrect={hasTouchInput ? "on" : "off"}
                     autoCapitalize={hasTouchInput ? "sentences" : "off"}
                     spellCheck={hasTouchInput}
@@ -1721,100 +1805,100 @@ export const PullRequestSection: React.FC<{
                 >
                   <button
                     type="button"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      setDraft((v) => !v);
-                    }}
-                    aria-label="Toggle draft PR"
-                    className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                  >
-                    {draft ? (
-                      <RiCheckboxLine className="size-4 text-primary" />
-                    ) : (
-                      <RiCheckboxBlankLine className="size-4" />
-                    )}
-                  </button>
-                  <span className="typography-ui-label text-foreground select-none">Draft</span>
-                </div>
+                   onClick={(e) => {
+                       e.preventDefault();
+                       e.stopPropagation();
+                       setDraft((v) => !v);
+                     }}
+                     aria-label={m.prToggleDraftPR()}
+                     className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                   >
+                     {draft ? (
+                       <RiCheckboxLine className="size-4 text-primary" />
+                     ) : (
+                       <RiCheckboxBlankLine className="size-4" />
+                     )}
+                   </button>
+                   <span className="typography-ui-label text-foreground select-none">{m.prDraftLabel()}</span>
+                 </div>
 
-                {/* Additional Context Section */}
-                {isMobile ? (
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="typography-micro text-muted-foreground">
-                        Additional context (optional)
-                      </span>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setIsContextSheetOpen(true)}
-                      >
-                        {additionalContext.trim() ? 'Edit' : 'Add'}
-                      </Button>
-                    </div>
-                    {additionalContext.trim() && (
-                      <div className="flex items-center gap-2">
-                        <span className="inline-flex items-center rounded-full bg-[var(--interactive-selection)] px-2 py-0.5 text-xs text-[var(--interactive-selection-foreground)]">
-                          Context added
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <Collapsible open={isContextOpen} onOpenChange={setIsContextOpen}>
-                    <CollapsibleTrigger className="flex w-full items-center justify-between rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)] px-3 py-2 hover:bg-[var(--interactive-hover)]">
-                      <span className="typography-micro text-muted-foreground">
-                        Additional context (optional)
-                      </span>
-                      <span className="typography-micro text-[var(--primary-base)]">
-                        {isContextOpen ? 'Hide' : additionalContext.trim() ? 'Edit' : 'Add'}
-                      </span>
-                    </CollapsibleTrigger>
-                    <CollapsibleContent>
-                      <div className="mt-2 space-y-2 rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)] p-3">
-                        <Textarea
-                          value={additionalContext}
-                          onChange={(e) => setAdditionalContext(e.target.value)}
-                          className="min-h-[100px] bg-transparent"
-                          placeholder="Explain why this change is needed...&#10;Mention how to test (commands / steps)...&#10;Call out risks / rollout plan..."
-                        />
-                        <p className="typography-micro text-muted-foreground">
-                          This text is only used to guide PR generation.
-                        </p>
-                      </div>
-                    </CollapsibleContent>
-                  </Collapsible>
-                )}
+                 {/* Additional Context Section */}
+                 {isMobile ? (
+                   <div className="space-y-2">
+                     <div className="flex items-center justify-between gap-2">
+                       <span className="typography-micro text-muted-foreground">
+                         {m.prAdditionalContextLabel()}
+                       </span>
+                       <Button
+                         variant="outline"
+                         size="sm"
+                         onClick={() => setIsContextSheetOpen(true)}
+                       >
+                         {additionalContext.trim() ? m.prEdit() : m.prAdd()}
+                       </Button>
+                     </div>
+                     {additionalContext.trim() && (
+                       <div className="flex items-center gap-2">
+                         <span className="inline-flex items-center rounded-full bg-[var(--interactive-selection)] px-2 py-0.5 text-xs text-[var(--interactive-selection-foreground)]">
+                           {m.prContextAdded()}
+                         </span>
+                       </div>
+                     )}
+                   </div>
+                 ) : (
+                   <Collapsible open={isContextOpen} onOpenChange={setIsContextOpen}>
+                     <CollapsibleTrigger className="flex w-full items-center justify-between rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)] px-3 py-2 hover:bg-[var(--interactive-hover)]">
+                       <span className="typography-micro text-muted-foreground">
+                         {m.prAdditionalContextOptional()}
+                       </span>
+                       <span className="typography-micro text-[var(--primary-base)]">
+                         {isContextOpen ? m.prHide() : additionalContext.trim() ? m.prEdit() : m.prAdd()}
+                       </span>
+                     </CollapsibleTrigger>
+                     <CollapsibleContent>
+                       <div className="mt-2 space-y-2 rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)] p-3">
+                         <Textarea
+                           value={additionalContext}
+                           onChange={(e) => setAdditionalContext(e.target.value)}
+                           className="min-h-[100px] bg-transparent"
+                           placeholder={m.prAdditionalContextPlaceholder()}
+                         />
+                         <p className="typography-micro text-muted-foreground">
+                           {m.prAdditionalContextGuide()}
+                         </p>
+                       </div>
+                     </CollapsibleContent>
+                   </Collapsible>
+                 )}
 
-                {/* Mobile Sheet for Context */}
-                <MobileOverlayPanel
-                  open={isContextSheetOpen}
-                  onClose={() => setIsContextSheetOpen(false)}
-                  title="Additional context"
-                  footer={
-                    <Button
-                      size="sm"
-                      onClick={() => setIsContextSheetOpen(false)}
-                      className="w-full"
-                    >
-                      Done
-                    </Button>
-                  }
-                >
-                  <div className="space-y-3">
-                    <Textarea
-                      value={additionalContext}
-                      onChange={(e) => setAdditionalContext(e.target.value)}
-                      className="min-h-[200px] bg-transparent"
-                      placeholder="Explain why this change is needed...&#10;Mention how to test (commands / steps)...&#10;Call out risks / rollout plan..."
-                      autoFocus
-                    />
-                    <p className="typography-micro text-muted-foreground">
-                      This text is only used to guide PR generation.
-                    </p>
-                  </div>
-                </MobileOverlayPanel>
+                 {/* Mobile Sheet for Context */}
+                 <MobileOverlayPanel
+                   open={isContextSheetOpen}
+                   onClose={() => setIsContextSheetOpen(false)}
+                   title={m.prAdditionalContextTitle()}
+                   footer={
+                     <Button
+                       size="sm"
+                       onClick={() => setIsContextSheetOpen(false)}
+                       className="w-full"
+                     >
+                       {m.prDone()}
+                     </Button>
+                   }
+                 >
+                   <div className="space-y-3">
+                     <Textarea
+                       value={additionalContext}
+                       onChange={(e) => setAdditionalContext(e.target.value)}
+                       className="min-h-[200px] bg-transparent"
+                       placeholder={m.prAdditionalContextPlaceholder()}
+                       autoFocus
+                     />
+                     <p className="typography-micro text-muted-foreground">
+                       {m.prAdditionalContextGuide()}
+                     </p>
+                   </div>
+                 </MobileOverlayPanel>
 
                 <div className="flex items-center gap-2">
                   <Button
@@ -1824,7 +1908,7 @@ export const PullRequestSection: React.FC<{
                     disabled={isGenerating || isCreating}
                   >
                     {isGenerating ? <RiLoader4Line className="size-4 animate-spin" /> : <RiAiGenerate2 className="size-4 text-primary" />}
-                    Generate
+                    {m.prGenerate()}
                   </Button>
                   <div className="flex-1" />
                   <Button
@@ -1836,7 +1920,7 @@ export const PullRequestSection: React.FC<{
                     <span className="inline-flex size-4 items-center justify-center">
                       {isCreating ? <RiLoader4Line className="size-4 animate-spin" /> : <RiGitPullRequestLine className="size-4" />}
                     </span>
-                    <span>Create PR</span>
+                    <span>{m.prCreatePR()}</span>
                   </Button>
                 </div>
               </div>
@@ -1848,10 +1932,10 @@ export const PullRequestSection: React.FC<{
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <RiGitPullRequestLine className="h-5 w-5" />
-              Check Details
+              {m.prCheckDetailsTitle()}
             </DialogTitle>
             <DialogDescription>
-              {pr ? `PR #${pr.number}` : 'Pull request'}
+              {pr ? `PR #${pr.number}` : m.prPullRequest()}
             </DialogDescription>
           </DialogHeader>
 
@@ -1859,7 +1943,7 @@ export const PullRequestSection: React.FC<{
             {isLoadingCheckDetails ? (
               <div className="text-center text-muted-foreground py-8 flex items-center justify-center gap-2">
                 <RiLoader4Line className="h-4 w-4 animate-spin" />
-                Loading...
+                {m.prLoading()}
               </div>
             ) : null}
 
@@ -1875,7 +1959,7 @@ export const PullRequestSection: React.FC<{
                     );
                   })
                 ) : (
-                  <div className="text-center text-muted-foreground py-8">No check details available.</div>
+                  <div className="text-center text-muted-foreground py-8">{m.prNoCheckDetails()}</div>
                 )}
               </div>
             ) : null}
@@ -1889,7 +1973,7 @@ export const PullRequestSection: React.FC<{
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <RiGitPullRequestLine className="h-5 w-5" />
-              PR Comments
+              {m.prPRCommentsTitle()}
               {pr ? (
                 <span className="typography-meta text-muted-foreground">PR #{pr.number}</span>
               ) : null}
@@ -1900,7 +1984,7 @@ export const PullRequestSection: React.FC<{
             {isLoadingCommentsDetails ? (
               <div className="text-center text-muted-foreground py-8 flex items-center justify-center gap-2">
                 <RiLoader4Line className="h-4 w-4 animate-spin" />
-                Loading...
+                {m.prLoading()}
               </div>
             ) : null}
 
@@ -1938,13 +2022,13 @@ export const PullRequestSection: React.FC<{
                                       onClick={() => {
                                         void sendSingleCommentToChat(comment);
                                       }}
-                                      aria-label="Send this comment to agent"
+                                      aria-label={m.prSendThisCommentToAgent()}
                                     >
                                       <RiAiGenerate2 className="size-3.5" />
-                                      Send to agent
+                                      {m.prSendToAgent()}
                                     </Button>
                                   </TooltipTrigger>
-                                  <TooltipContent><p>Send this comment to agent</p></TooltipContent>
+                                  <TooltipContent><p>{m.prSendThisCommentToAgent()}</p></TooltipContent>
                                 </Tooltip>
                               </div>
                               <div className="typography-micro text-muted-foreground">
@@ -1966,7 +2050,7 @@ export const PullRequestSection: React.FC<{
                     </div>
                   </div>
                 ) : (
-                  <div className="text-center text-muted-foreground py-8">No comments found.</div>
+                  <div className="text-center text-muted-foreground py-8">{m.prNoCommentsFound()}</div>
                 )}
               </div>
             ) : null}

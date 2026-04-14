@@ -7,6 +7,7 @@ import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { toast } from '@/components/ui';
 import type { DesktopSshInstance } from '@/lib/desktopSsh';
+import * as m from '@/lib/i18n/messages';
 
 type RemoteInstancesSidebarProps = {
   onItemSelect?: () => void;
@@ -132,16 +133,16 @@ export const RemoteInstancesSidebar: React.FC<RemoteInstancesSidebarProps> = ({ 
       variant="background"
       header={
         <div className="border-b px-3 pt-4 pb-3">
-          <h2 className="text-base font-semibold text-foreground mb-3">Remote Instances</h2>
+          <h2 className="text-base font-semibold text-foreground mb-3">{m.riSshInstancesManageTitle()}</h2>
           <div className="flex items-center justify-between gap-2">
-            <span className="typography-meta text-muted-foreground">Total {instances.length}</span>
+            <span className="typography-meta text-muted-foreground">{m.riSshInstancesTotal({ count: instances.length })}</span>
             <Button
               type="button"
               variant="ghost"
               size="icon"
               className="h-7 w-7 -my-1 text-muted-foreground"
               onClick={() => void handleAdd()}
-              aria-label="Add SSH instance"
+              aria-label={m.riSshInstancesAddAria()}
             >
               <RiAddLine className="size-4" />
             </Button>

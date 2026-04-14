@@ -11,6 +11,7 @@ import { useDeviceInfo } from '@/lib/device';
 import { RiArrowDownSLine, RiRobot2Line } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
+import { m } from '@/lib/i18n/messages';
 
 interface AgentSelectorProps {
     agentName: string;
@@ -48,7 +49,7 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
             <MobileOverlayPanel
                 open={isMobilePanelOpen}
                 onClose={closeMobilePanel}
-                title="Select agent"
+                title={m.selectorSelectAgent()}
             >
                 <div className="space-y-1">
                     <button
@@ -62,7 +63,7 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
                             closeMobilePanel();
                         }}
                     >
-                        <span className={cn('typography-meta', !agentName ? 'font-medium' : 'text-muted-foreground')}>Not selected</span>
+                        <span className={cn('typography-meta', !agentName ? 'font-medium' : 'text-muted-foreground')}>{m.selectorNotSelected()}</span>
                         {!agentName && <div className="h-2 w-2 rounded-full bg-primary" />}
                     </button>
                     {agents.map((agent) => {
@@ -114,7 +115,7 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
                     <div className="flex items-center gap-2">
                         <RiRobot2Line className="h-3.5 w-3.5 text-muted-foreground" />
                         <span className="typography-meta font-medium text-foreground">
-                            {agentName || 'Select agent...'}
+                            {agentName || m.selectorSelectAgent()}
                         </span>
                     </div>
                     <RiArrowDownSLine className="h-3 w-3 text-muted-foreground" />
@@ -128,7 +129,7 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
                         )}>
                             <RiRobot2Line className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
                             <span className="typography-micro font-medium whitespace-nowrap">
-                                {agentName || 'Not selected'}
+                                {agentName || m.selectorNotSelected()}
                             </span>
                             <RiArrowDownSLine className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
                         </div>
@@ -138,7 +139,7 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
                             className="typography-meta"
                             onSelect={() => handleAgentChange('')}
                         >
-                            <span className="text-muted-foreground">Not selected</span>
+                            <span className="text-muted-foreground">{m.selectorNotSelected()}</span>
                         </DropdownMenuItem>
                         {agents.map((agent) => (
                             <DropdownMenuItem

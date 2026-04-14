@@ -2,6 +2,7 @@ import React from 'react';
 import { cn } from '@/lib/utils';
 import type { PaceInfo } from '@/lib/quota';
 import { getPaceStatusColor, formatRemainingTime } from '@/lib/quota';
+import { m } from "@/lib/i18n/messages";
 
 interface PaceIndicatorProps {
   paceInfo: PaceInfo;
@@ -81,7 +82,7 @@ export const PaceIndicator: React.FC<PaceIndicatorProps> = ({
             </>
           ) : (
             <span title={predictionTooltip}>
-              <span className="text-muted-foreground">Pred: </span>
+              <span className="text-muted-foreground">{m.paceLabel()} </span>
               <span className="font-medium">{paceInfo.predictText}</span>
             </span>
           )}

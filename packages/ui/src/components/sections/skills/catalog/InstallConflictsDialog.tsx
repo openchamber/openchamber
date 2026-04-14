@@ -15,6 +15,7 @@ import {
   SelectItem,
   SelectTrigger,
 } from '@/components/ui/select';
+import { m } from '@/lib/i18n/messages';
 
 export type SkillConflict = {
   skillName: string;
@@ -62,18 +63,18 @@ export const InstallConflictsDialog: React.FC<InstallConflictsDialogProps> = ({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Skills already exist</DialogTitle>
+          <DialogTitle>{m.scConflictsTitle()}</DialogTitle>
           <DialogDescription>
-            Some selected skills are already installed in this scope. Choose whether to skip or overwrite them.
+            {m.scConflictsDesc()}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-3">
           <div className="flex items-center justify-between gap-2">
-            <span className="typography-meta text-muted-foreground">{conflicts.length} conflict(s)</span>
+            <span className="typography-meta text-muted-foreground">{m.scConflictsCount({ count: conflicts.length })}</span>
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="xs" className="!font-normal" onClick={() => setAll('skip')}>Skip all</Button>
-              <Button variant="outline" size="xs" className="!font-normal" onClick={() => setAll('overwrite')}>Overwrite all</Button>
+              <Button variant="outline" size="xs" className="!font-normal" onClick={() => setAll('skip')}>{m.scSkipAll()}</Button>
+              <Button variant="outline" size="xs" className="!font-normal" onClick={() => setAll('overwrite')}>{m.scOverwriteAll()}</Button>
             </div>
           </div>
 
@@ -86,7 +87,7 @@ export const InstallConflictsDialog: React.FC<InstallConflictsDialogProps> = ({
                 <div className="min-w-0">
                   <div className="typography-ui-label truncate">{conflict.skillName}</div>
                   <div className="typography-micro text-muted-foreground">
-                    Installed in {conflict.scope} / {conflict.source || 'opencode'}
+                    {m.scInstalledIn({ scope: conflict.scope, source: conflict.source || 'opencode' })}
                   </div>
                 </div>
 
@@ -95,14 +96,14 @@ export const InstallConflictsDialog: React.FC<InstallConflictsDialogProps> = ({
                   onValueChange={(v) => setDecisions((prev) => ({ ...prev, [conflict.skillName]: v as ConflictDecision }))}
                 >
                   <SelectTrigger className="w-fit">
-                    <span className="capitalize">{decisions[conflict.skillName] || 'skip'}</span>
+                    <span className="capitalize">{decisions[conflict.skillName] === 'overwrite' ? m.scOverwrite() : m.scSkip()}</span>
                   </SelectTrigger>
                   <SelectContent align="end">
                     <SelectItem value="skip" className="pr-2 [&>span:first-child]:hidden">
-                      Skip
+                      {m.scSkip()}
                     </SelectItem>
                     <SelectItem value="overwrite" className="pr-2 [&>span:first-child]:hidden">
-                      Overwrite
+                      {m.scOverwrite()}
                     </SelectItem>
                   </SelectContent>
                 </Select>
@@ -113,14 +114,14 @@ export const InstallConflictsDialog: React.FC<InstallConflictsDialogProps> = ({
 
         <DialogFooter>
           <Button size="sm" variant="ghost" onClick={() => onOpenChange(false)}>
-            Cancel
+            {m.commonCancel()}
           </Button>
           <Button
             size="sm"
             onClick={() => onConfirm(decisions)}
             disabled={!canConfirm}
           >
-            Continue
+            {m.scContinue()}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -12,6 +12,7 @@ import { useSessionMessageRecords } from '@/sync/sync-context';
 import { RiLoader4Line, RiSearchLine, RiTimeLine, RiGitBranchLine, RiArrowGoBackLine } from '@remixicon/react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { Part } from '@opencode-ai/sdk/v2';
+import { chatConversationTimeline, chatTimelineDescription, chatSearchMessages, chatNoMessagesFound, chatNoMessagesInSession } from '@/lib/i18n/messages';
 
 interface TimelineDialogProps {
     open: boolean;
@@ -89,17 +90,17 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
                 <DialogHeader>
                     <DialogTitle className="flex items-center gap-2">
                         <RiTimeLine className="h-5 w-5" />
-                        Conversation Timeline
+                        {chatConversationTimeline()}
                     </DialogTitle>
                     <DialogDescription>
-                        Navigate to any point in the conversation or fork a new session
+                        {chatTimelineDescription()}
                     </DialogDescription>
                 </DialogHeader>
 
                 <div className="relative mt-2">
                     <RiSearchLine className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input
-                        placeholder="Search messages..."
+                        placeholder={chatSearchMessages()}
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                         className="pl-9 w-full"
@@ -109,7 +110,7 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
                 <div className="flex-1 overflow-y-auto">
                     {filteredMessages.length === 0 ? (
                         <div className="text-center text-muted-foreground py-8">
-                            {searchQuery ? 'No messages found' : 'No messages in this session yet'}
+                            {searchQuery ? chatNoMessagesFound() : chatNoMessagesInSession()}
                         </div>
                     ) : (
                         filteredMessages.map((message) => {

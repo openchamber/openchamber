@@ -3,6 +3,7 @@ import { RiCloseLine, RiMessage2Line } from '@remixicon/react';
 import { useMessageQueueStore, type QueuedMessage } from '@/stores/messageQueueStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useInputStore } from '@/sync/input-store';
+import { chatRemoveFromQueue } from '@/lib/i18n/messages';
 
 interface QueuedMessageChipProps {
     message: QueuedMessage;
@@ -50,7 +51,7 @@ const QueuedMessageChip = memo(({ message, sessionId, onEdit }: QueuedMessageChi
                     removeFromQueue(sessionId, message.id);
                 }}
                 className="flex items-center justify-center h-6 w-6 flex-shrink-0 hover:bg-[var(--interactive-hover)] rounded-full transition-colors cursor-pointer"
-                aria-label="Remove from queue"
+                aria-label={chatRemoveFromQueue()}
             >
                 <RiCloseLine className="h-4 w-4 text-muted-foreground" />
             </span>

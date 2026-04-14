@@ -22,6 +22,7 @@ import { RiFolderLine, RiRobot2Line, RiUser3Line } from '@remixicon/react';
 import type { SkillsCatalogItem } from '@/lib/api/types';
 import { useSkillsCatalogStore } from '@/stores/useSkillsCatalogStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { m } from '@/lib/i18n/messages';
 import { InstallConflictsDialog, type ConflictDecision, type SkillConflict } from './InstallConflictsDialog';
 import {
   SKILL_LOCATION_OPTIONS,
@@ -122,7 +123,7 @@ export const InstallSkillDialog: React.FC<InstallSkillDialogProps> = ({ open, on
     }, { directory: request.directoryOverride ?? null });
 
     if (result.ok) {
-      toast.success('Skill installed successfully');
+      toast.success(m.scToastInstalledSuccessfully());
       onOpenChange(false);
       return;
     }
@@ -142,11 +143,11 @@ export const InstallSkillDialog: React.FC<InstallSkillDialogProps> = ({ open, on
     }
 
     if (result.error?.kind === 'authRequired') {
-      toast.error(result.error.message || 'Authentication required');
+      toast.error(result.error.message || m.scToastAuthRequired());
       return;
     }
 
-    toast.error(result.error?.message || 'Failed to install skill');
+    toast.error(result.error?.message || m.scToastInstallSkillFailed());
   };
 
   if (!item) {
@@ -158,15 +159,15 @@ export const InstallSkillDialog: React.FC<InstallSkillDialogProps> = ({ open, on
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="max-w-md" keyboardAvoid>
           <DialogHeader>
-            <DialogTitle>Install skill</DialogTitle>
+            <DialogTitle>{m.scInstallSkillTitle()}</DialogTitle>
             <DialogDescription>
-              Install <span className="font-semibold text-foreground">{item.skillName}</span> into one of four target locations.
+              {m.scInstallSkillDesc({ name: item.skillName })}
             </DialogDescription>
           </DialogHeader>
 
           <div className="mt-2 space-y-3">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="typography-ui-label text-foreground">Destination</span>
+              <span className="typography-ui-label text-foreground">{m.scDestination()}</span>
               <Select
                 value={locationValueFrom(scope, targetSource)}
                 onValueChange={(v) => {
@@ -199,9 +200,9 @@ export const InstallSkillDialog: React.FC<InstallSkillDialogProps> = ({ open, on
 
             {scope === 'project' && (
               <div className="flex flex-wrap items-center gap-2">
-                <span className="typography-ui-label text-foreground">Project</span>
+                <span className="typography-ui-label text-foreground">{m.scProject()}</span>
                 {projects.length === 0 ? (
-                  <span className="typography-meta text-muted-foreground">No projects available</span>
+                  <span className="typography-meta text-muted-foreground">{m.scNoProjects()}</span>
                 ) : (
                   <Select
                     value={resolvedTargetProjectId ?? ''}
@@ -209,7 +210,7 @@ export const InstallSkillDialog: React.FC<InstallSkillDialogProps> = ({ open, on
                     disabled={projects.length === 1}
                   >
                     <SelectTrigger className="w-fit">
-                      <SelectValue placeholder="Choose project" />
+                      <SelectValue placeholder={m.scChooseProject()} />
                     </SelectTrigger>
                     <SelectContent align="start">
                       {projects.map((p) => (
@@ -236,7 +237,7 @@ export const InstallSkillDialog: React.FC<InstallSkillDialogProps> = ({ open, on
               variant="ghost"
               onClick={() => onOpenChange(false)}
             >
-              Cancel
+              {m.commonCancel()}
             </Button>
             <Button
               size="sm"
@@ -252,7 +253,7 @@ export const InstallSkillDialog: React.FC<InstallSkillDialogProps> = ({ open, on
                 })
               }
             >
-              {isInstalling ? 'Installing...' : 'Install'}
+              {isInstalling ? m.scInstalling() : m.scInstall()}
             </Button>
           </DialogFooter>
         </DialogContent>

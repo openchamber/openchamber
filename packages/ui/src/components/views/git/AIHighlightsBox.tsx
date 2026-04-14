@@ -2,6 +2,7 @@ import React from 'react';
 import { RiArrowDownLine } from '@remixicon/react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { m } from '@/lib/i18n/messages';
 
 interface AIHighlightsBoxProps {
   highlights: string[];
@@ -26,7 +27,7 @@ export const AIHighlightsBox: React.FC<AIHighlightsBoxProps> = ({
   return (
     <div className="space-y-2 rounded-xl border border-border/60 bg-transparent px-3 py-2">
       <div className="flex items-center justify-between gap-2">
-        <p className="typography-micro text-muted-foreground">AI highlights</p>
+        <p className="typography-micro text-muted-foreground">{m.gitAiHighlights()}</p>
         <Tooltip delayDuration={1000}>
           <TooltipTrigger asChild>
             <Button
@@ -34,13 +35,13 @@ export const AIHighlightsBox: React.FC<AIHighlightsBoxProps> = ({
               size="icon"
               className="size-6"
               onClick={handleInsert}
-              aria-label="Insert highlights into commit message"
+              aria-label={m.gitInsertHighlightsIntoCommitMessage()}
             >
               <RiArrowDownLine className="size-4" />
             </Button>
           </TooltipTrigger>
           <TooltipContent sideOffset={8}>
-            Append highlights to commit message
+            {m.gitAppendHighlightsToCommitMessage()}
           </TooltipContent>
         </Tooltip>
       </div>

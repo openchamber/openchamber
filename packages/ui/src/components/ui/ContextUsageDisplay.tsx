@@ -3,6 +3,17 @@ import { RiDonutChartFill, RiDonutChartLine } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
+import {
+  ctxUsedTokens,
+  ctxContextLimit,
+  ctxOutputLimit,
+  ctxUsageAria,
+  ctxUsage,
+  ctxUsedTokensShort,
+  ctxContextLimitShort,
+  ctxOutputLimitShort,
+  ctxUsageShort,
+} from '@/lib/i18n/messages';
 
 interface ContextUsageDisplayProps {
   totalTokens: number;
@@ -58,9 +69,9 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
 
   const safeOutputLimit = typeof outputLimit === 'number' ? Math.max(outputLimit, 0) : 0;
   const tooltipLines = [
-    `Used tokens: ${formatTokens(totalTokens)}`,
-    `Context limit: ${formatTokens(contextLimit)}`,
-    `Output limit: ${formatTokens(safeOutputLimit)}`,
+    ctxUsedTokens().replace('{value}', formatTokens(totalTokens)),
+    ctxContextLimit().replace('{value}', formatTokens(contextLimit)),
+    ctxOutputLimit().replace('{value}', formatTokens(safeOutputLimit)),
   ];
 
   const isInteractive = !isMobile && typeof onClick === 'function';
@@ -103,7 +114,7 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
     <button
       type="button"
       className={sharedClassName}
-      aria-label="Context usage"
+      aria-label={ctxUsageAria()}
       aria-pressed={pressed}
       onClick={onClick}
     >
@@ -112,7 +123,7 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
   ) : (
     <div
       className={sharedClassName}
-      aria-label="Context usage"
+      aria-label={ctxUsageAria()}
       onClick={isMobile ? () => setMobileTooltipOpen(true) : undefined}
     >
       {contextContent}
@@ -126,24 +137,24 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
         <MobileOverlayPanel
           open={mobileTooltipOpen}
           onClose={() => setMobileTooltipOpen(false)}
-          title="Context Usage"
+          title={ctxUsage()}
         >
           <div className="flex flex-col gap-1.5">
             <div className="rounded-xl border border-border/40 bg-sidebar/30 px-3 py-2 space-y-1">
               <div className="flex justify-between items-center">
-                <span className="typography-meta text-muted-foreground">Used tokens</span>
+                <span className="typography-meta text-muted-foreground">{ctxUsedTokensShort()}</span>
                 <span className="typography-meta text-foreground font-medium">{formatTokens(totalTokens)}</span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="typography-meta text-muted-foreground">Context limit</span>
+                <span className="typography-meta text-muted-foreground">{ctxContextLimitShort()}</span>
                 <span className="typography-meta text-foreground font-medium">{formatTokens(contextLimit)}</span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="typography-meta text-muted-foreground">Output limit</span>
+                <span className="typography-meta text-muted-foreground">{ctxOutputLimitShort()}</span>
                 <span className="typography-meta text-foreground font-medium">{formatTokens(safeOutputLimit)}</span>
               </div>
               <div className="flex justify-between items-center pt-1 border-t border-border/40">
-                <span className="typography-meta text-muted-foreground">Usage</span>
+                <span className="typography-meta text-muted-foreground">{ctxUsageShort()}</span>
                 <span className={cn('typography-meta font-semibold', getPercentageColor(colorPct))}>
                   {Math.min(percentage, 999).toFixed(1)}%
                 </span>

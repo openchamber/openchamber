@@ -2,6 +2,7 @@ import React from 'react';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { useMagicPromptsStore } from '@/stores/useMagicPromptsStore';
 import { cn } from '@/lib/utils';
+import { m } from '@/lib/i18n/messages';
 
 interface MagicPromptsSidebarProps {
   onItemSelect?: () => void;
@@ -38,8 +39,8 @@ export const MagicPromptsSidebar: React.FC<MagicPromptsSidebarProps> = ({ onItem
   return (
     <div className="flex h-full flex-col bg-background">
       <div className="border-b px-3 pt-4 pb-3">
-        <h2 className="text-base font-semibold text-foreground">Magic Prompts</h2>
-        <p className="typography-meta mt-1 text-muted-foreground">Select a prompt template to edit.</p>
+        <h2 className="text-base font-semibold text-foreground">{m.magicPromptsTitle()}</h2>
+        <p className="typography-meta mt-1 text-muted-foreground">{m.magicPromptsSelect()}</p>
       </div>
 
       <ScrollableOverlay outerClassName="flex-1 min-h-0" className="space-y-3 px-3 py-2 overflow-x-hidden">

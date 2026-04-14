@@ -1,5 +1,6 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
+import { m } from '@/lib/i18n/messages';
 import { Input } from '@/components/ui/input';
 import { NumberInput } from '@/components/ui/number-input';
 import { Switch } from '@/components/ui/switch';
@@ -164,11 +165,11 @@ const HintLabel: React.FC<{ label: string; hint: React.ReactNode }> = ({ label, 
 const forwardTypeDescription = (type: DesktopSshPortForwardType): string => {
   switch (type) {
     case 'remote':
-      return 'Remote (-R): expose a port on the remote machine and send that traffic back to this laptop.';
+      return m.riSshInstancesRemoteForwardTypeRemote();
     case 'dynamic':
-      return 'Dynamic (-D): create a local SOCKS5 proxy on this laptop (for apps that support SOCKS proxy settings).';
+      return m.riSshInstancesRemoteForwardTypeDynamic();
     default:
-      return 'Local (-L): open a port on this laptop and send it to a remote host:port over SSH (use this to access remote services locally).';
+      return m.riSshInstancesRemoteForwardTypeLocal();
   }
 };
 
@@ -681,23 +682,23 @@ export const RemoteInstancesPage: React.FC = () => {
       <SettingsPageLayout>
         <div className="mb-8">
           <div className="mb-1 px-1 space-y-0.5">
-            <h3 className="typography-ui-header font-medium text-foreground">Remote Instances</h3>
-            <p className="typography-meta text-muted-foreground">Manage SSH-backed OpenChamber instances.</p>
+            <h3 className="typography-ui-header font-medium text-foreground">{m.riSshInstancesManageTitle()}</h3>
+            <p className="typography-meta text-muted-foreground">{m.riSshInstancesManageDesc()}</p>
           </div>
           <section className="px-2 pb-2 pt-0 space-y-3">
-            <p className="typography-meta text-muted-foreground">Select an instance from the sidebar or import one from SSH config.</p>
+            <p className="typography-meta text-muted-foreground">{m.riSshInstancesSelectInstance()}</p>
           </section>
         </div>
 
         <div className="mb-8 border-t border-[var(--surface-subtle)] pt-8">
           <div className="mb-1 px-1 space-y-0.5">
-            <h3 className="typography-ui-header font-medium text-foreground">Import from SSH config</h3>
+            <h3 className="typography-ui-header font-medium text-foreground">{m.riSshInstancesImportTitle()}</h3>
           </div>
           <section className="px-2 pb-2 pt-0">
           {isImportsLoading ? (
-            <p className="typography-meta text-muted-foreground">Loading SSH hosts...</p>
+            <p className="typography-meta text-muted-foreground">{m.riSshInstancesLoadingHosts()}</p>
           ) : importCandidates.length === 0 ? (
-            <p className="typography-meta text-muted-foreground">No SSH config hosts found.</p>
+            <p className="typography-meta text-muted-foreground">{m.riSshInstancesNoHosts()}</p>
           ) : (
             <div className="space-y-2">
               {importCandidates.map((candidate) => (
@@ -716,7 +717,7 @@ export const RemoteInstancesPage: React.FC = () => {
                     className="!font-normal"
                     onClick={() => void handleImportCandidate(candidate.host, candidate.pattern)}
                   >
-                    Create
+                    {m.riSshInstancesCreate()}
                   </Button>
                 </div>
               ))}
@@ -735,7 +736,7 @@ export const RemoteInstancesPage: React.FC = () => {
         >
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
-              <DialogTitle>Create from wildcard pattern</DialogTitle>
+              <DialogTitle>{m.riSshInstancesPatternDialogTitle()}</DialogTitle>
               <DialogDescription>
                 {patternHost ? `${patternHost} requires a concrete destination.` : 'Enter destination.'}
               </DialogDescription>
@@ -750,15 +751,15 @@ export const RemoteInstancesPage: React.FC = () => {
               <Input
                 value={patternDestination}
                 onChange={(event) => setPatternDestination(event.target.value)}
-                placeholder="user@host"
+                placeholder={m.riSshInstancesPatternPlaceholder()}
                 autoFocus
               />
               <div className="flex items-center justify-end gap-2">
                 <Button type="button" variant="outline" size="xs" className="!font-normal" onClick={closePatternDialog} disabled={patternCreating}>
-                  Cancel
+                  {m.riSshInstancesCancel()}
                 </Button>
                 <Button type="submit" size="xs" className="!font-normal" disabled={patternCreating}>
-                  Create
+                  {m.riSshInstancesCreate()}
                 </Button>
               </div>
             </form>
@@ -778,15 +779,15 @@ export const RemoteInstancesPage: React.FC = () => {
         <div className="mt-1 flex flex-wrap items-center gap-2 typography-meta text-muted-foreground">
           <span className={`h-2.5 w-2.5 rounded-full ${phaseDotClass(statusPhase)}`} />
           <span>{phaseLabel(statusPhase)}</span>
-          {status?.localUrl ? <span className="font-mono text-foreground/80">{status.localUrl}</span> : null}
-          {reconnectAppearsStuck ? <span>reconnect stale</span> : null}
+          {status?.localUrl ?           <span className="font-mono text-foreground/80">{status.localUrl}</span> : null}
+          {reconnectAppearsStuck ? <span>{m.riSshInstancesReconnectStale()}</span> : null}
         </div>
       </div>
 
       <div className="mb-8">
         <div className="mb-1 px-1 space-y-0.5">
-          <h3 className="typography-ui-header font-medium text-foreground">Actions</h3>
-          <p className="typography-meta text-muted-foreground">Connect, inspect logs, and manage this instance.</p>
+          <h3 className="typography-ui-header font-medium text-foreground">{m.riSshInstancesActionsTitle()}</h3>
+          <p className="typography-meta text-muted-foreground">{m.riSshInstancesActionsDesc()}</p>
         </div>
         <section className="px-2 pb-2 pt-0 space-y-3">
           <div className="flex flex-wrap items-center gap-2">
@@ -850,7 +851,7 @@ export const RemoteInstancesPage: React.FC = () => {
           </div>
           {status?.localUrl ? (
             <div className="flex flex-wrap items-center gap-2 typography-meta text-muted-foreground">
-              <span>Current local URL:</span>
+              <span>{m.riSshInstancesCurrentLocalUrl()}</span>
               <span className="font-mono text-foreground/90">{status.localUrl}</span>
             </div>
           ) : null}
@@ -859,12 +860,12 @@ export const RemoteInstancesPage: React.FC = () => {
 
       <div className="mb-8">
         <div className="mb-1 px-1 space-y-0.5">
-          <h3 className="typography-ui-header font-medium text-foreground">Instance</h3>
-          <p className="typography-meta text-muted-foreground">Core SSH settings.</p>
+          <h3 className="typography-ui-header font-medium text-foreground">{m.riSshInstancesInstanceSection()}</h3>
+          <p className="typography-meta text-muted-foreground">{m.riSshInstancesCoreSettingsDesc()}</p>
         </div>
         <section className="px-2 pb-2 pt-0 space-y-3">
           <div className="flex flex-col gap-1.5 py-1.5 md:flex-row md:items-center md:gap-8">
-            <span className="typography-ui-label text-foreground w-56 shrink-0">SSH command</span>
+            <span className="typography-ui-label text-foreground w-56 shrink-0">{m.riSshInstancesSshCommand()}</span>
             <Input
               className="h-7 md:max-w-xl"
               value={draft.sshCommand}
@@ -874,11 +875,11 @@ export const RemoteInstancesPage: React.FC = () => {
                   sshCommand: event.target.value,
                 }))
               }
-              placeholder="ssh -J jump user@host"
+              placeholder={m.riSshInstancesSshCommandRequired()}
             />
           </div>
           <div className="flex flex-col gap-1.5 py-1.5 md:flex-row md:items-center md:gap-8">
-            <span className="typography-ui-label text-foreground w-56 shrink-0">Nickname</span>
+            <span className="typography-ui-label text-foreground w-56 shrink-0">{m.riSshInstancesNickname()}</span>
             <Input
               className="h-7 md:max-w-sm"
               value={draft.nickname || ''}
@@ -888,7 +889,7 @@ export const RemoteInstancesPage: React.FC = () => {
                   nickname: event.target.value,
                 }))
               }
-              placeholder="Production Host"
+              placeholder={m.riSshInstancesNickname()}
             />
           </div>
           <div className="flex flex-col gap-1.5 py-1.5 md:flex-row md:items-center md:gap-8">
@@ -913,8 +914,8 @@ export const RemoteInstancesPage: React.FC = () => {
 
       <div className="mb-8 border-t border-[var(--surface-subtle)] pt-8">
         <div className="mb-1 px-1 space-y-0.5">
-          <h3 className="typography-ui-header font-medium text-foreground">Remote server</h3>
-          <p className="typography-meta text-muted-foreground">How OpenChamber is discovered or started on the remote machine.</p>
+          <h3 className="typography-ui-header font-medium text-foreground">{m.riSshInstancesTitleRemoteServer()}</h3>
+          <p className="typography-meta text-muted-foreground">{m.riSshInstancesDescRemoteServer()}</p>
         </div>
         <section className="px-2 pb-2 pt-0 space-y-3">
           <div className="flex flex-col gap-1.5 py-1.5 md:flex-row md:items-center md:gap-8">
@@ -937,11 +938,11 @@ export const RemoteInstancesPage: React.FC = () => {
               }
             >
               <SelectTrigger className="h-7 w-fit min-w-[140px]">
-                <SelectValue placeholder="Select mode" />
+                <SelectValue placeholder={m.riSshInstancesModeHint()} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="managed">Managed (auto start)</SelectItem>
-                <SelectItem value="external">External (already running)</SelectItem>
+                <SelectItem value="managed">{m.riSshInstancesModeManaged()}</SelectItem>
+                <SelectItem value="external">{m.riSshInstancesModeExternal()}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -1005,15 +1006,15 @@ export const RemoteInstancesPage: React.FC = () => {
                   }))
                 }
               >
-                <SelectTrigger className="h-7 w-fit min-w-[140px]">
-                  <SelectValue placeholder="Select install method" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="bun">bun</SelectItem>
-                  <SelectItem value="npm">npm</SelectItem>
-                  <SelectItem value="download_release">download release</SelectItem>
-                  <SelectItem value="upload_bundle">upload bundle</SelectItem>
-                </SelectContent>
+              <SelectTrigger className="h-7 w-fit min-w-[140px]">
+                <SelectValue placeholder={m.riSshInstancesInstallMethodHint()} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="bun">{m.riSshInstancesInstallBun()}</SelectItem>
+                <SelectItem value="npm">{m.riSshInstancesInstallNpm()}</SelectItem>
+                <SelectItem value="download_release">{m.riSshInstancesInstallDownload()}</SelectItem>
+                <SelectItem value="upload_bundle">{m.riSshInstancesInstallUpload()}</SelectItem>
+              </SelectContent>
               </Select>
             </div>
           ) : null}
@@ -1047,8 +1048,8 @@ export const RemoteInstancesPage: React.FC = () => {
 
       <div className="mb-8 border-t border-[var(--surface-subtle)] pt-8">
         <div className="mb-1 px-1 space-y-0.5">
-          <h3 className="typography-ui-header font-medium text-foreground">Main tunnel</h3>
-          <p className="typography-meta text-muted-foreground">Primary local URL that points to the remote OpenChamber server.</p>
+          <h3 className="typography-ui-header font-medium text-foreground">{m.riSshInstancesTitleMainTunnel()}</h3>
+          <p className="typography-meta text-muted-foreground">{m.riSshInstancesDescMainTunnel()}</p>
         </div>
         <section className="px-2 pb-2 pt-0 space-y-3">
           <div className="flex flex-col gap-1.5 py-1.5 md:flex-row md:items-center md:gap-8">
@@ -1077,11 +1078,11 @@ export const RemoteInstancesPage: React.FC = () => {
               }}
             >
               <SelectTrigger className="h-7 w-fit min-w-[140px]">
-                <SelectValue placeholder="Select bind host" />
+                <SelectValue placeholder={m.riSshInstancesBindHostHint()} />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="127.0.0.1">127.0.0.1</SelectItem>
-                <SelectItem value="localhost">localhost</SelectItem>
+                <SelectItem value="localhost">{m.riSshInstancesBindHostLocalhost()}</SelectItem>
                 <SelectItem value="0.0.0.0">0.0.0.0</SelectItem>
               </SelectContent>
             </Select>
@@ -1127,7 +1128,7 @@ export const RemoteInstancesPage: React.FC = () => {
                 variant="outline"
                 size="xs"
                 className="!font-normal h-7 w-7 px-0"
-                title="Pick random port"
+                title={m.riSshInstancesRandomPortTitle()}
                 onClick={() =>
                   updateDraft((current) => ({
                     ...current,
@@ -1147,12 +1148,12 @@ export const RemoteInstancesPage: React.FC = () => {
 
       <div className="mb-8 border-t border-[var(--surface-subtle)] pt-8">
         <div className="mb-1 px-1 space-y-0.5">
-          <h3 className="typography-ui-header font-medium text-foreground">Authentication</h3>
-          <p className="typography-meta text-muted-foreground">Optional credentials for SSH and remote UI.</p>
+          <h3 className="typography-ui-header font-medium text-foreground">{m.riSshInstancesTitleAuthentication()}</h3>
+          <p className="typography-meta text-muted-foreground">{m.riSshInstancesDescAuthentication()}</p>
         </div>
         <section className="px-2 pb-2 pt-0 space-y-3">
           <div className="flex flex-col gap-1.5 py-1.5 md:flex-row md:items-center md:gap-8">
-            <span className="typography-ui-label text-foreground w-56 shrink-0">SSH password (optional)</span>
+            <span className="typography-ui-label text-foreground w-56 shrink-0">{m.riSshInstancesSshPassword()}</span>
             <Input
               className="h-7 md:max-w-sm"
               type="password"
@@ -1170,12 +1171,12 @@ export const RemoteInstancesPage: React.FC = () => {
                   },
                 }))
               }
-              placeholder="Password or key passphrase"
+              placeholder={m.riSshInstancesSshPasswordPlaceholder()}
             />
           </div>
 
           <div className="flex flex-col gap-1.5 py-1.5 md:flex-row md:items-center md:gap-8">
-            <span className="typography-ui-label text-foreground w-56 shrink-0">OpenChamber UI password (optional)</span>
+            <span className="typography-ui-label text-foreground w-56 shrink-0">{m.riSshInstancesOpenchamberPassword()}</span>
             <Input
               className="h-7 md:max-w-sm"
               type="password"
@@ -1193,7 +1194,7 @@ export const RemoteInstancesPage: React.FC = () => {
                   },
                 }))
               }
-              placeholder="Protect remote UI with password"
+              placeholder={m.riSshInstancesOpenchamberPasswordPlaceholder()}
             />
           </div>
         </section>
@@ -1201,12 +1202,12 @@ export const RemoteInstancesPage: React.FC = () => {
 
       <div className="mb-8 border-t border-[var(--surface-subtle)] pt-8">
         <div className="mb-1 px-1 space-y-0.5">
-          <h3 className="typography-ui-header font-medium text-foreground">Port Forwards</h3>
-          <p className="typography-meta text-muted-foreground">Optional extra SSH forwards in addition to the primary OpenChamber tunnel.</p>
+          <h3 className="typography-ui-header font-medium text-foreground">{m.riSshInstancesTitlePortForwards()}</h3>
+          <p className="typography-meta text-muted-foreground">{m.riSshInstancesDescPortForwards()}</p>
         </div>
         <section className="px-2 pb-2 pt-0 space-y-2">
           {draft.portForwards.length === 0 ? (
-            <p className="typography-micro text-muted-foreground/80">No extra forwards configured yet.</p>
+            <p className="typography-micro text-muted-foreground/80">{m.riSshInstancesNoExtraForwards()}</p>
           ) : null}
 
           {draft.portForwards.map((forward, index) => {
@@ -1261,7 +1262,7 @@ export const RemoteInstancesPage: React.FC = () => {
                     </CollapsibleTrigger>
                   </div>
                   <div className="flex items-center gap-2">
-                    <Switch checked={forward.enabled} onCheckedChange={(checked) => updateForward((item) => ({ ...item, enabled: checked }))} aria-label="Enable forward" />
+                    <Switch checked={forward.enabled} onCheckedChange={(checked) => updateForward((item) => ({ ...item, enabled: checked }))} aria-label={m.riSshInstancesEnableForwardAria()} />
                     <Button
                       type="button"
                       variant="ghost"
@@ -1298,7 +1299,7 @@ export const RemoteInstancesPage: React.FC = () => {
                         }
                       >
                         <SelectTrigger className="h-7 w-fit min-w-[140px]">
-                          <SelectValue placeholder="Type" />
+                          <SelectValue placeholder={m.riSshInstancesForwardType()} />
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="local">Local (-L)</SelectItem>
@@ -1322,7 +1323,7 @@ export const RemoteInstancesPage: React.FC = () => {
                               localHost: event.target.value,
                             }))
                           }
-                          placeholder="127.0.0.1"
+                          placeholder={m.riSshInstancesLocalListenHint()}
                         />
                         <span className="text-muted-foreground">:</span>
                         <NumberInput
@@ -1364,7 +1365,7 @@ export const RemoteInstancesPage: React.FC = () => {
                                 remoteHost: event.target.value,
                               }))
                             }
-                            placeholder="127.0.0.1"
+                            placeholder={m.riSshInstancesRemoteListenHint()}
                           />
                           <span className="text-muted-foreground">:</span>
                           <NumberInput
@@ -1424,22 +1425,22 @@ export const RemoteInstancesPage: React.FC = () => {
                       </div>
 
                       {canOpenLocalEndpoint ? (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="xs"
-                          className="!font-normal"
-                          onClick={() => {
-                            void openExternalUrl(localEndpointUrl).then((opened) => {
-                              if (!opened) {
-                                toast.error('Failed to open local endpoint');
-                              }
-                            });
-                          }}
-                        >
-                          <RiExternalLinkLine className="h-3.5 w-3.5" />
-                          Open local
-                        </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              className="!font-normal"
+              onClick={() => {
+                void openExternalUrl(localEndpointUrl).then((opened) => {
+                  if (!opened) {
+                    toast.error(m.riSshInstancesFailedOpen());
+                  }
+                });
+              }}
+            >
+              <RiExternalLinkLine className="h-3.5 w-3.5" />
+              {m.riSshInstancesOpen()}
+            </Button>
                       ) : null}
                     </div>
                   </div>
@@ -1466,20 +1467,20 @@ export const RemoteInstancesPage: React.FC = () => {
             }}
           >
             <RiAddLine className="h-3.5 w-3.5" />
-            Add forward
+            {m.riSshInstancesAddForward()}
           </Button>
         </section>
       </div>
 
       <div className="mb-8 border-t border-[var(--surface-subtle)] pt-8">
         <div className="mb-1 px-1 space-y-0.5">
-          <h3 className="typography-ui-header font-medium text-foreground">Import from SSH config</h3>
+          <h3 className="typography-ui-header font-medium text-foreground">{m.riSshInstancesImportTitle()}</h3>
         </div>
         <section className="px-2 pb-2 pt-0">
         {isImportsLoading ? (
-          <p className="typography-meta text-muted-foreground">Loading SSH hosts...</p>
+          <p className="typography-meta text-muted-foreground">{m.riSshInstancesLoadingHosts()}</p>
         ) : importCandidates.length === 0 ? (
-          <p className="typography-meta text-muted-foreground">No SSH hosts available.</p>
+          <p className="typography-meta text-muted-foreground">{m.riSshInstancesNoHosts()}</p>
         ) : (
           <div>
             {importCandidates.slice(0, 8).map((candidate, index) => (
@@ -1501,7 +1502,7 @@ export const RemoteInstancesPage: React.FC = () => {
                   className="!font-normal"
                   onClick={() => void handleImportCandidate(candidate.host, candidate.pattern)}
                 >
-                  Import
+                  {m.riSshInstancesImport()}
                 </Button>
               </div>
             ))}
@@ -1513,7 +1514,7 @@ export const RemoteInstancesPage: React.FC = () => {
       <div className="sticky bottom-0 z-10 -mx-3 sm:-mx-6 bg-[var(--surface-background)] border-t border-[var(--interactive-border)] px-3 sm:px-6 py-3">
         <div className="flex items-center gap-2">
           <Button type="button" size="xs" className="!font-normal" onClick={() => void handleSave()} disabled={!hasChanges || isSaving}>
-            Save changes
+            {m.riSshInstancesSaveChanges()}
           </Button>
           {status?.localUrl ? (
             <>
@@ -1554,7 +1555,7 @@ export const RemoteInstancesPage: React.FC = () => {
       <Dialog open={logDialogOpen} onOpenChange={setLogDialogOpen}>
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>SSH Logs</DialogTitle>
+            <DialogTitle>{m.riSshInstancesSshLogsTitle()}</DialogTitle>
             <DialogDescription>
               {draft?.nickname?.trim() || draft?.sshParsed?.destination || draft?.id || 'Selected instance'}
             </DialogDescription>
@@ -1562,20 +1563,20 @@ export const RemoteInstancesPage: React.FC = () => {
           <div className="flex items-center justify-end gap-2">
             <Button type="button" variant="outline" size="xs" className="!font-normal" onClick={handleCopyAllLogs} disabled={logDialogLoading || !logLinesText.trim()}>
               <RiFileCopyLine className="h-3.5 w-3.5" />
-              Copy all
+              {m.riSshInstancesCopyAll()}
             </Button>
             <Button type="button" variant="outline" size="xs" className="!font-normal" onClick={() => void handleClearLogs()} disabled={logDialogLoading}>
               <RiDeleteBinLine className="h-3.5 w-3.5" />
-              Clear
+              {m.riSshInstancesClear()}
             </Button>
           </div>
           {logDialogLoading ? (
-            <div className="typography-meta text-muted-foreground">Loading logs...</div>
+            <div className="typography-meta text-muted-foreground">{m.riSshInstancesLoadingLogs()}</div>
           ) : logDialogError ? (
             <div className="typography-meta text-[var(--status-error)]">{logDialogError}</div>
           ) : (
             <pre className="max-h-[55vh] overflow-auto rounded-md border border-[var(--interactive-border)] bg-[var(--surface-elevated)] p-3 typography-micro text-foreground whitespace-pre-wrap break-words">
-              {logDialogLines.length > 0 ? logDialogLines.join('\n') : 'No SSH logs yet.'}
+              {logDialogLines.length > 0 ? logDialogLines.join('\n') : m.riSshInstancesNoSshLogs()}
             </pre>
           )}
         </DialogContent>
@@ -1591,7 +1592,7 @@ export const RemoteInstancesPage: React.FC = () => {
       >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Create from wildcard pattern</DialogTitle>
+            <DialogTitle>{m.riSshInstancesPatternDialogTitle()}</DialogTitle>
             <DialogDescription>
               {patternHost ? `${patternHost} requires a concrete destination.` : 'Enter destination.'}
             </DialogDescription>
@@ -1606,15 +1607,15 @@ export const RemoteInstancesPage: React.FC = () => {
             <Input
               value={patternDestination}
               onChange={(event) => setPatternDestination(event.target.value)}
-              placeholder="user@host"
+              placeholder={m.riSshInstancesPatternPlaceholder()}
               autoFocus
             />
             <div className="flex items-center justify-end gap-2">
               <Button type="button" variant="outline" size="xs" className="!font-normal" onClick={closePatternDialog} disabled={patternCreating}>
-                Cancel
+                {m.riSshInstancesCancel()}
               </Button>
               <Button type="submit" size="xs" className="!font-normal" disabled={patternCreating}>
-                Create
+                {m.riSshInstancesCreate()}
               </Button>
             </div>
           </form>

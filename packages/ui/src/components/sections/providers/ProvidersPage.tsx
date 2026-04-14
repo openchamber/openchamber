@@ -19,6 +19,7 @@ import { cn } from '@/lib/utils';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { openExternalUrl } from '@/lib/url';
 import type { ModelMetadata } from '@/types';
+import * as m from '@/lib/i18n/messages';
 
 const COMPACT_NUMBER_FORMATTER = new Intl.NumberFormat('en-US', {
   notation: 'compact',
@@ -192,7 +193,7 @@ export const ProvidersPage: React.FC = () => {
       } catch (error) {
         if (!isMounted) return;
         console.error('Failed to load provider auth methods:', error);
-        toast.error('Failed to load provider authentication methods');
+        toast.error(m.provToastLoadAuthFailed());
       } finally {
         if (isMounted) {
           setAuthLoading(false);
@@ -229,7 +230,7 @@ export const ProvidersPage: React.FC = () => {
       } catch (error) {
         if (!isMounted) return;
         console.error('Failed to load available providers:', error);
-        setAvailableError('Unable to load provider list');
+        setAvailableError(m.provToastLoadListFailed());
       } finally {
         if (isMounted) {
           setAvailableLoading(false);
@@ -326,7 +327,7 @@ export const ProvidersPage: React.FC = () => {
   const handleSaveApiKey = async (providerId: string) => {
     const apiKey = apiKeyInputs[providerId]?.trim() ?? '';
     if (!apiKey) {
-      toast.error('API key is required');
+      toast.error(m.provToastApiKeyRequired());
       return;
     }
 
@@ -346,13 +347,13 @@ export const ProvidersPage: React.FC = () => {
         throw new Error(message);
       }
 
-      toast.success('API key saved');
+      toast.success(m.provToastApiKeySaved());
       setApiKeyInputs((prev) => ({ ...prev, [providerId]: '' }));
       await reloadOpenCodeConfiguration({ scopes: ["providers"], mode: "active" });
       setSelectedProvider(providerId);
     } catch (error) {
       console.error('Failed to save API key:', error);
-      toast.error('Failed to save API key');
+      toast.error(m.provToastApiKeySaveFailed());
     } finally {
       setAuthBusyKey(null);
     }
@@ -410,10 +411,10 @@ export const ProvidersPage: React.FC = () => {
         void openExternalUrl(urlCandidate);
       }
       setPendingOAuth({ providerId, methodIndex });
-      toast.message('Complete the OAuth flow in your browser');
+      toast.message(m.provToastOauthCompleteBrowser());
     } catch (error) {
       console.error('Failed to start OAuth flow:', error);
-      toast.error('Failed to start OAuth flow');
+      toast.error(m.provToastOauthStartFailed());
     } finally {
       setAuthBusyKey(null);
     }
@@ -444,14 +445,14 @@ export const ProvidersPage: React.FC = () => {
         throw new Error(message);
       }
 
-      toast.success('OAuth connection completed');
+      toast.success(m.provToastOauthCompleted());
       setOauthCodes((prev) => ({ ...prev, [codeKey]: '' }));
       setPendingOAuth(null);
       await reloadOpenCodeConfiguration({ scopes: ["providers"], mode: "active" });
       setSelectedProvider(providerId);
     } catch (error) {
       console.error('Failed to complete OAuth flow:', error);
-      toast.error('Failed to complete OAuth flow');
+      toast.error(m.provToastOauthCompleteFailed());
     } finally {
       setAuthBusyKey(null);
     }
@@ -460,21 +461,21 @@ export const ProvidersPage: React.FC = () => {
   const handleCopyOAuthLink = async (url: string) => {
     const result = await copyTextToClipboard(url);
     if (result.ok) {
-      toast.success('OAuth link copied');
+      toast.success(m.provToastLinkCopied());
       return;
     }
     console.error('Failed to copy OAuth link:', result.error);
-    toast.error('Failed to copy OAuth link');
+    toast.error(m.provToastLinkCopyFailed());
   };
 
   const handleCopyOAuthCode = async (code: string) => {
     const result = await copyTextToClipboard(code);
     if (result.ok) {
-      toast.success('Device code copied');
+      toast.success(m.provToastDeviceCodeCopied());
       return;
     }
     console.error('Failed to copy device code:', result.error);
-    toast.error('Failed to copy device code');
+    toast.error(m.provToastDeviceCodeFailed());
   };
 
   const handleDisconnectProvider = async (providerId: string) => {
@@ -493,11 +494,11 @@ export const ProvidersPage: React.FC = () => {
         throw new Error(message);
       }
 
-      toast.success('Provider disconnected');
+      toast.success(m.provToastDisconnected());
       await reloadOpenCodeConfiguration({ scopes: ["providers"], mode: "active" });
     } catch (error) {
       console.error('Failed to disconnect provider:', error);
-      toast.error('Failed to disconnect provider');
+      toast.error(m.provToastDisconnectFailed());
     } finally {
       setAuthBusyKey(null);
     }
@@ -510,8 +511,8 @@ export const ProvidersPage: React.FC = () => {
       <div className="flex h-full items-center justify-center">
         <div className="text-center text-muted-foreground">
           <RiStackLine className="mx-auto mb-3 h-12 w-12 opacity-50" />
-          <p className="typography-body">No providers detected</p>
-          <p className="typography-meta mt-1 opacity-75">Check your OpenCode configuration</p>
+          <p className="typography-body">{m.provNoProvidersDetected()}</p>
+          <p className="typography-meta mt-1 opacity-75">{m.provCheckOpencodeConfig()}</p>
         </div>
       </div>
     );
@@ -522,23 +523,23 @@ export const ProvidersPage: React.FC = () => {
       <ScrollableOverlay keyboardAvoid outerClassName="h-full" className="w-full">
         <div className="mx-auto w-full max-w-3xl p-3 sm:p-6 sm:pt-8">
           <div className="mb-4">
-            <h1 className="typography-ui-header font-semibold text-foreground">Connect Provider</h1>
+            <h1 className="typography-ui-header font-semibold text-foreground">{m.provConnectProvider()}</h1>
           </div>
 
           <div className="mb-8">
             <div className="mb-1 px-1">
-              <h2 className="typography-ui-header font-medium text-foreground">Select Provider</h2>
+              <h2 className="typography-ui-header font-medium text-foreground">{m.provSelectProvider()}</h2>
             </div>
 
             <section className="px-2 pb-2 pt-0">
               <div className="flex flex-wrap items-center gap-2 py-1.5">
-                <span className="typography-ui-label text-foreground">Provider</span>
+                <span className="typography-ui-label text-foreground">{m.provProvider()}</span>
                   {availableLoading ? (
-                    <p className="typography-meta text-muted-foreground">Loading...</p>
+                    <p className="typography-meta text-muted-foreground">{m.provLoadingProviders()}</p>
                   ) : availableError ? (
                     <p className="typography-meta text-muted-foreground">{availableError}</p>
                   ) : unconnectedProviders.length === 0 ? (
-                    <p className="typography-meta text-muted-foreground">All providers connected.</p>
+                    <p className="typography-meta text-muted-foreground">{m.provAllConnected()}</p>
                   ) : (
                     <DropdownMenu open={providerDropdownOpen} onOpenChange={(open) => {
                       setProviderDropdownOpen(open);
@@ -556,7 +557,7 @@ export const ProvidersPage: React.FC = () => {
                             <span className={cn("truncate typography-ui-label font-normal", candidateProviderId ? "text-foreground" : "text-muted-foreground")}>
                               {candidateProviderId
                                 ? (unconnectedProviders.find(p => p.id === candidateProviderId)?.name || candidateProviderId)
-                                : "Select provider"}
+                                : m.provPlaceholderSelect()}
                             </span>
                           </span>
                           <RiArrowDownSLine className="h-4 w-4 flex-shrink-0 text-muted-foreground/50" />
@@ -577,7 +578,7 @@ export const ProvidersPage: React.FC = () => {
                             value={providerSearchQuery}
                             onChange={(e) => setProviderSearchQuery(e.target.value)}
                             onKeyDown={(e) => e.stopPropagation()}
-                            placeholder="Search..."
+                            placeholder={m.provPlaceholderSearch()}
                             className="flex-1 bg-transparent typography-meta outline-none placeholder:text-muted-foreground"
                             autoFocus
                           />
@@ -589,7 +590,7 @@ export const ProvidersPage: React.FC = () => {
                               return (p.name || p.id).toLowerCase().includes(query) || p.id.toLowerCase().includes(query);
                             });
                             if (filtered.length === 0) {
-                              return <p className="py-4 text-center typography-meta text-muted-foreground">No providers found</p>;
+                              return <p className="py-4 text-center typography-meta text-muted-foreground">{m.provNoProvidersFound()}</p>;
                             }
                             return filtered.map((provider) => (
                               <DropdownMenuItem
@@ -622,22 +623,22 @@ export const ProvidersPage: React.FC = () => {
           {candidateProviderId && (
             <div className="mb-8">
               <div className="mb-1 px-1">
-                <h2 className="typography-ui-header font-medium text-foreground">Authentication</h2>
+                <h2 className="typography-ui-header font-medium text-foreground">{m.provAuthentication()}</h2>
               </div>
 
               {authLoading ? (
-                <p className="typography-meta text-muted-foreground px-2">Loading authentication methods...</p>
+                <p className="typography-meta text-muted-foreground px-2">{m.provLoadingAuthMethods()}</p>
               ) : (
                 <section className="px-2 pb-2 pt-0 space-y-4">
                   <div className="py-1.5">
                     <label className="typography-ui-label text-foreground flex items-center gap-1.5">
-                      API Key
+                      {m.provApiKey()}
                       <Tooltip delayDuration={1000}>
                         <TooltipTrigger asChild>
                           <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
                         </TooltipTrigger>
                         <TooltipContent sideOffset={8} className="max-w-xs">
-                          Keys are sent directly to OpenCode and never stored by OpenChamber.
+                          {m.provKeyPrivacy()}
                         </TooltipContent>
                       </Tooltip>
                     </label>
@@ -651,7 +652,7 @@ export const ProvidersPage: React.FC = () => {
                             [candidateProviderId]: event.target.value,
                           }))
                         }
-                        placeholder="sk-..."
+                        placeholder={m.provPlaceholderApiKey()}
                         className="flex-1 font-mono text-xs"
                       />
                       <Button
@@ -660,7 +661,7 @@ export const ProvidersPage: React.FC = () => {
                         onClick={() => handleSaveApiKey(candidateProviderId)}
                         disabled={authBusyKey === `api:${candidateProviderId}`}
                       >
-                        {authBusyKey === `api:${candidateProviderId}` ? 'Saving...' : 'Save Key'}
+                        {authBusyKey === `api:${candidateProviderId}` ? m.provSaving() : m.provSaveKey()}
                       </Button>
                     </div>
                   </div>
@@ -701,7 +702,7 @@ export const ProvidersPage: React.FC = () => {
                                   onClick={() => handleOAuthStart(candidateProviderId, index)}
                                   disabled={authBusyKey === `oauth:${candidateProviderId}:${index}`}
                                 >
-                                  Connect
+                                  {m.provConnect()}
                                 </Button>
                               </div>
 
@@ -714,7 +715,7 @@ export const ProvidersPage: React.FC = () => {
                               {oauthDetails[codeKey]?.userCode && (
                                 <div className="flex items-center gap-2 mt-2">
                                   <Input value={oauthDetails[codeKey]?.userCode} readOnly className="font-mono text-center tracking-widest" />
-                                  <Button variant="outline" size="xs" className="!font-normal" onClick={() => handleCopyOAuthCode(oauthDetails[codeKey]?.userCode ?? '')}>Copy Code</Button>
+                                  <Button variant="outline" size="xs" className="!font-normal" onClick={() => handleCopyOAuthCode(oauthDetails[codeKey]?.userCode ?? '')}>{m.provCopyCode()}</Button>
                                 </div>
                               )}
 
@@ -722,8 +723,8 @@ export const ProvidersPage: React.FC = () => {
                                 <div className="flex items-center gap-2 mt-2">
                                   <Input value={oauthDetails[codeKey]?.url} readOnly className="text-xs text-muted-foreground" />
                                   <div className="flex gap-1 shrink-0">
-                                    <Button variant="outline" size="xs" className="!font-normal" onClick={() => openExternalUrl(oauthDetails[codeKey]?.url ?? '')}>Open</Button>
-                                    <Button variant="outline" size="xs" className="!font-normal" onClick={() => handleCopyOAuthLink(oauthDetails[codeKey]?.url ?? '')}>Copy</Button>
+                                    <Button variant="outline" size="xs" className="!font-normal" onClick={() => openExternalUrl(oauthDetails[codeKey]?.url ?? '')}>{m.provOpen()}</Button>
+                                    <Button variant="outline" size="xs" className="!font-normal" onClick={() => handleCopyOAuthLink(oauthDetails[codeKey]?.url ?? '')}>{m.actionCopy()}</Button>
                                   </div>
                                 </div>
                               )}
@@ -738,7 +739,7 @@ export const ProvidersPage: React.FC = () => {
                                         [codeKey]: event.target.value,
                                       }))
                                     }
-                                    placeholder="Paste authorization code"
+                                    placeholder={m.provPlaceholderAuthCode()}
                                     className="font-mono text-xs"
                                   />
                                   <Button
@@ -747,7 +748,7 @@ export const ProvidersPage: React.FC = () => {
                                     onClick={() => handleOAuthComplete(candidateProviderId, index)}
                                     disabled={authBusyKey === `oauth-complete:${candidateProviderId}:${index}`}
                                   >
-                                    {authBusyKey === `oauth-complete:${candidateProviderId}:${index}` ? 'Saving...' : 'Complete'}
+                                    {authBusyKey === `oauth-complete:${candidateProviderId}:${index}` ? m.provSaving() : m.provComplete()}
                                   </Button>
                                 </div>
                               )}
@@ -771,8 +772,8 @@ export const ProvidersPage: React.FC = () => {
       <div className="flex h-full items-center justify-center">
         <div className="text-center text-muted-foreground">
           <RiStackLine className="mx-auto mb-3 h-12 w-12 opacity-50" />
-          <p className="typography-body">Select a provider from the sidebar</p>
-          <p className="typography-meta mt-1 opacity-75">Review details and configure auth</p>
+          <p className="typography-body">{m.provSelectFromSidebar()}</p>
+          <p className="typography-meta mt-1 opacity-75">{m.provConfigureAuth()}</p>
         </div>
       </div>
     );
@@ -810,14 +811,14 @@ export const ProvidersPage: React.FC = () => {
         {/* Authentication */}
         <div className="mb-8">
           <div className="mb-1 px-1 flex items-center justify-between gap-2">
-            <h3 className="typography-ui-header font-medium text-foreground">Authentication</h3>
+            <h3 className="typography-ui-header font-medium text-foreground">{m.provAuthentication()}</h3>
             <Button
               variant="outline"
               size="xs"
               className="!font-normal"
               onClick={() => setShowAuthPanel((prev) => !prev)}
             >
-              {showAuthPanel ? 'Hide' : 'Reconnect'}
+              {showAuthPanel ? m.provHide() : m.provReconnect()}
             </Button>
           </div>
 
@@ -825,22 +826,22 @@ export const ProvidersPage: React.FC = () => {
             {!showAuthPanel ? (
               <div className="flex items-center gap-1.5 py-1.5">
                 <RiCheckLine className="w-4 h-4 text-[var(--status-success)] shrink-0" />
-                <span className="typography-ui-label text-foreground">Connected</span>
-                <span className="typography-meta text-muted-foreground ml-1">· Use Reconnect to update credentials</span>
+                <span className="typography-ui-label text-foreground">{m.provConnected()}</span>
+                <span className="typography-meta text-muted-foreground ml-1">{m.provReconnectHint()}</span>
               </div>
             ) : authLoading ? (
-              <div className="py-1.5 typography-meta text-muted-foreground">Loading authentication methods...</div>
+              <div className="py-1.5 typography-meta text-muted-foreground">{m.provLoadingAuthMethods()}</div>
             ) : (
               <div className="space-y-4">
                 <div className="py-1.5">
                   <label className="typography-ui-label text-foreground flex items-center gap-1.5">
-                    API Key
+                    {m.provApiKey()}
                     <Tooltip delayDuration={1000}>
                       <TooltipTrigger asChild>
                         <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
                       </TooltipTrigger>
                       <TooltipContent sideOffset={8} className="max-w-xs">
-                        Keys are sent directly to OpenCode and never stored by OpenChamber.
+                        {m.provKeyPrivacy()}
                       </TooltipContent>
                     </Tooltip>
                   </label>
@@ -854,7 +855,7 @@ export const ProvidersPage: React.FC = () => {
                           [selectedProvider.id]: event.target.value,
                         }))
                       }
-                      placeholder="sk-..."
+                      placeholder={m.provPlaceholderApiKey()}
                       className="flex-1 font-mono text-xs"
                     />
                     <Button
@@ -863,7 +864,7 @@ export const ProvidersPage: React.FC = () => {
                       onClick={() => handleSaveApiKey(selectedProvider.id)}
                       disabled={authBusyKey === `api:${selectedProvider.id}`}
                     >
-                      {authBusyKey === `api:${selectedProvider.id}` ? 'Saving...' : 'Save Key'}
+                      {authBusyKey === `api:${selectedProvider.id}` ? m.provSaving() : m.provSaveKey()}
                     </Button>
                   </div>
                 </div>
@@ -894,7 +895,7 @@ export const ProvidersPage: React.FC = () => {
                               onClick={() => handleOAuthStart(selectedProvider.id, index)}
                               disabled={authBusyKey === `oauth:${selectedProvider.id}:${index}`}
                             >
-                              Connect
+                              {m.provConnect()}
                             </Button>
                           </div>
 
@@ -907,7 +908,7 @@ export const ProvidersPage: React.FC = () => {
                           {oauthDetails[codeKey]?.userCode && (
                             <div className="flex items-center gap-2 mt-2">
                               <Input value={oauthDetails[codeKey]?.userCode} readOnly className="font-mono text-center tracking-widest" />
-                              <Button variant="outline" size="xs" className="!font-normal" onClick={() => handleCopyOAuthCode(oauthDetails[codeKey]?.userCode ?? '')}>Copy Code</Button>
+                              <Button variant="outline" size="xs" className="!font-normal" onClick={() => handleCopyOAuthCode(oauthDetails[codeKey]?.userCode ?? '')}>{m.provCopyCode()}</Button>
                             </div>
                           )}
 
@@ -915,8 +916,8 @@ export const ProvidersPage: React.FC = () => {
                             <div className="flex items-center gap-2 mt-2">
                               <Input value={oauthDetails[codeKey]?.url} readOnly className="text-xs text-muted-foreground" />
                               <div className="flex gap-1 shrink-0">
-                                <Button variant="outline" size="xs" className="!font-normal" onClick={() => openExternalUrl(oauthDetails[codeKey]?.url ?? '')}>Open</Button>
-                                <Button variant="outline" size="xs" className="!font-normal" onClick={() => handleCopyOAuthLink(oauthDetails[codeKey]?.url ?? '')}>Copy</Button>
+                                <Button variant="outline" size="xs" className="!font-normal" onClick={() => openExternalUrl(oauthDetails[codeKey]?.url ?? '')}>{m.provOpen()}</Button>
+                                <Button variant="outline" size="xs" className="!font-normal" onClick={() => handleCopyOAuthLink(oauthDetails[codeKey]?.url ?? '')}>{m.actionCopy()}</Button>
                               </div>
                             </div>
                           )}
@@ -931,7 +932,7 @@ export const ProvidersPage: React.FC = () => {
                                     [codeKey]: event.target.value,
                                   }))
                                 }
-                                placeholder="Paste authorization code"
+                                placeholder={m.provPlaceholderAuthCode()}
                                 className="font-mono text-xs"
                               />
                               <Button
@@ -940,7 +941,7 @@ export const ProvidersPage: React.FC = () => {
                                 onClick={() => handleOAuthComplete(selectedProvider.id, index)}
                                 disabled={authBusyKey === `oauth-complete:${selectedProvider.id}:${index}`}
                               >
-                                {authBusyKey === `oauth-complete:${selectedProvider.id}:${index}` ? 'Saving...' : 'Complete'}
+                                {authBusyKey === `oauth-complete:${selectedProvider.id}:${index}` ? m.provSaving() : m.provComplete()}
                               </Button>
                             </div>
                           )}
@@ -957,7 +958,7 @@ export const ProvidersPage: React.FC = () => {
         {/* Connection Details */}
         <div className="mb-8">
           <div className="mb-1 px-1">
-            <h3 className="typography-ui-header font-medium text-foreground">Connection Details</h3>
+            <h3 className="typography-ui-header font-medium text-foreground">{m.provConnectionDetails()}</h3>
           </div>
 
           <section className="px-2 pb-2 pt-0">
@@ -966,14 +967,14 @@ export const ProvidersPage: React.FC = () => {
                 {selectedSources && (selectedSources.auth.exists || selectedSources.user.exists || selectedSources.project.exists || selectedSources.custom?.exists) ? (
                   <span className="typography-meta text-muted-foreground">
                     Configured in: {[
-                      selectedSources.auth.exists ? 'auth credentials' : null,
-                      selectedSources.user.exists ? 'user config' : null,
-                      selectedSources.project.exists ? 'project config' : null,
-                      selectedSources.custom?.exists ? 'custom config' : null,
+                      selectedSources.auth.exists ? m.provAuthCredentials() : null,
+                      selectedSources.user.exists ? m.provUserConfig() : null,
+                      selectedSources.project.exists ? m.provProjectConfig() : null,
+                      selectedSources.custom?.exists ? m.provCustomConfig() : null,
                     ].filter(Boolean).join(', ')}
                   </span>
                 ) : (
-                  <span className="typography-meta text-muted-foreground">No active configuration source</span>
+                  <span className="typography-meta text-muted-foreground">{m.provNoConfigSource()}</span>
                 )}
               </div>
 
@@ -984,7 +985,7 @@ export const ProvidersPage: React.FC = () => {
                 onClick={() => handleDisconnectProvider(selectedProvider.id)}
                 disabled={authBusyKey === `disconnect:${selectedProvider.id}`}
               >
-                {authBusyKey === `disconnect:${selectedProvider.id}` ? 'Disconnecting...' : 'Disconnect'}
+                {authBusyKey === `disconnect:${selectedProvider.id}` ? m.provDisconnecting() : m.provDisconnect()}
               </Button>
             </div>
           </section>
@@ -994,7 +995,7 @@ export const ProvidersPage: React.FC = () => {
         <div className="mb-8">
           <div className="mb-1 px-1 flex items-center justify-between gap-2">
             <h3 className="typography-ui-header font-medium text-foreground">
-              Available Models
+              {m.provAvailableModels()}
               {providerModels.length > 0 && (
                 <span className="ml-1.5 typography-micro text-muted-foreground font-normal">
                   ({providerModels.length})
@@ -1013,7 +1014,7 @@ export const ProvidersPage: React.FC = () => {
                   hideAllModels(selectedProvider.id, allIds);
                 }}
               >
-                Hide all
+                {m.provHideAll()}
               </Button>
               <Button
                 variant="outline"
@@ -1021,7 +1022,7 @@ export const ProvidersPage: React.FC = () => {
                 className="!font-normal"
                 onClick={() => showAllModels(selectedProvider.id)}
               >
-                Show all
+                {m.provShowAll()}
               </Button>
             </div>
           </div>
@@ -1032,13 +1033,13 @@ export const ProvidersPage: React.FC = () => {
               <Input
                 value={modelQuery}
                 onChange={(event) => setModelQuery(event.target.value)}
-                placeholder="Filter models..."
+                placeholder={m.provPlaceholderFilterModels()}
                 className="h-7 pl-8 w-full"
               />
             </div>
 
             {filteredModels.length === 0 ? (
-              <p className="typography-meta text-muted-foreground py-4 text-center">No models match this filter.</p>
+              <p className="typography-meta text-muted-foreground py-4 text-center">{m.provNoModelsMatch()}</p>
             ) : (
               <div className="divide-y divide-[var(--surface-subtle)]">
                 {filteredModels.map((model) => {
@@ -1053,9 +1054,9 @@ export const ProvidersPage: React.FC = () => {
                   const outputTokens = formatTokens(metadata?.limit?.output);
 
                   const capabilityIcons: Array<{ key: string; icon: typeof RiToolsLine; label: string }> = [];
-                  if (metadata?.tool_call) capabilityIcons.push({ key: 'tools', icon: RiToolsLine, label: 'Tool calling' });
-                  if (metadata?.reasoning) capabilityIcons.push({ key: 'reasoning', icon: RiBrainAi3Line, label: 'Reasoning' });
-                  if (metadata?.attachment) capabilityIcons.push({ key: 'image', icon: RiFileImageLine, label: 'Image input' });
+                  if (metadata?.tool_call) capabilityIcons.push({ key: 'tools', icon: RiToolsLine, label: m.provCapToolCalling() });
+                  if (metadata?.reasoning) capabilityIcons.push({ key: 'reasoning', icon: RiBrainAi3Line, label: m.provCapReasoning() });
+                  if (metadata?.attachment) capabilityIcons.push({ key: 'image', icon: RiFileImageLine, label: m.provCapImageInput() });
 
                   return (
                     <div key={modelId} className="py-1.5">
@@ -1094,7 +1095,7 @@ export const ProvidersPage: React.FC = () => {
                           type="button"
                           onClick={() => toggleHiddenModel(selectedProvider.id, modelId)}
                           className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-[var(--interactive-hover)]/50"
-                          title={isHidden ? 'Show model in selectors' : 'Hide model from selectors'}
+                          title={isHidden ? m.provShowModelInSelectors() : m.provHideModelFromSelectors()}
                           aria-label={isHidden ? 'Show model' : 'Hide model'}
                         >
                           {isHidden ? <RiEyeOffLine className="h-3.5 w-3.5" /> : <RiEyeLine className="h-3.5 w-3.5" />}

@@ -23,6 +23,7 @@ import { useSkillsStore } from '@/stores/useSkillsStore';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { cn } from '@/lib/utils';
 import { SettingsProjectSelector } from '@/components/sections/shared/SettingsProjectSelector';
+import { m } from '@/lib/i18n/messages';
 
 interface CommandsSidebarProps {
   onItemSelect?: () => void;
@@ -216,7 +217,7 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
   return (
     <div className={cn('flex h-full flex-col', bgClass)}>
       <div className="border-b px-3 pt-4 pb-3">
-        <h2 className="text-base font-semibold text-foreground mb-3">Commands</h2>
+        <h2 className="text-base font-semibold text-foreground mb-3">{m.commandsSidebarTitle()}</h2>
         <SettingsProjectSelector className="mb-3" />
         <div className="flex items-center justify-between gap-2">
           <span className="typography-meta text-muted-foreground">Total {commandOnlyItems.length}</span>
@@ -234,7 +235,7 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
         {commandOnlyItems.length === 0 ? (
           <div className="py-12 px-4 text-center text-muted-foreground">
             <RiTerminalBoxLine className="mx-auto mb-3 h-10 w-10 opacity-50" />
-            <p className="typography-ui-label font-medium">No commands configured</p>
+            <p className="typography-ui-label font-medium">{m.commandsNotConfigured()}</p>
             <p className="typography-meta mt-1 opacity-75">Use the + button above to create one</p>
           </div>
         ) : (
@@ -328,7 +329,7 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
       <Dialog open={renameDialogCommand !== null} onOpenChange={(open) => !open && setRenameDialogCommand(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Rename Command</DialogTitle>
+            <DialogTitle>{m.commandsRename()}</DialogTitle>
             <DialogDescription>
               Enter a new name for the command "/{renameDialogCommand?.name}"
             </DialogDescription>
@@ -336,7 +337,7 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
           <Input
             value={renameNewName}
             onChange={(e) => setRenameNewName(e.target.value)}
-            placeholder="New command name..."
+            placeholder={m.commandsRenamePlaceholder()}
             className="text-foreground placeholder:text-muted-foreground"
             onKeyDown={(e) => {
               if (e.key === 'Enter') {

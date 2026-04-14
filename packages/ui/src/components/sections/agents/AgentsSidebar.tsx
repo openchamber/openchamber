@@ -24,6 +24,7 @@ import type { Agent } from '@opencode-ai/sdk/v2';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { SettingsProjectSelector } from '@/components/sections/shared/SettingsProjectSelector';
 import { SidebarGroup } from '@/components/sections/shared/SidebarGroup';
+import { m } from '@/lib/i18n/messages';
 
 interface AgentsSidebarProps {
   onItemSelect?: () => void;
@@ -319,7 +320,7 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
   return (
     <div className={cn('flex h-full flex-col', bgClass)}>
       <div className="border-b px-3 pt-4 pb-3">
-        <h2 className="text-base font-semibold text-foreground mb-3">Agents</h2>
+        <h2 className="text-base font-semibold text-foreground mb-3">{m.agentsSidebarTitle()}</h2>
         <SettingsProjectSelector className="mb-3" />
         <div className="flex items-center justify-between gap-2">
           <span className="typography-meta text-muted-foreground">Total {visibleAgents.length}</span>
@@ -337,7 +338,7 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
         {visibleAgents.length === 0 ? (
           <div className="py-12 px-4 text-center text-muted-foreground">
             <RiRobot2Line className="mx-auto mb-3 h-10 w-10 opacity-50" />
-            <p className="typography-ui-label font-medium">No agents configured</p>
+            <p className="typography-ui-label font-medium">{m.agentsNotConfigured()}</p>
             <p className="typography-meta mt-1 opacity-75">Use the + button above to create one</p>
           </div>
         ) : (
@@ -464,7 +465,7 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
       <Dialog open={renameDialogAgent !== null} onOpenChange={(open) => !open && setRenameDialogAgent(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Rename Agent</DialogTitle>
+            <DialogTitle>{m.agentsRename()}</DialogTitle>
             <DialogDescription>
               Enter a new name for the agent "@{renameDialogAgent?.name}"
             </DialogDescription>
@@ -472,7 +473,7 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
           <Input
             value={renameNewName}
             onChange={(e) => setRenameNewName(e.target.value)}
-            placeholder="New agent name..."
+            placeholder={m.agentsRenamePlaceholder()}
             className="text-foreground placeholder:text-muted-foreground"
             onKeyDown={(e) => {
               if (e.key === 'Enter') {

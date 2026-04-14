@@ -22,6 +22,7 @@ import { useDeviceInfo } from '@/lib/device';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { cn } from '@/lib/utils';
 import { isDesktopShell } from '@/lib/desktop';
+import { mainLayoutCloseDrawer } from '@/lib/i18n/messages';
 
 import { ChatView, PlanView, GitView, DiffView, TerminalView, FilesView, SettingsView, SettingsWindow, MultiRunWindow } from '@/components/views';
 
@@ -688,7 +689,7 @@ export const MainLayout: React.FC = () => {
                             setMobileLeftDrawerOpen(false);
                             setRightSidebarOpen(false);
                         }}
-                        aria-label="Close drawer"
+                        aria-label={mainLayoutCloseDrawer()}
                     />
                     
                     {/* Left drawer (Session) */}

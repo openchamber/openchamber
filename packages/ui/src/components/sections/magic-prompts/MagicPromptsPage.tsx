@@ -15,6 +15,7 @@ import {
   type MagicPromptId,
 } from '@/lib/magicPrompts';
 import { useMagicPromptsStore } from '@/stores/useMagicPromptsStore';
+import { m } from '@/lib/i18n/messages';
 
 type PromptBlock = {
   id: MagicPromptId;
@@ -213,7 +214,7 @@ export const MagicPromptsPage: React.FC = () => {
     return (
       <div className="py-6 px-6 flex items-center gap-2 text-muted-foreground">
         <GridLoader size="sm" />
-        <span className="typography-ui">Loading Magic Prompts...</span>
+        <span className="typography-ui">{m.magicPromptsLoading()}</span>
       </div>
     );
   }
@@ -284,7 +285,7 @@ export const MagicPromptsPage: React.FC = () => {
                 className="min-h-[220px] font-mono text-sm"
               />
               {isInvalidEmptyVisiblePrompt && (
-                <div className="typography-micro text-[var(--status-error)]">Visible prompt cannot be empty.</div>
+                <div className="typography-micro text-[var(--status-error)]">{m.magicPromptsVisibleEmpty()}</div>
               )}
 
               <div className="flex items-center justify-between gap-2">

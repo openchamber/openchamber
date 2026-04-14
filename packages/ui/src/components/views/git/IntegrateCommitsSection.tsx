@@ -32,6 +32,7 @@ import {
   type IntegratePlan,
 } from '@/lib/git/integrateWorktreeCommits';
 import type { WorktreeMetadata } from '@/types/worktree';
+import { m } from '@/lib/i18n/messages';
 
 type IntegrateUiState =
   | { kind: 'idle' }
@@ -240,7 +241,7 @@ export const IntegrateCommitsSection: React.FC<{
 
     // Use current session - set pending input text and synthetic parts
     if (!currentSessionId) {
-      toast.error('No active session', { description: 'Open a chat session first or start a new session.' });
+      toast.error(m.gitNoActiveSession(), { description: m.gitOpenChatSessionFirst() });
       return;
     }
 
@@ -255,14 +256,14 @@ export const IntegrateCommitsSection: React.FC<{
   const handleMove = React.useCallback(async () => {
     if (ui.kind !== 'ready') return;
     if (ui.plan.commits.length === 0) {
-      toast.message('No commits to move');
+      toast.message(m.gitNoCommitsToMove());
       return;
     }
     setUi({ kind: 'running', plan: ui.plan });
     try {
       const result = await integrateWorktreeCommits(ui.plan);
       if (result.kind === 'success') {
-        toast.success('Commits moved', {
+        toast.success(m.gitIntegrateSuccess(), {
           description: `${result.moved} commit${result.moved === 1 ? '' : 's'} into ${ui.plan.targetBranch}`,
         });
         const next = await computeIntegratePlan(ui.plan);
@@ -271,7 +272,7 @@ export const IntegrateCommitsSection: React.FC<{
         return;
       }
       if (result.kind === 'conflict') {
-        toast.error('Cherry-pick conflict', { description: 'Resolve conflicts, then continue.' });
+        toast.error(m.gitConflictError(), { description: m.gitConflictsMustBeResolved() });
         setUi({ kind: 'conflict', state: result.state, details: result.details });
         if (conflictStorageKey && typeof window !== 'undefined') {
           window.localStorage.setItem(conflictStorageKey, JSON.stringify(result.state));
@@ -279,7 +280,7 @@ export const IntegrateCommitsSection: React.FC<{
       }
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      toast.error('Failed to move commits', { description: message });
+      toast.error(m.gitIntegrateError(), { description: message });
       const next = await computeIntegratePlan({ repoRoot, sourceBranch, targetBranch }).catch(() => null);
       if (next) setUi({ kind: 'ready', plan: next });
       else setUi({ kind: 'idle' });
@@ -290,7 +291,7 @@ export const IntegrateCommitsSection: React.FC<{
     if (ui.kind !== 'conflict') return;
     try {
       await abortIntegrate(ui.state);
-      toast.message('Cherry-pick aborted');
+      toast.message(m.gitStashCancel());
       if (conflictStorageKey && typeof window !== 'undefined') {
         window.localStorage.removeItem(conflictStorageKey);
       }
@@ -306,7 +307,7 @@ export const IntegrateCommitsSection: React.FC<{
     try {
       const result = await continueIntegrate(ui.state);
       if (result.kind === 'success') {
-        toast.success('Cherry-pick finished');
+        toast.success(m.gitIntegrateSuccess());
         const next = await computeIntegratePlan({ repoRoot, sourceBranch, targetBranch }).catch(() => null);
         if (next) setUi({ kind: 'ready', plan: next });
         else setUi({ kind: 'idle' });
@@ -324,7 +325,7 @@ export const IntegrateCommitsSection: React.FC<{
       }
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      toast.error('Cherry-pick continue failed', { description: message });
+      toast.error(m.gitIntegrateError(), { description: message });
     }
   }, [ui, repoRoot, sourceBranch, targetBranch, onRefresh, conflictStorageKey]);
 
@@ -341,9 +342,9 @@ export const IntegrateCommitsSection: React.FC<{
       <div className={headerClassName}>
         <div className="flex items-center gap-2 min-w-0">
           <RiSplitCellsHorizontal className="size-4 text-muted-foreground" />
-          <h3 className="typography-ui-header font-semibold text-foreground truncate">Re-integrate commits</h3>
+          <h3 className="typography-ui-header font-semibold text-foreground truncate">{m.gitReintegrateCommits()}</h3>
           {ui.kind === 'ready' && ui.plan.commits.length > 0 ? (
-            <span className="typography-meta text-muted-foreground truncate">{ui.plan.commits.length} to move</span>
+            <span className="typography-meta text-muted-foreground truncate">{m.gitToMove(ui.plan.commits.length)}</span>
           ) : null}
         </div>
         <div className="flex items-center gap-2">
@@ -356,7 +357,7 @@ export const IntegrateCommitsSection: React.FC<{
       <div className={bodyClassName}>
         <div className="flex flex-wrap items-center gap-2">
           <div className="min-w-0">
-            <div className="typography-ui-label text-foreground">Move commits</div>
+            <div className="typography-ui-label text-foreground">{m.gitMoveCommits()}</div>
               <div className="typography-micro text-muted-foreground truncate">
                 {sourceBranch} → {targetBranch}
               </div>
@@ -367,7 +368,7 @@ export const IntegrateCommitsSection: React.FC<{
             <DropdownMenu open={branchDropdownOpen} onOpenChange={setBranchDropdownOpen}>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="sm" className="gap-1.5">
-                  Target
+                  {m.gitTarget()}
                   <span className="max-w-[160px] truncate font-mono text-xs text-muted-foreground">{targetBranch}</span>
                   <RiArrowDownSLine className="size-4 opacity-60" />
                 </Button>
@@ -377,14 +378,14 @@ export const IntegrateCommitsSection: React.FC<{
                 className="w-72 p-0 max-h-(--radix-dropdown-menu-content-available-height) flex flex-col overflow-hidden"
               >
                 <Command className="h-full min-h-0">
-                  <CommandInput ref={searchInputRef} placeholder="Search branches..." />
+                  <CommandInput ref={searchInputRef} placeholder={m.gitSearchBranches()} />
                   <CommandList
                     className="h-full min-h-0"
                     scrollbarClassName="overlay-scrollbar--flush overlay-scrollbar--dense overlay-scrollbar--zero"
                     disableHorizontal
                   >
-                    <CommandEmpty>No branches found.</CommandEmpty>
-                    <CommandGroup heading="Local branches">
+                    <CommandEmpty>{m.gitNoBranchesFound()}</CommandEmpty>
+                    <CommandGroup heading={m.gitLocalBranches()}>
                       {localBranches.map((branch) => (
                         <CommandItem
                           key={branch}
@@ -406,29 +407,28 @@ export const IntegrateCommitsSection: React.FC<{
 
             {ui.kind === 'ready' ? (
               <Button size="sm" onClick={() => void handleMove()} disabled={!isEligible || ui.plan.commits.length === 0}>
-                Move
+                {m.gitMove()}
               </Button>
             ) : ui.kind === 'loading' ? (
               <Button size="sm" variant="outline" disabled>
-                Checking…
+                {m.gitChecking()}
               </Button>
             ) : ui.kind === 'running' ? (
               <Button size="sm" variant="outline" disabled>
-                Moving…
+                {m.gitMoving()}
               </Button>
             ) : null}
           </div>
 
           {ui.kind === 'ready' && ui.plan.commits.length === 0 && (
-            <div className="typography-meta text-muted-foreground">No commits to move.</div>
+            <div className="typography-meta text-muted-foreground">{m.gitNoCommitsToMove()}</div>
           )}
 
           {ui.kind === 'ready' && ui.plan.commits.length > 0 && (
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-2">
                 <div className="typography-meta text-foreground">
-                  Commits to move
-                  <span className="text-muted-foreground"> ({ui.plan.commits.length})</span>
+                  {m.gitCommitsToMove(ui.plan.commits.length)}
                 </div>
                 {commitSummaries.length > 0 && ui.plan.commits.length > 5 && (
                   <button
@@ -436,7 +436,7 @@ export const IntegrateCommitsSection: React.FC<{
                     onClick={() => setShowAllCommits((v) => !v)}
                     className="typography-micro text-muted-foreground hover:text-foreground"
                   >
-                    {showAllCommits ? 'Show less' : 'Show all'}
+                    {showAllCommits ? m.gitShowLess() : m.gitShowAll()}
                   </button>
                 )}
               </div>
@@ -449,11 +449,11 @@ export const IntegrateCommitsSection: React.FC<{
                   </div>
                 ))}
                 {commitSummaries.length === 0 && (
-                  <div className="typography-meta text-muted-foreground">Preview unavailable.</div>
+                  <div className="typography-meta text-muted-foreground">{m.gitPreviewUnavailable()}</div>
                 )}
                 {ui.plan.commits.length > commitSummaries.length && (
                   <div className="typography-micro text-muted-foreground/70">
-                    Showing first {commitSummaries.length} commits.
+                    {m.gitShowingFirst(commitSummaries.length)}
                   </div>
                 )}
               </div>
@@ -463,10 +463,10 @@ export const IntegrateCommitsSection: React.FC<{
           {ui.kind === 'conflict' && (
             <div className="rounded-md border border-border/60 bg-background/60 p-3 space-y-2">
               <div className="typography-meta text-foreground">
-                Conflicts in {ui.details.unmergedFiles.length} files
+                {m.gitConflictsInFiles(ui.details.unmergedFiles.length)}
               </div>
               <div className="typography-micro text-muted-foreground/80">
-                Current commit: <span className="font-mono">{ui.state.currentCommit.slice(0, 7)}</span>
+                {m.gitCurrentCommit()} <span className="font-mono">{ui.state.currentCommit.slice(0, 7)}</span>
               </div>
               <div className="flex flex-wrap gap-1.5">
                 {ui.details.unmergedFiles.slice(0, 6).map((file) => (
@@ -475,12 +475,12 @@ export const IntegrateCommitsSection: React.FC<{
                   </span>
                 ))}
                 {ui.details.unmergedFiles.length > 6 && (
-                  <span className="text-xs text-muted-foreground">+{ui.details.unmergedFiles.length - 6} more</span>
+                  <span className="text-xs text-muted-foreground">{m.gitMore(ui.details.unmergedFiles.length - 6)}</span>
                 )}
               </div>
               <div className="flex items-center gap-2 pt-1">
                 <Button size="sm" variant="ghost" className="typography-meta" onClick={() => void handleAbort()}>
-                  Abort
+                  {m.gitAbort()}
                 </Button>
                 <Button
                   size="sm"
@@ -490,7 +490,7 @@ export const IntegrateCommitsSection: React.FC<{
                   onClick={() => void handleResolveWithAi({ state: ui.state, details: ui.details }, false)}
                 >
                   <RiSparklingLine className="size-3.5" />
-                  Current Session
+                  {m.gitCurrentSession()}
                 </Button>
                 <Button
                   size="sm"
@@ -499,10 +499,10 @@ export const IntegrateCommitsSection: React.FC<{
                   onClick={() => void handleResolveWithAi({ state: ui.state, details: ui.details }, true)}
                 >
                   <RiSparklingLine className="size-3.5" />
-                  New Session
+                  {m.gitNewSession()}
                 </Button>
                 <Button size="sm" className="typography-meta" onClick={() => void handleContinue()}>
-                  Continue
+                  {m.gitContinue()}
                 </Button>
               </div>
             </div>

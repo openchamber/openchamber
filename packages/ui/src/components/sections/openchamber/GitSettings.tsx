@@ -4,6 +4,7 @@ import { updateDesktopSettings } from '@/lib/persistence';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { setFilesViewShowGitignored, useFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
+import { m } from '@/lib/i18n/messages';
 
 export const GitSettings: React.FC = () => {
   const settingsGitmojiEnabled = useConfigStore((state) => state.settingsGitmojiEnabled);
@@ -82,7 +83,7 @@ export const GitSettings: React.FC = () => {
   return (
     <div className="mb-8">
       <div className="mb-1 px-1">
-        <h3 className="typography-ui-header font-medium text-foreground">Git Preferences</h3>
+        <h3 className="typography-ui-header font-medium text-foreground">{m.gitPreferencesTitle()}</h3>
       </div>
 
       <section className="px-2 pb-2 pt-0 space-y-0.5">
@@ -106,9 +107,9 @@ export const GitSettings: React.FC = () => {
             onChange={(checked) => {
               void handleGitmojiChange(checked);
             }}
-            ariaLabel="Enable Gitmoji picker"
+            ariaLabel={m.gitEnableGitmojiAria()}
           />
-          <span className="typography-ui-label text-foreground">Enable Gitmoji Picker</span>
+          <span className="typography-ui-label text-foreground">{m.gitEnableGitmoji()}</span>
         </div>
 
         <div
@@ -127,9 +128,9 @@ export const GitSettings: React.FC = () => {
           <Checkbox
             checked={showGitignored}
             onChange={setFilesViewShowGitignored}
-            ariaLabel="Display gitignored files"
+            ariaLabel={m.gitDisplayGitignoredAria()}
           />
-          <span className="typography-ui-label text-foreground">Display Gitignored Files</span>
+          <span className="typography-ui-label text-foreground">{m.gitDisplayGitignored()}</span>
         </div>
       </section>
     </div>

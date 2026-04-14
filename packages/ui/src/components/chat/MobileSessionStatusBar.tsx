@@ -55,6 +55,7 @@ import { useDrawerSwipe } from '@/hooks/useDrawerSwipe';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useNotificationStore } from '@/sync/notification-store';
+import { chatEditProjects, chatAddProject } from '@/lib/i18n/messages';
 
 interface MobileSessionStatusBarProps {
   onSessionSwitch?: (sessionId: string) => void;
@@ -798,7 +799,7 @@ function ProjectEditPanel({
     <MobileOverlayPanel
       open={isOpen}
       onClose={onClose}
-      title="Edit Projects"
+      title={chatEditProjects()}
       footer={
         <p className="text-xs text-[var(--surface-mutedForeground)] text-center">
           Drag items to reorder, or use arrows to move. Tap edit to change details.
@@ -1018,7 +1019,7 @@ function ProjectBar({
           type="button"
           onClick={onAddProject}
           className="flex items-center justify-center !py-1.5 px-2 rounded-md border border-[var(--primary-base)]/60 bg-[var(--primary-base)]/5 text-[var(--primary-base)]/80 hover:text-[var(--primary-base)] hover:bg-[var(--primary-base)]/10 !min-h-0"
-          aria-label="Add project"
+          aria-label={chatAddProject()}
         >
           <RiAddLine className="h-3 w-3" />
         </button>
@@ -1094,7 +1095,7 @@ function ProjectBar({
         type="button"
         onClick={onAddProject}
         className="flex items-center justify-center !py-1.5 px-2 rounded-md border border-[var(--primary-base)]/60 bg-[var(--primary-base)]/5 text-[var(--primary-base)]/80 hover:text-[var(--primary-base)] hover:bg-[var(--primary-base)]/10 shrink-0 !min-h-0"
-        aria-label="Add project"
+        aria-label={chatAddProject()}
       >
         <RiAddLine className="h-3.5 w-3.5" />
       </button>

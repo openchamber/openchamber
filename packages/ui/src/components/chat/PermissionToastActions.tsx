@@ -1,5 +1,6 @@
 import React from 'react';
 import { cn } from '@/lib/utils';
+import { chatApproveOnce, chatApproveAlways, chatDenyPermission } from '@/lib/i18n/messages';
 
 interface PermissionToastActionsProps {
   sessionTitle: string;
@@ -63,7 +64,7 @@ export const PermissionToastActions: React.FC<PermissionToastActionsProps> = ({
         <button
           onClick={() => handleAction(onOnce)}
           disabled={disabled || isBusy}
-          aria-label={`Approve once${actionContext}`}
+          aria-label={`${chatApproveOnce()}${actionContext}`}
           className={cn(
             "px-2 py-1 typography-meta font-medium rounded transition-colors h-6",
             "disabled:opacity-50 disabled:cursor-not-allowed"
@@ -85,7 +86,7 @@ export const PermissionToastActions: React.FC<PermissionToastActionsProps> = ({
         <button
           onClick={() => handleAction(onAlways)}
           disabled={disabled || isBusy}
-          aria-label={`Approve always${actionContext}`}
+          aria-label={`${chatApproveAlways()}${actionContext}`}
           className={cn(
             "px-2 py-1 typography-meta font-medium rounded transition-colors h-6",
             "disabled:opacity-50 disabled:cursor-not-allowed"
@@ -107,7 +108,7 @@ export const PermissionToastActions: React.FC<PermissionToastActionsProps> = ({
         <button
           onClick={() => handleAction(onDeny)}
           disabled={disabled || isBusy}
-          aria-label={`Deny permission${actionContext}`}
+          aria-label={`${chatDenyPermission()}${actionContext}`}
           className={cn(
             "px-2 py-1 typography-meta font-medium rounded transition-colors h-6",
             "disabled:opacity-50 disabled:cursor-not-allowed"

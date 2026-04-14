@@ -31,6 +31,7 @@ import {
   getModifierLabel,
   formatShortcutForDisplay,
 } from "@/lib/shortcuts";
+import { m } from "@/lib/i18n/messages";
 
 type ShortcutIcon = React.ComponentType<{ className?: string }>;
 
@@ -59,160 +60,160 @@ export const HelpDialog: React.FC = () => {
 
   const shortcuts: ShortcutSection[] = [
     {
-      category: "Navigation & Commands",
+      category: m.helpNavCommands(),
       items: [
         {
           id: 'open_command_palette',
-          description: "Open Command Palette",
+          description: m.helpOpenCommandPalette(),
           icon: RiCommandLine,
           keys: '',
         },
         {
           id: 'open_help',
-          description: "Show Keyboard Shortcuts (this dialog)",
+          description: m.helpShowShortcuts(),
           icon: RiQuestionLine,
           keys: '',
         },
         {
           id: 'toggle_sidebar',
-          description: "Toggle Session Sidebar",
+          description: m.helpToggleSessionSidebar(),
           icon: RiLayoutLeftLine,
           keys: '',
         },
         {
           keys: ["Tab"],
-          description: "Cycle Agent (chat input)",
+          description: m.helpCycleAgent(),
           icon: RiAiAgentLine,
         },
         {
           id: 'open_model_selector',
-          description: "Open Model Selector",
+          description: m.helpOpenModelSelector(),
           icon: RiAiGenerate2,
           keys: '',
         },
         {
           keys: ["↑↓"],
-          description: "Navigate Models (in picker)",
+          description: m.helpNavigateModels(),
           icon: RiAiGenerate2,
         },
         {
           keys: ["←→"],
-          description: "Adjust Thinking Mode (in picker, when supported)",
+          description: m.helpAdjustThinkingMode(),
           icon: RiBrainAi3Line,
         },
         {
           id: 'cycle_thinking_variant',
-          description: "Cycle Thinking Variant (global shortcut)",
+          description: m.helpCycleThinkingVariant(),
           icon: RiBrainAi3Line,
           keys: '',
         },
         {
           keys: [`Shift + Alt + ${mod} + N`],
-          description: "New Window (desktop only)",
+          description: m.helpNewWindow(),
           icon: RiWindowLine,
         },
       ],
     },
     {
-      category: "Session Management",
+      category: m.helpSessionManagement(),
       items: [
         {
           id: 'new_chat',
-          description: "Create New Session",
+          description: m.cmdNewSession(),
           icon: RiAddLine,
           keys: '',
         },
         {
           id: 'new_chat_worktree',
-          description: "Create New Worktree Draft",
+          description: m.cmdNewWorktreeDraft(),
           icon: RiGitBranchLine,
           keys: '',
         },
-        { id: 'focus_input', description: "Focus Chat Input", icon: RiText, keys: '' },
+        { id: 'focus_input', description: m.helpFocusChatInput(), icon: RiText, keys: '' },
         {
           id: 'abort_run',
-          description: "Abort active run (double press)",
+          description: m.helpAbortRun(),
           icon: RiCloseCircleLine,
           keys: '',
         },
       ],
     },
     {
-      category: "Panels",
+      category: m.helpPanels(),
       items: [
         {
           id: 'toggle_right_sidebar',
-          description: 'Toggle Right Sidebar',
+          description: m.cmdToggleRightSidebar(),
           icon: RiLayoutRightLine,
           keys: '',
         },
         {
           id: 'open_right_sidebar_git',
-          description: 'Open Right Sidebar Git Tab',
+          description: m.cmdOpenRightSidebarGit(),
           icon: RiGitBranchLine,
           keys: '',
         },
         {
           id: 'open_right_sidebar_files',
-          description: 'Open Right Sidebar Files Tab',
+          description: m.cmdOpenRightSidebarFiles(),
           icon: RiLayoutRightLine,
           keys: '',
         },
         {
           id: 'cycle_right_sidebar_tab',
-          description: 'Cycle Right Sidebar Tab',
+          description: m.helpCycleRightSidebarTab(),
           icon: RiLayoutRightLine,
           keys: '',
         },
         {
           id: 'toggle_terminal',
-          description: 'Toggle Terminal Dock',
+          description: m.cmdToggleTerminalDock(),
           icon: RiWindowLine,
           keys: '',
         },
         {
           id: 'toggle_terminal_expanded',
-          description: 'Toggle Terminal Expanded',
+          description: m.cmdToggleTerminalExpanded(),
           icon: RiWindowLine,
           keys: '',
         },
         {
           id: 'toggle_context_plan',
-          description: 'Toggle Plan Context Panel',
+          description: m.helpTogglePlanContext(),
           icon: RiTimeLine,
           keys: '',
         },
       ],
     },
     {
-      category: "Interface",
+      category: m.helpInterface(),
       items: [
         {
           id: 'cycle_theme',
-          description: "Cycle Theme (Light → Dark → System)",
+          description: m.helpCycleTheme(),
           icon: RiPaletteLine,
           keys: '',
         },
         {
           keys: [`${mod} + 1...9`],
-          description: "Switch Project",
+          description: m.helpSwitchProject(),
           icon: RiLayoutLeftLine,
         },
         {
           id: 'toggle_services_menu',
-          description: 'Toggle Services Menu',
+          description: m.helpToggleServicesMenu(),
           icon: RiStackLine,
           keys: '',
         },
         {
           id: 'cycle_services_tab',
-          description: 'Cycle Services Tab',
+          description: m.helpCycleServicesTab(),
           icon: RiStackLine,
           keys: '',
         },
         {
           id: 'open_settings',
-          description: "Open Settings",
+          description: m.cmdOpenSettings(),
           icon: RiSettings3Line,
           keys: '',
         },
@@ -226,10 +227,10 @@ export const HelpDialog: React.FC = () => {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <RiSettings3Line className="h-5 w-5" />
-            Keyboard Shortcuts
+            {m.helpKeyboardShortcuts()}
           </DialogTitle>
           <DialogDescription>
-            Use these keyboard shortcuts to navigate OpenChamber efficiently
+            {m.helpShortcutsDesc()}
           </DialogDescription>
         </DialogHeader>
 
@@ -264,7 +265,7 @@ export const HelpDialog: React.FC = () => {
                             <React.Fragment key={`${keyCombo}-${i}`}>
                               {i > 0 && (
                                 <span className="typography-meta text-muted-foreground mx-1">
-                                  or
+                                  {m.helpOr()}
                                 </span>
                               )}
                               <kbd className="inline-flex items-center gap-1 px-1.5 py-0.5 typography-meta font-mono bg-muted rounded border border-border/20">
@@ -285,17 +286,16 @@ export const HelpDialog: React.FC = () => {
             <div className="flex items-start gap-2">
               <RiQuestionLine className="h-3.5 w-3.5 text-muted-foreground mt-0.5" />
               <div className="typography-meta text-muted-foreground">
-                <p className="font-medium mb-1">Pro Tips:</p>
+                <p className="font-medium mb-1">{m.helpProTips()}</p>
                 <ul className="space-y-0.5 typography-meta">
                   <li>
-                    • Use Command Palette ({renderShortcut('open_command_palette', `${mod} K`, shortcutOverrides)}) to quickly access all
-                    actions
+                    • {m.helpTipCommandPalette()} ({renderShortcut('open_command_palette', `${mod} K`, shortcutOverrides)})
                   </li>
                   <li>
-                    • The 5 most recent sessions appear in the Command Palette
+                    • {m.helpTipRecentSessions()}
                   </li>
                   <li>
-                    • Theme cycling remembers your preference across sessions
+                    • {m.helpTipThemeCycling()}
                   </li>
                 </ul>
               </div>

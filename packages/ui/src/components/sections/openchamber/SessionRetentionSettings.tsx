@@ -8,13 +8,14 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionAutoCleanup } from '@/hooks/useSessionAutoCleanup';
+import { m } from '@/lib/i18n/messages';
 
 const MIN_DAYS = 1;
 const MAX_DAYS = 365;
 const DEFAULT_RETENTION_DAYS = 30;
 const RETENTION_ACTION_OPTIONS = [
-  { value: 'archive', label: 'Archive' },
-  { value: 'delete', label: 'Delete' },
+  { value: 'archive', label: m.actionArchive() },
+  { value: 'delete', label: m.commonDelete() },
 ] as const;
 
 export const SessionRetentionSettings: React.FC = () => {
@@ -30,19 +31,20 @@ export const SessionRetentionSettings: React.FC = () => {
 
   const handleRunCleanup = React.useCallback(async () => {
     const result = await runCleanup({ force: true });
-    const verb = result.action === 'archive' ? 'archiving' : 'deletion';
-    const pastTense = result.action === 'archive' ? 'Archived' : 'Deleted';
-    const failureVerb = result.action === 'archive' ? 'archive' : 'delete';
 
     if (result.completedIds.length === 0 && result.failedIds.length === 0) {
-      toast.message(`No sessions eligible for ${verb}`);
+      toast.message(m.srToastNoneEligible({ action: result.action === 'archive' ? 'archiving' : 'deletion' }));
       return;
     }
     if (result.completedIds.length > 0) {
-      toast.success(`${pastTense} ${result.completedIds.length} session${result.completedIds.length === 1 ? '' : 's'}`);
+      toast.success(result.action === 'archive'
+        ? m.srToastArchived({ count: result.completedIds.length })
+        : m.srToastDeleted({ count: result.completedIds.length }));
     }
     if (result.failedIds.length > 0) {
-      toast.error(`Failed to ${failureVerb} ${result.failedIds.length} session${result.failedIds.length === 1 ? '' : 's'}`);
+      toast.error(result.action === 'archive'
+        ? m.srToastArchiveFailed({ count: result.failedIds.length })
+        : m.srToastDeleteFailed({ count: result.failedIds.length }));
     }
   }, [runCleanup]);
 
@@ -50,17 +52,17 @@ export const SessionRetentionSettings: React.FC = () => {
     <div className="mb-8">
       <div className="mb-1 px-1">
         <div className="flex items-center gap-2">
-          <h3 className="typography-ui-header font-medium text-foreground">
-            Session Retention
-          </h3>
-          <Tooltip delayDuration={1000}>
-            <TooltipTrigger asChild>
-              <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
-            </TooltipTrigger>
-            <TooltipContent sideOffset={8} className="max-w-xs">
-              Automatically archive or delete inactive sessions based on last activity. Keeps the 5 most recent sessions.
-            </TooltipContent>
-          </Tooltip>
+            <h3 className="typography-ui-header font-medium text-foreground">
+              {m.sessionRetentionTitle()}
+            </h3>
+            <Tooltip delayDuration={1000}>
+              <TooltipTrigger asChild>
+                <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
+              </TooltipTrigger>
+              <TooltipContent sideOffset={8} className="max-w-xs">
+                {m.sessionRetentionTooltip()}
+              </TooltipContent>
+            </Tooltip>
         </div>
       </div>
 
@@ -81,14 +83,14 @@ export const SessionRetentionSettings: React.FC = () => {
           <Checkbox
             checked={autoDeleteEnabled}
             onChange={setAutoDeleteEnabled}
-            ariaLabel="Enable auto-cleanup"
+            ariaLabel={m.sessionRetentionEnableAria()}
           />
-          <span className="typography-ui-label text-foreground">Enable Auto-Cleanup</span>
+          <span className="typography-ui-label text-foreground">{m.sessionRetentionEnable()}</span>
         </div>
 
         <div className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
           <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
-            <span className="typography-ui-label text-foreground">Retention Period</span>
+            <span className="typography-ui-label text-foreground">{m.sessionRetentionPeriod()}</span>
           </div>
           <div className="flex items-center gap-2 sm:w-fit">
             <NumberInput
@@ -97,18 +99,18 @@ export const SessionRetentionSettings: React.FC = () => {
               min={MIN_DAYS}
               max={MAX_DAYS}
               step={1}
-              aria-label="Retention period in days"
+              aria-label={m.sessionRetentionPeriodAria()}
               className="w-20 tabular-nums"
             />
-            <span className="typography-ui-label text-muted-foreground">days</span>
+            <span className="typography-ui-label text-muted-foreground">{m.sessionRetentionDays()}</span>
             <Button size="sm"
               type="button"
               variant="ghost"
               onClick={() => setAutoDeleteAfterDays(DEFAULT_RETENTION_DAYS)}
               disabled={autoDeleteAfterDays === DEFAULT_RETENTION_DAYS}
               className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
-              aria-label="Reset retention period"
-              title="Reset"
+              aria-label={m.sessionRetentionResetPeriodAria()}
+              title={m.commonReset()}
             >
               <RiRestartLine className="h-3.5 w-3.5" />
             </Button>
@@ -117,7 +119,7 @@ export const SessionRetentionSettings: React.FC = () => {
 
         <div className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
           <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
-            <span className="typography-ui-label text-foreground">When sessions expire</span>
+            <span className="typography-ui-label text-foreground">{m.sessionRetentionAction()}</span>
           </div>
           <div className="flex flex-wrap items-center gap-1 sm:w-fit">
             {RETENTION_ACTION_OPTIONS.map((option) => (
@@ -144,7 +146,7 @@ export const SessionRetentionSettings: React.FC = () => {
       <div className="mt-1 px-2 py-1.5 space-y-1">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-8">
           <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
-            <p className="typography-meta text-foreground font-medium">Manual Cleanup</p>
+            <p className="typography-meta text-foreground font-medium">{m.sessionRetentionManual()}</p>
           </div>
           <div className="flex items-center gap-2 sm:w-fit">
             <Button
@@ -155,12 +157,12 @@ export const SessionRetentionSettings: React.FC = () => {
               disabled={isRunning}
               className="!font-normal"
             >
-              {isRunning ? 'Cleaning up...' : 'Run cleanup now'}
+              {isRunning ? m.sessionRetentionCleaning() : m.sessionRetentionRun()}
             </Button>
           </div>
         </div>
         <p className="typography-meta text-muted-foreground">
-          Eligible for {action === 'archive' ? 'archiving' : 'deletion'} right now: <span className="tabular-nums">{pendingCount}</span>
+          {m.sessionRetentionEligible({ action: action === 'archive' ? 'archiving' : 'deletion', count: pendingCount })}
         </p>
       </div>
     </div>

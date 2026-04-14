@@ -15,6 +15,7 @@ import { OverlayScrollbar } from '@/components/ui/OverlayScrollbar';
 import { ChangeRow } from './ChangeRow';
 import type { GitStatus } from '@/lib/api/types';
 import { cn } from '@/lib/utils';
+import { m } from '@/lib/i18n/messages';
 
 interface ChangesSectionProps {
   changeEntries: GitStatus['files'];
@@ -136,14 +137,14 @@ export const ChangesSection: React.FC<ChangesSectionProps> = ({
       <section className={containerClassName}>
         <header className={headerClassName}>
           <div className="flex min-w-0 items-center gap-2">
-            <h3 className="typography-ui-header font-semibold text-foreground">Changes</h3>
+            <h3 className="typography-ui-header font-semibold text-foreground">{m.gitChangesTitle()}</h3>
             {totalCount > 0 ? (
               <button
                 type="button"
                 onClick={areAllSelected ? onClearSelection : onSelectAll}
                 disabled={isRevertingAll}
                 aria-checked={isPartiallySelected ? 'mixed' : hasAnySelected}
-                aria-label={areAllSelected ? 'Clear file selection' : 'Select all files'}
+                aria-label={areAllSelected ? m.gitClearFileSelection() : m.gitSelectAllFiles()}
                 className={cn(
                   'inline-flex h-6 items-center gap-1 rounded px-1.5 text-muted-foreground',
                   'hover:bg-interactive-hover/55 hover:text-foreground',
@@ -168,7 +169,7 @@ export const ChangesSection: React.FC<ChangesSectionProps> = ({
                 onClick={() => setConfirmRevertAllOpen(true)}
                 disabled={isRevertingAll}
               >
-                Revert all
+                {m.gitRevertAll()}
               </Button>
             ) : null}
           </div>
@@ -246,17 +247,17 @@ export const ChangesSection: React.FC<ChangesSectionProps> = ({
       <Dialog open={confirmRevertAllOpen} onOpenChange={(open) => { if (!isRevertingAll) setConfirmRevertAllOpen(open); }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Revert all changes?</DialogTitle>
+            <DialogTitle>{m.gitRevertAllChanges()}</DialogTitle>
             <DialogDescription>
-              This will discard local changes for {totalCount} file{totalCount === 1 ? '' : 's'} in the list.
+              {m.gitRevertAllChangesDescription(totalCount)}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" size="sm" onClick={() => setConfirmRevertAllOpen(false)} disabled={isRevertingAll}>
-              Cancel
+              {m.gitStashCancel()}
             </Button>
             <Button variant="destructive" size="sm" onClick={() => void handleConfirmRevertAll()} disabled={isRevertingAll}>
-              {isRevertingAll ? 'Reverting...' : 'Revert all'}
+              {isRevertingAll ? m.gitReverting() : m.gitRevertAll()}
             </Button>
           </DialogFooter>
         </DialogContent>

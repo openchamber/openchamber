@@ -35,6 +35,9 @@ build/
 .gradle/
 .*.bun-build
 
+# Paraglide generated output (compiled from packages/ui/messages/*.json)
+packages/ui/src/paraglide/
+
 # Built webview assets (generated during build)
 src/main/resources/webview/
 

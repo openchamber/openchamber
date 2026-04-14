@@ -21,6 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { m } from '@/lib/i18n/messages';
 
 type PermissionAction = 'allow' | 'ask' | 'deny';
 type PermissionRule = { permission: string; pattern: string; action: PermissionAction };
@@ -376,7 +377,7 @@ export const AgentsPage: React.FC = () => {
   const applyPendingRule = React.useCallback((action: PermissionAction) => {
     const name = pendingRuleName.trim();
     if (!name) {
-      toast.error('Permission name is required');
+      toast.error(m.agToastPermissionRequired());
       return;
     }
 
@@ -397,7 +398,7 @@ export const AgentsPage: React.FC = () => {
   }, [globalPermission, pendingRuleName, pendingRulePattern, removeRule, setGlobalPermissionAndPrune, upsertRule]);
 
   const formatPermissionLabel = React.useCallback((permissionName: string): string => {
-    if (permissionName === '*') return 'Default';
+    if (permissionName === '*') return m.agGlobalDefault();
     if (permissionName === 'webfetch') return 'WebFetch';
     if (permissionName === 'websearch') return 'WebSearch';
     if (permissionName === 'codesearch') return 'CodeSearch';
@@ -528,13 +529,13 @@ export const AgentsPage: React.FC = () => {
     const agentName = isNewAgent ? draftName.trim().replace(/\s+/g, '-') : selectedAgentName?.trim();
 
     if (!agentName) {
-      toast.error('Agent name is required');
+      toast.error(m.agToastNameRequired());
       return;
     }
 
     // Check for duplicate name when creating new agent
     if (isNewAgent && agents.some((a) => a.name === agentName)) {
-      toast.error('An agent with this name already exists');
+      toast.error(m.agToastDuplicateName());
       return;
     }
 
@@ -566,13 +567,13 @@ export const AgentsPage: React.FC = () => {
       }
 
       if (success) {
-        toast.success(isNewAgent ? 'Agent created successfully' : 'Agent updated successfully');
+        toast.success(isNewAgent ? m.agToastCreated() : m.agToastUpdated());
       } else {
-        toast.error(isNewAgent ? 'Failed to create agent' : 'Failed to update agent');
+        toast.error(isNewAgent ? m.agToastCreateFailed() : m.agToastUpdateFailed());
       }
     } catch (error) {
       console.error('Error saving agent:', error);
-      const message = error instanceof Error && error.message ? error.message : 'An error occurred while saving';
+      const message = error instanceof Error && error.message ? error.message : m.agToastSaveError();
       toast.error(message);
     } finally {
       setIsSaving(false);
@@ -585,8 +586,8 @@ export const AgentsPage: React.FC = () => {
       <div className="flex h-full items-center justify-center">
         <div className="text-center text-muted-foreground">
           <RiRobot2Line className="mx-auto mb-3 h-12 w-12 opacity-50" />
-          <p className="typography-body">Select an agent from the sidebar</p>
-          <p className="typography-meta mt-1 opacity-75">or create a new one</p>
+          <p className="typography-body">{m.agSelectFromSidebar()}</p>
+          <p className="typography-meta mt-1 opacity-75">{m.agOrCreateNew()}</p>
         </div>
       </div>
     );
@@ -600,10 +601,10 @@ export const AgentsPage: React.FC = () => {
         <div className="mb-4 flex items-center justify-between gap-4">
           <div className="min-w-0">
             <h2 className="typography-ui-header font-semibold text-foreground truncate">
-              {isNewAgent ? 'New Agent' : selectedAgentName}
+              {isNewAgent ? m.agNewAgent() : selectedAgentName}
             </h2>
             <p className="typography-meta text-muted-foreground truncate">
-              {isNewAgent ? 'Configure a new assistant persona' : 'Edit agent settings'}
+              {isNewAgent ? m.agNewAgentDesc() : m.agEditAgentSettings()}
             </p>
           </div>
         </div>
@@ -612,7 +613,7 @@ export const AgentsPage: React.FC = () => {
         <div className="mb-8">
           <div className="mb-1 px-1">
             <h3 className="typography-ui-header font-medium text-foreground">
-              Identity & Role
+              {m.agIdentityRole()}
             </h3>
           </div>
 
@@ -621,7 +622,7 @@ export const AgentsPage: React.FC = () => {
             {isNewAgent && (
               <div className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
                 <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
-                  <span className="typography-ui-label text-foreground">Agent Name</span>
+                  <span className="typography-ui-label text-foreground">{m.agAgentName()}</span>
                 </div>
                 <div className="flex min-w-0 flex-1 items-center gap-2 sm:w-fit sm:flex-initial">
                   <div className="flex items-center">
@@ -629,25 +630,25 @@ export const AgentsPage: React.FC = () => {
                     <Input
                       value={draftName}
                       onChange={(e) => setDraftName(e.target.value)}
-                      placeholder="agent-name"
+                      placeholder={m.agentsNamePlaceholder()}
                       className="h-7 w-40 px-2"
                     />
                   </div>
                   <Select value={draftScope} onValueChange={(v) => setDraftScope(v as AgentScope)}>
                     <SelectTrigger className="w-fit min-w-[100px]">
-                      <SelectValue placeholder="Scope" />
+                      <SelectValue placeholder={m.agentsScopePlaceholder()} />
                     </SelectTrigger>
                     <SelectContent align="end">
                       <SelectItem value="user">
                         <div className="flex items-center gap-2">
                           <RiUser3Line className="h-3.5 w-3.5" />
-                          <span>Global</span>
+                          <span>{m.agGlobal()}</span>
                         </div>
                       </SelectItem>
                       <SelectItem value="project">
                         <div className="flex items-center gap-2">
                           <RiFolderLine className="h-3.5 w-3.5" />
-                          <span>Project</span>
+                          <span>{m.agentsScopeProject()}</span>
                         </div>
                       </SelectItem>
                     </SelectContent>
@@ -657,12 +658,12 @@ export const AgentsPage: React.FC = () => {
             )}
 
             <div className="py-1.5">
-              <span className="typography-ui-label text-foreground">Description</span>
+              <span className="typography-ui-label text-foreground">{m.agDescription()}</span>
               <div className="mt-1.5">
                 <Textarea
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
-                  placeholder="What does this agent do?"
+                  placeholder={m.agDescriptionPlaceholder()}
                   rows={2}
                   className="w-full resize-none min-h-[60px] bg-transparent"
                 />
@@ -672,13 +673,13 @@ export const AgentsPage: React.FC = () => {
             <div className="pb-1.5 pt-0.5">
               <div className="flex min-w-0 flex-col gap-1.5">
                 <div className="flex items-center gap-1.5">
-                  <span className="typography-ui-label text-foreground">Mode</span>
+                  <span className="typography-ui-label text-foreground">{m.agMode()}</span>
                   <Tooltip delayDuration={1000}>
                     <TooltipTrigger asChild>
                       <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
                     </TooltipTrigger>
                     <TooltipContent sideOffset={8} className="max-w-xs">
-                      Primary vs Subagent visibility
+                      {m.agModeTooltip()}
                     </TooltipContent>
                   </Tooltip>
                 </div>
@@ -694,7 +695,7 @@ export const AgentsPage: React.FC = () => {
                       : 'text-foreground'
                   )}
                 >
-                  Primary
+                  {m.agPrimary()}
                 </Button>
                 <Button
                   variant="outline"
@@ -707,7 +708,7 @@ export const AgentsPage: React.FC = () => {
                       : 'text-foreground'
                   )}
                 >
-                  Subagent
+                  {m.agSubagent()}
                 </Button>
                 <Button
                   variant="outline"
@@ -720,7 +721,7 @@ export const AgentsPage: React.FC = () => {
                       : 'text-foreground'
                   )}
                 >
-                  All
+                  {m.agAll()}
                 </Button>
                 </div>
               </div>
@@ -733,7 +734,7 @@ export const AgentsPage: React.FC = () => {
         <div className="mb-8">
           <div className="mb-1 px-1">
             <h3 className="typography-ui-header font-medium text-foreground">
-              Model & Parameters
+              {m.agModelParameters()}
             </h3>
           </div>
 
@@ -741,7 +742,7 @@ export const AgentsPage: React.FC = () => {
 
             <div className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
               <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
-                <span className="typography-ui-label text-foreground">Override Model</span>
+                <span className="typography-ui-label text-foreground">{m.agOverrideModel()}</span>
               </div>
               <div className="flex min-w-0 flex-1 items-center gap-2 sm:w-fit sm:flex-initial">
                 <ModelSelector
@@ -761,17 +762,17 @@ export const AgentsPage: React.FC = () => {
             <div className={cn("py-1.5", isMobile ? "flex flex-col gap-3" : "flex items-center gap-8")}>
               <div className={cn("flex min-w-0 flex-col", isMobile ? "w-full" : "sm:w-56 shrink-0")}>
                 <div className="flex items-center gap-1.5">
-                  <span className="typography-ui-label text-foreground">Temperature</span>
+                  <span className="typography-ui-label text-foreground">{m.agTemperature()}</span>
                   <Tooltip delayDuration={1000}>
                     <TooltipTrigger asChild>
                       <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
                     </TooltipTrigger>
                     <TooltipContent sideOffset={8} className="max-w-xs">
-                      Controls randomness. Higher = creative, Lower = focused.
+                      {m.agTempTooltip()}
                     </TooltipContent>
                   </Tooltip>
                 </div>
-                <span className="typography-meta text-muted-foreground">0.0 to 2.0</span>
+                <span className="typography-meta text-muted-foreground">{m.agTempRange()}</span>
               </div>
               <div className={cn("flex items-center gap-2", isMobile ? "w-full" : "w-fit")}>
                 <NumberInput
@@ -793,8 +794,8 @@ export const AgentsPage: React.FC = () => {
                     variant="ghost"
                     onClick={() => setTemperature(undefined)}
                     className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
-                    aria-label="Clear temperature override"
-                    title="Clear"
+                    aria-label={m.agClearTemp()}
+                    title={m.agClearTemp()}
                   >
                     <RiCloseLine className="h-3.5 w-3.5" />
                   </Button>
@@ -805,17 +806,17 @@ export const AgentsPage: React.FC = () => {
             <div className={cn("py-1.5", isMobile ? "flex flex-col gap-3" : "flex items-center gap-8")}>
               <div className={cn("flex min-w-0 flex-col", isMobile ? "w-full" : "sm:w-56 shrink-0")}>
                 <div className="flex items-center gap-1.5">
-                  <span className="typography-ui-label text-foreground">Top P</span>
+                  <span className="typography-ui-label text-foreground">{m.agTopP()}</span>
                   <Tooltip delayDuration={1000}>
                     <TooltipTrigger asChild>
                       <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
                     </TooltipTrigger>
                     <TooltipContent sideOffset={8} className="max-w-xs">
-                      Nucleus sampling diversity. Lower = likely tokens only.
+                      {m.agTopPTooltip()}
                     </TooltipContent>
                   </Tooltip>
                 </div>
-                <span className="typography-meta text-muted-foreground">0.0 to 1.0</span>
+                <span className="typography-meta text-muted-foreground">{m.agTopPRange()}</span>
               </div>
               <div className={cn("flex items-center gap-2", isMobile ? "w-full" : "w-fit")}>
                 <NumberInput
@@ -837,8 +838,8 @@ export const AgentsPage: React.FC = () => {
                     variant="ghost"
                     onClick={() => setTopP(undefined)}
                     className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
-                    aria-label="Clear top p override"
-                    title="Clear"
+                    aria-label={m.agClearTopP()}
+                    title={m.agClearTopP()}
                   >
                     <RiCloseLine className="h-3.5 w-3.5" />
                   </Button>
@@ -853,7 +854,7 @@ export const AgentsPage: React.FC = () => {
         <div className="mb-8">
           <div className="mb-1 px-1">
             <h3 className="typography-ui-header font-medium text-foreground">
-              System Prompt
+              {m.agSystemPrompt()}
             </h3>
           </div>
 
@@ -861,7 +862,7 @@ export const AgentsPage: React.FC = () => {
             <Textarea
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              placeholder="You are an expert coding assistant..."
+              placeholder={m.agPromptPlaceholder()}
               rows={8}
               className="w-full font-mono typography-meta min-h-[120px] max-h-[60vh] bg-transparent resize-y"
             />
@@ -872,7 +873,7 @@ export const AgentsPage: React.FC = () => {
         <div className="mb-2">
           <div className="mb-1 px-1 flex items-center justify-between gap-4">
             <h3 className="typography-ui-header font-medium text-foreground">
-              Tool Permissions
+              {m.agToolPermissions()}
             </h3>
             <Button
               variant="outline"
@@ -880,7 +881,7 @@ export const AgentsPage: React.FC = () => {
               className="!font-normal"
               onClick={() => setShowPermissionEditor((prev) => !prev)}
             >
-              {showPermissionEditor ? 'Hide Editor' : 'Advanced Editor'}
+              {showPermissionEditor ? m.agHideEditor() : m.agAdvancedEditor()}
             </Button>
           </div>
 
@@ -897,14 +898,14 @@ export const AgentsPage: React.FC = () => {
                       <span className="typography-micro text-muted-foreground/70 font-mono hidden sm:inline-block">{permissionName}</span>
                     </div>
                     <div className="flex items-center gap-3">
-                      {patternRulesCount > 0 ? (
-                        <span className="typography-micro text-muted-foreground bg-[var(--surface-muted)] px-1.5 py-0.5 rounded">Global: {summary}</span>
-                      ) : (
-                        <span className={cn("typography-micro capitalize px-1.5 py-0.5 rounded", summary === 'allow' ? "text-[var(--status-success)] bg-[var(--status-success)]/10" : summary === 'deny' ? "text-[var(--status-error)] bg-[var(--status-error)]/10" : "text-[var(--status-warning)] bg-[var(--status-warning)]/10")}>{summary}</span>
-                      )}
-                      {patternRulesCount > 0 && (
-                        <span className="typography-micro text-muted-foreground bg-[var(--surface-muted)] px-1.5 py-0.5 rounded">Rules: {patternSummary}</span>
-                      )}
+                       {patternRulesCount > 0 ? (
+                         <span className="typography-micro text-muted-foreground bg-[var(--surface-muted)] px-1.5 py-0.5 rounded">{m.agGlobalAction().replace('{action}', summary)}</span>
+                       ) : (
+                         <span className={cn("typography-micro capitalize px-1.5 py-0.5 rounded", summary === 'allow' ? "text-[var(--status-success)] bg-[var(--status-success)]/10" : summary === 'deny' ? "text-[var(--status-error)] bg-[var(--status-error)]/10" : "text-[var(--status-warning)] bg-[var(--status-warning)]/10")}>{summary}</span>
+                       )}
+                       {patternRulesCount > 0 && (
+                         <span className="typography-micro text-muted-foreground bg-[var(--surface-muted)] px-1.5 py-0.5 rounded">{m.agRulesSummary().replace('{summary}', patternSummary)}</span>
+                       )}
                     </div>
                   </div>
                 );
@@ -914,7 +915,7 @@ export const AgentsPage: React.FC = () => {
             <div className="space-y-6 px-2">
               <div className="flex items-center justify-between gap-4 py-1.5">
                 <div className="flex items-center gap-2">
-                  <span className="typography-ui-label text-foreground">Global Default</span>
+                  <span className="typography-ui-label text-foreground">{m.agGlobalDefault()}</span>
                   <span className="typography-micro text-muted-foreground/70 font-mono">*</span>
                 </div>
                 <Select
@@ -925,9 +926,9 @@ export const AgentsPage: React.FC = () => {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="allow">Allow</SelectItem>
-                    <SelectItem value="ask">Ask</SelectItem>
-                    <SelectItem value="deny">Deny</SelectItem>
+                    <SelectItem value="allow">{m.agAllow()}</SelectItem>
+                    <SelectItem value="ask">{m.agAsk()}</SelectItem>
+                    <SelectItem value="deny">{m.agDeny()}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -948,131 +949,131 @@ export const AgentsPage: React.FC = () => {
                           <span className="typography-ui-label text-foreground">{label}</span>
                           <span className="typography-micro text-muted-foreground/70 font-mono">{permissionName}</span>
                         </div>
-                        <div className="typography-micro text-muted-foreground">
-                          {patternRulesCount > 0 ? `Global: ${defaultAction}` : defaultAction}
-                        </div>
+                         <div className="typography-micro text-muted-foreground">
+                           {patternRulesCount > 0 ? m.agGlobalAction().replace('{action}', defaultAction) : defaultAction}
+                         </div>
                       </div>
 
-                      <div className="space-y-1 pl-2 mt-1">
-                        <div className="flex flex-wrap items-center justify-between gap-2 py-0.5">
-                          <div className="flex items-center gap-2">
-                            <span className="typography-micro text-muted-foreground">Pattern</span>
-                            <span className="typography-micro font-mono text-foreground bg-[var(--surface-muted)] px-1 rounded">*</span>
-                            {wildcardOverride && (
-                              <Button size="sm"
-                                variant="ghost"
-                                onClick={() => revertRule(permissionName, '*')}
-                                className="px-1.5 py-0 h-5"
-                              >
-                                <RiSubtractLine className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground" />
-                              </Button>
-                            )}
-                          </div>
-                          <Select
-                            value={wildcardValue}
-                            onValueChange={(value) => {
-                              if (value === 'global') {
-                                removeRule(permissionName, '*');
-                                return;
-                              }
-                              upsertRule(permissionName, '*', value as PermissionAction);
-                            }}
-                          >
-                            <SelectTrigger className="w-[90px]">
-                               <SelectValue />
-                             </SelectTrigger>
-                             <SelectContent>
-                               <SelectItem value="global">Global</SelectItem>
-                              {wildcardOptions.map((action) => (
-                                <SelectItem key={action} value={action} className="capitalize">
-                                  {action}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
+                       <div className="space-y-1 pl-2 mt-1">
+                         <div className="flex flex-wrap items-center justify-between gap-2 py-0.5">
+                           <div className="flex items-center gap-2">
+                             <span className="typography-micro text-muted-foreground">{m.agPattern()}</span>
+                             <span className="typography-micro font-mono text-foreground bg-[var(--surface-muted)] px-1 rounded">*</span>
+                             {wildcardOverride && (
+                               <Button size="sm"
+                                 variant="ghost"
+                                 onClick={() => revertRule(permissionName, '*')}
+                                 className="px-1.5 py-0 h-5"
+                               >
+                                 <RiSubtractLine className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground" />
+                               </Button>
+                             )}
+                           </div>
+                           <Select
+                             value={wildcardValue}
+                             onValueChange={(value) => {
+                               if (value === 'global') {
+                                 removeRule(permissionName, '*');
+                                 return;
+                               }
+                               upsertRule(permissionName, '*', value as PermissionAction);
+                             }}
+                           >
+                             <SelectTrigger className="w-[90px]">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="global">{m.agGlobal()}</SelectItem>
+                               {wildcardOptions.map((action) => (
+                                 <SelectItem key={action} value={action} className="capitalize">
+                                   {action}
+                                 </SelectItem>
+                               ))}
+                             </SelectContent>
+                           </Select>
+                         </div>
 
-                        {patternRules.map((rule) => {
-                          const ruleKey = buildRuleKey(rule.permission, rule.pattern);
-                          const baselineRule = baselineRuleMap.get(ruleKey);
-                          const isAdded = !baselineRule;
-                          const isModified = Boolean(baselineRule && baselineRule.action !== rule.action);
+                         {patternRules.map((rule) => {
+                           const ruleKey = buildRuleKey(rule.permission, rule.pattern);
+                           const baselineRule = baselineRuleMap.get(ruleKey);
+                           const isAdded = !baselineRule;
+                           const isModified = Boolean(baselineRule && baselineRule.action !== rule.action);
 
-                          return (
-                            <div key={ruleKey} className="flex flex-wrap items-center justify-between gap-2 py-0.5 border-t border-[var(--surface-subtle)]">
-                              <div className="flex items-center gap-2">
-                                <span className="typography-micro text-muted-foreground">Pattern</span>
-                                <span className="typography-micro font-mono text-foreground bg-[var(--surface-muted)] px-1 rounded">{rule.pattern}</span>
-                                {isAdded && <span className="typography-micro text-[var(--status-success)]">New</span>}
-                                {isModified && <span className="typography-micro text-[var(--status-warning)]">Modified</span>}
-                                {(isAdded || isModified) && (
-                                  <Button size="sm"
-                                    variant="ghost"
-                                    onClick={() => isAdded ? removeRule(rule.permission, rule.pattern) : revertRule(rule.permission, rule.pattern)}
-                                    className="px-1.5 py-0 h-5"
-                                  >
-                                    <RiSubtractLine className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground" />
-                                  </Button>
-                                )}
-                              </div>
-                              <Select
-                                value={rule.action}
-                                onValueChange={(value) => setRuleAction(rule.permission, rule.pattern, value as PermissionAction)}
-                              >
-                                 <SelectTrigger className="w-[90px]">
-                                   <SelectValue />
-                                 </SelectTrigger>
-                                 <SelectContent>
-                                   <SelectItem value="allow">Allow</SelectItem>
-                                  <SelectItem value="ask">Ask</SelectItem>
-                                  <SelectItem value="deny">Deny</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          );
-                        })}
-                      </div>
+                           return (
+                             <div key={ruleKey} className="flex flex-wrap items-center justify-between gap-2 py-0.5 border-t border-[var(--surface-subtle)]">
+                               <div className="flex items-center gap-2">
+                                 <span className="typography-micro text-muted-foreground">{m.agPattern()}</span>
+                                 <span className="typography-micro font-mono text-foreground bg-[var(--surface-muted)] px-1 rounded">{rule.pattern}</span>
+                                 {isAdded && <span className="typography-micro text-[var(--status-success)]">{m.agNew()}</span>}
+                                 {isModified && <span className="typography-micro text-[var(--status-warning)]">{m.agModified()}</span>}
+                                 {(isAdded || isModified) && (
+                                   <Button size="sm"
+                                     variant="ghost"
+                                     onClick={() => isAdded ? removeRule(rule.permission, rule.pattern) : revertRule(rule.permission, rule.pattern)}
+                                     className="px-1.5 py-0 h-5"
+                                   >
+                                     <RiSubtractLine className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground" />
+                                   </Button>
+                                 )}
+                               </div>
+                               <Select
+                                 value={rule.action}
+                                 onValueChange={(value) => setRuleAction(rule.permission, rule.pattern, value as PermissionAction)}
+                               >
+                                  <SelectTrigger className="w-[90px]">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="allow">{m.agAllow()}</SelectItem>
+                                   <SelectItem value="ask">{m.agAsk()}</SelectItem>
+                                   <SelectItem value="deny">{m.agDeny()}</SelectItem>
+                                 </SelectContent>
+                               </Select>
+                             </div>
+                           );
+                         })}
+                       </div>
                     </div>
                   );
                 })}
               </div>
 
-              <div className="border-t border-[var(--surface-subtle)] pt-3">
-                <h4 className="typography-ui-label text-foreground mb-2">Add Custom Rule</h4>
-                <div className="flex flex-col sm:flex-row items-end sm:items-center gap-2">
-                  <Select value={pendingRuleName} onValueChange={setPendingRuleName}>
-                    <SelectTrigger className="w-full sm:w-[160px]">
-                      {pendingRuleName ? (
-                        <span className="truncate">{formatPermissionLabel(pendingRuleName)}</span>
-                      ) : (
-                        <span className="text-muted-foreground">Permission...</span>
-                      )}
-                    </SelectTrigger>
-                    <SelectContent>
-                      {availablePermissionNames.map((name) => (
-                        <SelectItem key={name} value={name}>
-                          <div className="flex items-center justify-between gap-2 w-full">
-                            <span>{formatPermissionLabel(name)}</span>
-                          </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+               <div className="border-t border-[var(--surface-subtle)] pt-3">
+                 <h4 className="typography-ui-label text-foreground mb-2">{m.agAddCustomRule()}</h4>
+                 <div className="flex flex-col sm:flex-row items-end sm:items-center gap-2">
+                   <Select value={pendingRuleName} onValueChange={setPendingRuleName}>
+                     <SelectTrigger className="w-full sm:w-[160px]">
+                       {pendingRuleName ? (
+                         <span className="truncate">{formatPermissionLabel(pendingRuleName)}</span>
+                       ) : (
+                         <span className="text-muted-foreground">{m.agPermissionPlaceholder()}</span>
+                       )}
+                     </SelectTrigger>
+                     <SelectContent>
+                       {availablePermissionNames.map((name) => (
+                         <SelectItem key={name} value={name}>
+                           <div className="flex items-center justify-between gap-2 w-full">
+                             <span>{formatPermissionLabel(name)}</span>
+                           </div>
+                         </SelectItem>
+                       ))}
+                     </SelectContent>
+                   </Select>
 
-                  <Input
-                    value={pendingRulePattern}
-                    onChange={(e) => setPendingRulePattern(e.target.value)}
-                    placeholder="Pattern (e.g. *)"
-                    className="h-7 flex-1 font-mono text-xs"
-                  />
+                   <Input
+                     value={pendingRulePattern}
+                     onChange={(e) => setPendingRulePattern(e.target.value)}
+                     placeholder={m.agPatternPlaceholder()}
+                     className="h-7 flex-1 font-mono text-xs"
+                   />
 
-                  <div className="flex gap-1">
-                    <Button variant="outline" size="xs" className="!font-normal" onClick={() => applyPendingRule('allow')}>Allow</Button>
-                    <Button variant="outline" size="xs" className="!font-normal" onClick={() => applyPendingRule('ask')}>Ask</Button>
-                    <Button variant="outline" size="xs" className="!font-normal" onClick={() => applyPendingRule('deny')}>Deny</Button>
-                  </div>
-                </div>
-              </div>
+                   <div className="flex gap-1">
+                     <Button variant="outline" size="xs" className="!font-normal" onClick={() => applyPendingRule('allow')}>{m.agAllow()}</Button>
+                     <Button variant="outline" size="xs" className="!font-normal" onClick={() => applyPendingRule('ask')}>{m.agAsk()}</Button>
+                     <Button variant="outline" size="xs" className="!font-normal" onClick={() => applyPendingRule('deny')}>{m.agDeny()}</Button>
+                   </div>
+                 </div>
+               </div>
             </div>
           )}
         </div>
@@ -1085,7 +1086,7 @@ export const AgentsPage: React.FC = () => {
             size="xs"
             className="!font-normal"
           >
-            {isSaving ? 'Saving...' : 'Save Changes'}
+            {isSaving ? m.agSaving() : m.agSaveChanges()}
           </Button>
         </div>
 

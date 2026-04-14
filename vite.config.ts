@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { themeStoragePlugin } from './vite-theme-plugin'
+import { paraglideVitePlugin } from '@inlang/paraglide-js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -10,6 +11,10 @@ export default defineConfig({
   plugins: [
     react(),
     themeStoragePlugin(),
+    paraglideVitePlugin({
+      project: './packages/ui/project.inlang',
+      outdir: './packages/ui/src/paraglide',
+    }),
   ],
   resolve: {
     alias: [

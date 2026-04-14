@@ -54,6 +54,7 @@ import { useSync } from '@/sync/use-sync';
 import { useUIStore } from '@/stores/useUIStore';
 import { useModelLists } from '@/hooks/useModelLists';
 import { useIsTextTruncated } from '@/hooks/useIsTextTruncated';
+import { chatSearchProviders, chatSearchModels, chatSearchAgents, chatThinking, chatResetToDefault, chatNoAgentsFound } from '@/lib/i18n/messages';
 import type { MobileControlsPanel } from './mobileControlsUtils';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1417,7 +1418,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                             <Input
                                 value={mobileModelQuery}
                                 onChange={(event) => setMobileModelQuery(event.target.value)}
-                                placeholder="Search providers or models"
+                                placeholder={chatSearchProviders()}
                                 className="pl-7 h-9 rounded-xl border-border/40 bg-[var(--surface-elevated)] typography-meta"
                             />
                             {mobileModelQuery && (
@@ -1682,7 +1683,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             <MobileOverlayPanel
                 open={activeMobilePanel === 'variant'}
                 onClose={closeMobilePanel}
-                title="Thinking"
+                title={chatThinking()}
             >
                 <div className="flex flex-col gap-1.5">
                     <button
@@ -2229,7 +2230,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                     <RiSearchLine className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                                     <Input
                                         type="text"
-                                        placeholder="Search models"
+                                        placeholder={chatSearchModels()}
                                         value={desktopModelQuery}
                                         onChange={(e) => setDesktopModelQuery(e.target.value)}
                                         onKeyDown={handleModelKeyDown}
@@ -2594,7 +2595,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                         </DropdownMenuTrigger>
                     </TooltipTrigger>
                     <DropdownMenuContent align="end" alignOffset={-40} className="w-[min(180px,calc(100vw-2rem))]">
-                        <DropdownMenuLabel className="typography-ui-header font-semibold text-foreground">Thinking</DropdownMenuLabel>
+                        <DropdownMenuLabel className="typography-ui-header font-semibold text-foreground">{chatThinking()}</DropdownMenuLabel>
                         <DropdownMenuItem className="typography-meta" onSelect={() => handleVariantSelect(undefined)}>
                             <div className="flex items-center justify-between gap-2 w-full min-w-0">
                                 <span className="typography-meta font-medium text-foreground truncate min-w-0">Default</span>
@@ -2667,7 +2668,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                         <RiSearchLine className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                                         <Input
                                             type="text"
-                                            placeholder="Search agents"
+                                            placeholder={chatSearchAgents()}
                                             value={agentSearchQuery}
                                             onChange={(e) => setAgentSearchQuery(e.target.value)}
                                             onKeyDown={(e) => {
@@ -2688,7 +2689,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                                 >
                                                     <div className="flex items-center gap-1.5">
                                                         <RiArrowGoBackLine className="h-3.5 w-3.5 text-muted-foreground" />
-                                                        <span className="font-medium">Reset to default</span>
+                                                        <span className="font-medium">{chatResetToDefault()}</span>
                                                     </div>
                                                 </DropdownMenuItem>
                                                 <DropdownMenuSeparator />
@@ -2696,7 +2697,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                         )}
                                         {sortedAndFilteredAgents.length === 0 ? (
                                             <div className="px-2 py-4 text-center typography-meta text-muted-foreground">
-                                                No agents found
+                                                {chatNoAgentsFound()}
                                             </div>
                                         ) : (
                                             sortedAndFilteredAgents.map((agent) => (

@@ -9,6 +9,7 @@ import {
 } from '@remixicon/react';
 import { Button } from '@/components/ui/button';
 import type { GitMergeInProgress, GitRebaseInProgress } from '@/lib/api/types';
+import { m } from '@/lib/i18n/messages';
 
 interface InProgressOperationBannerProps {
   mergeInProgress: GitMergeInProgress | null | undefined;
@@ -60,19 +61,19 @@ export const InProgressOperationBanner: React.FC<InProgressOperationBannerProps>
 
   const isProcessing = processingAction !== null;
 
-  const operationLabel = operation === 'merge' ? 'Merge' : 'Rebase';
+  const operationLabel = operation === 'merge' ? m.gitMerge() : m.gitRebase();
   const OperationIcon = operation === 'merge' ? RiGitMergeLine : RiGitBranchLine;
 
   // Build description
   let description = '';
   if (mergeInProgress) {
-    description = mergeInProgress.message 
-      ? `Merging: ${mergeInProgress.message}` 
-      : `Merge in progress (${mergeInProgress.head})`;
+    description = mergeInProgress.message
+      ? m.gitMerging(mergeInProgress.message)
+      : m.gitMergeInProgress(mergeInProgress.head);
   } else if (rebaseInProgress) {
-    description = rebaseInProgress.headName 
-      ? `Rebasing ${rebaseInProgress.headName} onto ${rebaseInProgress.onto}` 
-      : `Rebase in progress`;
+    description = rebaseInProgress.headName
+      ? m.gitRebasing(rebaseInProgress.headName, rebaseInProgress.onto)
+      : m.gitRebaseInProgress();
   }
 
   return (
@@ -82,7 +83,7 @@ export const InProgressOperationBanner: React.FC<InProgressOperationBannerProps>
           <OperationIcon className="size-4 text-[var(--status-warning)] shrink-0" />
           <div className="min-w-0">
             <p className="typography-label text-[var(--status-warning)]">
-              {operationLabel} in Progress
+              {operationLabel} {m.gitOperationInProgress()}
             </p>
             {description && (
               <p className="typography-micro text-muted-foreground truncate">
@@ -102,7 +103,7 @@ export const InProgressOperationBanner: React.FC<InProgressOperationBannerProps>
               className="gap-1.5"
             >
               <RiSparklingLine className="size-4" />
-              Resolve with AI
+              {m.gitResolveWithAI()}
             </Button>
           )}
 
@@ -119,7 +120,7 @@ export const InProgressOperationBanner: React.FC<InProgressOperationBannerProps>
               ) : (
                 <RiCloseLine className="size-4" />
               )}
-              Abort
+              {m.gitAbort()}
             </Button>
           )}
 
@@ -136,7 +137,7 @@ export const InProgressOperationBanner: React.FC<InProgressOperationBannerProps>
               ) : (
                 <RiCheckLine className="size-4" />
               )}
-              Continue
+              {m.gitContinue()}
             </Button>
           )}
         </div>
@@ -144,7 +145,7 @@ export const InProgressOperationBanner: React.FC<InProgressOperationBannerProps>
 
       {hasUnresolvedConflicts && (
         <p className="typography-micro text-[var(--status-warning)] mt-2">
-          Conflicts must be resolved before continuing. Use &quot;Resolve with AI&quot; or resolve manually, then stage changes and click Continue.
+          {m.gitConflictsMustBeResolved()}
         </p>
       )}
     </div>

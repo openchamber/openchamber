@@ -3,6 +3,12 @@ import { RiArrowDownSLine, RiArrowUpSLine } from '@remixicon/react';
 
 import { Button } from '@/components/ui/button';
 import { JsonTreeViewer } from './JsonTreeViewer';
+import {
+  jsonEmptyContent,
+  jsonInvalid,
+  jsonExpandAll,
+  jsonCollapseAll,
+} from '@/lib/i18n/messages';
 
 interface JsonTreeViewProps {
   jsonString: string;
@@ -24,14 +30,14 @@ const JsonTreeView = React.memo(function JsonTreeView({
     try {
       const trimmed = jsonString.trim();
       if (!trimmed) {
-        setParseError('Empty JSON content');
+        setParseError(jsonEmptyContent());
         return null;
       }
       const parsed = JSON.parse(trimmed);
       setParseError(null);
       return parsed;
     } catch (err) {
-      setParseError(err instanceof Error ? err.message : 'Invalid JSON');
+      setParseError(err instanceof Error ? err.message : jsonInvalid());
       return null;
     }
   }, [jsonString]);
@@ -48,7 +54,7 @@ const JsonTreeView = React.memo(function JsonTreeView({
     return (
       <div className={className}>
         <div className="rounded-md border border-[var(--interactive-border)] bg-[var(--syntax-base-background)] p-4">
-          <div className="mb-1 font-medium text-[var(--surface-foreground)]">Invalid JSON</div>
+          <div className="mb-1 font-medium text-[var(--surface-foreground)]">{jsonInvalid()}</div>
           <div className="font-mono text-xs text-[var(--surface-mutedForeground)]">{parseError}</div>
         </div>
       </div>
@@ -69,7 +75,7 @@ const JsonTreeView = React.memo(function JsonTreeView({
           className="gap-1 text-xs text-muted-foreground"
         >
           <RiArrowDownSLine className="h-3 w-3" />
-          Expand All
+          {jsonExpandAll()}
         </Button>
         <Button
           variant="ghost"
@@ -78,7 +84,7 @@ const JsonTreeView = React.memo(function JsonTreeView({
           className="gap-1 text-xs text-muted-foreground"
         >
           <RiArrowUpSLine className="h-3 w-3" />
-          Collapse All
+          {jsonCollapseAll()}
         </Button>
       </div>
       <div

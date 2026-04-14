@@ -8,6 +8,7 @@ import { RiDiscordFill, RiGithubFill, RiTwitterXFill } from '@remixicon/react';
 import { debugUtils } from '@/lib/debug';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui';
+import { m } from '@/lib/i18n/messages';
 
 declare const __APP_VERSION__: string | undefined;
 
@@ -32,8 +33,8 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
     setCopiedDiagnostics(false);
     try {
       if (!diagnosticsReport) {
-        toast.error('Copy failed', {
-          description: 'Diagnostics not ready yet. Wait a second and retry.',
+        toast.error(m.toastCopyFailed(), {
+          description: m.aboutDiagNotReady(),
         });
         return;
       }
@@ -41,14 +42,14 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
       const result = await debugUtils.copyTextToClipboard(diagnosticsReport);
       if (result.ok) {
         setCopiedDiagnostics(true);
-        toast.success('Diagnostics copied');
+        toast.success(m.aboutDiagCopied());
       } else {
-        toast.error('Copy failed', {
+        toast.error(m.toastCopyFailed(), {
           description: result.error,
         });
       }
     } catch (error) {
-      toast.error('Copy failed');
+      toast.error(m.toastCopyFailed());
       console.error('Failed to copy diagnostics:', error);
     } finally {
       setIsCopyingDiagnostics(false);
@@ -117,13 +118,13 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
             <h2 className="text-lg font-semibold">OpenChamber</h2>
             {displayVersion && (
               <p className="typography-meta text-muted-foreground">
-                Version {displayVersion}
+                {m.aboutVersion().replace('{version}', displayVersion)}
               </p>
             )}
           </div>
 
           <p className="typography-meta text-muted-foreground">
-            A fan-made interface for{' '}
+            {m.aboutFanMade()}{' '}
             <a
               href="https://opencode.ai/"
               target="_blank"
@@ -132,7 +133,7 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
             >
               OpenCode
             </a>{' '}
-            agent
+            {m.aboutAgent()}
           </p>
 
           <div className="flex flex-col items-center gap-2 pt-2">
@@ -146,13 +147,13 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
               )}
             >
               {copiedDiagnostics
-                ? 'Diagnostics copied'
+                ? m.aboutDiagCopied()
                 : isPreparingDiagnostics
-                  ? 'Preparing diagnostics...'
-                  : 'Copy diagnostics'}
+                  ? m.aboutDiagPreparing()
+                  : m.aboutCopyDiagnostics()}
             </button>
             <p className="typography-micro text-muted-foreground">
-              Includes OpenChamber state, OpenCode health, directories, and projects.
+              {m.aboutDiagIncludes()}
             </p>
           </div>
 
@@ -187,7 +188,7 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
           </div>
 
           <p className="typography-meta text-muted-foreground/60 pt-2">
-            Made with love to comunity
+            {m.aboutMadeWithLove()}
           </p>
         </div>
       </DialogContent>

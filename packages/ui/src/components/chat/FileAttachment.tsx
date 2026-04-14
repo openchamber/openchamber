@@ -9,6 +9,7 @@ import { openExternalUrl } from '@/lib/url';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { useIsVSCodeRuntime } from '@/hooks/useRuntimeAPIs';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
+import { chatAttachFiles, chatRemoveImage } from '@/lib/i18n/messages';
 
 import type { ToolPopupContent } from './message/types';
 
@@ -109,7 +110,7 @@ export const FileAttachmentButton = memo(() => {
           </button>
         </TooltipTrigger>
         <TooltipContent side="top">
-          <p>Attach files</p>
+          <p>{chatAttachFiles()}</p>
         </TooltipContent>
       </Tooltip>
     </>
@@ -182,7 +183,7 @@ const ImagePreview = memo(({ file, onRemove }: ImagePreviewProps) => {
       <button
         onClick={onRemove}
         className="absolute top-0.5 right-0.5 h-4 w-4 rounded-full bg-background/80 text-foreground hover:text-destructive flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-        title="Remove image"
+        title={chatRemoveImage()}
         aria-label={`Remove ${displayName}`}
       >
         <RiCloseLine className="h-2.5 w-2.5" />
