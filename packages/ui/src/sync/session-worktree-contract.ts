@@ -183,6 +183,31 @@ export function getSessionWorktreeRepairActions(
   return [];
 }
 
+/** Reasons why a worktree mutation should be blocked. */
+export type MutationBlockingReason =
+  | { reason: 'dirty'; dirtyFiles?: number }
+  | { reason: 'attention'; attentionReason: NonNullable<SessionWorktreeAttachment['attentionReason']> }
+  | { reason: 'missing' }
+  | { reason: 'invalid' };
+
+/** Return blocking reasons that should prevent branch mutations. */
+export function getMutationBlockingReasons(
+  attachment: SessionWorktreeAttachment | null | undefined
+): MutationBlockingReason[] {
+  if (!attachment) return [];
+  const reasons: MutationBlockingReason[] = [];
+  if (attachment.worktreeStatus === 'missing') {
+    reasons.push({ reason: 'missing' });
+  }
+  if (attachment.worktreeStatus === 'invalid') {
+    reasons.push({ reason: 'invalid' });
+  }
+  if (attachment.attentionReason) {
+    reasons.push({ reason: 'attention', attentionReason: attachment.attentionReason });
+  }
+  return reasons;
+}
+
 // ---------------------------------------------------------------------------
 // Session target option builder
 // ---------------------------------------------------------------------------

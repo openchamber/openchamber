@@ -49,7 +49,7 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useUIStore } from '@/stores/useUIStore';
 import { useDetectedWorktreeMetadata } from '@/hooks/useDetectedWorktreeRoot';
 import { useSessionWorktreeStore } from '@/sync/session-worktree-store';
-import { getSessionWorktreeRepairActions } from '@/sync/session-worktree-contract';
+import { getSessionWorktreeRepairActions, getMutationBlockingReasons } from '@/sync/session-worktree-contract';
 import { IntegrateCommitsSection } from './git/IntegrateCommitsSection';
 
 import { GitHeader } from './git/GitHeader';
@@ -1052,6 +1052,19 @@ export const GitView: React.FC = () => {
 
   const handleCreateBranch = async (branchName: string, remote?: GitRemote) => {
     if (!currentDirectory || !status) return;
+
+    const blockingReasons = getMutationBlockingReasons(worktreeAttachment ?? null);
+    if (blockingReasons.length > 0) {
+      const reason = blockingReasons[0];
+      const reasonLabel = reason.reason === 'attention'
+        ? `${reason.attentionReason} in progress`
+        : reason.reason === 'missing'
+        ? 'worktree is missing'
+        : 'worktree is invalid';
+      toast.error(`Cannot create branch: ${reasonLabel}`);
+      return;
+    }
+
     const checkoutBase = status.current ?? null;
     const remoteName = remote?.name ?? 'origin';
 
@@ -1100,6 +1113,18 @@ export const GitView: React.FC = () => {
   const handleRenameBranch = async (oldName: string, newName: string) => {
     if (!currentDirectory) return;
 
+    const blockingReasons = getMutationBlockingReasons(worktreeAttachment ?? null);
+    if (blockingReasons.length > 0) {
+      const reason = blockingReasons[0];
+      const reasonLabel = reason.reason === 'attention'
+        ? `${reason.attentionReason} in progress`
+        : reason.reason === 'missing'
+        ? 'worktree is missing'
+        : 'worktree is invalid';
+      toast.error(`Cannot rename branch: ${reasonLabel}`);
+      return;
+    }
+
     try {
       await git.renameBranch(currentDirectory, oldName, newName);
       toast.success(`Renamed branch ${oldName} to ${newName}`);
@@ -1114,6 +1139,20 @@ export const GitView: React.FC = () => {
 
   const handleCheckoutBranch = async (branch: string) => {
     if (!currentDirectory) return;
+
+    // Block mutation if worktree is in an attention-required state
+    const blockingReasons = getMutationBlockingReasons(worktreeAttachment ?? null);
+    if (blockingReasons.length > 0) {
+      const reason = blockingReasons[0];
+      const reasonLabel = reason.reason === 'attention'
+        ? `${reason.attentionReason} in progress`
+        : reason.reason === 'missing'
+        ? 'worktree is missing'
+        : 'worktree is invalid';
+      toast.error(`Cannot checkout: ${reasonLabel}`);
+      return;
+    }
+
     const normalized = branch.replace(/^remotes\//, '');
 
     if (status?.current === normalized) {

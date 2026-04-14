@@ -3,6 +3,7 @@ import {
   resolveSessionWorktreeState,
   formatSessionWorktreeBadge,
   getSessionWorktreeRepairActions,
+  getMutationBlockingReasons,
   isWithinWorktreeRoot,
   buildSessionTargetOptions,
 } from './session-worktree-contract';
@@ -414,5 +415,104 @@ describe('buildSessionTargetOptions', () => {
     expect(root?.pending).toBeUndefined();
     expect(pending?.pending).toBe(true);
     expect(nonPending?.pending).toBeUndefined();
+  });
+});
+
+describe('getMutationBlockingReasons', () => {
+  test('returns empty when attachment is null', () => {
+    expect(getMutationBlockingReasons(null)).toHaveLength(0);
+    expect(getMutationBlockingReasons(undefined)).toHaveLength(0);
+  });
+
+  test('blocks mutation when worktree is missing', () => {
+    const reasons = getMutationBlockingReasons({
+      worktreeRoot: null,
+      cwd: null,
+      branch: null,
+      headState: 'branch',
+      worktreeStatus: 'missing',
+      worktreeSource: null,
+      legacy: false,
+      degraded: true,
+    });
+    expect(reasons).toHaveLength(1);
+    expect(reasons[0]).toEqual({ reason: 'missing' });
+  });
+
+  test('blocks mutation when worktree is invalid', () => {
+    const reasons = getMutationBlockingReasons({
+      worktreeRoot: null,
+      cwd: null,
+      branch: null,
+      headState: 'branch',
+      worktreeStatus: 'invalid',
+      worktreeSource: null,
+      legacy: false,
+      degraded: true,
+    });
+    expect(reasons).toHaveLength(1);
+    expect(reasons[0]).toEqual({ reason: 'invalid' });
+  });
+
+  test('blocks mutation during merge attention state', () => {
+    const reasons = getMutationBlockingReasons({
+      worktreeRoot: '/repo/worktrees/feat-a',
+      cwd: '/repo/worktrees/feat-a',
+      branch: 'feat-a',
+      headState: 'branch',
+      worktreeStatus: 'ready',
+      worktreeSource: 'existing',
+      legacy: false,
+      degraded: false,
+      attentionReason: 'merge',
+    });
+    expect(reasons).toHaveLength(1);
+    expect(reasons[0]).toEqual({ reason: 'attention', attentionReason: 'merge' });
+  });
+
+  test('blocks mutation during rebase attention state', () => {
+    const reasons = getMutationBlockingReasons({
+      worktreeRoot: '/repo/worktrees/feat-a',
+      cwd: '/repo/worktrees/feat-a',
+      branch: 'feat-a',
+      headState: 'branch',
+      worktreeStatus: 'ready',
+      worktreeSource: 'existing',
+      legacy: false,
+      degraded: false,
+      attentionReason: 'rebase',
+    });
+    expect(reasons).toHaveLength(1);
+    expect(reasons[0]).toEqual({ reason: 'attention', attentionReason: 'rebase' });
+  });
+
+  test('returns empty for ready worktree with no attention', () => {
+    const reasons = getMutationBlockingReasons({
+      worktreeRoot: '/repo/worktrees/feat-a',
+      cwd: '/repo/worktrees/feat-a',
+      branch: 'feat-a',
+      headState: 'branch',
+      worktreeStatus: 'ready',
+      worktreeSource: 'existing',
+      legacy: false,
+      degraded: false,
+    });
+    expect(reasons).toHaveLength(0);
+  });
+
+  test('blocks mutation during cherry-pick attention state', () => {
+    const reasons = getMutationBlockingReasons({
+      worktreeRoot: '/repo/worktrees/feat-a',
+      cwd: '/repo/worktrees/feat-a',
+      branch: 'feat-a',
+      headState: 'branch',
+      worktreeStatus: 'ready',
+      worktreeSource: 'existing',
+      legacy: false,
+      degraded: false,
+      attentionReason: 'cherry-pick',
+    });
+    expect(reasons).toHaveLength(1);
+    expect(reasons[0]).toEqual({ reason: 'attention', attentionReason: 'cherry-pick' });
   });
 });
