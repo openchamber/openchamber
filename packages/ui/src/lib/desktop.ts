@@ -458,12 +458,20 @@ export const restartToApplyUpdate = async (): Promise<boolean> => {
     return false;
   }
 
+  return restartDesktopApp();
+};
+
+export const restartDesktopApp = async (): Promise<boolean> => {
+  if (!isTauriShell()) {
+    return false;
+  }
+
   try {
     const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
     await tauri?.core?.invoke?.('desktop_restart');
     return true;
   } catch (error) {
-    console.warn('Failed to restart for update (tauri)', error);
+    console.warn('Failed to restart desktop app (tauri)', error);
     return false;
   }
 };
