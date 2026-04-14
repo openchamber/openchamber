@@ -1,3 +1,4 @@
+import { registerAssetlinksRoute } from './assetlinks-routes.js';
 import { registerPwaManifestRoute } from './pwa-manifest-routes.js';
 
 export const createStaticRoutesRuntime = (dependencies) => {
@@ -27,6 +28,7 @@ export const createStaticRoutesRuntime = (dependencies) => {
 
     if (fs.existsSync(distPath)) {
       console.log(`Serving static files from ${distPath}`);
+      registerAssetlinksRoute(app, { process });
       app.use(express.static(distPath, {
         setHeaders(res, filePath) {
           // Service workers should never be long-cached; iOS is especially sensitive.
