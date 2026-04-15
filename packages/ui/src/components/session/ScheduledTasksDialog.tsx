@@ -50,6 +50,15 @@ const formatSchedule = (task: ScheduledTask): string => {
       : '';
     return `Weekly ${days} ${timesLabel}${task.schedule.timezone ? ` (${task.schedule.timezone})` : ''}`;
   }
+  if (task.schedule.kind === 'once') {
+    const date = typeof task.schedule.date === 'string' && task.schedule.date.trim().length > 0
+      ? task.schedule.date
+      : 'Unknown date';
+    const time = typeof task.schedule.time === 'string' && task.schedule.time.trim().length > 0
+      ? task.schedule.time
+      : '--:--';
+    return `One-time ${date} ${time}${task.schedule.timezone ? ` (${task.schedule.timezone})` : ''}`;
+  }
   return `Cron: ${task.schedule.cron || ''}${task.schedule.timezone ? ` (${task.schedule.timezone})` : ''}`;
 };
 

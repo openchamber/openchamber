@@ -72,4 +72,32 @@ describe('project-config runtime', () => {
       await cleanup();
     }
   });
+
+  it('accepts one-time schedule with date and time', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    try {
+      const result = await runtime.upsertScheduledTask('project-test', {
+        name: 'One-time review',
+        enabled: true,
+        schedule: {
+          kind: 'once',
+          date: '2026-04-20',
+          time: '13:45',
+          timezone: 'Europe/Kyiv',
+        },
+        execution: {
+          prompt: 'Create a release summary',
+          providerID: 'openai',
+          modelID: 'gpt-4.1',
+        },
+      });
+
+      expect(result.task.schedule.kind).toBe('once');
+      expect(result.task.schedule.date).toBe('2026-04-20');
+      expect(result.task.schedule.time).toBe('13:45');
+      expect(result.task.schedule.timezone).toBe('Europe/Kyiv');
+    } finally {
+      await cleanup();
+    }
+  });
 });

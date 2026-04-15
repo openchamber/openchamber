@@ -5,9 +5,10 @@ export type ScheduledTask = {
   name: string;
   enabled: boolean;
   schedule: {
-    kind: 'daily' | 'weekly' | 'cron';
+    kind: 'daily' | 'weekly' | 'once' | 'cron';
     times?: string[];
     time?: string;
+    date?: string;
     weekdays?: number[];
     cron?: string;
     timezone?: string;

@@ -140,6 +140,28 @@ export const computeNextRunAt = (task, nowMs = Date.now()) => {
     return null;
   }
 
+  if (schedule.kind === 'once') {
+    if (typeof schedule.date !== 'string' || typeof schedule.time !== 'string') {
+      return null;
+    }
+
+    const parsed = DateTime.fromFormat(
+      `${schedule.date} ${schedule.time}`,
+      'yyyy-LL-dd HH:mm',
+      { zone },
+    );
+    if (!parsed.isValid) {
+      return null;
+    }
+
+    const minAllowed = now.plus({ milliseconds: TASK_DUE_SLACK_MS });
+    if (parsed <= minAllowed) {
+      return null;
+    }
+
+    return parsed.toMillis();
+  }
+
   if (schedule.kind === 'cron') {
     try {
       const iterator = parser.parseExpression(schedule.cron, {
@@ -507,7 +529,25 @@ export const createScheduledTasksRuntime = (deps) => {
     if (!durationMs) {
       durationMs = Math.max(0, finishedAt - runStartedAt);
     }
-    const latestTask = (tasksByProject.get(projectID)?.get(taskID)) || task;
+    let latestTask = (tasksByProject.get(projectID)?.get(taskID)) || task;
+    const shouldConsumeOneTimeTask = latestTask?.schedule?.kind === 'once' && reason === 'scheduled';
+    if (shouldConsumeOneTimeTask && latestTask?.enabled) {
+      try {
+        const consumed = await projectConfigRuntime.upsertScheduledTask(projectID, {
+          ...latestTask,
+          enabled: false,
+        });
+        latestTask = consumed.task || latestTask;
+        updateInMemoryTask(projectID, latestTask);
+      } catch (consumeError) {
+        logger.warn?.('[ScheduledTasks] failed to consume one-time task', {
+          projectID,
+          taskID,
+          error: safeErrorMessage(consumeError),
+        });
+      }
+    }
+
     const nextRunAt = computeNextRunAt(latestTask, finishedAt);
 
     const statePatch = {

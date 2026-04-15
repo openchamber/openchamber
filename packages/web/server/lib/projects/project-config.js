@@ -40,6 +40,21 @@ const normalizeTimeValue = (value) => {
   return time;
 };
 
+const normalizeDateValue = (value) => {
+  const date = asNonEmptyString(value);
+  if (!date) {
+    return null;
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return null;
+  }
+  const parsed = DateTime.fromISO(date, { zone: 'UTC' });
+  if (!parsed.isValid || parsed.toFormat('yyyy-LL-dd') !== date) {
+    return null;
+  }
+  return date;
+};
+
 const normalizeWeekdays = (value) => {
   if (!Array.isArray(value)) {
     return null;
@@ -132,8 +147,8 @@ const normalizeSchedule = (value, existingSchedule) => {
   }
 
   const kind = asNonEmptyString(value.kind);
-  if (kind !== 'daily' && kind !== 'weekly' && kind !== 'cron') {
-    throw new Error('schedule.kind must be daily, weekly, or cron');
+  if (kind !== 'daily' && kind !== 'weekly' && kind !== 'once' && kind !== 'cron') {
+    throw new Error('schedule.kind must be daily, weekly, once, or cron');
   }
 
   const fallbackTimezone = existingSchedule?.timezone || resolveDefaultTimezone();
@@ -160,6 +175,20 @@ const normalizeSchedule = (value, existingSchedule) => {
       throw new Error('schedule.weekdays must include values from 0 to 6 for weekly schedule');
     }
     return { kind, times, weekdays, timezone };
+  }
+
+  if (kind === 'once') {
+    const date = normalizeDateValue(value.date);
+    if (!date) {
+      throw new Error('schedule.date must be YYYY-MM-DD for once schedule');
+    }
+
+    const time = normalizeTimeValue(value.time);
+    if (!time) {
+      throw new Error('schedule.time must be HH:mm for once schedule');
+    }
+
+    return { kind, date, time, timezone };
   }
 
   const cron = clampLength(asNonEmptyString(value.cron) || '', MAX_CRON_LENGTH);

@@ -47,6 +47,36 @@ describe('scheduled-tasks runtime helpers', () => {
     expect(next).toBe(Date.UTC(2025, 0, 1, 9, 45, 0));
   });
 
+  it('computes one-time next run for future date', () => {
+    const nowUtc = Date.UTC(2026, 3, 15, 10, 0, 0);
+    const next = computeNextRunAt({
+      enabled: true,
+      schedule: {
+        kind: 'once',
+        date: '2026-04-16',
+        time: '13:30',
+        timezone: 'UTC',
+      },
+    }, nowUtc);
+
+    expect(next).toBe(Date.UTC(2026, 3, 16, 13, 30, 0));
+  });
+
+  it('returns null for past one-time schedule', () => {
+    const nowUtc = Date.UTC(2026, 3, 16, 14, 0, 0);
+    const next = computeNextRunAt({
+      enabled: true,
+      schedule: {
+        kind: 'once',
+        date: '2026-04-16',
+        time: '13:30',
+        timezone: 'UTC',
+      },
+    }, nowUtc);
+
+    expect(next).toBeNull();
+  });
+
   it('formats session title with timestamp suffix', () => {
     const title = formatScheduledSessionTitle({
       name: 'Morning Sync',

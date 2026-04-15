@@ -1,19 +1,14 @@
 import * as React from 'react';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import * as DialogPrimitive from '@radix-ui/react-dialog';
+import { cn } from '@/lib/utils';
+import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui';
-import { RiAddLine, RiCloseLine } from '@remixicon/react';
+import { RiAddLine, RiCloseLine, RiCalendarLine, RiArrowLeftSLine, RiArrowRightSLine, RiArrowDownSLine } from '@remixicon/react';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
 import { AgentSelector } from '@/components/sections/commands/AgentSelector';
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -44,13 +39,328 @@ const TIMEZONE_OPTIONS = (() => {
   ];
 })();
 
+const getLocalDateISO = () => {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const parseISODateToLocal = (value: string): Date | null => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) {
+    return null;
+  }
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(year, month - 1, day);
+  if (
+    Number.isNaN(date.getTime())
+    || date.getFullYear() !== year
+    || date.getMonth() !== month - 1
+    || date.getDate() !== day
+  ) {
+    return null;
+  }
+  return date;
+};
+
+const formatLocalDateISO = (date: Date): string => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const formatDateLabel = (isoDate: string): string => {
+  const date = parseISODateToLocal(isoDate);
+  if (!date) {
+    return 'Select date';
+  }
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(date);
+};
+
+const shiftMonth = (date: Date, delta: number): Date => {
+  return new Date(date.getFullYear(), date.getMonth() + delta, 1);
+};
+
+const getCalendarCells = (monthDate: Date): Array<{ date: Date; inCurrentMonth: boolean }> => {
+  const year = monthDate.getFullYear();
+  const month = monthDate.getMonth();
+  const firstDay = new Date(year, month, 1);
+  const firstWeekday = firstDay.getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const daysInPrevMonth = new Date(year, month, 0).getDate();
+
+  const cells: Array<{ date: Date; inCurrentMonth: boolean }> = [];
+  for (let index = 0; index < 42; index += 1) {
+    const dayOffset = index - firstWeekday + 1;
+    if (dayOffset <= 0) {
+      const day = daysInPrevMonth + dayOffset;
+      cells.push({ date: new Date(year, month - 1, day), inCurrentMonth: false });
+      continue;
+    }
+    if (dayOffset > daysInMonth) {
+      cells.push({ date: new Date(year, month + 1, dayOffset - daysInMonth), inCurrentMonth: false });
+      continue;
+    }
+    cells.push({ date: new Date(year, month, dayOffset), inCurrentMonth: true });
+  }
+  return cells;
+};
+
+const parse24hTime = (value: string): { hour12: string; minute: string; meridiem: 'AM' | 'PM' } => {
+  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(value);
+  if (!match) {
+    return { hour12: '12', minute: '00', meridiem: 'AM' };
+  }
+  const hour24 = Number(match[1]);
+  const minute = match[2];
+  const meridiem = hour24 >= 12 ? 'PM' : 'AM';
+  const rawHour12 = hour24 % 12 === 0 ? 12 : hour24 % 12;
+  return {
+    hour12: String(rawHour12).padStart(2, '0'),
+    minute,
+    meridiem,
+  };
+};
+
+const to24hTime = (hour12: string, minute: string, meridiem: 'AM' | 'PM'): string => {
+  const hourNumRaw = Number(hour12);
+  const minuteNumRaw = Number(minute);
+  const hourNum = Number.isFinite(hourNumRaw) ? Math.min(12, Math.max(1, hourNumRaw)) : 12;
+  const minuteNum = Number.isFinite(minuteNumRaw) ? Math.min(59, Math.max(0, minuteNumRaw)) : 0;
+
+  let hour24 = hourNum % 12;
+  if (meridiem === 'PM') {
+    hour24 += 12;
+  }
+  return `${String(hour24).padStart(2, '0')}:${String(minuteNum).padStart(2, '0')}`;
+};
+
+const getValidNumber = (value: string, config: { max: number; min?: number; loop?: boolean }) => {
+  const { max, min = 0, loop = false } = config;
+  let numericValue = Number.parseInt(value, 10);
+
+  if (Number.isFinite(numericValue)) {
+    if (!loop) {
+      if (numericValue > max) {
+        numericValue = max;
+      }
+      if (numericValue < min) {
+        numericValue = min;
+      }
+    } else {
+      if (numericValue > max) {
+        numericValue = min;
+      }
+      if (numericValue < min) {
+        numericValue = max;
+      }
+    }
+    return String(numericValue).padStart(2, '0');
+  }
+
+  return '00';
+};
+
+const getValid12Hour = (value: string) => {
+  if (/^(0[1-9]|1[0-2])$/.test(value)) {
+    return value;
+  }
+  return getValidNumber(value, { min: 1, max: 12 });
+};
+
+const getValidMinute = (value: string) => {
+  if (/^[0-5][0-9]$/.test(value)) {
+    return value;
+  }
+  return getValidNumber(value, { max: 59 });
+};
+
+const getArrowHour = (value: string, step: number) => {
+  return getValidNumber(String(Number.parseInt(value, 10) + step), { min: 1, max: 12, loop: true });
+};
+
+const getArrowMinute = (value: string, step: number) => {
+  return getValidNumber(String(Number.parseInt(value, 10) + step), { min: 0, max: 59, loop: true });
+};
+
+interface TimePillProps {
+  value: string;
+  onChange: (next: string) => void;
+}
+
+const FieldLabel: React.FC<{
+  htmlFor?: string;
+  required?: boolean;
+  children: React.ReactNode;
+}> = ({ htmlFor, required, children }) => (
+  <div className="flex items-center gap-1.5">
+    <label htmlFor={htmlFor} className="typography-meta font-medium text-foreground">
+      {children}
+      {required && <span className="ml-0.5 text-destructive">*</span>}
+    </label>
+  </div>
+);
+
+const TimePill: React.FC<TimePillProps> = ({ value, onChange }) => {
+  const parts = React.useMemo(() => parse24hTime(value), [value]);
+  const hourRef = React.useRef<HTMLInputElement>(null);
+  const minuteRef = React.useRef<HTMLInputElement>(null);
+  const [hourDraft, setHourDraftState] = React.useState<string | null>(null);
+  const [minuteDraft, setMinuteDraftState] = React.useState<string | null>(null);
+  const hourDraftRef = React.useRef<string | null>(null);
+  const minuteDraftRef = React.useRef<string | null>(null);
+
+  const setHourDraft = React.useCallback((next: string | null) => {
+    hourDraftRef.current = next;
+    setHourDraftState(next);
+  }, []);
+  const setMinuteDraft = React.useCallback((next: string | null) => {
+    minuteDraftRef.current = next;
+    setMinuteDraftState(next);
+  }, []);
+
+  const onHourChange = (raw: string) => {
+    const digits = raw.replace(/\D/g, '').slice(0, 2);
+    setHourDraft(digits);
+    if (digits.length === 2) {
+      onChange(to24hTime(getValid12Hour(digits), parts.minute, parts.meridiem));
+      setHourDraft(null);
+      minuteRef.current?.focus();
+    }
+  };
+  const commitHour = () => {
+    const digits = hourDraftRef.current;
+    if (digits === null) return;
+    setHourDraft(null);
+    if (digits.length === 0) return;
+    onChange(to24hTime(getValid12Hour(digits.padStart(2, '0')), parts.minute, parts.meridiem));
+  };
+  const onMinuteChange = (raw: string) => {
+    const digits = raw.replace(/\D/g, '').slice(0, 2);
+    setMinuteDraft(digits);
+    if (digits.length === 2) {
+      onChange(to24hTime(parts.hour12, getValidMinute(digits), parts.meridiem));
+      setMinuteDraft(null);
+    }
+  };
+  const commitMinute = () => {
+    const digits = minuteDraftRef.current;
+    if (digits === null) return;
+    setMinuteDraft(null);
+    if (digits.length === 0) return;
+    onChange(to24hTime(parts.hour12, getValidMinute(digits.padStart(2, '0')), parts.meridiem));
+  };
+  const stepHour = (step: number) =>
+    onChange(to24hTime(getArrowHour(parts.hour12, step), parts.minute, parts.meridiem));
+  const stepMinute = (step: number) =>
+    onChange(to24hTime(parts.hour12, getArrowMinute(parts.minute, step), parts.meridiem));
+  const setPeriod = (next: 'AM' | 'PM') => {
+    if (next !== parts.meridiem) {
+      onChange(to24hTime(parts.hour12, parts.minute, next));
+    }
+  };
+
+  const onHourKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      commitHour();
+      minuteRef.current?.focus();
+      return;
+    }
+    if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+      event.preventDefault();
+      setHourDraft(null);
+      stepHour(event.key === 'ArrowUp' ? 1 : -1);
+    }
+  };
+  const onMinuteKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'ArrowLeft' && (event.currentTarget.selectionStart ?? 0) === 0) {
+      event.preventDefault();
+      commitMinute();
+      hourRef.current?.focus();
+      return;
+    }
+    if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+      event.preventDefault();
+      setMinuteDraft(null);
+      stepMinute(event.key === 'ArrowUp' ? 1 : -1);
+    }
+  };
+
+  return (
+    <div className="inline-flex h-9 w-fit items-center gap-1 rounded-md border border-border bg-background pl-2 pr-1 focus-within:ring-1 focus-within:ring-interactive-focusRing focus-within:border-interactive-focusRing">
+      <input
+        ref={hourRef}
+        inputMode="numeric"
+        value={hourDraft ?? parts.hour12}
+        onChange={(event) => onHourChange(event.target.value)}
+        onKeyDown={onHourKeyDown}
+        onFocus={() => setHourDraft('')}
+        onBlur={commitHour}
+        maxLength={2}
+        aria-label="Hours"
+        className="h-7 w-7 shrink-0 rounded-sm bg-transparent text-center font-mono text-sm tabular-nums text-foreground outline-none caret-transparent focus:bg-interactive-hover"
+      />
+      <span className="font-mono text-sm text-muted-foreground">:</span>
+      <input
+        ref={minuteRef}
+        inputMode="numeric"
+        value={minuteDraft ?? parts.minute}
+        onChange={(event) => onMinuteChange(event.target.value)}
+        onKeyDown={onMinuteKeyDown}
+        onFocus={() => setMinuteDraft('')}
+        onBlur={commitMinute}
+        maxLength={2}
+        aria-label="Minutes"
+        className="h-7 w-7 shrink-0 rounded-sm bg-transparent text-center font-mono text-sm tabular-nums text-foreground outline-none caret-transparent focus:bg-interactive-hover"
+      />
+      <Select value={parts.meridiem} onValueChange={(next) => setPeriod(next as 'AM' | 'PM')}>
+        <SelectTrigger
+          aria-label="Period"
+          className="ml-1 h-7 w-fit border-0 bg-transparent pl-2 pr-1 shadow-none hover:bg-interactive-hover focus:ring-0"
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="AM">AM</SelectItem>
+          <SelectItem value="PM">PM</SelectItem>
+        </SelectContent>
+      </Select>
+    </div>
+  );
+};
+
+const startOfMonth = (date: Date) => new Date(date.getFullYear(), date.getMonth(), 1);
+
+const startOfToday = () => {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+};
+
+const isSameCalendarDay = (a: Date, b: Date) => (
+  a.getFullYear() === b.getFullYear()
+  && a.getMonth() === b.getMonth()
+  && a.getDate() === b.getDate()
+);
+
 type ScheduledTaskDraft = {
   id?: string;
   name: string;
   enabled: boolean;
   schedule: {
-    kind: 'daily' | 'weekly';
+    kind: 'daily' | 'weekly' | 'once';
     times: string[];
+    onceDate: string;
+    onceTime: string;
     weekdays: number[];
     timezone: string;
   };
@@ -97,6 +407,8 @@ const toDraft = (
       schedule: {
         kind: 'daily',
         times: ['09:00'],
+        onceDate: getLocalDateISO(),
+        onceTime: '09:00',
         weekdays: [1],
         timezone: timezoneFallback,
       },
@@ -115,8 +427,16 @@ const toDraft = (
     name: task.name,
     enabled: task.enabled,
     schedule: {
-      kind: task.schedule.kind === 'weekly' ? 'weekly' : 'daily',
+      kind: task.schedule.kind === 'once'
+        ? 'once'
+        : (task.schedule.kind === 'weekly' ? 'weekly' : 'daily'),
       times: normalizeDraftTimes(task),
+      onceDate: typeof task.schedule.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(task.schedule.date)
+        ? task.schedule.date
+        : getLocalDateISO(),
+      onceTime: typeof task.schedule.time === 'string' && /^([01]\d|2[0-3]):([0-5]\d)$/.test(task.schedule.time)
+        ? task.schedule.time
+        : '09:00',
       weekdays: Array.isArray(task.schedule.weekdays) ? task.schedule.weekdays : [1],
       timezone: task.schedule.timezone || timezoneFallback,
     },
@@ -142,9 +462,18 @@ const validateDraft = (draft: ScheduledTaskDraft): string | null => {
     return 'Model is required';
   }
 
-  const validTimes = draft.schedule.times.filter((value) => /^([01]\d|2[0-3]):([0-5]\d)$/.test(value));
-  if (validTimes.length === 0) {
-    return 'Add at least one valid time';
+  if (draft.schedule.kind === 'once') {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(draft.schedule.onceDate)) {
+      return 'Date must use YYYY-MM-DD';
+    }
+    if (!/^([01]\d|2[0-3]):([0-5]\d)$/.test(draft.schedule.onceTime)) {
+      return 'Time must use HH:mm';
+    }
+  } else {
+    const validTimes = draft.schedule.times.filter((value) => /^([01]\d|2[0-3]):([0-5]\d)$/.test(value));
+    if (validTimes.length === 0) {
+      return 'Add at least one valid time';
+    }
   }
 
   if (draft.schedule.kind === 'weekly' && draft.schedule.weekdays.length === 0) {
@@ -187,6 +516,12 @@ export function ScheduledTaskEditorDialog(props: {
     })
   );
   const [saving, setSaving] = React.useState(false);
+  const [isDatePickerOpen, setIsDatePickerOpen] = React.useState(false);
+  const [calendarMonth, setCalendarMonth] = React.useState<Date>(() => {
+    const initialDate = parseISODateToLocal(task?.schedule?.date || '') || new Date();
+    return new Date(initialDate.getFullYear(), initialDate.getMonth(), 1);
+  });
+  const datePickerRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
     if (!open) {
@@ -208,7 +543,28 @@ export function ScheduledTaskEditorDialog(props: {
         agent: currentAgentName,
       })
     );
+    const sourceDate = parseISODateToLocal(task?.schedule?.date || '') || new Date();
+    setCalendarMonth(new Date(sourceDate.getFullYear(), sourceDate.getMonth(), 1));
+    setIsDatePickerOpen(false);
   }, [open, task, currentProviderID, currentModelID, currentVariant, currentAgentName]);
+
+  React.useEffect(() => {
+    if (!isDatePickerOpen) {
+      return;
+    }
+
+    const onPointerDown = (event: MouseEvent) => {
+      if (datePickerRef.current && !datePickerRef.current.contains(event.target as Node)) {
+        setIsDatePickerOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', onPointerDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+    };
+  }, [isDatePickerOpen]);
+
 
   const variantOptions = React.useMemo(() => {
     const provider = providers.find((item) => item.id === draft.execution.providerID);
@@ -271,6 +627,33 @@ export function ScheduledTaskEditorDialog(props: {
     }));
   }, []);
 
+  const todayDate = React.useMemo(() => startOfToday(), []);
+  const currentMonthStart = React.useMemo(() => startOfMonth(todayDate), [todayDate]);
+  const selectedDateLabel = React.useMemo(() => {
+    const selectedDate = parseISODateToLocal(draft.schedule.onceDate);
+    if (!selectedDate) {
+      return null;
+    }
+    if (isSameCalendarDay(selectedDate, todayDate)) {
+      return 'Today';
+    }
+    return new Intl.DateTimeFormat(undefined, { weekday: 'short' }).format(selectedDate);
+  }, [draft.schedule.onceDate, todayDate]);
+  const isAtCurrentMonth = React.useMemo(
+    () => startOfMonth(calendarMonth).getTime() <= currentMonthStart.getTime(),
+    [calendarMonth, currentMonthStart],
+  );
+
+  const setOneTimeDate = React.useCallback((isoDate: string) => {
+    setDraft((prev) => ({
+      ...prev,
+      schedule: {
+        ...prev.schedule,
+        onceDate: isoDate,
+      },
+    }));
+  }, []);
+
   const handleSubmit = React.useCallback(async () => {
     const validationError = validateDraft(draft);
     if (validationError) {
@@ -285,9 +668,16 @@ export function ScheduledTaskEditorDialog(props: {
       enabled: draft.enabled,
       schedule: {
         kind: draft.schedule.kind,
-        times: normalizedTimes,
         timezone: draft.schedule.timezone.trim(),
-        ...(draft.schedule.kind === 'weekly' ? { weekdays: draft.schedule.weekdays } : {}),
+        ...(draft.schedule.kind === 'once'
+          ? {
+              date: draft.schedule.onceDate,
+              time: draft.schedule.onceTime,
+            }
+          : {
+              times: normalizedTimes,
+              ...(draft.schedule.kind === 'weekly' ? { weekdays: draft.schedule.weekdays } : {}),
+            }),
       },
       execution: {
         prompt: draft.execution.prompt,
@@ -310,127 +700,318 @@ export function ScheduledTaskEditorDialog(props: {
     }
   }, [draft, onOpenChange, onSave]);
 
+  const descriptionId = React.useId();
+  const hasOpenFloatingMenu = React.useCallback(() => {
+    if (typeof document === 'undefined') return false;
+    return Boolean(
+      document.querySelector(
+        '[data-slot="dropdown-menu-content"][data-state="open"], [data-slot="select-content"][data-state="open"]'
+      )
+    );
+  }, []);
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>{task ? 'Edit scheduled task' : 'New scheduled task'}</DialogTitle>
-          <DialogDescription>Configure a server-side task that creates a new session and sends a prompt.</DialogDescription>
-        </DialogHeader>
-
-        <div className="space-y-4">
-          <label className="flex flex-col gap-1">
-            <span className="typography-meta text-muted-foreground">Task name</span>
-            <Input
-              value={draft.name}
-              onChange={(event) => setDraft((prev) => ({ ...prev, name: event.target.value }))}
-              placeholder="Daily sync"
-              maxLength={80}
-            />
-          </label>
-
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <label className="flex flex-col gap-1">
-              <span className="typography-meta text-muted-foreground">Schedule type</span>
-              <Select
-                value={draft.schedule.kind}
-                onValueChange={(value: 'daily' | 'weekly') => {
-                  setDraft((prev) => ({
-                    ...prev,
-                    schedule: {
-                      ...prev.schedule,
-                      kind: value,
-                    },
-                  }));
-                }}
-              >
-                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="daily">Daily</SelectItem>
-                  <SelectItem value="weekly">Weekly</SelectItem>
-                </SelectContent>
-              </Select>
-            </label>
-
-            <label className="flex flex-col gap-1">
-              <span className="typography-meta text-muted-foreground">Timezone</span>
-              <Select
-                value={draft.schedule.timezone}
-                onValueChange={(timezone) => {
-                  setDraft((prev) => ({
-                    ...prev,
-                    schedule: {
-                      ...prev.schedule,
-                      timezone,
-                    },
-                  }));
-                }}
-              >
-                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {TIMEZONE_OPTIONS.map((timezone) => (
-                    <SelectItem key={timezone} value={timezone}>{timezone}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </label>
+    <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
+      <DialogPrimitive.Portal>
+        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/50 dark:bg-black/75" />
+        <DialogPrimitive.Content
+          aria-describedby={descriptionId}
+          onInteractOutside={(event) => {
+            if (hasOpenFloatingMenu()) event.preventDefault();
+          }}
+          className={cn(
+            'fixed z-50 top-[50%] left-[50%] translate-x-[-50%] translate-y-[-50%]',
+            'w-[90vw] max-w-[720px] h-[680px] max-h-[85vh]',
+            'flex flex-col rounded-xl border shadow-none overflow-hidden',
+            'bg-background'
+          )}
+        >
+          <div className="absolute right-0.5 top-0.5 z-50">
+            <button
+              type="button"
+              onClick={() => onOpenChange(false)}
+              aria-label="Close"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md p-0.5 text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            >
+              <RiCloseLine className="h-5 w-5" />
+            </button>
           </div>
+          <DialogPrimitive.Description id={descriptionId} className="sr-only">
+            Configure a server-side task that creates a new session and sends a prompt.
+          </DialogPrimitive.Description>
 
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <div className="typography-meta text-muted-foreground">Times</div>
-              <Button type="button" size="sm" variant="outline" onClick={addTime}>
-                <RiAddLine className="mr-1 h-4 w-4" /> Add time
-              </Button>
+          <header className="shrink-0 px-4 sm:px-6 pt-5 pb-3">
+            <div className="mx-auto w-full max-w-2xl">
+              <DialogPrimitive.Title className="typography-ui-label font-medium text-foreground">
+                {task ? 'Edit scheduled task' : 'New scheduled task'}
+              </DialogPrimitive.Title>
+              <p className="typography-meta mt-0.5 text-muted-foreground">
+                Configure a server-side task that creates a new session and sends a prompt.
+              </p>
             </div>
-            <div className="space-y-2">
-              {draft.schedule.times.map((time, index) => (
-                <div key={index} className="flex items-center gap-2">
-                  <Input
-                    type="time"
-                    value={time}
-                    onChange={(event) => updateTimeAt(index, event.target.value)}
-                    className="w-[170px]"
-                  />
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="ghost"
-                    onClick={() => removeTimeAt(index)}
-                    aria-label="Remove time"
-                  >
-                    <RiCloseLine className="h-4 w-4" />
-                  </Button>
-                </div>
-              ))}
-            </div>
-          </div>
+          </header>
 
-          {draft.schedule.kind === 'weekly' ? (
-            <div className="space-y-2">
-              <div className="typography-meta text-muted-foreground">Weekdays</div>
-              <div className="flex flex-wrap gap-2">
-                {WEEKDAY_LABELS.map((weekday) => {
-                  const checked = draft.schedule.weekdays.includes(weekday.value);
-                  return (
-                    <button
-                      key={weekday.value}
-                      type="button"
-                      onClick={() => toggleWeekday(weekday.value, !checked)}
-                      className="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 typography-meta hover:bg-interactive-hover"
+          <ScrollShadow className="flex-1 min-h-0 overflow-auto [scrollbar-gutter:stable_both-edges]" size={64} hideTopShadow>
+            <div className="mx-auto w-full max-w-2xl px-4 sm:px-6 pb-5">
+              <div className="flex flex-col gap-5">
+                <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
+                  <div className="flex flex-col gap-1">
+                    <FieldLabel htmlFor="sched-name" required>Task name</FieldLabel>
+                    <Input
+                      id="sched-name"
+                      value={draft.name}
+                      onChange={(event) => setDraft((prev) => ({ ...prev, name: event.target.value }))}
+                      placeholder="Daily sync"
+                      maxLength={80}
+                      className="w-full sm:max-w-[220px]"
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                    <FieldLabel>Schedule type</FieldLabel>
+                    <Select
+                      value={draft.schedule.kind}
+                      onValueChange={(value: 'daily' | 'weekly' | 'once') => {
+                        setDraft((prev) => ({
+                          ...prev,
+                          schedule: { ...prev.schedule, kind: value },
+                        }));
+                      }}
                     >
-                      <Checkbox checked={checked} onChange={(next) => toggleWeekday(weekday.value, next)} ariaLabel={weekday.label} />
-                      <span>{weekday.label}</span>
-                    </button>
-                  );
-                })}
+                      <SelectTrigger className="w-fit max-w-full"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="daily">Daily</SelectItem>
+                        <SelectItem value="weekly">Weekly</SelectItem>
+                        <SelectItem value="once">One-time</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                </div>
+
+          {draft.schedule.kind === 'once' ? (
+            <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
+              <div className="flex flex-col gap-1" ref={datePickerRef}>
+                <FieldLabel>Date</FieldLabel>
+                <div className="relative">
+                  <button
+                    type="button"
+                    className="inline-flex h-9 w-fit max-w-full items-center justify-between gap-2 rounded-md border border-border bg-background px-3 text-left hover:bg-interactive-hover"
+                    onClick={() => setIsDatePickerOpen((prev) => !prev)}
+                  >
+                    <span className="inline-flex items-center gap-2">
+                      <RiCalendarLine className="h-4 w-4 text-muted-foreground" />
+                      <span className="typography-ui-label text-foreground">{formatDateLabel(draft.schedule.onceDate)}</span>
+                    </span>
+                    <RiArrowDownSLine className="h-4 w-4 text-muted-foreground" />
+                  </button>
+
+                  {isDatePickerOpen ? (
+                    <div className="absolute left-0 top-[calc(100%+6px)] z-50 w-[288px] rounded-xl border border-border bg-background p-3 shadow-sm">
+                      <div className="mb-2 flex items-center justify-between">
+                        <button
+                          type="button"
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-interactive-hover disabled:cursor-not-allowed disabled:opacity-40"
+                          onClick={() => setCalendarMonth((prev) => shiftMonth(prev, -1))}
+                          aria-label="Previous month"
+                          disabled={isAtCurrentMonth}
+                        >
+                          <RiArrowLeftSLine className="h-4 w-4" />
+                        </button>
+                        <div className="typography-ui-label text-foreground">
+                          {new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' }).format(calendarMonth)}
+                        </div>
+                        <button
+                          type="button"
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-interactive-hover"
+                          onClick={() => setCalendarMonth((prev) => shiftMonth(prev, 1))}
+                          aria-label="Next month"
+                        >
+                          <RiArrowRightSLine className="h-4 w-4" />
+                        </button>
+                      </div>
+
+                      <div className="mb-1 grid grid-cols-7 gap-1 px-1">
+                        {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map((weekday) => (
+                          <div key={weekday} className="py-1 text-center typography-micro text-muted-foreground">
+                            {weekday}
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="grid grid-cols-7 gap-1">
+                        {getCalendarCells(calendarMonth).map(({ date, inCurrentMonth }) => {
+                          const isoDate = formatLocalDateISO(date);
+                          const isSelected = isoDate === draft.schedule.onceDate;
+                          const isToday = isSameCalendarDay(date, todayDate);
+                          const isPast = date.getTime() < todayDate.getTime();
+                          const dayClass = isSelected
+                            ? 'bg-interactive-selection text-interactive-selection-foreground'
+                            : (isPast
+                              ? 'text-muted-foreground/40'
+                              : (inCurrentMonth
+                                ? 'text-foreground hover:bg-interactive-hover'
+                                : 'text-muted-foreground/60 hover:bg-interactive-hover'));
+                          return (
+                            <button
+                              key={isoDate}
+                              type="button"
+                              onClick={() => {
+                                if (isPast) {
+                                  return;
+                                }
+                                setOneTimeDate(isoDate);
+                                setIsDatePickerOpen(false);
+                              }}
+                              disabled={isPast}
+                              className={[
+                                'h-8 rounded-md typography-ui-label',
+                                dayClass,
+                                isToday && !isSelected
+                                  ? 'ring-1 ring-inset ring-interactive-focusRing bg-interactive-hover/50'
+                                  : '',
+                                isPast ? 'cursor-not-allowed opacity-45' : '',
+                              ].join(' ')}
+                            >
+                              {date.getDate()}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      <div className="mt-2 flex items-center justify-between border-t border-border pt-2">
+                        <div className="typography-micro text-muted-foreground">{selectedDateLabel || ''}</div>
+                        <Button
+                          type="button"
+                          size="xs"
+                          variant="ghost"
+                          onClick={() => {
+                            setOneTimeDate(formatLocalDateISO(todayDate));
+                            setCalendarMonth(new Date(todayDate.getFullYear(), todayDate.getMonth(), 1));
+                          }}
+                        >
+                          Jump to today
+                        </Button>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="flex min-w-0 flex-col gap-1">
+                <FieldLabel>Time</FieldLabel>
+                <TimePill
+                  value={draft.schedule.onceTime}
+                  onChange={(next) => setDraft((prev) => ({
+                    ...prev,
+                    schedule: { ...prev.schedule, onceTime: next },
+                  }))}
+                />
+
+                <div className="mt-2 flex flex-col gap-1">
+                  <FieldLabel>Timezone</FieldLabel>
+                  <Select
+                    value={draft.schedule.timezone}
+                    onValueChange={(timezone) => {
+                      setDraft((prev) => ({
+                        ...prev,
+                        schedule: { ...prev.schedule, timezone },
+                      }));
+                    }}
+                  >
+                    <SelectTrigger className="w-fit max-w-full"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {TIMEZONE_OPTIONS.map((timezone) => (
+                        <SelectItem key={timezone} value={timezone}>{timezone}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             </div>
-          ) : null}
+          ) : (
+            <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
+              {draft.schedule.kind === 'weekly' ? (
+                <div className="flex flex-col gap-1 sm:col-span-2">
+                  <FieldLabel>Weekdays</FieldLabel>
+                  <div className="flex flex-wrap gap-x-3 gap-y-2">
+                    {WEEKDAY_LABELS.map((weekday) => {
+                      const checked = draft.schedule.weekdays.includes(weekday.value);
+                      return (
+                        <button
+                          key={weekday.value}
+                          type="button"
+                          onClick={() => toggleWeekday(weekday.value, !checked)}
+                          className={[
+                            'inline-flex items-center gap-1.5 px-0.5 py-0.5 typography-meta',
+                            checked ? 'text-foreground' : 'text-muted-foreground',
+                            'hover:text-foreground',
+                          ].join(' ')}
+                        >
+                          <Checkbox checked={checked} onChange={(next) => toggleWeekday(weekday.value, next)} ariaLabel={weekday.label} />
+                          <span>{weekday.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
 
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <label className="flex min-w-0 flex-col gap-1">
-              <span className="typography-meta text-muted-foreground">Model</span>
+              <div className="flex flex-col gap-2">
+                <FieldLabel>Times</FieldLabel>
+                <div className="flex flex-col gap-2">
+                  {draft.schedule.times.map((time, index) => (
+                    <div key={index} className="flex items-center gap-2">
+                      <TimePill
+                        value={time}
+                        onChange={(next) => updateTimeAt(index, next)}
+                      />
+                      {draft.schedule.times.length > 1 ? (
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => removeTimeAt(index)}
+                          aria-label="Remove time"
+                        >
+                          <RiCloseLine className="h-4 w-4" />
+                        </Button>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+                <div>
+                  <Button type="button" size="sm" variant="outline" onClick={addTime}>
+                    <RiAddLine className="mr-1 h-4 w-4" /> Add time
+                  </Button>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <FieldLabel>Timezone</FieldLabel>
+                <Select
+                  value={draft.schedule.timezone}
+                  onValueChange={(timezone) => {
+                    setDraft((prev) => ({
+                      ...prev,
+                      schedule: { ...prev.schedule, timezone },
+                    }));
+                  }}
+                >
+                  <SelectTrigger className="w-fit max-w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {TIMEZONE_OPTIONS.map((timezone) => (
+                      <SelectItem key={timezone} value={timezone}>{timezone}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
+            <div className="flex min-w-0 flex-col gap-1">
+              <FieldLabel required>Model</FieldLabel>
               <ModelSelector
                 providerId={draft.execution.providerID}
                 modelId={draft.execution.modelID}
@@ -446,10 +1027,10 @@ export function ScheduledTaskEditorDialog(props: {
                   }));
                 }}
               />
-            </label>
+            </div>
 
-            <label className="flex min-w-0 flex-col gap-1">
-              <span className="typography-meta text-muted-foreground">Default thinking</span>
+            <div className="flex min-w-0 flex-col gap-1">
+              <FieldLabel>Default thinking</FieldLabel>
               <Select
                 value={draft.execution.variant || '__default'}
                 onValueChange={(value) => {
@@ -462,7 +1043,7 @@ export function ScheduledTaskEditorDialog(props: {
                   }));
                 }}
               >
-                <SelectTrigger className="w-fit min-w-[120px]"><SelectValue /></SelectTrigger>
+                <SelectTrigger className="w-fit max-w-full"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="__default">Default</SelectItem>
                   {variantOptions.map((variant) => (
@@ -470,11 +1051,11 @@ export function ScheduledTaskEditorDialog(props: {
                   ))}
                 </SelectContent>
               </Select>
-            </label>
+            </div>
           </div>
 
-          <label className="flex min-w-0 flex-col gap-1">
-            <span className="typography-meta text-muted-foreground">Agent</span>
+          <div className="flex min-w-0 flex-col gap-1">
+            <FieldLabel>Agent</FieldLabel>
             <AgentSelector
               agentName={draft.execution.agent}
               onChange={(agent) => setDraft((prev) => ({
@@ -485,11 +1066,12 @@ export function ScheduledTaskEditorDialog(props: {
                 },
               }))}
             />
-          </label>
+          </div>
 
-          <label className="flex flex-col gap-1">
-            <span className="typography-meta text-muted-foreground">Prompt</span>
+          <div className="flex flex-col gap-1">
+            <FieldLabel htmlFor="sched-prompt" required>Prompt</FieldLabel>
             <Textarea
+              id="sched-prompt"
               value={draft.execution.prompt}
               onChange={(event) => setDraft((prev) => ({
                 ...prev,
@@ -500,24 +1082,37 @@ export function ScheduledTaskEditorDialog(props: {
               }))}
               rows={8}
               placeholder="Summarize open tasks and propose next actions"
+              className="typography-meta min-h-[120px] max-h-[300px] resize-none overflow-y-auto"
             />
-          </label>
+          </div>
 
-          <label className="inline-flex items-center gap-2">
-            <Checkbox
-              checked={draft.enabled}
-              onChange={(enabled) => setDraft((prev) => ({ ...prev, enabled }))}
-              ariaLabel="Enable task"
-            />
-            <span className="typography-meta">Enabled</span>
-          </label>
-        </div>
+              </div>
+            </div>
+          </ScrollShadow>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>Cancel</Button>
-          <Button onClick={handleSubmit} disabled={saving}>{saving ? 'Saving...' : 'Save'}</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          <div className="shrink-0 px-4 sm:px-6 py-3">
+            <div className="mx-auto flex w-full max-w-2xl items-center justify-between gap-3">
+              <label className="inline-flex items-center gap-2">
+                <Checkbox
+                  checked={draft.enabled}
+                  onChange={(enabled) => setDraft((prev) => ({ ...prev, enabled }))}
+                  ariaLabel="Enable task"
+                />
+                <span className="typography-meta">Enabled</span>
+              </label>
+
+              <div className="flex items-center gap-2">
+                <Button type="button" variant="ghost" size="sm" onClick={() => onOpenChange(false)} disabled={saving}>
+                  Cancel
+                </Button>
+                <Button type="button" size="sm" onClick={handleSubmit} disabled={saving}>
+                  {saving ? 'Saving...' : 'Save'}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </DialogPrimitive.Content>
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
   );
 }
