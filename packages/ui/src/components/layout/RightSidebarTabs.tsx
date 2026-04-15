@@ -5,14 +5,45 @@ import { useTranslation } from 'react-i18next';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { GitView } from '@/components/views';
 import { useUIStore } from '@/stores/useUIStore';
+import { useGitStore } from '@/stores/useGitStore';
+import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { SidebarFilesTree } from './SidebarFilesTree';
 
 type RightTab = 'git' | 'files';
+
+/**
+ * Keeps git status fresh while the right sidebar is open.
+ * Replaces the GitPollingProvider removed in commit b2d5ccb4.
+ * The previous polling ran globally; now we only refresh when the sidebar is open.
+ */
+function useRightSidebarGitSync(directory: string | undefined, isSidebarOpen: boolean) {
+  const { git } = useRuntimeAPIs();
+  const ensureStatus = useGitStore((state) => state.ensureStatus);
+
+  React.useEffect(() => {
+    if (!directory || !git || !isSidebarOpen) return;
+
+    void ensureStatus(directory, git);
+
+    const POLL_INTERVAL = 10_000;
+    const id = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      void ensureStatus(directory, git);
+    }, POLL_INTERVAL);
+
+    return () => clearInterval(id);
+  }, [directory, git, isSidebarOpen, ensureStatus]);
+}
 
 export const RightSidebarTabs: React.FC = () => {
   const { t } = useTranslation();
   const rightSidebarTab = useUIStore((state) => state.rightSidebarTab);
   const setRightSidebarTab = useUIStore((state) => state.setRightSidebarTab);
+  const isRightSidebarOpen = useUIStore((state) => state.isRightSidebarOpen);
+  const directory = useEffectiveDirectory();
+
+  useRightSidebarGitSync(directory, isRightSidebarOpen);
 
   const tabItems = React.useMemo(() => [
     {

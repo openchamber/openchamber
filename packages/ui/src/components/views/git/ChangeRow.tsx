@@ -50,6 +50,7 @@ interface ChangeRowProps {
   isReverting: boolean;
   stats?: { insertions: number; deletions: number };
   rowPaddingClassName?: string;
+  indentPx?: number;
 }
 
 export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
@@ -61,6 +62,7 @@ export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
   isReverting,
   stats,
   rowPaddingClassName,
+  indentPx = 0,
 }) {
   const descriptor = useMemo(() => describeChange(file), [file]);
   const indicatorLabel = descriptor.description;
@@ -105,6 +107,7 @@ export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
       tabIndex={0}
       onClick={onViewDiff}
       onKeyDown={handleKeyDown}
+      style={indentPx > 0 ? { paddingLeft: `${indentPx}px` } : undefined}
     >
         <button
           type="button"

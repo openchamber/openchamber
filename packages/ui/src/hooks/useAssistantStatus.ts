@@ -3,7 +3,7 @@ import type { AssistantMessage, Message, Part, ReasoningPart, TextPart, ToolPart
 
 import type { MessageStreamPhase } from '@/stores/types/sessionTypes';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useDirectorySync, useSessionPermissions, useSessionStatus } from '@/sync/sync-context';
+import { useDirectorySync, useSessionPermissions, useSessionQuestions, useSessionStatus } from '@/sync/sync-context';
 import { isFullySyntheticMessage } from '@/lib/messages/synthetic';
 import { useCurrentSessionActivity } from './useSessionActivity';
 
@@ -163,6 +163,7 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
     );
 
     const sessionPermissionRequests = useSessionPermissions(currentSessionId ?? '');
+    const sessionQuestionRequests = useSessionQuestions(currentSessionId ?? '');
 
     const sessionAbortRecord = useSessionUIStore(
         React.useCallback((state) => {
@@ -427,9 +428,24 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
         }
 
         const hasPendingPermission = sessionPermissionRequests.length > 0;
+        const hasPendingQuestion = sessionQuestionRequests.length > 0;
 
-        if (!hasPendingPermission) {
+        if (!hasPendingPermission && !hasPendingQuestion) {
             return baseWorking;
+        }
+
+        if (hasPendingQuestion) {
+            return {
+                ...baseWorking,
+                statusText: null,
+                isWorking: false,
+                hasWorkingContext: false,
+                hasActiveTools: false,
+                canAbort: false,
+                activePartType: undefined,
+                activeToolName: undefined,
+                retryInfo: null,
+            };
         }
 
         return {
@@ -439,7 +455,7 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
             canAbort: false,
             retryInfo: null,
         };
-    }, [baseWorking, sessionPermissionRequests]);
+    }, [baseWorking, sessionPermissionRequests, sessionQuestionRequests]);
 
     return {
         forming,

@@ -60,7 +60,10 @@ export const createBootstrapRuntime = (dependencies) => {
 
     registerCommonRequestMiddleware(app, { express });
 
-    const uiAuthController = createUiAuth({ password: uiPassword });
+    const uiAuthController = createUiAuth({
+      password: uiPassword,
+      readSettingsFromDiskMigrated,
+    });
     if (uiAuthController.enabled) {
       console.log('UI password protection enabled for browser sessions');
     }

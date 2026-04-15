@@ -1203,20 +1203,46 @@ const MIN_RESTORE_WINDOW_HEIGHT: u32 = 560;
 
 const LOCAL_HOST_ID: &str = "local";
 
+/// Synthetic host ID used when the boot target is forced via
+/// `OPENCHAMBER_SERVER_URL` (no config-based host entry).
+const ENV_OVERRIDE_HOST_ID: &str = "__env";
+
+/// Synthetic host ID used when a window is opened at an explicit URL
+/// via `desktop_new_window_at_url` (no config-based host entry).
+const DIRECT_URL_HOST_ID: &str = "__direct";
+
+/// Compare two URL strings for "same server" identity using normalized
+/// origin + path. This avoids misclassification when one URL has a
+/// trailing slash and the other does not (e.g. `OPENCHAMBER_SERVER_URL`
+/// pointing at the local sidecar without a trailing `/`).
+fn same_server_url(a: &str, b: &str) -> bool {
+    let parsed_a = url::Url::parse(a);
+    let parsed_b = url::Url::parse(b);
+    match (parsed_a, parsed_b) {
+        (Ok(a), Ok(b)) => {
+            a.origin() == b.origin()
+                && a.path().trim_end_matches('/') == b.path().trim_end_matches('/')
+        }
+        _ => a == b,
+    }
+}
+
 #[derive(Default)]
 struct SidecarState {
     child: Mutex<Option<CommandChild>>,
     url: Mutex<Option<String>>,
 }
 
-/// Holds the initialization script and local origin, shared across all windows.
+/// Holds per-window initialization scripts and a global local origin.
+/// Each window gets its own init script (containing the correct boot outcome
+/// for that window's target URL), so page reloads re-inject the right data.
 #[derive(Default)]
 struct DesktopUiInjectionState {
-    script: Mutex<Option<String>>,
+    /// Init scripts keyed by window label. Each window's script contains
+    /// the correct `__OPENCHAMBER_DESKTOP_BOOT_OUTCOME__` for that window.
+    scripts: Mutex<std::collections::HashMap<String, String>>,
+    /// Local origin — shared across all windows since the sidecar is global.
     local_origin: Mutex<Option<String>>,
-    /// Host URLs that were probed unreachable (e.g. at startup).
-    /// `open_new_window` checks this to avoid opening windows at dead hosts.
-    unreachable_hosts: Mutex<HashSet<String>>,
 }
 
 /// Tracks the set of currently-focused window labels.
@@ -1267,6 +1293,52 @@ struct DesktopHost {
 struct DesktopHostsConfig {
     hosts: Vec<DesktopHost>,
     default_host_id: Option<String>,
+    #[serde(default)]
+    initial_host_choice_completed: bool,
+}
+
+/// Input type for `desktop_hosts_set`. Fields may be omitted to preserve
+/// existing stored values, ensuring backward-compatible callers don't
+/// accidentally reset onboarding state.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopHostsConfigInput {
+    hosts: Vec<DesktopHost>,
+    default_host_id: Option<String>,
+    #[serde(default)]
+    initial_host_choice_completed: Option<bool>,
+}
+
+/// Process-wide mutex serializing all read-modify-write operations on the
+/// desktop `settings.json`.  This prevents concurrent writers (host config,
+/// local port, window state, vibrancy, onboarding flag) from clobbering
+/// each other's independent fields.
+static SETTINGS_FILE_MUTEX: Mutex<()> = Mutex::new(());
+
+/// Merge a partial input into an existing config, preserving fields that
+/// the caller omitted (`None`). This is the single source of truth for
+/// the merge semantics used by `desktop_hosts_set`.
+fn merge_desktop_hosts_config(
+    existing: &DesktopHostsConfig,
+    input: &DesktopHostsConfigInput,
+) -> DesktopHostsConfig {
+    DesktopHostsConfig {
+        hosts: input.hosts.clone(),
+        default_host_id: input.default_host_id.clone(),
+        initial_host_choice_completed: input
+            .initial_host_choice_completed
+            .unwrap_or(existing.initial_host_choice_completed),
+    }
+}
+
+/// Atomic read-merge-write: reads existing config from `path`, merges
+/// `input` into it, and writes the result — all while holding the process
+/// lock. Tests and the `desktop_hosts_set` command share this path.
+fn write_desktop_hosts_config_input_to_path(path: &Path, input: &DesktopHostsConfigInput) -> Result<()> {
+    let _guard = SETTINGS_FILE_MUTEX.lock().expect("desktop hosts mutex");
+    let existing = read_desktop_hosts_config_from_path(path);
+    let merged = merge_desktop_hosts_config(&existing, input);
+    write_desktop_hosts_config_to_path(path, &merged)
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -1367,6 +1439,7 @@ fn read_desktop_local_port_from_disk() -> Option<u16> {
 }
 
 fn write_desktop_local_port_to_disk(port: u16) -> Result<()> {
+    let _guard = SETTINGS_FILE_MUTEX.lock().expect("settings file mutex");
     let path = settings_file_path();
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -1408,6 +1481,12 @@ fn read_desktop_hosts_config_from_path(path: &Path) -> DesktopHostsConfig {
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
 
+    let initial_host_choice_completed = parsed
+        .as_ref()
+        .and_then(|v| v.get("desktopInitialHostChoiceCompleted"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
     let mut hosts: Vec<DesktopHost> = Vec::new();
     if let serde_json::Value::Array(items) = hosts_value {
         for item in items {
@@ -1433,6 +1512,7 @@ fn read_desktop_hosts_config_from_path(path: &Path) -> DesktopHostsConfig {
     DesktopHostsConfig {
         hosts,
         default_host_id: default_value,
+        initial_host_choice_completed,
     }
 }
 
@@ -1451,6 +1531,7 @@ fn read_desktop_window_state_from_disk() -> Option<DesktopWindowState> {
 }
 
 fn write_desktop_window_state_to_disk(state: &DesktopWindowState) -> Result<()> {
+    let _guard = SETTINGS_FILE_MUTEX.lock().expect("settings file mutex");
     let path = settings_file_path();
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -1469,10 +1550,6 @@ fn write_desktop_window_state_to_disk(state: &DesktopWindowState) -> Result<()> 
     root["desktopWindowState"] = serde_json::to_value(state).unwrap_or(serde_json::Value::Null);
     fs::write(&path, serde_json::to_string_pretty(&root)?)?;
     Ok(())
-}
-
-fn write_desktop_hosts_config_to_disk(config: &DesktopHostsConfig) -> Result<()> {
-    write_desktop_hosts_config_to_path(&settings_file_path(), config)
 }
 
 fn write_desktop_hosts_config_to_path(path: &Path, config: &DesktopHostsConfig) -> Result<()> {
@@ -1516,9 +1593,241 @@ fn write_desktop_hosts_config_to_path(path: &Path, config: &DesktopHostsConfig) 
         Some(id) if !id.trim().is_empty() => serde_json::Value::String(id.trim().to_string()),
         _ => serde_json::Value::Null,
     };
+    root["desktopInitialHostChoiceCompleted"] =
+        serde_json::Value::Bool(config.initial_host_choice_completed);
 
     fs::write(&path, serde_json::to_string_pretty(&root)?)?;
     Ok(())
+}
+
+// ── Boot outcome resolution ──
+
+/// Authoritative desktop boot outcome injected into the webview as
+/// `window.__OPENCHAMBER_DESKTOP_BOOT_OUTCOME__`.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopBootOutcome {
+    target: Option<String>, // "local" | "remote" | null
+    status: String,          // "ok" | "not-configured" | "unreachable" | "wrong-service" | "missing"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    host_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    url: Option<String>,
+}
+
+/// Probe status classification for boot resolution.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ProbeClass {
+    Ok,
+    Auth,
+    Unreachable,
+    WrongService,
+    NoProbe,
+}
+
+impl ProbeClass {
+    fn from_probe(probe: Option<&HostProbeResult>) -> Self {
+        match probe {
+            Some(p) if p.status == "ok" => ProbeClass::Ok,
+            Some(p) if p.status == "auth" => ProbeClass::Auth,
+            Some(p) if p.status == "wrong-service" => ProbeClass::WrongService,
+            Some(_) => ProbeClass::Unreachable,
+            None => ProbeClass::NoProbe,
+        }
+    }
+}
+
+/// Result of the shared soft+hard probe policy.
+struct ProbeWithRetryResult {
+    /// Whether the target is navigable (ok or auth).
+    navigable: bool,
+    /// The final probe result, if available.
+    probe: Option<HostProbeResult>,
+}
+
+/// Shared probe policy: soft probe first, hard retry on failure.
+/// Used by both startup and open_new_window for consistency.
+async fn probe_with_retry(url: &str) -> ProbeWithRetryResult {
+    let soft_probe =
+        probe_host_with_timeout(url, STARTUP_REMOTE_PROBE_SOFT_TIMEOUT).await;
+
+    let (navigable, final_probe) = match &soft_probe {
+        Ok(probe) if matches!(probe.status.as_str(), "ok" | "auth") => {
+            (true, Some(probe.clone()))
+        }
+        Ok(_) => {
+            log::warn!(
+                "[desktop] host slow/unreachable ({}), retrying with extended timeout",
+                url
+            );
+            match probe_host_with_timeout(url, STARTUP_REMOTE_PROBE_HARD_TIMEOUT).await {
+                Ok(hard_probe) if matches!(hard_probe.status.as_str(), "ok" | "auth") => {
+                    (true, Some(hard_probe))
+                }
+                Ok(hard_probe) => (false, Some(hard_probe)),
+                Err(_) => (false, None),
+            }
+        }
+        Err(_) => {
+            log::warn!(
+                "[desktop] host errored ({}), retrying with extended timeout",
+                url
+            );
+            match probe_host_with_timeout(url, STARTUP_REMOTE_PROBE_HARD_TIMEOUT).await {
+                Ok(hard_probe) if matches!(hard_probe.status.as_str(), "ok" | "auth") => {
+                    (true, Some(hard_probe))
+                }
+                Ok(hard_probe) => (false, Some(hard_probe)),
+                Err(_) => (false, None),
+            }
+        }
+    };
+
+    ProbeWithRetryResult {
+        navigable,
+        probe: final_probe,
+    }
+}
+
+/// Determine the boot outcome from the desktop hosts config, optional probe
+/// result, local server availability, and optional env-forced URL.
+///
+/// When `env_target_url` is `Some`, it overrides the config-based default
+/// host selection. The returned outcome always describes the actual boot
+/// target, including env-forced remotes.
+///
+/// This is the single source of truth for boot resolution logic. Both the
+/// initial startup and `open_new_window` should delegate to this function
+/// for consistency.
+fn resolve_boot_outcome(
+    cfg: &DesktopHostsConfig,
+    probe: Option<&HostProbeResult>,
+    local_available: bool,
+    env_target_url: Option<&str>,
+) -> DesktopBootOutcome {
+    let probe_class = ProbeClass::from_probe(probe);
+
+    // Env-forced URL takes precedence over config. This is its own
+    // authoritative branch — never falls through to config-based resolution.
+    if let Some(env_url) = env_target_url {
+        return match probe_class {
+            ProbeClass::Ok | ProbeClass::Auth | ProbeClass::NoProbe => DesktopBootOutcome {
+                target: Some("remote".to_string()),
+                status: "ok".to_string(),
+                host_id: Some(ENV_OVERRIDE_HOST_ID.to_string()),
+                url: Some(env_url.to_string()),
+            },
+            ProbeClass::WrongService => DesktopBootOutcome {
+                target: Some("remote".to_string()),
+                status: "wrong-service".to_string(),
+                host_id: Some(ENV_OVERRIDE_HOST_ID.to_string()),
+                url: Some(env_url.to_string()),
+            },
+            ProbeClass::Unreachable => DesktopBootOutcome {
+                target: Some("remote".to_string()),
+                status: "unreachable".to_string(),
+                host_id: Some(ENV_OVERRIDE_HOST_ID.to_string()),
+                url: Some(env_url.to_string()),
+            },
+        };
+    }
+
+    // No default host configured
+    let default_id = cfg.default_host_id.as_deref().unwrap_or("");
+    if default_id.is_empty() {
+        // Whether or not choice is completed, no default means not-configured
+        return DesktopBootOutcome {
+            target: None,
+            status: "not-configured".to_string(),
+            host_id: None,
+            url: None,
+        };
+    }
+
+    // Default is local
+    if default_id == LOCAL_HOST_ID {
+        if local_available {
+            return DesktopBootOutcome {
+                target: Some("local".to_string()),
+                status: "ok".to_string(),
+                host_id: None,
+                url: None,
+            };
+        }
+        return DesktopBootOutcome {
+            target: Some("local".to_string()),
+            status: "unreachable".to_string(),
+            host_id: None,
+            url: None,
+        };
+    }
+
+    // Default is a remote host — find it
+    let host = cfg
+        .hosts
+        .iter()
+        .find(|h| h.id == default_id);
+
+    let Some(host) = host else {
+        return DesktopBootOutcome {
+            target: Some("remote".to_string()),
+            status: "missing".to_string(),
+            host_id: Some(default_id.to_string()),
+            url: None,
+        };
+    };
+
+    let host_id = host.id.clone();
+    let host_url = host.url.clone();
+
+    match probe_class {
+        ProbeClass::Ok | ProbeClass::Auth => DesktopBootOutcome {
+            target: Some("remote".to_string()),
+            status: "ok".to_string(),
+            host_id: Some(host_id),
+            url: Some(host_url),
+        },
+        ProbeClass::WrongService => DesktopBootOutcome {
+            target: Some("remote".to_string()),
+            status: "wrong-service".to_string(),
+            host_id: Some(host_id),
+            url: Some(host_url),
+        },
+        ProbeClass::Unreachable => DesktopBootOutcome {
+            target: Some("remote".to_string()),
+            status: "unreachable".to_string(),
+            host_id: Some(host_id),
+            url: Some(host_url),
+        },
+        ProbeClass::NoProbe => {
+            // No probe result and choice already completed — treat as recovery
+            // (the probe hasn't happened yet, but the user has made a choice,
+            // so this shouldn't normally occur in practice).
+            DesktopBootOutcome {
+                target: Some("remote".to_string()),
+                status: "unreachable".to_string(),
+                host_id: Some(host_id),
+                url: Some(host_url),
+            }
+        }
+    }
+}
+
+/// Compute the boot outcome to display when the local server fails to start.
+///
+/// This ensures the UI leaves the splash screen and shows an appropriate
+/// chooser/recovery state instead of hanging. It delegates to the existing
+/// `resolve_boot_outcome` with `local_available = false` and no probe.
+fn compute_local_startup_failure_boot_outcome(cfg: &DesktopHostsConfig) -> DesktopBootOutcome {
+    resolve_boot_outcome(cfg, None, false, None)
+}
+
+/// Build the init script for the startup failure fallback case.
+///
+/// Uses an empty `local_origin` since the local server is not running;
+/// the UI can fall back to `window.location.origin` when needed.
+fn build_startup_failure_init_script(boot_outcome: &DesktopBootOutcome) -> String {
+    build_init_script("", Some(boot_outcome))
 }
 
 #[tauri::command]
@@ -1527,8 +1836,9 @@ fn desktop_hosts_get() -> Result<DesktopHostsConfig, String> {
 }
 
 #[tauri::command]
-fn desktop_hosts_set(config: DesktopHostsConfig) -> Result<(), String> {
-    write_desktop_hosts_config_to_disk(&config).map_err(|err| err.to_string())
+fn desktop_hosts_set(input: DesktopHostsConfigInput) -> Result<(), String> {
+    write_desktop_hosts_config_input_to_path(&settings_file_path(), &input)
+        .map_err(|err| err.to_string())
 }
 
 #[derive(Clone, Serialize)]
@@ -1575,9 +1885,42 @@ async fn probe_host_with_timeout(url: &str, timeout: Duration) -> Result<HostPro
     }
 }
 
+async fn wait_for_local_opencode_ready_with(
+    url: &str,
+    timeout: Duration,
+    initial_interval: Duration,
+    max_interval: Duration,
+) -> Option<HostProbeResult> {
+    let deadline = std::time::Instant::now() + timeout;
+    let mut interval = initial_interval;
+    let mut last_probe: Option<HostProbeResult> = None;
+
+    while std::time::Instant::now() < deadline {
+        match probe_host_with_timeout(url, max_interval).await {
+            Ok(probe) if matches!(probe.status.as_str(), "ok" | "auth") => {
+                return Some(probe);
+            }
+            Ok(probe) => {
+                last_probe = Some(probe);
+            }
+            Err(_) => {}
+        }
+
+        tokio::time::sleep(interval).await;
+        interval = (interval * 2).min(max_interval);
+    }
+
+    last_probe
+}
+
+/// Uses the same probe_with_retry policy as startup/new-window (soft + hard)
+/// so that first-launch/recovery remote connect accepts slow-but-valid hosts.
 #[tauri::command]
 async fn desktop_host_probe(url: String) -> Result<HostProbeResult, String> {
-    probe_host_with_timeout(&url, STARTUP_REMOTE_PROBE_SOFT_TIMEOUT).await
+    let result = probe_with_retry(&url).await;
+    result
+        .probe
+        .ok_or_else(|| "Probe failed".to_string())
 }
 
 #[derive(Clone, Serialize)]
@@ -2064,23 +2407,16 @@ async fn spawn_local_server(app: &tauri::AppHandle) -> Result<String> {
         let app_handle = app.clone();
         tauri::async_runtime::spawn(async move {
             let mut rx = rx;
-            let mut stdout_buffer = String::new();
             while let Some(event) = rx.recv().await {
                 match event {
                     CommandEvent::Stdout(bytes) => {
-                        stdout_buffer.push_str(&String::from_utf8_lossy(&bytes));
-
-                        while let Some(newline_index) = stdout_buffer.find('\n') {
-                            let line = stdout_buffer[..newline_index].trim_end_matches('\r');
-                            if let Some(rest) = line.strip_prefix(SIDECAR_NOTIFY_PREFIX) {
-                                if let Ok(parsed) =
-                                    serde_json::from_str::<SidecarNotifyPayload>(rest.trim())
-                                {
-                                    maybe_show_sidecar_notification(&app_handle, parsed);
-                                }
+                        let line = String::from_utf8_lossy(&bytes);
+                        if let Some(rest) = line.strip_prefix(SIDECAR_NOTIFY_PREFIX) {
+                            if let Ok(parsed) =
+                                serde_json::from_str::<SidecarNotifyPayload>(rest.trim())
+                            {
+                                maybe_show_sidecar_notification(&app_handle, parsed);
                             }
-
-                            stdout_buffer.drain(..=newline_index);
                         }
                     }
                     CommandEvent::Error(error) => {
@@ -2293,9 +2629,12 @@ fn desktop_new_window(app: tauri::AppHandle) -> Result<(), String> {
 
 /// Open a new window pointed at a specific URL (used by the host switcher UI).
 ///
-/// IMPORTANT: Must remain synchronous -- see `desktop_new_window` doc comment.
+/// For remote URLs (not matching local origin), probes the host and only opens
+/// the window if the probe returns `ok` or `auth`. Falls back to local if the
+/// remote is non-navigable. Window creation is dispatched to the main thread
+/// and its result is propagated back to the caller.
 #[tauri::command]
-fn desktop_new_window_at_url(app: tauri::AppHandle, url: String) -> Result<(), String> {
+async fn desktop_new_window_at_url(app: tauri::AppHandle, url: String) -> Result<(), String> {
     // Validate scheme to prevent file://, data:, javascript: etc.
     let parsed = url::Url::parse(&url).map_err(|e| format!("Invalid URL: {e}"))?;
     match parsed.scheme() {
@@ -2314,7 +2653,68 @@ fn desktop_new_window_at_url(app: tauri::AppHandle, url: String) -> Result<(), S
         })
         .ok_or_else(|| "Local origin not yet known (sidecar may still be starting)".to_string())?;
 
-    create_window(&app, &url, &local_origin, false).map_err(|e| e.to_string())
+    // If the URL is local, create the window directly.
+    if same_server_url(&url, &local_origin) {
+        let boot_outcome = DesktopBootOutcome {
+            target: Some("local".to_string()),
+            status: "ok".to_string(),
+            host_id: None,
+            url: None,
+        };
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let handle = app.clone();
+        app.run_on_main_thread(move || {
+            let result = create_window(&handle, &url, &local_origin, Some(&boot_outcome), false)
+                .map_err(|e| e.to_string());
+            let _ = tx.send(result);
+        })
+        .map_err(|e| e.to_string())?;
+        return rx.await.map_err(|_| "Window creation cancelled".to_string())?;
+    }
+
+    // Remote URL: probe with shared retry policy before opening.
+    let result = probe_with_retry(&url).await;
+
+    let (final_url, boot_outcome) = if result.navigable {
+        let outcome = DesktopBootOutcome {
+            target: Some("remote".to_string()),
+            status: "ok".to_string(),
+            host_id: Some(DIRECT_URL_HOST_ID.to_string()),
+            url: Some(url.clone()),
+        };
+        (url, outcome)
+    } else {
+        log::info!(
+            "[desktop] new_window_at_url: remote ({}) probe returned non-navigable status, falling back to local",
+            url
+        );
+        let local_fallback = format!("{}/", local_origin);
+        let outcome = match &result.probe {
+            Some(probe) if probe.status == "wrong-service" => DesktopBootOutcome {
+                target: Some("remote".to_string()),
+                status: "wrong-service".to_string(),
+                host_id: Some(DIRECT_URL_HOST_ID.to_string()),
+                url: Some(url),
+            },
+            _ => DesktopBootOutcome {
+                target: Some("remote".to_string()),
+                status: "unreachable".to_string(),
+                host_id: Some(DIRECT_URL_HOST_ID.to_string()),
+                url: Some(url),
+            },
+        };
+        (local_fallback, outcome)
+    };
+
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let handle = app.clone();
+    app.run_on_main_thread(move || {
+        let result = create_window(&handle, &final_url, &local_origin, Some(&boot_outcome), false)
+            .map_err(|e| e.to_string());
+        let _ = tx.send(result);
+    })
+    .map_err(|e| e.to_string())?;
+    rx.await.map_err(|_| "Window creation cancelled".to_string())?
 }
 
 /// Read a file and return its content as base64 with mime type detection.
@@ -2429,16 +2829,19 @@ fn macos_major_version() -> Option<u32> {
 
 /// Build the initialization script injected into every webview window.
 /// This is computed once and reused for all windows.
-fn build_init_script(local_origin: &str) -> String {
+fn build_init_script(local_origin: &str, boot_outcome: Option<&DesktopBootOutcome>) -> String {
     let home =
         std::env::var(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).unwrap_or_default();
     let macos_major = macos_major_version().unwrap_or(0);
 
     let home_json = serde_json::to_string(&home).unwrap_or_else(|_| "\"\"".into());
     let local_json = serde_json::to_string(local_origin).unwrap_or_else(|_| "\"\"".into());
+    let boot_outcome_json = boot_outcome
+        .and_then(|o| serde_json::to_string(o).ok())
+        .unwrap_or_else(|| "undefined".to_string());
 
     let mut init_script = format!(
-        "(function(){{try{{window.__OPENCHAMBER_HOME__={home_json};window.__OPENCHAMBER_MACOS_MAJOR__={macos_major};window.__OPENCHAMBER_LOCAL_ORIGIN__={local_json};}}catch(_e){{}}}})();"
+        "(function(){{try{{window.__OPENCHAMBER_HOME__={home_json};window.__OPENCHAMBER_MACOS_MAJOR__={macos_major};window.__OPENCHAMBER_LOCAL_ORIGIN__={local_json};window.__OPENCHAMBER_DESKTOP_BOOT_OUTCOME__={boot_outcome_json};}}catch(_e){{}}}})();"
     );
 
     // Cleanup: older builds injected a native-ish Instance switcher button into pages.
@@ -2646,16 +3049,22 @@ fn create_window(
     app: &tauri::AppHandle,
     url: &str,
     local_origin: &str,
+    boot_outcome: Option<&DesktopBootOutcome>,
     restore_geometry: bool,
 ) -> Result<()> {
     let parsed = url::Url::parse(url).map_err(|err| anyhow!("Invalid URL: {err}"))?;
     let label = next_window_label(app);
 
-    let init_script = build_init_script(local_origin);
+    let init_script = build_init_script(local_origin, boot_outcome);
 
-    // Store the init script and local origin so new windows and page reloads can reuse it.
+    // Store the init script under this window's label so page reloads
+    // re-inject the correct boot outcome for this window.
     if let Some(state) = app.try_state::<DesktopUiInjectionState>() {
-        *state.script.lock().expect("desktop ui injection mutex") = Some(init_script.clone());
+        state
+            .scripts
+            .lock()
+            .expect("desktop ui injection mutex")
+            .insert(label.clone(), init_script.clone());
         *state
             .local_origin
             .lock()
@@ -2842,12 +3251,21 @@ fn build_startup_splash_script() -> String {
     )
 }
 
-fn activate_main_window(app: &tauri::AppHandle, url: &str, local_origin: &str) -> Result<()> {
+fn activate_main_window(
+    app: &tauri::AppHandle,
+    url: &str,
+    local_origin: &str,
+    boot_outcome: Option<&DesktopBootOutcome>,
+) -> Result<()> {
     let parsed = url::Url::parse(url).map_err(|err| anyhow!("Invalid URL: {err}"))?;
-    let init_script = build_init_script(local_origin);
+    let init_script = build_init_script(local_origin, boot_outcome);
 
     if let Some(state) = app.try_state::<DesktopUiInjectionState>() {
-        *state.script.lock().expect("desktop ui injection mutex") = Some(init_script);
+        state
+            .scripts
+            .lock()
+            .expect("desktop ui injection mutex")
+            .insert("main".to_string(), init_script);
         *state
             .local_origin
             .lock()
@@ -2860,7 +3278,7 @@ fn activate_main_window(app: &tauri::AppHandle, url: &str, local_origin: &str) -
         return Ok(());
     }
 
-    create_window(app, url, local_origin, true)
+    create_window(app, url, local_origin, boot_outcome, true)
 }
 
 /// Open a new window pointed at the default host (local or configured default).
@@ -2899,7 +3317,7 @@ fn open_new_window(app: &tauri::AppHandle) {
         return;
     };
 
-    // Resolve the URL the same way as initial setup: default host or local.
+    // Resolve the URL the same way as initial setup: env override, then default host, else local.
     let local_url = app
         .try_state::<SidecarState>()
         .and_then(|state| state.url.lock().expect("sidecar url mutex").clone())
@@ -2912,42 +3330,83 @@ fn open_new_window(app: &tauri::AppHandle) {
         local_url.clone()
     };
 
-    let mut target_url = local_ui_url.clone();
+    let env_target = std::env::var("OPENCHAMBER_SERVER_URL")
+        .ok()
+        .and_then(|raw| normalize_server_url(&raw))
+        .filter(|url| !same_server_url(url, &local_ui_url));
 
     let cfg = read_desktop_hosts_config_from_disk();
-    if let Some(default_id) = cfg.default_host_id {
+
+    let target_url = if let Some(ref env_url) = env_target {
+        env_url.clone()
+    } else if let Some(default_id) = cfg.default_host_id.as_deref() {
         if default_id == LOCAL_HOST_ID {
-            target_url = local_ui_url.clone();
-        } else if let Some(host) = cfg.hosts.into_iter().find(|h| h.id == default_id) {
-            target_url = host.url;
+            local_ui_url.clone()
+        } else {
+            cfg.hosts
+                .iter()
+                .find(|h| h.id == default_id)
+                .map(|h| h.url.clone())
+                .unwrap_or(local_ui_url.clone())
         }
+    } else {
+        local_ui_url.clone()
+    };
+
+    // Compute boot outcome for the new window (no probe yet for sync local case).
+    let boot_outcome = resolve_boot_outcome(
+        &cfg,
+        None,
+        true,
+        env_target.as_deref(),
+    );
+
+    // If the target is local, create the window immediately on this (main) thread.
+    if same_server_url(&target_url, &local_ui_url) {
+        if let Err(err) = create_window(app, &target_url, &local_origin, Some(&boot_outcome), false) {
+            log::error!("[desktop] failed to create new window: {err}");
+        }
+        return;
     }
 
-    // If this host was previously probed unreachable (e.g. at startup), fall back to local.
-    if target_url != local_ui_url {
-        let is_cached_unreachable = app
-            .try_state::<DesktopUiInjectionState>()
-            .map(|state| {
-                state
-                    .unreachable_hosts
-                    .lock()
-                    .expect("unreachable hosts mutex")
-                    .contains(&target_url)
-            })
-            .unwrap_or(false);
+    // For remote hosts, probe asynchronously then dispatch window creation
+    // back to the main thread via run_on_main_thread (required on macOS).
+    // Uses the same probe_with_retry policy as startup (soft + hard).
+    let handle = app.clone();
+    let cfg_snapshot = cfg.clone();
+    let env_target_snapshot = env_target.clone();
+    tauri::async_runtime::spawn(async move {
+        let result = probe_with_retry(&target_url).await;
 
-        if is_cached_unreachable {
+        let final_url = if result.navigable {
+            target_url
+        } else {
             log::info!(
-                "[desktop] new window: default host ({}) cached as unreachable, using local",
+                "[desktop] new window: default host ({}) probe returned non-navigable status, using local",
                 target_url
             );
-            target_url = local_ui_url;
-        }
-    }
+            local_ui_url
+        };
 
-    if let Err(err) = create_window(app, &target_url, &local_origin, false) {
-        log::error!("[desktop] failed to create new window: {err}");
-    }
+        // Recompute boot outcome with actual probe result, using the
+        // same config/env snapshot that chose this window's target.
+        let final_boot_outcome = resolve_boot_outcome(
+            &cfg_snapshot,
+            result.probe.as_ref(),
+            true,
+            env_target_snapshot.as_deref(),
+        );
+
+        let local = local_origin;
+        let handle_clone = handle.clone();
+        if let Err(err) = handle.run_on_main_thread(move || {
+            if let Err(err) = create_window(&handle_clone, &final_url, &local, Some(&final_boot_outcome), false) {
+                log::error!("[desktop] failed to create new window: {err}");
+            }
+        }) {
+            log::error!("[desktop] failed to dispatch window creation to main thread: {err}");
+        }
+    });
 }
 
 fn main() {
@@ -2998,8 +3457,9 @@ fn main() {
         .plugin(log_builder.build())
         .on_page_load(|window, _payload| {
             if let Some(state) = window.app_handle().try_state::<DesktopUiInjectionState>() {
-                if let Ok(guard) = state.script.lock() {
-                    if let Some(script) = guard.as_ref() {
+                let label = window.label().to_string();
+                if let Ok(guard) = state.scripts.lock() {
+                    if let Some(script) = guard.get(&label) {
                         let _ = window.eval(script);
                     }
                 }
@@ -3169,6 +3629,15 @@ fn main() {
                     state.remove_window(&label);
                 }
 
+                // Remove stale per-window init script.
+                if let Some(state) = app.try_state::<DesktopUiInjectionState>() {
+                    state
+                        .scripts
+                        .lock()
+                        .expect("desktop ui injection mutex")
+                        .remove(&label);
+                }
+
                 // If this was the last window, kill the sidecar and exit.
                 let remaining = app.webview_windows().len();
                 if remaining == 0 {
@@ -3223,6 +3692,28 @@ fn main() {
             }
 
             tauri::async_runtime::spawn(async move {
+                // Helper: inject a fallback boot outcome when the local server
+                // cannot start, so the UI leaves the splash and shows
+                // chooser/recovery instead of hanging on a white screen.
+                let handle_for_fallback = handle.clone();
+                let inject_startup_failure = |err: String| {
+                    log::error!("[desktop] failed to start local server: {err}");
+                    let cfg = read_desktop_hosts_config_from_disk();
+                    let boot_outcome = compute_local_startup_failure_boot_outcome(&cfg);
+                    let init_script = build_startup_failure_init_script(&boot_outcome);
+                    if let Some(state) = handle_for_fallback.try_state::<DesktopUiInjectionState>()
+                    {
+                        state
+                            .scripts
+                            .lock()
+                            .expect("desktop ui injection mutex")
+                            .insert("main".to_string(), init_script.clone());
+                    }
+                    if let Some(window) = handle_for_fallback.get_webview_window("main") {
+                        let _ = window.eval(&init_script);
+                    }
+                };
+
                 let local_url = if cfg!(debug_assertions) {
                     let dev_url = "http://127.0.0.1:3901".to_string();
                     if wait_for_health(&dev_url).await {
@@ -3231,7 +3722,7 @@ fn main() {
                         match spawn_local_server(&handle).await {
                             Ok(local) => local,
                             Err(err) => {
-                                log::error!("[desktop] failed to start local server: {err}");
+                                inject_startup_failure(err.to_string());
                                 return;
                             }
                         }
@@ -3240,7 +3731,7 @@ fn main() {
                     match spawn_local_server(&handle).await {
                         Ok(local) => local,
                         Err(err) => {
-                            log::error!("[desktop] failed to start local server: {err}");
+                            inject_startup_failure(err.to_string());
                             return;
                         }
                     }
@@ -3270,66 +3761,88 @@ fn main() {
                     .unwrap_or_else(|| local_ui_url.clone());
 
                 // Selected host: env override first, then desktop default host, else local.
+                // If env override points to the local server, ignore it and use
+                // config-based resolution instead.
                 let env_target = std::env::var("OPENCHAMBER_SERVER_URL")
                     .ok()
-                    .and_then(|raw| normalize_server_url(&raw));
+                    .and_then(|raw| normalize_server_url(&raw))
+                    .filter(|url| !same_server_url(url, &local_ui_url));
 
-                let mut initial_url = env_target.unwrap_or_else(|| local_ui_url.clone());
+                let mut initial_url = env_target.as_deref().unwrap_or(&local_ui_url).to_string();
 
-                if initial_url == local_ui_url {
-                    let cfg = read_desktop_hosts_config_from_disk();
-                    if let Some(default_id) = cfg.default_host_id {
-                        if default_id == LOCAL_HOST_ID {
-                            initial_url = local_ui_url.clone();
-                        } else if let Some(host) = cfg.hosts.into_iter().find(|h| h.id == default_id) {
-                            initial_url = host.url;
+                // Compute boot outcome and legacy-upgrade if needed.
+                let cfg = read_desktop_hosts_config_from_disk();
+
+                if env_target.is_none() {
+                    if let Some(default_id) = cfg.default_host_id.as_deref() {
+                        if default_id != LOCAL_HOST_ID {
+                            if let Some(host) = cfg.hosts.iter().find(|h| h.id == default_id) {
+                                initial_url = host.url.clone();
+                            }
                         }
                     }
                 }
 
-                if initial_url != local_ui_url {
-                    let failed_url = initial_url.clone();
-                    let soft_probe =
-                        probe_host_with_timeout(&initial_url, STARTUP_REMOTE_PROBE_SOFT_TIMEOUT).await;
+                // If remote, probe and fall back to local if unreachable.
+                // Use the shared probe_with_retry policy (soft + hard).
+                let final_probe: Option<HostProbeResult> = if !same_server_url(&initial_url, &local_ui_url) {
+                    let result = probe_with_retry(&initial_url).await;
 
-                    let remote_reachable = match soft_probe {
-                        Ok(probe) if probe.status != "unreachable" => true,
-                        Ok(_) | Err(_) => {
-                            log::warn!(
-                                "[desktop] startup host slow/unreachable ({}), retrying with extended timeout",
-                                initial_url
-                            );
-
-                            match probe_host_with_timeout(
-                                &initial_url,
-                                STARTUP_REMOTE_PROBE_HARD_TIMEOUT,
-                            )
-                            .await
-                            {
-                                Ok(probe) if probe.status != "unreachable" => true,
-                                Ok(_) | Err(_) => false,
-                            }
-                        }
-                    };
-
-                    if !remote_reachable {
+                    if !result.navigable {
                         log::warn!(
                             "[desktop] startup host unreachable after retries ({}), falling back to local ({})",
                             initial_url,
                             local_ui_url
                         );
                         initial_url = local_ui_url.clone();
-                        if let Some(state) = handle.try_state::<DesktopUiInjectionState>() {
-                            state
-                                .unreachable_hosts
-                                .lock()
-                                .expect("unreachable hosts mutex")
-                                .insert(failed_url);
-                        }
                     }
-                }
 
-                if let Err(err) = activate_main_window(&handle, &initial_url, &local_origin) {
+                    result.probe
+                } else {
+                    None
+                };
+
+                // Probe the local server to verify opencode is actually running.
+                // spawn_local_server only confirms the sidecar web server responded
+                // HTTP 200 — it does not check whether opencode CLI is ready.
+                let local_available = match wait_for_local_opencode_ready_with(
+                    &local_url,
+                    LOCAL_SIDECAR_HEALTH_TIMEOUT,
+                    LOCAL_SIDECAR_HEALTH_POLL_INITIAL_INTERVAL,
+                    LOCAL_SIDECAR_HEALTH_POLL_MAX_INTERVAL,
+                )
+                .await
+                {
+                    Some(probe) if matches!(probe.status.as_str(), "ok" | "auth") => {
+                        log::info!("[desktop] local opencode verified (status={})", probe.status);
+                        true
+                    }
+                    Some(probe) => {
+                        log::warn!(
+                            "[desktop] local server up but opencode not ready (status={}), treating as unavailable",
+                            probe.status
+                        );
+                        false
+                    }
+                    None => {
+                        log::warn!("[desktop] local opencode probe failed, treating as unavailable");
+                        false
+                    }
+                };
+
+                let boot_outcome = resolve_boot_outcome(
+                    &cfg,
+                    final_probe.as_ref(),
+                    local_available,
+                    env_target.as_deref(),
+                );
+
+                if let Err(err) = activate_main_window(
+                    &handle,
+                    &initial_url,
+                    &local_origin,
+                    Some(&boot_outcome),
+                ) {
                     log::error!("[desktop] failed to activate main window: {err}");
                 }
             });
@@ -3375,6 +3888,10 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn unique_settings_path(test_name: &str) -> PathBuf {
@@ -3412,6 +3929,7 @@ mod tests {
                 url: "https://example.com?coder_session_token=xxxxxx".to_string(),
             }],
             default_host_id: Some("remote-1".to_string()),
+            initial_host_choice_completed: false,
         };
 
         write_desktop_hosts_config_to_path(&path, &config).expect("write config");
@@ -3424,5 +3942,413 @@ mod tests {
             "https://example.com/?coder_session_token=xxxxxx"
         );
         assert_eq!(read_back.default_host_id.as_deref(), Some("remote-1"));
+    }
+
+    #[test]
+    fn read_hosts_config_defaults_initial_choice_flag_to_false() {
+        let path = unique_settings_path("desktop-hosts-default-flag");
+        std::fs::write(&path, r#"{"desktopHosts":[],"desktopDefaultHostId":null}"#).unwrap();
+
+        let cfg = read_desktop_hosts_config_from_path(&path);
+        let _ = fs::remove_file(&path);
+        assert_eq!(cfg.initial_host_choice_completed, false);
+    }
+
+    #[test]
+    fn write_and_read_hosts_config_preserves_initial_choice_flag() {
+        let path = unique_settings_path("desktop-hosts-preserve-flag");
+        let cfg = DesktopHostsConfig {
+            hosts: vec![],
+            default_host_id: Some(LOCAL_HOST_ID.to_string()),
+            initial_host_choice_completed: true,
+        };
+
+        write_desktop_hosts_config_to_path(&path, &cfg).unwrap();
+        let reread = read_desktop_hosts_config_from_path(&path);
+        let _ = fs::remove_file(&path);
+
+        assert_eq!(reread.default_host_id.as_deref(), Some(LOCAL_HOST_ID));
+        assert!(reread.initial_host_choice_completed);
+    }
+
+    #[test]
+    fn omitted_initial_choice_flag_preserves_stored_true() {
+        let path = unique_settings_path("desktop-hosts-omit-preserves");
+
+        // Seed: write config with initialHostChoiceCompleted = true
+        let seed = DesktopHostsConfig {
+            hosts: vec![DesktopHost {
+                id: "remote-1".to_string(),
+                label: "Remote".to_string(),
+                url: "https://example.com".to_string(),
+            }],
+            default_host_id: Some("remote-1".to_string()),
+            initial_host_choice_completed: true,
+        };
+        write_desktop_hosts_config_to_path(&path, &seed).unwrap();
+
+        // Call the production merge-and-write path with omitted field
+        let input = DesktopHostsConfigInput {
+            hosts: vec![],
+            default_host_id: Some("local".to_string()),
+            initial_host_choice_completed: None,
+        };
+        write_desktop_hosts_config_input_to_path(&path, &input).unwrap();
+
+        let reread = read_desktop_hosts_config_from_path(&path);
+        let _ = fs::remove_file(&path);
+
+        // The stored true must be preserved, not reset to false
+        assert!(reread.initial_host_choice_completed);
+    }
+
+    // --- Task 2: probe validation tests ---
+
+    /// Spawn a tiny HTTP server on a random port that responds with `status_code`
+    /// and `body`. Returns the base URL (e.g. `http://127.0.0.1:{port}`).
+    async fn spawn_test_http_server(status_code: u16, body: &str) -> String {
+        use tokio::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind test server");
+        let port = listener.local_addr().unwrap().port();
+        let body_owned = body.to_string();
+
+        tokio::spawn(async move {
+            loop {
+                let (mut stream, _) = tokio::select! {
+                    res = listener.accept() => { res.expect("accept") }
+                    else => break,
+                };
+                use tokio::io::AsyncWriteExt;
+                let response = format!(
+                    "HTTP/1.1 {status_code} OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body_owned}",
+                    body_owned.len()
+                );
+                let _ = stream.write_all(response.as_bytes()).await;
+            }
+        });
+
+        format!("http://127.0.0.1:{port}")
+    }
+
+    #[tokio::test]
+    async fn probe_returns_wrong_service_for_generic_http_200_health() {
+        let url = spawn_test_http_server(200, r#"{"status":"ok","uptime":42}"#).await;
+        // Give the server a moment to start listening
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        let result = probe_host_with_timeout(&url, Duration::from_secs(2))
+            .await
+            .expect("probe should not error");
+        assert_eq!(result.status, "wrong-service");
+    }
+
+    #[tokio::test]
+    async fn probe_returns_ok_for_valid_openchamber_health_payload() {
+        let url = spawn_test_http_server(200, r#"{"openCodeRunning":true}"#).await;
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        let result = probe_host_with_timeout(&url, Duration::from_secs(2))
+            .await
+            .expect("probe should not error");
+        assert_eq!(result.status, "ok");
+    }
+
+    #[tokio::test]
+    async fn probe_returns_auth_for_401_health() {
+        let url = spawn_test_http_server(401, r#"{"message":"unauthorized"}"#).await;
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        let result = probe_host_with_timeout(&url, Duration::from_secs(2))
+            .await
+            .expect("probe should not error");
+        assert_eq!(result.status, "auth");
+    }
+
+    async fn spawn_flaky_openchamber_health_server() -> String {
+        use tokio::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind flaky test server");
+        let port = listener.local_addr().unwrap().port();
+        let request_count = Arc::new(AtomicUsize::new(0));
+
+        tokio::spawn({
+            let request_count = Arc::clone(&request_count);
+            async move {
+                loop {
+                    let (mut stream, _) = tokio::select! {
+                        res = listener.accept() => { res.expect("accept") }
+                        else => break,
+                    };
+
+                    let count = request_count.fetch_add(1, Ordering::SeqCst);
+                    let body = if count == 0 {
+                        r#"{"status":"ok","openCodeRunning":false,"isOpenCodeReady":false}"#
+                    } else {
+                        r#"{"status":"ok","openCodeRunning":true,"isOpenCodeReady":true}"#
+                    };
+
+                    use tokio::io::AsyncWriteExt;
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                    let _ = stream.write_all(response.as_bytes()).await;
+                }
+            }
+        });
+
+        format!("http://127.0.0.1:{port}")
+    }
+
+    #[tokio::test]
+    async fn wait_for_local_opencode_ready_retries_until_health_payload_is_ready() {
+        let url = spawn_flaky_openchamber_health_server().await;
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        let result = wait_for_local_opencode_ready_with(
+            &url,
+            Duration::from_millis(200),
+            Duration::from_millis(10),
+            Duration::from_millis(20),
+        )
+        .await
+        .expect("probe result");
+
+        assert_eq!(result.status, "ok");
+    }
+
+    #[tokio::test]
+    async fn wait_for_local_opencode_ready_returns_last_probe_when_server_never_becomes_ready() {
+        let url = spawn_test_http_server(
+            200,
+            r#"{"status":"ok","openCodeRunning":false,"isOpenCodeReady":false}"#,
+        )
+        .await;
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        let result = wait_for_local_opencode_ready_with(
+            &url,
+            Duration::from_millis(120),
+            Duration::from_millis(10),
+            Duration::from_millis(20),
+        )
+        .await
+        .expect("probe result");
+
+        assert_eq!(result.status, "wrong-service");
+    }
+
+    // --- Task 3: boot outcome resolution tests ---
+
+    fn make_config(
+        hosts: Vec<(&str, &str, &str)>,
+        default_host_id: Option<&str>,
+        initial_host_choice_completed: bool,
+    ) -> DesktopHostsConfig {
+        DesktopHostsConfig {
+            hosts: hosts
+                .into_iter()
+                .map(|(id, label, url)| DesktopHost {
+                    id: id.to_string(),
+                    label: label.to_string(),
+                    url: url.to_string(),
+                })
+                .collect(),
+            default_host_id: default_host_id.map(|s| s.to_string()),
+            initial_host_choice_completed,
+        }
+    }
+
+    #[test]
+    fn resolve_boot_outcome_returns_first_launch_when_no_default_and_choice_not_completed() {
+        let cfg = make_config(vec![], None, false);
+        let probe: Option<&HostProbeResult> = None;
+        let outcome = resolve_boot_outcome(&cfg, probe, true, None);
+        assert_eq!(outcome.target, None);
+        assert_eq!(outcome.status, "not-configured");
+    }
+
+    #[test]
+    fn resolve_boot_outcome_returns_recovery_no_default_host_when_choice_completed_but_default_missing() {
+        let cfg = make_config(
+            vec![("remote-a", "Remote A", "https://a.test")],
+            None,
+            true,
+        );
+        let probe: Option<&HostProbeResult> = None;
+        let outcome = resolve_boot_outcome(&cfg, probe, true, None);
+        assert_eq!(outcome.target, None);
+        assert_eq!(outcome.status, "not-configured");
+    }
+
+    #[test]
+    fn resolve_boot_outcome_returns_recovery_missing_default_host_when_default_id_has_no_matching_host() {
+        let cfg = make_config(vec![], Some("gone-1"), true);
+        let probe: Option<&HostProbeResult> = None;
+        let outcome = resolve_boot_outcome(&cfg, probe, true, None);
+        assert_eq!(outcome.target, Some("remote".to_string()));
+        assert_eq!(outcome.status, "missing");
+        assert_eq!(outcome.host_id.as_deref(), Some("gone-1"));
+    }
+
+    #[test]
+    fn resolve_boot_outcome_returns_main_local_when_default_is_local_and_available() {
+        let cfg = make_config(vec![], Some("local"), true);
+        let probe: Option<&HostProbeResult> = None;
+        let outcome = resolve_boot_outcome(&cfg, probe, true, None);
+        assert_eq!(outcome.target, Some("local".to_string()));
+        assert_eq!(outcome.status, "ok");
+    }
+
+    #[test]
+    fn resolve_boot_outcome_returns_recovery_local_unavailable_when_local_is_default_but_unavailable() {
+        let cfg = make_config(vec![], Some("local"), true);
+        let probe: Option<&HostProbeResult> = None;
+        let outcome = resolve_boot_outcome(&cfg, probe, false, None);
+        assert_eq!(outcome.target, Some("local".to_string()));
+        assert_eq!(outcome.status, "unreachable");
+    }
+
+    #[test]
+    fn resolve_boot_outcome_returns_main_remote_when_probe_is_ok() {
+        let cfg = make_config(
+            vec![("remote-a", "Remote A", "https://a.test")],
+            Some("remote-a"),
+            true,
+        );
+        let probe = HostProbeResult {
+            status: "ok".to_string(),
+            latency_ms: 10,
+        };
+        let outcome = resolve_boot_outcome(&cfg, Some(&probe), true, None);
+        assert_eq!(outcome.target, Some("remote".to_string()));
+        assert_eq!(outcome.status, "ok");
+        assert_eq!(outcome.host_id.as_deref(), Some("remote-a"));
+        assert_eq!(outcome.url.as_deref(), Some("https://a.test"));
+    }
+
+    #[test]
+    fn resolve_boot_outcome_returns_main_remote_when_probe_is_auth() {
+        let cfg = make_config(
+            vec![("remote-a", "Remote A", "https://a.test")],
+            Some("remote-a"),
+            true,
+        );
+        let probe = HostProbeResult {
+            status: "auth".to_string(),
+            latency_ms: 10,
+        };
+        let outcome = resolve_boot_outcome(&cfg, Some(&probe), true, None);
+        assert_eq!(outcome.target, Some("remote".to_string()));
+        assert_eq!(outcome.status, "ok");
+    }
+
+    #[test]
+    fn resolve_boot_outcome_returns_recovery_remote_unreachable_when_probe_fails() {
+        let cfg = make_config(
+            vec![("remote-a", "Remote A", "https://a.test")],
+            Some("remote-a"),
+            true,
+        );
+        let probe = HostProbeResult {
+            status: "unreachable".to_string(),
+            latency_ms: 2000,
+        };
+        let outcome = resolve_boot_outcome(&cfg, Some(&probe), true, None);
+        assert_eq!(outcome.target, Some("remote".to_string()));
+        assert_eq!(outcome.status, "unreachable");
+        assert_eq!(outcome.host_id.as_deref(), Some("remote-a"));
+    }
+
+    #[test]
+    fn resolve_boot_outcome_returns_recovery_remote_wrong_service_when_probe_says_wrong_service() {
+        let cfg = make_config(
+            vec![("remote-a", "Remote A", "https://a.test")],
+            Some("remote-a"),
+            true,
+        );
+        let probe = HostProbeResult {
+            status: "wrong-service".to_string(),
+            latency_ms: 50,
+        };
+        let outcome = resolve_boot_outcome(&cfg, Some(&probe), true, None);
+        assert_eq!(outcome.target, Some("remote".to_string()));
+        assert_eq!(outcome.status, "wrong-service");
+        assert_eq!(outcome.host_id.as_deref(), Some("remote-a"));
+    }
+
+    #[test]
+    fn resolve_boot_outcome_no_probe_but_remote_default_returns_unreachable() {
+        // Remote default but no probe result yet — treat as unreachable
+        // (probe hasn't happened yet, but user has already chosen a remote)
+        let cfg = make_config(
+            vec![("remote-a", "Remote A", "https://a.test")],
+            Some("remote-a"),
+            false,
+        );
+        let probe: Option<&HostProbeResult> = None;
+        let outcome = resolve_boot_outcome(&cfg, probe, true, None);
+        assert_eq!(outcome.target, Some("remote".to_string()));
+        assert_eq!(outcome.status, "unreachable");
+        assert_eq!(outcome.host_id.as_deref(), Some("remote-a"));
+    }
+
+    // --- Startup failure fallback boot outcome tests ---
+
+    #[test]
+    fn startup_failure_returns_recovery_local_unavailable_when_default_is_local() {
+        let cfg = make_config(vec![], Some("local"), true);
+        let outcome = compute_local_startup_failure_boot_outcome(&cfg);
+        assert_eq!(outcome.target, Some("local".to_string()));
+        assert_eq!(outcome.status, "unreachable");
+    }
+
+    #[test]
+    fn startup_failure_returns_first_launch_when_no_default_and_choice_not_completed() {
+        let cfg = make_config(vec![], None, false);
+        let outcome = compute_local_startup_failure_boot_outcome(&cfg);
+        assert_eq!(outcome.target, None);
+        assert_eq!(outcome.status, "not-configured");
+    }
+
+    #[test]
+    fn startup_failure_returns_recovery_no_default_host_when_choice_completed_but_no_default() {
+        let cfg = make_config(vec![], None, true);
+        let outcome = compute_local_startup_failure_boot_outcome(&cfg);
+        assert_eq!(outcome.target, None);
+        assert_eq!(outcome.status, "not-configured");
+    }
+
+    #[test]
+    fn startup_failure_never_returns_main_outcome() {
+        // When the local server fails to start, the fallback outcome must
+        // never be a "main-*" variant because the startup-failure path
+        // only injects globals into the already-open startup window — it
+        // does NOT navigate to a remote URL. A "main-*" outcome would
+        // gate splash dismissal on initialization and hang.
+        let cfg = make_config(vec![], None, false);
+        let outcome = compute_local_startup_failure_boot_outcome(&cfg);
+        assert!(
+            outcome.status != "ok",
+            "startup failure fallback must not return main-* outcome, got: {:?}",
+            outcome
+        );
+    }
+
+    #[test]
+    fn startup_failure_init_script_contains_boot_outcome_json() {
+        let cfg = make_config(vec![], Some("local"), true);
+        let outcome = compute_local_startup_failure_boot_outcome(&cfg);
+        let script = build_startup_failure_init_script(&outcome);
+        // The script must contain the serialized boot outcome JSON.
+        assert!(
+            script.contains(r#""target":"local""#) && script.contains(r#""status":"unreachable""#),
+            "init script should embed the structured boot outcome"
+        );
+        // It must also set __OPENCHAMBER_DESKTOP_BOOT_OUTCOME__
+        assert!(
+            script.contains("__OPENCHAMBER_DESKTOP_BOOT_OUTCOME__"),
+            "init script must set __OPENCHAMBER_DESKTOP_BOOT_OUTCOME__"
+        );
     }
 }

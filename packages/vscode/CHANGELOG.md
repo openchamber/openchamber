@@ -1,3 +1,13 @@
+## [1.9.5] - 2026-04-14
+
+- Chat/Tool Output: added an interactive tree viewer for structured outputs and fixed JSON quote rendering, making large payloads easier to inspect accurately (thanks to @yaozhenghangma).
+- Chat/Reliability: fixed question-tool content disappearing after refresh, so follow-up answers remain visible after panel reloads (thanks to @jwcrystal).
+- Sync/Performance: optimized multi-session streaming with per-directory queues, event coalescing, and parts-gap recovery for steadier live updates in busy workspaces (thanks to @jwcrystal).
+- Task/Reliability: hardened subagent session resolution and polling lifecycle handling to reduce silent task failures (thanks to @jwcrystal).
+- Sessions/UI: kept active sessions visible in Recent, auto-expanded parent groups for subagent sessions, and hid empty archived/folder sections for cleaner navigation (thanks to @jwcrystal).
+- Models: restored model-variant compatibility with newer OpenCode runtimes so variant selection behaves more reliably (thanks to @Chi-square-test).
+- Usage: added Zhipu AI Coding Plan tracking for broader quota visibility in the extension (thanks to @cainiao1992).
+
 ## [1.9.4] - 2026-04-07
 
 - Reliability/Streaming: added loading timeouts, automatic SSE reconnect, and message retry behavior so temporary connection stalls recover more reliably (thanks to @jwcrystal).

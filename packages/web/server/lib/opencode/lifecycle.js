@@ -1,7 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
-import fs from 'node:fs';
 import net from 'node:net';
-import path from 'node:path';
 
 export const createOpenCodeLifecycleRuntime = (deps) => {
   const {
@@ -18,7 +16,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     ensureLocalOpenCodeServerPassword,
     buildWslExecArgs,
     resolveWslExecutablePath,
-    opencodeShimInterpreter,
+    resolveManagedOpenCodeLaunchSpec,
     setOpenCodePort,
     setDetectedOpenCodeApiPrefix,
     setupProxy,
@@ -27,7 +25,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
   } = deps;
 
   const killProcessOnPort = (port) => {
-    if (!port) return;
+    if (!port || process.platform === 'win32') return;
     try {
       const result = spawnSync('lsof', ['-ti', `:${port}`], { encoding: 'utf8', timeout: 5000, windowsHide: true });
       const output = result.stdout || '';
@@ -43,6 +41,139 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       }
     } catch {
     }
+  };
+
+  const hasChildProcessExited = (child) => !child || child.exitCode !== null || child.signalCode !== null;
+
+  const waitForChildProcessClose = (child, timeoutMs) => new Promise((resolve) => {
+    if (!child || hasChildProcessExited(child)) {
+      resolve(true);
+      return;
+    }
+
+    let done = false;
+    const finish = (closed) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      child.off('close', onClose);
+      child.off('error', onError);
+      resolve(closed);
+    };
+
+    const onClose = () => finish(true);
+    const onError = () => finish(hasChildProcessExited(child));
+    const timer = setTimeout(() => finish(hasChildProcessExited(child)), timeoutMs);
+
+    child.once('close', onClose);
+    child.once('error', onError);
+  });
+
+  const waitForPortRelease = (port, timeoutMs, hostname = env.ENV_CONFIGURED_OPENCODE_HOSTNAME) => {
+    if (!port) {
+      return Promise.resolve(true);
+    }
+
+    const probeHost = !hostname || hostname === '0.0.0.0' || hostname === '::' || hostname === '[::]'
+      ? '127.0.0.1'
+      : hostname;
+    const deadline = Date.now() + timeoutMs;
+
+    return new Promise((resolve) => {
+      const attempt = () => {
+        const socket = net.connect({ port, host: probeHost });
+        let settled = false;
+
+        const finish = (released) => {
+          if (settled) return;
+          settled = true;
+          socket.removeAllListeners();
+          socket.destroy();
+          if (released || Date.now() >= deadline) {
+            resolve(released);
+            return;
+          }
+          setTimeout(attempt, 150);
+        };
+
+        socket.once('connect', () => finish(false));
+        socket.once('timeout', () => finish(true));
+        socket.once('error', (error) => {
+          if (error && typeof error === 'object' && (error.code === 'ECONNREFUSED' || error.code === 'EHOSTUNREACH')) {
+            finish(true);
+            return;
+          }
+          finish(false);
+        });
+        socket.setTimeout(500);
+      };
+
+      attempt();
+    });
+  };
+
+  const closeManagedOpenCodeChild = async (child) => {
+    if (!child) {
+      return;
+    }
+
+    const pid = child.pid;
+    if (!pid || hasChildProcessExited(child)) {
+      await waitForChildProcessClose(child, 250);
+      return;
+    }
+
+    if (process.platform === 'win32') {
+      try {
+        child.kill();
+      } catch {
+      }
+
+      if (await waitForChildProcessClose(child, 800)) {
+        return;
+      }
+
+      try {
+        spawnSync('taskkill', ['/pid', String(pid), '/t'], {
+          stdio: 'ignore',
+          timeout: 3000,
+          windowsHide: true,
+        });
+      } catch {
+      }
+
+      if (await waitForChildProcessClose(child, 1500)) {
+        return;
+      }
+
+      try {
+        spawnSync('taskkill', ['/pid', String(pid), '/f', '/t'], {
+          stdio: 'ignore',
+          timeout: 5000,
+          windowsHide: true,
+        });
+      } catch {
+      }
+
+      await waitForChildProcessClose(child, 3000);
+      return;
+    }
+
+    try {
+      child.kill('SIGTERM');
+    } catch {
+    }
+
+    if (await waitForChildProcessClose(child, 2500)) {
+      return;
+    }
+
+    try {
+      child.kill('SIGKILL');
+    } catch {
+    }
+
+    await waitForChildProcessClose(child, 1000);
   };
 
   const createManagedOpenCodeServerProcess = async ({ hostname, port, timeout, cwd, env: processEnv }) => {
@@ -72,26 +203,13 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     }
 
     if (process.platform === 'win32' && !state.useWslForOpencode) {
-      const interpreter = opencodeShimInterpreter(binary);
-      if (interpreter) {
-        args.unshift(binary);
-        binary = interpreter;
-      } else {
-        try {
-          const shimContent = fs.readFileSync(binary, 'utf8');
-          const jsMatch = shimContent.match(/node_modules[\\/]opencode[^\s"']*/);
-          if (jsMatch) {
-            const candidate = path.resolve(path.dirname(binary), jsMatch[0]);
-            if (fs.existsSync(candidate)) {
-              const realInterp = opencodeShimInterpreter(candidate);
-              if (realInterp) {
-                args.unshift(candidate);
-                binary = realInterp;
-              }
-            }
-          }
-        } catch {
+      const launchSpec = resolveManagedOpenCodeLaunchSpec(binary);
+      if (launchSpec?.binary) {
+        if (launchSpec.wrapperType) {
+          console.log(`Launching OpenCode via ${launchSpec.wrapperType}: ${launchSpec.binary}`);
         }
+        binary = launchSpec.binary;
+        args = [...(Array.isArray(launchSpec.args) ? launchSpec.args : []), ...args];
       }
     }
 
@@ -155,11 +273,8 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
 
     return {
       url,
-      close() {
-        try {
-          child.kill('SIGTERM');
-        } catch {
-        }
+      async close() {
+        await closeManagedOpenCodeChild(child);
       },
     };
   };
@@ -302,7 +417,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       }
 
       try {
-        serverInstance.close();
+        await serverInstance.close();
       } catch {
       }
       throw new Error('Server started but health check failed (timeout)');
@@ -359,7 +474,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       if (state.openCodeProcess) {
         console.log('Stopping existing OpenCode process...');
         try {
-          state.openCodeProcess.close();
+          await state.openCodeProcess.close();
         } catch (error) {
           console.warn('Error closing OpenCode process:', error);
         }
@@ -368,7 +483,9 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       }
 
       killProcessOnPort(portToKill);
-      await new Promise((resolve) => setTimeout(resolve, 250));
+      if (!(await waitForPortRelease(portToKill, 5000))) {
+        console.warn(`Timed out waiting for OpenCode port ${portToKill} to be released`);
+      }
 
       if (env.ENV_CONFIGURED_OPENCODE_PORT) {
         console.log(`Using OpenCode port from environment: ${env.ENV_CONFIGURED_OPENCODE_PORT}`);
@@ -626,5 +743,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     refreshOpenCodeAfterConfigChange,
     bootstrapOpenCodeAtStartup,
     startHealthMonitoring,
+    waitForPortRelease,
   };
 };

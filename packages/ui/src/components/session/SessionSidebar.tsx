@@ -3,7 +3,7 @@ import type { Session } from '@opencode-ai/sdk/v2';
 import { RiLayoutLeftLine } from '@remixicon/react';
 import { toast } from '@/components/ui';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { isDesktopLocalOriginActive, isDesktopShell, isTauriShell } from '@/lib/desktop';
+import { isDesktopLocalOriginActive, isDesktopShell, isTauriShell, startDesktopWindowDrag } from '@/lib/desktop';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { formatDirectoryName, cn } from '@/lib/utils';
@@ -128,8 +128,6 @@ const SessionStatusActivityBridge: React.FC<SessionStatusActivityBridgeProps> = 
     [globalSessionStatuses],
   );
 
-  const previousStreamingIdsRef = React.useRef<Set<string>>(new Set());
-
   React.useEffect(() => {
     const nextStreamingIds = new Set<string>();
     sessionStatus.forEach((status, sessionId) => {
@@ -138,11 +136,9 @@ const SessionStatusActivityBridge: React.FC<SessionStatusActivityBridgeProps> = 
       }
     });
 
-    const previousStreamingIds = previousStreamingIdsRef.current;
-    const startedStreamingIds = Array.from(nextStreamingIds).filter((sessionId) => !previousStreamingIds.has(sessionId));
-    if (startedStreamingIds.length > 0) {
+    if (nextStreamingIds.size > 0) {
       setActiveNowEntries((prev) => {
-        const next = startedStreamingIds.reduce((entries, sessionId) => addActiveNowSession(entries, sessionId), prev);
+        const next = Array.from(nextStreamingIds).reduce((entries, sessionId) => addActiveNowSession(entries, sessionId), prev);
         if (next === prev) {
           return prev;
         }
@@ -150,8 +146,6 @@ const SessionStatusActivityBridge: React.FC<SessionStatusActivityBridgeProps> = 
         return next;
       });
     }
-
-    previousStreamingIdsRef.current = nextStreamingIds;
   }, [sessionStatus, safeStorage, setActiveNowEntries]);
 
   return null;
@@ -490,13 +484,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
       return;
     }
 
-    try {
-      const { getCurrentWindow } = await import('@tauri-apps/api/window');
-      const appWindow = getCurrentWindow();
-      await appWindow.startDragging();
-    } catch (error) {
-      console.error('Failed to start window dragging:', error);
-    }
+    await startDesktopWindowDrag();
   }, [isDesktopShellRuntime]);
 
   const {
@@ -731,6 +719,23 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         toast.error('Failed to select directory');
       });
   }, [addProject, tauriIpcAvailable]);
+
+  // Auto-expand parent session when navigating to a subagent (child) session
+  React.useEffect(() => {
+    if (!currentSessionId) return;
+    const current = sessions.find((s) => s.id === currentSessionId);
+    const parentID = (current as Session & { parentID?: string | null })?.parentID;
+    if (!parentID) return;
+    setExpandedParents((prev) => {
+      if (prev.has(parentID)) return prev;
+      const next = new Set(prev);
+      next.add(parentID);
+      try {
+        safeStorage.setItem(SESSION_EXPANDED_STORAGE_KEY, JSON.stringify(Array.from(next)));
+      } catch { /* ignored */ }
+      return next;
+    });
+  }, [currentSessionId, sessions, safeStorage]);
 
   const toggleParent = React.useCallback((sessionId: string) => {
     setExpandedParents((prev) => {

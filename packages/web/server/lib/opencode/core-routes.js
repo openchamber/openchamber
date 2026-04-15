@@ -67,6 +67,100 @@ export const registerAuthAndAccessRoutes = (app, dependencies) => {
     return uiAuthController.handleSessionCreate(req, res);
   });
 
+  app.get('/auth/passkey/status', (req, res) => {
+    const requestScope = tunnelAuthController.classifyRequestScope(req);
+    if (requestScope === 'tunnel' || requestScope === 'unknown-public') {
+      return res.json({ enabled: false, hasPasskeys: false, passkeyCount: 0, rpID: null, tunnelLocked: true });
+    }
+    return uiAuthController.handlePasskeyStatus(req, res);
+  });
+
+  app.post('/auth/passkey/authenticate/options', (req, res) => {
+    const requestScope = tunnelAuthController.classifyRequestScope(req);
+    if (requestScope === 'tunnel' || requestScope === 'unknown-public') {
+      return res.status(403).json({ error: 'Passkey login is disabled for tunnel scope', tunnelLocked: true });
+    }
+    return uiAuthController.handlePasskeyAuthenticationOptions(req, res);
+  });
+
+  app.post('/auth/passkey/authenticate/verify', (req, res) => {
+    const requestScope = tunnelAuthController.classifyRequestScope(req);
+    if (requestScope === 'tunnel' || requestScope === 'unknown-public') {
+      return res.status(403).json({ error: 'Passkey login is disabled for tunnel scope', tunnelLocked: true });
+    }
+    return uiAuthController.handlePasskeyAuthenticationVerify(req, res);
+  });
+
+  app.post('/auth/passkey/register/options', async (req, res, next) => {
+    const requestScope = tunnelAuthController.classifyRequestScope(req);
+    if (requestScope === 'tunnel' || requestScope === 'unknown-public') {
+      return res.status(403).json({ error: 'Passkey setup is disabled for tunnel scope', tunnelLocked: true });
+    }
+    try {
+      await uiAuthController.requireAuth(req, res, async () => {
+        await uiAuthController.handlePasskeyRegistrationOptions(req, res);
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post('/auth/passkey/register/verify', async (req, res, next) => {
+    const requestScope = tunnelAuthController.classifyRequestScope(req);
+    if (requestScope === 'tunnel' || requestScope === 'unknown-public') {
+      return res.status(403).json({ error: 'Passkey setup is disabled for tunnel scope', tunnelLocked: true });
+    }
+    try {
+      await uiAuthController.requireAuth(req, res, async () => {
+        await uiAuthController.handlePasskeyRegistrationVerify(req, res);
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get('/api/passkeys', async (req, res, next) => {
+    const requestScope = tunnelAuthController.classifyRequestScope(req);
+    if (requestScope === 'tunnel' || requestScope === 'unknown-public') {
+      return res.status(403).json({ error: 'Passkey management is disabled for tunnel scope', tunnelLocked: true });
+    }
+    try {
+      await uiAuthController.requireAuth(req, res, async () => {
+        await uiAuthController.handlePasskeyList(req, res);
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.delete('/api/passkeys/:id', async (req, res, next) => {
+    const requestScope = tunnelAuthController.classifyRequestScope(req);
+    if (requestScope === 'tunnel' || requestScope === 'unknown-public') {
+      return res.status(403).json({ error: 'Passkey management is disabled for tunnel scope', tunnelLocked: true });
+    }
+    try {
+      await uiAuthController.requireAuth(req, res, async () => {
+        await uiAuthController.handlePasskeyRevoke(req, res);
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post('/api/auth/reset', async (req, res, next) => {
+    const requestScope = tunnelAuthController.classifyRequestScope(req);
+    if (requestScope === 'tunnel' || requestScope === 'unknown-public') {
+      return res.status(403).json({ error: 'Global sign-out is disabled for tunnel scope', tunnelLocked: true });
+    }
+    try {
+      await uiAuthController.requireAuth(req, res, async () => {
+        await uiAuthController.handleResetAuth(req, res);
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.get('/connect', async (req, res) => {
     try {
       const token = typeof req.query?.t === 'string' ? req.query.t : '';

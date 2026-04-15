@@ -648,6 +648,35 @@ const getCodeLanguage = (className: string | undefined): string => {
   return match?.[1]?.toLowerCase() ?? 'text';
 };
 
+const decodeHtmlEntities = (value: string): string => {
+  let decoded = value;
+  for (let i = 0; i < 3; i += 1) {
+    const next = decoded
+      .replace(/&quot;/g, '"')
+      .replace(/&#34;/g, '"')
+      .replace(/&apos;/g, "'")
+      .replace(/&#39;/g, "'")
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&amp;/g, '&');
+    if (next === decoded) {
+      return decoded;
+    }
+    decoded = next;
+  }
+  return decoded;
+};
+
+const normalizeCodeBlockText = (code: string, language: string): string => {
+  if (!['json', 'jsonc', 'json5'].includes(language)) {
+    return code;
+  }
+  if (!/&(quot|#34|amp;quot|lt|gt|amp|apos|#39);/.test(code)) {
+    return code;
+  }
+  return decodeHtmlEntities(code);
+};
+
 const MarkdownCodeBlock: React.FC<{
   code: string;
   language: string;
@@ -751,8 +780,8 @@ const buildMarkdownComponents = ({
   pre({ children, ...props }) {
     const child = React.Children.only(children) as React.ReactElement<{ className?: string; children?: React.ReactNode }>;
     const className = child.props.className;
-    const code = extractCodeText(child.props.children).replace(/\n$/, '');
     const language = getCodeLanguage(className);
+    const code = normalizeCodeBlockText(extractCodeText(child.props.children).replace(/\n$/, ''), language);
     if (language === 'mermaid') {
       return <MermaidBlock source={code} mode={useUIStore.getState().mermaidRenderingMode} />;
     }

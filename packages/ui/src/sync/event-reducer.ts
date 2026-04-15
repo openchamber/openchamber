@@ -1,6 +1,5 @@
 import type {
   Event,
-  FileDiff,
   Message,
   Part,
   PermissionRequest,
@@ -11,11 +10,45 @@ import type {
   Todo,
 } from "@opencode-ai/sdk/v2/client"
 import { Binary } from "./binary"
-import type { GlobalState, State } from "./types"
+import type { FileDiff, GlobalState, State } from "./types"
 import { dropSessionCaches } from "./session-cache"
 import { stripSessionDiffSnapshots } from "./sanitize"
+import { syncDebug } from "./debug"
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
+const DELTA_OVERLAP_FIELDS = ["text", "output"] as const
+
+type DedupeMetadata = {
+  __dedupeNextDeltaFields?: string[]
+}
+
+function appendNonOverlappingDelta(existingValue: string | undefined, delta: string) {
+  if (!existingValue || delta.length === 0) return (existingValue ?? "") + delta
+  if (existingValue.endsWith(delta)) return existingValue
+
+  const maxOverlap = Math.min(existingValue.length, delta.length)
+  for (let overlap = maxOverlap; overlap > 0; overlap--) {
+    if (existingValue.endsWith(delta.slice(0, overlap))) {
+      return existingValue + delta.slice(overlap)
+    }
+  }
+
+  return existingValue + delta
+}
+
+function getUpdatedDeltaFields(previous: Part, next: Part) {
+  const dedupeFields: string[] = []
+  for (const field of DELTA_OVERLAP_FIELDS) {
+    const previousValue = (previous as Record<string, unknown>)[field]
+    const nextValue = (next as Record<string, unknown>)[field]
+    if (typeof previousValue !== "string" || typeof nextValue !== "string") continue
+    if (previousValue.length === 0 || nextValue.length === 0) continue
+    if (nextValue === previousValue || nextValue.startsWith(previousValue) || previousValue.startsWith(nextValue)) {
+      dedupeFields.push(field)
+    }
+  }
+  return dedupeFields
+}
 
 // ---------------------------------------------------------------------------
 // Global events
@@ -160,6 +193,7 @@ export function applyDirectoryEvent(
           && (existing as { finish?: unknown }).finish === (info as { finish?: unknown }).finish
           && (existing.time as { completed?: number })?.completed === (info.time as { completed?: number })?.completed
         if (unchanged) {
+          syncDebug.reducer.messageUpdatedUnchanged(info.sessionID, info.id, info.role, (info as { finish?: unknown }).finish, (info.time as { completed?: number })?.completed)
           return false
         }
         const next = [...messages]
@@ -190,17 +224,25 @@ export function applyDirectoryEvent(
 
     case "message.part.updated": {
       const part = (event.properties as { part: Part }).part
-      if (SKIP_PARTS.has(part.type)) return false
+      if (SKIP_PARTS.has(part.type)) {
+        syncDebug.reducer.partSkipped((part as { messageID: string }).messageID, part.id, part.type)
+        return false
+      }
       const messageID = (part as { messageID: string }).messageID
       const parts = draft.part[messageID]
       if (!parts) {
+        syncDebug.reducer.partUpdatedNoExistingParts(messageID, part.id, part.type)
         draft.part[messageID] = [part]
         return true
       }
       const next = [...parts]
       const result = Binary.search(next, part.id, (p) => p.id)
       if (result.found) {
-        next[result.index] = part
+        const previous = next[result.index]
+        const dedupeFields = getUpdatedDeltaFields(previous, part)
+        next[result.index] = dedupeFields.length > 0
+          ? { ...part, __dedupeNextDeltaFields: dedupeFields } as unknown as Part
+          : part
       } else {
         // Replace optimistic part (no sessionID) with server part of same type.
         // Gate: only scan if the first part lacks sessionID (optimistic parts are
@@ -246,14 +288,26 @@ export function applyDirectoryEvent(
         delta: string
       }
       const parts = draft.part[props.messageID]
-      if (!parts) return false
+      if (!parts) {
+        syncDebug.reducer.partDeltaNoParts(props.messageID, props.partID)
+        return false
+      }
       const result = Binary.search(parts, props.partID, (p) => p.id)
-      if (!result.found) return false
+      if (!result.found) {
+        syncDebug.reducer.partDeltaNotFound(props.messageID, props.partID)
+        return false
+      }
       const existing = parts[result.index] as Record<string, unknown>
       const existingValue = existing[props.field] as string | undefined
+      const dedupeFields = (existing as DedupeMetadata).__dedupeNextDeltaFields ?? []
+      const shouldDedupe = dedupeFields.includes(props.field)
       // Create new Part object + new array so React detects the change
       const next = [...parts]
-      next[result.index] = { ...existing, [props.field]: (existingValue ?? "") + props.delta } as Part
+      next[result.index] = {
+        ...existing,
+        [props.field]: shouldDedupe ? appendNonOverlappingDelta(existingValue, props.delta) : (existingValue ?? "") + props.delta,
+        __dedupeNextDeltaFields: dedupeFields.filter((field) => field !== props.field),
+      } as unknown as Part
       draft.part[props.messageID] = next
       return true
     }
