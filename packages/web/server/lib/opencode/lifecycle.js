@@ -125,6 +125,15 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
 
     if (process.platform === 'win32') {
       try {
+        child.kill();
+      } catch {
+      }
+
+      if (await waitForChildProcessClose(child, 800)) {
+        return;
+      }
+
+      try {
         spawnSync('taskkill', ['/pid', String(pid), '/t'], {
           stdio: 'ignore',
           timeout: 3000,

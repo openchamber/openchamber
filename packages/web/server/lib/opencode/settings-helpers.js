@@ -371,6 +371,12 @@ export const createSettingsHelpers = (dependencies) => {
         result.diffViewMode = mode;
       }
     }
+    if (typeof candidate.gitChangesViewMode === 'string') {
+      const mode = candidate.gitChangesViewMode.trim();
+      if (mode === 'flat' || mode === 'tree') {
+        result.gitChangesViewMode = mode;
+      }
+    }
     if (typeof candidate.directoryShowHidden === 'boolean') {
       result.directoryShowHidden = candidate.directoryShowHidden;
     }

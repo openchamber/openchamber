@@ -98,6 +98,13 @@ let bootedAt = 0
 const BOOT_DEBOUNCE_MS = 1500
 const RECONNECT_MESSAGE_LIMIT = 200
 const RECONNECT_SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
+const requestSignature = (items: Array<{ id: string }> | undefined): string => {
+  if (!items || items.length === 0) return ""
+  return items
+    .map((item) => item.id)
+    .sort(cmp)
+    .join("|")
+}
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 
@@ -718,6 +725,46 @@ async function resyncDirectoryAfterReconnect(
     setIndexedSessionDirectory(routingIndex, nextSession.id, directory)
     setIndexedSessionMessages(routingIndex, sessionId, directory, nextMessages)
   }))
+
+  // Re-fetch pending questions on reconnect — they may have been asked
+  // during the SSE disconnection window and will not arrive via SSE events.
+  // Overwrite sessions covered by API response, and clear reconnect candidates
+  // that remain unchanged during the request but are absent from the response.
+  // If SSE changed a session while the request was in-flight, keep that data.
+  try {
+    const before = store.getState()
+    const beforeSignatures = new Map(
+      candidateSessionIds.map((sessionId) => [sessionId, requestSignature(before.question[sessionId])]),
+    )
+    const pendingQuestions = await opencodeClient.listPendingQuestions({ directories: [directory] })
+    const grouped: Record<string, QuestionRequest[]> = {}
+    for (const q of pendingQuestions) {
+      if (!q?.id || !q.sessionID) continue
+      const list = grouped[q.sessionID]
+      if (list) list.push(q)
+      else grouped[q.sessionID] = [q]
+    }
+    // Sort each group by id for binary-search compatibility
+    for (const sessionId of Object.keys(grouped)) {
+      grouped[sessionId].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    }
+    store.setState((state: DirectoryStore) => {
+      const merged = { ...state.question }
+      for (const [sessionId, questions] of Object.entries(grouped)) {
+        merged[sessionId] = questions
+      }
+      for (const sessionId of candidateSessionIds) {
+        if (grouped[sessionId]) continue
+        const beforeSignature = beforeSignatures.get(sessionId) ?? ""
+        const currentSignature = requestSignature(state.question[sessionId])
+        if (currentSignature !== beforeSignature) continue
+        delete merged[sessionId]
+      }
+      return { question: merged }
+    })
+  } catch {
+    // Non-fatal: question resync best-effort
+  }
 
   ingestDirectoryStateIntoRoutingIndex(routingIndex, directory, store.getState())
 }
