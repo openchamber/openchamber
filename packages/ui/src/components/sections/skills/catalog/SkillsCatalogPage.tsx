@@ -155,8 +155,8 @@ export const SkillsCatalogPage: React.FC<SkillsCatalogPageProps> = ({ mode, onMo
               <div className="h-10">
                 <SortableTabsStrip
                   items={[
-                    { id: 'manual', label: 'Manual' },
-                    { id: 'external', label: 'External' },
+                    { id: 'manual', label: m.skCatalogManual() },
+                    { id: 'external', label: m.skCatalogExternal() },
                   ]}
                   activeId={mode}
                   onSelect={(next) => onModeChange(next as 'manual' | 'external')}

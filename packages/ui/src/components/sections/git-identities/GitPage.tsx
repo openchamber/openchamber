@@ -256,7 +256,7 @@ const IdentityRow: React.FC<IdentityRowProps> = ({
       onClick={onEdit}
       role="button"
       tabIndex={0}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onEdit(); }}
+      onKeyDown={(e) => { if (e.key === m.commonKeyEnter() || e.key === ' ') onEdit(); }}
     >
       <div className="flex items-center gap-3 min-w-0">
         <IconComponent className="w-4 h-4 shrink-0" style={{ color: iconColor }} />

@@ -49,7 +49,7 @@ export const UsageSidebar: React.FC<UsageSidebarProps> = ({ onItemSelect }) => {
     try {
       await updateDesktopSettings(changes);
     } catch (error) {
-      console.warn('Failed to save usage settings:', error);
+      console.warn(m.usageFailedSaveSettings(), error);
     }
   }, []);
 
@@ -90,7 +90,7 @@ export const UsageSidebar: React.FC<UsageSidebarProps> = ({ onItemSelect }) => {
                   <Checkbox
                     checked={usageAutoRefresh}
                     onChange={handleUsageAutoRefreshChange}
-                    ariaLabel="Toggle auto refresh"
+                    ariaLabel={m.usageToggleAutoRefresh()}
                   />
                 </span>
               </TooltipTrigger>

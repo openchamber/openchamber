@@ -19,33 +19,50 @@ import { browserVoiceService } from '@/lib/voice/browserVoiceService';
 import { audioStreamService } from '@/lib/voice/audioStreamService';
 import { cn } from '@/lib/utils';
 import { m } from '@/lib/i18n/messages';
+import {
+    voiceLangEnglish,
+    voiceLangGerman,
+    voiceLangItalian,
+    voiceVoiceAlloy,
+    voiceVoiceBallad,
+    voiceVoiceCoral,
+    voiceVoiceEcho,
+    voiceVoiceFable,
+    voiceVoiceNova,
+    voiceVoiceOnyx,
+    voiceVoiceSage,
+    voiceVoiceShimmer,
+    voiceVoiceVerse,
+    voiceVoiceMarin,
+    voiceVoiceCedar,
+} from '@/lib/i18n/messages';
 const LANGUAGE_OPTIONS = [
-    { value: 'en-US', label: 'English' },
+    { value: 'en-US', label: voiceLangEnglish() },
     { value: 'es-ES', label: 'Español' },
     { value: 'fr-FR', label: 'Français' },
-    { value: 'de-DE', label: 'Deutsch' },
+    { value: 'de-DE', label: voiceLangGerman() },
     { value: 'ja-JP', label: '日本語' },
     { value: 'zh-CN', label: '中文' },
     { value: 'pt-BR', label: 'Português' },
-    { value: 'it-IT', label: 'Italiano' },
+    { value: 'it-IT', label: voiceLangItalian() },
     { value: 'ko-KR', label: '한국어' },
     { value: 'uk-UA', label: 'Українська' },
 ];
 
 const OPENAI_VOICE_OPTIONS = [
-    { value: 'alloy', label: 'Alloy' },
+    { value: 'alloy', label: voiceVoiceAlloy() },
     { value: 'ash', label: 'Ash' },
-    { value: 'ballad', label: 'Ballad' },
-    { value: 'coral', label: 'Coral' },
-    { value: 'echo', label: 'Echo' },
-    { value: 'fable', label: 'Fable' },
-    { value: 'nova', label: 'Nova' },
-    { value: 'onyx', label: 'Onyx' },
-    { value: 'sage', label: 'Sage' },
-    { value: 'shimmer', label: 'Shimmer' },
-    { value: 'verse', label: 'Verse' },
-    { value: 'marin', label: 'Marin' },
-    { value: 'cedar', label: 'Cedar' },
+    { value: 'ballad', label: voiceVoiceBallad() },
+    { value: 'coral', label: voiceVoiceCoral() },
+    { value: 'echo', label: voiceVoiceEcho() },
+    { value: 'fable', label: voiceVoiceFable() },
+    { value: 'nova', label: voiceVoiceNova() },
+    { value: 'onyx', label: voiceVoiceOnyx() },
+    { value: 'sage', label: voiceVoiceSage() },
+    { value: 'shimmer', label: voiceVoiceShimmer() },
+    { value: 'verse', label: voiceVoiceVerse() },
+    { value: 'marin', label: voiceVoiceMarin() },
+    { value: 'cedar', label: voiceVoiceCedar() },
 ];
 
 export const VoiceSettings: React.FC = () => {

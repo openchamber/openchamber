@@ -25,13 +25,13 @@ export const PaceIndicator: React.FC<PaceIndicatorProps> = ({
   const statusLabel = React.useMemo(() => {
     switch (paceInfo.status) {
       case 'on-track':
-        return 'On track';
+        return m.paceOnTrack();
       case 'slightly-fast':
-        return 'Slightly fast';
+        return m.paceSlightlyFast();
       case 'too-fast':
-        return 'Too fast';
+        return m.paceTooFast();
       case 'exhausted':
-        return 'Used up';
+        return m.paceUsedUp();
     }
   }, [paceInfo.status]);
 

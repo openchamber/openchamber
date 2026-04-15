@@ -74,7 +74,7 @@ export const SessionRetentionSettings: React.FC = () => {
           aria-pressed={autoDeleteEnabled}
           onClick={() => setAutoDeleteEnabled(!autoDeleteEnabled)}
           onKeyDown={(event) => {
-            if (event.key === ' ' || event.key === 'Enter') {
+            if (event.key === ' ' || event.key === m.commonKeyEnter()) {
               event.preventDefault();
               setAutoDeleteEnabled(!autoDeleteEnabled);
             }

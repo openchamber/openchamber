@@ -66,7 +66,7 @@ export const GitHubSettings: React.FC = () => {
           await refreshStatus(runtimeGitHub);
         }
       } catch (error) {
-        console.warn('Failed to load GitHub auth status:', error);
+        console.warn(m.githubFailedLoadAuth(), error);
       }
     })();
     return () => {
@@ -101,7 +101,7 @@ export const GitHubSettings: React.FC = () => {
       const url = payload.verificationUriComplete || payload.verificationUri;
       void openExternal(url);
     } catch (error) {
-      console.error('Failed to start GitHub connect:', error);
+      console.error(m.githubFailedStartConnect(), error);
       toast.error(m.githubToastConnectFailed());
     } finally {
       setIsBusy(false);
@@ -153,13 +153,13 @@ export const GitHubSettings: React.FC = () => {
             setPollIntervalMs((prev) => (prev ? prev + 5000 : 5000));
           }
 
-          if (result.status === 'expired_token' || result.status === 'access_denied') {
-             toast.error(result.error || m.githubToastAuthorizationFailed());
-            setFlow(null);
-            stopPolling();
-          }
-        } catch (error) {
-          console.warn('GitHub polling failed:', error);
+           if (result.status === 'expired_token' || result.status === 'access_denied') {
+              toast.error(result.error || m.githubToastAuthorizationFailed());
+             setFlow(null);
+             stopPolling();
+           }
+         } catch (error) {
+           console.warn(m.githubPollingFailed(), error);
         }
       })();
     }, pollIntervalMs);
@@ -191,7 +191,7 @@ export const GitHubSettings: React.FC = () => {
       toast.success(m.githubToastDisconnected());
       await refreshStatus(runtimeGitHub, { force: true });
     } catch (error) {
-      console.error('Failed to disconnect GitHub:', error);
+      console.error(m.githubFailedDisconnect(), error);
       toast.error(m.githubToastDisconnectFailed());
     } finally {
       setIsBusy(false);
@@ -223,7 +223,7 @@ export const GitHubSettings: React.FC = () => {
       setStatus(payload);
       toast.success(m.githubToastSwitched());
     } catch (error) {
-      console.error('Failed to switch GitHub account:', error);
+      console.error(m.githubFailedSwitchAccount(), error);
       toast.error(m.githubToastSwitchFailed());
     } finally {
       setIsBusy(false);

@@ -142,7 +142,7 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
 
   const handleDeleteAgent = async (agent: Agent) => {
     if (isAgentBuiltIn(agent)) {
-      toast.error('Built-in agents cannot be deleted');
+      toast.error(m.agBuiltinNoDelete());
       return;
     }
 
@@ -180,9 +180,9 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
       }
       closeConfirmActionDialog();
     } else if (confirmActionType === 'delete') {
-      toast.error('Failed to delete agent');
+      toast.error(m.agFailedDelete());
     } else {
-      toast.error('Failed to reset agent');
+      toast.error(m.agFailedReset());
     }
 
     setIsConfirmActionPending(false);
@@ -232,7 +232,7 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
     const sanitizedName = renameNewName.trim().replace(/\s+/g, '-');
 
     if (!sanitizedName) {
-      toast.error('Agent name is required');
+      toast.error(m.agNameRequired());
       return;
     }
 
@@ -242,7 +242,7 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
     }
 
     if (agents.some((a) => a.name === sanitizedName)) {
-      toast.error('An agent with this name already exists');
+      toast.error(m.agNameExists());
       return;
     }
 
@@ -271,10 +271,10 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
         toast.success(`Agent renamed to "${sanitizedName}"`);
         setSelectedAgent(sanitizedName);
       } else {
-        toast.error('Failed to remove old agent after rename');
+        toast.error(m.agFailedRemoveOldRename());
       }
     } else {
-      toast.error('Failed to rename agent');
+      toast.error(m.agFailedRename());
     }
 
     setRenameDialogAgent(null);
@@ -438,7 +438,7 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
       >
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>{confirmActionType === 'delete' ? 'Delete Agent' : 'Reset Agent'}</DialogTitle>
+            <DialogTitle>{confirmActionType === 'delete' ? m.agDeleteAgent() : m.agResetAgent()}</DialogTitle>
             <DialogDescription>
               {confirmActionType === 'delete'
                 ? `Are you sure you want to delete agent "${confirmActionAgent?.name}"?`
@@ -455,7 +455,7 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
               Cancel
             </Button>
             <Button size="sm" onClick={handleConfirmAction} disabled={isConfirmActionPending}>
-              {confirmActionType === 'delete' ? 'Delete' : 'Reset'}
+              {confirmActionType === 'delete' ? m.agDelete() : m.agReset()}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -476,7 +476,7 @@ export const AgentsSidebar: React.FC<AgentsSidebarProps> = ({ onItemSelect }) =>
             placeholder={m.agentsRenamePlaceholder()}
             className="text-foreground placeholder:text-muted-foreground"
             onKeyDown={(e) => {
-              if (e.key === 'Enter') {
+              if (e.key === m.commonKeyEnter()) {
                 handleRenameAgent();
               }
             }}

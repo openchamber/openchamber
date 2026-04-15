@@ -40,6 +40,7 @@ export const aboutDiagPreparing = compatMessage(generated.about_diag_preparing)
 export const aboutDiscord = compatMessage(generated.about_discord)
 export const aboutFanMade = compatMessage(generated.about_fan_made)
 export const aboutGithubLink = compatMessage(generated.about_github_link)
+export const aboutLatestVersion = compatMessage(generated.about_latest_version)
 export const aboutMadeWithLove = compatMessage(generated.about_made_with_love)
 export const aboutUpToDate = compatMessage(generated.about_up_to_date)
 export const aboutVersion = compatMessage(generated.about_version)
@@ -70,12 +71,20 @@ export const agAgentName = compatMessage(generated.ag_agent_name)
 export const agAll = compatMessage(generated.ag_all)
 export const agAllow = compatMessage(generated.ag_allow)
 export const agAsk = compatMessage(generated.ag_ask)
+export const agBuiltinNoDelete = compatMessage(generated.ag_builtin_no_delete)
 export const agClearTemp = compatMessage(generated.ag_clear_temp)
 export const agClearTopP = compatMessage(generated.ag_clear_top_p)
+export const agDelete = compatMessage(generated.ag_delete)
+export const agDeleteAgent = compatMessage(generated.ag_delete_agent)
 export const agDeny = compatMessage(generated.ag_deny)
 export const agDescription = compatMessage(generated.ag_description)
 export const agDescriptionPlaceholder = compatMessage(generated.ag_description_placeholder)
 export const agEditAgentSettings = compatMessage(generated.ag_edit_agent_settings)
+export const agErrorSaving = compatMessage(generated.ag_error_saving)
+export const agFailedDelete = compatMessage(generated.ag_failed_delete)
+export const agFailedRemoveOldRename = compatMessage(generated.ag_failed_remove_old_rename)
+export const agFailedRename = compatMessage(generated.ag_failed_rename)
+export const agFailedReset = compatMessage(generated.ag_failed_reset)
 export const agGlobal = compatMessage(generated.ag_global)
 export const agGlobalAction = compatMessage(generated.ag_global_action)
 export const agGlobalDefault = compatMessage(generated.ag_global_default)
@@ -85,6 +94,8 @@ export const agMode = compatMessage(generated.ag_mode)
 export const agModeTooltip = compatMessage(generated.ag_mode_tooltip)
 export const agModelParameters = compatMessage(generated.ag_model_parameters)
 export const agModified = compatMessage(generated.ag_modified)
+export const agNameExists = compatMessage(generated.ag_name_exists)
+export const agNameRequired = compatMessage(generated.ag_name_required)
 export const agNew = compatMessage(generated.ag_new)
 export const agNewAgent = compatMessage(generated.ag_new_agent)
 export const agNewAgentDesc = compatMessage(generated.ag_new_agent_desc)
@@ -95,6 +106,8 @@ export const agPatternPlaceholder = compatMessage(generated.ag_pattern_placehold
 export const agPermissionPlaceholder = compatMessage(generated.ag_permission_placeholder)
 export const agPrimary = compatMessage(generated.ag_primary)
 export const agPromptPlaceholder = compatMessage(generated.ag_prompt_placeholder)
+export const agReset = compatMessage(generated.ag_reset)
+export const agResetAgent = compatMessage(generated.ag_reset_agent)
 export const agRulesSummary = compatMessage(generated.ag_rules_summary)
 export const agSaveChanges = compatMessage(generated.ag_save_changes)
 export const agSaving = compatMessage(generated.ag_saving)
@@ -112,7 +125,14 @@ export const agToastPermissionRequired = compatMessage(generated.ag_toast_permis
 export const agToastSaveError = compatMessage(generated.ag_toast_save_error)
 export const agToastUpdateFailed = compatMessage(generated.ag_toast_update_failed)
 export const agToastUpdated = compatMessage(generated.ag_toast_updated)
+export const agToolCodesearch = compatMessage(generated.ag_tool_codesearch)
+export const agToolDoomLoop = compatMessage(generated.ag_tool_doom_loop)
+export const agToolExternalDirectory = compatMessage(generated.ag_tool_external_directory)
 export const agToolPermissions = compatMessage(generated.ag_tool_permissions)
+export const agToolTodoread = compatMessage(generated.ag_tool_todoread)
+export const agToolTodowrite = compatMessage(generated.ag_tool_todowrite)
+export const agToolWebfetch = compatMessage(generated.ag_tool_webfetch)
+export const agToolWebsearch = compatMessage(generated.ag_tool_websearch)
 export const agTopP = compatMessage(generated.ag_top_p)
 export const agTopPRange = compatMessage(generated.ag_top_p_range)
 export const agTopPTooltip = compatMessage(generated.ag_top_p_tooltip)
@@ -216,18 +236,28 @@ export const chatYou = compatMessage(generated.chat_you)
 export const chatYourAnswer = compatMessage(generated.chat_your_answer)
 export const cmdActions = compatMessage(generated.cmd_actions)
 export const cmdArgumentsHint = compatMessage(generated.cmd_arguments_hint)
+export const cmdBuiltinNoDelete = compatMessage(generated.cmd_builtin_no_delete)
 export const cmdCommandName = compatMessage(generated.cmd_command_name)
 export const cmdCommandTemplate = compatMessage(generated.cmd_command_template)
 export const cmdDarkTheme = compatMessage(generated.cmd_dark_theme)
+export const cmdDelete = compatMessage(generated.cmd_delete)
+export const cmdDeleteCommand = compatMessage(generated.cmd_delete_command)
 export const cmdDescription = compatMessage(generated.cmd_description)
 export const cmdDescriptionPlaceholder = compatMessage(generated.cmd_description_placeholder)
 export const cmdEditSettings = compatMessage(generated.cmd_edit_settings)
+export const cmdErrorSaving = compatMessage(generated.cmd_error_saving)
 export const cmdExecutionContext = compatMessage(generated.cmd_execution_context)
+export const cmdFailedDelete = compatMessage(generated.cmd_failed_delete)
+export const cmdFailedRemoveOldRename = compatMessage(generated.cmd_failed_remove_old_rename)
+export const cmdFailedRename = compatMessage(generated.cmd_failed_rename)
+export const cmdFailedReset = compatMessage(generated.cmd_failed_reset)
 export const cmdFileHint = compatMessage(generated.cmd_file_hint)
 export const cmdGlobal = compatMessage(generated.cmd_global)
 export const cmdIdentity = compatMessage(generated.cmd_identity)
 export const cmdKeyboardShortcuts = compatMessage(generated.cmd_keyboard_shortcuts)
 export const cmdLightTheme = compatMessage(generated.cmd_light_theme)
+export const cmdNameExists = compatMessage(generated.cmd_name_exists)
+export const cmdNameRequired = compatMessage(generated.cmd_name_required)
 export const cmdNewCommand = compatMessage(generated.cmd_new_command)
 export const cmdNewCommandDesc = compatMessage(generated.cmd_new_command_desc)
 export const cmdNewSession = compatMessage(generated.cmd_new_session)
@@ -247,6 +277,8 @@ export const cmdOverrideModel = compatMessage(generated.cmd_override_model)
 export const cmdPlaceholder = compatMessage(generated.cmd_placeholder)
 export const cmdProject = compatMessage(generated.cmd_project)
 export const cmdRecentSessions = compatMessage(generated.cmd_recent_sessions)
+export const cmdReset = compatMessage(generated.cmd_reset)
+export const cmdResetCommand = compatMessage(generated.cmd_reset_command)
 export const cmdSaveChanges = compatMessage(generated.cmd_save_changes)
 export const cmdSaving = compatMessage(generated.cmd_saving)
 export const cmdSelectFromSidebar = compatMessage(generated.cmd_select_from_sidebar)
@@ -283,6 +315,17 @@ export const commonDelete = compatMessage(generated.common_delete)
 export const commonDisabled = compatMessage(generated.common_disabled)
 export const commonEnabled = compatMessage(generated.common_enabled)
 export const commonError = compatMessage(generated.common_error)
+export const commonKeyCancel = compatMessage(generated.common_key_cancel)
+export const commonKeyConnect = compatMessage(generated.common_key_connect)
+export const commonKeyCreate = compatMessage(generated.common_key_create)
+export const commonKeyDelete = compatMessage(generated.common_key_delete)
+export const commonKeyDisconnect = compatMessage(generated.common_key_disconnect)
+export const commonKeyEnter = compatMessage(generated.common_key_enter)
+export const commonKeyEscape = compatMessage(generated.common_key_escape)
+export const commonKeyRemove = compatMessage(generated.common_key_remove)
+export const commonKeyReset = compatMessage(generated.common_key_reset)
+export const commonKeyRetry = compatMessage(generated.common_key_retry)
+export const commonKeySave = compatMessage(generated.common_key_save)
 export const commonLoading = compatMessage(generated.common_loading)
 export const commonPreview = compatMessage(generated.common_preview)
 export const commonReset = compatMessage(generated.common_reset)
@@ -338,6 +381,11 @@ export const ctxUser = compatMessage(generated.ctx_user)
 export const defaultsDefaultAgent = compatMessage(generated.defaults_default_agent)
 export const defaultsDefaultModel = compatMessage(generated.defaults_default_model)
 export const defaultsDefaultThinking = compatMessage(generated.defaults_default_thinking)
+export const defaultsFailedLoad = compatMessage(generated.defaults_failed_load)
+export const defaultsFailedSaveAgent = compatMessage(generated.defaults_failed_save_agent)
+export const defaultsFailedSaveModel = compatMessage(generated.defaults_failed_save_model)
+export const defaultsFailedSaveModelServer = compatMessage(generated.defaults_failed_save_model_server)
+export const defaultsFailedSaveVariant = compatMessage(generated.defaults_failed_save_variant)
 export const defaultsOpencodeDefault = compatMessage(generated.defaults_opencode_default)
 export const defaultsOptionDefault = compatMessage(generated.defaults_option_default)
 export const defaultsShowDeletionDialog = compatMessage(generated.defaults_show_deletion_dialog)
@@ -502,13 +550,17 @@ export const gitCancel = compatMessage(generated.git_cancel)
 export const gitChanges = compatMessage(generated.git_changes)
 export const gitChangesDiscardAll = compatMessage(generated.git_changes_discard_all)
 export const gitChangesDiscardConfirm = compatMessage(generated.git_changes_discard_confirm)
+export const gitChangesFlatList = compatMessage(generated.git_changes_flat_list)
 export const gitChangesNoChanges = compatMessage(generated.git_changes_no_changes)
 export const gitChangesStageAll = compatMessage(generated.git_changes_stage_all)
 export const gitChangesStaged = compatMessage(generated.git_changes_staged)
 export const gitChangesTitle = compatMessage(generated.git_changes_title)
+export const gitChangesTreeView = compatMessage(generated.git_changes_tree_view)
 export const gitChangesUnstageAll = compatMessage(generated.git_changes_unstage_all)
 export const gitChangesUnstaged = compatMessage(generated.git_changes_unstaged)
 export const gitChangesUntracked = compatMessage(generated.git_changes_untracked)
+export const gitChangesView = compatMessage(generated.git_changes_view)
+export const gitChangesViewMode = compatMessage(generated.git_changes_view_mode)
 export const gitChecking = compatMessage(generated.git_checking)
 export const gitClearFileSelection = compatMessage(generated.git_clear_file_selection)
 export const gitCommit = compatMessage(generated.git_commit)
@@ -555,6 +607,8 @@ export const gitDisplayGitignoredAria = compatMessage(generated.git_display_giti
 export const gitEnableGitmoji = compatMessage(generated.git_enable_gitmoji)
 export const gitEnableGitmojiAria = compatMessage(generated.git_enable_gitmoji_aria)
 export const gitErrorLoadingDetails = compatMessage(generated.git_error_loading_details)
+export const gitFailedLoadSettings = compatMessage(generated.git_failed_load_settings)
+export const gitFailedSaveGitmoji = compatMessage(generated.git_failed_save_gitmoji)
 export const gitFetch = compatMessage(generated.git_fetch)
 export const gitFoundCredentials = compatMessage(generated.git_found_credentials)
 export const gitGenerate = compatMessage(generated.git_generate)
@@ -566,16 +620,47 @@ export const gitHistory = compatMessage(generated.git_history)
 export const gitHistoryDialogDescription = compatMessage(generated.git_history_dialog_description)
 export const gitIdentities = compatMessage(generated.git_identities)
 export const gitIdentityAuthMethod = compatMessage(generated.git_identity_auth_method)
+export const gitIdentityCancel = compatMessage(generated.git_identity_cancel)
+export const gitIdentityCategoryBranch = compatMessage(generated.git_identity_category_branch)
+export const gitIdentityCategoryCode = compatMessage(generated.git_identity_category_code)
+export const gitIdentityCategoryPersonal = compatMessage(generated.git_identity_category_personal)
+export const gitIdentityCategorySchool = compatMessage(generated.git_identity_category_school)
+export const gitIdentityCategoryWork = compatMessage(generated.git_identity_category_work)
 export const gitIdentityColor = compatMessage(generated.git_identity_color)
+export const gitIdentityColorCyan = compatMessage(generated.git_identity_color_cyan)
+export const gitIdentityColorGreen = compatMessage(generated.git_identity_color_green)
+export const gitIdentityColorOrange = compatMessage(generated.git_identity_color_orange)
+export const gitIdentityColorRed = compatMessage(generated.git_identity_color_red)
+export const gitIdentityColorYellow = compatMessage(generated.git_identity_color_yellow)
+export const gitIdentityCreateNew = compatMessage(generated.git_identity_create_new)
+export const gitIdentityCreating = compatMessage(generated.git_identity_creating)
 export const gitIdentityDeleteProfile = compatMessage(generated.git_identity_delete_profile)
+export const gitIdentityEditIdentity = compatMessage(generated.git_identity_edit_identity)
+export const gitIdentityEditProfile = compatMessage(generated.git_identity_edit_profile)
 export const gitIdentityEmail = compatMessage(generated.git_identity_email)
 export const gitIdentityEmailPlaceholder = compatMessage(generated.git_identity_email_placeholder)
+export const gitIdentityErrorDeleting = compatMessage(generated.git_identity_error_deleting)
+export const gitIdentityErrorDeletingDetail = compatMessage(generated.git_identity_error_deleting_detail)
+export const gitIdentityErrorSaving = compatMessage(generated.git_identity_error_saving)
+export const gitIdentityErrorSavingDetail = compatMessage(generated.git_identity_error_saving_detail)
+export const gitIdentityFailedCreateProfile = compatMessage(generated.git_identity_failed_create_profile)
+export const gitIdentityFailedDeleteProfile = compatMessage(generated.git_identity_failed_delete_profile)
+export const gitIdentityFailedUpdateProfile = compatMessage(generated.git_identity_failed_update_profile)
+export const gitIdentityGlobalIdentity = compatMessage(generated.git_identity_global_identity)
 export const gitIdentityHost = compatMessage(generated.git_identity_host)
 export const gitIdentityHostPlaceholder = compatMessage(generated.git_identity_host_placeholder)
+export const gitIdentityHostRequiredToken = compatMessage(generated.git_identity_host_required_token)
 export const gitIdentityIcon = compatMessage(generated.git_identity_icon)
+export const gitIdentityImportCredential = compatMessage(generated.git_identity_import_credential)
+export const gitIdentityNameEmailRequired = compatMessage(generated.git_identity_name_email_required)
+export const gitIdentityNewIdentity = compatMessage(generated.git_identity_new_identity)
+export const gitIdentityProfileCreated = compatMessage(generated.git_identity_profile_created)
+export const gitIdentityProfileDeleted = compatMessage(generated.git_identity_profile_deleted)
 export const gitIdentityProfileName = compatMessage(generated.git_identity_profile_name)
 export const gitIdentityProfileNamePlaceholder = compatMessage(generated.git_identity_profile_name_placeholder)
+export const gitIdentityProfileUpdated = compatMessage(generated.git_identity_profile_updated)
 export const gitIdentitySshKeyPath = compatMessage(generated.git_identity_ssh_key_path)
+export const gitIdentitySystemWideReadonly = compatMessage(generated.git_identity_system_wide_readonly)
 export const gitIdentityUserName = compatMessage(generated.git_identity_user_name)
 export const gitIdentityUserNamePlaceholder = compatMessage(generated.git_identity_user_name_placeholder)
 export const gitImport = compatMessage(generated.git_import)
@@ -743,9 +828,14 @@ export const githubAvatarAlt = compatMessage(generated.github_avatar_alt)
 export const githubCancel = compatMessage(generated.github_cancel)
 export const githubConnect = compatMessage(generated.github_connect)
 export const githubDisconnect = compatMessage(generated.github_disconnect)
+export const githubFailedDisconnect = compatMessage(generated.github_failed_disconnect)
+export const githubFailedLoadAuth = compatMessage(generated.github_failed_load_auth)
+export const githubFailedStartConnect = compatMessage(generated.github_failed_start_connect)
+export const githubFailedSwitchAccount = compatMessage(generated.github_failed_switch_account)
 export const githubNotConnected = compatMessage(generated.github_not_connected)
 export const githubOpenGithub = compatMessage(generated.github_open_github)
 export const githubOtherAccounts = compatMessage(generated.github_other_accounts)
+export const githubPollingFailed = compatMessage(generated.github_polling_failed)
 export const githubScopes = compatMessage(generated.github_scopes)
 export const githubSwitchTo = compatMessage(generated.github_switch_to)
 export const githubTitle = compatMessage(generated.github_title)
@@ -794,8 +884,43 @@ export const jsonCollapseAll = compatMessage(generated.json_collapse_all)
 export const jsonEmptyContent = compatMessage(generated.json_empty_content)
 export const jsonExpandAll = compatMessage(generated.json_expand_all)
 export const jsonInvalid = compatMessage(generated.json_invalid)
+export const keyboardCaptureFirst = compatMessage(generated.keyboard_capture_first)
+export const keyboardConflictBrowserDefaults = compatMessage(generated.keyboard_conflict_browser_defaults)
+export const keyboardPressKeys = compatMessage(generated.keyboard_press_keys)
 export const keyboardShortcutConflict = compatMessage(generated.keyboard_shortcut_conflict)
 export const keyboardShortcutsTitle = compatMessage(generated.keyboard_shortcuts_title)
+export const magicPromptCherryPick = compatMessage(generated.magic_prompt_cherry_pick)
+export const magicPromptCherryPickDesc = compatMessage(generated.magic_prompt_cherry_pick_desc)
+export const magicPromptCommitGeneration = compatMessage(generated.magic_prompt_commit_generation)
+export const magicPromptFailedLoad = compatMessage(generated.magic_prompt_failed_load)
+export const magicPromptFailedLoadDetail = compatMessage(generated.magic_prompt_failed_load_detail)
+export const magicPromptFailedReset = compatMessage(generated.magic_prompt_failed_reset)
+export const magicPromptFailedResetAll = compatMessage(generated.magic_prompt_failed_reset_all)
+export const magicPromptFailedSave = compatMessage(generated.magic_prompt_failed_save)
+export const magicPromptGithub = compatMessage(generated.magic_prompt_github)
+export const magicPromptInstructions = compatMessage(generated.magic_prompt_instructions)
+export const magicPromptIssueReview = compatMessage(generated.magic_prompt_issue_review)
+export const magicPromptPrComments = compatMessage(generated.magic_prompt_pr_comments)
+export const magicPromptPrCommentsDesc = compatMessage(generated.magic_prompt_pr_comments_desc)
+export const magicPromptPrFailedChecks = compatMessage(generated.magic_prompt_pr_failed_checks)
+export const magicPromptPrFailedChecksDesc = compatMessage(generated.magic_prompt_pr_failed_checks_desc)
+export const magicPromptPrGeneration = compatMessage(generated.magic_prompt_pr_generation)
+export const magicPromptPrReview = compatMessage(generated.magic_prompt_pr_review)
+export const magicPromptResetAll = compatMessage(generated.magic_prompt_reset_all)
+export const magicPromptResetAllOverrides = compatMessage(generated.magic_prompt_reset_all_overrides)
+export const magicPromptResetDefault = compatMessage(generated.magic_prompt_reset_default)
+export const magicPromptResetToDefault = compatMessage(generated.magic_prompt_reset_to_default)
+export const magicPromptResetting = compatMessage(generated.magic_prompt_resetting)
+export const magicPromptSave = compatMessage(generated.magic_prompt_save)
+export const magicPromptSaved = compatMessage(generated.magic_prompt_saved)
+export const magicPromptSaving = compatMessage(generated.magic_prompt_saving)
+export const magicPromptSinglePrComment = compatMessage(generated.magic_prompt_single_pr_comment)
+export const magicPromptSinglePrCommentDesc = compatMessage(generated.magic_prompt_single_pr_comment_desc)
+export const magicPromptUnsavedChanges = compatMessage(generated.magic_prompt_unsaved_changes)
+export const magicPromptUsingBuiltinDefault = compatMessage(generated.magic_prompt_using_builtin_default)
+export const magicPromptUsingSavedOverride = compatMessage(generated.magic_prompt_using_saved_override)
+export const magicPromptVisibleCannotBeEmpty = compatMessage(generated.magic_prompt_visible_cannot_be_empty)
+export const magicPromptVisiblePrompt = compatMessage(generated.magic_prompt_visible_prompt)
 export const magicPromptsLoading = compatMessage(generated.magic_prompts_loading)
 export const magicPromptsSelect = compatMessage(generated.magic_prompts_select)
 export const magicPromptsTitle = compatMessage(generated.magic_prompts_title)
@@ -806,6 +931,7 @@ export const mcpCancel = compatMessage(generated.mcp_cancel)
 export const mcpCommand = compatMessage(generated.mcp_command)
 export const mcpConnect = compatMessage(generated.mcp_connect)
 export const mcpConnected = compatMessage(generated.mcp_connected)
+export const mcpConnectionFailed = compatMessage(generated.mcp_connection_failed)
 export const mcpCreate = compatMessage(generated.mcp_create)
 export const mcpDelete = compatMessage(generated.mcp_delete)
 export const mcpDeleteDesc = compatMessage(generated.mcp_delete_desc)
@@ -815,7 +941,10 @@ export const mcpDeleting = compatMessage(generated.mcp_deleting)
 export const mcpDisconnect = compatMessage(generated.mcp_disconnect)
 export const mcpEnableServer = compatMessage(generated.mcp_enable_server)
 export const mcpEnvVariables = compatMessage(generated.mcp_env_variables)
+export const mcpErrorOccurred = compatMessage(generated.mcp_error_occurred)
 export const mcpFailed = compatMessage(generated.mcp_failed)
+export const mcpFailedDeleteServer = compatMessage(generated.mcp_failed_delete_server)
+export const mcpHide = compatMessage(generated.mcp_hide)
 export const mcpKey = compatMessage(generated.mcp_key)
 export const mcpKeyPlaceholder = compatMessage(generated.mcp_key_placeholder)
 export const mcpLocalStdio = compatMessage(generated.mcp_local_stdio)
@@ -831,6 +960,7 @@ export const mcpPasteCommandTitle = compatMessage(generated.mcp_paste_command_ti
 export const mcpPasteEnv = compatMessage(generated.mcp_paste_env)
 export const mcpPasteEnvTitle = compatMessage(generated.mcp_paste_env_title)
 export const mcpProject = compatMessage(generated.mcp_project)
+export const mcpProjectScope = compatMessage(generated.mcp_project_scope)
 export const mcpRemoteSse = compatMessage(generated.mcp_remote_sse)
 export const mcpSaveChanges = compatMessage(generated.mcp_save_changes)
 export const mcpSaving = compatMessage(generated.mcp_saving)
@@ -838,6 +968,7 @@ export const mcpSelectFromSidebar = compatMessage(generated.mcp_select_from_side
 export const mcpServer = compatMessage(generated.mcp_server)
 export const mcpServerName = compatMessage(generated.mcp_server_name)
 export const mcpServerUrl = compatMessage(generated.mcp_server_url)
+export const mcpShow = compatMessage(generated.mcp_show)
 export const mcpSidebarAddTitle = compatMessage(generated.mcp_sidebar_add_title)
 export const mcpSidebarNotConfigured = compatMessage(generated.mcp_sidebar_not_configured)
 export const mcpSidebarTitle = compatMessage(generated.mcp_sidebar_title)
@@ -856,6 +987,7 @@ export const mcpToastUrlEmpty = compatMessage(generated.mcp_toast_url_empty)
 export const mcpTransportMode = compatMessage(generated.mcp_transport_mode)
 export const mcpUrlPlaceholder = compatMessage(generated.mcp_url_placeholder)
 export const mcpUser = compatMessage(generated.mcp_user)
+export const mcpUserScope = compatMessage(generated.mcp_user_scope)
 export const mcpValue = compatMessage(generated.mcp_value)
 export const mcpValuePlaceholder = compatMessage(generated.mcp_value_placeholder)
 export const mcpValuesPlaintext = compatMessage(generated.mcp_values_plaintext)
@@ -874,11 +1006,15 @@ export const notifDefaultTitleReady = compatMessage(generated.notif_default_titl
 export const notifDeliveryTitle = compatMessage(generated.notif_delivery_title)
 export const notifEnable = compatMessage(generated.notif_enable)
 export const notifEnableAria = compatMessage(generated.notif_enable_aria)
+export const notifErrorAbort = compatMessage(generated.notif_error_abort)
 export const notifEventCompletion = compatMessage(generated.notif_event_completion)
 export const notifEventError = compatMessage(generated.notif_event_error)
 export const notifEventQuestion = compatMessage(generated.notif_event_question)
 export const notifEventSubtask = compatMessage(generated.notif_event_subtask)
 export const notifEventsTitle = compatMessage(generated.notif_events_title)
+export const notifFailedLoadZenModels = compatMessage(generated.notif_failed_load_zen_models)
+export const notifFailedRequestPermission = compatMessage(generated.notif_failed_request_permission)
+export const notifFailedSaveUtilityModel = compatMessage(generated.notif_failed_save_utility_model)
 export const notifLength = compatMessage(generated.notif_length)
 export const notifLengthDesc = compatMessage(generated.notif_length_desc)
 export const notifMaxLength = compatMessage(generated.notif_max_length)
@@ -886,8 +1022,10 @@ export const notifMaxLengthDesc = compatMessage(generated.notif_max_length_desc)
 export const notifNotSelected = compatMessage(generated.notif_not_selected)
 export const notifPermissionDeniedHint = compatMessage(generated.notif_permission_denied_hint)
 export const notifPermissionGrantedDisabled = compatMessage(generated.notif_permission_granted_disabled)
+export const notifPermissionRequest = compatMessage(generated.notif_permission_request)
 export const notifPushEnable = compatMessage(generated.notif_push_enable)
 export const notifPushEnableAria = compatMessage(generated.notif_push_enable_aria)
+export const notifPushManager = compatMessage(generated.notif_push_manager)
 export const notifPushManagerUnavailable = compatMessage(generated.notif_push_manager_unavailable)
 export const notifPushNotSupported = compatMessage(generated.notif_push_not_supported)
 export const notifPushRequestTimedOut = compatMessage(generated.notif_push_request_timed_out)
@@ -906,6 +1044,9 @@ export const notifSummarizationModelTooltip = compatMessage(generated.notif_summ
 export const notifSummarizationTitle = compatMessage(generated.notif_summarization_title)
 export const notifSummarizeLast = compatMessage(generated.notif_summarize_last)
 export const notifSummarizeLastAria = compatMessage(generated.notif_summarize_last_aria)
+export const notifSwActivationTimeout = compatMessage(generated.notif_sw_activation_timeout)
+export const notifSwNotSupported = compatMessage(generated.notif_sw_not_supported)
+export const notifSwRegistrationFailed = compatMessage(generated.notif_sw_registration_failed)
 export const notifTemplateMessage = compatMessage(generated.notif_template_message)
 export const notifTemplateTitle = compatMessage(generated.notif_template_title)
 export const notifTemplatesTitle = compatMessage(generated.notif_templates_title)
@@ -939,6 +1080,7 @@ export const ocCliTip = compatMessage(generated.oc_cli_tip)
 export const ocCliTitle = compatMessage(generated.oc_cli_title)
 export const ocCliTooltip = compatMessage(generated.oc_cli_tooltip)
 export const ocNoData = compatMessage(generated.oc_no_data)
+export const ocPromise = compatMessage(generated.oc_promise)
 export const ocStatusCopied = compatMessage(generated.oc_status_copied)
 export const ocStatusDesc = compatMessage(generated.oc_status_desc)
 export const ocStatusTitle = compatMessage(generated.oc_status_title)
@@ -972,10 +1114,19 @@ export const optSvg = compatMessage(generated.opt_svg)
 export const optSvgDesc = compatMessage(generated.opt_svg_desc)
 export const optSystem = compatMessage(generated.opt_system)
 export const paceLabel = compatMessage(generated.pace_label)
+export const paceOnTrack = compatMessage(generated.pace_on_track)
+export const paceSlightlyFast = compatMessage(generated.pace_slightly_fast)
+export const paceTooFast = compatMessage(generated.pace_too_fast)
+export const paceUsedUp = compatMessage(generated.pace_used_up)
 export const passkeyAdd = compatMessage(generated.passkey_add)
 export const passkeyAdded = compatMessage(generated.passkey_added)
 export const passkeyCancelSetup = compatMessage(generated.passkey_cancel_setup)
 export const passkeyCurrentDevice = compatMessage(generated.passkey_current_device)
+export const passkeyEnableLockFirst = compatMessage(generated.passkey_enable_lock_first)
+export const passkeyFailedAdd = compatMessage(generated.passkey_failed_add)
+export const passkeyFailedClearAuth = compatMessage(generated.passkey_failed_clear_auth)
+export const passkeyFailedLoad = compatMessage(generated.passkey_failed_load)
+export const passkeyFailedRemove = compatMessage(generated.passkey_failed_remove)
 export const passkeyLastUsed = compatMessage(generated.passkey_last_used)
 export const passkeyLoading = compatMessage(generated.passkey_loading)
 export const passkeyLockRequired = compatMessage(generated.passkey_lock_required)
@@ -1088,18 +1239,26 @@ export const projActionAddAction = compatMessage(generated.proj_action_add_actio
 export const projActionAddNewAction = compatMessage(generated.proj_action_add_new_action)
 export const projActionChooseProjectAction = compatMessage(generated.proj_action_choose_project_action)
 export const projActionDesktopForwardUnavailable = compatMessage(generated.proj_action_desktop_forward_unavailable)
+export const projActionFailedSave = compatMessage(generated.proj_action_failed_save)
 export const projActionFailedToCreateTerminalSession = compatMessage(generated.proj_action_failed_to_create_terminal_session)
 export const projActionFailedToRunAction = compatMessage(generated.proj_action_failed_to_run_action)
+export const projActionFillRequired = compatMessage(generated.proj_action_fill_required)
 export const projActionInvalidCustomUrl = compatMessage(generated.proj_action_invalid_custom_url)
 export const projActionNoActiveDirectory = compatMessage(generated.proj_action_no_active_directory)
 export const projActionOpenedActionUrl = compatMessage(generated.proj_action_opened_action_url)
 export const projActionOpenedForwardedUrl = compatMessage(generated.proj_action_opened_forwarded_url)
 export const projActionOpenedUrlFromOutput = compatMessage(generated.proj_action_opened_url_from_output)
 export const projActionRun = compatMessage(generated.proj_action_run)
+export const projActionSaveActions = compatMessage(generated.proj_action_save_actions)
+export const projActionSaved = compatMessage(generated.proj_action_saved)
+export const projActionSaving = compatMessage(generated.proj_action_saving)
 export const projActionStop = compatMessage(generated.proj_action_stop)
+export const projActionUntitled = compatMessage(generated.proj_action_untitled)
 export const projAddProjectAria = compatMessage(generated.proj_add_project_aria)
+export const projDirSelectionCancelled = compatMessage(generated.proj_dir_selection_cancelled)
 export const projDiscoverFavicon = compatMessage(generated.proj_discover_favicon)
 export const projDiscovering = compatMessage(generated.proj_discovering)
+export const projFailedSelectDir = compatMessage(generated.proj_failed_select_dir)
 export const projNoProjects = compatMessage(generated.proj_no_projects)
 export const projNone = compatMessage(generated.proj_none)
 export const projPreview = compatMessage(generated.proj_preview)
@@ -1183,14 +1342,30 @@ export const provCopyCode = compatMessage(generated.prov_copy_code)
 export const provCustomConfig = compatMessage(generated.prov_custom_config)
 export const provDisconnect = compatMessage(generated.prov_disconnect)
 export const provDisconnecting = compatMessage(generated.prov_disconnecting)
+export const provFailedCompleteOauth = compatMessage(generated.prov_failed_complete_oauth)
+export const provFailedCompleteOauthDetail = compatMessage(generated.prov_failed_complete_oauth_detail)
+export const provFailedCopyDeviceCode = compatMessage(generated.prov_failed_copy_device_code)
+export const provFailedCopyOauthLink = compatMessage(generated.prov_failed_copy_oauth_link)
+export const provFailedDisconnect = compatMessage(generated.prov_failed_disconnect)
+export const provFailedDisconnectDetail = compatMessage(generated.prov_failed_disconnect_detail)
+export const provFailedLoadAuthMethods = compatMessage(generated.prov_failed_load_auth_methods)
+export const provFailedLoadAvailable = compatMessage(generated.prov_failed_load_available)
+export const provFailedLoadSources = compatMessage(generated.prov_failed_load_sources)
+export const provFailedLoadSourcesDetail = compatMessage(generated.prov_failed_load_sources_detail)
+export const provFailedSaveApiKey = compatMessage(generated.prov_failed_save_api_key)
+export const provFailedSaveApiKeyDetail = compatMessage(generated.prov_failed_save_api_key_detail)
+export const provFailedStartOauth = compatMessage(generated.prov_failed_start_oauth)
+export const provFailedStartOauthDetail = compatMessage(generated.prov_failed_start_oauth_detail)
 export const provHide = compatMessage(generated.prov_hide)
 export const provHideAll = compatMessage(generated.prov_hide_all)
+export const provHideModel = compatMessage(generated.prov_hide_model)
 export const provHideModelFromSelectors = compatMessage(generated.prov_hide_model_from_selectors)
 export const provKeyPrivacy = compatMessage(generated.prov_key_privacy)
 export const provLoadingAuthMethods = compatMessage(generated.prov_loading_auth_methods)
 export const provLoadingProviders = compatMessage(generated.prov_loading_providers)
 export const provNoConfigSource = compatMessage(generated.prov_no_config_source)
 export const provNoModelsMatch = compatMessage(generated.prov_no_models_match)
+export const provNoOauthDetails = compatMessage(generated.prov_no_oauth_details)
 export const provNoProvidersDetected = compatMessage(generated.prov_no_providers_detected)
 export const provNoProvidersFound = compatMessage(generated.prov_no_providers_found)
 export const provOpen = compatMessage(generated.prov_open)
@@ -1208,6 +1383,7 @@ export const provSaving = compatMessage(generated.prov_saving)
 export const provSelectFromSidebar = compatMessage(generated.prov_select_from_sidebar)
 export const provSelectProvider = compatMessage(generated.prov_select_provider)
 export const provShowAll = compatMessage(generated.prov_show_all)
+export const provShowModel = compatMessage(generated.prov_show_model)
 export const provShowModelInSelectors = compatMessage(generated.prov_show_model_in_selectors)
 export const provToastApiKeyRequired = compatMessage(generated.prov_toast_api_key_required)
 export const provToastApiKeySaveFailed = compatMessage(generated.prov_toast_api_key_save_failed)
@@ -1242,16 +1418,20 @@ export const riSshInstancesBindHost = compatMessage(generated.ri_ssh_instances_b
 export const riSshInstancesBindHostHint = compatMessage(generated.ri_ssh_instances_bind_host_hint)
 export const riSshInstancesBindHostLocalhost = compatMessage(generated.ri_ssh_instances_bind_host_localhost)
 export const riSshInstancesBindingLocalForwardsWarning = compatMessage(generated.ri_ssh_instances_binding_local_forwards_warning)
+export const riSshInstancesCanDisconnect = compatMessage(generated.ri_ssh_instances_can_disconnect)
 export const riSshInstancesCancel = compatMessage(generated.ri_ssh_instances_cancel)
 export const riSshInstancesClear = compatMessage(generated.ri_ssh_instances_clear)
 export const riSshInstancesConfig = compatMessage(generated.ri_ssh_instances_config)
 export const riSshInstancesConnect = compatMessage(generated.ri_ssh_instances_connect)
+export const riSshInstancesConnectAction = compatMessage(generated.ri_ssh_instances_connect_action)
+export const riSshInstancesConnecting = compatMessage(generated.ri_ssh_instances_connecting)
 export const riSshInstancesConnectionStatus = compatMessage(generated.ri_ssh_instances_connection_status)
 export const riSshInstancesConnectionTimeout = compatMessage(generated.ri_ssh_instances_connection_timeout)
 export const riSshInstancesCopyAll = compatMessage(generated.ri_ssh_instances_copy_all)
 export const riSshInstancesCopyLocalUrl = compatMessage(generated.ri_ssh_instances_copy_local_url)
 export const riSshInstancesCoreSettingsDesc = compatMessage(generated.ri_ssh_instances_core_settings_desc)
 export const riSshInstancesCreate = compatMessage(generated.ri_ssh_instances_create)
+export const riSshInstancesCreateAction = compatMessage(generated.ri_ssh_instances_create_action)
 export const riSshInstancesCurrentLocalUrl = compatMessage(generated.ri_ssh_instances_current_local_url)
 export const riSshInstancesDescAuthentication = compatMessage(generated.ri_ssh_instances_desc_authentication)
 export const riSshInstancesDescMainTunnel = compatMessage(generated.ri_ssh_instances_desc_main_tunnel)
@@ -1274,6 +1454,7 @@ export const riSshInstancesFailedRetry = compatMessage(generated.ri_ssh_instance
 export const riSshInstancesFailedSaveSshInstance = compatMessage(generated.ri_ssh_instances_failed_save_ssh_instance)
 export const riSshInstancesForwardType = compatMessage(generated.ri_ssh_instances_forward_type)
 export const riSshInstancesForwardTypeHint = compatMessage(generated.ri_ssh_instances_forward_type_hint)
+export const riSshInstancesForwardTypeLabel = compatMessage(generated.ri_ssh_instances_forward_type_label)
 export const riSshInstancesImport = compatMessage(generated.ri_ssh_instances_import)
 export const riSshInstancesImportTitle = compatMessage(generated.ri_ssh_instances_import_title)
 export const riSshInstancesInstallBun = compatMessage(generated.ri_ssh_instances_install_bun)
@@ -1293,8 +1474,12 @@ export const riSshInstancesLoadingHosts = compatMessage(generated.ri_ssh_instanc
 export const riSshInstancesLoadingLogs = compatMessage(generated.ri_ssh_instances_loading_logs)
 export const riSshInstancesLocalListen = compatMessage(generated.ri_ssh_instances_local_listen)
 export const riSshInstancesLocalListenHint = compatMessage(generated.ri_ssh_instances_local_listen_hint)
+export const riSshInstancesLocalListenHintAlt = compatMessage(generated.ri_ssh_instances_local_listen_hint_alt)
 export const riSshInstancesLocalListenLabel = compatMessage(generated.ri_ssh_instances_local_listen_label)
 export const riSshInstancesLocalPortInUse = compatMessage(generated.ri_ssh_instances_local_port_in_use)
+export const riSshInstancesLocalTarget = compatMessage(generated.ri_ssh_instances_local_target)
+export const riSshInstancesLocalTargetHint = compatMessage(generated.ri_ssh_instances_local_target_hint)
+export const riSshInstancesLocalUrlCopied = compatMessage(generated.ri_ssh_instances_local_url_copied)
 export const riSshInstancesLocalUrlNotAvailable = compatMessage(generated.ri_ssh_instances_local_url_not_available)
 export const riSshInstancesLogs = compatMessage(generated.ri_ssh_instances_logs)
 export const riSshInstancesLogsCleared = compatMessage(generated.ri_ssh_instances_logs_cleared)
@@ -1311,6 +1496,7 @@ export const riSshInstancesNoExtraForwards = compatMessage(generated.ri_ssh_inst
 export const riSshInstancesNoHosts = compatMessage(generated.ri_ssh_instances_no_hosts)
 export const riSshInstancesNoLogsToCopy = compatMessage(generated.ri_ssh_instances_no_logs_to_copy)
 export const riSshInstancesNoSshLogs = compatMessage(generated.ri_ssh_instances_no_ssh_logs)
+export const riSshInstancesOcPasswordStoreConfirm = compatMessage(generated.ri_ssh_instances_oc_password_store_confirm)
 export const riSshInstancesOpen = compatMessage(generated.ri_ssh_instances_open)
 export const riSshInstancesOpenchamberPassword = compatMessage(generated.ri_ssh_instances_openchamber_password)
 export const riSshInstancesOpenchamberPasswordPlaceholder = compatMessage(generated.ri_ssh_instances_openchamber_password_placeholder)
@@ -1326,22 +1512,30 @@ export const riSshInstancesPreferredRemotePortHint = compatMessage(generated.ri_
 export const riSshInstancesPrimaryButton = compatMessage(generated.ri_ssh_instances_primary_button)
 export const riSshInstancesRandomPort = compatMessage(generated.ri_ssh_instances_random_port)
 export const riSshInstancesRandomPortTitle = compatMessage(generated.ri_ssh_instances_random_port_title)
+export const riSshInstancesReconnectNow = compatMessage(generated.ri_ssh_instances_reconnect_now)
 export const riSshInstancesReconnectStale = compatMessage(generated.ri_ssh_instances_reconnect_stale)
+export const riSshInstancesReconnecting = compatMessage(generated.ri_ssh_instances_reconnecting)
 export const riSshInstancesRemoteForwardTypeDynamic = compatMessage(generated.ri_ssh_instances_remote_forward_type_dynamic)
 export const riSshInstancesRemoteForwardTypeLocal = compatMessage(generated.ri_ssh_instances_remote_forward_type_local)
 export const riSshInstancesRemoteForwardTypeRemote = compatMessage(generated.ri_ssh_instances_remote_forward_type_remote)
 export const riSshInstancesRemoteListen = compatMessage(generated.ri_ssh_instances_remote_listen)
+export const riSshInstancesRemoteListenAlt = compatMessage(generated.ri_ssh_instances_remote_listen_alt)
 export const riSshInstancesRemoteListenHint = compatMessage(generated.ri_ssh_instances_remote_listen_hint)
+export const riSshInstancesRemoteListenHintAlt = compatMessage(generated.ri_ssh_instances_remote_listen_hint_alt)
 export const riSshInstancesRemoteListenLabel = compatMessage(generated.ri_ssh_instances_remote_listen_label)
+export const riSshInstancesRemoteTargetHint = compatMessage(generated.ri_ssh_instances_remote_target_hint)
 export const riSshInstancesRemove = compatMessage(generated.ri_ssh_instances_remove)
 export const riSshInstancesRemoveAria = compatMessage(generated.ri_ssh_instances_remove_aria)
 export const riSshInstancesRemoveInstance = compatMessage(generated.ri_ssh_instances_remove_instance)
 export const riSshInstancesRetriedRandomPort = compatMessage(generated.ri_ssh_instances_retried_random_port)
 export const riSshInstancesRetry = compatMessage(generated.ri_ssh_instances_retry)
 export const riSshInstancesRetryFailed = compatMessage(generated.ri_ssh_instances_retry_failed)
+export const riSshInstancesSaveAction = compatMessage(generated.ri_ssh_instances_save_action)
 export const riSshInstancesSaveChanges = compatMessage(generated.ri_ssh_instances_save_changes)
+export const riSshInstancesSaving = compatMessage(generated.ri_ssh_instances_saving)
 export const riSshInstancesSecondaryButton = compatMessage(generated.ri_ssh_instances_secondary_button)
 export const riSshInstancesSelectInstance = compatMessage(generated.ri_ssh_instances_select_instance)
+export const riSshInstancesSelectedInstance = compatMessage(generated.ri_ssh_instances_selected_instance)
 export const riSshInstancesSocksProxy = compatMessage(generated.ri_ssh_instances_socks_proxy)
 export const riSshInstancesSshCommand = compatMessage(generated.ri_ssh_instances_ssh_command)
 export const riSshInstancesSshCommandRequired = compatMessage(generated.ri_ssh_instances_ssh_command_required)
@@ -1350,20 +1544,40 @@ export const riSshInstancesSshLogsDescription = compatMessage(generated.ri_ssh_i
 export const riSshInstancesSshLogsTitle = compatMessage(generated.ri_ssh_instances_ssh_logs_title)
 export const riSshInstancesSshPassword = compatMessage(generated.ri_ssh_instances_ssh_password)
 export const riSshInstancesSshPasswordPlaceholder = compatMessage(generated.ri_ssh_instances_ssh_password_placeholder)
+export const riSshInstancesSshPasswordStoreConfirm = compatMessage(generated.ri_ssh_instances_ssh_password_store_confirm)
 export const riSshInstancesStatusAuthCheck = compatMessage(generated.ri_ssh_instances_status_auth_check)
+export const riSshInstancesStatusCheckingAuth = compatMessage(generated.ri_ssh_instances_status_checking_auth)
 export const riSshInstancesStatusConfigResolved = compatMessage(generated.ri_ssh_instances_status_config_resolved)
+export const riSshInstancesStatusConnectingShort = compatMessage(generated.ri_ssh_instances_status_connecting_short)
 export const riSshInstancesStatusDegraded = compatMessage(generated.ri_ssh_instances_status_degraded)
+export const riSshInstancesStatusDetectingServer = compatMessage(generated.ri_ssh_instances_status_detecting_server)
 export const riSshInstancesStatusError = compatMessage(generated.ri_ssh_instances_status_error)
+export const riSshInstancesStatusErrorShort = compatMessage(generated.ri_ssh_instances_status_error_short)
+export const riSshInstancesStatusEstablishingSsh = compatMessage(generated.ri_ssh_instances_status_establishing_ssh)
 export const riSshInstancesStatusForwarding = compatMessage(generated.ri_ssh_instances_status_forwarding)
+export const riSshInstancesStatusForwardingPorts = compatMessage(generated.ri_ssh_instances_status_forwarding_ports)
+export const riSshInstancesStatusForwardingShort = compatMessage(generated.ri_ssh_instances_status_forwarding_short)
 export const riSshInstancesStatusIdle = compatMessage(generated.ri_ssh_instances_status_idle)
+export const riSshInstancesStatusIdleShort = compatMessage(generated.ri_ssh_instances_status_idle_short)
 export const riSshInstancesStatusInstalling = compatMessage(generated.ri_ssh_instances_status_installing)
+export const riSshInstancesStatusInstallingOc = compatMessage(generated.ri_ssh_instances_status_installing_oc)
+export const riSshInstancesStatusInstallingShort = compatMessage(generated.ri_ssh_instances_status_installing_short)
 export const riSshInstancesStatusMasterConnecting = compatMessage(generated.ri_ssh_instances_status_master_connecting)
+export const riSshInstancesStatusProbingRemote = compatMessage(generated.ri_ssh_instances_status_probing_remote)
 export const riSshInstancesStatusReady = compatMessage(generated.ri_ssh_instances_status_ready)
+export const riSshInstancesStatusReadyShort = compatMessage(generated.ri_ssh_instances_status_ready_short)
+export const riSshInstancesStatusReconnectShort = compatMessage(generated.ri_ssh_instances_status_reconnect_short)
 export const riSshInstancesStatusReconnecting = compatMessage(generated.ri_ssh_instances_status_reconnecting)
+export const riSshInstancesStatusReconnectingShort = compatMessage(generated.ri_ssh_instances_status_reconnecting_short)
 export const riSshInstancesStatusRemoteProbe = compatMessage(generated.ri_ssh_instances_status_remote_probe)
 export const riSshInstancesStatusServerDetecting = compatMessage(generated.ri_ssh_instances_status_server_detecting)
 export const riSshInstancesStatusServerStarting = compatMessage(generated.ri_ssh_instances_status_server_starting)
+export const riSshInstancesStatusStartingServer = compatMessage(generated.ri_ssh_instances_status_starting_server)
+export const riSshInstancesStatusStartingShort = compatMessage(generated.ri_ssh_instances_status_starting_short)
 export const riSshInstancesStatusUpdating = compatMessage(generated.ri_ssh_instances_status_updating)
+export const riSshInstancesStatusUpdatingOc = compatMessage(generated.ri_ssh_instances_status_updating_oc)
+export const riSshInstancesStatusUpdatingShort = compatMessage(generated.ri_ssh_instances_status_updating_short)
+export const riSshInstancesStorePasswordConfirm = compatMessage(generated.ri_ssh_instances_store_password_confirm)
 export const riSshInstancesStoreSshPassword = compatMessage(generated.ri_ssh_instances_store_ssh_password)
 export const riSshInstancesTitleAuthentication = compatMessage(generated.ri_ssh_instances_title_authentication)
 export const riSshInstancesTitleMainTunnel = compatMessage(generated.ri_ssh_instances_title_main_tunnel)
@@ -1371,8 +1585,10 @@ export const riSshInstancesTitlePortForwards = compatMessage(generated.ri_ssh_in
 export const riSshInstancesTitleRemoteServer = compatMessage(generated.ri_ssh_instances_title_remote_server)
 export const riSshInstancesTotal = compatMessage(generated.ri_ssh_instances_total)
 export const riSshInstancesTypeDynamic = compatMessage(generated.ri_ssh_instances_type_dynamic)
+export const riSshInstancesTypeDynamicBadge = compatMessage(generated.ri_ssh_instances_type_dynamic_badge)
 export const riSshInstancesTypeLocal = compatMessage(generated.ri_ssh_instances_type_local)
 export const riSshInstancesTypeRemote = compatMessage(generated.ri_ssh_instances_type_remote)
+export const riSshInstancesTypeRemoteBadge = compatMessage(generated.ri_ssh_instances_type_remote_badge)
 export const riSshInstancesValueHint = compatMessage(generated.ri_ssh_instances_value_hint)
 export const rightSidebarResizePanel = compatMessage(generated.right_sidebar_resize_panel)
 export const scAddCatalog = compatMessage(generated.sc_add_catalog)
@@ -1465,6 +1681,10 @@ export const selectorAddToFavorites = compatMessage(generated.selector_add_to_fa
 export const selectorCurrent = compatMessage(generated.selector_current)
 export const selectorFavorite = compatMessage(generated.selector_favorite)
 export const selectorFavorites = compatMessage(generated.selector_favorites)
+export const selectorKeyArrowDown = compatMessage(generated.selector_key_arrow_down)
+export const selectorKeyArrowUp = compatMessage(generated.selector_key_arrow_up)
+export const selectorKeyEnter = compatMessage(generated.selector_key_enter)
+export const selectorKeyEscape = compatMessage(generated.selector_key_escape)
 export const selectorKeyboardHints = compatMessage(generated.selector_keyboard_hints)
 export const selectorNoModelOptional = compatMessage(generated.selector_no_model_optional)
 export const selectorNoModelsFound = compatMessage(generated.selector_no_models_found)
@@ -1513,6 +1733,7 @@ export const settingsMagicPrompts = compatMessage(generated.settings_magic_promp
 export const settingsMcp = compatMessage(generated.settings_mcp)
 export const settingsNotAvailable = compatMessage(generated.settings_not_available)
 export const settingsNotAvailableDescription = compatMessage(generated.settings_not_available_description)
+export const settingsProjectSelector = compatMessage(generated.settings_project_selector)
 export const settingsProjects = compatMessage(generated.settings_projects)
 export const settingsProvidersPage = compatMessage(generated.settings_providers_page)
 export const settingsReloadOpencode = compatMessage(generated.settings_reload_opencode)
@@ -1527,6 +1748,8 @@ export const settingsSectionShortcuts = compatMessage(generated.settings_section
 export const settingsSectionTunnel = compatMessage(generated.settings_section_tunnel)
 export const settingsSectionVisual = compatMessage(generated.settings_section_visual)
 export const settingsSectionVoice = compatMessage(generated.settings_section_voice)
+export const settingsSidebarAddNewItem = compatMessage(generated.settings_sidebar_add_new_item)
+export const settingsSidebarTotal = compatMessage(generated.settings_sidebar_total)
 export const settingsSkills = compatMessage(generated.settings_skills)
 export const settingsSkillsCatalog = compatMessage(generated.settings_skills_catalog)
 export const settingsSwitchProjectAria = compatMessage(generated.settings_switch_project_aria)
@@ -1581,8 +1804,12 @@ export const skAddFileDesc = compatMessage(generated.sk_add_file_desc)
 export const skAddFileTitle = compatMessage(generated.sk_add_file_title)
 export const skBasicInfo = compatMessage(generated.sk_basic_info)
 export const skCancel = compatMessage(generated.sk_cancel)
+export const skCatalogExternal = compatMessage(generated.sk_catalog_external)
+export const skCatalogManual = compatMessage(generated.sk_catalog_manual)
 export const skClaudeCompatible = compatMessage(generated.sk_claude_compatible)
+export const skCreateFile = compatMessage(generated.sk_create_file)
 export const skCreateSkill = compatMessage(generated.sk_create_skill)
+export const skCreatedSuccessfully = compatMessage(generated.sk_created_successfully)
 export const skDelete = compatMessage(generated.sk_delete)
 export const skDeleteConfirm = compatMessage(generated.sk_delete_confirm)
 export const skDeleteFile = compatMessage(generated.sk_delete_file)
@@ -1598,6 +1825,10 @@ export const skDuplicate = compatMessage(generated.sk_duplicate)
 export const skEditFile = compatMessage(generated.sk_edit_file)
 export const skEditFileDesc = compatMessage(generated.sk_edit_file_desc)
 export const skEditSkill = compatMessage(generated.sk_edit_skill)
+export const skErrorSaving = compatMessage(generated.sk_error_saving)
+export const skFailedDeleteFile = compatMessage(generated.sk_failed_delete_file)
+export const skFailedLoadDetails = compatMessage(generated.sk_failed_load_details)
+export const skFileAlreadyExists = compatMessage(generated.sk_file_already_exists)
 export const skFileContent = compatMessage(generated.sk_file_content)
 export const skFilePath = compatMessage(generated.sk_file_path)
 export const skFilePathPlaceholder = compatMessage(generated.sk_file_path_placeholder)
@@ -1618,6 +1849,7 @@ export const skRename = compatMessage(generated.sk_rename)
 export const skRenamePlaceholder = compatMessage(generated.sk_rename_placeholder)
 export const skRenamePrompt = compatMessage(generated.sk_rename_prompt)
 export const skRenameSkill = compatMessage(generated.sk_rename_skill)
+export const skRenamed = compatMessage(generated.sk_renamed)
 export const skSaveChanges = compatMessage(generated.sk_save_changes)
 export const skSaving = compatMessage(generated.sk_saving)
 export const skSelectFromSidebar = compatMessage(generated.sk_select_from_sidebar)
@@ -1640,6 +1872,7 @@ export const skToastRenamed = compatMessage(generated.sk_toast_renamed)
 export const skToastSaveError = compatMessage(generated.sk_toast_save_error)
 export const skToastUpdateFailed = compatMessage(generated.sk_toast_update_failed)
 export const skTotal = compatMessage(generated.sk_total)
+export const skUpdatedSuccessfully = compatMessage(generated.sk_updated_successfully)
 export const skUserSkills = compatMessage(generated.sk_user_skills)
 export const skillsContentPlaceholder = compatMessage(generated.skills_content_placeholder)
 export const skillsFilePlaceholder = compatMessage(generated.skills_file_placeholder)
@@ -1823,17 +2056,24 @@ export const usageDisplay = compatMessage(generated.usage_display)
 export const usageDisplayModePlaceholder = compatMessage(generated.usage_display_mode_placeholder)
 export const usageDisplayQuota = compatMessage(generated.usage_display_quota)
 export const usageDisplayUsage = compatMessage(generated.usage_display_usage)
+export const usageFailedSaveSettings = compatMessage(generated.usage_failed_save_settings)
 export const usageIntervalPlaceholder = compatMessage(generated.usage_interval_placeholder)
 export const usageNotSet = compatMessage(generated.usage_not_set)
 export const usageRefreshAria = compatMessage(generated.usage_refresh_aria)
+export const usageShowInDropdown = compatMessage(generated.usage_show_in_dropdown)
 export const usageTitle = compatMessage(generated.usage_title)
+export const usageToggleAutoRefresh = compatMessage(generated.usage_toggle_auto_refresh)
 export const visualActivityDefaultMode = compatMessage(generated.visual_activity_default_mode)
 export const visualChatRenderMode = compatMessage(generated.visual_chat_render_mode)
 export const visualDiffLayout = compatMessage(generated.visual_diff_layout)
 export const visualDiffViewMode = compatMessage(generated.visual_diff_view_mode)
+export const visualEnableSpellcheck = compatMessage(generated.visual_enable_spellcheck)
 export const visualFontSizePercentage = compatMessage(generated.visual_font_size_percentage)
 export const visualMermaidRenderingMode = compatMessage(generated.visual_mermaid_rendering_mode)
+export const visualOcAppTitle = compatMessage(generated.visual_oc_app_title)
+export const visualPersistDraftMessages = compatMessage(generated.visual_persist_draft_messages)
 export const visualPwaInstallAppName = compatMessage(generated.visual_pwa_install_app_name)
+export const visualQueueMessagesDefault = compatMessage(generated.visual_queue_messages_default)
 export const visualReset = compatMessage(generated.visual_reset)
 export const visualResetFontSize = compatMessage(generated.visual_reset_font_size)
 export const visualResetInputBarOffset = compatMessage(generated.visual_reset_input_bar_offset)
@@ -1842,6 +2082,15 @@ export const visualResetSpacing = compatMessage(generated.visual_reset_spacing)
 export const visualResetTerminalFontSize = compatMessage(generated.visual_reset_terminal_font_size)
 export const visualSelectDarkTheme = compatMessage(generated.visual_select_dark_theme)
 export const visualSelectLightTheme = compatMessage(generated.visual_select_light_theme)
+export const visualSendUsageReports = compatMessage(generated.visual_send_usage_reports)
+export const visualShowDotfiles = compatMessage(generated.visual_show_dotfiles)
+export const visualShowExpandedBashTools = compatMessage(generated.visual_show_expanded_bash_tools)
+export const visualShowExpandedEditTools = compatMessage(generated.visual_show_expanded_edit_tools)
+export const visualShowMobileStatusBar = compatMessage(generated.visual_show_mobile_status_bar)
+export const visualShowReasoningTraces = compatMessage(generated.visual_show_reasoning_traces)
+export const visualShowToolFileIcons = compatMessage(generated.visual_show_tool_file_icons)
+export const visualStickyUserHeader = compatMessage(generated.visual_sticky_user_header)
+export const visualTerminalQuickKeys = compatMessage(generated.visual_terminal_quick_keys)
 export const visualThemeImportInfo = compatMessage(generated.visual_theme_import_info)
 export const visualUserMessageRenderingMode = compatMessage(generated.visual_user_message_rendering_mode)
 export const voiceApiKey = compatMessage(generated.voice_api_key)
@@ -1854,6 +2103,9 @@ export const voiceConfiguredAbove = compatMessage(generated.voice_configured_abo
 export const voiceEnable = compatMessage(generated.voice_enable)
 export const voiceEnableAria = compatMessage(generated.voice_enable_aria)
 export const voiceHoldMs = compatMessage(generated.voice_hold_ms)
+export const voiceLangEnglish = compatMessage(generated.voice_lang_english)
+export const voiceLangGerman = compatMessage(generated.voice_lang_german)
+export const voiceLangItalian = compatMessage(generated.voice_lang_italian)
 export const voiceLanguage = compatMessage(generated.voice_language)
 export const voiceMediaRecorderWarning = compatMessage(generated.voice_media_recorder_warning)
 export const voiceMessageReadAloud = compatMessage(generated.voice_message_read_aloud)
@@ -1908,7 +2160,19 @@ export const voiceTitle = compatMessage(generated.voice_title)
 export const voiceTtsRequiresKey = compatMessage(generated.voice_tts_requires_key)
 export const voiceUsingConfigKey = compatMessage(generated.voice_using_config_key)
 export const voiceVoice = compatMessage(generated.voice_voice)
+export const voiceVoiceAlloy = compatMessage(generated.voice_voice_alloy)
+export const voiceVoiceBallad = compatMessage(generated.voice_voice_ballad)
+export const voiceVoiceCedar = compatMessage(generated.voice_voice_cedar)
+export const voiceVoiceCoral = compatMessage(generated.voice_voice_coral)
+export const voiceVoiceEcho = compatMessage(generated.voice_voice_echo)
+export const voiceVoiceFable = compatMessage(generated.voice_voice_fable)
 export const voiceVoiceIdentifierDesc = compatMessage(generated.voice_voice_identifier_desc)
+export const voiceVoiceMarin = compatMessage(generated.voice_voice_marin)
+export const voiceVoiceNova = compatMessage(generated.voice_voice_nova)
+export const voiceVoiceOnyx = compatMessage(generated.voice_voice_onyx)
+export const voiceVoiceSage = compatMessage(generated.voice_voice_sage)
+export const voiceVoiceShimmer = compatMessage(generated.voice_voice_shimmer)
+export const voiceVoiceVerse = compatMessage(generated.voice_voice_verse)
 export const vsActivityDefault = compatMessage(generated.vs_activity_default)
 export const vsBash = compatMessage(generated.vs_bash)
 export const vsChatRenderMode = compatMessage(generated.vs_chat_render_mode)
@@ -1972,6 +2236,7 @@ export const m = {
   aboutDiscord,
   aboutFanMade,
   aboutGithubLink,
+  aboutLatestVersion,
   aboutMadeWithLove,
   aboutUpToDate,
   aboutVersion,
@@ -2002,12 +2267,20 @@ export const m = {
   agAll,
   agAllow,
   agAsk,
+  agBuiltinNoDelete,
   agClearTemp,
   agClearTopP,
+  agDelete,
+  agDeleteAgent,
   agDeny,
   agDescription,
   agDescriptionPlaceholder,
   agEditAgentSettings,
+  agErrorSaving,
+  agFailedDelete,
+  agFailedRemoveOldRename,
+  agFailedRename,
+  agFailedReset,
   agGlobal,
   agGlobalAction,
   agGlobalDefault,
@@ -2017,6 +2290,8 @@ export const m = {
   agModeTooltip,
   agModelParameters,
   agModified,
+  agNameExists,
+  agNameRequired,
   agNew,
   agNewAgent,
   agNewAgentDesc,
@@ -2027,6 +2302,8 @@ export const m = {
   agPermissionPlaceholder,
   agPrimary,
   agPromptPlaceholder,
+  agReset,
+  agResetAgent,
   agRulesSummary,
   agSaveChanges,
   agSaving,
@@ -2044,7 +2321,14 @@ export const m = {
   agToastSaveError,
   agToastUpdateFailed,
   agToastUpdated,
+  agToolCodesearch,
+  agToolDoomLoop,
+  agToolExternalDirectory,
   agToolPermissions,
+  agToolTodoread,
+  agToolTodowrite,
+  agToolWebfetch,
+  agToolWebsearch,
   agTopP,
   agTopPRange,
   agTopPTooltip,
@@ -2148,18 +2432,28 @@ export const m = {
   chatYourAnswer,
   cmdActions,
   cmdArgumentsHint,
+  cmdBuiltinNoDelete,
   cmdCommandName,
   cmdCommandTemplate,
   cmdDarkTheme,
+  cmdDelete,
+  cmdDeleteCommand,
   cmdDescription,
   cmdDescriptionPlaceholder,
   cmdEditSettings,
+  cmdErrorSaving,
   cmdExecutionContext,
+  cmdFailedDelete,
+  cmdFailedRemoveOldRename,
+  cmdFailedRename,
+  cmdFailedReset,
   cmdFileHint,
   cmdGlobal,
   cmdIdentity,
   cmdKeyboardShortcuts,
   cmdLightTheme,
+  cmdNameExists,
+  cmdNameRequired,
   cmdNewCommand,
   cmdNewCommandDesc,
   cmdNewSession,
@@ -2179,6 +2473,8 @@ export const m = {
   cmdPlaceholder,
   cmdProject,
   cmdRecentSessions,
+  cmdReset,
+  cmdResetCommand,
   cmdSaveChanges,
   cmdSaving,
   cmdSelectFromSidebar,
@@ -2215,6 +2511,17 @@ export const m = {
   commonDisabled,
   commonEnabled,
   commonError,
+  commonKeyCancel,
+  commonKeyConnect,
+  commonKeyCreate,
+  commonKeyDelete,
+  commonKeyDisconnect,
+  commonKeyEnter,
+  commonKeyEscape,
+  commonKeyRemove,
+  commonKeyReset,
+  commonKeyRetry,
+  commonKeySave,
   commonLoading,
   commonPreview,
   commonReset,
@@ -2270,6 +2577,11 @@ export const m = {
   defaultsDefaultAgent,
   defaultsDefaultModel,
   defaultsDefaultThinking,
+  defaultsFailedLoad,
+  defaultsFailedSaveAgent,
+  defaultsFailedSaveModel,
+  defaultsFailedSaveModelServer,
+  defaultsFailedSaveVariant,
   defaultsOpencodeDefault,
   defaultsOptionDefault,
   defaultsShowDeletionDialog,
@@ -2434,13 +2746,17 @@ export const m = {
   gitChanges,
   gitChangesDiscardAll,
   gitChangesDiscardConfirm,
+  gitChangesFlatList,
   gitChangesNoChanges,
   gitChangesStageAll,
   gitChangesStaged,
   gitChangesTitle,
+  gitChangesTreeView,
   gitChangesUnstageAll,
   gitChangesUnstaged,
   gitChangesUntracked,
+  gitChangesView,
+  gitChangesViewMode,
   gitChecking,
   gitClearFileSelection,
   gitCommit,
@@ -2487,6 +2803,8 @@ export const m = {
   gitEnableGitmoji,
   gitEnableGitmojiAria,
   gitErrorLoadingDetails,
+  gitFailedLoadSettings,
+  gitFailedSaveGitmoji,
   gitFetch,
   gitFoundCredentials,
   gitGenerate,
@@ -2498,16 +2816,47 @@ export const m = {
   gitHistoryDialogDescription,
   gitIdentities,
   gitIdentityAuthMethod,
+  gitIdentityCancel,
+  gitIdentityCategoryBranch,
+  gitIdentityCategoryCode,
+  gitIdentityCategoryPersonal,
+  gitIdentityCategorySchool,
+  gitIdentityCategoryWork,
   gitIdentityColor,
+  gitIdentityColorCyan,
+  gitIdentityColorGreen,
+  gitIdentityColorOrange,
+  gitIdentityColorRed,
+  gitIdentityColorYellow,
+  gitIdentityCreateNew,
+  gitIdentityCreating,
   gitIdentityDeleteProfile,
+  gitIdentityEditIdentity,
+  gitIdentityEditProfile,
   gitIdentityEmail,
   gitIdentityEmailPlaceholder,
+  gitIdentityErrorDeleting,
+  gitIdentityErrorDeletingDetail,
+  gitIdentityErrorSaving,
+  gitIdentityErrorSavingDetail,
+  gitIdentityFailedCreateProfile,
+  gitIdentityFailedDeleteProfile,
+  gitIdentityFailedUpdateProfile,
+  gitIdentityGlobalIdentity,
   gitIdentityHost,
   gitIdentityHostPlaceholder,
+  gitIdentityHostRequiredToken,
   gitIdentityIcon,
+  gitIdentityImportCredential,
+  gitIdentityNameEmailRequired,
+  gitIdentityNewIdentity,
+  gitIdentityProfileCreated,
+  gitIdentityProfileDeleted,
   gitIdentityProfileName,
   gitIdentityProfileNamePlaceholder,
+  gitIdentityProfileUpdated,
   gitIdentitySshKeyPath,
+  gitIdentitySystemWideReadonly,
   gitIdentityUserName,
   gitIdentityUserNamePlaceholder,
   gitImport,
@@ -2675,9 +3024,14 @@ export const m = {
   githubCancel,
   githubConnect,
   githubDisconnect,
+  githubFailedDisconnect,
+  githubFailedLoadAuth,
+  githubFailedStartConnect,
+  githubFailedSwitchAccount,
   githubNotConnected,
   githubOpenGithub,
   githubOtherAccounts,
+  githubPollingFailed,
   githubScopes,
   githubSwitchTo,
   githubTitle,
@@ -2726,8 +3080,43 @@ export const m = {
   jsonEmptyContent,
   jsonExpandAll,
   jsonInvalid,
+  keyboardCaptureFirst,
+  keyboardConflictBrowserDefaults,
+  keyboardPressKeys,
   keyboardShortcutConflict,
   keyboardShortcutsTitle,
+  magicPromptCherryPick,
+  magicPromptCherryPickDesc,
+  magicPromptCommitGeneration,
+  magicPromptFailedLoad,
+  magicPromptFailedLoadDetail,
+  magicPromptFailedReset,
+  magicPromptFailedResetAll,
+  magicPromptFailedSave,
+  magicPromptGithub,
+  magicPromptInstructions,
+  magicPromptIssueReview,
+  magicPromptPrComments,
+  magicPromptPrCommentsDesc,
+  magicPromptPrFailedChecks,
+  magicPromptPrFailedChecksDesc,
+  magicPromptPrGeneration,
+  magicPromptPrReview,
+  magicPromptResetAll,
+  magicPromptResetAllOverrides,
+  magicPromptResetDefault,
+  magicPromptResetToDefault,
+  magicPromptResetting,
+  magicPromptSave,
+  magicPromptSaved,
+  magicPromptSaving,
+  magicPromptSinglePrComment,
+  magicPromptSinglePrCommentDesc,
+  magicPromptUnsavedChanges,
+  magicPromptUsingBuiltinDefault,
+  magicPromptUsingSavedOverride,
+  magicPromptVisibleCannotBeEmpty,
+  magicPromptVisiblePrompt,
   magicPromptsLoading,
   magicPromptsSelect,
   magicPromptsTitle,
@@ -2738,6 +3127,7 @@ export const m = {
   mcpCommand,
   mcpConnect,
   mcpConnected,
+  mcpConnectionFailed,
   mcpCreate,
   mcpDelete,
   mcpDeleteDesc,
@@ -2747,7 +3137,10 @@ export const m = {
   mcpDisconnect,
   mcpEnableServer,
   mcpEnvVariables,
+  mcpErrorOccurred,
   mcpFailed,
+  mcpFailedDeleteServer,
+  mcpHide,
   mcpKey,
   mcpKeyPlaceholder,
   mcpLocalStdio,
@@ -2763,6 +3156,7 @@ export const m = {
   mcpPasteEnv,
   mcpPasteEnvTitle,
   mcpProject,
+  mcpProjectScope,
   mcpRemoteSse,
   mcpSaveChanges,
   mcpSaving,
@@ -2770,6 +3164,7 @@ export const m = {
   mcpServer,
   mcpServerName,
   mcpServerUrl,
+  mcpShow,
   mcpSidebarAddTitle,
   mcpSidebarNotConfigured,
   mcpSidebarTitle,
@@ -2788,6 +3183,7 @@ export const m = {
   mcpTransportMode,
   mcpUrlPlaceholder,
   mcpUser,
+  mcpUserScope,
   mcpValue,
   mcpValuePlaceholder,
   mcpValuesPlaintext,
@@ -2806,11 +3202,15 @@ export const m = {
   notifDeliveryTitle,
   notifEnable,
   notifEnableAria,
+  notifErrorAbort,
   notifEventCompletion,
   notifEventError,
   notifEventQuestion,
   notifEventSubtask,
   notifEventsTitle,
+  notifFailedLoadZenModels,
+  notifFailedRequestPermission,
+  notifFailedSaveUtilityModel,
   notifLength,
   notifLengthDesc,
   notifMaxLength,
@@ -2818,8 +3218,10 @@ export const m = {
   notifNotSelected,
   notifPermissionDeniedHint,
   notifPermissionGrantedDisabled,
+  notifPermissionRequest,
   notifPushEnable,
   notifPushEnableAria,
+  notifPushManager,
   notifPushManagerUnavailable,
   notifPushNotSupported,
   notifPushRequestTimedOut,
@@ -2838,6 +3240,9 @@ export const m = {
   notifSummarizationTitle,
   notifSummarizeLast,
   notifSummarizeLastAria,
+  notifSwActivationTimeout,
+  notifSwNotSupported,
+  notifSwRegistrationFailed,
   notifTemplateMessage,
   notifTemplateTitle,
   notifTemplatesTitle,
@@ -2871,6 +3276,7 @@ export const m = {
   ocCliTitle,
   ocCliTooltip,
   ocNoData,
+  ocPromise,
   ocStatusCopied,
   ocStatusDesc,
   ocStatusTitle,
@@ -2904,10 +3310,19 @@ export const m = {
   optSvgDesc,
   optSystem,
   paceLabel,
+  paceOnTrack,
+  paceSlightlyFast,
+  paceTooFast,
+  paceUsedUp,
   passkeyAdd,
   passkeyAdded,
   passkeyCancelSetup,
   passkeyCurrentDevice,
+  passkeyEnableLockFirst,
+  passkeyFailedAdd,
+  passkeyFailedClearAuth,
+  passkeyFailedLoad,
+  passkeyFailedRemove,
   passkeyLastUsed,
   passkeyLoading,
   passkeyLockRequired,
@@ -3020,18 +3435,26 @@ export const m = {
   projActionAddNewAction,
   projActionChooseProjectAction,
   projActionDesktopForwardUnavailable,
+  projActionFailedSave,
   projActionFailedToCreateTerminalSession,
   projActionFailedToRunAction,
+  projActionFillRequired,
   projActionInvalidCustomUrl,
   projActionNoActiveDirectory,
   projActionOpenedActionUrl,
   projActionOpenedForwardedUrl,
   projActionOpenedUrlFromOutput,
   projActionRun,
+  projActionSaveActions,
+  projActionSaved,
+  projActionSaving,
   projActionStop,
+  projActionUntitled,
   projAddProjectAria,
+  projDirSelectionCancelled,
   projDiscoverFavicon,
   projDiscovering,
+  projFailedSelectDir,
   projNoProjects,
   projNone,
   projPreview,
@@ -3115,14 +3538,30 @@ export const m = {
   provCustomConfig,
   provDisconnect,
   provDisconnecting,
+  provFailedCompleteOauth,
+  provFailedCompleteOauthDetail,
+  provFailedCopyDeviceCode,
+  provFailedCopyOauthLink,
+  provFailedDisconnect,
+  provFailedDisconnectDetail,
+  provFailedLoadAuthMethods,
+  provFailedLoadAvailable,
+  provFailedLoadSources,
+  provFailedLoadSourcesDetail,
+  provFailedSaveApiKey,
+  provFailedSaveApiKeyDetail,
+  provFailedStartOauth,
+  provFailedStartOauthDetail,
   provHide,
   provHideAll,
+  provHideModel,
   provHideModelFromSelectors,
   provKeyPrivacy,
   provLoadingAuthMethods,
   provLoadingProviders,
   provNoConfigSource,
   provNoModelsMatch,
+  provNoOauthDetails,
   provNoProvidersDetected,
   provNoProvidersFound,
   provOpen,
@@ -3140,6 +3579,7 @@ export const m = {
   provSelectFromSidebar,
   provSelectProvider,
   provShowAll,
+  provShowModel,
   provShowModelInSelectors,
   provToastApiKeyRequired,
   provToastApiKeySaveFailed,
@@ -3174,16 +3614,20 @@ export const m = {
   riSshInstancesBindHostHint,
   riSshInstancesBindHostLocalhost,
   riSshInstancesBindingLocalForwardsWarning,
+  riSshInstancesCanDisconnect,
   riSshInstancesCancel,
   riSshInstancesClear,
   riSshInstancesConfig,
   riSshInstancesConnect,
+  riSshInstancesConnectAction,
+  riSshInstancesConnecting,
   riSshInstancesConnectionStatus,
   riSshInstancesConnectionTimeout,
   riSshInstancesCopyAll,
   riSshInstancesCopyLocalUrl,
   riSshInstancesCoreSettingsDesc,
   riSshInstancesCreate,
+  riSshInstancesCreateAction,
   riSshInstancesCurrentLocalUrl,
   riSshInstancesDescAuthentication,
   riSshInstancesDescMainTunnel,
@@ -3206,6 +3650,7 @@ export const m = {
   riSshInstancesFailedSaveSshInstance,
   riSshInstancesForwardType,
   riSshInstancesForwardTypeHint,
+  riSshInstancesForwardTypeLabel,
   riSshInstancesImport,
   riSshInstancesImportTitle,
   riSshInstancesInstallBun,
@@ -3225,8 +3670,12 @@ export const m = {
   riSshInstancesLoadingLogs,
   riSshInstancesLocalListen,
   riSshInstancesLocalListenHint,
+  riSshInstancesLocalListenHintAlt,
   riSshInstancesLocalListenLabel,
   riSshInstancesLocalPortInUse,
+  riSshInstancesLocalTarget,
+  riSshInstancesLocalTargetHint,
+  riSshInstancesLocalUrlCopied,
   riSshInstancesLocalUrlNotAvailable,
   riSshInstancesLogs,
   riSshInstancesLogsCleared,
@@ -3243,6 +3692,7 @@ export const m = {
   riSshInstancesNoHosts,
   riSshInstancesNoLogsToCopy,
   riSshInstancesNoSshLogs,
+  riSshInstancesOcPasswordStoreConfirm,
   riSshInstancesOpen,
   riSshInstancesOpenchamberPassword,
   riSshInstancesOpenchamberPasswordPlaceholder,
@@ -3258,22 +3708,30 @@ export const m = {
   riSshInstancesPrimaryButton,
   riSshInstancesRandomPort,
   riSshInstancesRandomPortTitle,
+  riSshInstancesReconnectNow,
   riSshInstancesReconnectStale,
+  riSshInstancesReconnecting,
   riSshInstancesRemoteForwardTypeDynamic,
   riSshInstancesRemoteForwardTypeLocal,
   riSshInstancesRemoteForwardTypeRemote,
   riSshInstancesRemoteListen,
+  riSshInstancesRemoteListenAlt,
   riSshInstancesRemoteListenHint,
+  riSshInstancesRemoteListenHintAlt,
   riSshInstancesRemoteListenLabel,
+  riSshInstancesRemoteTargetHint,
   riSshInstancesRemove,
   riSshInstancesRemoveAria,
   riSshInstancesRemoveInstance,
   riSshInstancesRetriedRandomPort,
   riSshInstancesRetry,
   riSshInstancesRetryFailed,
+  riSshInstancesSaveAction,
   riSshInstancesSaveChanges,
+  riSshInstancesSaving,
   riSshInstancesSecondaryButton,
   riSshInstancesSelectInstance,
+  riSshInstancesSelectedInstance,
   riSshInstancesSocksProxy,
   riSshInstancesSshCommand,
   riSshInstancesSshCommandRequired,
@@ -3282,20 +3740,40 @@ export const m = {
   riSshInstancesSshLogsTitle,
   riSshInstancesSshPassword,
   riSshInstancesSshPasswordPlaceholder,
+  riSshInstancesSshPasswordStoreConfirm,
   riSshInstancesStatusAuthCheck,
+  riSshInstancesStatusCheckingAuth,
   riSshInstancesStatusConfigResolved,
+  riSshInstancesStatusConnectingShort,
   riSshInstancesStatusDegraded,
+  riSshInstancesStatusDetectingServer,
   riSshInstancesStatusError,
+  riSshInstancesStatusErrorShort,
+  riSshInstancesStatusEstablishingSsh,
   riSshInstancesStatusForwarding,
+  riSshInstancesStatusForwardingPorts,
+  riSshInstancesStatusForwardingShort,
   riSshInstancesStatusIdle,
+  riSshInstancesStatusIdleShort,
   riSshInstancesStatusInstalling,
+  riSshInstancesStatusInstallingOc,
+  riSshInstancesStatusInstallingShort,
   riSshInstancesStatusMasterConnecting,
+  riSshInstancesStatusProbingRemote,
   riSshInstancesStatusReady,
+  riSshInstancesStatusReadyShort,
+  riSshInstancesStatusReconnectShort,
   riSshInstancesStatusReconnecting,
+  riSshInstancesStatusReconnectingShort,
   riSshInstancesStatusRemoteProbe,
   riSshInstancesStatusServerDetecting,
   riSshInstancesStatusServerStarting,
+  riSshInstancesStatusStartingServer,
+  riSshInstancesStatusStartingShort,
   riSshInstancesStatusUpdating,
+  riSshInstancesStatusUpdatingOc,
+  riSshInstancesStatusUpdatingShort,
+  riSshInstancesStorePasswordConfirm,
   riSshInstancesStoreSshPassword,
   riSshInstancesTitleAuthentication,
   riSshInstancesTitleMainTunnel,
@@ -3303,8 +3781,10 @@ export const m = {
   riSshInstancesTitleRemoteServer,
   riSshInstancesTotal,
   riSshInstancesTypeDynamic,
+  riSshInstancesTypeDynamicBadge,
   riSshInstancesTypeLocal,
   riSshInstancesTypeRemote,
+  riSshInstancesTypeRemoteBadge,
   riSshInstancesValueHint,
   rightSidebarResizePanel,
   scAddCatalog,
@@ -3397,6 +3877,10 @@ export const m = {
   selectorCurrent,
   selectorFavorite,
   selectorFavorites,
+  selectorKeyArrowDown,
+  selectorKeyArrowUp,
+  selectorKeyEnter,
+  selectorKeyEscape,
   selectorKeyboardHints,
   selectorNoModelOptional,
   selectorNoModelsFound,
@@ -3445,6 +3929,7 @@ export const m = {
   settingsMcp,
   settingsNotAvailable,
   settingsNotAvailableDescription,
+  settingsProjectSelector,
   settingsProjects,
   settingsProvidersPage,
   settingsReloadOpencode,
@@ -3459,6 +3944,8 @@ export const m = {
   settingsSectionTunnel,
   settingsSectionVisual,
   settingsSectionVoice,
+  settingsSidebarAddNewItem,
+  settingsSidebarTotal,
   settingsSkills,
   settingsSkillsCatalog,
   settingsSwitchProjectAria,
@@ -3513,8 +4000,12 @@ export const m = {
   skAddFileTitle,
   skBasicInfo,
   skCancel,
+  skCatalogExternal,
+  skCatalogManual,
   skClaudeCompatible,
+  skCreateFile,
   skCreateSkill,
+  skCreatedSuccessfully,
   skDelete,
   skDeleteConfirm,
   skDeleteFile,
@@ -3530,6 +4021,10 @@ export const m = {
   skEditFile,
   skEditFileDesc,
   skEditSkill,
+  skErrorSaving,
+  skFailedDeleteFile,
+  skFailedLoadDetails,
+  skFileAlreadyExists,
   skFileContent,
   skFilePath,
   skFilePathPlaceholder,
@@ -3550,6 +4045,7 @@ export const m = {
   skRenamePlaceholder,
   skRenamePrompt,
   skRenameSkill,
+  skRenamed,
   skSaveChanges,
   skSaving,
   skSelectFromSidebar,
@@ -3572,6 +4068,7 @@ export const m = {
   skToastSaveError,
   skToastUpdateFailed,
   skTotal,
+  skUpdatedSuccessfully,
   skUserSkills,
   skillsContentPlaceholder,
   skillsFilePlaceholder,
@@ -3755,17 +4252,24 @@ export const m = {
   usageDisplayModePlaceholder,
   usageDisplayQuota,
   usageDisplayUsage,
+  usageFailedSaveSettings,
   usageIntervalPlaceholder,
   usageNotSet,
   usageRefreshAria,
+  usageShowInDropdown,
   usageTitle,
+  usageToggleAutoRefresh,
   visualActivityDefaultMode,
   visualChatRenderMode,
   visualDiffLayout,
   visualDiffViewMode,
+  visualEnableSpellcheck,
   visualFontSizePercentage,
   visualMermaidRenderingMode,
+  visualOcAppTitle,
+  visualPersistDraftMessages,
   visualPwaInstallAppName,
+  visualQueueMessagesDefault,
   visualReset,
   visualResetFontSize,
   visualResetInputBarOffset,
@@ -3774,6 +4278,15 @@ export const m = {
   visualResetTerminalFontSize,
   visualSelectDarkTheme,
   visualSelectLightTheme,
+  visualSendUsageReports,
+  visualShowDotfiles,
+  visualShowExpandedBashTools,
+  visualShowExpandedEditTools,
+  visualShowMobileStatusBar,
+  visualShowReasoningTraces,
+  visualShowToolFileIcons,
+  visualStickyUserHeader,
+  visualTerminalQuickKeys,
   visualThemeImportInfo,
   visualUserMessageRenderingMode,
   voiceApiKey,
@@ -3786,6 +4299,9 @@ export const m = {
   voiceEnable,
   voiceEnableAria,
   voiceHoldMs,
+  voiceLangEnglish,
+  voiceLangGerman,
+  voiceLangItalian,
   voiceLanguage,
   voiceMediaRecorderWarning,
   voiceMessageReadAloud,
@@ -3840,7 +4356,19 @@ export const m = {
   voiceTtsRequiresKey,
   voiceUsingConfigKey,
   voiceVoice,
+  voiceVoiceAlloy,
+  voiceVoiceBallad,
+  voiceVoiceCedar,
+  voiceVoiceCoral,
+  voiceVoiceEcho,
+  voiceVoiceFable,
   voiceVoiceIdentifierDesc,
+  voiceVoiceMarin,
+  voiceVoiceNova,
+  voiceVoiceOnyx,
+  voiceVoiceSage,
+  voiceVoiceShimmer,
+  voiceVoiceVerse,
   vsActivityDefault,
   vsBash,
   vsChatRenderMode,

@@ -40,7 +40,7 @@ export const SettingsProjectSelector: React.FC<{ className?: string }> = ({ clas
 
   const rawLabel = activeProject?.label && activeProject.label.trim().length > 0
     ? activeProject.label
-    : (activeProject?.path.split('/').filter(Boolean).pop() || activeProject?.path || 'Project');
+    : (activeProject?.path.split('/').filter(Boolean).pop() || activeProject?.path || m.settingsProjectSelector());
   const label = formatProjectLabel(rawLabel);
 
   return (

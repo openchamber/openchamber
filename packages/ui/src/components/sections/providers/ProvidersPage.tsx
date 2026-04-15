@@ -20,6 +20,25 @@ import { copyTextToClipboard } from '@/lib/clipboard';
 import { openExternalUrl } from '@/lib/url';
 import type { ModelMetadata } from '@/types';
 import * as m from '@/lib/i18n/messages';
+import {
+    provFailedLoadAuthMethods,
+    provFailedLoadAvailable,
+    provFailedLoadSources,
+    provFailedLoadSourcesDetail,
+    provFailedSaveApiKey,
+    provFailedSaveApiKeyDetail,
+    provFailedStartOauth,
+    provNoOauthDetails,
+    provFailedStartOauthDetail,
+    provFailedCompleteOauth,
+    provFailedCompleteOauthDetail,
+    provFailedCopyOauthLink,
+    provFailedCopyDeviceCode,
+    provFailedDisconnect,
+    provFailedDisconnectDetail,
+    provShowModel,
+    provHideModel,
+} from '@/lib/i18n/messages';
 
 const COMPACT_NUMBER_FORMATTER = new Intl.NumberFormat('en-US', {
   notation: 'compact',
@@ -192,7 +211,7 @@ export const ProvidersPage: React.FC = () => {
         setAuthMethodsByProvider(parseAuthPayload(payload));
       } catch (error) {
         if (!isMounted) return;
-        console.error('Failed to load provider auth methods:', error);
+        console.error(provFailedLoadAuthMethods(), error);
         toast.error(m.provToastLoadAuthFailed());
       } finally {
         if (isMounted) {
@@ -229,7 +248,7 @@ export const ProvidersPage: React.FC = () => {
         setAvailableProviders(parseProvidersPayload(payload));
       } catch (error) {
         if (!isMounted) return;
-        console.error('Failed to load available providers:', error);
+        console.error(provFailedLoadAvailable(), error);
         setAvailableError(m.provToastLoadListFailed());
       } finally {
         if (isMounted) {
@@ -297,7 +316,7 @@ export const ProvidersPage: React.FC = () => {
 
         const payload = await response.json().catch(() => null);
         if (!response.ok) {
-          throw new Error(payload?.error || 'Failed to load provider sources');
+          throw new Error(payload?.error || provFailedLoadSources());
         }
 
         const sources = (payload?.sources ?? payload?.data?.sources) as ProviderSources | undefined;
@@ -309,7 +328,7 @@ export const ProvidersPage: React.FC = () => {
         }
       } catch (error) {
         if (!cancelled) {
-          console.error('Failed to load provider sources:', error);
+          console.error(provFailedLoadSourcesDetail(), error);
         }
       }
     };
@@ -343,7 +362,7 @@ export const ProvidersPage: React.FC = () => {
 
       const payload = await response.json().catch(() => null);
       if (!response.ok) {
-        const message = payload?.error || 'Failed to save API key';
+        const message = payload?.error || provFailedSaveApiKey();
         throw new Error(message);
       }
 
@@ -352,7 +371,7 @@ export const ProvidersPage: React.FC = () => {
       await reloadOpenCodeConfiguration({ scopes: ["providers"], mode: "active" });
       setSelectedProvider(providerId);
     } catch (error) {
-      console.error('Failed to save API key:', error);
+      console.error(provFailedSaveApiKeyDetail(), error);
       toast.error(m.provToastApiKeySaveFailed());
     } finally {
       setAuthBusyKey(null);
@@ -372,7 +391,7 @@ export const ProvidersPage: React.FC = () => {
 
       const payload = await response.json().catch(() => null);
       if (!response.ok) {
-        const message = payload?.error || 'Failed to start OAuth flow';
+        const message = payload?.error || provFailedStartOauth();
         throw new Error(message);
       }
 
@@ -394,7 +413,7 @@ export const ProvidersPage: React.FC = () => {
         undefined;
 
       if (!urlCandidate && !instructions && !userCode) {
-        throw new Error('No OAuth details returned');
+        throw new Error(provNoOauthDetails());
       }
 
       const detailsKey = `${providerId}:${methodIndex}`;
@@ -413,7 +432,7 @@ export const ProvidersPage: React.FC = () => {
       setPendingOAuth({ providerId, methodIndex });
       toast.message(m.provToastOauthCompleteBrowser());
     } catch (error) {
-      console.error('Failed to start OAuth flow:', error);
+      console.error(provFailedStartOauthDetail(), error);
       toast.error(m.provToastOauthStartFailed());
     } finally {
       setAuthBusyKey(null);
@@ -441,7 +460,7 @@ export const ProvidersPage: React.FC = () => {
 
       const responsePayload = await response.json().catch(() => null);
       if (!response.ok) {
-        const message = responsePayload?.error || 'Failed to complete OAuth flow';
+        const message = responsePayload?.error || provFailedCompleteOauth();
         throw new Error(message);
       }
 
@@ -451,7 +470,7 @@ export const ProvidersPage: React.FC = () => {
       await reloadOpenCodeConfiguration({ scopes: ["providers"], mode: "active" });
       setSelectedProvider(providerId);
     } catch (error) {
-      console.error('Failed to complete OAuth flow:', error);
+      console.error(provFailedCompleteOauthDetail(), error);
       toast.error(m.provToastOauthCompleteFailed());
     } finally {
       setAuthBusyKey(null);
@@ -464,7 +483,7 @@ export const ProvidersPage: React.FC = () => {
       toast.success(m.provToastLinkCopied());
       return;
     }
-    console.error('Failed to copy OAuth link:', result.error);
+    console.error(provFailedCopyOauthLink(), result.error);
     toast.error(m.provToastLinkCopyFailed());
   };
 
@@ -474,7 +493,7 @@ export const ProvidersPage: React.FC = () => {
       toast.success(m.provToastDeviceCodeCopied());
       return;
     }
-    console.error('Failed to copy device code:', result.error);
+    console.error(provFailedCopyDeviceCode(), result.error);
     toast.error(m.provToastDeviceCodeFailed());
   };
 
@@ -490,14 +509,14 @@ export const ProvidersPage: React.FC = () => {
 
       const payload = await response.json().catch(() => null);
       if (!response.ok) {
-        const message = payload?.error || 'Failed to disconnect provider';
+        const message = payload?.error || provFailedDisconnect();
         throw new Error(message);
       }
 
       toast.success(m.provToastDisconnected());
       await reloadOpenCodeConfiguration({ scopes: ["providers"], mode: "active" });
     } catch (error) {
-      console.error('Failed to disconnect provider:', error);
+      console.error(provFailedDisconnectDetail(), error);
       toast.error(m.provToastDisconnectFailed());
     } finally {
       setAuthBusyKey(null);
@@ -1096,7 +1115,7 @@ export const ProvidersPage: React.FC = () => {
                           onClick={() => toggleHiddenModel(selectedProvider.id, modelId)}
                           className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-[var(--interactive-hover)]/50"
                           title={isHidden ? m.provShowModelInSelectors() : m.provHideModelFromSelectors()}
-                          aria-label={isHidden ? 'Show model' : 'Hide model'}
+                          aria-label={isHidden ? provShowModel() : provHideModel()}
                         >
                           {isHidden ? <RiEyeOffLine className="h-3.5 w-3.5" /> : <RiEyeLine className="h-3.5 w-3.5" />}
                         </button>

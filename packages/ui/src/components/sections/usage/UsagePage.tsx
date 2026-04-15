@@ -71,7 +71,7 @@ export const UsagePage: React.FC = () => {
   const selectedResult = results.find((entry) => entry.providerId === selectedProviderId) ?? null;
 
   const providerMeta = QUOTA_PROVIDERS.find((provider) => provider.id === selectedProviderId);
-  const providerName = providerMeta?.name ?? selectedProviderId ?? 'Usage';
+  const providerName = providerMeta?.name ?? selectedProviderId ?? m.usageTitle();
   const usage = selectedResult?.usage;
   const showInDropdown = selectedProviderId ? dropdownProviderIds.includes(selectedProviderId) : false;
   const handleDropdownToggle = React.useCallback((enabled: boolean) => {
@@ -178,7 +178,7 @@ export const UsagePage: React.FC = () => {
             aria-pressed={showInDropdown}
             onClick={() => handleDropdownToggle(!showInDropdown)}
             onKeyDown={(event) => {
-              if (event.key === ' ' || event.key === 'Enter') {
+              if (event.key === ' ' || event.key === m.commonKeyEnter()) {
                 event.preventDefault();
                 handleDropdownToggle(!showInDropdown);
               }

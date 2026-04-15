@@ -399,13 +399,13 @@ export const AgentsPage: React.FC = () => {
 
   const formatPermissionLabel = React.useCallback((permissionName: string): string => {
     if (permissionName === '*') return m.agGlobalDefault();
-    if (permissionName === 'webfetch') return 'WebFetch';
-    if (permissionName === 'websearch') return 'WebSearch';
-    if (permissionName === 'codesearch') return 'CodeSearch';
-    if (permissionName === 'doom_loop') return 'Doom Loop';
-    if (permissionName === 'external_directory') return 'External Directory';
-    if (permissionName === 'todowrite') return 'TodoWrite';
-    if (permissionName === 'todoread') return 'TodoRead';
+    if (permissionName === 'webfetch') return m.agToolWebfetch();
+    if (permissionName === 'websearch') return m.agToolWebsearch();
+    if (permissionName === 'codesearch') return m.agToolCodesearch();
+    if (permissionName === 'doom_loop') return m.agToolDoomLoop();
+    if (permissionName === 'external_directory') return m.agToolExternalDirectory();
+    if (permissionName === 'todowrite') return m.agToolTodowrite();
+    if (permissionName === 'todoread') return m.agToolTodoread();
 
     return permissionName
       .split(/[_-]+/g)
@@ -572,7 +572,7 @@ export const AgentsPage: React.FC = () => {
         toast.error(isNewAgent ? m.agToastCreateFailed() : m.agToastUpdateFailed());
       }
     } catch (error) {
-      console.error('Error saving agent:', error);
+      console.error(m.agErrorSaving(), error);
       const message = error instanceof Error && error.message ? error.message : m.agToastSaveError();
       toast.error(message);
     } finally {

@@ -62,31 +62,31 @@ const isPortInUseError = (error: unknown): boolean => {
 const phaseLabel = (phase?: string): string => {
   switch (phase) {
     case 'config_resolved':
-      return 'Resolving configuration';
+      return m.riSshInstancesStatusConfigResolved();
     case 'auth_check':
-      return 'Checking auth';
+      return m.riSshInstancesStatusCheckingAuth();
     case 'master_connecting':
-      return 'Establishing SSH';
+      return m.riSshInstancesStatusEstablishingSsh();
     case 'remote_probe':
-      return 'Probing remote';
+      return m.riSshInstancesStatusProbingRemote();
     case 'installing':
-      return 'Installing OpenChamber';
+      return m.riSshInstancesStatusInstallingOc();
     case 'updating':
-      return 'Updating OpenChamber';
+      return m.riSshInstancesStatusUpdatingOc();
     case 'server_detecting':
-      return 'Detecting server';
+      return m.riSshInstancesStatusDetectingServer();
     case 'server_starting':
-      return 'Starting server';
+      return m.riSshInstancesStatusStartingServer();
     case 'forwarding':
-      return 'Forwarding ports';
+      return m.riSshInstancesStatusForwardingPorts();
     case 'ready':
-      return 'Ready';
+      return m.riSshInstancesStatusReadyShort();
     case 'degraded':
-      return 'Reconnecting';
+      return m.riSshInstancesStatusReconnecting();
     case 'error':
-      return 'Error';
+      return m.riSshInstancesStatusErrorShort();
     default:
-      return 'Idle';
+      return m.riSshInstancesStatusIdleShort();
   }
 };
 
@@ -380,7 +380,7 @@ export const RemoteInstancesPage: React.FC = () => {
     const normalized = normalizeForSave(draft);
 
     if (!normalized.sshCommand.trim()) {
-      toast.error('SSH command is required');
+      toast.error(m.riSshInstancesSshCommandRequired());
       return;
     }
 
@@ -398,7 +398,7 @@ export const RemoteInstancesPage: React.FC = () => {
       normalized.auth.sshPassword.value?.trim() &&
       normalized.auth.sshPassword.store !== 'settings'
     ) {
-      const store = window.confirm('Store SSH password in settings.json as plaintext?');
+      const store = window.confirm(m.riSshInstancesStoreSshPassword());
       normalized.auth.sshPassword.store = store ? 'settings' : 'never';
       if (!store) {
         normalized.auth.sshPassword.value = undefined;
@@ -410,7 +410,7 @@ export const RemoteInstancesPage: React.FC = () => {
       normalized.auth.openchamberPassword.value?.trim() &&
       normalized.auth.openchamberPassword.store !== 'settings'
     ) {
-      const store = window.confirm('Store OpenChamber UI password in settings.json as plaintext?');
+      const store = window.confirm(m.riSshInstancesOcPasswordStoreConfirm());
       normalized.auth.openchamberPassword.store = store ? 'settings' : 'never';
       if (!store) {
         normalized.auth.openchamberPassword.value = undefined;
@@ -419,9 +419,9 @@ export const RemoteInstancesPage: React.FC = () => {
 
     try {
       await upsertInstance(normalized);
-      toast.success('SSH instance saved');
+      toast.success(m.riSshInstancesSshInstanceSaved());
     } catch (error) {
-      toast.error('Failed to save SSH instance', {
+      toast.error(m.riSshInstancesFailedSaveSshInstance(), {
         description: error instanceof Error ? error.message : String(error),
       });
     }
@@ -433,10 +433,10 @@ export const RemoteInstancesPage: React.FC = () => {
       try {
         await createFromCommand(id, `ssh ${destination}`, host);
         setSelectedId(id);
-        toast.success('SSH instance created');
+        toast.success(m.riSshInstancesInstanceCreated());
         return true;
       } catch (error) {
-        toast.error('Failed to create SSH instance', {
+        toast.error(m.riSshInstancesFailedCreate(), {
           description: error instanceof Error ? error.message : String(error),
         });
         return false;
@@ -472,7 +472,7 @@ export const RemoteInstancesPage: React.FC = () => {
       return;
     }
     if (!destination) {
-      toast.error('Destination is required');
+      toast.error(m.riSshInstancesDestinationRequired());
       return;
     }
 
@@ -498,7 +498,7 @@ export const RemoteInstancesPage: React.FC = () => {
         throw error;
       }
 
-      const allow = window.confirm('Local port is already in use. Pick a random free local port and retry?');
+      const allow = window.confirm(m.riSshInstancesLocalPortInUse());
       if (!allow) {
         throw error;
       }
@@ -513,7 +513,7 @@ export const RemoteInstancesPage: React.FC = () => {
 
       await upsertInstance(nextInstance);
       await connect(nextInstance.id);
-      toast.success('Retried with a random local port');
+      toast.success(m.riSshInstancesRetriedRandomPort());
     }
   }, [connect, selectedInstance, upsertInstance]);
 
@@ -577,12 +577,12 @@ export const RemoteInstancesPage: React.FC = () => {
 
   const handleCopyAllLogs = React.useCallback(() => {
     if (!logLinesText.trim()) {
-      toast.error('No logs to copy');
+      toast.error(m.riSshInstancesNoLogsToCopy());
       return;
     }
     void copyTextToClipboard(logLinesText).then((result) => {
       if (result.ok) {
-        toast.success('Logs copied');
+        toast.success(m.riSshInstancesLogsCopied());
       }
     });
   }, [logLinesText]);
@@ -594,9 +594,9 @@ export const RemoteInstancesPage: React.FC = () => {
     try {
       await desktopSshLogsClear(draft.id);
       setLogDialogLines([]);
-      toast.success('Logs cleared');
+      toast.success(m.riSshInstancesLogsCleared());
     } catch (error) {
-      toast.error('Failed to clear logs', {
+      toast.error(m.riSshInstancesFailedClearLogs(), {
         description: error instanceof Error ? error.message : String(error),
       });
     }
@@ -604,13 +604,13 @@ export const RemoteInstancesPage: React.FC = () => {
 
   const handleOpenCurrentInstance = React.useCallback(async () => {
     if (!status?.localUrl) {
-      toast.error('Instance URL is not available yet');
+      toast.error(m.riSshInstancesLocalUrlNotAvailable());
       return;
     }
 
     const target = status.localUrl.trim();
     if (!target) {
-      toast.error('Instance URL is not available yet');
+      toast.error(m.riSshInstancesLocalUrlNotAvailable());
       return;
     }
 
@@ -652,7 +652,7 @@ export const RemoteInstancesPage: React.FC = () => {
 
     void operation
       .catch((error) => {
-        toast.error('Retry failed', {
+        toast.error(m.riSshInstancesRetryFailed(), {
           description: error instanceof Error ? error.message : String(error),
         });
       })
@@ -662,12 +662,12 @@ export const RemoteInstancesPage: React.FC = () => {
   }, [connectWithPortRecovery, disconnect, draft, isConnecting, isReconnecting, retry]);
 
   const retryButtonLabel = isConnecting
-    ? 'Connecting...'
+    ? m.riSshInstancesConnecting()
     : isReconnecting
       ? reconnectAppearsStuck
-        ? 'Reconnect now'
-        : 'Reconnecting...'
-      : 'Retry';
+        ? m.riSshInstancesReconnectNow()
+        : m.riSshInstancesReconnecting()
+      : m.riSshInstancesRetry();
 
   const canRetry =
     !isPrimaryActionPending &&
@@ -675,7 +675,7 @@ export const RemoteInstancesPage: React.FC = () => {
     (statusPhase === 'error' || statusPhase === 'idle' || !statusPhase || (isReconnecting && reconnectAppearsStuck)) &&
     !isConnecting;
 
-  const primaryButtonLabel = isReady ? 'Disconnect' : canDisconnect ? 'Cancel' : 'Connect';
+  const primaryButtonLabel = isReady ? m.commonKeyDisconnect() : canDisconnect ? m.commonKeyCancel() : m.commonKeyConnect();
 
   if (!draft) {
     return (
@@ -704,10 +704,10 @@ export const RemoteInstancesPage: React.FC = () => {
               {importCandidates.map((candidate) => (
                 <div key={`${candidate.source}:${candidate.host}`} className="flex items-center justify-between gap-3 rounded-md border border-[var(--interactive-border)] px-3 py-2">
                   <div className="min-w-0">
-                    <div className="typography-ui-label text-foreground truncate">
-                      {candidate.host}
-                      {candidate.pattern ? ' (pattern)' : ''}
-                    </div>
+                 <div className="typography-ui-label text-foreground truncate">
+                       {candidate.host}
+                       {candidate.pattern ? ` (${m.riSshInstancesPattern()})` : ''}
+                     </div>
                     <div className="typography-micro text-muted-foreground">{candidate.source} config</div>
                   </div>
                   <Button
@@ -738,7 +738,7 @@ export const RemoteInstancesPage: React.FC = () => {
             <DialogHeader>
               <DialogTitle>{m.riSshInstancesPatternDialogTitle()}</DialogTitle>
               <DialogDescription>
-                {patternHost ? `${patternHost} requires a concrete destination.` : 'Enter destination.'}
+                {patternHost ? `${patternHost} requires a concrete destination.` : m.riSshInstancesPatternEnterDestination()}
               </DialogDescription>
             </DialogHeader>
             <form
@@ -831,15 +831,15 @@ export const RemoteInstancesPage: React.FC = () => {
               size="xs"
               className="!font-normal text-[var(--status-error)] border-[var(--status-error)]/30 hover:text-[var(--status-error)]"
               onClick={() => {
-                const ok = window.confirm('Remove this SSH instance?');
+                const ok = window.confirm(m.riSshInstancesRemoveInstance());
                 if (!ok) return;
                 void removeInstance(draft.id)
                   .then(() => {
                     setSelectedId(null);
-                    toast.success('SSH instance removed');
+                    toast.success(m.riSshInstancesRemove());
                   })
                   .catch((err) => {
-                    toast.error('Failed to remove SSH instance', {
+                    toast.error(m.riSshInstancesFailedRemove(), {
                       description: err instanceof Error ? err.message : String(err),
                     });
                   });
@@ -893,7 +893,7 @@ export const RemoteInstancesPage: React.FC = () => {
             />
           </div>
           <div className="flex flex-col gap-1.5 py-1.5 md:flex-row md:items-center md:gap-8">
-            <span className="typography-ui-label text-foreground w-56 shrink-0">Connection timeout (sec)</span>
+            <span className="typography-ui-label text-foreground w-56 shrink-0">{m.riSshInstancesConnectionTimeout()}</span>
             <NumberInput
               containerClassName="w-fit"
               min={5}
@@ -905,9 +905,10 @@ export const RemoteInstancesPage: React.FC = () => {
                 updateDraft((current) => ({
                   ...current,
                   connectionTimeoutSec: Number.isFinite(next) ? next : current.connectionTimeoutSec,
-                }));
-              }}
-            />
+                  }));
+                }}
+                emptyLabel="Auto"
+              />
           </div>
         </section>
       </div>
@@ -921,7 +922,7 @@ export const RemoteInstancesPage: React.FC = () => {
           <div className="flex flex-col gap-1.5 py-1.5 md:flex-row md:items-center md:gap-8">
             <div className="w-56 shrink-0">
               <HintLabel
-                label="Mode"
+                label={m.riSshInstancesMode()}
                 hint="Managed installs/updates and starts OpenChamber remotely. External assumes it is already running."
               />
             </div>
@@ -950,8 +951,8 @@ export const RemoteInstancesPage: React.FC = () => {
           <div className="flex flex-col gap-1.5 py-1.5 md:flex-row md:items-center md:gap-8">
             <div className="w-56 shrink-0">
               <HintLabel
-                label="Preferred remote port"
-                hint="Port OpenChamber should use on the remote host. Leave empty to let the runtime choose."
+                label={m.riSshInstancesPreferredRemotePort()}
+                hint={m.riSshInstancesPreferredRemotePortHint()}
               />
             </div>
             <NumberInput
@@ -977,17 +978,17 @@ export const RemoteInstancesPage: React.FC = () => {
                     ...current.remoteOpenchamber,
                     preferredPort: undefined,
                   },
-                }));
-              }}
-              emptyLabel="Auto"
-            />
-          </div>
+                 }));
+               }}
+               emptyLabel="Auto"
+             />
+           </div>
 
           {isManagedMode ? (
             <div className="flex flex-col gap-1.5 py-1.5 md:flex-row md:items-center md:gap-8">
               <div className="w-56 shrink-0">
                 <HintLabel
-                  label="Install method"
+                  label={m.riSshInstancesInstallMethod()}
                   hint="How OpenChamber gets installed/updated remotely when mode is Managed."
                 />
               </div>
@@ -1023,8 +1024,8 @@ export const RemoteInstancesPage: React.FC = () => {
             <div className="flex flex-col gap-1.5 py-1.5 md:flex-row md:items-center md:gap-8">
               <div className="w-56 shrink-0">
                 <HintLabel
-                  label="Keep server running"
-                  hint="If enabled, OpenChamber daemon is left running remotely when you disconnect."
+                  label={m.riSshInstancesKeepServerRunning()}
+                  hint={m.riSshInstancesKeepServerRunningHint()}
                 />
               </div>
               <div className="flex w-full items-center gap-2 md:max-w-xs">
@@ -1055,7 +1056,7 @@ export const RemoteInstancesPage: React.FC = () => {
           <div className="flex flex-col gap-1.5 py-1.5 md:flex-row md:items-center md:gap-8">
             <div className="w-56 shrink-0">
               <HintLabel
-                label="Bind host"
+                label={m.riSshInstancesBindHost()}
                 hint="Network interface for the main local URL. Use 127.0.0.1/localhost for local-only access."
               />
             </div>
@@ -1091,8 +1092,8 @@ export const RemoteInstancesPage: React.FC = () => {
           <div className="flex flex-col gap-1.5 py-1.5 md:flex-row md:items-center md:gap-8">
             <div className="w-56 shrink-0">
               <HintLabel
-                label="Preferred local port"
-                hint="Preferred local port for the main OpenChamber tunnel. Leave empty for auto-select."
+                label={m.riSshInstancesPreferredLocalPort()}
+                hint={m.riSshInstancesPreferredLocalPortHint()}
               />
             </div>
             <div className="flex w-full items-center gap-2 md:max-w-sm">
@@ -1119,11 +1120,11 @@ export const RemoteInstancesPage: React.FC = () => {
                       ...current.localForward,
                       preferredLocalPort: undefined,
                     },
-                  }));
-                }}
-                emptyLabel="Auto"
-              />
-              <Button
+                     }));
+               }}
+               emptyLabel="Auto"
+             />
+               <Button
                 type="button"
                 variant="outline"
                 size="xs"
@@ -1220,14 +1221,14 @@ export const RemoteInstancesPage: React.FC = () => {
               }));
             };
 
-            const localLabel = forward.type === 'remote' ? 'Local target' : 'Local listen';
+            const localLabel = forward.type === 'remote' ? m.riSshInstancesLocalTarget() : m.riSshInstancesLocalListen();
             const localHint = forward.type === 'remote'
-              ? 'Local host and port on your machine that receives traffic from remote -R listener.'
-              : 'Local host and port where this forward listens on your machine.';
-            const remoteLabel = forward.type === 'remote' ? 'Remote listen' : 'Remote target';
+              ? m.riSshInstancesLocalTargetHint()
+              : m.riSshInstancesLocalListenHintAlt();
+            const remoteLabel = forward.type === 'remote' ? m.riSshInstancesRemoteListen() : m.riSshInstancesRemoteListenAlt();
             const remoteHint = forward.type === 'remote'
-              ? 'Remote host and port where SSH creates the -R listener.'
-              : 'Remote host and port that receives traffic from local -L listener.';
+              ? m.riSshInstancesRemoteListenHintAlt()
+              : m.riSshInstancesRemoteTargetHint();
 
             const localEndpoint = formatEndpoint(forward.localHost || 'localhost', forward.localPort);
             const remoteEndpoint = formatEndpoint(forward.remoteHost || 'localhost', forward.remotePort);
@@ -1239,7 +1240,7 @@ export const RemoteInstancesPage: React.FC = () => {
 
             const isForwardOpen = Boolean(expandedForwards[forward.id]);
 
-            const typeLabel = forward.type === 'local' ? 'Local (-L)' : forward.type === 'remote' ? 'Remote (-R)' : 'Dynamic (-D)';
+            const typeLabel = forward.type === 'local' ? m.riSshInstancesTypeLocal() : forward.type === 'remote' ? m.riSshInstancesTypeRemote() : m.riSshInstancesTypeDynamic();
 
             return (
               <Collapsible
@@ -1285,7 +1286,7 @@ export const RemoteInstancesPage: React.FC = () => {
                     <div className="flex flex-col gap-1.5 py-1.5 md:flex-row md:items-center md:gap-8">
                       <div className="w-56 shrink-0">
                         <HintLabel
-                          label="Forward type"
+                          label={m.riSshInstancesForwardType()}
                           hint="Local (-L): laptop -> remote service. Remote (-R): remote machine -> this laptop. Dynamic (-D): local SOCKS5 proxy."
                         />
                       </div>
@@ -1302,9 +1303,9 @@ export const RemoteInstancesPage: React.FC = () => {
                           <SelectValue placeholder={m.riSshInstancesForwardType()} />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="local">Local (-L)</SelectItem>
-                          <SelectItem value="remote">Remote (-R)</SelectItem>
-                          <SelectItem value="dynamic">Dynamic (-D)</SelectItem>
+                          <SelectItem value="local">{m.riSshInstancesTypeLocal()}</SelectItem>
+                          <SelectItem value="remote">{m.riSshInstancesTypeRemote()}</SelectItem>
+                          <SelectItem value="dynamic">{m.riSshInstancesTypeDynamic()}</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -1343,12 +1344,12 @@ export const RemoteInstancesPage: React.FC = () => {
                             updateForward((item) => ({
                               ...item,
                               localPort: undefined,
-                            }));
-                          }}
-                          emptyLabel="Auto"
-                        />
-                      </div>
-                    </div>
+                             }));
+               }}
+               emptyLabel="Auto"
+             />
+                       </div>
+                     </div>
 
                     {forward.type !== 'dynamic' ? (
                       <div className="flex flex-col gap-1.5 py-1.5 md:flex-row md:items-center md:gap-8">
@@ -1385,42 +1386,42 @@ export const RemoteInstancesPage: React.FC = () => {
                               updateForward((item) => ({
                                 ...item,
                                 remotePort: undefined,
-                              }));
-                            }}
-                            emptyLabel="Auto"
-                          />
-                        </div>
-                      </div>
+                               }));
+               }}
+               emptyLabel="Auto"
+             />
+                         </div>
+                       </div>
                     ) : null}
 
                     <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-md bg-[var(--surface-subtle)] p-2">
                       <div className="flex flex-wrap items-center gap-1 typography-micro text-muted-foreground/80">
                         {forward.type === 'dynamic' ? (
-                          <>
-                            <RiComputerLine className="h-3.5 w-3.5" />
-                            <span className="font-mono text-foreground">{localEndpoint}</span>
-                            <span>(local SOCKS5)</span>
-                          </>
+          <>
+            <RiComputerLine className="h-3.5 w-3.5" />
+            <span className="font-mono text-foreground">{localEndpoint}</span>
+            <span>(local SOCKS5)</span>
+          </>
                         ) : forward.type === 'remote' ? (
-                          <>
-                            <RiServerLine className="h-3.5 w-3.5" />
-                            <span className="font-mono text-foreground">{remoteEndpoint}</span>
-                            <span>(remote)</span>
-                            <RiArrowRightLine className="h-3.5 w-3.5" />
-                            <RiComputerLine className="h-3.5 w-3.5" />
-                            <span className="font-mono text-foreground">{localEndpoint}</span>
-                            <span>(local)</span>
-                          </>
+          <>
+            <RiServerLine className="h-3.5 w-3.5" />
+            <span className="font-mono text-foreground">{remoteEndpoint}</span>
+            <span>(remote)</span>
+            <RiArrowRightLine className="h-3.5 w-3.5" />
+            <RiComputerLine className="h-3.5 w-3.5" />
+            <span className="font-mono text-foreground">{localEndpoint}</span>
+            <span>(local)</span>
+          </>
                         ) : (
-                          <>
-                            <RiComputerLine className="h-3.5 w-3.5" />
-                            <span className="font-mono text-foreground">{localEndpoint}</span>
-                            <span>(local)</span>
-                            <RiArrowRightLine className="h-3.5 w-3.5" />
-                            <RiServerLine className="h-3.5 w-3.5" />
-                            <span className="font-mono text-foreground">{remoteEndpoint}</span>
-                            <span>(remote)</span>
-                          </>
+          <>
+            <RiComputerLine className="h-3.5 w-3.5" />
+            <span className="font-mono text-foreground">{localEndpoint}</span>
+            <span>(local)</span>
+            <RiArrowRightLine className="h-3.5 w-3.5" />
+            <RiServerLine className="h-3.5 w-3.5" />
+            <span className="font-mono text-foreground">{remoteEndpoint}</span>
+            <span>(remote)</span>
+          </>
                         )}
                       </div>
 
@@ -1491,7 +1492,7 @@ export const RemoteInstancesPage: React.FC = () => {
                 <div className="min-w-0">
                   <div className="typography-ui-label text-foreground truncate">
                     {candidate.host}
-                    {candidate.pattern ? ' (pattern)' : ''}
+                    {candidate.pattern ? ` (${m.riSshInstancesPattern()})` : ''}
                   </div>
                   <div className="typography-micro text-muted-foreground truncate">{candidate.sshCommand}</div>
                 </div>
@@ -1526,27 +1527,39 @@ export const RemoteInstancesPage: React.FC = () => {
                 onClick={() => {
                   void copyTextToClipboard(status.localUrl || '').then((result) => {
                     if (result.ok) {
-                      toast.success('Local URL copied');
+                      toast.success(m.riSshInstancesLocalUrlCopied());
                     }
                   });
-                }}
-              >
-                <RiFileCopyLine className="h-3.5 w-3.5" />
-                Copy local URL
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="xs"
-                className="!font-normal"
-                onClick={() => {
-                  void handleOpenCurrentInstance();
-                }}
-              >
-                <RiExternalLinkLine className="h-3.5 w-3.5" />
-                Open
-              </Button>
-            </>
+                 }}
+               >
+                 <RiFileCopyLine className="h-3.5 w-3.5" />
+                 Copy local URL
+               </Button>
+               <Button
+                 type="button"
+                 variant="outline"
+                 size="xs"
+                 className="!font-normal"
+                 onClick={() => {
+                   void handleOpenCurrentInstance();
+                 }}
+               >
+                 <RiExternalLinkLine className="h-3.5 w-3.5" />
+                 Open
+               </Button>
+               <Button
+                 type="button"
+                 variant="outline"
+                 size="xs"
+                 className="!font-normal"
+                 onClick={() => {
+                   void handleOpenCurrentInstance();
+                  }}
+                >
+                  <RiExternalLinkLine className="h-3.5 w-3.5" />
+                  Open
+                </Button>
+             </>
           ) : null}
           {error ? <div className="ml-auto typography-meta text-[var(--status-error)]">{error}</div> : null}
         </div>
@@ -1557,7 +1570,7 @@ export const RemoteInstancesPage: React.FC = () => {
           <DialogHeader>
             <DialogTitle>{m.riSshInstancesSshLogsTitle()}</DialogTitle>
             <DialogDescription>
-              {draft?.nickname?.trim() || draft?.sshParsed?.destination || draft?.id || 'Selected instance'}
+              {draft?.nickname?.trim() || draft?.sshParsed?.destination || draft?.id || m.riSshInstancesSelectedInstance()}
             </DialogDescription>
           </DialogHeader>
           <div className="flex items-center justify-end gap-2">
@@ -1593,9 +1606,9 @@ export const RemoteInstancesPage: React.FC = () => {
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>{m.riSshInstancesPatternDialogTitle()}</DialogTitle>
-            <DialogDescription>
-              {patternHost ? `${patternHost} requires a concrete destination.` : 'Enter destination.'}
-            </DialogDescription>
+              <DialogDescription>
+                {patternHost ? `${patternHost} requires a concrete destination.` : m.riSshInstancesPatternEnterDestination()}
+              </DialogDescription>
           </DialogHeader>
           <form
             className="space-y-3"

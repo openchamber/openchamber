@@ -21,7 +21,7 @@ import { useUIStore } from "@/stores/useUIStore";
 import { WorkingPlaceholder } from "./message/parts/WorkingPlaceholder";
 import { isVSCodeRuntime } from "@/lib/desktop";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { actionStop, statusInProgress, statusPending, statusCompleted, statusCancelled, statusAborted, statusHighPriority, statusMediumPriority, statusLowPriority, statusTasks, statusTasksSummary } from '@/lib/i18n/messages';
+import { actionStop, statusInProgress, statusPending, statusCompleted, statusCancelled, statusAborted, statusHighPriority, statusMediumPriority, statusLowPriority } from '@/lib/i18n/messages';
 
 const statusConfig: Record<TodoStatus, { textClassName: string }> = {
   in_progress: {

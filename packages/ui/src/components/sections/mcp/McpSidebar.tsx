@@ -115,7 +115,7 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
     if (success) {
       toast.success(`MCP server "${deleteTarget.name}" deleted`);
     } else {
-      toast.error('Failed to delete MCP server');
+      toast.error(m.mcpFailedDeleteServer());
     }
     setDeleteTarget(null);
     setIsDeleting(false);
@@ -211,7 +211,7 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
                             className="text-destructive focus:text-destructive"
                           >
                             <RiDeleteBinLine className="h-4 w-4 mr-px" />
-                            Delete
+                            {m.mcpDelete()}
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
@@ -281,7 +281,7 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
                             className="text-destructive focus:text-destructive"
                           >
                             <RiDeleteBinLine className="h-4 w-4 mr-px" />
-                            Delete
+                            {m.mcpDelete()}
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
@@ -317,7 +317,7 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
               Cancel
             </Button>
             <Button size="sm" onClick={handleDelete} disabled={isDeleting}>
-              {isDeleting ? 'Deleting…' : 'Delete'}
+              {isDeleting ? 'Deleting…' : m.mcpDelete()}
             </Button>
           </DialogFooter>
         </DialogContent>

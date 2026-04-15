@@ -41,14 +41,14 @@ export const ProjectsSidebar: React.FC<{ onItemSelect?: () => void }> = ({ onIte
             return;
           }
           setSelectedId(added.id);
-        } else if (result.error && result.error !== 'Directory selection cancelled') {
+        } else if (result.error && result.error !== m.projDirSelectionCancelled()) {
           toast.error(m.projToastSelectDirectoryFailed(), {
             description: result.error,
           });
         }
       })
       .catch((error) => {
-        console.error('Failed to select directory:', error);
+        console.error(m.projFailedSelectDir(), error);
         toast.error(m.projToastSelectDirectoryFailed());
       });
   }, [addProject, setSelectedId, tauriIpcAvailable]);

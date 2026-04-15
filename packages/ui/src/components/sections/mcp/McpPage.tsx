@@ -286,13 +286,13 @@ const EnvEditor: React.FC<EnvEditorProps> = ({ value, onChange }) => {
                 className="font-mono typography-meta pr-8 w-full"
                 spellCheck={false}
               />
-              <button
-                type="button"
-                onClick={() => toggleReveal(idx)}
-                className="absolute right-2 text-muted-foreground/60 hover:text-muted-foreground"
-                title={revealedKeys.has(idx) ? 'Hide' : 'Show'}
-              >
-                {revealedKeys.has(idx)
+               <button
+                 type="button"
+                 onClick={() => toggleReveal(idx)}
+                 className="absolute right-2 text-muted-foreground/60 hover:text-muted-foreground"
+                 title={revealedKeys.has(idx) ? m.mcpHide() : m.mcpShow()}
+               >
+                 {revealedKeys.has(idx)
                   ? <RiEyeOffLine className="h-3.5 w-3.5" />
                   : <RiEyeLine className="h-3.5 w-3.5" />}
               </button>
@@ -458,12 +458,12 @@ export const McpPage: React.FC = () => {
       const success = isNewServer ? await createMcp(draft) : await updateMcp(name, draft);
       if (success) {
         if (isNewServer) { setMcpDraft(null); setSelectedMcp(name); }
-        toast.success(isNewServer ? m.mcpToastCreated() : m.mcpToastSaved());
-      } else {
-        toast.error(m.mcpToastSaveFailed());
-      }
+         toast.success(isNewServer ? m.mcpToastCreated() : m.mcpToastSaved());
+       } else {
+         toast.error(m.mcpToastSaveFailed());
+       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'An error occurred');
+      toast.error(err instanceof Error ? err.message : m.mcpErrorOccurred());
     } finally {
       setIsSaving(false);
     }
@@ -488,11 +488,11 @@ export const McpPage: React.FC = () => {
         toast.success(m.mcpToastDisconnected());
       } else {
         await connectMcp(selectedMcpName, currentDirectory);
-        toast.success(m.mcpToastConnected());
-      }
-      await refreshStatus({ directory: currentDirectory, silent: true });
+         toast.success(m.mcpToastConnected());
+       }
+       await refreshStatus({ directory: currentDirectory, silent: true });
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Connection failed');
+      toast.error(err instanceof Error ? err.message : m.mcpConnectionFailed());
     } finally {
       setIsConnecting(false);
     }
@@ -569,8 +569,8 @@ export const McpPage: React.FC = () => {
                     className="h-7 w-48 font-mono px-2"
                     autoFocus
                   />
-                  <Select value={draftScope} onValueChange={(value) => setDraftScope(value as McpScope)}>
-                    <SelectTrigger className="!h-7 !w-7 !min-w-0 !px-0 !py-0 justify-center [&>svg:last-child]:hidden" title={draftScope === 'user' ? 'User scope' : 'Project scope'}>
+                   <Select value={draftScope} onValueChange={(value) => setDraftScope(value as McpScope)}>
+                    <SelectTrigger className="!h-7 !w-7 !min-w-0 !px-0 !py-0 justify-center [&>svg:last-child]:hidden" title={draftScope === 'user' ? m.mcpUserScope() : m.mcpProjectScope()}>
                       {draftScope === 'user' ? <RiUser3Line className="h-3.5 w-3.5" /> : <RiFolderLine className="h-3.5 w-3.5" />}
                     </SelectTrigger>
                     <SelectContent align="end">
@@ -596,21 +596,21 @@ export const McpPage: React.FC = () => {
               className="group flex cursor-pointer items-center gap-2 py-1.5"
               role="button"
               tabIndex={0}
-              aria-pressed={enabled}
-              onClick={() => setEnabled(!enabled)}
-              onKeyDown={(event) => {
-                if (event.key === ' ' || event.key === 'Enter') {
-                  event.preventDefault();
-                  setEnabled(!enabled);
-                }
-              }}
-            >
-              <Checkbox
-                checked={enabled}
-                onChange={setEnabled}
-                ariaLabel="Enable server"
-              />
-              <span className="typography-ui-label text-foreground">{m.mcpEnableServer()}</span>
+               aria-pressed={enabled}
+               onClick={() => setEnabled(!enabled)}
+               onKeyDown={(event) => {
+                 if (event.key === ' ' || event.key === m.commonKeyEnter()) {
+                   event.preventDefault();
+                   setEnabled(!enabled);
+                 }
+               }}
+             >
+               <Checkbox
+                 checked={enabled}
+                 onChange={setEnabled}
+                 ariaLabel="Enable server"
+               />
+               <span className="typography-ui-label text-foreground">{m.mcpEnableServer()}</span>
             </div>
 
             <div className="pb-1.5 pt-0.5">

@@ -27,19 +27,19 @@ import { cn } from '@/lib/utils';
 import { m } from '@/lib/i18n/messages';
 
 const PROFILE_COLORS = [
-  { key: 'keyword', label: 'Green', cssVar: 'var(--syntax-keyword)' },
-  { key: 'error', label: 'Red', cssVar: 'var(--status-error)' },
-  { key: 'string', label: 'Cyan', cssVar: 'var(--syntax-string)' },
-  { key: 'function', label: 'Orange', cssVar: 'var(--syntax-function)' },
-  { key: 'type', label: 'Yellow', cssVar: 'var(--syntax-type)' },
+  { key: 'keyword', label: m.gitIdentityColorGreen(), cssVar: 'var(--syntax-keyword)' },
+  { key: 'error', label: m.gitIdentityColorRed(), cssVar: 'var(--status-error)' },
+  { key: 'string', label: m.gitIdentityColorCyan(), cssVar: 'var(--syntax-string)' },
+  { key: 'function', label: m.gitIdentityColorOrange(), cssVar: 'var(--syntax-function)' },
+  { key: 'type', label: m.gitIdentityColorYellow(), cssVar: 'var(--syntax-type)' },
 ];
 
 const PROFILE_ICONS = [
-  { key: 'branch', Icon: RiGitBranchLine, label: 'Branch' },
-  { key: 'briefcase', Icon: RiBriefcaseLine, label: 'Work' },
-  { key: 'house', Icon: RiHomeLine, label: 'Personal' },
-  { key: 'graduation', Icon: RiGraduationCapLine, label: 'School' },
-  { key: 'code', Icon: RiCodeLine, label: 'Code' },
+  { key: 'branch', Icon: RiGitBranchLine, label: m.gitIdentityCategoryBranch() },
+  { key: 'briefcase', Icon: RiBriefcaseLine, label: m.gitIdentityCategoryWork() },
+  { key: 'house', Icon: RiHomeLine, label: m.gitIdentityCategoryPersonal() },
+  { key: 'graduation', Icon: RiGraduationCapLine, label: m.gitIdentityCategorySchool() },
+  { key: 'code', Icon: RiCodeLine, label: m.gitIdentityCategoryCode() },
 ];
 
 interface GitIdentityEditorDialogProps {
@@ -131,11 +131,11 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
 
   const handleSave = async () => {
     if (!userName.trim() || !userEmail.trim()) {
-      toast.error('User name and email are required');
+      toast.error(m.gitIdentityNameEmailRequired());
       return;
     }
     if (authType === 'token' && !host.trim()) {
-      toast.error('Host is required for token-based authentication');
+      toast.error(m.gitIdentityHostRequiredToken());
       return;
     }
 
@@ -162,14 +162,14 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
       }
 
       if (success) {
-        toast.success(isNewProfile ? 'Profile created' : 'Profile updated');
+        toast.success(isNewProfile ? m.gitIdentityProfileCreated() : m.gitIdentityProfileUpdated());
         onOpenChange(false);
       } else {
-        toast.error(isNewProfile ? 'Failed to create profile' : 'Failed to update profile');
+        toast.error(isNewProfile ? m.gitIdentityFailedCreateProfile() : m.gitIdentityFailedUpdateProfile());
       }
     } catch (error) {
       console.error('Error saving profile:', error);
-      toast.error('An error occurred while saving');
+      toast.error(m.gitIdentityErrorSaving());
     } finally {
       setIsSaving(false);
     }
@@ -181,15 +181,15 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
     try {
       const success = await deleteProfile(profileId);
       if (success) {
-        toast.success('Profile deleted');
+        toast.success(m.gitIdentityProfileDeleted());
         setIsDeleteDialogOpen(false);
         onOpenChange(false);
       } else {
-        toast.error('Failed to delete profile');
+        toast.error(m.gitIdentityFailedDeleteProfile());
       }
     } catch (error) {
       console.error('Error deleting profile:', error);
-      toast.error('An error occurred while deleting');
+      toast.error(m.gitIdentityErrorDeleting());
     } finally {
       setIsDeleting(false);
     }
@@ -201,12 +201,12 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
   }, [color]);
 
   const title = importData
-    ? 'Import Credential'
+    ? m.gitIdentityImportCredential()
     : isNewProfile
-    ? 'New Identity'
+    ? m.gitIdentityNewIdentity()
     : isGlobalProfile
-    ? 'Global Identity'
-    : (selectedProfile?.name || 'Edit Identity');
+    ? m.gitIdentityGlobalIdentity()
+    : (selectedProfile?.name || m.gitIdentityEditIdentity());
 
   return (
     <>
@@ -216,10 +216,10 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
             <DialogTitle>{title}</DialogTitle>
             <DialogDescription>
               {isGlobalProfile
-                ? 'System-wide Git identity (read-only)'
+                ? m.gitIdentitySystemWideReadonly()
                 : isNewProfile
-                ? 'Create a new Git identity profile'
-                : 'Edit identity profile settings'}
+                ? m.gitIdentityCreateNew()
+                : m.gitIdentityEditProfile()}
             </DialogDescription>
           </DialogHeader>
 
@@ -440,11 +440,11 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
               </Button>
             )}
             <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)} className="text-foreground hover:bg-interactive-hover hover:text-foreground">
-              {isGlobalProfile ? 'Close' : 'Cancel'}
+              {isGlobalProfile ? m.commonClose() : m.commonCancel()}
             </Button>
             {!isGlobalProfile && (
               <Button size="sm" onClick={handleSave} disabled={isSaving}>
-                {isSaving ? 'Saving...' : isNewProfile ? 'Create' : 'Save'}
+                {isSaving ? m.commonLoading() : isNewProfile ? m.commonKeyCreate() : m.commonSave()}
               </Button>
             )}
           </DialogFooter>
@@ -465,10 +465,10 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
           </DialogHeader>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setIsDeleteDialogOpen(false)} disabled={isDeleting}>
-              Cancel
+              {m.commonCancel()}
             </Button>
             <Button size="sm" variant="destructive" onClick={() => void handleConfirmDelete()} disabled={isDeleting}>
-              Delete
+              {m.commonDelete()}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -118,7 +118,7 @@ const SkillsInstalledPage: React.FC = () => {
             setSupportingFiles(md.supportingFiles || []);
           }
         } catch (error) {
-          console.error('Failed to load skill details:', error);
+          console.error(m.skFailedLoadDetails(), error);
         } finally {
           setIsLoading(false);
         }
@@ -180,12 +180,12 @@ const SkillsInstalledPage: React.FC = () => {
       }
 
       if (success) {
-        toast.success(isNewSkill ? 'Skill created successfully' : 'Skill updated successfully');
+        toast.success(isNewSkill ? m.skCreatedSuccessfully() : m.skUpdatedSuccessfully());
       } else {
         toast.error(isNewSkill ? m.skToastCreateFailed() : m.skToastUpdateFailed());
       }
     } catch (error) {
-      console.error('Error saving skill:', error);
+      console.error(m.skErrorSaving(), error);
       toast.error(m.skToastSaveError());
     } finally {
       setIsSaving(false);
@@ -249,7 +249,7 @@ const SkillsInstalledPage: React.FC = () => {
         toast.success(`File "${filePath}" updated`);
       } else {
         if (pendingFiles.some(f => f.path === filePath)) {
-          toast.error('A file with this name already exists');
+          toast.error(m.skFileAlreadyExists());
           return;
         }
         setPendingFiles(prev => [...prev, { path: filePath, content: newFileContent }]);
@@ -312,7 +312,7 @@ const SkillsInstalledPage: React.FC = () => {
       }
       setDeleteFilePath(null);
     } else {
-      toast.error('Failed to delete file');
+      toast.error(m.skFailedDeleteFile());
     }
 
     setIsDeletingFile(false);
@@ -612,11 +612,11 @@ const SkillsInstalledPage: React.FC = () => {
                 setEditingFilePath(null);
               }}
             >
-              {m.skCancel()}
-            </Button>
-            <Button size="sm" onClick={handleSaveFile} disabled={isLoadingFile || !hasFileChanges}>
-              {editingFilePath ? m.skSaveChanges() : 'Create File'}
-            </Button>
+               {m.skCancel()}
+             </Button>
+             <Button size="sm" onClick={handleSaveFile} disabled={isLoadingFile || !hasFileChanges}>
+               {editingFilePath ? m.skSaveChanges() : m.skCreateFile()}
+             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

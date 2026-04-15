@@ -560,27 +560,27 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                             const handleKeyDown = (e: React.KeyboardEvent) => {
                                 e.stopPropagation();
 
-                                if (e.key === 'ArrowDown') {
+                                if (e.key === m.selectorKeyArrowDown()) {
                                     e.preventDefault();
                                     const nextIndex = (selectedIndex + 1) % Math.max(1, totalItems);
                                     setSelectedIndex(nextIndex);
                                     setTimeout(() => {
                                         itemRefs.current[nextIndex]?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
                                     }, 0);
-                                } else if (e.key === 'ArrowUp') {
+                                } else if (e.key === m.selectorKeyArrowUp()) {
                                     e.preventDefault();
                                     const prevIndex = (selectedIndex - 1 + Math.max(1, totalItems)) % Math.max(1, totalItems);
                                     setSelectedIndex(prevIndex);
                                     setTimeout(() => {
                                         itemRefs.current[prevIndex]?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
                                     }, 0);
-                                } else if (e.key === 'Enter') {
+                                } else if (e.key === m.commonKeyEnter()) {
                                     e.preventDefault();
                                     const selectedItem = flatModelList[selectedIndex];
                                     if (selectedItem) {
                                         handleProviderAndModelChange(selectedItem.providerID, selectedItem.modelID);
                                     }
-                                } else if (e.key === 'Escape') {
+                                } else if (e.key === m.commonKeyEscape()) {
                                     e.preventDefault();
                                     setIsDropdownOpen(false);
                                 }

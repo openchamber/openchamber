@@ -127,7 +127,7 @@ export const ProjectActionsSection: React.FC<ProjectActionsSectionProps> = ({ pr
       return entry.name.trim().length === 0 || entry.command.trim().length === 0;
     });
     if (hasIncomplete) {
-      return 'Fill action name and command before saving.';
+      return m.projActionFillRequired();
     }
     return null;
   }, [actions]);
@@ -173,7 +173,7 @@ export const ProjectActionsSection: React.FC<ProjectActionsSectionProps> = ({ pr
         primaryActionId: null,
       });
       if (!ok) {
-        toast.error('Failed to save actions');
+        toast.error(m.projActionFailedSave());
         return;
       }
       setInitialSnapshot(JSON.stringify({ actions }));
@@ -182,9 +182,9 @@ export const ProjectActionsSection: React.FC<ProjectActionsSectionProps> = ({ pr
           detail: { projectId: projectRef.id },
         }));
       }
-      toast.success('Project actions saved');
+      toast.success(m.projActionSaved());
     } catch {
-      toast.error('Failed to save actions');
+      toast.error(m.projActionFailedSave());
     } finally {
       setIsSaving(false);
     }
@@ -218,7 +218,7 @@ export const ProjectActionsSection: React.FC<ProjectActionsSectionProps> = ({ pr
               const selectedIconKey = (action.icon as keyof typeof PROJECT_ACTION_ICON_MAP) || 'play';
               const SelectedIcon = PROJECT_ACTION_ICON_MAP[selectedIconKey] || RiPlayLine;
               const isOpen = expandedActions[action.id] ?? false;
-              const title = action.name.trim() || 'Untitled action';
+              const title = action.name.trim() || m.projActionUntitled();
 
               return (
                 <Collapsible
@@ -328,7 +328,7 @@ export const ProjectActionsSection: React.FC<ProjectActionsSectionProps> = ({ pr
                               ...(current.autoOpenUrl === true ? { autoOpenUrl: undefined } : { autoOpenUrl: true }),
                             }))}
                             onKeyDown={(event) => {
-                              if (event.key === ' ' || event.key === 'Enter') {
+                              if (event.key === ' ' || event.key === m.commonKeyEnter()) {
                                 event.preventDefault();
                                 updateAction(action.id, (current) => ({
                                   ...current,
@@ -420,13 +420,13 @@ export const ProjectActionsSection: React.FC<ProjectActionsSectionProps> = ({ pr
             <p className="typography-meta mb-2 text-[var(--status-warning)]">{validationError}</p>
           ) : null}
           <Button
-            type="button"
-            size="xs"
-            className="!font-normal"
-            onClick={handleSave}
-            disabled={!canSave}
-          >
-            {isSaving ? 'Saving...' : 'Save Actions'}
+             type="button"
+             size="xs"
+             className="!font-normal"
+             onClick={handleSave}
+             disabled={!canSave}
+           >
+             {isSaving ? m.projActionSaving() : m.projActionSaveActions()}
           </Button>
         </div>
       </section>

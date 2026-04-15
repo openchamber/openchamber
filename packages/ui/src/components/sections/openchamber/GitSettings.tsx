@@ -74,7 +74,7 @@ export const GitSettings: React.FC = () => {
         }
 
       } catch (error) {
-        console.warn('Failed to load git settings:', error);
+        console.warn(m.gitFailedLoadSettings(), error);
       } finally {
         setIsLoading(false);
       }
@@ -89,7 +89,7 @@ export const GitSettings: React.FC = () => {
         gitmojiEnabled: enabled,
       });
     } catch (error) {
-      console.warn('Failed to save gitmoji setting:', error);
+      console.warn(m.gitFailedSaveGitmoji(), error);
     }
   }, [setSettingsGitmojiEnabled]);
 
@@ -114,11 +114,11 @@ export const GitSettings: React.FC = () => {
 
       <section className="px-2 pb-2 pt-0 space-y-0.5">
         <div className="pt-1 pb-1">
-          <h4 className="typography-ui-header font-medium text-foreground">Changes View</h4>
-          <div role="radiogroup" aria-label="Git changes view mode" className="mt-0.5 space-y-0">
+          <h4 className="typography-ui-header font-medium text-foreground">{m.gitChangesView()}</h4>
+          <div role="radiogroup" aria-label={m.gitChangesViewMode()} className="mt-0.5 space-y-0">
             {[
-              { id: 'flat' as const, label: 'Flat List' },
-              { id: 'tree' as const, label: 'Tree View' },
+              { id: 'flat' as const, label: m.gitChangesFlatList() },
+              { id: 'tree' as const, label: m.gitChangesTreeView() },
             ].map((option) => {
               const selected = gitChangesViewMode === option.id;
               return (
@@ -129,7 +129,7 @@ export const GitSettings: React.FC = () => {
                   aria-pressed={selected}
                   onClick={() => { handleGitChangesViewModeChange(option.id); }}
                   onKeyDown={(event) => {
-                    if (event.key === ' ' || event.key === 'Enter') {
+                    if (event.key === ' ' || event.key === m.commonKeyEnter()) {
                       event.preventDefault();
                       handleGitChangesViewModeChange(option.id);
                     }
@@ -159,7 +159,7 @@ export const GitSettings: React.FC = () => {
             void handleGitmojiChange(!settingsGitmojiEnabled);
           }}
           onKeyDown={(event) => {
-            if (event.key === ' ' || event.key === 'Enter') {
+            if (event.key === ' ' || event.key === m.commonKeyEnter()) {
               event.preventDefault();
               void handleGitmojiChange(!settingsGitmojiEnabled);
             }
@@ -182,7 +182,7 @@ export const GitSettings: React.FC = () => {
           aria-pressed={showGitignored}
           onClick={() => setFilesViewShowGitignored(!showGitignored)}
           onKeyDown={(event) => {
-            if (event.key === ' ' || event.key === 'Enter') {
+            if (event.key === ' ' || event.key === m.commonKeyEnter()) {
               event.preventDefault();
               setFilesViewShowGitignored(!showGitignored);
             }

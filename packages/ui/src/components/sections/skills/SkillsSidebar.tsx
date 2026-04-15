@@ -154,7 +154,7 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
     // Create new skill with new name
     const success = await createSkill({
       name: sanitizedName,
-      description: 'Renamed skill', // Will need proper description
+      description: m.skRenamed(), // Will need proper description
       scope: renameDialogSkill.scope,
       source: renameDialogSkill.source,
     });
@@ -378,7 +378,7 @@ export const SkillsSidebar: React.FC<SkillsSidebarProps> = ({ onItemSelect }) =>
             placeholder={m.skRenamePlaceholder()}
             className="text-foreground placeholder:text-muted-foreground"
             onKeyDown={(e) => {
-              if (e.key === 'Enter') {
+              if (e.key === m.commonKeyEnter()) {
                 handleRenameSkill();
               }
             }}

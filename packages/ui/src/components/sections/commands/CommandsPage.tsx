@@ -150,7 +150,7 @@ export const CommandsPage: React.FC = () => {
         toast.error(isNewCommand ? m.cmdToastCreateFailed() : m.cmdToastUpdateFailed());
       }
     } catch (error) {
-      console.error('Error saving command:', error);
+      console.error(m.cmdErrorSaving(), error);
       toast.error(m.cmdToastSaveError());
     } finally {
       setIsSaving(false);

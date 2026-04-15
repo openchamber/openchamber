@@ -2,6 +2,21 @@ import React from 'react';
 import { RiRestartLine, RiInformationLine } from '@remixicon/react';
 
 import { m } from '@/lib/i18n/messages';
+import {
+    visualTerminalQuickKeys,
+    visualShowExpandedBashTools,
+    visualShowExpandedEditTools,
+    visualShowReasoningTraces,
+    visualStickyUserHeader,
+    visualShowToolFileIcons,
+    visualShowMobileStatusBar,
+    visualShowDotfiles,
+    visualQueueMessagesDefault,
+    visualPersistDraftMessages,
+    visualEnableSpellcheck,
+    visualSendUsageReports,
+    commonKeyEnter,
+} from '@/lib/i18n/messages';
 
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
@@ -164,7 +179,7 @@ const MERMAID_RENDERING_OPTIONS: Option<'svg' | 'ascii'>[] = [
     },
 ];
 
-const DEFAULT_PWA_INSTALL_NAME = 'OpenChamber - AI Coding Assistant';
+const DEFAULT_PWA_INSTALL_NAME = m.visualOcAppTitle();
 
 type PwaInstallNameWindow = Window & {
     __OPENCHAMBER_SET_PWA_INSTALL_NAME__?: (value: string) => string;
@@ -814,7 +829,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                     <Checkbox
                                         checked={showTerminalQuickKeysOnDesktop}
                                         onChange={setShowTerminalQuickKeysOnDesktop}
-                                        ariaLabel="Terminal quick keys"
+                                        ariaLabel={visualTerminalQuickKeys()}
                                     />
                                     <div className="flex min-w-0 items-center gap-1.5">
                                         <span className="typography-ui-label text-foreground">{vsTerminalQuickKeys()}</span>
@@ -977,12 +992,12 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                     }
                                                 }}
                                             >
-                                                <Checkbox
-                                                    checked={showExpandedBashTools}
-                                                    onChange={handleShowExpandedBashToolsChange}
-                                                    ariaLabel="Show expanded bash tools"
-                                                />
-                                                <span className="typography-ui-label text-foreground">{vsBash()}</span>
+                                            <Checkbox
+                                                checked={showExpandedBashTools}
+                                                onChange={handleShowExpandedBashToolsChange}
+                                                ariaLabel={visualShowExpandedBashTools()}
+                                            />
+                                            <span className="typography-ui-label text-foreground">{vsBash()}</span>
                                             </div>
 
                                             <div
@@ -998,12 +1013,12 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                     }
                                                 }}
                                             >
-                                                <Checkbox
-                                                    checked={showExpandedEditTools}
-                                                    onChange={handleShowExpandedEditToolsChange}
-                                                    ariaLabel="Show expanded edit tools"
-                                                />
-                                                <span className="typography-ui-label text-foreground">{vsEditTools()}</span>
+                                            <Checkbox
+                                                checked={showExpandedEditTools}
+                                                onChange={handleShowExpandedEditToolsChange}
+                                                ariaLabel={visualShowExpandedEditTools()}
+                                            />
+                                            <span className="typography-ui-label text-foreground">{vsEditTools()}</span>
                                             </div>
                                         </section>
                                     )}
@@ -1173,7 +1188,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             <Checkbox
                                                 checked={showReasoningTraces}
                                                 onChange={setShowReasoningTraces}
-                                                ariaLabel="Show reasoning traces"
+                                                ariaLabel={visualShowReasoningTraces()}
                                             />
                                             <span className="typography-ui-label text-foreground">{vsShowReasoningTraces()}</span>
                                         </div>
@@ -1196,7 +1211,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             <Checkbox
                                                 checked={stickyUserHeader}
                                                 onChange={handleStickyUserHeaderChange}
-                                                ariaLabel="Sticky user header"
+                                                ariaLabel={visualStickyUserHeader()}
                                             />
                                             <span className="typography-ui-label text-foreground">{vsStickyUserHeader()}</span>
                                         </div>
@@ -1219,7 +1234,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             <Checkbox
                                                 checked={showToolFileIcons}
                                                 onChange={handleShowToolFileIconsChange}
-                                                ariaLabel="Show tool file icons"
+                                                ariaLabel={visualShowToolFileIcons()}
                                             />
                                             <span className="typography-ui-label text-foreground">{vsShowToolFileIcons()}</span>
                                         </div>
@@ -1242,7 +1257,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             <Checkbox
                                                 checked={showMobileSessionStatusBar}
                                                 onChange={setShowMobileSessionStatusBar}
-                                                ariaLabel="Show mobile status bar"
+                                                ariaLabel={visualShowMobileStatusBar()}
                                             />
                                             <span className="typography-ui-label text-foreground">{vsShowMobileStatusBar()}</span>
                                         </div>
@@ -1265,7 +1280,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             <Checkbox
                                                 checked={directoryShowHidden}
                                                 onChange={setDirectoryShowHidden}
-                                                ariaLabel="Show dotfiles"
+                                                ariaLabel={visualShowDotfiles()}
                                             />
                                             <span className="typography-ui-label text-foreground">{vsShowDotfiles()}</span>
                                         </div>
@@ -1288,7 +1303,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             <Checkbox
                                                 checked={queueModeEnabled}
                                                 onChange={setQueueMode}
-                                                ariaLabel="Queue messages by default"
+                                                ariaLabel={visualQueueMessagesDefault()}
                                             />
                                             <div className="flex min-w-0 items-center gap-1.5">
                                                 <span className="typography-ui-label text-foreground">{vsQueueMessagesDefault()}</span>
@@ -1297,7 +1312,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                                         <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
                                                     </TooltipTrigger>
                                                     <TooltipContent sideOffset={8} className="max-w-xs">
-                                                        When enabled, Enter queues messages. Use {getModifierLabel()}+Enter to send.
+                                                        When enabled, {commonKeyEnter()} queues messages. Use {getModifierLabel()}+{commonKeyEnter()} to send.
                                                     </TooltipContent>
                                                 </Tooltip>
                                             </div>
@@ -1321,7 +1336,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             <Checkbox
                                                 checked={persistChatDraft}
                                                 onChange={setPersistChatDraft}
-                                                ariaLabel="Persist draft messages"
+                                                ariaLabel={visualPersistDraftMessages()}
                                             />
                                             <span className="typography-ui-label text-foreground">{vsPersistDraftMessages()}</span>
                                         </div>
@@ -1344,7 +1359,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             <Checkbox
                                                 checked={inputSpellcheckEnabled}
                                                 onChange={handleInputSpellcheckChange}
-                                                ariaLabel="Enable spellcheck in text inputs"
+                                                ariaLabel={visualEnableSpellcheck()}
                                             />
                                             <span className="typography-ui-label text-foreground">{vsEnableSpellcheck()}</span>
                                         </div>
@@ -1365,7 +1380,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 <Checkbox
                                     checked={reportUsage}
                                     onChange={handleReportUsageChange}
-                                    ariaLabel="Send anonymous usage reports"
+                                    ariaLabel={visualSendUsageReports()}
                                 />
                                 <div className="flex min-w-0 flex-col gap-0.5">
                                     <div

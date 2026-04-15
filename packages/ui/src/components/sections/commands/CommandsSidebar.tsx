@@ -91,7 +91,7 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
 
   const handleDeleteCommand = async (command: Command) => {
     if (isCommandBuiltIn(command)) {
-      toast.error('Built-in commands cannot be deleted');
+      toast.error(m.cmdBuiltinNoDelete());
       return;
     }
 
@@ -129,9 +129,9 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
       }
       closeConfirmActionDialog();
     } else if (confirmActionType === 'delete') {
-      toast.error('Failed to delete command');
+      toast.error(m.cmdFailedDelete());
     } else {
-      toast.error('Failed to reset command');
+      toast.error(m.cmdFailedReset());
     }
 
     setIsConfirmActionPending(false);
@@ -172,7 +172,7 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
     const sanitizedName = renameNewName.trim().replace(/\s+/g, '-');
 
     if (!sanitizedName) {
-      toast.error('Command name is required');
+      toast.error(m.cmdNameRequired());
       return;
     }
 
@@ -182,7 +182,7 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
     }
 
     if (commands.some((cmd) => cmd.name === sanitizedName)) {
-      toast.error('A command with this name already exists');
+      toast.error(m.cmdNameExists());
       return;
     }
 
@@ -202,10 +202,10 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
         toast.success(`Command renamed to "${sanitizedName}"`);
         setSelectedCommand(sanitizedName);
       } else {
-        toast.error('Failed to remove old command after rename');
+        toast.error(m.cmdFailedRemoveOldRename());
       }
     } else {
-      toast.error('Failed to rename command');
+      toast.error(m.cmdFailedRename());
     }
 
     setRenameDialogCommand(null);
@@ -302,7 +302,7 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
       >
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>{confirmActionType === 'delete' ? 'Delete Command' : 'Reset Command'}</DialogTitle>
+            <DialogTitle>{confirmActionType === 'delete' ? m.cmdDeleteCommand() : m.cmdResetCommand()}</DialogTitle>
             <DialogDescription>
               {confirmActionType === 'delete'
                 ? `Are you sure you want to delete command "${confirmActionCommand?.name}"?`
@@ -319,7 +319,7 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
               Cancel
             </Button>
             <Button size="sm" onClick={handleConfirmAction} disabled={isConfirmActionPending}>
-              {confirmActionType === 'delete' ? 'Delete' : 'Reset'}
+              {confirmActionType === 'delete' ? m.cmdDelete() : m.cmdReset()}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -340,7 +340,7 @@ export const CommandsSidebar: React.FC<CommandsSidebarProps> = ({ onItemSelect }
             placeholder={m.commandsRenamePlaceholder()}
             className="text-foreground placeholder:text-muted-foreground"
             onKeyDown={(e) => {
-              if (e.key === 'Enter') {
+              if (e.key === m.commonKeyEnter()) {
                 handleRenameCommand();
               }
             }}

@@ -34,7 +34,7 @@ export const AboutSettings: React.FC = () => {
         setShowChecking(false);
         // Show toast if check completed with no update available
         if (didInitiateCheck.current && !updateStore.available && !updateStore.error) {
-          toast.success('You are on the latest version');
+          toast.success(m.aboutLatestVersion());
           didInitiateCheck.current = false;
         }
       }, MIN_CHECKING_DURATION);

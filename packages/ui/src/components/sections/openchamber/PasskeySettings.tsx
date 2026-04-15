@@ -46,7 +46,7 @@ export const PasskeySettings: React.FC = () => {
       const nextPasskeys = await fetchStoredPasskeys();
       setPasskeys(nextPasskeys);
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Could not load passkeys.';
+      const message = error instanceof Error ? error.message : m.passkeyFailedLoad();
       setErrorMessage(message);
     } finally {
       setIsLoading(false);
@@ -94,7 +94,7 @@ export const PasskeySettings: React.FC = () => {
 
   const handleRegisterPasskey = React.useCallback(async () => {
     if (!status.enabled) {
-      const message = 'Enable the UI password lock before adding passkeys.';
+      const message = m.passkeyEnableLockFirst();
       setErrorMessage(message);
       toast.message(message);
       return;
@@ -126,7 +126,7 @@ export const PasskeySettings: React.FC = () => {
         return;
       }
 
-      const message = error instanceof Error ? error.message : 'Could not add passkey.';
+      const message = error instanceof Error ? error.message : m.passkeyFailedAdd();
       setErrorMessage(message);
       toast.error(message);
     } finally {
@@ -144,7 +144,7 @@ export const PasskeySettings: React.FC = () => {
       await loadPasskeys();
       toast.success(m.passkeyToastRemoved());
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Could not remove passkey.';
+      const message = error instanceof Error ? error.message : m.passkeyFailedRemove();
       setErrorMessage(message);
       toast.error(message);
     } finally {
@@ -160,7 +160,7 @@ export const PasskeySettings: React.FC = () => {
       await resetAllAuth();
       window.location.reload();
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Could not clear saved authentication.';
+      const message = error instanceof Error ? error.message : m.passkeyFailedClearAuth();
       setErrorMessage(message);
       toast.error(message);
       setIsResetting(false);

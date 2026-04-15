@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { RiAddLine } from '@remixicon/react';
 import { useDeviceInfo } from '@/lib/device';
 import { cn } from '@/lib/utils';
+import { m } from '@/lib/i18n/messages';
 
 interface SettingsSidebarHeaderProps {
   /** Total count to display (e.g., "Total 5") */
@@ -29,8 +30,8 @@ interface SettingsSidebarHeaderProps {
 export const SettingsSidebarHeader: React.FC<SettingsSidebarHeaderProps> = ({
   count,
   onAdd,
-  label = 'Total',
-  addButtonLabel = 'Add new item',
+  label = m.settingsSidebarTotal(),
+  addButtonLabel = m.settingsSidebarAddNewItem(),
 }) => {
   const { isMobile } = useDeviceInfo();
 

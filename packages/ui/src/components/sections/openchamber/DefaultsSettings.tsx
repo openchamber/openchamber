@@ -102,7 +102,7 @@ export const DefaultsSettings: React.FC = () => {
           if (agent !== undefined) setDefaultAgent(agent);
         }
       } catch (error) {
-        console.warn('Failed to load defaults settings:', error);
+        console.warn(m.defaultsFailedLoad(), error);
       } finally {
         setIsLoading(false);
       }
@@ -135,10 +135,10 @@ export const DefaultsSettings: React.FC = () => {
           body: JSON.stringify({ defaultModel: newValue }),
         });
         if (!response.ok) {
-          console.warn('Failed to save default model to server:', response.status, response.statusText);
+          console.warn(m.defaultsFailedSaveModelServer(), response.status, response.statusText);
         }
       } catch (error) {
-        console.warn('Failed to save default model:', error);
+        console.warn(m.defaultsFailedSaveModel(), error);
       }
     },
     [providers, setCurrentVariant, setModel, setProvider, setSettingsDefaultModel, setSettingsDefaultVariant]
@@ -156,7 +156,7 @@ export const DefaultsSettings: React.FC = () => {
       try {
         await updateDesktopSettings({ defaultVariant: newValue ?? '' });
       } catch (error) {
-        console.warn('Failed to save default variant:', error);
+        console.warn(m.defaultsFailedSaveVariant(), error);
       }
     },
     [setCurrentVariant, setSettingsDefaultVariant]
@@ -175,7 +175,7 @@ export const DefaultsSettings: React.FC = () => {
       try {
         await updateDesktopSettings({ defaultAgent: newValue ?? '' });
       } catch (error) {
-        console.warn('Failed to save default agent:', error);
+        console.warn(m.defaultsFailedSaveAgent(), error);
       }
     },
     [setAgent, setSettingsDefaultAgent]

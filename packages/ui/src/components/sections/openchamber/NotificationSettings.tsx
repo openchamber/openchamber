@@ -126,7 +126,7 @@ export const NotificationSettings: React.FC = () => {
       })
       .catch((error) => {
         if (error?.name !== 'AbortError') {
-          console.warn('Failed to load zen utility models:', error);
+          console.warn(m.notifFailedLoadZenModels(), error);
         }
       });
 
@@ -160,7 +160,7 @@ export const NotificationSettings: React.FC = () => {
           gitModelId: '',
         });
       } catch (error) {
-        console.warn('Failed to save utility model setting:', error);
+        console.warn(m.notifFailedSaveUtilityModel(), error);
       }
     },
     [setSettingsZenModel]
@@ -227,7 +227,7 @@ export const NotificationSettings: React.FC = () => {
           });
         }
       } catch (error) {
-        console.error('Failed to request notification permission:', error);
+        console.error(m.notifFailedRequestPermission(), error);
         toast.error(m.notifToastRequestPermissionFailed());
       }
     } else if (checked && notificationPermission === 'granted') {
@@ -310,7 +310,7 @@ export const NotificationSettings: React.FC = () => {
         onStateChange();
       }),
       15000,
-      'Service worker activation timed out'
+      m.notifSwActivationTimeout()
     );
   };
 
@@ -346,12 +346,12 @@ export const NotificationSettings: React.FC = () => {
       }
     }
 
-    throw lastError instanceof Error ? lastError : new Error('Service worker registration failed');
+    throw lastError instanceof Error ? lastError : new Error(m.notifSwRegistrationFailed());
   };
 
   const getServiceWorkerRegistration = async (): Promise<ServiceWorkerRegistration> => {
     if (!('serviceWorker' in navigator)) {
-      throw new Error('Service worker not supported');
+      throw new Error(m.notifSwNotSupported());
     }
 
     const existing = await navigator.serviceWorker.getRegistration();
@@ -538,7 +538,7 @@ export const NotificationSettings: React.FC = () => {
                 void handleToggleChange(!(nativeNotificationsEnabled && canShowNotifications));
               }}
               onKeyDown={(event) => {
-                if (event.key === ' ' || event.key === 'Enter') {
+                if (event.key === ' ' || event.key === m.commonKeyEnter()) {
                   event.preventDefault();
                   void handleToggleChange(!(nativeNotificationsEnabled && canShowNotifications));
                 }
@@ -562,7 +562,7 @@ export const NotificationSettings: React.FC = () => {
                 aria-pressed={notificationMode === 'always'}
                 onClick={() => setNotificationMode(notificationMode === 'always' ? 'hidden-only' : 'always')}
                 onKeyDown={(event) => {
-                  if (event.key === ' ' || event.key === 'Enter') {
+                  if (event.key === ' ' || event.key === m.commonKeyEnter()) {
                     event.preventDefault();
                     setNotificationMode(notificationMode === 'always' ? 'hidden-only' : 'always');
                   }
@@ -621,7 +621,7 @@ export const NotificationSettings: React.FC = () => {
                   aria-pressed={notifyOnCompletion}
                   onClick={() => setNotifyOnCompletion(!notifyOnCompletion)}
                   onKeyDown={(event) => {
-                    if (event.key === ' ' || event.key === 'Enter') {
+                    if (event.key === ' ' || event.key === m.commonKeyEnter()) {
                       event.preventDefault();
                       setNotifyOnCompletion(!notifyOnCompletion);
                     }
@@ -638,7 +638,7 @@ export const NotificationSettings: React.FC = () => {
                   aria-pressed={notifyOnSubtasks}
                   onClick={() => setNotifyOnSubtasks(!notifyOnSubtasks)}
                   onKeyDown={(event) => {
-                    if (event.key === ' ' || event.key === 'Enter') {
+                    if (event.key === ' ' || event.key === m.commonKeyEnter()) {
                       event.preventDefault();
                       setNotifyOnSubtasks(!notifyOnSubtasks);
                     }
@@ -655,7 +655,7 @@ export const NotificationSettings: React.FC = () => {
                   aria-pressed={notifyOnError}
                   onClick={() => setNotifyOnError(!notifyOnError)}
                   onKeyDown={(event) => {
-                    if (event.key === ' ' || event.key === 'Enter') {
+                    if (event.key === ' ' || event.key === m.commonKeyEnter()) {
                       event.preventDefault();
                       setNotifyOnError(!notifyOnError);
                     }
@@ -672,7 +672,7 @@ export const NotificationSettings: React.FC = () => {
                   aria-pressed={notifyOnQuestion}
                   onClick={() => setNotifyOnQuestion(!notifyOnQuestion)}
                   onKeyDown={(event) => {
-                    if (event.key === ' ' || event.key === 'Enter') {
+                    if (event.key === ' ' || event.key === m.commonKeyEnter()) {
                       event.preventDefault();
                       setNotifyOnQuestion(!notifyOnQuestion);
                     }
@@ -740,7 +740,7 @@ export const NotificationSettings: React.FC = () => {
                   aria-pressed={summarizeLastMessage}
                   onClick={() => setSummarizeLastMessage(!summarizeLastMessage)}
                   onKeyDown={(event) => {
-                    if (event.key === ' ' || event.key === 'Enter') {
+                    if (event.key === ' ' || event.key === m.commonKeyEnter()) {
                       event.preventDefault();
                       setSummarizeLastMessage(!summarizeLastMessage);
                     }

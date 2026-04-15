@@ -5,6 +5,7 @@ import { UsageProgressBar } from './UsageProgressBar';
 import { PaceIndicator } from './PaceIndicator';
 import { useQuotaStore } from '@/stores/useQuotaStore';
 import { Checkbox } from '@/components/ui/checkbox';
+import { m } from '@/lib/i18n/messages';
 
 interface UsageCardProps {
   title: string;
@@ -50,7 +51,7 @@ export const UsageCard: React.FC<UsageCardProps> = ({
             <Checkbox
               checked={toggleEnabled}
               onChange={(checked) => onToggle?.(checked)}
-              ariaLabel="Show in dropdown"
+              ariaLabel={m.usageShowInDropdown()}
             />
           )}
           <div className="min-w-0 flex flex-col">
