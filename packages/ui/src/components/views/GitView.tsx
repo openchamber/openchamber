@@ -1059,7 +1059,7 @@ export const GitView: React.FC = () => {
   const handleCreateBranch = async (branchName: string, remote?: GitRemote) => {
     if (!currentDirectory || !status) return;
 
-    const blockingReasons = getMutationBlockingReasons(worktreeAttachment ?? null);
+    const blockingReasons = getMutationBlockingReasons(worktreeAttachment ?? null, status);
     if (blockingReasons.length > 0) {
       const reason = blockingReasons[0];
       const reasonLabel = reason.reason === 'attention'
@@ -1119,7 +1119,7 @@ export const GitView: React.FC = () => {
   const handleRenameBranch = async (oldName: string, newName: string) => {
     if (!currentDirectory) return;
 
-    const blockingReasons = getMutationBlockingReasons(worktreeAttachment ?? null);
+    const blockingReasons = getMutationBlockingReasons(worktreeAttachment ?? null, status);
     if (blockingReasons.length > 0) {
       const reason = blockingReasons[0];
       const reasonLabel = reason.reason === 'attention'
@@ -1147,7 +1147,7 @@ export const GitView: React.FC = () => {
     if (!currentDirectory) return;
 
     // Block mutation if worktree is in an attention-required state
-    const blockingReasons = getMutationBlockingReasons(worktreeAttachment ?? null);
+    const blockingReasons = getMutationBlockingReasons(worktreeAttachment ?? null, status);
     if (blockingReasons.length > 0) {
       const reason = blockingReasons[0];
       const reasonLabel = reason.reason === 'attention'

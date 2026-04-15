@@ -615,6 +615,48 @@ describe('getMutationBlockingReasons', () => {
     expect(reasons).toHaveLength(1);
     expect(reasons[0]).toEqual({ reason: 'attention', attentionReason: 'cherry-pick' });
   });
+
+  test('blocks mutation when git status is dirty', () => {
+    const reasons = getMutationBlockingReasons(
+      { worktreeRoot: '/repo', cwd: '/repo', branch: 'main', headState: 'branch', worktreeStatus: 'ready', worktreeSource: 'existing', legacy: false, degraded: false },
+      { isClean: false, files: [{ path: 'a.ts' }, { path: 'b.ts' }] }
+    );
+    expect(reasons).toHaveLength(1);
+    expect(reasons[0]).toEqual({ reason: 'dirty', dirtyFiles: 2 });
+  });
+
+  test('blocks mutation for dirty tree even without attachment', () => {
+    const reasons = getMutationBlockingReasons(null, { isClean: false, files: [{ path: 'a.ts' }] });
+    expect(reasons).toHaveLength(1);
+    expect(reasons[0]).toEqual({ reason: 'dirty', dirtyFiles: 1 });
+  });
+
+  test('does not block when git status is clean', () => {
+    const reasons = getMutationBlockingReasons(
+      { worktreeRoot: '/repo', cwd: '/repo', branch: 'main', headState: 'branch', worktreeStatus: 'ready', worktreeSource: 'existing', legacy: false, degraded: false },
+      { isClean: true, files: [] }
+    );
+    expect(reasons).toHaveLength(0);
+  });
+
+  test('returns dirty and missing reasons together', () => {
+    const reasons = getMutationBlockingReasons(
+      { worktreeRoot: '/repo', cwd: '/repo', branch: 'main', headState: 'branch', worktreeStatus: 'missing', worktreeSource: 'existing', legacy: false, degraded: false },
+      { isClean: false, files: [{ path: 'a.ts' }] }
+    );
+    expect(reasons).toHaveLength(2);
+    expect(reasons[0]).toEqual({ reason: 'dirty', dirtyFiles: 1 });
+    expect(reasons[1]).toEqual({ reason: 'missing' });
+  });
+
+  test('returns dirty without file count when files is undefined', () => {
+    const reasons = getMutationBlockingReasons(
+      null,
+      { isClean: false }
+    );
+    expect(reasons).toHaveLength(1);
+    expect(reasons[0]).toEqual({ reason: 'dirty' });
+  });
 });
 
 describe('getAttachmentBranchLabel', () => {

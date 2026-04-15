@@ -265,12 +265,22 @@ export type MutationBlockingReason =
   | { reason: 'missing' }
   | { reason: 'invalid' };
 
+/** Git status shape needed for dirty-tree detection. */
+export type GitStatusForBlocking = {
+  isClean: boolean;
+  files?: unknown[];
+};
+
 /** Return blocking reasons that should prevent branch mutations. */
 export function getMutationBlockingReasons(
-  attachment: SessionWorktreeAttachment | null | undefined
+  attachment: SessionWorktreeAttachment | null | undefined,
+  gitStatus?: GitStatusForBlocking | null
 ): MutationBlockingReason[] {
-  if (!attachment) return [];
   const reasons: MutationBlockingReason[] = [];
+  if (gitStatus && !gitStatus.isClean) {
+    reasons.push({ reason: 'dirty', dirtyFiles: Array.isArray(gitStatus.files) ? gitStatus.files.length : undefined });
+  }
+  if (!attachment) return reasons;
   if (attachment.worktreeStatus === 'missing') {
     reasons.push({ reason: 'missing' });
   }
