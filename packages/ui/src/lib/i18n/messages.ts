@@ -288,6 +288,16 @@ export const commonPreview = compatMessage(generated.common_preview)
 export const commonReset = compatMessage(generated.common_reset)
 export const commonSave = compatMessage(generated.common_save)
 export const commonSearch = compatMessage(generated.common_search)
+export const contextPanelClosePanel = compatMessage(generated.context_panel_close_panel)
+export const contextPanelCloseTab = compatMessage(generated.context_panel_close_tab)
+export const contextPanelCollapsePanel = compatMessage(generated.context_panel_collapse_panel)
+export const contextPanelExpandPanel = compatMessage(generated.context_panel_expand_panel)
+export const contextPanelResizePanel = compatMessage(generated.context_panel_resize_panel)
+export const contextPanelTabChat = compatMessage(generated.context_panel_tab_chat)
+export const contextPanelTabContext = compatMessage(generated.context_panel_tab_context)
+export const contextPanelTabDiff = compatMessage(generated.context_panel_tab_diff)
+export const contextPanelTabFiles = compatMessage(generated.context_panel_tab_files)
+export const contextPanelTabPlan = compatMessage(generated.context_panel_tab_plan)
 export const ctxAssistant = compatMessage(generated.ctx_assistant)
 export const ctxCacheRead = compatMessage(generated.ctx_cache_read)
 export const ctxCacheWrite = compatMessage(generated.ctx_cache_write)
@@ -1070,6 +1080,34 @@ export const projUndoRemove = compatMessage(generated.proj_undo_remove)
 export const projUploadIcon = compatMessage(generated.proj_upload_icon)
 export const projUploading = compatMessage(generated.proj_uploading)
 export const projWorktree = compatMessage(generated.proj_worktree)
+export const projectActionAddNewAction = compatMessage(generated.project_action_add_new_action)
+export const projectActionChooseProjectAction = compatMessage(generated.project_action_choose_project_action)
+export const projectActionFallback = compatMessage(generated.project_action_fallback)
+export const projectEditCancel = compatMessage(generated.project_edit_cancel)
+export const projectEditClear = compatMessage(generated.project_edit_clear)
+export const projectEditColorLabel = compatMessage(generated.project_edit_color_label)
+export const projectEditCustomIconAlreadySet = compatMessage(generated.project_edit_custom_icon_already_set)
+export const projectEditDiscoverFavicon = compatMessage(generated.project_edit_discover_favicon)
+export const projectEditDiscovering = compatMessage(generated.project_edit_discovering)
+export const projectEditFailedToDiscoverIcon = compatMessage(generated.project_edit_failed_to_discover_icon)
+export const projectEditFailedToRemoveIcon = compatMessage(generated.project_edit_failed_to_remove_icon)
+export const projectEditFailedToUploadIcon = compatMessage(generated.project_edit_failed_to_upload_icon)
+export const projectEditIconBackgroundAria = compatMessage(generated.project_edit_icon_background_aria)
+export const projectEditIconBackgroundPlaceholder = compatMessage(generated.project_edit_icon_background_placeholder)
+export const projectEditIconDiscovered = compatMessage(generated.project_edit_icon_discovered)
+export const projectEditIconLabel = compatMessage(generated.project_edit_icon_label)
+export const projectEditIconRemoved = compatMessage(generated.project_edit_icon_removed)
+export const projectEditIconUpdated = compatMessage(generated.project_edit_icon_updated)
+export const projectEditNameLabel = compatMessage(generated.project_edit_name_label)
+export const projectEditNamePlaceholder = compatMessage(generated.project_edit_name_placeholder)
+export const projectEditPreviewLabel = compatMessage(generated.project_edit_preview_label)
+export const projectEditRemoveProjectIcon = compatMessage(generated.project_edit_remove_project_icon)
+export const projectEditRemoving = compatMessage(generated.project_edit_removing)
+export const projectEditSave = compatMessage(generated.project_edit_save)
+export const projectEditTitle = compatMessage(generated.project_edit_title)
+export const projectEditUndoRemove = compatMessage(generated.project_edit_undo_remove)
+export const projectEditUploadIcon = compatMessage(generated.project_edit_upload_icon)
+export const projectEditUploading = compatMessage(generated.project_edit_uploading)
 export const projectsClearBgTitle = compatMessage(generated.projects_clear_bg_title)
 export const projectsClearIconBgAria = compatMessage(generated.projects_clear_icon_bg_aria)
 export const projectsIconBgAria = compatMessage(generated.projects_icon_bg_aria)
@@ -1441,16 +1479,39 @@ export const settingsSkillsCatalog = compatMessage(generated.settings_skills_cat
 export const settingsSwitchProjectAria = compatMessage(generated.settings_switch_project_aria)
 export const settingsTitle = compatMessage(generated.settings_title)
 export const settingsUsagePage = compatMessage(generated.settings_usage_page)
+export const sidebarActivityShowFewer = compatMessage(generated.sidebar_activity_show_fewer)
+export const sidebarActivityShowMore = compatMessage(generated.sidebar_activity_show_more)
 export const sidebarAgents = compatMessage(generated.sidebar_agents)
 export const sidebarAgentsDesc = compatMessage(generated.sidebar_agents_desc)
 export const sidebarCommands = compatMessage(generated.sidebar_commands)
 export const sidebarCommandsDesc = compatMessage(generated.sidebar_commands_desc)
+export const sidebarFooterAbout = compatMessage(generated.sidebar_footer_about)
+export const sidebarFooterSettings = compatMessage(generated.sidebar_footer_settings)
+export const sidebarFooterShortcuts = compatMessage(generated.sidebar_footer_shortcuts)
+export const sidebarFooterUpdate = compatMessage(generated.sidebar_footer_update)
 export const sidebarGitIdentities = compatMessage(generated.sidebar_git_identities)
 export const sidebarGitIdentitiesDesc = compatMessage(generated.sidebar_git_identities_desc)
+export const sidebarHeaderAddProject = compatMessage(generated.sidebar_header_add_project)
+export const sidebarHeaderClearSearch = compatMessage(generated.sidebar_header_clear_search)
+export const sidebarHeaderCollapseAll = compatMessage(generated.sidebar_header_collapse_all)
+export const sidebarHeaderDefault = compatMessage(generated.sidebar_header_default)
+export const sidebarHeaderDisplayMode = compatMessage(generated.sidebar_header_display_mode)
+export const sidebarHeaderEscToClear = compatMessage(generated.sidebar_header_esc_to_clear)
+export const sidebarHeaderExpandAll = compatMessage(generated.sidebar_header_expand_all)
+export const sidebarHeaderMatch = compatMessage(generated.sidebar_header_match)
+export const sidebarHeaderMatches = compatMessage(generated.sidebar_header_matches)
+export const sidebarHeaderMinimal = compatMessage(generated.sidebar_header_minimal)
+export const sidebarHeaderNewMultiRun = compatMessage(generated.sidebar_header_new_multi_run)
+export const sidebarHeaderNewSession = compatMessage(generated.sidebar_header_new_session)
+export const sidebarHeaderProjectNotes = compatMessage(generated.sidebar_header_project_notes)
+export const sidebarHeaderSearchPlaceholder = compatMessage(generated.sidebar_header_search_placeholder)
+export const sidebarHeaderSearchSessions = compatMessage(generated.sidebar_header_search_sessions)
 export const sidebarMcp = compatMessage(generated.sidebar_mcp)
 export const sidebarMcpDesc = compatMessage(generated.sidebar_mcp_desc)
+export const sidebarProjectsNoSessions = compatMessage(generated.sidebar_projects_no_sessions)
 export const sidebarProviders = compatMessage(generated.sidebar_providers)
 export const sidebarProvidersDesc = compatMessage(generated.sidebar_providers_desc)
+export const sidebarResizeLeftPanel = compatMessage(generated.sidebar_resize_left_panel)
 export const sidebarSessions = compatMessage(generated.sidebar_sessions)
 export const sidebarSessionsDesc = compatMessage(generated.sidebar_sessions_desc)
 export const sidebarSettings = compatMessage(generated.sidebar_settings)
@@ -1568,8 +1629,6 @@ export const toolAgentTypeLabel = compatMessage(generated.tool_agent_type_label)
 export const toolCloseImagePreview = compatMessage(generated.tool_close_image_preview)
 export const toolCommand = compatMessage(generated.tool_command)
 export const toolDetails = compatMessage(generated.tool_details)
-export const toolFailedLoadDiagram = compatMessage(generated.tool_failed_load_diagram)
-export const toolFailedReadDiagram = compatMessage(generated.tool_failed_read_diagram)
 export const toolFailedToLoadDiagram = compatMessage(generated.tool_failed_to_load_diagram)
 export const toolFailedToReadDiagram = compatMessage(generated.tool_failed_to_read_diagram)
 export const toolImagePreview = compatMessage(generated.tool_image_preview)
@@ -1583,7 +1642,6 @@ export const toolPreviousImage = compatMessage(generated.tool_previous_image)
 export const toolRetry = compatMessage(generated.tool_retry)
 export const toolTaskDetails = compatMessage(generated.tool_task_details)
 export const toolTaskLabel = compatMessage(generated.tool_task_label)
-export const toolUnableRenderMermaid = compatMessage(generated.tool_unable_render_mermaid)
 export const toolUnableToRenderDiagram = compatMessage(generated.tool_unable_to_render_diagram)
 export const toolUnsupportedMermaidProtocol = compatMessage(generated.tool_unsupported_mermaid_protocol)
 export const tunnelBrowseConfig = compatMessage(generated.tunnel_browse_config)
@@ -2108,6 +2166,16 @@ export const m = {
   commonReset,
   commonSave,
   commonSearch,
+  contextPanelClosePanel,
+  contextPanelCloseTab,
+  contextPanelCollapsePanel,
+  contextPanelExpandPanel,
+  contextPanelResizePanel,
+  contextPanelTabChat,
+  contextPanelTabContext,
+  contextPanelTabDiff,
+  contextPanelTabFiles,
+  contextPanelTabPlan,
   ctxAssistant,
   ctxCacheRead,
   ctxCacheWrite,
@@ -2890,6 +2958,34 @@ export const m = {
   projUploadIcon,
   projUploading,
   projWorktree,
+  projectActionAddNewAction,
+  projectActionChooseProjectAction,
+  projectActionFallback,
+  projectEditCancel,
+  projectEditClear,
+  projectEditColorLabel,
+  projectEditCustomIconAlreadySet,
+  projectEditDiscoverFavicon,
+  projectEditDiscovering,
+  projectEditFailedToDiscoverIcon,
+  projectEditFailedToRemoveIcon,
+  projectEditFailedToUploadIcon,
+  projectEditIconBackgroundAria,
+  projectEditIconBackgroundPlaceholder,
+  projectEditIconDiscovered,
+  projectEditIconLabel,
+  projectEditIconRemoved,
+  projectEditIconUpdated,
+  projectEditNameLabel,
+  projectEditNamePlaceholder,
+  projectEditPreviewLabel,
+  projectEditRemoveProjectIcon,
+  projectEditRemoving,
+  projectEditSave,
+  projectEditTitle,
+  projectEditUndoRemove,
+  projectEditUploadIcon,
+  projectEditUploading,
   projectsClearBgTitle,
   projectsClearIconBgAria,
   projectsIconBgAria,
@@ -3261,16 +3357,39 @@ export const m = {
   settingsSwitchProjectAria,
   settingsTitle,
   settingsUsagePage,
+  sidebarActivityShowFewer,
+  sidebarActivityShowMore,
   sidebarAgents,
   sidebarAgentsDesc,
   sidebarCommands,
   sidebarCommandsDesc,
+  sidebarFooterAbout,
+  sidebarFooterSettings,
+  sidebarFooterShortcuts,
+  sidebarFooterUpdate,
   sidebarGitIdentities,
   sidebarGitIdentitiesDesc,
+  sidebarHeaderAddProject,
+  sidebarHeaderClearSearch,
+  sidebarHeaderCollapseAll,
+  sidebarHeaderDefault,
+  sidebarHeaderDisplayMode,
+  sidebarHeaderEscToClear,
+  sidebarHeaderExpandAll,
+  sidebarHeaderMatch,
+  sidebarHeaderMatches,
+  sidebarHeaderMinimal,
+  sidebarHeaderNewMultiRun,
+  sidebarHeaderNewSession,
+  sidebarHeaderProjectNotes,
+  sidebarHeaderSearchPlaceholder,
+  sidebarHeaderSearchSessions,
   sidebarMcp,
   sidebarMcpDesc,
+  sidebarProjectsNoSessions,
   sidebarProviders,
   sidebarProvidersDesc,
+  sidebarResizeLeftPanel,
   sidebarSessions,
   sidebarSessionsDesc,
   sidebarSettings,
@@ -3388,8 +3507,6 @@ export const m = {
   toolCloseImagePreview,
   toolCommand,
   toolDetails,
-  toolFailedLoadDiagram,
-  toolFailedReadDiagram,
   toolFailedToLoadDiagram,
   toolFailedToReadDiagram,
   toolImagePreview,
@@ -3403,7 +3520,6 @@ export const m = {
   toolRetry,
   toolTaskDetails,
   toolTaskLabel,
-  toolUnableRenderMermaid,
   toolUnableToRenderDiagram,
   toolUnsupportedMermaidProtocol,
   tunnelBrowseConfig,
