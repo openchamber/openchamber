@@ -1890,6 +1890,5 @@
   "context_panel_session_chat": "Session chat {id}",
   "project_action_fallback_label": "Action",
   "project_action_choose": "Choose project action",
-  "project_action_add_new_action": "Add new action",
   "project_action_choose_project_action_aria": "Choose project action"
 }

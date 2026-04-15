@@ -196,11 +196,11 @@ export function SidebarHeader(props: Props): React.ReactNode {
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <DropdownMenuTrigger asChild>
-                      <button
-                        type="button"
-                        className={headerActionButtonClass}
-                        aria-label={m.sidebarHeaderSessionDisplayMode()}
-                      >
+                        <button
+                          type="button"
+                          className={headerActionButtonClass}
+                          aria-label={m.sidebarHeaderDisplayMode()}
+                        >
                         <RiEqualizer2Line className={headerActionIconClass} />
                       </button>
                     </DropdownMenuTrigger>
