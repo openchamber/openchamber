@@ -907,6 +907,37 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     }
   }, [loadDirectory, root, showGitignored, showHidden]);
 
+  // Auto-refresh expanded directories when user returns to the tab
+  React.useEffect(() => {
+    if (!files.listDirectory) return;
+
+    const handleVisibilityChange = () => {
+      if (!document.hidden && expandedPaths.length > 0) {
+        for (const dir of expandedPaths) {
+          void refreshDirectory(dir);
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [expandedPaths, files.listDirectory, refreshDirectory]);
+
+  // Poll expanded directories for external changes
+  React.useEffect(() => {
+    if (!files.listDirectory) return;
+    if (expandedPaths.length === 0) return;
+
+    const interval = setInterval(() => {
+      if (document.hidden) return;
+      for (const dir of expandedPaths) {
+        void refreshDirectory(dir);
+      }
+    }, 8000);
+
+    return () => clearInterval(interval);
+  }, [expandedPaths, files.listDirectory, refreshDirectory]);
+
   const handleDialogSubmit = React.useCallback(async (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!dialogData || !activeDialog) return;
