@@ -9,6 +9,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
+import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { toast } from '@/components/ui';
 import {
   RiLoader4Line,
@@ -142,6 +143,7 @@ const toneStyle = (tone: StatusTone): React.CSSProperties => {
 export function ScheduledTasksDialog() {
   const open = useUIStore((state) => state.isScheduledTasksDialogOpen);
   const setOpen = useUIStore((state) => state.setScheduledTasksDialogOpen);
+  const isMobile = useUIStore((state) => state.isMobile);
   const projects = useProjectsStore((state) => state.projects);
   const activeProject = useProjectsStore((state) => state.getActiveProject());
   const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
@@ -190,12 +192,14 @@ export function ScheduledTasksDialog() {
     );
   }, [homeDirectory, currentTheme.metadata.variant, currentTheme.colors.surface.foreground]);
 
-  const reloadTasks = React.useCallback(async (projectID: string) => {
+  const reloadTasks = React.useCallback(async (projectID: string, options?: { silent?: boolean }) => {
     if (!projectID) {
       setTasks([]);
       return;
     }
-    setLoading(true);
+    if (!options?.silent) {
+      setLoading(true);
+    }
     try {
       const nextTasks = await fetchScheduledTasks(projectID);
       nextTasks.sort((a, b) => {
@@ -211,9 +215,13 @@ export function ScheduledTasksDialog() {
       setTasks(nextTasks);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to load scheduled tasks');
-      setTasks([]);
+      if (!options?.silent) {
+        setTasks([]);
+      }
     } finally {
-      setLoading(false);
+      if (!options?.silent) {
+        setLoading(false);
+      }
     }
   }, []);
 
@@ -246,7 +254,7 @@ export function ScheduledTasksDialog() {
         clearTimeout(timeoutID);
       }
       timeoutID = setTimeout(() => {
-        void reloadTasks(selectedProjectID);
+        void reloadTasks(selectedProjectID, { silent: true });
       }, 400);
     });
     return () => {
@@ -271,14 +279,16 @@ export function ScheduledTasksDialog() {
       return;
     }
     setMutatingTaskID(task.id);
+    setTasks((prev) => prev.map((item) => (item.id === task.id ? { ...item, enabled } : item)));
     try {
       await upsertScheduledTask(selectedProjectID, {
         ...task,
         enabled,
       });
-      await reloadTasks(selectedProjectID);
+      await reloadTasks(selectedProjectID, { silent: true });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to update task');
+      await reloadTasks(selectedProjectID, { silent: true });
     } finally {
       setMutatingTaskID(null);
     }
@@ -296,7 +306,7 @@ export function ScheduledTasksDialog() {
     setMutatingTaskID(task.id);
     try {
       await deleteScheduledTask(selectedProjectID, task.id);
-      await reloadTasks(selectedProjectID);
+      await reloadTasks(selectedProjectID, { silent: true });
       toast.success('Scheduled task deleted');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to delete task');
@@ -313,7 +323,7 @@ export function ScheduledTasksDialog() {
     try {
       await runScheduledTaskNow(selectedProjectID, task.id);
       await Promise.all([
-        reloadTasks(selectedProjectID),
+        reloadTasks(selectedProjectID, { silent: true }),
         refreshGlobalSessions(),
       ]);
       toast.success('Task started');
@@ -324,206 +334,247 @@ export function ScheduledTasksDialog() {
     }
   }, [selectedProjectID, reloadTasks]);
 
+  const projectSelector = (
+    <div className="flex flex-col items-start gap-1">
+      <span className="typography-meta text-muted-foreground">Project</span>
+      <Select
+        value={selectedProjectID || '__none'}
+        onValueChange={(value) => {
+          const nextProjectID = value === '__none' ? '' : value;
+          setSelectedProjectID(nextProjectID);
+          if (nextProjectID) {
+            void reloadTasks(nextProjectID);
+          } else {
+            setTasks([]);
+          }
+        }}
+      >
+        <SelectTrigger className={isMobile ? 'w-full' : undefined}>
+          {selectedProject ? (
+            <SelectValue>{renderProjectLabel(selectedProject)}</SelectValue>
+          ) : (
+            <SelectValue placeholder="Select project" />
+          )}
+        </SelectTrigger>
+        <SelectContent>
+          {projects.length === 0 ? <SelectItem value="__none">No projects</SelectItem> : null}
+          {projects.map((project) => (
+            <SelectItem key={project.id} value={project.id}>
+              {renderProjectLabel(project)}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+
+  const openNewTaskEditor = () => {
+    setEditorTask(null);
+    setEditorOpen(true);
+  };
+
+  const tasksContent = (
+    <div className="space-y-4">
+      {!isMobile ? (
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          {projectSelector}
+          <Button onClick={openNewTaskEditor} disabled={!selectedProjectID}>
+            <RiAddLine className="mr-1 h-4 w-4" /> New task
+          </Button>
+        </div>
+      ) : (
+        projectSelector
+      )}
+
+      {loading ? (
+        <div className="flex items-center gap-2 typography-meta text-muted-foreground">
+          <RiLoader4Line className="h-4 w-4 animate-spin" /> Loading tasks...
+        </div>
+      ) : tasks.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-border p-4 typography-meta text-muted-foreground">
+          {selectedProjectID ? 'No scheduled tasks yet.' : 'Select a project to manage scheduled tasks.'}
+        </div>
+      ) : (
+        <div className="space-y-2.5">
+          {tasks.map((task) => {
+            const isBusy = mutatingTaskID === task.id;
+            const status = (task.state?.lastStatus || 'idle') as ScheduledTaskStatus;
+            const meta = STATUS_META[status];
+            const nextAt = task.state?.nextRunAt;
+            const lastAt = task.state?.lastRunAt;
+
+            return (
+              <div
+                key={task.id}
+                className={cn(
+                  'rounded-lg border border-border p-4 transition-opacity',
+                  !task.enabled && 'opacity-60',
+                )}
+              >
+                <div className="min-w-0">
+                  <div className="typography-ui-header truncate font-semibold text-foreground">
+                    {task.name}
+                  </div>
+                  <div className="typography-micro truncate text-muted-foreground">
+                    {formatSchedule(task)}
+                  </div>
+                </div>
+
+                <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1 typography-micro text-muted-foreground">
+                  <span className="inline-flex items-center gap-1.5">
+                    <RiTimerLine className="h-3.5 w-3.5" />
+                    <span className="font-medium text-foreground">Next</span>
+                    {nextAt ? (
+                      <>
+                        <span className="text-foreground">{formatRelativeTime(nextAt)}</span>
+                        <span className="text-muted-foreground/50">·</span>
+                        <span>{formatClockTime(nextAt)}</span>
+                      </>
+                    ) : (
+                      <span>—</span>
+                    )}
+                  </span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <RiHistoryLine className="h-3.5 w-3.5" />
+                    <span className="font-medium text-foreground">Last run</span>
+                    {status === 'running' ? (
+                      <span
+                        className="inline-flex items-center gap-1"
+                        style={{ color: 'var(--status-warning)' }}
+                      >
+                        <RiLoader4Line className="h-3.5 w-3.5 animate-spin" />
+                        running now
+                      </span>
+                    ) : lastAt ? (
+                      <>
+                        {meta.tone !== 'muted' ? (
+                          <span
+                            className="inline-flex items-center gap-1"
+                            style={{ color: `var(--status-${meta.tone})` }}
+                          >
+                            <meta.Icon className="h-3.5 w-3.5" />
+                            {meta.label}
+                          </span>
+                        ) : null}
+                        <span className="text-muted-foreground/50">·</span>
+                        <span>{formatRelativeTime(lastAt)}</span>
+                      </>
+                    ) : (
+                      <span>never</span>
+                    )}
+                  </span>
+                </div>
+
+                {task.state?.lastError ? (
+                  <div
+                    className="mt-3 flex items-start gap-2 rounded-md border p-2 typography-micro"
+                    style={toneStyle('error')}
+                  >
+                    <RiErrorWarningLine className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                    <span className="min-w-0 break-words">{task.state.lastError}</span>
+                  </div>
+                ) : null}
+
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+                  <label
+                    className={cn(
+                      'inline-flex cursor-pointer items-center gap-2 typography-micro font-medium',
+                      task.enabled ? 'text-foreground' : 'text-muted-foreground',
+                      isBusy && 'cursor-not-allowed opacity-50',
+                    )}
+                  >
+                    <Checkbox
+                      checked={task.enabled}
+                      onChange={(enabled) => void handleToggleEnabled(task, enabled)}
+                      ariaLabel={task.enabled ? `Pause ${task.name}` : `Enable ${task.name}`}
+                      disabled={isBusy}
+                    />
+                    {task.enabled ? 'Enabled' : 'Paused'}
+                  </label>
+
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void handleRunNow(task)}
+                      disabled={isBusy}
+                    >
+                      <RiPlayLine className="h-4 w-4" /> run now
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setEditorTask(task);
+                        setEditorOpen(true);
+                      }}
+                      disabled={isBusy}
+                      aria-label={`Edit ${task.name}`}
+                    >
+                      <RiEdit2Line className="h-4 w-4" /> edit
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={() => void handleDeleteTask(task)}
+                      disabled={isBusy}
+                      aria-label={`Delete ${task.name}`}
+                    >
+                      <RiDeleteBinLine className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Scheduled tasks</DialogTitle>
-            <DialogDescription>Server-side tasks that create a new session and send a configured prompt.</DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex flex-col items-start gap-1">
-                <span className="typography-meta text-muted-foreground">Project</span>
-                <Select
-                  value={selectedProjectID || '__none'}
-                  onValueChange={(value) => {
-                    const nextProjectID = value === '__none' ? '' : value;
-                    setSelectedProjectID(nextProjectID);
-                    if (nextProjectID) {
-                      void reloadTasks(nextProjectID);
-                    } else {
-                      setTasks([]);
-                    }
-                  }}
-                >
-                  <SelectTrigger>
-                    {selectedProject ? (
-                      <SelectValue>{renderProjectLabel(selectedProject)}</SelectValue>
-                    ) : (
-                      <SelectValue placeholder="Select project" />
-                    )}
-                  </SelectTrigger>
-                  <SelectContent>
-                    {projects.length === 0 ? <SelectItem value="__none">No projects</SelectItem> : null}
-                    {projects.map((project) => (
-                      <SelectItem key={project.id} value={project.id}>
-                        {renderProjectLabel(project)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+      {isMobile ? (
+        <MobileOverlayPanel
+          open={open}
+          title="Scheduled tasks"
+          onClose={() => setOpen(false)}
+          contentMaxHeightClassName="max-h-[min(80vh,640px)]"
+          renderHeader={(closeButton) => (
+            <div className="flex flex-col gap-1 border-b border-border/40 px-3 py-2">
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="typography-ui-label font-semibold text-foreground">Scheduled tasks</h2>
+                {closeButton}
               </div>
-
-              <Button
-                onClick={() => {
-                  setEditorTask(null);
-                  setEditorOpen(true);
-                }}
-                disabled={!selectedProjectID}
-              >
-                <RiAddLine className="mr-1 h-4 w-4" /> New task
-              </Button>
+              <p className="typography-micro text-muted-foreground">
+                Server-side tasks that create a new session and send a configured prompt.
+              </p>
             </div>
+          )}
+          footer={(
+            <Button
+              className="w-full"
+              onClick={openNewTaskEditor}
+              disabled={!selectedProjectID}
+            >
+              <RiAddLine className="mr-1 h-4 w-4" /> New task
+            </Button>
+          )}
+        >
+          {tasksContent}
+        </MobileOverlayPanel>
+      ) : (
+        <Dialog open={open} onOpenChange={setOpen}>
+          <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Scheduled tasks</DialogTitle>
+              <DialogDescription>Server-side tasks that create a new session and send a configured prompt.</DialogDescription>
+            </DialogHeader>
 
-            {loading ? (
-              <div className="flex items-center gap-2 typography-meta text-muted-foreground">
-                <RiLoader4Line className="h-4 w-4 animate-spin" /> Loading tasks...
-              </div>
-            ) : tasks.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-border p-4 typography-meta text-muted-foreground">
-                {selectedProjectID ? 'No scheduled tasks yet.' : 'Select a project to manage scheduled tasks.'}
-              </div>
-            ) : (
-              <div className="space-y-2.5">
-                {tasks.map((task) => {
-                  const isBusy = mutatingTaskID === task.id;
-                  const status = (task.state?.lastStatus || 'idle') as ScheduledTaskStatus;
-                  const meta = STATUS_META[status];
-                  const nextAt = task.state?.nextRunAt;
-                  const lastAt = task.state?.lastRunAt;
-
-                  return (
-                    <div
-                      key={task.id}
-                      className={cn(
-                        'rounded-lg border border-border p-4 transition-opacity',
-                        !task.enabled && 'opacity-60',
-                      )}
-                    >
-                      <div className="min-w-0">
-                        <div className="typography-ui-header truncate font-semibold text-foreground">
-                          {task.name}
-                        </div>
-                        <div className="typography-micro truncate text-muted-foreground">
-                          {formatSchedule(task)}
-                        </div>
-                      </div>
-
-                      <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1 typography-micro text-muted-foreground">
-                        <span className="inline-flex items-center gap-1.5">
-                          <RiTimerLine className="h-3.5 w-3.5" />
-                          <span className="font-medium text-foreground">Next</span>
-                          {nextAt ? (
-                            <>
-                              <span className="text-foreground">{formatRelativeTime(nextAt)}</span>
-                              <span className="text-muted-foreground/50">·</span>
-                              <span>{formatClockTime(nextAt)}</span>
-                            </>
-                          ) : (
-                            <span>—</span>
-                          )}
-                        </span>
-                        <span className="inline-flex items-center gap-1.5">
-                          <RiHistoryLine className="h-3.5 w-3.5" />
-                          <span className="font-medium text-foreground">Last run</span>
-                          {status === 'running' ? (
-                            <span
-                              className="inline-flex items-center gap-1"
-                              style={{ color: 'var(--status-warning)' }}
-                            >
-                              <RiLoader4Line className="h-3.5 w-3.5 animate-spin" />
-                              running now
-                            </span>
-                          ) : lastAt ? (
-                            <>
-                              {meta.tone !== 'muted' ? (
-                                <span
-                                  className="inline-flex items-center gap-1"
-                                  style={{ color: `var(--status-${meta.tone})` }}
-                                >
-                                  <meta.Icon className="h-3.5 w-3.5" />
-                                  {meta.label}
-                                </span>
-                              ) : null}
-                              <span className="text-muted-foreground/50">·</span>
-                              <span>{formatRelativeTime(lastAt)}</span>
-                            </>
-                          ) : (
-                            <span>never</span>
-                          )}
-                        </span>
-                      </div>
-
-                      {task.state?.lastError ? (
-                        <div
-                          className="mt-3 flex items-start gap-2 rounded-md border p-2 typography-micro"
-                          style={toneStyle('error')}
-                        >
-                          <RiErrorWarningLine className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                          <span className="min-w-0 break-words">{task.state.lastError}</span>
-                        </div>
-                      ) : null}
-
-                      <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
-                        <label
-                          className={cn(
-                            'inline-flex cursor-pointer items-center gap-2 typography-micro font-medium',
-                            task.enabled ? 'text-foreground' : 'text-muted-foreground',
-                            isBusy && 'cursor-not-allowed opacity-50',
-                          )}
-                        >
-                          <Checkbox
-                            checked={task.enabled}
-                            onChange={(enabled) => void handleToggleEnabled(task, enabled)}
-                            ariaLabel={task.enabled ? `Pause ${task.name}` : `Enable ${task.name}`}
-                            disabled={isBusy}
-                          />
-                          {task.enabled ? 'Enabled' : 'Paused'}
-                        </label>
-
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => void handleRunNow(task)}
-                            disabled={isBusy}
-                          >
-                            <RiPlayLine className="h-4 w-4" /> run now
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              setEditorTask(task);
-                              setEditorOpen(true);
-                            }}
-                            disabled={isBusy}
-                            aria-label={`Edit ${task.name}`}
-                          >
-                            <RiEdit2Line className="h-4 w-4" /> edit
-                          </Button>
-                          <Button
-                            variant="destructive"
-                            size="sm"
-                            onClick={() => void handleDeleteTask(task)}
-                            disabled={isBusy}
-                            aria-label={`Delete ${task.name}`}
-                          >
-                            <RiDeleteBinLine className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
+            {tasksContent}
+          </DialogContent>
+        </Dialog>
+      )}
 
       <ScheduledTaskEditorDialog
         open={editorOpen}

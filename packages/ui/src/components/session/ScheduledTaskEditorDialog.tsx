@@ -7,6 +7,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
+import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { toast } from '@/components/ui';
 import { RiAddLine, RiCloseLine, RiCalendarLine, RiArrowLeftSLine, RiArrowRightSLine, RiArrowDownSLine } from '@remixicon/react';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
@@ -582,6 +583,7 @@ export function ScheduledTaskEditorDialog(props: {
   const currentAgentName = useConfigStore((state) => state.currentAgentName || '');
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const weekStartPreference = useUIStore((state) => state.weekStartPreference);
+  const isMobile = useUIStore((state) => state.isMobile);
 
   const [draft, setDraft] = React.useState<ScheduledTaskDraft>(() =>
     toDraft(task, {
@@ -846,50 +848,11 @@ export function ScheduledTaskEditorDialog(props: {
     );
   }, []);
 
-  return (
-    <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
-      <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/50 dark:bg-black/75" />
-        <DialogPrimitive.Content
-          aria-describedby={descriptionId}
-          onInteractOutside={(event) => {
-            if (hasOpenFloatingMenu()) event.preventDefault();
-          }}
-          className={cn(
-            'fixed z-50 top-[50%] left-[50%] translate-x-[-50%] translate-y-[-50%]',
-            'w-[90vw] max-w-[720px] h-[680px] max-h-[85vh]',
-            'flex flex-col rounded-xl border shadow-none overflow-hidden',
-            'bg-background'
-          )}
-        >
-          <div className="absolute right-0.5 top-0.5 z-50">
-            <button
-              type="button"
-              onClick={() => onOpenChange(false)}
-              aria-label="Close"
-              className="inline-flex h-7 w-7 items-center justify-center rounded-md p-0.5 text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-            >
-              <RiCloseLine className="h-5 w-5" />
-            </button>
-          </div>
-          <DialogPrimitive.Description id={descriptionId} className="sr-only">
-            Configure a server-side task that creates a new session and sends a prompt.
-          </DialogPrimitive.Description>
+  const title = task ? 'Edit scheduled task' : 'New scheduled task';
+  const description = 'Configure a server-side task that creates a new session and sends a prompt.';
 
-          <header className="shrink-0 px-4 sm:px-6 pt-5 pb-3">
-            <div className="mx-auto w-full max-w-2xl">
-              <DialogPrimitive.Title className="typography-ui-label font-medium text-foreground">
-                {task ? 'Edit scheduled task' : 'New scheduled task'}
-              </DialogPrimitive.Title>
-              <p className="typography-meta mt-0.5 text-muted-foreground">
-                Configure a server-side task that creates a new session and sends a prompt.
-              </p>
-            </div>
-          </header>
-
-          <ScrollShadow className="flex-1 min-h-0 overflow-auto [scrollbar-gutter:stable_both-edges]" size={64} hideTopShadow>
-            <div className="mx-auto w-full max-w-2xl px-4 sm:px-6 pb-5">
-              <div className="flex flex-col gap-5">
+  const formBody = (
+    <div className="flex flex-col gap-5">
                 <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
                   <div className="flex flex-col gap-1">
                     <FieldLabel htmlFor="sched-name" required>Task name</FieldLabel>
@@ -1224,30 +1187,104 @@ export function ScheduledTaskEditorDialog(props: {
               className="typography-meta min-h-[120px] max-h-[300px] resize-none overflow-y-auto"
             />
           </div>
+    </div>
+  );
 
-              </div>
+  const footerRow = (
+    <div className="flex items-center justify-between gap-3">
+      <label className="inline-flex items-center gap-2">
+        <Checkbox
+          checked={draft.enabled}
+          onChange={(enabled) => setDraft((prev) => ({ ...prev, enabled }))}
+          ariaLabel="Enable task"
+        />
+        <span className="typography-meta">Enabled</span>
+      </label>
+
+      <div className="flex items-center gap-2">
+        <Button type="button" variant="ghost" size="sm" onClick={() => onOpenChange(false)} disabled={saving}>
+          Cancel
+        </Button>
+        <Button type="button" size="sm" onClick={handleSubmit} disabled={saving}>
+          {saving ? 'Saving...' : 'Save'}
+        </Button>
+      </div>
+    </div>
+  );
+
+  if (isMobile) {
+    return (
+      <MobileOverlayPanel
+        open={open}
+        title={title}
+        onClose={() => onOpenChange(false)}
+        contentMaxHeightClassName="max-h-[min(80vh,640px)]"
+        renderHeader={(closeButton) => (
+          <div className="flex flex-col gap-1 border-b border-border/40 px-3 py-2">
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="typography-ui-label font-semibold text-foreground">{title}</h2>
+              {closeButton}
+            </div>
+            <p className="typography-micro text-muted-foreground">{description}</p>
+          </div>
+        )}
+        footer={footerRow}
+      >
+        {formBody}
+      </MobileOverlayPanel>
+    );
+  }
+
+  return (
+    <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
+      <DialogPrimitive.Portal>
+        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/50 dark:bg-black/75" />
+        <DialogPrimitive.Content
+          aria-describedby={descriptionId}
+          onInteractOutside={(event) => {
+            if (hasOpenFloatingMenu()) event.preventDefault();
+          }}
+          className={cn(
+            'fixed z-50 top-[50%] left-[50%] translate-x-[-50%] translate-y-[-50%]',
+            'w-[90vw] max-w-[720px] h-[680px] max-h-[85vh]',
+            'flex flex-col rounded-xl border shadow-none overflow-hidden',
+            'bg-background'
+          )}
+        >
+          <div className="absolute right-0.5 top-0.5 z-50">
+            <button
+              type="button"
+              onClick={() => onOpenChange(false)}
+              aria-label="Close"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md p-0.5 text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            >
+              <RiCloseLine className="h-5 w-5" />
+            </button>
+          </div>
+          <DialogPrimitive.Description id={descriptionId} className="sr-only">
+            {description}
+          </DialogPrimitive.Description>
+
+          <header className="shrink-0 px-4 sm:px-6 pt-5 pb-3">
+            <div className="mx-auto w-full max-w-2xl">
+              <DialogPrimitive.Title className="typography-ui-label font-medium text-foreground">
+                {title}
+              </DialogPrimitive.Title>
+              <p className="typography-meta mt-0.5 text-muted-foreground">
+                {description}
+              </p>
+            </div>
+          </header>
+
+          <ScrollShadow className="flex-1 min-h-0 overflow-auto [scrollbar-gutter:stable_both-edges]" size={64} hideTopShadow>
+            <div className="mx-auto w-full max-w-2xl px-4 sm:px-6 pb-5">
+              {formBody}
             </div>
           </ScrollShadow>
 
           <div className="shrink-0 px-4 sm:px-6 py-3">
-            <div className="mx-auto flex w-full max-w-2xl items-center justify-between gap-3">
-              <label className="inline-flex items-center gap-2">
-                <Checkbox
-                  checked={draft.enabled}
-                  onChange={(enabled) => setDraft((prev) => ({ ...prev, enabled }))}
-                  ariaLabel="Enable task"
-                />
-                <span className="typography-meta">Enabled</span>
-              </label>
-
-              <div className="flex items-center gap-2">
-                <Button type="button" variant="ghost" size="sm" onClick={() => onOpenChange(false)} disabled={saving}>
-                  Cancel
-                </Button>
-                <Button type="button" size="sm" onClick={handleSubmit} disabled={saving}>
-                  {saving ? 'Saving...' : 'Save'}
-                </Button>
-              </div>
+            <div className="mx-auto w-full max-w-2xl">
+              {footerRow}
             </div>
           </div>
         </DialogPrimitive.Content>
