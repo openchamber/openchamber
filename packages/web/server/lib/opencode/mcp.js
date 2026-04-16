@@ -161,7 +161,12 @@ function deleteMcpConfig(name, workingDirectory) {
  * Build a clean MCP entry object, omitting undefined/null values
  */
 function buildMcpEntry(data) {
-  const entry = {};
+  const entry = (data && typeof data === 'object' && !Array.isArray(data))
+    ? { ...data }
+    : {};
+
+  delete entry.name;
+  delete entry.scope;
 
   // type is required
   entry.type = data.type === 'remote' ? 'remote' : 'local';
@@ -170,11 +175,68 @@ function buildMcpEntry(data) {
     // command must be a non-empty array of strings
     if (Array.isArray(data.command) && data.command.length > 0) {
       entry.command = data.command.map(String);
+    } else {
+      delete entry.command;
     }
+
+    delete entry.url;
+    delete entry.headers;
+    delete entry.oauth;
   } else {
     // remote: url required
     if (data.url && typeof data.url === 'string') {
       entry.url = data.url.trim();
+    } else {
+      delete entry.url;
+    }
+
+    delete entry.command;
+
+    if (data.headers && typeof data.headers === 'object' && !Array.isArray(data.headers)) {
+      const cleaned = {};
+      for (const [k, v] of Object.entries(data.headers)) {
+        if (k && v !== undefined && v !== null) {
+          cleaned[k] = String(v);
+        }
+      }
+      if (Object.keys(cleaned).length > 0) {
+        entry.headers = cleaned;
+      } else {
+        delete entry.headers;
+      }
+    } else if (data.headers === undefined) {
+      delete entry.headers;
+    }
+
+    if (data.oauth === false) {
+      entry.oauth = false;
+    } else if (data.oauth && typeof data.oauth === 'object' && !Array.isArray(data.oauth)) {
+      const oauth = {};
+      if (typeof data.oauth.clientId === 'string' && data.oauth.clientId.trim()) {
+        oauth.clientId = data.oauth.clientId.trim();
+      }
+      if (typeof data.oauth.clientSecret === 'string' && data.oauth.clientSecret.trim()) {
+        oauth.clientSecret = data.oauth.clientSecret.trim();
+      }
+      if (typeof data.oauth.scope === 'string' && data.oauth.scope.trim()) {
+        oauth.scope = data.oauth.scope.trim();
+      }
+      if (typeof data.oauth.redirectUri === 'string' && data.oauth.redirectUri.trim()) {
+        oauth.redirectUri = data.oauth.redirectUri.trim();
+      }
+      if (Object.keys(oauth).length > 0) {
+        entry.oauth = oauth;
+      } else {
+        delete entry.oauth;
+      }
+    } else if (data.oauth === undefined) {
+      delete entry.oauth;
+    }
+
+    if (typeof data.timeout === 'number' && Number.isFinite(data.timeout) && data.timeout > 0) {
+      entry.timeout = data.timeout;
+    } else if (data.timeout === undefined || data.timeout === null || data.timeout === '') {
+      delete entry.timeout;
     }
   }
 
@@ -188,7 +250,11 @@ function buildMcpEntry(data) {
     }
     if (Object.keys(cleaned).length > 0) {
       entry.environment = cleaned;
+    } else {
+      delete entry.environment;
     }
+  } else if (data.environment === undefined) {
+    delete entry.environment;
   }
 
   // enabled defaults to true

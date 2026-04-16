@@ -38,10 +38,20 @@ export interface McpLocalConfig {
   enabled: boolean;
 }
 
+export interface McpOAuthConfig {
+  clientId?: string;
+  clientSecret?: string;
+  scope?: string;
+  redirectUri?: string;
+}
+
 export interface McpRemoteConfig {
   type: 'remote';
   url: string;
   environment?: Record<string, string>;
+  headers?: Record<string, string>;
+  oauth?: McpOAuthConfig | false;
+  timeout?: number;
   enabled: boolean;
 }
 
@@ -55,6 +65,13 @@ export interface McpDraft {
   command: string[];
   url: string;
   environment: Array<{ key: string; value: string }>;
+  headers: Array<{ key: string; value: string }>;
+  oauthEnabled: boolean;
+  oauthClientId: string;
+  oauthClientSecret: string;
+  oauthScope: string;
+  oauthRedirectUri: string;
+  timeout: string;
   enabled: boolean;
 }
 
@@ -69,6 +86,12 @@ export const envArrayToRecord = (arr: Array<{ key: string; value: string }>): Re
   const filtered = arr.filter((e) => e.key.trim());
   if (filtered.length === 0) return undefined;
   return Object.fromEntries(filtered.map((e) => [e.key.trim(), e.value]));
+};
+
+const trimOptionalString = (value: string | undefined): string | undefined => {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
 };
 
 const CLIENT_RELOAD_DELAY_MS = 800;
@@ -310,6 +333,46 @@ function buildMcpBody(config: Partial<McpDraft>): Record<string, unknown> {
 
   if (config.environment !== undefined) {
     body.environment = envArrayToRecord(config.environment) ?? {};
+  }
+
+  if (config.headers !== undefined) {
+    body.headers = envArrayToRecord(config.headers) ?? {};
+  }
+
+  if (
+    config.oauthEnabled !== undefined ||
+    config.oauthClientId !== undefined ||
+    config.oauthClientSecret !== undefined ||
+    config.oauthScope !== undefined ||
+    config.oauthRedirectUri !== undefined
+  ) {
+    if (config.oauthEnabled === false) {
+      body.oauth = false;
+    } else {
+      const oauth = {
+        clientId: trimOptionalString(config.oauthClientId),
+        clientSecret: trimOptionalString(config.oauthClientSecret),
+        scope: trimOptionalString(config.oauthScope),
+        redirectUri: trimOptionalString(config.oauthRedirectUri),
+      };
+
+      if (oauth.clientId || oauth.clientSecret || oauth.scope || oauth.redirectUri) {
+        body.oauth = oauth;
+      } else if (config.oauthEnabled) {
+        body.oauth = {};
+      } else {
+        body.oauth = false;
+      }
+    }
+  }
+
+  if (config.timeout !== undefined) {
+    const timeout = Number(config.timeout);
+    if (Number.isFinite(timeout) && timeout > 0) {
+      body.timeout = timeout;
+    } else {
+      body.timeout = null;
+    }
   }
 
   if (config.enabled !== undefined) {

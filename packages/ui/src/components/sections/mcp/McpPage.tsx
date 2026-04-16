@@ -4,6 +4,8 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui';
+import { copyTextToClipboard } from '@/lib/clipboard';
+import { openExternalUrl } from '@/lib/url';
 import {
   useMcpConfigStore,
   envRecordToArray,
@@ -18,8 +20,10 @@ import {
   RiDeleteBinLine,
   RiEyeLine,
   RiEyeOffLine,
+  RiExternalLinkLine,
   RiFolderLine,
   RiPlugLine,
+  RiRefreshLine,
   RiUser3Line,
 } from '@remixicon/react';
 import { cn } from '@/lib/utils';
@@ -356,6 +360,37 @@ const StatusBadge: React.FC<{ status: string | undefined; enabled: boolean }> = 
   );
 };
 
+const getStatusDescription = (status: string | undefined, error?: string): string => {
+  switch (status) {
+    case 'connected':
+      return 'Connected and ready for OpenCode to discover tools and resources.';
+    case 'failed':
+      return error?.trim() || 'OpenCode could not reach this MCP server.';
+    case 'needs_auth':
+      return 'This remote MCP server requires authorization before it can connect.';
+    case 'needs_client_registration':
+      return error?.trim() || 'This remote MCP server requires client registration before authorization can complete.';
+    case 'disabled':
+      return 'This MCP server is disabled in configuration.';
+    default:
+      return 'Refresh or test the connection to load live runtime status.';
+  }
+};
+
+const statusCardClass = (status: string | undefined): string => {
+  switch (status) {
+    case 'connected':
+      return 'border-[var(--status-success-border)] bg-[var(--status-success-background)]';
+    case 'failed':
+      return 'border-[var(--status-error-border)] bg-[var(--status-error-background)]';
+    case 'needs_auth':
+    case 'needs_client_registration':
+      return 'border-[var(--status-warning-border)] bg-[var(--status-warning-background)]';
+    default:
+      return 'border-[var(--interactive-border)] bg-[var(--surface-elevated)]';
+  }
+};
+
 // ─────────────────────────────────────────────────────────────
 // McpPage
 // ─────────────────────────────────────────────────────────────
@@ -377,6 +412,9 @@ export const McpPage: React.FC = () => {
   const refreshStatus = useMcpStore((state) => state.refresh);
   const connectMcp = useMcpStore((state) => state.connect);
   const disconnectMcp = useMcpStore((state) => state.disconnect);
+  const startAuthMcp = useMcpStore((state) => state.startAuth);
+  const clearAuthMcp = useMcpStore((state) => state.clearAuth);
+  const testConnectionMcp = useMcpStore((state) => state.testConnection);
 
   const selectedServer = selectedMcpName ? getMcpByName(selectedMcpName) : null;
   const isNewServer = Boolean(mcpDraft && mcpDraft.name === selectedMcpName && !selectedServer);
@@ -388,15 +426,37 @@ export const McpPage: React.FC = () => {
   const [command, setCommand] = React.useState<string[]>([]);
   const [url, setUrl] = React.useState('');
   const [envEntries, setEnvEntries] = React.useState<Array<{ key: string; value: string }>>([]);
+  const [headerEntries, setHeaderEntries] = React.useState<Array<{ key: string; value: string }>>([]);
+  const [oauthEnabled, setOauthEnabled] = React.useState(true);
+  const [oauthClientId, setOauthClientId] = React.useState('');
+  const [oauthClientSecret, setOauthClientSecret] = React.useState('');
+  const [oauthScope, setOauthScope] = React.useState('');
+  const [oauthRedirectUri, setOauthRedirectUri] = React.useState('');
+  const [timeout, setTimeoutValue] = React.useState('');
   const [enabled, setEnabled] = React.useState(true);
   const [isSaving, setIsSaving] = React.useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = React.useState(false);
   const [isDeleting, setIsDeleting] = React.useState(false);
   const [isConnecting, setIsConnecting] = React.useState(false);
+  const [isRefreshingStatus, setIsRefreshingStatus] = React.useState(false);
+  const [isAuthorizing, setIsAuthorizing] = React.useState(false);
+  const [isClearingAuth, setIsClearingAuth] = React.useState(false);
+  const [isTestingConnection, setIsTestingConnection] = React.useState(false);
+  const [authUrl, setAuthUrl] = React.useState<string | null>(null);
+  const [isAuthPolling, setIsAuthPolling] = React.useState(false);
+  const authPollAttemptsRef = React.useRef(0);
 
   const initialRef = React.useRef<{
     mcpType: 'local' | 'remote'; command: string[]; url: string;
-    envEntries: Array<{ key: string; value: string }>; enabled: boolean;
+    envEntries: Array<{ key: string; value: string }>;
+    headerEntries: Array<{ key: string; value: string }>;
+    oauthEnabled: boolean;
+    oauthClientId: string;
+    oauthClientSecret: string;
+    oauthScope: string;
+    oauthRedirectUri: string;
+    timeout: string;
+    enabled: boolean;
   } | null>(null);
 
   // Populate form when selection changes
@@ -408,21 +468,80 @@ export const McpPage: React.FC = () => {
       setCommand(mcpDraft.command);
       setUrl(mcpDraft.url);
       setEnvEntries(mcpDraft.environment);
+      setHeaderEntries(mcpDraft.headers);
+      setOauthEnabled(mcpDraft.oauthEnabled);
+      setOauthClientId(mcpDraft.oauthClientId);
+      setOauthClientSecret(mcpDraft.oauthClientSecret);
+      setOauthScope(mcpDraft.oauthScope);
+      setOauthRedirectUri(mcpDraft.oauthRedirectUri);
+      setTimeoutValue(mcpDraft.timeout);
       setEnabled(mcpDraft.enabled);
       initialRef.current = {
         mcpType: mcpDraft.type, command: mcpDraft.command,
-        url: mcpDraft.url, envEntries: mcpDraft.environment, enabled: mcpDraft.enabled,
+        url: mcpDraft.url,
+        envEntries: mcpDraft.environment,
+        headerEntries: mcpDraft.headers,
+        oauthEnabled: mcpDraft.oauthEnabled,
+        oauthClientId: mcpDraft.oauthClientId,
+        oauthClientSecret: mcpDraft.oauthClientSecret,
+        oauthScope: mcpDraft.oauthScope,
+        oauthRedirectUri: mcpDraft.oauthRedirectUri,
+        timeout: mcpDraft.timeout,
+        enabled: mcpDraft.enabled,
       };
       return;
     }
     if (selectedServer) {
       setDraftScope(selectedServer.scope === 'project' ? 'project' : 'user');
       const envArr = envRecordToArray(selectedServer.environment);
+      const remoteServer = selectedServer.type === 'remote'
+        ? selectedServer as typeof selectedServer & {
+            headers?: Record<string, string>;
+            oauth?: {
+              clientId?: string;
+              clientSecret?: string;
+              scope?: string;
+              redirectUri?: string;
+            } | false;
+            timeout?: number;
+          }
+        : null;
+      const headersArr = envRecordToArray(remoteServer?.headers);
+      const oauth = remoteServer?.oauth;
+      const oauthConfig = oauth && typeof oauth === 'object' ? oauth : null;
+      const nextOauthEnabled = oauth !== false;
       const t = selectedServer.type;
       const cmd = t === 'local' ? ((selectedServer as { command?: string[] }).command ?? []) : [];
       const u = t === 'remote' ? ((selectedServer as { url?: string }).url ?? '') : '';
-      setMcpType(t); setCommand(cmd); setUrl(u); setEnvEntries(envArr); setEnabled(selectedServer.enabled);
-      initialRef.current = { mcpType: t, command: cmd, url: u, envEntries: envArr, enabled: selectedServer.enabled };
+      const nextTimeout = typeof remoteServer?.timeout === 'number' && Number.isFinite(remoteServer.timeout)
+        ? String(remoteServer.timeout)
+        : '';
+      setMcpType(t);
+      setCommand(cmd);
+      setUrl(u);
+      setEnvEntries(envArr);
+      setHeaderEntries(headersArr);
+      setOauthEnabled(nextOauthEnabled);
+      setOauthClientId(nextOauthEnabled ? (oauthConfig?.clientId ?? '') : '');
+      setOauthClientSecret(nextOauthEnabled ? (oauthConfig?.clientSecret ?? '') : '');
+      setOauthScope(nextOauthEnabled ? (oauthConfig?.scope ?? '') : '');
+      setOauthRedirectUri(nextOauthEnabled ? (oauthConfig?.redirectUri ?? '') : '');
+      setTimeoutValue(nextTimeout);
+      setEnabled(selectedServer.enabled);
+      initialRef.current = {
+        mcpType: t,
+        command: cmd,
+        url: u,
+        envEntries: envArr,
+        headerEntries: headersArr,
+        oauthEnabled: nextOauthEnabled,
+        oauthClientId: nextOauthEnabled ? (oauthConfig?.clientId ?? '') : '',
+        oauthClientSecret: nextOauthEnabled ? (oauthConfig?.clientSecret ?? '') : '',
+        oauthScope: nextOauthEnabled ? (oauthConfig?.scope ?? '') : '',
+        oauthRedirectUri: nextOauthEnabled ? (oauthConfig?.redirectUri ?? '') : '',
+        timeout: nextTimeout,
+        enabled: selectedServer.enabled,
+      };
     }
   }, [selectedServer, isNewServer, mcpDraft]);
 
@@ -434,9 +553,16 @@ export const McpPage: React.FC = () => {
       enabled !== init.enabled ||
       JSON.stringify(command) !== JSON.stringify(init.command) ||
       url !== init.url ||
-      JSON.stringify(envEntries) !== JSON.stringify(init.envEntries)
+      JSON.stringify(envEntries) !== JSON.stringify(init.envEntries) ||
+      JSON.stringify(headerEntries) !== JSON.stringify(init.headerEntries) ||
+      oauthEnabled !== init.oauthEnabled ||
+      oauthClientId !== init.oauthClientId ||
+      oauthClientSecret !== init.oauthClientSecret ||
+      oauthScope !== init.oauthScope ||
+      oauthRedirectUri !== init.oauthRedirectUri ||
+      timeout !== init.timeout
     );
-  }, [mcpType, command, url, envEntries, enabled]);
+  }, [mcpType, command, url, envEntries, headerEntries, oauthEnabled, oauthClientId, oauthClientSecret, oauthScope, oauthRedirectUri, timeout, enabled]);
 
   const handleSave = async () => {
     const name = isNewServer ? draftName.trim() : selectedMcpName ?? '';
@@ -451,7 +577,22 @@ export const McpPage: React.FC = () => {
       toast.error('URL cannot be empty for a remote server'); return;
     }
 
-    const draft: McpDraft = { name, scope: draftScope, type: mcpType, command, url, environment: envEntries, enabled };
+    const draft: McpDraft = {
+      name,
+      scope: draftScope,
+      type: mcpType,
+      command,
+      url,
+      environment: envEntries,
+      headers: headerEntries,
+      oauthEnabled,
+      oauthClientId,
+      oauthClientSecret,
+      oauthScope,
+      oauthRedirectUri,
+      timeout,
+      enabled,
+    };
     setIsSaving(true);
     try {
       const success = isNewServer ? await createMcp(draft) : await updateMcp(name, draft);
@@ -497,6 +638,150 @@ export const McpPage: React.FC = () => {
     }
   };
 
+  const requireSavedConfig = React.useCallback((): boolean => {
+    if (isNewServer) {
+      toast.error('Create the server before running live actions');
+      return false;
+    }
+    if (isDirty) {
+      toast.error('Save changes before running live actions');
+      return false;
+    }
+    return true;
+  }, [isDirty, isNewServer]);
+
+  const handleRefreshRuntimeStatus = React.useCallback(async (silent = false) => {
+    setIsRefreshingStatus(!silent);
+    try {
+      await refreshStatus({ directory: currentDirectory, silent });
+    } catch (err) {
+      if (!silent) {
+        toast.error(err instanceof Error ? err.message : 'Failed to refresh MCP status');
+      }
+    } finally {
+      setIsRefreshingStatus(false);
+    }
+  }, [currentDirectory, refreshStatus]);
+
+  const handleStartAuthorization = React.useCallback(async () => {
+    if (!selectedMcpName || mcpType !== 'remote' || !requireSavedConfig()) return;
+
+    setIsAuthorizing(true);
+    try {
+      const nextAuthUrl = await startAuthMcp(selectedMcpName, currentDirectory);
+      setAuthUrl(nextAuthUrl);
+      setIsAuthPolling(true);
+      authPollAttemptsRef.current = 0;
+
+      const opened = await openExternalUrl(nextAuthUrl);
+      if (opened) {
+        toast.message('Complete the MCP authorization flow in your browser');
+      } else {
+        toast.error('Could not open the authorization URL automatically');
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to start authorization');
+    } finally {
+      setIsAuthorizing(false);
+    }
+  }, [currentDirectory, mcpType, requireSavedConfig, selectedMcpName, startAuthMcp]);
+
+  const handleClearAuthorization = React.useCallback(async () => {
+    if (!selectedMcpName || !requireSavedConfig()) return;
+
+    setIsClearingAuth(true);
+    try {
+      await clearAuthMcp(selectedMcpName, currentDirectory);
+      setAuthUrl(null);
+      setIsAuthPolling(false);
+      authPollAttemptsRef.current = 0;
+      toast.success('Saved MCP authorization was removed');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to clear authorization');
+    } finally {
+      setIsClearingAuth(false);
+    }
+  }, [clearAuthMcp, currentDirectory, requireSavedConfig, selectedMcpName]);
+
+  const handleCopyAuthUrl = React.useCallback(async () => {
+    if (!authUrl) return;
+    const result = await copyTextToClipboard(authUrl);
+    if (result.ok) {
+      toast.success('Authorization URL copied');
+      return;
+    }
+    toast.error('Failed to copy authorization URL');
+  }, [authUrl]);
+
+  const handleTestConnection = React.useCallback(async () => {
+    if (!selectedMcpName || !requireSavedConfig()) return;
+    if (!enabled) {
+      toast.error('Enable this server before testing the connection');
+      return;
+    }
+
+    setIsTestingConnection(true);
+    try {
+      const result = await testConnectionMcp(selectedMcpName, currentDirectory);
+      const nextStatus = result.status?.status;
+
+      if (nextStatus === 'connected') {
+        toast.success('Connection test succeeded');
+      } else if (nextStatus === 'needs_auth') {
+        toast.message('Connection requires authorization');
+      } else if (nextStatus === 'needs_client_registration') {
+        toast.message('Connection requires client registration');
+      } else if (nextStatus === 'failed') {
+        toast.error(result.status?.error || result.error || 'Connection test failed');
+      } else if (result.error) {
+        toast.error(result.error);
+      } else {
+        toast.message('Connection test finished. Refresh status for details.');
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Connection test failed');
+    } finally {
+      setIsTestingConnection(false);
+    }
+  }, [currentDirectory, enabled, requireSavedConfig, selectedMcpName, testConnectionMcp]);
+
+  React.useEffect(() => {
+    if (!isAuthPolling || !selectedMcpName) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      void (async () => {
+        authPollAttemptsRef.current += 1;
+        await refreshStatus({ directory: currentDirectory, silent: true });
+        const nextStatus = useMcpStore.getState().getStatusForDirectory(currentDirectory ?? null)[selectedMcpName];
+
+        if (!nextStatus) {
+          return;
+        }
+
+        if (nextStatus.status !== 'needs_auth' && nextStatus.status !== 'needs_client_registration') {
+          setIsAuthPolling(false);
+          authPollAttemptsRef.current = 0;
+          setAuthUrl(null);
+          if (nextStatus.status === 'connected') {
+            toast.success('MCP authorization completed');
+          }
+          return;
+        }
+
+        if (authPollAttemptsRef.current >= 30) {
+          setIsAuthPolling(false);
+          authPollAttemptsRef.current = 0;
+        }
+      })();
+    }, 2000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [currentDirectory, isAuthPolling, refreshStatus, selectedMcpName]);
+
   // ── Empty state ──
   if (!selectedMcpName) {
     return (
@@ -512,6 +797,11 @@ export const McpPage: React.FC = () => {
 
   const runtimeStatus = mcpStatus[selectedMcpName];
   const isConnected = runtimeStatus?.status === 'connected';
+  const needsAuthorization = runtimeStatus?.status === 'needs_auth' || runtimeStatus?.status === 'needs_client_registration';
+  const runtimeDescription = getStatusDescription(
+    runtimeStatus?.status,
+    runtimeStatus && 'error' in runtimeStatus ? runtimeStatus.error : undefined,
+  );
 
   return (
     <ScrollableOverlay keyboardAvoid outerClassName="h-full" className="w-full">
@@ -546,6 +836,97 @@ export const McpPage: React.FC = () => {
             </div>
           </div>
         </div>
+
+        {!isNewServer && (
+          <div className="mb-8 px-2">
+            <div className={cn('rounded-lg border p-3', statusCardClass(runtimeStatus?.status))}>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="typography-ui-label text-foreground">Runtime Status</span>
+                    <StatusBadge status={runtimeStatus?.status} enabled={enabled} />
+                  </div>
+                  <p className="mt-1 typography-meta text-muted-foreground">{runtimeDescription}</p>
+                  <p className="mt-1 typography-micro text-muted-foreground/80">
+                    {draftScope === 'project'
+                      ? `Project-scoped to ${currentDirectory ?? 'the active project'}`
+                      : 'User-scoped configuration'}
+                  </p>
+                  {authUrl && (
+                    <div className="mt-3 rounded-md border border-[var(--interactive-border)] bg-[var(--surface-background)] px-3 py-2">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="min-w-0 flex-1">
+                          <div className="typography-micro text-muted-foreground">Authorization URL</div>
+                          <div className="truncate typography-micro text-foreground font-mono">{authUrl}</div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Button variant="outline" size="xs" className="!font-normal" onClick={() => void openExternalUrl(authUrl)}>
+                            <RiExternalLinkLine className="h-3.5 w-3.5" />
+                            Open
+                          </Button>
+                          <Button variant="outline" size="xs" className="!font-normal" onClick={() => void handleCopyAuthUrl()}>
+                            <RiClipboardLine className="h-3.5 w-3.5" />
+                            Copy
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                  <Button
+                    variant="outline"
+                    size="xs"
+                    className="!font-normal"
+                    onClick={() => void handleRefreshRuntimeStatus()}
+                    disabled={isRefreshingStatus}
+                  >
+                    <RiRefreshLine className={cn('h-3.5 w-3.5', isRefreshingStatus && 'animate-spin')} />
+                    Refresh
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="xs"
+                    className="!font-normal"
+                    onClick={() => void handleTestConnection()}
+                    disabled={isTestingConnection || !enabled}
+                  >
+                    {isTestingConnection ? 'Testing...' : 'Test Connection'}
+                  </Button>
+                  {mcpType === 'remote' && (
+                    <>
+                      <Button
+                        variant={needsAuthorization ? 'default' : 'outline'}
+                        size="xs"
+                        className="!font-normal"
+                        onClick={() => void handleStartAuthorization()}
+                        disabled={isAuthorizing || !enabled}
+                      >
+                        {isAuthorizing ? 'Starting...' : needsAuthorization ? 'Authorize' : 'Reauthorize'}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="xs"
+                        className="!font-normal"
+                        onClick={() => void handleClearAuthorization()}
+                        disabled={isClearingAuth || !enabled}
+                      >
+                        {isClearingAuth ? 'Clearing...' : 'Clear Auth'}
+                      </Button>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {isAuthPolling && (
+                <p className="mt-3 typography-micro text-muted-foreground">
+                  Waiting for OpenCode to observe the completed browser authorization flow...
+                </p>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Server Identity */}
         <div className="mb-8">
@@ -671,6 +1052,105 @@ export const McpPage: React.FC = () => {
           </section>
         </div>
 
+        {mcpType === 'remote' && (
+          <div className="mb-8">
+            <div className="mb-1 px-1">
+              <h3 className="typography-ui-header font-medium text-foreground">Advanced Remote Options</h3>
+            </div>
+
+            <section className="px-2 pb-2 pt-0">
+              <details className="rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)]">
+                <summary className="cursor-pointer list-none px-3 py-2 typography-ui-label text-foreground">
+                  Configure headers, OAuth details, and request timeout
+                </summary>
+                <div className="space-y-6 border-t border-[var(--interactive-border)] px-3 py-3">
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="typography-ui-label text-foreground">Timeout (ms)</span>
+                      <Input
+                        type="number"
+                        min="1"
+                        step="1"
+                        value={timeout}
+                        onChange={(e) => setTimeoutValue(e.target.value)}
+                        placeholder="5000"
+                        className="h-7 w-32 font-mono px-2"
+                      />
+                    </div>
+                    <p className="typography-micro text-muted-foreground">
+                      Leave blank to use OpenCode&apos;s default MCP timeout.
+                    </p>
+                  </div>
+
+                  <div>
+                    <div className="mb-2 typography-ui-label text-foreground">
+                      Request Headers
+                      {headerEntries.length > 0 && (
+                        <span className="ml-1.5 typography-micro text-muted-foreground font-normal">({headerEntries.length})</span>
+                      )}
+                    </div>
+                    <EnvEditor value={headerEntries} onChange={setHeaderEntries} />
+                  </div>
+
+                  <div className="space-y-3">
+                    <div
+                      className="group flex cursor-pointer items-center gap-2 py-1.5"
+                      role="button"
+                      tabIndex={0}
+                      aria-pressed={oauthEnabled}
+                      onClick={() => setOauthEnabled(!oauthEnabled)}
+                      onKeyDown={(event) => {
+                        if (event.key === ' ' || event.key === 'Enter') {
+                          event.preventDefault();
+                          setOauthEnabled(!oauthEnabled);
+                        }
+                      }}
+                    >
+                      <Checkbox checked={oauthEnabled} onChange={setOauthEnabled} ariaLabel="Enable OAuth auto-detection" />
+                      <span className="typography-ui-label text-foreground">Enable OAuth auto-detection</span>
+                    </div>
+
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <Input
+                        value={oauthClientId}
+                        onChange={(e) => setOauthClientId(e.target.value)}
+                        placeholder="OAuth client ID"
+                        className="font-mono typography-meta"
+                        disabled={!oauthEnabled}
+                      />
+                      <Input
+                        value={oauthClientSecret}
+                        onChange={(e) => setOauthClientSecret(e.target.value)}
+                        placeholder="OAuth client secret"
+                        className="font-mono typography-meta"
+                        disabled={!oauthEnabled}
+                      />
+                      <Input
+                        value={oauthScope}
+                        onChange={(e) => setOauthScope(e.target.value)}
+                        placeholder="Scopes (space-delimited)"
+                        className="font-mono typography-meta"
+                        disabled={!oauthEnabled}
+                      />
+                      <Input
+                        value={oauthRedirectUri}
+                        onChange={(e) => setOauthRedirectUri(e.target.value)}
+                        placeholder="Redirect URI"
+                        className="font-mono typography-meta"
+                        disabled={!oauthEnabled}
+                      />
+                    </div>
+
+                    <p className="typography-micro text-muted-foreground">
+                      Leave these fields blank to let OpenCode infer OAuth settings from the MCP server.
+                    </p>
+                  </div>
+                </div>
+              </details>
+            </section>
+          </div>
+        )}
+
         {/* Environment Variables */}
         <div className="mb-2">
           <div className="mb-1 px-1">
@@ -701,9 +1181,9 @@ export const McpPage: React.FC = () => {
           </Button>
           {!isNewServer && (
             <Button
-              variant="ghost"
+              variant="destructive"
               size="xs"
-              className="!font-normal text-[var(--status-error)] hover:text-[var(--status-error)]"
+              className="!font-normal"
               onClick={() => setShowDeleteConfirm(true)}
             >
               Delete
@@ -727,14 +1207,14 @@ export const McpPage: React.FC = () => {
           </DialogHeader>
           <DialogFooter>
             <Button
-              variant="ghost"
+              variant="outline"
               onClick={() => setShowDeleteConfirm(false)}
               disabled={isDeleting}
-              className="text-foreground hover:bg-interactive-hover hover:text-foreground"
+              className="text-foreground"
             >
               Cancel
             </Button>
-            <Button size="sm" onClick={handleDelete} disabled={isDeleting}>
+            <Button variant="destructive" size="sm" onClick={handleDelete} disabled={isDeleting}>
               {isDeleting ? 'Deleting…' : 'Delete'}
             </Button>
           </DialogFooter>
