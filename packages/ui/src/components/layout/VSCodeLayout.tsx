@@ -326,6 +326,23 @@ export const VSCodeLayout: React.FC = () => {
   const usesMobileLayout = containerWidth > 0 && containerWidth < MOBILE_WIDTH_THRESHOLD;
   const usesExpandedLayout = containerWidth >= EXPANDED_LAYOUT_THRESHOLD;
 
+  React.useEffect(() => {
+    if (viewMode !== 'sidebar') {
+      return;
+    }
+    if (usesExpandedLayout) {
+      return;
+    }
+    if (currentView !== 'sessions') {
+      return;
+    }
+    if (!newSessionDraftOpen) {
+      return;
+    }
+
+    setCurrentView('chat');
+  }, [currentView, newSessionDraftOpen, usesExpandedLayout, viewMode]);
+
   const clampExpandedSidebarWidth = React.useCallback((value: number) => {
     return Math.min(SESSIONS_SIDEBAR_MAX_WIDTH, Math.max(SESSIONS_SIDEBAR_MIN_WIDTH, value));
   }, []);
