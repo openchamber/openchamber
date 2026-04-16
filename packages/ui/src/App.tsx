@@ -51,6 +51,7 @@ import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import type { RuntimeAPIs } from '@/lib/api/types';
 import { TooltipProvider } from '@/components/ui/tooltip';
+import { QuickOpenDialog } from '@/components/ui/QuickOpenDialog';
 
 const AboutDialogWrapper: React.FC = () => {
   const isAboutDialogOpen = useUIStore((s) => s.isAboutDialogOpen);
@@ -704,6 +705,7 @@ function App({ apis }: AppProps) {
                   <MainLayout />
                   <Toaster />
                   <ConfigUpdateOverlay />
+                  <QuickOpenDialog />
                   <AboutDialogWrapper />
                   {showMemoryDebug && (
                     <MemoryDebugPanel onClose={() => setShowMemoryDebug(false)} />

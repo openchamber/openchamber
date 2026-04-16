@@ -14,7 +14,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useDeviceInfo } from '@/lib/device';
-import { RiAddLine, RiChatAi3Line, RiCheckLine, RiCodeLine, RiComputerLine, RiGitBranchLine, RiLayoutLeftLine, RiLayoutRightLine, RiMoonLine, RiQuestionLine, RiSettings3Line, RiSunLine, RiTerminalBoxLine } from '@remixicon/react';
+import { RiAddLine, RiChatAi3Line, RiCheckLine, RiCodeLine, RiComputerLine, RiFileLine, RiGitBranchLine, RiLayoutLeftLine, RiLayoutRightLine, RiMoonLine, RiQuestionLine, RiSettings3Line, RiSunLine, RiTerminalBoxLine } from '@remixicon/react';
 import { createWorktreeSession } from '@/lib/worktreeSessionCreator';
 import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
@@ -24,6 +24,7 @@ export const CommandPalette: React.FC = () => {
   const isCommandPaletteOpen = useUIStore((s) => s.isCommandPaletteOpen);
   const setCommandPaletteOpen = useUIStore((s) => s.setCommandPaletteOpen);
   const setHelpDialogOpen = useUIStore((s) => s.setHelpDialogOpen);
+  const setQuickOpenOpen = useUIStore((s) => s.setQuickOpenOpen);
   const setActiveMainTab = useUIStore((s) => s.setActiveMainTab);
   const setSettingsDialogOpen = useUIStore((s) => s.setSettingsDialogOpen);
   const setSettingsPage = useUIStore((s) => s.setSettingsPage);
@@ -67,6 +68,11 @@ export const CommandPalette: React.FC = () => {
 
   const handleShowHelp = () => {
     setHelpDialogOpen(true);
+    handleClose();
+  };
+
+  const handleOpenQuickOpen = () => {
+    setQuickOpenOpen(true);
     handleClose();
   };
 
@@ -182,6 +188,11 @@ export const CommandPalette: React.FC = () => {
             <RiLayoutLeftLine className="mr-2 h-4 w-4" />
             <span>Open Session List</span>
             <CommandShortcut>{shortcut('toggle_sidebar')}</CommandShortcut>
+          </CommandItem>
+          <CommandItem onSelect={handleOpenQuickOpen}>
+            <RiFileLine className="mr-2 h-4 w-4" />
+            <span>Quick Open</span>
+            <CommandShortcut>{shortcut('open_quick_open')}</CommandShortcut>
           </CommandItem>
           <CommandItem onSelect={handleCreateSession}>
             <RiAddLine className="mr-2 h-4 w-4" />

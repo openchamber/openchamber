@@ -481,6 +481,7 @@ interface UIStore {
   pendingFileFocusPath: string | null;
   isMobile: boolean;
   isKeyboardOpen: boolean;
+  isQuickOpenOpen: boolean;
   isCommandPaletteOpen: boolean;
   isHelpDialogOpen: boolean;
   isAboutDialogOpen: boolean;
@@ -598,6 +599,8 @@ interface UIStore {
   navigateToDiff: (filePath: string) => void;
   consumePendingDiffFile: () => string | null;
   setIsMobile: (isMobile: boolean) => void;
+  setQuickOpenOpen: (open: boolean) => void;
+  toggleQuickOpen: () => void;
   toggleCommandPalette: () => void;
   setCommandPaletteOpen: (open: boolean) => void;
   toggleHelpDialog: () => void;
@@ -714,6 +717,7 @@ export const useUIStore = create<UIStore>()(
         pendingFileFocusPath: null,
         isMobile: false,
         isKeyboardOpen: false,
+        isQuickOpenOpen: false,
         isCommandPaletteOpen: false,
         isHelpDialogOpen: false,
         isAboutDialogOpen: false,
@@ -1222,6 +1226,14 @@ export const useUIStore = create<UIStore>()(
 
         setIsMobile: (isMobile) => {
           set({ isMobile });
+        },
+
+        setQuickOpenOpen: (open) => {
+          set({ isQuickOpenOpen: open });
+        },
+
+        toggleQuickOpen: () => {
+          set((state) => ({ isQuickOpenOpen: !state.isQuickOpenOpen }));
         },
 
         toggleCommandPalette: () => {
