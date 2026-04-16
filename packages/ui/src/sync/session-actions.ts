@@ -7,22 +7,21 @@ import type { OpencodeClient, Session, Message, Part } from "@opencode-ai/sdk/v2
 import { Binary } from "./binary"
 import { useSessionUIStore } from "./session-ui-store"
 import { useInputStore } from "./input-store"
-import type { DirectoryStore } from "./child-store"
-import type { StoreApi } from "zustand"
+import type { ChildStoreManager } from "./child-store"
 import { opencodeClient } from "@/lib/opencode/client"
 import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
 import { registerSessionDirectory } from "./sync-refs"
 
 // Reference set by SyncProvider — allows actions to access SDK and stores
 let _sdk: OpencodeClient | null = null
-let _childStores: { ensureChild: (dir: string) => StoreApi<DirectoryStore> } | null = null
+let _childStores: ChildStoreManager | null = null
 let _getDirectory: () => string = () => ""
 let _optimisticAdd: ((input: { sessionID: string; message: Message; parts: Part[] }) => void) | null = null
 let _optimisticRemove: ((input: { sessionID: string; messageID: string }) => void) | null = null
 
 export function setActionRefs(
   sdk: OpencodeClient,
-  childStores: { ensureChild: (dir: string) => StoreApi<DirectoryStore> },
+  childStores: ChildStoreManager,
   getDirectory: () => string,
 ) {
   _sdk = sdk
@@ -73,6 +72,59 @@ function getSessionReplyClient(sessionId?: string): OpencodeClient {
     return opencodeClient.getScopedSdkClient(directory)
   }
   return sdk()
+}
+
+function resolveDirectoryForBlockingRequest(
+  type: "permission" | "question",
+  sessionId: string,
+  requestId: string,
+): string | null {
+  const stores = _childStores
+  if (!stores || !requestId) {
+    return null
+  }
+
+  for (const [directory, store] of stores.children) {
+    const state = store.getState()
+    const requestMap = type === "permission" ? state.permission : state.question
+    for (const requests of Object.values(requestMap) as Array<Array<{ id: string }> | undefined>) {
+      if (requests?.some((request) => request.id === requestId)) {
+        return directory
+      }
+    }
+  }
+
+  const sessionDirectory = useSessionUIStore.getState().getDirectoryForSession(sessionId)
+  if (sessionDirectory) {
+    return sessionDirectory
+  }
+
+  for (const [directory, store] of stores.children) {
+    const state = store.getState()
+    if (
+      state.session.some((session) => session.id === sessionId)
+      || Object.prototype.hasOwnProperty.call(state.message, sessionId)
+      || Object.prototype.hasOwnProperty.call(state.session_status ?? {}, sessionId)
+      || Object.prototype.hasOwnProperty.call(state.permission ?? {}, sessionId)
+      || Object.prototype.hasOwnProperty.call(state.question ?? {}, sessionId)
+    ) {
+      return directory
+    }
+  }
+
+  return null
+}
+
+function getRequestReplyClient(
+  type: "permission" | "question",
+  sessionId: string,
+  requestId: string,
+): OpencodeClient {
+  const requestDirectory = resolveDirectoryForBlockingRequest(type, sessionId, requestId)
+  if (requestDirectory) {
+    return opencodeClient.getScopedSdkClient(requestDirectory)
+  }
+  return getSessionReplyClient(sessionId)
 }
 
 // ---------------------------------------------------------------------------
@@ -356,7 +408,7 @@ export async function respondToPermission(
   requestId: string,
   response: "once" | "always" | "reject",
 ): Promise<void> {
-  const result = await getSessionReplyClient(sessionId).permission.reply({
+  const result = await getRequestReplyClient("permission", sessionId, requestId).permission.reply({
     requestID: requestId,
     reply: response,
   })
@@ -369,7 +421,7 @@ export async function dismissPermission(
   sessionId: string,
   requestId: string,
 ): Promise<void> {
-  const result = await getSessionReplyClient(sessionId).permission.reply({
+  const result = await getRequestReplyClient("permission", sessionId, requestId).permission.reply({
     requestID: requestId,
     reply: "reject",
   })
@@ -387,7 +439,7 @@ export async function respondToQuestion(
   requestId: string,
   answers: string[] | string[][],
 ): Promise<void> {
-  const result = await getSessionReplyClient(sessionId).question.reply({
+  const result = await getRequestReplyClient("question", sessionId, requestId).question.reply({
     requestID: requestId,
     answers: answers as Array<Array<string>>,
   })
@@ -400,7 +452,7 @@ export async function rejectQuestion(
   sessionId: string,
   requestId: string,
 ): Promise<void> {
-  const result = await getSessionReplyClient(sessionId).question.reject({
+  const result = await getRequestReplyClient("question", sessionId, requestId).question.reject({
     requestID: requestId,
   })
   if (!result.data) {

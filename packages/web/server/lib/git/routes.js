@@ -823,6 +823,45 @@ export function registerGitRoutes(app) {
     }
   });
 
+  app.post('/api/git/validate-directory', async (req, res) => {
+    const { validateWorktreeDirectory } = await getGitLibraries();
+    if (typeof validateWorktreeDirectory !== 'function') {
+      return res.status(501).json({ error: 'validateWorktreeDirectory is not available' });
+    }
+    try {
+      const { directory, worktreeRoot } = req.body || {};
+      if (!directory || typeof directory !== 'string') {
+        return res.status(400).json({ error: 'directory is required' });
+      }
+      if (!worktreeRoot || typeof worktreeRoot !== 'string') {
+        return res.status(400).json({ error: 'worktreeRoot is required' });
+      }
+      const result = await validateWorktreeDirectory(directory, worktreeRoot);
+      res.json(result);
+    } catch (error) {
+      console.error('Failed to validate worktree directory:', error);
+      res.status(500).json({ error: error.message || 'Failed to validate worktree directory' });
+    }
+  });
+
+  app.post('/api/git/canonicalize-worktree-state', async (req, res) => {
+    const { canonicalizeWorktreeState } = await getGitLibraries();
+    if (typeof canonicalizeWorktreeState !== 'function') {
+      return res.status(501).json({ error: 'canonicalizeWorktreeState is not available' });
+    }
+    try {
+      const { directory } = req.body || {};
+      if (!directory || typeof directory !== 'string') {
+        return res.status(400).json({ error: 'directory is required' });
+      }
+      const result = await canonicalizeWorktreeState(directory);
+      res.json(result);
+    } catch (error) {
+      console.error('Failed to canonicalize worktree state:', error);
+      res.status(500).json({ error: error.message || 'Failed to canonicalize worktree state' });
+    }
+  });
+
   app.get('/api/git/log', async (req, res) => {
     const { getLog } = await getGitLibraries();
     try {

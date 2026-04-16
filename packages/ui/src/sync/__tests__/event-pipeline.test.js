@@ -236,7 +236,7 @@ describe('createEventPipeline', () => {
     expect(received[0].payload.type).toBe('server.connected');
   });
 
-  it('delivers message.part.delta events after a coalesced message.part.updated (no stale-delta skip)', async () => {
+  it('skips stale message.part.delta events after a newer message.part.updated for the same field', async () => {
     installDomStubs();
 
     let releaseStream;
@@ -246,8 +246,8 @@ describe('createEventPipeline', () => {
 
     const received = [];
 
-    // Simulate: part.updated arrives first, then delta, then part.updated again (coalesces with first).
-    // After coalescing, the delta should still be delivered — NOT skipped.
+    // Simulate: part.updated arrives, then delta, then a newer part.updated for the
+    // same part. The older queued delta becomes stale and must be skipped.
     const directory = '/test/dir';
     const sdk = createSdkWithEvents([
       // T0: message.part.updated for part-A
@@ -260,7 +260,7 @@ describe('createEventPipeline', () => {
           },
         },
       },
-      // T1: message.part.delta for part-A (should flow through even after coalesce)
+      // T1: message.part.delta for part-A (should be dropped as stale)
       {
         payload: {
           type: 'message.part.delta',
@@ -290,7 +290,7 @@ describe('createEventPipeline', () => {
         sdk,
         onEvent: (dir, payload) => {
           received.push({ directory: dir, payload });
-          if (received.length === 2) {
+          if (received.length === 1) {
             cleanup();
             releaseStream();
             resolve();
@@ -301,20 +301,70 @@ describe('createEventPipeline', () => {
 
     await delivered;
 
-    // Coalescing means T0 and T2 merge into one event at T0's queue position.
-    // The delta is a different event type with no coalesce key, so it gets
-    // its own queue slot. After coalesce:
-    //   - queue[0] = coalesced part.updated (from T2, replacing T0)
-    //   - queue[1] = part.delta (from T1)
-    // Total: 2 events delivered
-    expect(received.length).toBe(2);
-
-    // The first event should be the coalesced message.part.updated
+    expect(received.length).toBe(1);
     expect(received[0].payload.type).toBe('message.part.updated');
+  });
 
-    // The delta MUST be delivered — it should NOT be skipped
+  it('keeps delta events for other fields on the same part', async () => {
+    const received = await runPipelineWithEvents([
+      {
+        directory: 'dir-a',
+        payload: {
+          type: 'message.part.delta',
+          properties: {
+            messageID: 'msg-1',
+            partID: 'part-1',
+            field: 'reasoning',
+            delta: 'before',
+          },
+        },
+      },
+      {
+        directory: 'dir-a',
+        payload: {
+          type: 'message.part.updated',
+          properties: {
+            part: { id: 'part-1', type: 'text', messageID: 'msg-1' },
+          },
+        },
+      },
+    ]);
+
+    expect(received).toHaveLength(2);
+    expect(received[0].payload.type).toBe('message.part.delta');
+    expect(received[0].payload.properties.field).toBe('reasoning');
+    expect(received[1].payload.type).toBe('message.part.updated');
+  });
+
+  it('keeps text delta after an initial part.updated when no newer part.updated replaced it', async () => {
+    const received = await runPipelineWithEvents([
+      {
+        directory: 'dir-a',
+        payload: {
+          type: 'message.part.updated',
+          properties: {
+            part: { id: 'part-1', type: 'text', messageID: 'msg-1' },
+          },
+        },
+      },
+      {
+        directory: 'dir-a',
+        payload: {
+          type: 'message.part.delta',
+          properties: {
+            messageID: 'msg-1',
+            partID: 'part-1',
+            field: 'text',
+            delta: 'hello',
+          },
+        },
+      },
+    ]);
+
+    expect(received).toHaveLength(2);
+    expect(received[0].payload.type).toBe('message.part.updated');
     expect(received[1].payload.type).toBe('message.part.delta');
-    expect(received[1].payload.properties.delta).toBe(' world');
+    expect(received[1].payload.properties.delta).toBe('hello');
   });
 
   it('coalesces message.part.updated events for the same part', async () => {
@@ -366,6 +416,62 @@ describe('createEventPipeline', () => {
     // Only 1 event should be delivered (coalesced)
     expect(received.length).toBe(1);
     expect(received[0].payload.type).toBe('message.part.updated');
+  });
+
+  it('routes events before queueing so coalescing happens on the resolved directory', async () => {
+    installDomStubs();
+
+    let releaseStream;
+    const hold = new Promise((resolve) => {
+      releaseStream = resolve;
+    });
+
+    const received = [];
+    const sdk = createSdkWithEvents([
+      {
+        directory: 'global',
+        payload: {
+          type: 'message.part.updated',
+          properties: {
+            part: { id: 'part-A', type: 'text', messageID: 'msg-1' },
+          },
+        },
+      },
+      {
+        directory: '/real-dir',
+        payload: {
+          type: 'message.part.updated',
+          properties: {
+            part: { id: 'part-A', type: 'text', messageID: 'msg-1', text: 'next' },
+          },
+        },
+      },
+    ], hold);
+
+    const delivered = new Promise((resolve) => {
+      const { cleanup } = createEventPipeline({
+        sdk,
+        routeDirectory: (directory, payload) => {
+          if (payload.type === 'message.part.updated') {
+            return '/resolved-dir';
+          }
+          return directory;
+        },
+        onEvent: (dir, payload) => {
+          received.push({ directory: dir, payload });
+          cleanup();
+          releaseStream();
+          resolve();
+        },
+      });
+    });
+
+    await delivered;
+
+    expect(received).toHaveLength(1);
+    expect(received[0].directory).toBe('/resolved-dir');
+    expect(received[0].payload.type).toBe('message.part.updated');
+    expect(received[0].payload.properties.part.text).toBe('next');
   });
 });
 

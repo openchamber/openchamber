@@ -110,6 +110,8 @@ const VisualSectionContent: React.FC = () => {
         'theme',
         'pwaInstallName',
         'pwaOrientation',
+        'timeFormat',
+        'weekStart',
         'fontSize',
         'terminalFontSize',
         'spacing',

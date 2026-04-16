@@ -17,6 +17,7 @@ import {
   RiContractUpDownLine,
   RiExpandUpDownLine,
   RiStickyNoteLine,
+  RiCalendarScheduleLine,
 } from '@remixicon/react';
 import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
 import type { ProjectRef } from '@/lib/openchamberConfig';
@@ -47,6 +48,7 @@ type Props = {
   searchMatchCount: number;
   collapseAllProjects: () => void;
   expandAllProjects: () => void;
+  openScheduledTasksDialog: () => void;
 };
 
 export function SidebarHeader(props: Props): React.ReactNode {
@@ -74,6 +76,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
     searchMatchCount,
     collapseAllProjects,
     expandAllProjects,
+    openScheduledTasksDialog,
   } = props;
 
   const displayMode = useSessionDisplayStore((state) => state.displayMode);
@@ -115,9 +118,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
                 </TooltipTrigger>
                 <TooltipContent side="bottom" sideOffset={4}><p>New session</p></TooltipContent>
               </Tooltip>
-            </div>
 
-            <div className="flex items-center gap-1.5">
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
@@ -131,6 +132,22 @@ export function SidebarHeader(props: Props): React.ReactNode {
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom" sideOffset={4}><p>New multi-run</p></TooltipContent>
+              </Tooltip>
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={openScheduledTasksDialog}
+                    className={headerActionButtonClass}
+                    aria-label="Scheduled tasks"
+                  >
+                    <RiCalendarScheduleLine className={headerActionIconClass} />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" sideOffset={4}><p>Scheduled tasks</p></TooltipContent>
               </Tooltip>
 
               {useMobileNotesPanel ? (

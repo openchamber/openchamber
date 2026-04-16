@@ -173,6 +173,22 @@ export async function handleStandardGitBridgeMessage(message: BridgeMessageInput
       return { id, type, success: true, data: result };
     }
 
+    case 'api:git/validate-directory': {
+      const { directory, worktreeRoot } = (payload || {}) as { directory?: string; worktreeRoot?: string };
+      const dirError = requireDirectory(id, type, directory);
+      if (dirError) return dirError;
+      const result = await gitService.validateWorktreeDirectory(directory!, worktreeRoot!);
+      return { id, type, success: true, data: result };
+    }
+
+    case 'api:git/canonicalize-worktree-state': {
+      const { directory } = (payload || {}) as { directory?: string };
+      const dirError = requireDirectory(id, type, directory);
+      if (dirError) return dirError;
+      const result = await gitService.canonicalizeWorktreeState(directory!);
+      return { id, type, success: true, data: result };
+    }
+
     case 'api:git/diff': {
       const { directory, path: filePath, staged, contextLines } = (payload || {}) as {
         directory?: string;

@@ -371,6 +371,18 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => {
   if (typeof settings.showExpandedEditTools === 'boolean' && settings.showExpandedEditTools !== store.showExpandedEditTools) {
     store.setShowExpandedEditTools(settings.showExpandedEditTools);
   }
+  if (typeof settings.timeFormatPreference === 'string'
+    && (settings.timeFormatPreference === 'auto' || settings.timeFormatPreference === '12h' || settings.timeFormatPreference === '24h')) {
+    if (settings.timeFormatPreference !== store.timeFormatPreference) {
+      store.setTimeFormatPreference(settings.timeFormatPreference);
+    }
+  }
+  if (typeof settings.weekStartPreference === 'string'
+    && (settings.weekStartPreference === 'auto' || settings.weekStartPreference === 'sunday' || settings.weekStartPreference === 'monday')) {
+    if (settings.weekStartPreference !== store.weekStartPreference) {
+      store.setWeekStartPreference(settings.weekStartPreference);
+    }
+  }
   if (typeof settings.chatRenderMode === 'string'
     && (settings.chatRenderMode === 'sorted' || settings.chatRenderMode === 'live')) {
     if (settings.chatRenderMode !== store.chatRenderMode) {
@@ -779,6 +791,14 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   }
   if (typeof candidate.showExpandedEditTools === 'boolean') {
     result.showExpandedEditTools = candidate.showExpandedEditTools;
+  }
+  if (typeof candidate.timeFormatPreference === 'string'
+    && (candidate.timeFormatPreference === 'auto' || candidate.timeFormatPreference === '12h' || candidate.timeFormatPreference === '24h')) {
+    result.timeFormatPreference = candidate.timeFormatPreference;
+  }
+  if (typeof candidate.weekStartPreference === 'string'
+    && (candidate.weekStartPreference === 'auto' || candidate.weekStartPreference === 'sunday' || candidate.weekStartPreference === 'monday')) {
+    result.weekStartPreference = candidate.weekStartPreference;
   }
   if (typeof candidate.chatRenderMode === 'string'
     && (candidate.chatRenderMode === 'sorted' || candidate.chatRenderMode === 'live')) {

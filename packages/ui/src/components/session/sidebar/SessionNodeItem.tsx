@@ -108,6 +108,24 @@ const getNodeChildSignature = (node: SessionNode): string => {
     .join('|');
 };
 
+const treeContainsSessionId = (node: SessionNode, sessionId: string | null): boolean => {
+  if (!sessionId) {
+    return false;
+  }
+
+  if (node.session.id === sessionId) {
+    return true;
+  }
+
+  for (const child of node.children) {
+    if (treeContainsSessionId(child, sessionId)) {
+      return true;
+    }
+  }
+
+  return false;
+};
+
 const areEqual = (prev: Props, next: Props): boolean => {
   const prevSession = prev.node.session;
   const nextSession = next.node.session;
@@ -121,7 +139,13 @@ const areEqual = (prev: Props, next: Props): boolean => {
   if (prev.groupDirectory !== next.groupDirectory) return false;
   if (prev.projectId !== next.projectId) return false;
   if (prev.archivedBucket !== next.archivedBucket) return false;
-  if ((prev.currentSessionId === prevSessionId) !== (next.currentSessionId === nextSessionId)) return false;
+  if (prev.currentSessionId !== next.currentSessionId) {
+    const prevActiveInTree = treeContainsSessionId(prev.node, prev.currentSessionId);
+    const nextActiveInTree = treeContainsSessionId(next.node, next.currentSessionId);
+    if (prevActiveInTree || nextActiveInTree) {
+      return false;
+    }
+  }
   if (prev.pinnedSessionIds.has(prevSessionId) !== next.pinnedSessionIds.has(nextSessionId)) return false;
   if (prev.expandedParents.has(prevSessionId) !== next.expandedParents.has(nextSessionId)) return false;
   if (prev.hasSessionSearchQuery !== next.hasSessionSearchQuery) return false;

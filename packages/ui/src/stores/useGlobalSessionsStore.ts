@@ -109,6 +109,46 @@ const upsertSessionIntoList = (sessions: Session[], session: Session): Session[]
   return next;
 };
 
+const mergeSessionLists = (existing: Session[], incoming?: Session[]): Session[] => {
+  if (!incoming || incoming.length === 0) {
+    return existing;
+  }
+
+  if (existing.length === 0) {
+    return incoming;
+  }
+
+  const byId = new Map(existing.map((session) => [session.id, session]));
+  incoming.forEach((session) => {
+    byId.set(session.id, session);
+  });
+
+  const ordered: Session[] = [];
+  const seen = new Set<string>();
+
+  existing.forEach((session) => {
+    const next = byId.get(session.id);
+    if (!next) {
+      return;
+    }
+    ordered.push(next);
+    seen.add(session.id);
+  });
+
+  incoming.forEach((session) => {
+    if (seen.has(session.id)) {
+      return;
+    }
+    const next = byId.get(session.id);
+    if (next) {
+      ordered.push(next);
+      seen.add(session.id);
+    }
+  });
+
+  return ordered;
+};
+
 const applySnapshot = (
   state: GlobalSessionsState,
   activeSessions: Session[],
@@ -172,15 +212,16 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
           listGlobalSessionPages(sdk, { archived: true, pageSize: PAGE_SIZE }),
         ]);
 
+        const fallbackSnapshot = mergeSessionLists(current.activeSessions, fallbackActive);
         const nextActiveSessions = activeResult.status === 'fulfilled'
           ? activeResult.value
-          : (fallbackActive ?? current.activeSessions);
+          : fallbackSnapshot;
         const nextArchivedSessions = archivedResult.status === 'fulfilled'
           ? archivedResult.value
           : current.archivedSessions;
 
         if (activeResult.status === 'rejected') {
-          console.warn('[GlobalSessions] Failed to load active sessions, using fallback:', activeResult.reason);
+          console.warn('[GlobalSessions] Failed to load active sessions, preserving existing snapshot with fallback merge:', activeResult.reason);
         }
         if (archivedResult.status === 'rejected') {
           console.warn('[GlobalSessions] Failed to load archived sessions, preserving current snapshot:', archivedResult.reason);
@@ -189,7 +230,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
         set((state) => applySnapshot(state, nextActiveSessions, nextArchivedSessions, 'ready'));
         return { activeSessions: nextActiveSessions, archivedSessions: nextArchivedSessions };
       } catch (error) {
-        const nextActiveSessions = fallbackActive ?? current.activeSessions;
+        const nextActiveSessions = mergeSessionLists(current.activeSessions, fallbackActive);
         const nextArchivedSessions = current.archivedSessions;
         console.warn('[GlobalSessions] Failed to load sessions, using fallback snapshot:', error);
         set((state) => applySnapshot(state, nextActiveSessions, nextArchivedSessions, 'error'));

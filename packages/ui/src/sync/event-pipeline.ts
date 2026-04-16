@@ -38,6 +38,7 @@ const HEARTBEAT_TIMEOUT_MS = 15_000
 export type EventPipelineInput = {
   sdk: OpencodeClient
   onEvent: (directory: string, payload: Event) => void
+  routeDirectory?: (directory: string, payload: Event) => string
   /** Called after SSE reconnects (visibility restore or heartbeat timeout). */
   onReconnect?: () => void
 }
@@ -85,12 +86,13 @@ type DirectoryQueue = {
   queue: Event[]
   buffer: Event[]
   coalesced: Map<string, number>
+  staleDeltas: Set<string>
   timer: ReturnType<typeof setTimeout> | undefined
   last: number
 }
 
 export function createEventPipeline(input: EventPipelineInput) {
-  const { sdk, onEvent, onReconnect } = input
+  const { sdk, onEvent, onReconnect, routeDirectory } = input
   const abort = new AbortController()
   let hasConnected = false
 
@@ -104,6 +106,7 @@ export function createEventPipeline(input: EventPipelineInput) {
       queue: [],
       buffer: [],
       coalesced: new Map(),
+      staleDeltas: new Set(),
       timer: undefined,
       last: 0,
     }
@@ -136,6 +139,8 @@ export function createEventPipeline(input: EventPipelineInput) {
     return undefined
   }
 
+  const deltaKey = (messageID: string, partID: string, field: string) => `${messageID}:${partID}:${field}`
+
   // Flush one directory — swap queue, dispatch events.
   // React 18 auto-batching still collapses the setState calls inside a single
   // directory's flush into one render pass.
@@ -149,14 +154,22 @@ export function createEventPipeline(input: EventPipelineInput) {
     if (d.queue.length === 0) return
 
     const events = d.queue
+    const staleDeltas = d.staleDeltas.size > 0 ? new Set(d.staleDeltas) : undefined
     d.queue = d.buffer
     d.buffer = events
     d.queue.length = 0
     d.coalesced.clear()
+    d.staleDeltas.clear()
 
     d.last = Date.now()
     syncDebug.pipeline.flush(events.length)
     for (const payload of events) {
+      if (staleDeltas && payload.type === "message.part.delta") {
+        const props = payload.properties as { messageID: string; partID: string; field: string }
+        if (staleDeltas.has(deltaKey(props.messageID, props.partID, props.field))) {
+          continue
+        }
+      }
       onEvent(directory, payload)
     }
 
@@ -241,7 +254,8 @@ export function createEventPipeline(input: EventPipelineInput) {
           }
           const normalizedPayload = normalizeEventType(payload)
           const directory = resolveEventDirectory(event, normalizedPayload)
-          const d = getOrCreateDir(directory)
+          const routedDirectory = routeDirectory?.(directory, normalizedPayload) || directory
+          const d = getOrCreateDir(routedDirectory)
           const k = key(normalizedPayload)
           if (k) {
             const i = d.coalesced.get(k)
@@ -261,6 +275,11 @@ export function createEventPipeline(input: EventPipelineInput) {
                 } as unknown as Event
               } else {
                 d.queue[i] = normalizedPayload
+                if (normalizedPayload.type === "message.part.updated") {
+                  const part = (normalizedPayload.properties as { part: { messageID: string; id: string } }).part
+                  d.staleDeltas.add(deltaKey(part.messageID, part.id, "text"))
+                  d.staleDeltas.add(deltaKey(part.messageID, part.id, "output"))
+                }
               }
               syncDebug.pipeline.coalesced(normalizedPayload.type, k)
               continue
@@ -268,7 +287,7 @@ export function createEventPipeline(input: EventPipelineInput) {
             d.coalesced.set(k, d.queue.length)
           }
           d.queue.push(normalizedPayload)
-          scheduleDir(directory)
+          scheduleDir(routedDirectory)
 
           if (Date.now() - yielded < STREAM_YIELD_MS) continue
           yielded = Date.now()

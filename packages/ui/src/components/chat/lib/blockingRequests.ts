@@ -13,11 +13,6 @@ export const collectVisibleSessionIdsForBlockingRequests = (
     const current = sessions.find((session) => session.id === currentSessionId);
     if (!current) return [currentSessionId];
 
-    // Opencode parity: when viewing a child session, permission/question prompts are handled in parent thread.
-    if (current.parentID) {
-        return [];
-    }
-
     const childrenByParent = new Map<string, string[]>();
     for (const session of sessions) {
         if (!session.parentID) {

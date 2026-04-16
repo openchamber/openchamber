@@ -1,4 +1,5 @@
 import type { Session } from '@opencode-ai/sdk/v2';
+import type { SessionStatus } from '@opencode-ai/sdk/v2/client';
 
 export const ACTIVE_NOW_STORAGE_KEY = 'oc.sessions.activeNow';
 export const ACTIVE_NOW_MAX_AGE_MS = 36 * 60 * 60 * 1000;
@@ -102,6 +103,22 @@ export const deriveActiveNowSessions = (
     .filter((session) => !isArchivedSession(session))
     .filter((session) => !isSubtaskSession(session));
   return sortSessionsByUpdated(sessions);
+};
+
+export const deriveLiveActiveNowSessions = (
+  sessions: Session[],
+  statuses: Record<string, SessionStatus>,
+): Session[] => {
+  const activeSessions = sessions.filter((session) => {
+    if (isArchivedSession(session) || isSubtaskSession(session)) {
+      return false;
+    }
+
+    const status = statuses[session.id];
+    return status?.type === 'busy' || status?.type === 'retry';
+  });
+
+  return sortSessionsByUpdated(activeSessions);
 };
 
 export const getSessionUpdatedAtMs = getSessionUpdatedAt;

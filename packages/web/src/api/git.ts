@@ -22,6 +22,8 @@ export const createWebGitAPI = (): GitAPI => ({
   validateGitWorktree: gitApiHttp.validateGitWorktree,
   createGitWorktree: gitApiHttp.createGitWorktree,
   deleteGitWorktree: gitApiHttp.deleteGitWorktree,
+  validateWorktreeDirectory: gitApiHttp.validateWorktreeDirectory,
+  canonicalizeWorktreeState: gitApiHttp.canonicalizeWorktreeState,
   createGitCommit(directory: string, message: string, options?: CreateGitCommitOptions) {
     return gitApiHttp.createGitCommit(directory, message, options);
   },
