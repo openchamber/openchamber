@@ -137,6 +137,7 @@ export type { VoiceStatus, VoiceMode } from "./voice-store"
 
 export type NewSessionDraftState = {
   open: boolean
+  requestKey: number
   selectedProjectId?: string | null
   directoryOverride: string | null
   pendingWorktreeRequestId?: string | null
@@ -360,6 +361,7 @@ const activateConfigForDirectory = async (directory: string | null | undefined):
 
 const DEFAULT_DRAFT: NewSessionDraftState = {
   open: false,
+  requestKey: 0,
   directoryOverride: null,
   parentID: null,
 }
@@ -481,9 +483,10 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
     persistDraftTarget({ projectId: selectedProject?.id ?? null, directory })
 
-    set({
+    set((s) => ({
       newSessionDraft: {
         open: true,
+        requestKey: s.newSessionDraft.requestKey + 1,
         selectedProjectId: selectedProject?.id ?? null,
         directoryOverride: directory,
         pendingWorktreeRequestId: options?.pendingWorktreeRequestId ?? null,
@@ -497,7 +500,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       },
       currentSessionId: null,
       error: null,
-    })
+    }))
 
     if (options?.initialPrompt) {
       useInputStore.getState().setPendingInputText(options.initialPrompt)
@@ -510,8 +513,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   // closeNewSessionDraft
   // ---------------------------------------------------------------------------
   closeNewSessionDraft: () => {
-    set({
+    set((s) => ({
       newSessionDraft: {
+        ...s.newSessionDraft,
         open: false,
         selectedProjectId: null,
         directoryOverride: null,
@@ -524,7 +528,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         syntheticParts: undefined,
         targetFolderId: undefined,
       },
-    })
+    }))
   },
 
   setNewSessionDraftTarget: (target) => {

@@ -116,6 +116,7 @@ export interface SyntheticContextPart {
 
 export type NewSessionDraftState = {
     open: boolean;
+    requestKey: number;
     selectedProjectId?: string | null;
     directoryOverride: string | null;
     pendingWorktreeRequestId?: string | null;

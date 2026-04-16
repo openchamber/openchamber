@@ -103,6 +103,7 @@ export const VSCodeLayout: React.FC = () => {
     return sessions.find((session) => session.id === currentSessionId)?.title || 'Session';
   }, [currentSessionId, sessions]);
   const newSessionDraftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
+  const newSessionDraftRequestKey = useSessionUIStore((state) => state.newSessionDraft?.requestKey ?? 0);
   const isSyncingMessages = useViewportStore((state) => state.isSyncing);
   const hasActiveSessionWork = useDirectorySync((state) => {
     const statuses = state.session_status;
@@ -128,7 +129,7 @@ export const VSCodeLayout: React.FC = () => {
   const [hasInitializedOnce, setHasInitializedOnce] = React.useState<boolean>(() => configInitialized);
   const [isInitializing, setIsInitializing] = React.useState<boolean>(false);
   const lastBootstrapAttemptAt = React.useRef<number>(0);
-  const previousNewSessionDraftOpenRef = React.useRef(newSessionDraftOpen);
+  const previousDraftRequestKeyRef = React.useRef(newSessionDraftRequestKey);
 
   // Navigate to chat when a session is selected
   React.useEffect(() => {
@@ -328,8 +329,8 @@ export const VSCodeLayout: React.FC = () => {
   const usesExpandedLayout = containerWidth >= EXPANDED_LAYOUT_THRESHOLD;
 
   React.useEffect(() => {
-    const draftJustOpened = !previousNewSessionDraftOpenRef.current && newSessionDraftOpen;
-    previousNewSessionDraftOpenRef.current = newSessionDraftOpen;
+    const draftRequestChanged = previousDraftRequestKeyRef.current !== newSessionDraftRequestKey;
+    previousDraftRequestKeyRef.current = newSessionDraftRequestKey;
 
     if (viewMode !== 'sidebar') {
       return;
@@ -340,12 +341,12 @@ export const VSCodeLayout: React.FC = () => {
     if (currentView !== 'sessions') {
       return;
     }
-    if (!draftJustOpened) {
+    if (!newSessionDraftOpen || !draftRequestChanged) {
       return;
     }
 
     setCurrentView('chat');
-  }, [currentView, newSessionDraftOpen, usesExpandedLayout, viewMode]);
+  }, [currentView, newSessionDraftOpen, newSessionDraftRequestKey, usesExpandedLayout, viewMode]);
 
   const clampExpandedSidebarWidth = React.useCallback((value: number) => {
     return Math.min(SESSIONS_SIDEBAR_MAX_WIDTH, Math.max(SESSIONS_SIDEBAR_MIN_WIDTH, value));
