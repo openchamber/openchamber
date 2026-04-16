@@ -2,6 +2,7 @@ import React from 'react';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
+import { m } from '@/lib/i18n/messages';
 
 interface CommitInputProps {
   value: string;
@@ -18,7 +19,7 @@ const MAX_HEIGHT = 200;
 export const CommitInput: React.FC<CommitInputProps> = ({
   value,
   onChange,
-  placeholder = 'Commit message',
+  placeholder = m.gitCommitPlaceholder(),
   disabled = false,
   hasTouchInput = false,
   isMobile = false,

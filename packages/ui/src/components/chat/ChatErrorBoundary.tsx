@@ -1,3 +1,4 @@
+import { m } from '@/lib/i18n/messages';
 import React from 'react';
 import { RiChat3Line, RiRestartLine } from '@remixicon/react';
 import { Button } from '../ui/button';
@@ -60,7 +61,7 @@ export class ChatErrorBoundary extends React.Component<ChatErrorBoundaryProps, C
 
               {this.state.error && (
                 <details className="text-xs font-mono bg-muted p-3 rounded">
-                  <summary className="cursor-pointer hover:bg-interactive-hover/80">Error details</summary>
+                  <summary className="cursor-pointer hover:bg-interactive-hover/80">{m.cebErrorDetails()}</summary>
                   <pre className="mt-2 overflow-x-auto">
                     {this.state.error.toString()}
                   </pre>

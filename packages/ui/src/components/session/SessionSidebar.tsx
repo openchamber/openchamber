@@ -1,5 +1,6 @@
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
+import { m } from '@/lib/i18n/messages';
 import { RiLayoutLeftLine } from '@remixicon/react';
 import { toast } from '@/components/ui';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -582,8 +583,8 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
   const emptyState = (
     <div className="py-6 text-center text-muted-foreground">
-      <p className="typography-ui-label font-semibold">No sessions yet</p>
-      <p className="typography-meta mt-1">Create your first session to start coding.</p>
+      <p className="typography-ui-label font-semibold">{m.ssNoSessionsYet()}</p>
+      <p className="typography-meta mt-1">{m.ssCreateYourFirstSessionToStartCoding()}</p>
     </div>
   );
 
@@ -614,11 +615,11 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     void updateStore.checkForUpdates().then(() => {
       const { available, error } = useUpdateStore.getState();
       if (error) {
-        toast.error('Failed to check for updates', { description: error });
+        toast.error(m.ssFailedToCheckForUpdates(), { description: error });
         return;
       }
       if (!available) {
-        toast.success('You are on the latest version');
+        toast.success(m.ssYouAreOnTheLatestVersion());
         return;
       }
       setUpdateDialogOpen(true);
@@ -704,19 +705,19 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         if (result.success && result.path) {
           const added = addProject(result.path, { id: result.projectId });
           if (!added) {
-            toast.error('Failed to add project', {
-              description: 'Please select a valid directory.',
+            toast.error(m.ssFailedToAddProject(), {
+              description: m.ssPleaseSelectAValidDirectory(),
             });
           }
         } else if (result.error && result.error !== 'Directory selection cancelled') {
-          toast.error('Failed to select directory', {
+          toast.error(m.ssFailedToSelectDirectory(), {
             description: result.error,
           });
         }
       })
       .catch((error) => {
         console.error('Desktop: Error selecting directory:', error);
-        toast.error('Failed to select directory');
+        toast.error(m.ssFailedToSelectDirectory());
       });
   }, [addProject, tauriIpcAvailable]);
 
@@ -762,7 +763,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
         toggleFolderCollapse(parentId);
       }
 
-      const newFolder = createFolder(scopeKey, 'New folder', parentId);
+      const newFolder = createFolder(scopeKey, m.ssNewFolder(), parentId);
       setRenamingFolderId(newFolder.id);
       setRenameFolderDraft(newFolder.name);
       return newFolder;
@@ -930,8 +931,8 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
 
   const searchEmptyState = (
     <div className="py-6 text-center text-muted-foreground">
-      <p className="typography-ui-label font-semibold">No matching sessions</p>
-      <p className="typography-meta mt-1">Try a different title, branch, folder, or path.</p>
+      <p className="typography-ui-label font-semibold">{m.ssNoMatchingSessions()}</p>
+      <p className="typography-meta mt-1">{m.ssTryADifferentTitleBranchFolderOrPath()}</p>
     </div>
   );
 
@@ -1079,7 +1080,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     };
 
     return [
-      { key: 'active-now' as const, title: 'recent', items: activeNowSessions.map(toItem) },
+      { key: 'active-now' as const, title: m.ssRecent(), items: activeNowSessions.map(toItem) },
     ];
   }, [activeNowSessions, sessionSidebarMetaById]);
 

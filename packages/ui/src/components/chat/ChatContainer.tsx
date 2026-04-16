@@ -21,6 +21,7 @@ import { OverlayScrollbar } from '@/components/ui/OverlayScrollbar';
 import type { PermissionRequest } from '@/types/permission';
 import type { QuestionRequest } from '@/types/question';
 import { cn } from '@/lib/utils';
+import { m } from '@/lib/i18n/messages';
 import {
     collectVisibleSessionIdsForBlockingRequests,
     flattenBlockingRequests,
@@ -46,7 +47,7 @@ const EMPTY_PERMISSIONS: PermissionRequest[] = [];
 const EMPTY_QUESTIONS: QuestionRequest[] = [];
 const IDLE_SESSION_STATUS = { type: 'idle' as const };
 const SESSION_RESELECTED_EVENT = 'openchamber:session-reselected';
-const DEFAULT_RETRY_MESSAGE = 'Quota limit reached. Retrying automatically.';
+const DEFAULT_RETRY_MESSAGE = m.chatQuotaLimitRetrying();
 const CHAT_SCROLL_STYLE = { overflowAnchor: 'none' } as const;
 type SessionMessageRecord = { info: Message; parts: Part[] };
 
@@ -428,11 +429,11 @@ export const ChatContainer: React.FC = () => {
             size="xs"
             onClick={handleReturnToParentSession}
             className="absolute left-3 top-3 z-20 !font-normal bg-[var(--surface-background)]/95"
-            aria-label="Return to parent session"
-            title={parentSession.title?.trim() ? `Return to: ${parentSession.title}` : 'Return to parent session'}
+            aria-label={m.chatReturnToParentSession()}
+            title={parentSession.title?.trim() ? m.chatReturnTo({ title: parentSession.title }) : m.chatReturnToParentSession()}
         >
             <RiArrowLeftLine className="h-4 w-4" />
-            Parent
+            {m.chatParent()}
         </Button>
     ) : null;
 

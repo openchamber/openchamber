@@ -34,6 +34,7 @@ import { GitHubSettings } from '@/components/sections/openchamber/GitHubSettings
 import { GitIdentityEditorDialog } from './GitIdentityEditorDialog';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { cn } from '@/lib/utils';
+import { m } from '@/lib/i18n/messages';
 
 const ICON_MAP: Record<string, React.ComponentType<{ className?: string; style?: React.CSSProperties }>> = {
   branch: RiGitBranchLine,
@@ -91,10 +92,10 @@ export const GitPage: React.FC = () => {
     const next = defaultGitIdentityId === profileId ? null : profileId;
     const ok = await setDefaultGitIdentityId(next);
     if (!ok) {
-      toast.error('Failed to update default identity');
+      toast.error(m.gitToastDefaultFailed());
       return;
     }
-    toast.success(next ? 'Default identity updated' : 'Default identity unset');
+    toast.success(next ? m.gitToastDefaultUpdated() : m.gitToastDefaultUnset());
   };
 
   const handleConfirmDelete = async () => {
@@ -102,10 +103,10 @@ export const GitPage: React.FC = () => {
     setIsDeletePending(true);
     const success = await deleteProfile(deleteDialogProfile.id);
     if (success) {
-      toast.success(`Profile "${deleteDialogProfile.name}" deleted`);
+      toast.success(m.gitToastProfileDeleted().replace('{name}', deleteDialogProfile.name));
       setDeleteDialogProfile(null);
     } else {
-      toast.error('Failed to delete profile');
+      toast.error(m.gitToastDeleteFailed());
     }
     setIsDeletePending(false);
   };
@@ -116,14 +117,14 @@ export const GitPage: React.FC = () => {
         <div className="mx-auto w-full max-w-3xl space-y-6 p-3 sm:p-6 sm:pt-8">
           <GitHubSettings />
 
-          {/* Identities Section */}
+           {/* Identities Section */}
           <div className="border-t border-border/40 pt-6">
             <div className="mb-3 px-1 flex items-start justify-between gap-4">
               <div className="flex items-center gap-2">
-                <h3 className="typography-ui-header font-semibold text-foreground">Identities</h3>
+                <h3 className="typography-ui-header font-semibold text-foreground">{m.gitIdentities()}</h3>
               </div>
               <Button size="sm" variant="outline" onClick={() => openEditor('new')}>
-                <RiAddLine className="w-3.5 h-3.5 mr-1" /> New
+                <RiAddLine className="w-3.5 h-3.5 mr-1" /> {m.gitNewButton()}
               </Button>
             </div>
 
@@ -153,23 +154,23 @@ export const GitPage: React.FC = () => {
                 />
               ))}
 
-              {/* Empty state */}
-              {!globalIdentity && profiles.length === 0 && unimportedCredentials.length === 0 && (
-                <div className="py-8 px-4 text-center text-muted-foreground">
-                  <RiShieldKeyholeLine className="mx-auto mb-2 h-8 w-8 opacity-40" />
-                  <p className="typography-ui-label">No identities configured</p>
-                  <p className="typography-meta mt-1 opacity-75">Create one to manage Git author settings per project</p>
-                </div>
-              )}
+               {/* Empty state */}
+               {!globalIdentity && profiles.length === 0 && unimportedCredentials.length === 0 && (
+                 <div className="py-8 px-4 text-center text-muted-foreground">
+                   <RiShieldKeyholeLine className="mx-auto mb-2 h-8 w-8 opacity-40" />
+                   <p className="typography-ui-label">{m.gitNoIdentities()}</p>
+                   <p className="typography-meta mt-1 opacity-75">{m.gitNoIdentitiesHint()}</p>
+                 </div>
+               )}
 
-              {/* Discovered credentials */}
-              {unimportedCredentials.length > 0 && (
-                <>
-                  <div className="px-4 py-2 border-t border-[var(--surface-subtle)]">
-                    <span className="typography-micro text-muted-foreground">
-                      Found in ~/.git-credentials
-                    </span>
-                  </div>
+               {/* Discovered credentials */}
+               {unimportedCredentials.length > 0 && (
+                 <>
+                   <div className="px-4 py-2 border-t border-[var(--surface-subtle)]">
+                     <span className="typography-micro text-muted-foreground">
+                       {m.gitFoundCredentials()}
+                     </span>
+                   </div>
                   {unimportedCredentials.map((cred, i) => (
                     <DiscoveredRow
                       key={`${cred.host}-${cred.username}`}
@@ -195,28 +196,28 @@ export const GitPage: React.FC = () => {
         importData={editorImportData}
       />
 
-      {/* Delete confirmation */}
-      <Dialog
-        open={deleteDialogProfile !== null}
-        onOpenChange={(o) => { if (!isDeletePending) { if (!o) setDeleteDialogProfile(null); } }}
-      >
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Delete Profile</DialogTitle>
-            <DialogDescription>
-              Are you sure you want to delete "{deleteDialogProfile?.name}"?
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setDeleteDialogProfile(null)} disabled={isDeletePending}>
-              Cancel
-            </Button>
-            <Button size="sm" variant="destructive" onClick={() => void handleConfirmDelete()} disabled={isDeletePending}>
-              Delete
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+       {/* Delete confirmation */}
+       <Dialog
+         open={deleteDialogProfile !== null}
+         onOpenChange={(o) => { if (!isDeletePending) { if (!o) setDeleteDialogProfile(null); } }}
+       >
+         <DialogContent className="max-w-md">
+           <DialogHeader>
+             <DialogTitle>{m.gitDeleteProfile()}</DialogTitle>
+             <DialogDescription>
+               {m.gitDeleteConfirm().replace('{name}', deleteDialogProfile?.name || '')}
+             </DialogDescription>
+           </DialogHeader>
+           <DialogFooter>
+             <Button variant="ghost" onClick={() => setDeleteDialogProfile(null)} disabled={isDeletePending}>
+               {m.gitCancel()}
+             </Button>
+             <Button size="sm" variant="destructive" onClick={() => void handleConfirmDelete()} disabled={isDeletePending}>
+               {m.gitDelete()}
+             </Button>
+           </DialogFooter>
+         </DialogContent>
+       </Dialog>
     </>
   );
 };
@@ -255,7 +256,7 @@ const IdentityRow: React.FC<IdentityRowProps> = ({
       onClick={onEdit}
       role="button"
       tabIndex={0}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onEdit(); }}
+      onKeyDown={(e) => { if (e.key === m.commonKeyEnter() || e.key === ' ') onEdit(); }}
     >
       <div className="flex items-center gap-3 min-w-0">
         <IconComponent className="w-4 h-4 shrink-0" style={{ color: iconColor }} />
@@ -267,12 +268,12 @@ const IdentityRow: React.FC<IdentityRowProps> = ({
             </span>
             {isDefault && (
               <span className="typography-micro text-primary bg-primary/12 px-1 rounded flex-shrink-0 leading-none pb-px border border-primary/25">
-                default
+                {m.gitDefaultBadge()}
               </span>
             )}
             {isReadOnly && (
               <span className="typography-micro text-muted-foreground bg-muted px-1 rounded flex-shrink-0 leading-none pb-px border border-border/50">
-                system
+                {m.gitSystemBadge()}
               </span>
             )}
           </div>
@@ -295,7 +296,7 @@ const IdentityRow: React.FC<IdentityRowProps> = ({
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-fit min-w-28">
           <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onToggleDefault(); }}>
-            {isDefault ? 'Unset default' : 'Set as default'}
+            {isDefault ? m.gitUnsetDefault() : m.gitSetDefault()}
           </DropdownMenuItem>
           {!isReadOnly && onDelete && (
             <DropdownMenuItem
@@ -303,7 +304,7 @@ const IdentityRow: React.FC<IdentityRowProps> = ({
               className="text-destructive focus:text-destructive"
             >
               <RiDeleteBinLine className="h-4 w-4 mr-px" />
-              Delete
+              {m.gitDelete()}
             </DropdownMenuItem>
           )}
         </DropdownMenuContent>
@@ -340,7 +341,7 @@ const DiscoveredRow: React.FC<DiscoveredRowProps> = ({ credential, onImport, has
       </div>
       <Button size="sm" variant="ghost" onClick={onImport} className="gap-1 shrink-0">
         <RiDownloadLine className="h-3 w-3" />
-        Import
+        {m.gitImport()}
       </Button>
     </div>
   );

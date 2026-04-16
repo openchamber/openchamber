@@ -5,10 +5,11 @@
   "type": "module",
   "main": "src/main.tsx",
   "scripts": {
-    "dev": "tsc --noEmit --watch",
-    "build": "tsc --noEmit",
-    "type-check": "tsc --noEmit",
-    "lint": "eslint \"./src/**/*.{ts,tsx}\" --config ../../eslint.config.js"
+    "paraglide:compile": "bunx @inlang/paraglide-js compile --project ./project.inlang --outdir ./src/paraglide && node ./scripts/generate-paraglide-compat.mjs",
+    "dev": "bun run paraglide:compile && tsc --noEmit --watch",
+    "build": "bun run paraglide:compile && tsc --noEmit",
+    "type-check": "bun run paraglide:compile && tsc --noEmit",
+    "lint": "bun run paraglide:compile && eslint \"./src/**/*.{ts,tsx}\" --config ../../eslint.config.js"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.0",
@@ -87,6 +88,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.33.0",
+    "@inlang/plugin-message-format": "^4.4.0",
     "@tailwindcss/postcss": "^4.0.0",
     "@tauri-apps/api": "^2.10.1",
     "@types/node": "^24.3.1",

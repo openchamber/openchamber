@@ -1,6 +1,7 @@
 import React from 'react';
 import { RiAiAgentLine, RiBrainAi3Line, RiUser3Line } from '@remixicon/react';
 import { cn } from '@/lib/utils';
+import { m } from '@/lib/i18n/messages';
 import { getAgentColor } from '@/lib/agentColors';
 import { useProviderLogo } from '@/hooks/useProviderLogo';
 
@@ -53,7 +54,7 @@ const MessageHeader: React.FC<MessageHeaderProps> = ({ isUser, providerID, agent
                                 isUser ? 'text-primary' : 'text-foreground'
                             )}
                         >
-                            {isUser ? 'You' : (modelName || 'Assistant')}
+                            {isUser ? m.chatYou() : (modelName || m.chatAssistant())}
                         </h3>
                         {!isUser && agentName && (
                             <div

@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { GridLoader } from '@/components/ui/grid-loader';
+import { m } from '@/lib/i18n/messages';
 import {
   RiAddLine,
   RiArrowDownSLine,
@@ -259,7 +260,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
               onChange={(event) => setEditTitle(event.target.value)}
               className="flex-1 min-w-0 bg-transparent typography-ui-label outline-none placeholder:text-muted-foreground"
               autoFocus
-              placeholder="Rename session"
+              placeholder={m.sniRenameSession()}
               onKeyDown={(event) => {
                 if (event.key === 'Escape') {
                   event.stopPropagation();
@@ -308,7 +309,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
           ))}
         </span>
       );
-  const inlineStatusMarker = !isMinimalMode && showStatusMarker ? (
+      const inlineStatusMarker = !isMinimalMode && showStatusMarker ? (
     <span className="inline-flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center">
       {statusMarkerContent}
     </span>
@@ -344,7 +345,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
           ? 'opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto'
           : '',
       )}
-      aria-label={isExpanded ? 'Collapse subsessions' : 'Expand subsessions'}
+      aria-label={isExpanded ? m.sniCollapseSubsessions() : m.sniExpandSubsessions()}
     >
       {isExpanded ? <RiArrowDownSLine className="h-3 w-3" /> : <RiArrowRightSLine className="h-3 w-3" />}
     </span>
@@ -379,95 +380,95 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   const sessionMenuContent = (
     <DropdownMenuContent align="end" className="min-w-[180px]" onCloseAutoFocus={(event) => { if (renamingFolderId) event.preventDefault(); }}>
       <DropdownMenuItem
-        onClick={() => {
-          setEditingId(session.id);
-          setEditTitle(sessionTitle);
-        }}
-        className="[&>svg]:mr-1"
-      >
-        <RiPencilAiLine className="mr-1 h-4 w-4" />
-        Rename
-      </DropdownMenuItem>
-      <DropdownMenuItem onClick={() => togglePinnedSession(session.id)} className="[&>svg]:mr-1">
-        {isPinnedSession ? <RiUnpinLine className="mr-1 h-4 w-4" /> : <RiPushpinLine className="mr-1 h-4 w-4" />}
-        {isPinnedSession ? 'Unpin session' : 'Pin session'}
-      </DropdownMenuItem>
-      {!resolvedSession.share ? (
-        <DropdownMenuItem onClick={() => handleShareSession(resolvedSession)} className="[&>svg]:mr-1">
-          <RiShare2Line className="mr-1 h-4 w-4" />
-          Share
-        </DropdownMenuItem>
-      ) : (
-        <>
-          <DropdownMenuItem onClick={() => { if (resolvedSession.share?.url) handleCopyShareUrl(resolvedSession.share.url, session.id); }} className="[&>svg]:mr-1">
-            {copiedSessionId === session.id ? <><RiCheckLine className="mr-1 h-4 w-4" style={{ color: 'var(--status-success)' }} />Copied</> : <><RiFileCopyLine className="mr-1 h-4 w-4" />Copy link</>}
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => handleUnshareSession(session.id)} className="[&>svg]:mr-1">
-            <RiLinkUnlinkM className="mr-1 h-4 w-4" />
-            Unshare
-          </DropdownMenuItem>
-        </>
-      )}
+         onClick={() => {
+           setEditingId(session.id);
+           setEditTitle(sessionTitle);
+         }}
+         className="[&>svg]:mr-1"
+       >
+         <RiPencilAiLine className="mr-1 h-4 w-4" />
+         {m.sniRename()}
+       </DropdownMenuItem>
+       <DropdownMenuItem onClick={() => togglePinnedSession(session.id)} className="[&>svg]:mr-1">
+         {isPinnedSession ? <RiUnpinLine className="mr-1 h-4 w-4" /> : <RiPushpinLine className="mr-1 h-4 w-4" />}
+         {isPinnedSession ? m.sniUnpinSession() : m.sniPinSession()}
+       </DropdownMenuItem>
+       {!resolvedSession.share ? (
+         <DropdownMenuItem onClick={() => handleShareSession(resolvedSession)} className="[&>svg]:mr-1">
+           <RiShare2Line className="mr-1 h-4 w-4" />
+           {m.sniShare()}
+         </DropdownMenuItem>
+       ) : (
+         <>
+           <DropdownMenuItem onClick={() => { if (resolvedSession.share?.url) handleCopyShareUrl(resolvedSession.share.url, session.id); }} className="[&>svg]:mr-1">
+             {copiedSessionId === session.id ? <><RiCheckLine className="mr-1 h-4 w-4" style={{ color: 'var(--status-success)' }} />{m.sniCopied()}</> : <><RiFileCopyLine className="mr-1 h-4 w-4" />{m.sniCopyLink()}</>}
+           </DropdownMenuItem>
+           <DropdownMenuItem onClick={() => handleUnshareSession(session.id)} className="[&>svg]:mr-1">
+             <RiLinkUnlinkM className="mr-1 h-4 w-4" />
+             {m.sniUnshare()}
+           </DropdownMenuItem>
+         </>
+       )}
 
-      {sessionDirectory && !archivedBucket ? (() => {
-        const scopeFolders = getFoldersForScope(sessionDirectory);
-        const currentFolderId = getSessionFolderId(sessionDirectory, session.id);
-        return (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuSub>
-              <DropdownMenuSubTrigger className="[&>svg]:mr-1"><RiFolderLine className="h-4 w-4" />Move to folder</DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className="min-w-[180px]">
-                {scopeFolders.length === 0 ? (
-                  <DropdownMenuItem disabled className="text-muted-foreground">No folders yet</DropdownMenuItem>
-                ) : (
-                  scopeFolders.map((folder) => (
-                    <DropdownMenuItem key={folder.id} onClick={() => { if (currentFolderId === folder.id) removeSessionFromFolder(sessionDirectory, session.id); else addSessionToFolder(sessionDirectory, folder.id, session.id); }}>
-                      <span className="flex-1 truncate">{folder.name}</span>
-                      {currentFolderId === folder.id ? <RiCheckLine className="ml-2 h-3.5 w-3.5 text-primary flex-shrink-0" /> : null}
-                    </DropdownMenuItem>
-                  ))
-                )}
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => { const newFolder = createFolderAndStartRename(sessionDirectory); if (!newFolder) return; addSessionToFolder(sessionDirectory, newFolder.id, session.id); }}>
-                  <RiAddLine className="mr-1 h-4 w-4" />
-                  New folder...
-                </DropdownMenuItem>
-                {currentFolderId ? (
-                  <DropdownMenuItem onClick={() => { removeSessionFromFolder(sessionDirectory, session.id); }} className="text-destructive focus:text-destructive">
-                    <RiCloseLine className="mr-1 h-4 w-4" />
-                    Remove from folder
-                  </DropdownMenuItem>
-                ) : null}
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
-          </>
-        );
-      })() : null}
+       {sessionDirectory && !archivedBucket ? (() => {
+         const scopeFolders = getFoldersForScope(sessionDirectory);
+         const currentFolderId = getSessionFolderId(sessionDirectory, session.id);
+         return (
+           <>
+             <DropdownMenuSeparator />
+             <DropdownMenuSub>
+               <DropdownMenuSubTrigger className="[&>svg]:mr-1"><RiFolderLine className="h-4 w-4" />{m.sniMoveToFolder()}</DropdownMenuSubTrigger>
+               <DropdownMenuSubContent className="min-w-[180px]">
+                 {scopeFolders.length === 0 ? (
+                   <DropdownMenuItem disabled className="text-muted-foreground">{m.sniNoFoldersYet()}</DropdownMenuItem>
+                 ) : (
+                   scopeFolders.map((folder) => (
+                     <DropdownMenuItem key={folder.id} onClick={() => { if (currentFolderId === folder.id) removeSessionFromFolder(sessionDirectory, session.id); else addSessionToFolder(sessionDirectory, folder.id, session.id); }}>
+                       <span className="flex-1 truncate">{folder.name}</span>
+                       {currentFolderId === folder.id ? <RiCheckLine className="ml-2 h-3.5 w-3.5 text-primary flex-shrink-0" /> : null}
+                     </DropdownMenuItem>
+                   ))
+                 )}
+                 <DropdownMenuSeparator />
+                 <DropdownMenuItem onClick={() => { const newFolder = createFolderAndStartRename(sessionDirectory); if (!newFolder) return; addSessionToFolder(sessionDirectory, newFolder.id, session.id); }}>
+                   <RiAddLine className="mr-1 h-4 w-4" />
+                   {m.sniNewFolder()}
+                 </DropdownMenuItem>
+                 {currentFolderId ? (
+                   <DropdownMenuItem onClick={() => { removeSessionFromFolder(sessionDirectory, session.id); }} className="text-destructive focus:text-destructive">
+                     <RiCloseLine className="mr-1 h-4 w-4" />
+                     {m.sniRemoveFromFolder()}
+                   </DropdownMenuItem>
+                 ) : null}
+               </DropdownMenuSubContent>
+             </DropdownMenuSub>
+           </>
+         );
+       })() : null}
 
-      {!isVSCode ? (
-        <DropdownMenuItem
-          disabled={!sessionDirectory}
-          onClick={() => {
-            if (!sessionDirectory) return;
-            openContextPanelTab(sessionDirectory, {
-              mode: 'chat',
-              dedupeKey: `session:${session.id}`,
-              label: sessionTitle,
-            });
-          }}
-          className="[&>svg]:mr-1"
-        >
-          <RiChat4Line className="mr-1 h-4 w-4" />
-          <span className="truncate">Open in Side Panel</span>
-          <span className="shrink-0 typography-micro px-1 rounded leading-none pb-px text-[var(--status-warning)] bg-[var(--status-warning)]/10">beta</span>
-        </DropdownMenuItem>
-      ) : null}
+       {!isVSCode ? (
+         <DropdownMenuItem
+           disabled={!sessionDirectory}
+           onClick={() => {
+             if (!sessionDirectory) return;
+             openContextPanelTab(sessionDirectory, {
+               mode: 'chat',
+               dedupeKey: `session:${session.id}`,
+               label: sessionTitle,
+             });
+           }}
+           className="[&>svg]:mr-1"
+         >
+           <RiChat4Line className="mr-1 h-4 w-4" />
+           <span className="truncate">{m.sniOpenInSidePanel()}</span>
+           <span className="shrink-0 typography-micro px-1 rounded leading-none pb-px text-[var(--status-warning)] bg-[var(--status-warning)]/10">{m.sniBeta()}</span>
+         </DropdownMenuItem>
+       ) : null}
 
-      <DropdownMenuSeparator />
+       <DropdownMenuSeparator />
       <DropdownMenuItem className="text-destructive focus:text-destructive [&>svg]:mr-1" onClick={() => handleDeleteSession(session, { archivedBucket })}>
         <RiDeleteBinLine className="mr-1 h-4 w-4" />
-        {archivedBucket ? 'Delete' : 'Archive'}
+        {archivedBucket ? m.sniDelete() : m.sniArchive()}
       </DropdownMenuItem>
     </DropdownMenuContent>
   );
@@ -500,9 +501,9 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                         : '',
                     )}
                   >
-                    <div className={cn('flex w-full items-center min-w-0 flex-1 overflow-hidden', isMinimalMode ? 'gap-1' : 'gap-1')}>
-                      {isPinnedSession ? <RiPushpinLine className="h-3 w-3 flex-shrink-0 text-primary" aria-label="Pinned session" /> : null}
-                      <div className={cn('block min-w-0 flex-1 truncate typography-ui-label font-normal', isActive ? 'text-primary' : 'text-foreground')}>{renderHighlightedText(sessionTitle, normalizedSessionSearchQuery)}</div>
+                 <div className={cn('flex w-full items-center min-w-0 flex-1 overflow-hidden', isMinimalMode ? 'gap-1' : 'gap-1')}>
+                    {isPinnedSession ? <RiPushpinLine className="h-3 w-3 flex-shrink-0 text-primary" aria-label={m.sniPinnedSession()} /> : null}
+                     <div className={cn('block min-w-0 flex-1 truncate typography-ui-label font-normal', isActive ? 'text-primary' : 'text-foreground')}>{renderHighlightedText(sessionTitle, normalizedSessionSearchQuery)}</div>
                       {mobileVariant ? <span className="ml-2 flex-shrink-0 text-[0.72rem] text-muted-foreground/75">{sessionCompactUpdatedLabel}</span> : null}
                       {!mobileVariant ? (
                         <div className="relative ml-1 flex h-4 min-w-4 flex-shrink-0 items-center justify-end">
@@ -524,10 +525,10 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                                     ? 'opacity-100 pointer-events-auto'
                                     : cn('opacity-0 pointer-events-none', revealOnHoverClass),
                                 )}
-                                aria-label="Session menu"
-                                onClick={handleMenuTriggerClick}
-                                onKeyDown={(event) => event.stopPropagation()}
-                              >
+                                 aria-label={m.sniSessionMenu()}
+                                 onClick={handleMenuTriggerClick}
+                                 onKeyDown={(event) => event.stopPropagation()}
+                               >
                                 <RiMore2Line className="h-2.5 w-2.5" />
                               </button>
                             </DropdownMenuTrigger>
@@ -580,12 +581,12 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                     : revealPaddingClass
                 )}
               >
-                <div className={cn('flex w-full items-center min-w-0 flex-1 overflow-hidden', isMinimalMode ? 'gap-1' : 'gap-1')}>
+                 <div className={cn('flex w-full items-center min-w-0 flex-1 overflow-hidden', isMinimalMode ? 'gap-1' : 'gap-1')}>
                     {inlineStatusMarker}
-                    {isPinnedSession ? <RiPushpinLine className="h-3 w-3 flex-shrink-0 text-primary" aria-label="Pinned session" /> : null}
+                    {isPinnedSession ? <RiPushpinLine className="h-3 w-3 flex-shrink-0 text-primary" aria-label={m.sniPinnedSession()} /> : null}
                     <div className={cn('block min-w-0 flex-1 truncate typography-ui-label font-normal', isActive ? 'text-primary' : 'text-foreground')}>{renderHighlightedText(sessionTitle, normalizedSessionSearchQuery)}</div>
                     {pendingPermissionCount > 0 ? (
-                      <span className="inline-flex items-center gap-1 rounded bg-destructive/10 px-1 py-0.5 text-[0.7rem] text-destructive flex-shrink-0" title="Permission required" aria-label="Permission required">
+                      <span className="inline-flex items-center gap-1 rounded bg-destructive/10 px-1 py-0.5 text-[0.7rem] text-destructive flex-shrink-0" title={m.sniPermissionRequired()} aria-label={m.sniPermissionRequired()}>
                         <RiShieldLine className="h-3 w-3" />
                         <span className="leading-none">{pendingPermissionCount}</span>
                       </span>
@@ -628,18 +629,18 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
                 <DropdownMenuTrigger asChild>
                   <button
                     type="button"
-                    className={cn(
-                      'inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity',
-                      isMinimalMode && !mobileVariant
-                        ? (isMenuOpen
-                            ? 'h-4 w-4 opacity-100 pointer-events-auto'
-                            : cn('h-4 w-4 opacity-0 pointer-events-none', revealOnHoverClass))
-                        : 'h-6 w-6 opacity-100',
-                    )}
-                    aria-label="Session menu"
-                    onClick={handleMenuTriggerClick}
-                    onKeyDown={(event) => event.stopPropagation()}
-                    >
+                       className={cn(
+                         'inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity',
+                         isMinimalMode && !mobileVariant
+                           ? (isMenuOpen
+                               ? 'h-4 w-4 opacity-100 pointer-events-auto'
+                               : cn('h-4 w-4 opacity-0 pointer-events-none', revealOnHoverClass))
+                           : 'h-6 w-6 opacity-100',
+                       )}
+                     aria-label={m.sniSessionMenu()}
+                     onClick={handleMenuTriggerClick}
+                     onKeyDown={(event) => event.stopPropagation()}
+                     >
                       <RiMore2Line className={cn(isMinimalMode && !mobileVariant ? 'h-2.5 w-2.5' : 'h-3.5 w-3.5')} />
                   </button>
                 </DropdownMenuTrigger>

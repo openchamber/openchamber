@@ -3,6 +3,15 @@ import { RiErrorWarningLine, RiRestartLine } from '@remixicon/react';
 import { Button } from './button';
 import { Card, CardContent, CardHeader, CardTitle } from './card';
 import { copyTextToClipboard } from '@/lib/clipboard';
+import {
+  errUnknown,
+  errSomethingWrong,
+  errUnexpectedDesc,
+  errDetails,
+  errTryAgain,
+  commonCopied,
+  commonCopy,
+} from '@/lib/i18n/messages';
 
 interface ErrorBoundaryState {
   hasError: boolean;
@@ -37,7 +46,7 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
   };
 
   handleCopy = async () => {
-    const errorText = this.state.error ? String(this.state.error) : 'Unknown error';
+    const errorText = this.state.error ? String(this.state.error) : errUnknown();
     const stack = this.state.error?.stack ? `\n\nStack:\n${this.state.error.stack}` : '';
     const componentStack = this.state.errorInfo?.componentStack ? `\n\nComponent stack:${this.state.errorInfo.componentStack}` : '';
     const payload = `${errorText}${stack}${componentStack}`;
@@ -63,17 +72,17 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
             <CardHeader className="text-center">
               <CardTitle className="flex items-center justify-center gap-2 text-destructive">
                 <RiErrorWarningLine className="h-5 w-5" />
-                Something went wrong
+                {errSomethingWrong()}
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <p className="text-sm text-muted-foreground text-center">
-                The application encountered an unexpected error. This has been logged for debugging.
+                {errUnexpectedDesc()}
               </p>
 
               {this.state.error && (
                 <details className="text-xs font-mono bg-muted p-3 rounded">
-                  <summary className="cursor-pointer hover:bg-interactive-hover/80">Error details</summary>
+                  <summary className="cursor-pointer hover:bg-interactive-hover/80">{errDetails()}</summary>
                   <pre className="mt-2 overflow-x-auto">
                     {this.state.error.toString()}
                     {this.state.errorInfo?.componentStack ? `\n\nComponent stack:${this.state.errorInfo.componentStack}` : ''}
@@ -84,10 +93,10 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
               <div className="flex gap-2">
                 <Button onClick={this.handleReset} variant="outline" className="flex-1">
                   <RiRestartLine className="h-4 w-4 mr-2" />
-                  Try again
+                  {errTryAgain()}
                 </Button>
                 <Button onClick={this.handleCopy} variant="outline" className="flex-1">
-                  {this.state.copied ? 'Copied' : 'Copy'}
+                  {this.state.copied ? commonCopied() : commonCopy()}
                 </Button>
               </div>
             </CardContent>

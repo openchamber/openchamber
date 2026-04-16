@@ -11,6 +11,7 @@ import { cn } from '@/lib/utils';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { ContextPanelContent } from './ContextSidebarTab';
+import { m } from '@/lib/i18n/messages';
 
 const CONTEXT_PANEL_MIN_WIDTH = 360;
 const CONTEXT_PANEL_MAX_WIDTH = 1400;
@@ -57,11 +58,11 @@ const getRelativePathLabel = (filePath: string | null, directory: string): strin
 };
 
 const getModeLabel = (mode: 'diff' | 'file' | 'context' | 'plan' | 'chat'): string => {
-  if (mode === 'chat') return 'Chat';
-  if (mode === 'file') return 'Files';
-  if (mode === 'diff') return 'Diff';
-  if (mode === 'plan') return 'Plan';
-  return 'Context';
+  if (mode === 'chat') return m.contextPanelTabChat();
+  if (mode === 'file') return m.contextPanelTabFiles();
+  if (mode === 'diff') return m.contextPanelTabDiff();
+  if (mode === 'plan') return m.contextPanelTabPlan();
+  return m.contextPanelTabContext();
 };
 
 const getFileNameFromPath = (path: string | null): string | null => {
@@ -88,7 +89,7 @@ const getTabLabel = (tab: { mode: 'diff' | 'file' | 'context' | 'plan' | 'chat';
   }
 
   if (tab.mode === 'file') {
-    return getFileNameFromPath(tab.targetPath) || 'Files';
+    return getFileNameFromPath(tab.targetPath) || m.contextPanelTabFiles();
   }
 
   return getModeLabel(tab.mode);
@@ -403,7 +404,7 @@ export const ContextPanel: React.FC = () => {
       label,
       icon: getTabIcon(tab),
       title: tabPathLabel ? `${rawLabel}: ${tabPathLabel}` : rawLabel,
-      closeLabel: `Close ${label} tab`,
+      closeLabel: m.contextPanelCloseTab({ label }),
     };
   }), [effectiveDirectory, tabs]);
 
@@ -461,8 +462,8 @@ export const ContextPanel: React.FC = () => {
           size="sm"
           onClick={handleToggleExpanded}
           className="h-7 w-7 p-0"
-          title={isExpanded ? 'Collapse panel' : 'Expand panel'}
-          aria-label={isExpanded ? 'Collapse panel' : 'Expand panel'}
+          title={isExpanded ? m.contextPanelCollapse() : m.contextPanelExpand()}
+          aria-label={isExpanded ? m.contextPanelCollapse() : m.contextPanelExpand()}
         >
           {isExpanded ? <RiFullscreenExitLine className="h-3.5 w-3.5" /> : <RiFullscreenLine className="h-3.5 w-3.5" />}
         </Button>
@@ -472,8 +473,8 @@ export const ContextPanel: React.FC = () => {
           size="sm"
           onClick={handleClose}
           className="h-7 w-7 p-0"
-          title="Close panel"
-          aria-label="Close panel"
+          title={m.contextPanelClose()}
+          aria-label={m.contextPanelClose()}
         >
           <RiCloseLine className="h-3.5 w-3.5" />
         </Button>
@@ -527,7 +528,7 @@ export const ContextPanel: React.FC = () => {
           onPointerCancel={handleResizeEnd}
           role="separator"
           aria-orientation="vertical"
-          aria-label="Resize context panel"
+          aria-label={m.contextPanelResize()}
         />
       )}
       {header}
@@ -559,7 +560,7 @@ export const ContextPanel: React.FC = () => {
                 chatFrameRefs.current.set(tab.id, node);
               }}
               src={src}
-              title={`Session chat ${sessionID}`}
+              title={m.contextPanelSessionChat({ id: sessionID })}
               className={cn(
                 'absolute inset-0 h-full w-full border-0 bg-background',
                 activeChatTabID === tab.id ? 'block' : 'hidden'

@@ -26,6 +26,7 @@ declare global {
       panelType?: PanelType;
       viewMode?: 'sidebar' | 'editor';
       initialSessionId?: string | null;
+      language?: string;
     };
     __OPENCHAMBER_VSCODE_THEME__?: VSCodeThemePayload['theme'];
     __OPENCHAMBER_VSCODE_SHIKI_THEMES__?: { light?: Record<string, unknown>; dark?: Record<string, unknown> } | null;

@@ -8,6 +8,7 @@ import { RiAddLine, RiStackLine } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import { SettingsProjectSelector } from '@/components/sections/shared/SettingsProjectSelector';
 import { opencodeClient } from '@/lib/opencode/client';
+import { m } from '@/lib/i18n/messages';
 
 const ADD_PROVIDER_ID = '__add_provider__';
 
@@ -106,7 +107,7 @@ export const ProvidersSidebar: React.FC<ProvidersSidebarProps> = ({ onItemSelect
   return (
     <div className={cn('flex h-full flex-col', bgClass)}>
       <div className="border-b px-3 pt-4 pb-3">
-        <h2 className="text-base font-semibold text-foreground mb-3">Providers</h2>
+        <h2 className="text-base font-semibold text-foreground mb-3">{m.providersTitle()}</h2>
         <SettingsProjectSelector className="mb-3" />
         <div className="flex items-center justify-between gap-2">
           <span className="typography-meta text-muted-foreground">Total {providers.length}</span>
@@ -117,8 +118,8 @@ export const ProvidersSidebar: React.FC<ProvidersSidebarProps> = ({ onItemSelect
               setSelectedProvider(ADD_PROVIDER_ID);
               onItemSelect?.();
             }}
-            aria-label="Connect provider"
-            title="Connect provider"
+            aria-label={m.providersConnectAria()}
+            title={m.providersConnectAria()}
           >
             <RiAddLine className="h-3.5 w-3.5" />
           </Button>
@@ -129,8 +130,8 @@ export const ProvidersSidebar: React.FC<ProvidersSidebarProps> = ({ onItemSelect
         {providers.length === 0 ? (
           <div className="py-12 px-4 text-center text-muted-foreground">
             <RiStackLine className="mx-auto mb-3 h-10 w-10 opacity-50" />
-            <p className="typography-ui-label font-medium">No providers found</p>
-            <p className="typography-meta mt-1 opacity-75">Check your OpenCode configuration</p>
+            <p className="typography-ui-label font-medium">{m.providersNotFound()}</p>
+            <p className="typography-meta mt-1 opacity-75">{m.providersCheckConfig()}</p>
           </div>
         ) : (
           <>

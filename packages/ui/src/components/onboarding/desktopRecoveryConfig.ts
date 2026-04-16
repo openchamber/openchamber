@@ -1,4 +1,5 @@
 import { redactSensitiveUrl } from '@/lib/desktopHosts';
+import { m } from '@/lib/i18n/messages';
 
 export type RecoveryVariant =
   | 'local-unavailable'
@@ -35,69 +36,68 @@ export function getDesktopRecoveryConfig(
   switch (variant) {
     case 'local-unavailable':
       return {
-        title: 'Local OpenCode Unavailable',
-        description:
-          'OpenCode CLI could not be started or is not installed. Install OpenCode or connect to a remote server instead.',
+        title: m.obLocalUnavailableTitle(),
+        description: m.obLocalUnavailableDescription(),
         iconKey: 'local',
         showRetry: true,
-        retryLabel: 'Retry Local',
+        retryLabel: m.obRetryLocal(),
         showUseLocal: true,
         showUseRemote: true,
-        useLocalLabel: 'Set Up Local',
-        useRemoteLabel: 'Use Remote',
+        useLocalLabel: m.obSetUpLocal(),
+        useRemoteLabel: m.obUseRemote(),
       };
 
     case 'remote-missing':
       return {
-        title: 'No Default Connection',
-        description: 'Your saved default connection could not be found. Choose how you want to connect.',
+        title: m.obNoDefaultConnection(),
+        description: m.obNoDefaultConnectionDescription(),
         iconKey: 'local',
         showRetry: false,
         showUseLocal: true,
         showUseRemote: true,
-        useLocalLabel: 'Use Local',
-        useRemoteLabel: 'Use Remote',
+        useLocalLabel: m.obSetUpLocal(),
+        useRemoteLabel: m.obUseRemote(),
       };
 
     case 'remote-unreachable': {
       const host = formatHostDisplay(hostLabel, hostUrl);
       return {
-        title: 'Remote Server Unreachable',
-        description: `Could not connect to "${host || 'the remote server'}". Check your network connection and verify the server address.`,
+        title: m.obRemoteServerUnreachableTitle(),
+        description: m.obRemoteServerUnreachableDescription({ host }),
         iconKey: 'remote',
         showRetry: true,
-        retryLabel: 'Retry Connection',
+        retryLabel: m.obRetryConnection(),
         showUseLocal: true,
         showUseRemote: true,
-        useLocalLabel: 'Use Local',
-        useRemoteLabel: 'Use Remote',
+        useLocalLabel: m.obSetUpLocal(),
+        useRemoteLabel: m.obUseRemote(),
       };
     }
 
     case 'remote-wrong-service': {
       const host = formatHostDisplay(hostLabel, hostUrl);
       return {
-        title: 'Incompatible Server',
-        description: `The server at "${host || 'unknown'}" is not running OpenChamber. Verify the address points to an OpenChamber server.`,
+        title: m.obIncompatibleServer(),
+        description: m.obIncompatibleServerDescription({ host }),
         iconKey: 'remote',
         showRetry: false,
         showUseLocal: true,
         showUseRemote: true,
-        useLocalLabel: 'Use Local',
-        useRemoteLabel: 'Use Remote',
+        useLocalLabel: m.obSetUpLocal(),
+        useRemoteLabel: m.obUseRemote(),
       };
     }
 
     case 'missing-default-host':
       return {
-        title: 'No Default Connection',
-        description: 'Your saved default connection could not be found. Choose how you want to connect.',
+        title: m.obNoDefaultConnection(),
+        description: m.obNoDefaultConnectionDescription(),
         iconKey: 'local',
         showRetry: false,
         showUseLocal: true,
         showUseRemote: true,
-        useLocalLabel: 'Use Local',
-        useRemoteLabel: 'Use Remote',
+        useLocalLabel: m.obSetUpLocal(),
+        useRemoteLabel: m.obUseRemote(),
       };
 
     default: {

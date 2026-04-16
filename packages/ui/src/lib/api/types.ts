@@ -10,6 +10,9 @@ export interface RuntimeDescriptor {
   isVSCode: boolean;
 
   label?: string;
+
+  /** The UI language locale (e.g. 'en', 'zh-CN', 'vi', 'ja'). Populated by VS Code from vscode.env.language. */
+  language?: string;
 }
 
 export interface ApiError {

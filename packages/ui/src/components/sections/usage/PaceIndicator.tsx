@@ -2,6 +2,7 @@ import React from 'react';
 import { cn } from '@/lib/utils';
 import type { PaceInfo } from '@/lib/quota';
 import { getPaceStatusColor, formatRemainingTime } from '@/lib/quota';
+import { m } from "@/lib/i18n/messages";
 
 interface PaceIndicatorProps {
   paceInfo: PaceInfo;
@@ -24,13 +25,13 @@ export const PaceIndicator: React.FC<PaceIndicatorProps> = ({
   const statusLabel = React.useMemo(() => {
     switch (paceInfo.status) {
       case 'on-track':
-        return 'On track';
+        return m.paceOnTrack();
       case 'slightly-fast':
-        return 'Slightly fast';
+        return m.paceSlightlyFast();
       case 'too-fast':
-        return 'Too fast';
+        return m.paceTooFast();
       case 'exhausted':
-        return 'Used up';
+        return m.paceUsedUp();
     }
   }, [paceInfo.status]);
 
@@ -81,7 +82,7 @@ export const PaceIndicator: React.FC<PaceIndicatorProps> = ({
             </>
           ) : (
             <span title={predictionTooltip}>
-              <span className="text-muted-foreground">Pred: </span>
+              <span className="text-muted-foreground">{m.paceLabel()} </span>
               <span className="font-medium">{paceInfo.predictText}</span>
             </span>
           )}

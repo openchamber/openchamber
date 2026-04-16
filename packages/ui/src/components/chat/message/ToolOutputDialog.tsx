@@ -6,6 +6,7 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { createPortal } from 'react-dom';
 
 import { cn } from '@/lib/utils';
+import { m } from '@/lib/i18n/messages';
 import { SimpleMarkdownRenderer } from '../MarkdownRenderer';
 import { toolDisplayStyles } from '@/lib/typography';
 import { getLanguageFromExtension } from '@/lib/toolHelpers';
@@ -344,7 +345,7 @@ const ImagePreviewDialog: React.FC<{
     }, [gallery, popup.image?.index, popup.image?.url, popup.open]);
 
     const currentImage = gallery[currentIndex] ?? gallery[0] ?? popup.image;
-    const imageTitle = currentImage?.filename || popup.title || 'Image preview';
+    const imageTitle = currentImage?.filename || popup.title || m.toolImagePreview();
     const hasMultipleImages = gallery.length > 1;
 
     const showPrevious = React.useCallback(() => {
@@ -434,7 +435,7 @@ const ImagePreviewDialog: React.FC<{
                         onMouseDown={(event) => event.stopPropagation()}
                         onClick={showPrevious}
                         className="absolute left-3 top-1/2 -translate-y-1/2 z-10 h-10 w-10 flex items-center justify-center rounded-full bg-black/40 text-foreground/90 hover:bg-black/55 focus:outline-none focus:ring-2 focus:ring-primary/60"
-                        aria-label="Previous image"
+                        aria-label={m.toolPreviousImage()}
                     >
                         <RiArrowLeftSLine className="h-6 w-6" />
                     </button>
@@ -443,7 +444,7 @@ const ImagePreviewDialog: React.FC<{
                         onMouseDown={(event) => event.stopPropagation()}
                         onClick={showNext}
                         className="absolute right-3 top-1/2 -translate-y-1/2 z-10 h-10 w-10 flex items-center justify-center rounded-full bg-black/40 text-foreground/90 hover:bg-black/55 focus:outline-none focus:ring-2 focus:ring-primary/60"
-                        aria-label="Next image"
+                        aria-label={m.toolNextImage()}
                     >
                         <RiArrowRightSLine className="h-6 w-6" />
                     </button>
@@ -472,7 +473,7 @@ const ImagePreviewDialog: React.FC<{
                             type="button"
                             className="h-8 w-8 flex items-center justify-center rounded-lg text-muted-foreground/80 hover:text-foreground focus:outline-none focus:ring-2 focus:ring-primary/60"
                             onClick={() => onOpenChange(false)}
-                            aria-label="Close image preview"
+                            aria-label={m.toolCloseImagePreview()}
                         >
                             <RiCloseLine className="h-4 w-4" />
                         </button>
@@ -707,7 +708,7 @@ const MermaidPreviewDialog: React.FC<{
         const target = popup.mermaid;
         if (!target?.url) {
             setStatus('error');
-            setErrorMessage('Missing Mermaid source URL.');
+            setErrorMessage(m.toolMissingMermaidUrl());
             return;
         }
 
@@ -730,12 +731,12 @@ const MermaidPreviewDialog: React.FC<{
         } else if (target.url.toLowerCase().startsWith('file://')) {
             const normalizedPath = normalizeFilePath(target.url);
             if (!normalizedPath) {
-                sourcePromise = Promise.reject(new Error('Invalid local file path for Mermaid preview.'));
+                sourcePromise = Promise.reject(new Error(m.toolInvalidMermaidPath()));
             } else {
                 sourcePromise = fetch(`/api/fs/raw?path=${encodeURIComponent(normalizedPath)}`)
                     .then((response) => {
                         if (!response.ok) {
-                            return Promise.reject(new Error(`Failed to read diagram file (${response.status})`));
+                            return Promise.reject(new Error(m.toolFailedToReadDiagram({ status: String(response.status) })));
                         }
                         return response.text();
                     });
@@ -747,12 +748,12 @@ const MermaidPreviewDialog: React.FC<{
             const resolvedUrl = canParse ? new URL(target.url, window.location.origin) : null;
 
             if (!resolvedUrl || (resolvedUrl.protocol !== 'http:' && resolvedUrl.protocol !== 'https:')) {
-                sourcePromise = Promise.reject(new Error('Unsupported Mermaid URL protocol.'));
+                sourcePromise = Promise.reject(new Error(m.toolUnsupportedMermaidProtocol()));
             } else {
                 sourcePromise = fetch(resolvedUrl.toString())
                     .then((response) => {
                         if (!response.ok) {
-                            return Promise.reject(new Error(`Failed to load diagram (${response.status})`));
+                            return Promise.reject(new Error(m.toolFailedToLoadDiagram({ status: String(response.status) })));
                         }
                         return response.text();
                     });
@@ -931,14 +932,14 @@ const MermaidPreviewDialog: React.FC<{
                             {status === 'loading' && (
                                 <div className="h-full min-h-28 flex items-center justify-center gap-2 text-muted-foreground typography-meta">
                                     <RiLoader4Line className="h-4 w-4 animate-spin" />
-                                    <span>Loading diagram...</span>
+                                    <span>{m.toolLoadingDiagram()}</span>
                                 </div>
                             )}
 
                             {status === 'error' && (
                                 <div className="rounded-xl border border-border/30 bg-muted/20 p-3 space-y-3">
                                     <p className="typography-markdown" style={{ color: 'var(--status-error)' }}>
-                                        {errorMessage || 'Unable to render Mermaid diagram.'}
+                                        {errorMessage || m.toolUnableToRenderDiagram()}
                                     </p>
                                     <button
                                         type="button"
@@ -951,7 +952,7 @@ const MermaidPreviewDialog: React.FC<{
                                             color: 'var(--surface-foreground)',
                                         }}
                                     >
-                                        Retry
+                                        {m.toolRetry()}
                                     </button>
                                 </div>
                             )}
@@ -1043,10 +1044,10 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
                                 <div className="border-b border-border/20 p-4 -mx-3">
                                     <div className="typography-markdown font-medium text-muted-foreground mb-2 px-3">
                                         {meta.tool === 'bash'
-                                            ? 'Command:'
+                                            ? m.toolCommand()
                                             : meta.tool === 'task'
-                                                ? 'Task Details:'
-                                                : 'Input:'}
+                                                ? m.toolTaskDetails()
+                                                : m.toolInput()}
                                     </div>
                                     {meta.tool === 'bash' && getInputValue('command') ? (
                                         <div className="tool-input-surface bg-transparent rounded-xl border border-border/20 mx-3">
@@ -1066,9 +1067,9 @@ const ToolOutputDialog: React.FC<ToolOutputDialogProps> = ({ popup, onOpenChange
                                             className="tool-input-surface bg-transparent rounded-xl border border-border/20 font-mono whitespace-pre-wrap text-foreground/90 mx-3"
                                             style={toolDisplayStyles.getPopupStyles()}
                                         >
-                                            {getInputValue('description') ? `Task: ${getInputValue('description')}\n` : ''}
-                                            {getInputValue('subagent_type') ? `Agent Type: ${getInputValue('subagent_type')}\n` : ''}
-                                            {`Instructions:\n${getInputValue('prompt')}`}
+                                            {getInputValue('description') ? `${m.toolTaskLabel()} ${getInputValue('description')}\n` : ''}
+                                            {getInputValue('subagent_type') ? `${m.toolAgentTypeLabel()} ${getInputValue('subagent_type')}\n` : ''}
+                                            {`${m.toolInstructionsLabel()}\n${getInputValue('prompt')}`}
                                         </div>
                                     ) : meta.tool === 'write' && getInputValue('content') ? (
                                         <div className="tool-input-surface bg-transparent rounded-xl border border-border/20 mx-3">

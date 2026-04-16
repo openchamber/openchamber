@@ -12,6 +12,7 @@ import { useSessionMessageRecords } from '@/sync/sync-context';
 import { RiLoader4Line, RiSearchLine, RiTimeLine, RiGitBranchLine, RiArrowGoBackLine } from '@remixicon/react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { Part } from '@opencode-ai/sdk/v2';
+import { m } from '@/lib/i18n/messages';
 
 interface TimelineDialogProps {
     open: boolean;
@@ -30,10 +31,10 @@ function formatRelativeTime(timestamp: number): string {
     const diffHours = Math.floor(diffMins / 60);
     const diffDays = Math.floor(diffHours / 24);
 
-    if (diffSecs < 60) return 'just now';
-    if (diffMins < 60) return `${diffMins}m ago`;
-    if (diffHours < 24) return `${diffHours}h ago`;
-    if (diffDays < 7) return `${diffDays}d ago`;
+    if (diffSecs < 60) return m.tdJustNow();
+    if (diffMins < 60) return m.tdMAgo({ minutes: diffMins });
+    if (diffHours < 24) return m.tdHAgo({ hours: diffHours });
+    if (diffDays < 7) return m.tdDAgo({ days: diffDays });
     return new Date(timestamp).toLocaleDateString();
 }
 
@@ -89,17 +90,17 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
                 <DialogHeader>
                     <DialogTitle className="flex items-center gap-2">
                         <RiTimeLine className="h-5 w-5" />
-                        Conversation Timeline
+                        {m.tdConversationTimeline()}
                     </DialogTitle>
                     <DialogDescription>
-                        Navigate to any point in the conversation or fork a new session
+                        {m.tdTimelineDescription()}
                     </DialogDescription>
                 </DialogHeader>
 
                 <div className="relative mt-2">
                     <RiSearchLine className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input
-                        placeholder="Search messages..."
+                        placeholder={m.tdSearchMessages()}
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                         className="pl-9 w-full"
@@ -109,7 +110,7 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
                 <div className="flex-1 overflow-y-auto">
                     {filteredMessages.length === 0 ? (
                         <div className="text-center text-muted-foreground py-8">
-                            {searchQuery ? 'No messages found' : 'No messages in this session yet'}
+                            {searchQuery ? m.tdNoMessagesFound() : m.tdNoMessagesInSession()}
                         </div>
                     ) : (
                         filteredMessages.map((message) => {
@@ -134,7 +135,7 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
                                         {messageNumber}.
                                     </span>
                                     <p className="flex-1 min-w-0 typography-small text-foreground truncate ml-0.5">
-                                        {preview || '[No text content]'}
+                                        {preview || m.tdNoTextContent()}
                                         {preview && preview.length >= 80 && '…'}
                                     </p>
 
@@ -158,7 +159,7 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
                                                         <RiArrowGoBackLine className="h-4 w-4" />
                                                     </button>
                                                 </TooltipTrigger>
-                                                <TooltipContent sideOffset={6}>Revert from here</TooltipContent>
+                                                <TooltipContent sideOffset={6}>{m.tdRevertFromHere()}</TooltipContent>
                                             </Tooltip>
 
                                             <Tooltip delayDuration={1000}>
@@ -179,7 +180,7 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
                                                         )}
                                                     </button>
                                                 </TooltipTrigger>
-                                                <TooltipContent sideOffset={6}>Fork from here</TooltipContent>
+                                                <TooltipContent sideOffset={6}>{m.tdForkFromHere()}</TooltipContent>
                                             </Tooltip>
                                         </div>
                                     </div>
@@ -190,7 +191,7 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
                 </div>
 
                 <div className="mt-4 p-3 bg-muted/30 rounded-lg">
-                    <p className="typography-meta text-muted-foreground font-medium mb-2">Actions</p>
+                    <p className="typography-meta text-muted-foreground font-medium mb-2">{m.tdActions()}</p>
                     <div className="mb-2 flex items-center gap-2">
                         <button
                             type="button"
@@ -200,7 +201,7 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
                                 onOpenChange(false);
                             }}
                         >
-                            Previous turn
+                            {m.tdPreviousTurn()}
                         </button>
                         <span className="text-muted-foreground/50">/</span>
                         <button
@@ -211,20 +212,20 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
                                 onOpenChange(false);
                             }}
                         >
-                            Latest
+                            {m.tdLatest()}
                         </button>
                     </div>
                     <div className="flex flex-col gap-1.5 typography-meta text-muted-foreground">
                         <div className="flex items-center gap-2">
-                            <span>Click on a message to scroll to it in the conversation</span>
+                            <span>{m.tdClickToScroll()}</span>
                         </div>
                         <div className="flex items-center gap-2">
                             <RiArrowGoBackLine className="h-4 w-4 flex-shrink-0" />
-                            <span>Undo to this point (message text will populate input)</span>
+                            <span>{m.tdUndoToPoint()}</span>
                         </div>
                         <div className="flex items-center gap-2">
                             <RiGitBranchLine className="h-4 w-4 flex-shrink-0" />
-                            <span>Create a new session starting from here</span>
+                            <span>{m.tdCreateSessionFromHere()}</span>
                         </div>
                     </div>
                 </div>

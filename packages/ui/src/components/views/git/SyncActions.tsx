@@ -15,6 +15,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import type { GitRemote } from '@/lib/gitApi';
+import { m } from '@/lib/i18n/messages';
 
 type SyncAction = 'fetch' | 'pull' | 'push' | null;
 
@@ -192,8 +193,8 @@ export const SyncActions: React.FC<SyncActionsProps> = ({
                       event.stopPropagation();
                       onRemoveRemote(remote);
                     }}
-                    aria-label={`Remove ${remote.name} remote`}
-                    title={`Remove ${remote.name}`}
+                    aria-label={m.gitSyncRemoveRemote({ name: remote.name })}
+                    title={m.gitSyncRemove({ name: remote.name })}
                   >
                     {removingRemoteName === remote.name ? (
                       <RiLoader4Line className="size-3.5 animate-spin" />
@@ -217,17 +218,17 @@ export const SyncActions: React.FC<SyncActionsProps> = ({
             'fetch',
             <RiRefreshLine className="size-4" />,
             <RiLoader4Line className="size-4 animate-spin" />,
-            'Fetch',
+            m.gitSyncFetch(),
             onFetch,
-            'Fetch from remote'
+            m.gitSyncFetchFromRemote()
           )
         : renderButton(
             'fetch',
             <RiRefreshLine className="size-4" />,
             <RiLoader4Line className="size-4 animate-spin" />,
-            'Fetch',
+            m.gitSyncFetch(),
             handleFetch,
-            'Fetch from remote'
+            m.gitSyncFetchFromRemote()
           )}
 
       {hasMultipleRemotes
@@ -235,18 +236,18 @@ export const SyncActions: React.FC<SyncActionsProps> = ({
             'pull',
             <RiArrowDownLine className="size-4" />,
             <RiLoader4Line className="size-4 animate-spin" />,
-            'Pull',
+            m.gitSyncPull(),
             onPull,
-            behindCount > 0 ? `Pull changes (${behindCount} behind)` : 'Pull changes',
+            behindCount > 0 ? m.gitSyncPullChangesBehind({ count: behindCount }) : m.gitSyncPullChanges(),
             behindCount
           )
         : renderButton(
             'pull',
             <RiArrowDownLine className="size-4" />,
             <RiLoader4Line className="size-4 animate-spin" />,
-            'Pull',
+            m.gitSyncPull(),
             handlePull,
-            behindCount > 0 ? `Pull changes (${behindCount} behind)` : 'Pull changes',
+            behindCount > 0 ? m.gitSyncPullChangesBehind({ count: behindCount }) : m.gitSyncPullChanges(),
             behindCount
           )}
 
@@ -254,9 +255,9 @@ export const SyncActions: React.FC<SyncActionsProps> = ({
         'push',
         <RiArrowUpLine className="size-4" />,
         <RiLoader4Line className="size-4 animate-spin" />,
-        'Push',
+        m.gitSyncPush(),
         handlePush,
-        aheadCount > 0 ? `Push changes (${aheadCount} ahead)` : 'Push changes',
+        aheadCount > 0 ? m.gitSyncPushChangesAhead({ count: aheadCount }) : m.gitSyncPushChanges(),
         aheadCount
       )}
     </div>

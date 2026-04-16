@@ -4,6 +4,7 @@ import type { SidebarSection } from '@/constants/sidebar';
 import { getSafeStorage } from './utils/safeStorage';
 import { SEMANTIC_TYPOGRAPHY, getTypographyVariable, type SemanticTypographyKey } from '@/lib/typography';
 import type { ShortcutCombo } from '@/lib/shortcuts';
+import type { Locale } from '@/lib/i18n/runtime';
 
 export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files';
 export type RightSidebarTab = 'git' | 'files';
@@ -682,6 +683,10 @@ interface UIStore {
   setShortcutOverride: (actionId: string, combo: ShortcutCombo) => void;
   clearShortcutOverride: (actionId: string) => void;
   resetAllShortcutOverrides: () => void;
+
+  // i18n locale persistence (reactive state lives in useI18nStore)
+  locale: Locale;
+  setLocale: (locale: Locale) => void;
 }
 
 
@@ -691,6 +696,7 @@ export const useUIStore = create<UIStore>()(
       (set, get) => ({
 
         theme: 'system',
+        locale: 'en' as Locale,
         isMultiRunLauncherOpen: false,
         multiRunLauncherPrefillPrompt: '',
         isSidebarOpen: true,
@@ -1709,6 +1715,9 @@ export const useUIStore = create<UIStore>()(
         setReportUsage: (value) => {
           set({ reportUsage: value });
         },
+        setLocale: (locale: Locale) => {
+          set({ locale });
+        },
         viewPagerPage: 'center',
         setViewPagerPage: (page: 'left' | 'center' | 'right') => {
           set({ viewPagerPage: page });
@@ -1896,6 +1905,7 @@ export const useUIStore = create<UIStore>()(
           showMobileSessionStatusBar: state.showMobileSessionStatusBar,
           isMobileSessionStatusBarCollapsed: state.isMobileSessionStatusBarCollapsed,
           shortcutOverrides: state.shortcutOverrides,
+          locale: state.locale,
         })
       }
     ),

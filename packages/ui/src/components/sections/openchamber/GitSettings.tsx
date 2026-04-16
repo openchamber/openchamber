@@ -6,6 +6,7 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { setFilesViewShowGitignored, useFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
+import { m } from '@/lib/i18n/messages';
 
 export const GitSettings: React.FC = () => {
   const settingsGitmojiEnabled = useConfigStore((state) => state.settingsGitmojiEnabled);
@@ -73,7 +74,7 @@ export const GitSettings: React.FC = () => {
         }
 
       } catch (error) {
-        console.warn('Failed to load git settings:', error);
+        console.warn(m.gitFailedLoadSettings(), error);
       } finally {
         setIsLoading(false);
       }
@@ -88,7 +89,7 @@ export const GitSettings: React.FC = () => {
         gitmojiEnabled: enabled,
       });
     } catch (error) {
-      console.warn('Failed to save gitmoji setting:', error);
+      console.warn(m.gitFailedSaveGitmoji(), error);
     }
   }, [setSettingsGitmojiEnabled]);
 
@@ -108,16 +109,16 @@ export const GitSettings: React.FC = () => {
   return (
     <div className="mb-8">
       <div className="mb-1 px-1">
-        <h3 className="typography-ui-header font-medium text-foreground">Git Preferences</h3>
+        <h3 className="typography-ui-header font-medium text-foreground">{m.gitPreferencesTitle()}</h3>
       </div>
 
       <section className="px-2 pb-2 pt-0 space-y-0.5">
         <div className="pt-1 pb-1">
-          <h4 className="typography-ui-header font-medium text-foreground">Changes View</h4>
-          <div role="radiogroup" aria-label="Git changes view mode" className="mt-0.5 space-y-0">
+          <h4 className="typography-ui-header font-medium text-foreground">{m.gitChangesView()}</h4>
+          <div role="radiogroup" aria-label={m.gitChangesViewMode()} className="mt-0.5 space-y-0">
             {[
-              { id: 'flat' as const, label: 'Flat List' },
-              { id: 'tree' as const, label: 'Tree View' },
+              { id: 'flat' as const, label: m.gitChangesFlatList() },
+              { id: 'tree' as const, label: m.gitChangesTreeView() },
             ].map((option) => {
               const selected = gitChangesViewMode === option.id;
               return (
@@ -128,7 +129,7 @@ export const GitSettings: React.FC = () => {
                   aria-pressed={selected}
                   onClick={() => { handleGitChangesViewModeChange(option.id); }}
                   onKeyDown={(event) => {
-                    if (event.key === ' ' || event.key === 'Enter') {
+                    if (event.key === ' ' || event.key === m.commonKeyEnter()) {
                       event.preventDefault();
                       handleGitChangesViewModeChange(option.id);
                     }
@@ -158,7 +159,7 @@ export const GitSettings: React.FC = () => {
             void handleGitmojiChange(!settingsGitmojiEnabled);
           }}
           onKeyDown={(event) => {
-            if (event.key === ' ' || event.key === 'Enter') {
+            if (event.key === ' ' || event.key === m.commonKeyEnter()) {
               event.preventDefault();
               void handleGitmojiChange(!settingsGitmojiEnabled);
             }
@@ -169,9 +170,9 @@ export const GitSettings: React.FC = () => {
             onChange={(checked) => {
               void handleGitmojiChange(checked);
             }}
-            ariaLabel="Enable Gitmoji picker"
+            ariaLabel={m.gitEnableGitmojiAria()}
           />
-          <span className="typography-ui-label text-foreground">Enable Gitmoji Picker</span>
+          <span className="typography-ui-label text-foreground">{m.gitEnableGitmoji()}</span>
         </div>
 
         <div
@@ -181,7 +182,7 @@ export const GitSettings: React.FC = () => {
           aria-pressed={showGitignored}
           onClick={() => setFilesViewShowGitignored(!showGitignored)}
           onKeyDown={(event) => {
-            if (event.key === ' ' || event.key === 'Enter') {
+            if (event.key === ' ' || event.key === m.commonKeyEnter()) {
               event.preventDefault();
               setFilesViewShowGitignored(!showGitignored);
             }
@@ -190,9 +191,9 @@ export const GitSettings: React.FC = () => {
           <Checkbox
             checked={showGitignored}
             onChange={setFilesViewShowGitignored}
-            ariaLabel="Display gitignored files"
+            ariaLabel={m.gitDisplayGitignoredAria()}
           />
-          <span className="typography-ui-label text-foreground">Display Gitignored Files</span>
+          <span className="typography-ui-label text-foreground">{m.gitDisplayGitignored()}</span>
         </div>
       </section>
     </div>

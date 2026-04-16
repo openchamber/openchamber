@@ -18,6 +18,7 @@ import {
   RiNodeTree,
   RiPencilAiLine,
 } from '@remixicon/react';
+import { m } from '@/lib/i18n/messages';
 import { cn } from '@/lib/utils';
 import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, getProjectIconImageUrl } from '@/lib/projectMeta';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
@@ -223,13 +224,13 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                         'inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 hover:text-foreground transition-opacity',
                           mobileVariant ? 'opacity-100' : 'opacity-0 pointer-events-none group-hover/project:opacity-100 group-hover/project:pointer-events-auto group-focus-within/project:opacity-100 group-focus-within/project:pointer-events-auto',
                         )}
-                        aria-label="New worktree"
+                         aria-label={m.siNewWorktree()}
                       >
                         <RiNodeTree className="h-4 w-4" />
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="bottom" sideOffset={4}>
-                      <p>New worktree...</p>
+                      <p>{m.siNewWorktree()}</p>
                     </TooltipContent>
                   </Tooltip>
                 ) : null}
@@ -249,7 +250,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                               ? 'opacity-100'
                               : 'opacity-0 pointer-events-none group-hover/project:opacity-100 group-hover/project:pointer-events-auto group-focus-within/project:opacity-100 group-focus-within/project:pointer-events-auto',
                         )}
-                        aria-label="Project menu"
+                         aria-label={m.siProjectMenu()}
                         onClick={handleMenuTriggerClick}
                       >
                         <RiMore2Line className="h-3.5 w-3.5" />
@@ -259,19 +260,19 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                       {showCreateButtons && !isRepo && !hideDirectoryControls && onNewSession && (
                       <DropdownMenuItem onClick={onNewSession}>
                         <RiAddLine className="mr-1.5 h-4 w-4" />
-                        New Session
+                        {m.siNewSession()}
                       </DropdownMenuItem>
                     )}
                     <DropdownMenuItem onClick={onRenameStart}>
                       <RiPencilAiLine className="mr-1.5 h-4 w-4" />
-                      Rename
+                      {m.siRename()}
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       onClick={onClose}
                       className="text-destructive focus:text-destructive"
                     >
                       <RiCloseLine className="mr-1.5 h-4 w-4" />
-                      Close Project
+                      {m.siCloseProject()}
                     </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
@@ -291,13 +292,13 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                           'inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 transition-opacity',
                           mobileVariant ? 'opacity-100' : 'opacity-0 pointer-events-none group-hover/project:opacity-100 group-hover/project:pointer-events-auto group-focus-within/project:opacity-100 group-focus-within/project:pointer-events-auto',
                         )}
-                        aria-label={isRepo ? 'New draft session' : 'New session'}
+                         aria-label={isRepo ? m.siNewDraftSession() : m.siNewSession()}
                       >
                         <RiAddLine className="h-4 w-4" />
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="bottom" sideOffset={4}>
-                      <p>{isRepo ? 'New draft session' : 'New session'}</p>
+                      <p>{isRepo ? m.siNewDraftSession() : m.siNewSession()}</p>
                     </TooltipContent>
                   </Tooltip>
                 </div>

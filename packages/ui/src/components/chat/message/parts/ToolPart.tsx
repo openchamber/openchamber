@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { RiArrowDownSLine, RiArrowRightSLine, RiExternalLinkLine } from '@remixicon/react';
@@ -26,6 +25,7 @@ import type { ToolPopupContent } from '../types';
 import { ensurePierreThemeRegistered } from '@/lib/shiki/appThemeRegistry';
 import { getDefaultTheme } from '@/lib/theme/themes';
 import type { MessageRecord } from '@/lib/messageCompletion';
+import { m } from '@/lib/i18n/messages';
 
 import {
     formatEditOutput,
@@ -1192,7 +1192,7 @@ const TaskToolSummary: React.FC<{
                         ) : (
                             <RiArrowRightSLine className="h-3.5 w-3.5 flex-shrink-0" />
                         )}
-                        <span className="typography-meta text-foreground/80 font-medium">Output</span>
+                        <span className="typography-meta text-foreground/80 font-medium">{m.tpOutput()}</span>
                     </button>
                     {isOutputExpanded ? (
                         <ToolScrollableSection maxHeightClass="max-h-[50vh]">
@@ -1590,7 +1590,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                 );
             }
 
-            return <div className="typography-meta text-muted-foreground">Awaiting response...</div>;
+            return <div className="typography-meta text-muted-foreground">{m.tpAwaitingResponse()}</div>;
         }
 
         if (part.tool === 'task' && hasStringOutput) {
@@ -1655,7 +1655,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         }
 
         return renderScrollableBlock(
-            <div className="typography-meta text-muted-foreground/70">No output produced</div>,
+            <div className="typography-meta text-muted-foreground/70">{m.tpNoOutputProduced()}</div>,
             { maxHeightClass: 'max-h-60' }
         );
     };

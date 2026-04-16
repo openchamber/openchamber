@@ -19,7 +19,15 @@ const createStubTerminalAPI = (): TerminalAPI => ({
 });
 
 export const createVSCodeAPIs = (): RuntimeAPIs => ({
-  runtime: { platform: 'vscode', isDesktop: false, isVSCode: true, label: 'VS Code Extension' },
+  runtime: {
+    platform: 'vscode',
+    isDesktop: false,
+    isVSCode: true,
+    label: 'VS Code Extension',
+    language: typeof window !== 'undefined' && window.__VSCODE_CONFIG__?.language
+      ? window.__VSCODE_CONFIG__.language
+      : undefined,
+  },
   terminal: createStubTerminalAPI(),
   git: createVSCodeGitAPI(),
   files: createVSCodeFilesAPI(),

@@ -7,6 +7,7 @@ import type { QuestionRequest } from '@/types/question';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessions } from '@/sync/sync-context';
 import * as sessionActions from '@/sync/session-actions';
+import { m } from '@/lib/i18n/messages';
 
 interface QuestionCardProps {
   question: QuestionRequest;
@@ -68,10 +69,10 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
     const isCustom = Boolean(customMode[index]);
     if (isCustom) {
       const value = (customText[index] ?? '').trim();
-      return value || '(no answer)';
+      return value || m.qcNoAnswer();
     }
     const answers = selectedOptions[index] ?? [];
-    return answers.length > 0 ? answers.join(', ') : '(no answer)';
+    return answers.length > 0 ? answers.join(', ') : m.qcNoAnswer();
   }, [customMode, customText, selectedOptions]);
 
   const isMultiple = Boolean(activeQuestion?.multiple);
@@ -196,10 +197,10 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
           <div className="px-2 py-1.5 border-b border-border/20">
             <div className="flex items-center gap-2">
               <RiQuestionLine className="h-3.5 w-3.5 text-primary" />
-              <span className="typography-meta font-medium text-muted-foreground">Input needed</span>
+              <span className="typography-meta font-medium text-muted-foreground">{m.qcInputNeeded()}</span>
               {isFromSubagent ? (
                 <span className="typography-micro text-muted-foreground px-1.5 py-0.5 rounded bg-foreground/5">
-                  From subagent
+                  {m.qcFromSubagent()}
                 </span>
               ) : null}
               {activeHeader ? (
@@ -236,7 +237,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
                       )}
                     >
                       {isSummary ? <RiListCheck3 className="h-3 w-3" /> : null}
-                      {tab.label}
+                      {isSummary ? m.qcSummary() : tab.label}
                     </button>
                   );
                 })}
@@ -248,7 +249,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
               <div className="space-y-2">
                 {questions.map((q, index) => {
                   const answer = getAnswerDisplay(index);
-                  const hasAnswer = answer !== '(no answer)';
+                  const hasAnswer = answer !== m.qcNoAnswer();
                   return (
                     <button
                       key={index}
@@ -256,7 +257,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
                       onClick={() => setActiveTab(String(index))}
                       className="w-full text-left rounded px-1.5 py-1 hover:bg-interactive-hover/20 transition-colors"
                     >
-                      <div className="typography-micro text-muted-foreground">{q.header || `Question ${index + 1}`}</div>
+                      <div className="typography-micro text-muted-foreground">{q.header || m.qcQuestion({ index: index + 1 })}</div>
                       <div className={cn(
                         'typography-meta',
                         hasAnswer ? 'text-foreground' : 'text-muted-foreground/50 italic'
@@ -272,7 +273,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
                 <div className="typography-meta font-medium text-foreground mb-1.5">{activeQuestion.question}</div>
 
                 {isMultiple ? (
-                  <div className="typography-micro text-muted-foreground mb-1.5">Select multiple</div>
+                  <div className="typography-micro text-muted-foreground mb-1.5">{m.qcSelectMultiple()}</div>
                 ) : null}
 
                 <div className="space-y-0.5">
@@ -311,7 +312,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
                                 {option.label}
                               </span>
                               {recommended ? (
-                                <span className="typography-micro text-primary/80">recommended</span>
+                                <span className="typography-micro text-primary/80">{m.qcRecommended()}</span>
                               ) : null}
                             </div>
                             {option.description ? (
@@ -344,7 +345,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
                         'typography-meta',
                         isCustomActive ? 'text-foreground font-medium' : 'text-muted-foreground'
                       )}>
-                        Other…
+                        {m.qcOther()}
                       </span>
                     </div>
                   </button>
@@ -371,7 +372,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
                           el.style.height = `${Math.min(Math.max(el.scrollHeight, minHeight), maxHeight)}px`;
                           setCustomText((prev) => ({ ...prev, [activeIndex]: el.value }));
                         }}
-                        placeholder="Your answer"
+                        placeholder={m.qcYourAnswer()}
                         disabled={isResponding}
                         rows={2}
                         className="w-full bg-transparent border border-border/30 focus:border-primary rounded px-2 py-1 outline-none typography-meta text-foreground placeholder:text-muted-foreground/50 transition-colors resize-none overflow-hidden"
@@ -397,7 +398,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
               )}
             >
               {requiredSatisfied ? <RiCheckLine className="h-3 w-3" /> : <RiArrowRightSLine className="h-3 w-3" />}
-              {requiredSatisfied ? 'Submit' : 'Next'}
+              {requiredSatisfied ? m.qcSubmit() : m.qcNext()}
             </button>
 
             <button
@@ -411,7 +412,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
               )}
             >
               <RiCloseLine className="h-3 w-3" />
-              Dismiss
+              {m.qcDismiss()}
             </button>
 
             {isResponding ? (

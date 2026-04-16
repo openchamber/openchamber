@@ -9,6 +9,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { isTauriShell } from '@/lib/desktop';
+import { m } from '@/lib/i18n/messages';
 
 type ConnectionState = 'idle' | 'testing' | 'success' | 'error';
 
@@ -35,11 +36,11 @@ function getProbeStatusMessage(status: ProbeStatus): string | null {
     case 'ok':
       return null; // Success is shown separately
     case 'auth':
-      return 'Server requires authentication. You can still connect, but may need to provide credentials.';
+      return m.obServerRequiresAuth();
     case 'wrong-service':
-      return 'Server responded but is not running OpenChamber. Verify the address points to an OpenChamber server.';
+      return m.obWrongService();
     case 'unreachable':
-      return 'Server is unreachable. Check your network connection and verify the server address.';
+      return m.obServerUnreachable();
     default:
       return null;
   }
@@ -89,7 +90,7 @@ export function RemoteConnectionForm({
       setProbeResult(result);
       setState(result.status === 'ok' ? 'success' : 'error');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Connection test failed');
+      setError(err instanceof Error ? err.message : m.obConnectionTestFailed());
       setState('error');
     }
   }, [normalizedUrl]);
@@ -144,7 +145,7 @@ export function RemoteConnectionForm({
         await tauri?.core?.invoke?.('desktop_restart');
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save connection');
+      setError(err instanceof Error ? err.message : m.obFailedToSaveConnection());
       setState('error');
     }
   }, [normalizedUrl, label, onConnect]);
@@ -164,47 +165,45 @@ export function RemoteConnectionForm({
         {showBackButton && (
           <div className="flex items-center">
             <Button variant="ghost" onClick={onBack} className="p-0 text-muted-foreground hover:text-foreground">
-              &larr; Back
+              &larr; {m.obBack()}
             </Button>
           </div>
         )}
 
         <div className="space-y-2 text-center">
           <h1 className="typography-ui-header text-xl font-semibold text-foreground">
-            {isRecoveryMode ? 'Connect to a Different Server' : 'Connect to Remote Server'}
+            {isRecoveryMode ? m.obConnectToDifferentServer() : m.obConnectToRemoteServer()}
           </h1>
           <p className="text-muted-foreground text-sm">
-            {isRecoveryMode
-              ? 'Enter the address of an OpenChamber server to connect to.'
-              : 'Enter the address of an OpenChamber server to connect to.'}
+            {m.obRemoteServerDescription()}
           </p>
         </div>
 
         <div className="space-y-4">
           <div className="space-y-2">
             <label htmlFor="remote-url" className="text-sm text-foreground">
-              Server Address
+              {m.obServerAddress()}
             </label>
             <Input
               id="remote-url"
               type="url"
               value={url}
               onChange={handleUrlChange}
-              placeholder="https://your-server.example.com:4096"
+              placeholder={m.obServerAddressPlaceholder()}
               disabled={isTesting}
             />
           </div>
 
           <div className="space-y-2">
             <label htmlFor="remote-label" className="text-sm text-foreground">
-              Name (optional)
+              {m.obServerNameOptional()}
             </label>
             <Input
               id="remote-label"
               type="text"
               value={label}
               onChange={handleLabelChange}
-              placeholder="My Remote Server"
+              placeholder={m.obServerNamePlaceholder()}
               disabled={isTesting}
             />
           </div>
@@ -219,7 +218,7 @@ export function RemoteConnectionForm({
               color: 'var(--status-success)',
             }}
           >
-            Connected successfully ({probeResult.latencyMs}ms)
+            {m.obConnectedSuccessfully({ latencyMs: probeResult.latencyMs })}
           </div>
         )}
 
@@ -232,7 +231,7 @@ export function RemoteConnectionForm({
               color: 'var(--status-warning)',
             }}
           >
-            Server requires authentication. You can still connect.
+            {m.obServerRequiresAuthShort()}
           </div>
         )}
 
@@ -246,13 +245,13 @@ export function RemoteConnectionForm({
             }}
           >
             <div>
-              <div className="font-semibold mb-1">Connection Failed</div>
+              <div className="font-semibold mb-1">{m.obConnectionFailed()}</div>
               <div className="opacity-90">{probeMessage}</div>
             </div>
             <div className="text-xs opacity-80">
               {probeResult.status === 'unreachable'
-                ? 'Suggestions: Check the server address, verify the server is running, or check your network connection.'
-                : 'Suggestions: Verify the URL points to an OpenChamber server, or contact the server administrator.'}
+                ? m.obSuggestionsUnreachable()
+                : m.obSuggestionsWrongService()}
             </div>
           </div>
         )}
@@ -276,20 +275,20 @@ export function RemoteConnectionForm({
             onClick={handleTest}
             disabled={!canTest}
           >
-            {isTesting ? 'Testing\u2026' : 'Test Connection'}
+            {isTesting ? m.obTesting() : m.obTestConnection()}
           </Button>
           <Button
             onClick={handleConnect}
             disabled={!canConnect}
           >
-            Connect &amp; Restart
+            {m.obConnectAndRestart()}
           </Button>
         </div>
 
         {/* Suggested actions when connection is blocked */}
         {isBlocking && (
           <div className="flex flex-col gap-2 pt-2 border-t border-border">
-            <div className="text-xs text-muted-foreground text-center">What would you like to do?</div>
+            <div className="text-xs text-muted-foreground text-center">{m.obWhatWouldYouLikeToDo()}</div>
             <div className="flex gap-2">
               <Button
                 variant="outline"
@@ -297,7 +296,7 @@ export function RemoteConnectionForm({
                 onClick={onBack}
                 className="flex-1"
               >
-                Choose Different Server
+                {m.obChooseDifferentServer()}
               </Button>
               {!isRecoveryMode && onSwitchToLocal && (
                 <Button
@@ -306,7 +305,7 @@ export function RemoteConnectionForm({
                   onClick={onSwitchToLocal}
                   className="flex-1"
                 >
-                  Use Local Instead
+                  {m.obUseLocalInstead()}
                 </Button>
               )}
             </div>

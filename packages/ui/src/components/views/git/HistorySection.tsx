@@ -15,6 +15,7 @@ import {
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { HistoryCommitRow } from './HistoryCommitRow';
 import type { GitLogEntry, CommitFileEntry } from '@/lib/api/types';
+import { m } from '@/lib/i18n/messages';
 
 const LOG_SIZE_OPTIONS = [
   { label: '25 commits', value: 25 },
@@ -98,7 +99,7 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
       {log.all.length === 0 ? (
         <div className="flex h-full items-center justify-center p-4">
           <p className="typography-ui-label text-muted-foreground">
-            No commits found
+            {m.hsNoCommitsFound()}
           </p>
         </div>
       ) : hasSplitHistory && branchDivider ? (
@@ -148,7 +149,7 @@ export const HistorySection: React.FC<HistorySectionProps> = ({
       className="rounded-xl border border-border/60 bg-background/70 overflow-hidden"
     >
       <CollapsibleTrigger className="flex w-full items-center justify-between px-3 h-10 hover:bg-transparent">
-        <h3 className="typography-ui-header font-semibold text-foreground">History</h3>
+        <h3 className="typography-ui-header font-semibold text-foreground">{m.hsHeadingHistory()}</h3>
         <div className="flex items-center gap-2">
           {isOpen && (
             <div

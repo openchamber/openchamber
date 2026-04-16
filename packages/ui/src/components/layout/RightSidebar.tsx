@@ -2,6 +2,7 @@ import React from 'react';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 import { isDesktopShell, startDesktopWindowDrag } from '@/lib/desktop';
+import { rightSidebarResizePanel } from '@/lib/i18n/messages';
 
 export const RIGHT_SIDEBAR_CONTENT_WIDTH = 420;
 const RIGHT_SIDEBAR_MIN_WIDTH = 400;
@@ -169,7 +170,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ isOpen, children, cl
           onPointerCancel={handlePointerEnd}
           role="separator"
           aria-orientation="vertical"
-          aria-label="Resize right panel"
+            aria-label={rightSidebarResizePanel()}
         />
       )}
       <div

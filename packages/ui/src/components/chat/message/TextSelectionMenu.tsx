@@ -6,6 +6,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { RiChatNewLine, RiAddLine, RiFileCopyLine } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import { copyTextToClipboard } from '@/lib/clipboard';
+import { actionCopy, m } from '@/lib/i18n/messages';
 
 interface TextSelectionMenuProps {
   containerRef: React.RefObject<HTMLElement | null>;
@@ -488,7 +489,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
           type="button"
         >
           <RiAddLine className="h-5 w-5" />
-          <span>Add to chat</span>
+          <span>{m.chatAddToChat()}</span>
         </button>
         
         <button
@@ -503,7 +504,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
           type="button"
         >
           <RiChatNewLine className="h-5 w-5" />
-          <span>New session</span>
+          <span>{m.chatNewSessionMenu()}</span>
         </button>
         
         <button
@@ -518,7 +519,7 @@ export const TextSelectionMenu: React.FC<TextSelectionMenuProps> = ({ containerR
           type="button"
         >
           <RiFileCopyLine className="h-5 w-5" />
-          <span>Copy</span>
+          <span>{actionCopy()}</span>
         </button>
       </div>,
       document.body

@@ -103,10 +103,11 @@ const ShortcutsSectionContent: React.FC = () => {
     return <KeyboardShortcutsSettings />;
 };
 
-// Visual section: Theme Mode, Font Size, Spacing, Input Bar Offset (mobile), Nav Rail
+// Visual section: Language, Theme Mode, Font Size, Spacing, Input Bar Offset (mobile), Nav Rail
 const VisualSectionContent: React.FC = () => {
     const isVSCode = isVSCodeRuntime();
     return <OpenChamberVisualSettings visibleSettings={[
+        'language',
         'theme',
         'pwaInstallName',
         'fontSize',

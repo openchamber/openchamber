@@ -11,6 +11,7 @@ import {
   type DragEndEvent,
 } from '@dnd-kit/core';
 import { RiStickyNoteLine } from '@remixicon/react';
+import { m } from '@/lib/i18n/messages';
 
 export const DraggableSessionRow: React.FC<{
   sessionId: string;
@@ -69,7 +70,7 @@ export const SessionFolderDndScope: React.FC<{
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
   );
   const [activeDragId, setActiveDragId] = React.useState<string | null>(null);
-  const [activeDragTitle, setActiveDragTitle] = React.useState<string>('Session');
+  const [activeDragTitle, setActiveDragTitle] = React.useState<string>(m.sfdSession());
   const [activeDragWidth, setActiveDragWidth] = React.useState<number | null>(null);
   const [activeDragHeight, setActiveDragHeight] = React.useState<number | null>(null);
 
@@ -98,7 +99,7 @@ export const SessionFolderDndScope: React.FC<{
         const data = event.active.data.current as { type?: string; sessionId?: string; sessionTitle?: string } | undefined;
         if (data?.type === 'session' && data.sessionId) {
           setActiveDragId(data.sessionId);
-          setActiveDragTitle(data.sessionTitle ?? 'Session');
+          setActiveDragTitle(data.sessionTitle ?? m.sfdSession());
           const width = event.active.rect.current.initial?.width;
           const height = event.active.rect.current.initial?.height;
           setActiveDragWidth(typeof width === 'number' ? width : null);

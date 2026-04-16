@@ -7,6 +7,7 @@ import { useDesktopSshStore } from '@/stores/useDesktopSshStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { toast } from '@/components/ui';
 import type { DesktopSshInstance } from '@/lib/desktopSsh';
+import * as m from '@/lib/i18n/messages';
 
 type RemoteInstancesSidebarProps = {
   onItemSelect?: () => void;
@@ -31,23 +32,23 @@ const isPortInUseError = (error: unknown): boolean => {
 const phaseLabel = (phase?: string): string => {
   switch (phase) {
     case 'ready':
-      return 'Ready';
+      return m.riSshInstancesStatusReadyShort();
     case 'error':
-      return 'Error';
+      return m.riSshInstancesStatusErrorShort();
     case 'degraded':
-      return 'Reconnect';
+      return m.riSshInstancesStatusReconnectShort();
     case 'installing':
-      return 'Installing';
+      return m.riSshInstancesStatusInstallingShort();
     case 'updating':
-      return 'Updating';
+      return m.riSshInstancesStatusUpdatingShort();
     case 'forwarding':
-      return 'Forwarding';
+      return m.riSshInstancesStatusForwardingShort();
     case 'server_starting':
-      return 'Starting';
+      return m.riSshInstancesStatusStartingShort();
     case 'master_connecting':
-      return 'Connecting';
+      return m.riSshInstancesStatusConnectingShort();
     default:
-      return 'Idle';
+      return m.riSshInstancesStatusIdleShort();
   }
 };
 
@@ -89,11 +90,11 @@ export const RemoteInstancesSidebar: React.FC<RemoteInstancesSidebarProps> = ({ 
   const handleAdd = React.useCallback(async () => {
     const id = makeId();
     try {
-      await createFromCommand(id, 'ssh user@example.com', 'New SSH Instance');
+      await createFromCommand(id, 'ssh user@example.com', m.riSshInstancesNewSshInstance());
       setSelectedId(id);
       onItemSelect?.();
     } catch (error) {
-      toast.error('Failed to create SSH instance', {
+      toast.error(m.riSshInstancesFailedCreate(), {
         description: error instanceof Error ? error.message : String(error),
       });
     }
@@ -108,7 +109,7 @@ export const RemoteInstancesSidebar: React.FC<RemoteInstancesSidebarProps> = ({ 
         throw error;
       }
 
-      const allow = window.confirm('Local port is already in use. Pick a random free local port and retry?');
+      const allow = window.confirm(m.riSshInstancesLocalPortInUse());
       if (!allow) {
         throw error;
       }
@@ -123,7 +124,7 @@ export const RemoteInstancesSidebar: React.FC<RemoteInstancesSidebarProps> = ({ 
 
       await upsertInstance(nextInstance);
       await connect(nextInstance.id);
-      toast.success('Retried with a random local port');
+      toast.success(m.riSshInstancesRetriedRandomPort());
     }
   }, [connect, upsertInstance]);
 
@@ -132,16 +133,16 @@ export const RemoteInstancesSidebar: React.FC<RemoteInstancesSidebarProps> = ({ 
       variant="background"
       header={
         <div className="border-b px-3 pt-4 pb-3">
-          <h2 className="text-base font-semibold text-foreground mb-3">Remote Instances</h2>
+          <h2 className="text-base font-semibold text-foreground mb-3">{m.riSshInstancesManageTitle()}</h2>
           <div className="flex items-center justify-between gap-2">
-            <span className="typography-meta text-muted-foreground">Total {instances.length}</span>
+            <span className="typography-meta text-muted-foreground">{m.riSshInstancesTotal({ count: instances.length })}</span>
             <Button
               type="button"
               variant="ghost"
               size="icon"
               className="h-7 w-7 -my-1 text-muted-foreground"
               onClick={() => void handleAdd()}
-              aria-label="Add SSH instance"
+              aria-label={m.riSshInstancesAddAria()}
             >
               <RiAddLine className="size-4" />
             </Button>
@@ -169,31 +170,31 @@ export const RemoteInstancesSidebar: React.FC<RemoteInstancesSidebarProps> = ({ 
             }}
             actions={[
               {
-                label: isReady ? 'Disconnect' : 'Connect',
+                label: isReady ? m.commonKeyDisconnect() : m.commonKeyConnect(),
                 icon: isReady ? RiStopLine : RiPlug2Line,
                 onClick: () => {
                   const op = isReady ? disconnect(instance.id) : connectWithPortRecovery(instance);
                   void op.catch((error) => {
-                    toast.error(`Failed to ${isReady ? 'disconnect' : 'connect'} instance`, {
+                    toast.error(isReady ? m.riSshInstancesFailedDisconnect() : m.riSshInstancesFailedConnect(), {
                       description: error instanceof Error ? error.message : String(error),
                     });
                   });
                 },
               },
               {
-                label: 'Retry',
+                label: m.riSshInstancesRetry(),
                 icon: RiRefreshLine,
                 onClick: () => {
                   if (!canRetry) return;
                   void retry(instance.id).catch((error) => {
-                    toast.error('Failed to retry connection', {
+                    toast.error(m.riSshInstancesRetryFailed(), {
                       description: error instanceof Error ? error.message : String(error),
                     });
                   });
                 },
               },
               {
-                label: 'Remove',
+                label: m.riSshInstancesRemove(),
                 icon: RiDeleteBinLine,
                 destructive: true,
                 onClick: () => {
@@ -203,7 +204,7 @@ export const RemoteInstancesSidebar: React.FC<RemoteInstancesSidebarProps> = ({ 
                       setSelectedId(next?.id || null);
                     }
                   }).catch((error) => {
-                    toast.error('Failed to remove instance', {
+                    toast.error(m.riSshInstancesFailedRemove(), {
                       description: error instanceof Error ? error.message : String(error),
                     });
                   });

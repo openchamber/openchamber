@@ -26,6 +26,7 @@ import {
     RiAlertLine,
 } from '@remixicon/react';
 import type { BrowserVoiceStatus } from '@/hooks/useBrowserVoice';
+import { m } from '@/lib/i18n/messages';
 
 export interface VoiceStatusIndicatorProps {
     /** Current voice status */
@@ -123,7 +124,7 @@ export function VoiceStatusIndicator({
                 {conversationMode && status === 'idle' && (
                     <span
                         className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-green-500 rounded-full"
-                        aria-label="Conversation mode active"
+                        aria-label={m.vsiConversationModeActive()}
                     />
                 )}
             </div>

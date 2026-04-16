@@ -1,5 +1,6 @@
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
+import { m } from '@/lib/i18n/messages';
 import {
   RiAddLine,
   RiArchiveLine,
@@ -277,21 +278,21 @@ export function SessionGroupSection(props: Props): React.ReactNode {
   const showBranchSubtitle = !prIndicator && !group.isMain && Boolean(group.branch);
   const prVisualState = prIndicator?.visualState ?? null;
   const checksSummary = prIndicator && prIndicator.state === 'open' && prIndicator.checks
-    ? `${prIndicator.checks.success}/${prIndicator.checks.total} checks passed`
+    ? m.sgChecksPassed({ success: prIndicator.checks.success, total: prIndicator.checks.total })
     : null;
   const checksTail = prIndicator && prIndicator.state === 'open' && prIndicator.checks
     ? [
-      prIndicator.checks.failure > 0 ? `${prIndicator.checks.failure} failing` : null,
-      prIndicator.checks.pending > 0 ? `${prIndicator.checks.pending} pending` : null,
+      prIndicator.checks.failure > 0 ? m.sgFailing({ count: prIndicator.checks.failure }) : null,
+      prIndicator.checks.pending > 0 ? m.sgPending({ count: prIndicator.checks.pending }) : null,
     ].filter((item): item is string => Boolean(item)).join(', ')
     : null;
   const mergeabilityLabel = prIndicator && prIndicator.state === 'open'
     ? (prIndicator.mergeableState === 'blocked' || prIndicator.mergeableState === 'dirty'
-        ? 'Conflicts or blocked'
-        : (prIndicator.mergeableState === 'clean' || prIndicator.canMerge === true ? 'Mergeable' : null))
+        ? m.sgConflictsOrBlocked()
+        : (prIndicator.mergeableState === 'clean' || prIndicator.canMerge === true ? m.sgMergeable() : null))
     : null;
   const mergeStateLabel = prIndicator && prIndicator.state === 'open' && prIndicator.mergeableState
-    ? `Merge state: ${prIndicator.mergeableState}`
+    ? m.sgMergeState({ state: prIndicator.mergeableState })
     : null;
   const baseBranchLabel = prIndicator?.base ?? null;
   const headBranchLabel = prIndicator?.head ?? null;
@@ -303,20 +304,20 @@ export function SessionGroupSection(props: Props): React.ReactNode {
     }
     switch (prIndicator.visualState) {
       case 'merged':
-        return { label: 'Merged', color: 'var(--pr-merged)' };
+        return { label: m.sgMerged(), color: 'var(--pr-merged)' };
       case 'open':
         return (prIndicator.canMerge === true || prIndicator.mergeableState === 'clean' || prIndicator.checks?.state === 'success')
-          ? { label: 'Ready to merge', color: 'var(--pr-open)' }
-          : { label: 'PR open', color: 'var(--pr-open)' };
+          ? { label: m.sgReadyToMerge(), color: 'var(--pr-open)' }
+          : { label: m.sgPrOpen(), color: 'var(--pr-open)' };
       case 'blocked':
         return {
-          label: prIndicator.mergeableState === 'dirty' ? 'Merge conflicts' : 'Merge blocked',
+          label: prIndicator.mergeableState === 'dirty' ? m.sgMergeConflicts() : m.sgMergeBlocked(),
           color: 'var(--pr-blocked)',
         };
       case 'draft':
-        return { label: 'Draft PR', color: 'var(--pr-draft)' };
+        return { label: m.sgDraftPr(), color: 'var(--pr-draft)' };
       case 'closed':
-        return { label: 'Closed', color: 'var(--pr-closed)' };
+        return { label: m.sgClosed(), color: 'var(--pr-closed)' };
       default:
         return null;
     }
@@ -448,7 +449,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
       {visibleSessions.map((node) => renderSessionNode(node, 0, group.directory, projectId, group.isArchivedBucket === true))}
       {totalSessions === 0 && allFoldersForGroup.length === 0 ? (
         <div className="py-1 text-left typography-micro text-muted-foreground">
-          {group.isArchivedBucket ? 'No archived sessions yet.' : 'No sessions in this workspace yet.'}
+          {group.isArchivedBucket ? m.sgNoArchivedSessionsYet() : m.sgNoSessionsInThisWorkspaceYet()}
         </div>
       ) : null}
       {remainingCount > 0 && !isExpanded ? (
@@ -457,7 +458,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
           onClick={() => toggleGroupSessionLimit(groupKey)}
           className="mt-0.5 flex items-center justify-start rounded-md px-1.5 py-0.5 text-left text-xs text-muted-foreground/70 leading-tight hover:text-foreground hover:underline"
         >
-          Show {remainingCount} more {remainingCount === 1 ? 'session' : 'sessions'}
+          {m.sgShowMoreSessions({ count: remainingCount })}
         </button>
       ) : null}
       {isExpanded && totalSessions > maxVisible ? (
@@ -466,7 +467,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
           onClick={() => toggleGroupSessionLimit(groupKey)}
           className="mt-0.5 flex items-center justify-start rounded-md px-1.5 py-0.5 text-left text-xs text-muted-foreground/70 leading-tight hover:text-foreground hover:underline"
         >
-          Show fewer sessions
+          {m.sgShowFewerSessions()}
         </button>
       ) : null}
     </SessionFolderDndScope>
@@ -491,7 +492,7 @@ export function SessionGroupSection(props: Props): React.ReactNode {
             onToggleCollapsedGroup(groupKey);
           }
         }}
-        aria-label={isCollapsed ? `Expand ${group.label}` : `Collapse ${group.label}`}
+        aria-label={isCollapsed ? m.sgExpand({ label: group.label }) : m.sgCollapse({ label: group.label })}
         aria-expanded={!isCollapsed}
       >
         <div
@@ -661,12 +662,12 @@ export function SessionGroupSection(props: Props): React.ReactNode {
                     });
                   }}
                   className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-                  aria-label={`Delete archived sessions in ${group.label}`}
+                  aria-label={m.sgDeleteArchivedSessionsIn({ label: group.label })}
                 >
                   <RiDeleteBinLine className="h-4 w-4" />
                 </button>
               </TooltipTrigger>
-              <TooltipContent side="bottom" sideOffset={4}><p>Delete archived sessions</p></TooltipContent>
+              <TooltipContent side="bottom" sideOffset={4}><p>{m.sgDeleteArchivedSessions()}</p></TooltipContent>
             </Tooltip>
           </div>
         ) : null}
@@ -685,12 +686,12 @@ export function SessionGroupSection(props: Props): React.ReactNode {
                     });
                   }}
                   className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-                  aria-label={`Delete ${group.label}`}
+                  aria-label={m.sgDelete({ label: group.label })}
                 >
                   <RiDeleteBinLine className="h-4 w-4" />
                 </button>
               </TooltipTrigger>
-              <TooltipContent side="bottom" sideOffset={4}><p>Delete worktree</p></TooltipContent>
+              <TooltipContent side="bottom" sideOffset={4}><p>{m.sgDeleteWorktree()}</p></TooltipContent>
             </Tooltip>
           </div>
         ) : null}
@@ -708,15 +709,15 @@ export function SessionGroupSection(props: Props): React.ReactNode {
                     openNewSessionDraft({ directoryOverride: group.directory });
                   }}
                   className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-                   aria-label={`New draft session in ${group.label}`}
+                   aria-label={m.sgNewDraftSessionIn({ label: group.label })}
                  >
                    <RiAddLine className="h-4 w-4" />
                  </button>
                </TooltipTrigger>
-               <TooltipContent side="bottom" sideOffset={4}><p>New draft session</p></TooltipContent>
-             </Tooltip>
-           </div>
-         ) : null}
+               <TooltipContent side="bottom" sideOffset={4}><p>{m.sgNewDraftSession()}</p></TooltipContent>
+            </Tooltip>
+          </div>
+        ) : null}
       </div>
       {!isCollapsed ? <div className={cn('oc-group-body', groupBodyPaddingClass)}>{body}</div> : null}
     </div>

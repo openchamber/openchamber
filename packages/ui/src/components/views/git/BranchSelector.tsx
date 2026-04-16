@@ -24,6 +24,7 @@ import {
 } from '@/components/ui/command';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { GitRemote } from '@/lib/api/types';
+import { m } from '@/lib/i18n/messages';
 
 interface BranchInfo {
   ahead?: number;
@@ -181,15 +182,15 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
             </Button>
           </DropdownMenuTrigger>
         </TooltipTrigger>
-        <TooltipContent sideOffset={8}>
-          Current branch
-        </TooltipContent>
+          <TooltipContent sideOffset={8}>
+            {m.bsTooltipCurrentBranch()}
+          </TooltipContent>
       </Tooltip>
 
       <DropdownMenuContent align="start" className="w-72 p-0 max-h-[60vh] flex flex-col">
         <Command className="h-full min-h-0">
           <CommandInput
-            placeholder="Search branches..."
+            placeholder={m.bsPlaceholderSearchBranches()}
             value={search}
             onValueChange={setSearch}
           />
@@ -197,13 +198,13 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
             scrollbarClassName="overlay-scrollbar--flush overlay-scrollbar--dense overlay-scrollbar--zero"
             disableHorizontal
           >
-            <CommandEmpty>No branches found.</CommandEmpty>
+            <CommandEmpty>{m.bsEmptyNoBranchesFound()}</CommandEmpty>
 
             <CommandGroup>
               {showRemoteSelect ? (
                 // Remote selection step
                 <div className="px-2 py-1.5">
-                  <div className="flex items-center gap-2 mb-2">
+                   <div className="flex items-center gap-2 mb-2">
                     <button
                       type="button"
                       onClick={handleBackFromRemoteSelect}
@@ -213,7 +214,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
                       <RiArrowLeftLine className="size-4" />
                     </button>
                     <span className="typography-meta text-muted-foreground">
-                      Push <span className="text-foreground font-medium">{sanitizedNewBranch}</span> to:
+                      {m.bsPushBranchTo({ branchName: sanitizedNewBranch })}
                     </span>
                   </div>
                   <div className="flex flex-col gap-1">
@@ -238,29 +239,29 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
                     ))}
                   </div>
                 </div>
-              ) : !showCreate ? (
+               ) : !showCreate ? (
                 <CommandItem onSelect={handleShowCreate}>
                   <RiAddLine className="size-4" />
-                  <span>Create new branch...</span>
+                  <span>{m.bsCreateNewBranch()}</span>
                 </CommandItem>
               ) : (
                 <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg">
-                  <input
-                    ref={createInputRef}
-                    placeholder="New branch name"
-                    value={newBranchName}
-                    onChange={(e) => setNewBranchName(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        handleCreate();
-                      } else if (e.key === 'Escape') {
-                        e.preventDefault();
-                        handleCancelCreate();
-                      }
-                    }}
-                    className="flex-1 min-w-0 bg-transparent typography-meta outline-none placeholder:text-muted-foreground"
-                  />
+                   <input
+                     ref={createInputRef}
+                     placeholder={m.bsPlaceholderNewBranchName()}
+                     value={newBranchName}
+                     onChange={(e) => setNewBranchName(e.target.value)}
+                     onKeyDown={(e) => {
+                       if (e.key === 'Enter') {
+                         e.preventDefault();
+                         handleCreate();
+                       } else if (e.key === 'Escape') {
+                         e.preventDefault();
+                         handleCancelCreate();
+                       }
+                     }}
+                     className="flex-1 min-w-0 bg-transparent typography-meta outline-none placeholder:text-muted-foreground"
+                   />
                   <button
                     type="button"
                     onClick={handleCreate}
@@ -287,56 +288,56 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
 
             <CommandSeparator />
 
-            <CommandGroup heading="Local branches">
-              {filteredLocal.map((branch) => (
-                <CommandItem
-                  key={`local-${branch}`}
-                  onSelect={() => handleCheckout(branch)}
-                >
-                  <span className="flex flex-1 flex-col">
-                    <span className="typography-ui-label text-foreground">
-                      {branch}
-                    </span>
-                    {(branchInfo?.[branch]?.ahead || branchInfo?.[branch]?.behind) && (
-                      <span className="typography-micro text-muted-foreground">
-                        {branchInfo[branch].ahead || 0} ahead ·{' '}
-                        {branchInfo[branch].behind || 0} behind
-                      </span>
-                    )}
-                  </span>
-                  {currentBranch === branch && (
-                    <span className="typography-micro text-primary">Current</span>
-                  )}
-                </CommandItem>
-              ))}
-              {filteredLocal.length === 0 && (
-                <CommandItem disabled className="justify-center">
-                  <span className="typography-meta text-muted-foreground">
-                    No local branches
-                  </span>
-                </CommandItem>
-              )}
-            </CommandGroup>
+             <CommandGroup heading={m.bsHeadingLocalBranches()}>
+               {filteredLocal.map((branch) => (
+                 <CommandItem
+                   key={`local-${branch}`}
+                   onSelect={() => handleCheckout(branch)}
+                 >
+                   <span className="flex flex-1 flex-col">
+                     <span className="typography-ui-label text-foreground">
+                       {branch}
+                     </span>
+                     {(branchInfo?.[branch]?.ahead || branchInfo?.[branch]?.behind) && (
+                       <span className="typography-micro text-muted-foreground">
+                         {branchInfo[branch].ahead || 0} {m.bsAhead()} ·{' '}
+                         {branchInfo[branch].behind || 0} {m.bsBehind()}
+                       </span>
+                     )}
+                   </span>
+                   {currentBranch === branch && (
+                     <span className="typography-micro text-primary">{m.bsLabelCurrent()}</span>
+                   )}
+                 </CommandItem>
+               ))}
+               {filteredLocal.length === 0 && (
+                 <CommandItem disabled className="justify-center">
+                   <span className="typography-meta text-muted-foreground">
+                     {m.bsEmptyNoLocalBranches()}
+                   </span>
+                 </CommandItem>
+               )}
+             </CommandGroup>
 
-            <CommandSeparator />
+             <CommandSeparator />
 
-            <CommandGroup heading="Remote branches">
-              {filteredRemote.map((branch) => (
-                <CommandItem
-                  key={`remote-${branch}`}
-                  onSelect={() => handleCheckout(branch)}
-                >
-                  <span className="typography-ui-label text-foreground">{branch}</span>
-                </CommandItem>
-              ))}
-              {filteredRemote.length === 0 && (
-                <CommandItem disabled className="justify-center">
-                  <span className="typography-meta text-muted-foreground">
-                    No remote branches
-                  </span>
-                </CommandItem>
-              )}
-            </CommandGroup>
+             <CommandGroup heading={m.bsHeadingRemoteBranches()}>
+               {filteredRemote.map((branch) => (
+                 <CommandItem
+                   key={`remote-${branch}`}
+                   onSelect={() => handleCheckout(branch)}
+                 >
+                   <span className="typography-ui-label text-foreground">{branch}</span>
+                 </CommandItem>
+               ))}
+               {filteredRemote.length === 0 && (
+                 <CommandItem disabled className="justify-center">
+                   <span className="typography-meta text-muted-foreground">
+                     {m.bsEmptyNoRemoteBranches()}
+                   </span>
+                 </CommandItem>
+               )}
+             </CommandGroup>
 
           </CommandList>
         </Command>

@@ -22,6 +22,7 @@ import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
 import type { ProjectRef } from '@/lib/openchamberConfig';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { ProjectNotesTodoPanel } from '../ProjectNotesTodoPanel';
+import { m } from '@/lib/i18n/messages';
 
 type Props = {
   hideDirectoryControls: boolean;
@@ -95,12 +96,12 @@ export function SidebarHeader(props: Props): React.ReactNode {
                     type="button"
                     onClick={handleOpenDirectoryDialog}
                     className={headerActionButtonClass}
-                    aria-label="Add project"
+                    aria-label={m.sidebarHeaderAddProject()}
                   >
                     <RiFolderAddLine className={headerActionIconClass} />
                   </button>
                 </TooltipTrigger>
-                <TooltipContent side="bottom" sideOffset={4}><p>Add project</p></TooltipContent>
+                <TooltipContent side="bottom" sideOffset={4}><p>{m.sidebarHeaderAddProject()}</p></TooltipContent>
               </Tooltip>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -108,12 +109,12 @@ export function SidebarHeader(props: Props): React.ReactNode {
                     type="button"
                     onClick={handleNewSession}
                     className={headerActionButtonClass}
-                    aria-label="New session"
+                    aria-label={m.sidebarHeaderNewSession()}
                   >
                     <RiChatNewLine className={headerActionIconClass} />
                   </button>
                 </TooltipTrigger>
-                <TooltipContent side="bottom" sideOffset={4}><p>New session</p></TooltipContent>
+                <TooltipContent side="bottom" sideOffset={4}><p>{m.sidebarHeaderNewSession()}</p></TooltipContent>
               </Tooltip>
             </div>
 
@@ -124,13 +125,13 @@ export function SidebarHeader(props: Props): React.ReactNode {
                     type="button"
                     onClick={openMultiRunLauncher}
                     className={headerActionButtonClass}
-                    aria-label="New multi-run"
+                    aria-label={m.sidebarHeaderNewMultiRun()}
                     disabled={!canOpenMultiRun}
                   >
                     <ArrowsMerge className={headerActionIconClass} />
                   </button>
                 </TooltipTrigger>
-                <TooltipContent side="bottom" sideOffset={4}><p>New multi-run</p></TooltipContent>
+                <TooltipContent side="bottom" sideOffset={4}><p>{m.sidebarHeaderNewMultiRun()}</p></TooltipContent>
               </Tooltip>
 
               {useMobileNotesPanel ? (
@@ -140,13 +141,13 @@ export function SidebarHeader(props: Props): React.ReactNode {
                       type="button"
                       onClick={() => setProjectNotesPanelOpen(true)}
                       className={headerActionButtonClass}
-                      aria-label="Project notes"
+                      aria-label={m.sidebarHeaderProjectNotes()}
                       disabled={!activeProjectRefForHeader}
                     >
                       <RiStickyNoteLine className={headerActionIconClass} />
                     </button>
                   </TooltipTrigger>
-                  <TooltipContent side="bottom" sideOffset={4}><p>Project notes</p></TooltipContent>
+                  <TooltipContent side="bottom" sideOffset={4}><p>{m.sidebarHeaderProjectNotes()}</p></TooltipContent>
                 </Tooltip>
               ) : (
                 <DropdownMenu open={projectNotesPanelOpen} onOpenChange={setProjectNotesPanelOpen} modal={false}>
@@ -156,14 +157,14 @@ export function SidebarHeader(props: Props): React.ReactNode {
                         <button
                           type="button"
                           className={headerActionButtonClass}
-                          aria-label="Project notes"
+                          aria-label={m.sidebarHeaderProjectNotes()}
                           disabled={!activeProjectRefForHeader}
                         >
                           <RiStickyNoteLine className={headerActionIconClass} />
                         </button>
                       </DropdownMenuTrigger>
                     </TooltipTrigger>
-                    <TooltipContent side="bottom" sideOffset={4}><p>Project notes</p></TooltipContent>
+                    <TooltipContent side="bottom" sideOffset={4}><p>{m.sidebarHeaderProjectNotes()}</p></TooltipContent>
                   </Tooltip>
                   <DropdownMenuContent align="start" className="w-[420px] max-w-[min(92vw,420px)] p-0">
                     <ProjectNotesTodoPanel
@@ -182,53 +183,53 @@ export function SidebarHeader(props: Props): React.ReactNode {
                     type="button"
                     onClick={() => setIsSessionSearchOpen((prev) => !prev)}
                     className={headerActionButtonClass}
-                    aria-label="Search sessions"
+                    aria-label={m.sidebarHeaderSearchSessions()}
                     aria-expanded={isSessionSearchOpen}
                   >
                     <RiSearchLine className={headerActionIconClass} />
                   </button>
                 </TooltipTrigger>
-                <TooltipContent side="bottom" sideOffset={4}><p>Search sessions</p></TooltipContent>
+                <TooltipContent side="bottom" sideOffset={4}><p>{m.sidebarHeaderSearchSessions()}</p></TooltipContent>
               </Tooltip>
 
               <DropdownMenu>
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <DropdownMenuTrigger asChild>
-                      <button
-                        type="button"
-                        className={headerActionButtonClass}
-                        aria-label="Session display mode"
-                      >
+                        <button
+                          type="button"
+                          className={headerActionButtonClass}
+                          aria-label={m.sidebarHeaderDisplayMode()}
+                        >
                         <RiEqualizer2Line className={headerActionIconClass} />
                       </button>
                     </DropdownMenuTrigger>
                   </TooltipTrigger>
-                  <TooltipContent side="bottom" sideOffset={4}><p>Display mode</p></TooltipContent>
+                    <TooltipContent side="bottom" sideOffset={4}><p>{m.sidebarHeaderDisplayMode()}</p></TooltipContent>
                 </Tooltip>
                 <DropdownMenuContent align="end" className="min-w-[160px]">
                   <DropdownMenuItem
                     onClick={() => setDisplayMode('default')}
                     className="flex items-center justify-between"
                   >
-                    <span>Default</span>
+                    <span>{m.sidebarHeaderDefault()}</span>
                     {displayMode === 'default' ? <RiCheckLine className="h-4 w-4 text-primary" /> : null}
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     onClick={() => setDisplayMode('minimal')}
                     className="flex items-center justify-between"
                   >
-                    <span>Minimal</span>
+                    <span>{m.sidebarHeaderMinimal()}</span>
                     {displayMode === 'minimal' ? <RiCheckLine className="h-4 w-4 text-primary" /> : null}
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={collapseAllProjects} className="flex items-center gap-2">
                     <RiContractUpDownLine className="h-4 w-4" />
-                    <span>Collapse all</span>
+                    <span>{m.sidebarHeaderCollapseAll()}</span>
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={expandAllProjects} className="flex items-center gap-2">
                     <RiExpandUpDownLine className="h-4 w-4" />
-                    <span>Expand all</span>
+                    <span>{m.sidebarHeaderExpandAll()}</span>
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -239,9 +240,9 @@ export function SidebarHeader(props: Props): React.ReactNode {
             <div className="pb-1">
               <div className="mb-1 flex items-center justify-between px-0.5 typography-micro text-muted-foreground/80">
                 {hasSessionSearchQuery ? (
-                  <span>{searchMatchCount} {searchMatchCount === 1 ? 'match' : 'matches'}</span>
+                  <span>{searchMatchCount} {searchMatchCount === 1 ? m.sidebarHeaderMatch() : m.sidebarHeaderMatches()}</span>
                 ) : <span />}
-                <span>Esc to clear</span>
+                <span>{m.sidebarHeaderEscToClear()}</span>
               </div>
               <div className="relative">
                 <RiSearchLine className="pointer-events-none absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -249,7 +250,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
                   ref={sessionSearchInputRef}
                   value={sessionSearchQuery}
                   onChange={(event) => setSessionSearchQuery(event.target.value)}
-                  placeholder="Search sessions..."
+                  placeholder={m.sidebarHeaderSearchPlaceholder()}
                   className="h-8 w-full rounded-md border border-border bg-transparent pl-8 pr-8 typography-ui-label text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
                   onKeyDown={(event) => {
                     if (event.key === 'Escape') {
@@ -267,7 +268,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
                     type="button"
                     onClick={() => setSessionSearchQuery('')}
                     className="absolute right-1 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-                    aria-label="Clear search"
+                    aria-label={m.sidebarHeaderClearSearch()}
                   >
                     <RiCloseLine className="h-3.5 w-3.5" />
                   </button>

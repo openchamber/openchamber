@@ -12,6 +12,7 @@ import {
 import { useGitStore, useGitBranches, useGitLoadingBranches } from '@/stores/useGitStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
+import { m } from '@/lib/i18n/messages';
 
 /** localStorage key matching NewWorktreeDialog */
 const LAST_SOURCE_BRANCH_KEY = 'oc:lastWorktreeSourceBranch';
@@ -151,22 +152,22 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
           size="lg"
           className={className ?? 'w-fit typography-meta text-foreground'}
         >
-          <SelectValue placeholder={isLoading ? 'Loading branches…' : 'Select source branch...'} />
+          <SelectValue placeholder={isLoading ? m.mrLoadingBranches() : m.mrSelectSourceBranch()} />
         </SelectTrigger>
         <SelectContent className="max-h-[280px] max-w-[320px]">
           {isLoading ? (
             <div className="px-2 py-4 text-center typography-meta text-muted-foreground">
-              Loading branches...
+              {m.mrLoadingBranches()}
             </div>
           ) : localBranches.length === 0 && remoteBranches.length === 0 ? (
             <div className="px-2 py-4 text-center typography-meta text-muted-foreground">
-              No branches found
+              {m.mrNoBranchesFound()}
             </div>
           ) : (
             <>
               {localBranches.length > 0 && (
                 <SelectGroup>
-                  <SelectLabel className="font-semibold text-foreground">Local branches</SelectLabel>
+                  <SelectLabel className="font-semibold text-foreground">{m.mrLocalBranches()}</SelectLabel>
                   {localBranches.map((branch) => (
                     <SelectItem key={branch} value={branch} className="whitespace-normal break-all">
                       {branch}
@@ -179,7 +180,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
               )}
               {remoteBranches.length > 0 && (
                 <SelectGroup>
-                  <SelectLabel className="font-semibold text-foreground">Remote branches</SelectLabel>
+                  <SelectLabel className="font-semibold text-foreground">{m.mrRemoteBranches()}</SelectLabel>
                   {remoteBranches.map((branch) => (
                     <SelectItem key={`remotes/${branch}`} value={`remotes/${branch}`} className="whitespace-normal break-all">
                       {branch}
@@ -193,7 +194,7 @@ export const BranchSelector: React.FC<BranchSelectorProps> = ({
       </Select>
 
       {isGitRepository === false && (
-        <p className="typography-micro text-muted-foreground/70 mt-2">Not in a git repository.</p>
+        <p className="typography-micro text-muted-foreground/70 mt-2">{m.mrNotGitRepository()}</p>
       )}
     </div>
   );

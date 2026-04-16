@@ -9,6 +9,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
+import { m } from '@/lib/i18n/messages';
 import {
   RiGithubLine,
   RiLoader4Line,
@@ -101,7 +102,7 @@ export function GitHubIntegrationDialog({
       if (activeTab === 'issues' && github.issuesList) {
         const result = await github.issuesList(projectDirectory, { page: 1 });
         if (result.connected === false) {
-          setError('GitHub not connected');
+          setError(m.giGithubNotConnected());
           setIssues([]);
         } else {
           setIssues(result.issues ?? []);
@@ -111,7 +112,7 @@ export function GitHubIntegrationDialog({
       } else if (activeTab === 'prs' && github.prsList) {
         const result = await github.prsList(projectDirectory, { page: 1 });
         if (result.connected === false) {
-          setError('GitHub not connected');
+          setError(m.giGithubNotConnected());
           setPrs([]);
         } else {
           setPrs(result.prs ?? []);
@@ -120,7 +121,7 @@ export function GitHubIntegrationDialog({
         }
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load data');
+      setError(err instanceof Error ? err.message : m.giFailedToLoadData());
     } finally {
       setLoading(false);
     }
@@ -199,12 +200,12 @@ export function GitHubIntegrationDialog({
       
       setValidations(prev => new Map(prev).set(branchName, {
         isValid: !isBlocked,
-        error: isBlocked ? 'Branch is already checked out in a worktree' : null,
+        error: isBlocked ? m.giBranchAlreadyCheckedOut() : null,
       }));
     } catch {
       setValidations(prev => new Map(prev).set(branchName, {
         isValid: false,
-        error: 'Validation failed',
+        error: m.giValidationFailed(),
       }));
     }
   }, [projectRef, validations]);
@@ -293,16 +294,16 @@ export function GitHubIntegrationDialog({
   // Content for the dialog (shared between mobile and desktop)
   const dialogContent = (
     <>
-      {!isGitHubConnected ? (
+       {!isGitHubConnected ? (
         <div className="flex-1 flex flex-col items-center justify-center p-8 gap-4">
           <RiGithubLine className="h-12 w-12 text-muted-foreground" />
           <div className="text-center">
-            <p className="typography-ui-label text-foreground">Connect to GitHub</p>
+            <p className="typography-ui-label text-foreground">{m.giConnectToGitHub()}</p>
             <p className="typography-small text-muted-foreground mt-1">
-              Link issues or pull requests to auto-fill worktree details
+              {m.giLinkIssuesOrPrs()}
             </p>
           </div>
-          <Button onClick={openGitHubSettings} size="sm">Connect GitHub</Button>
+          <Button onClick={openGitHubSettings} size="sm">{m.giConnectGitHub()}</Button>
         </div>
       ) : (
         <>
@@ -312,7 +313,7 @@ export function GitHubIntegrationDialog({
             <Input
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder={activeTab === 'issues' ? "Search issues or enter #123..." : "Search PRs or enter #456..."}
+              placeholder={activeTab === 'issues' ? m.giSearchIssuesPlaceholder() : m.giSearchPrsPlaceholder()}
               className="h-8 pl-9"
             />
           </div>
@@ -358,9 +359,9 @@ export function GitHubIntegrationDialog({
                         </div>
                       </button>
                     ))
-                  ) : (
+                   ) : (
                     <div className="flex items-center justify-center h-[300px] text-center typography-small text-muted-foreground">
-                      No issues found
+                      {m.giNoIssuesFound()}
                     </div>
                   )}
                   
@@ -372,7 +373,7 @@ export function GitHubIntegrationDialog({
                         onClick={() => void loadMore()}
                         className="h-7 text-xs"
                       >
-                        Load more
+                        {m.giLoadMore()}
                       </Button>
                     </div>
                   )}
@@ -425,9 +426,9 @@ export function GitHubIntegrationDialog({
                         </button>
                       );
                     })
-                  ) : (
+                   ) : (
                     <div className="flex items-center justify-center h-[300px] text-center typography-small text-muted-foreground">
-                      No pull requests found
+                      {m.giNoPrsFound()}
                     </div>
                   )}
                   
@@ -439,7 +440,7 @@ export function GitHubIntegrationDialog({
                         onClick={() => void loadMore()}
                         className="h-7 text-xs"
                       >
-                        Load more
+                        {m.giLoadMore()}
                       </Button>
                     </div>
                   )}
@@ -468,12 +469,12 @@ export function GitHubIntegrationDialog({
         'flex items-center gap-4',
         isMobile ? 'w-full justify-center order-1' : 'flex-1'
       )}>
-        {/* Selected Issue/PR display - hidden on mobile (shown in header instead) */}
+         {/* Selected Issue/PR display - hidden on mobile (shown in header instead) */}
         {!isMobile && (selectedIssue || selectedPr) && (
           <div className="flex items-center gap-2 px-2 h-8 rounded-md bg-muted/50 border border-border/50">
             <RiCheckLine className="h-3.5 w-3.5 text-status-success shrink-0" />
             <span className="typography-small truncate max-w-[150px]">
-              {selectedIssue ? `Issue #${selectedIssue.number}` : `PR #${selectedPr?.number}`}
+              {selectedIssue ? m.giIssue({ number: selectedIssue.number }) : m.giPr({ number: selectedPr?.number ?? 0 })}
             </span>
             <button
               onClick={handleClear}
@@ -484,16 +485,16 @@ export function GitHubIntegrationDialog({
           </div>
         )}
         
-        {/* Include Diff Checkbox - only show when PR tab is active and PR is selected */}
+         {/* Include Diff Checkbox - only show when PR tab is active and PR is selected */}
         {activeTab === 'prs' && selectedPr && (
           <label className="flex items-center gap-2 cursor-pointer h-8">
             <Checkbox
               checked={includeDiff}
               onChange={(checked) => setIncludeDiff(checked)}
-              ariaLabel="Include PR diff in session context"
+              ariaLabel={m.giIncludeDiffAriaLabel()}
             />
             <span className="typography-small text-foreground">
-              Include PR diff
+              {m.giIncludeDiff()}
             </span>
           </label>
         )}
@@ -504,46 +505,46 @@ export function GitHubIntegrationDialog({
         'flex gap-2',
         isMobile ? 'w-full order-2' : 'justify-end'
       )}>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => onOpenChange(false)}
-          className={cn(isMobile && 'flex-1')}
-        >
-          Cancel
-        </Button>
-        <Button
-          size="sm"
-          onClick={handleConfirm}
-          disabled={!canConfirm}
-          className={cn(isMobile && 'flex-1')}
-        >
-          Select
-        </Button>
+       <Button
+           variant="outline"
+           size="sm"
+           onClick={() => onOpenChange(false)}
+           className={cn(isMobile && 'flex-1')}
+         >
+           {m.giCancel()}
+         </Button>
+         <Button
+           size="sm"
+           onClick={handleConfirm}
+           disabled={!canConfirm}
+           className={cn(isMobile && 'flex-1')}
+         >
+           {m.giSelect()}
+         </Button>
       </div>
     </div>
   );
 
   return (
     <>
-      {isMobile ? (
+       {isMobile ? (
         <MobileOverlayPanel
           open={open}
-          title="Select from GitHub"
+          title={m.giSelectFromGitHub()}
           onClose={() => onOpenChange(false)}
           footer={!isGitHubConnected ? undefined : footerContent}
           renderHeader={(closeButton) => (
             <div className="flex flex-col gap-2 px-3 py-2 border-b border-border/40">
               <div className="flex items-center justify-between">
-                <h2 className="typography-ui-label font-semibold text-foreground">Select from GitHub</h2>
+                <h2 className="typography-ui-label font-semibold text-foreground">{m.giSelectFromGitHub()}</h2>
                 {closeButton}
               </div>
               {/* Tabs - using SortableTabsStrip */}
               <div className="w-full">
                 <SortableTabsStrip
                   items={[
-                    { id: 'issues', label: 'Issues', icon: <RiGitBranchLine className="h-3.5 w-3.5" /> },
-                    { id: 'prs', label: 'Pull Requests', icon: <RiGitPullRequestLine className="h-3.5 w-3.5" /> },
+                    { id: 'issues', label: m.giIssues(), icon: <RiGitBranchLine className="h-3.5 w-3.5" /> },
+                    { id: 'prs', label: m.giPullRequests(), icon: <RiGitPullRequestLine className="h-3.5 w-3.5" /> },
                   ]}
                   activeId={activeTab}
                   onSelect={(id) => {
@@ -555,12 +556,12 @@ export function GitHubIntegrationDialog({
                 />
               </div>
               
-              {/* Selected Item Inline Display */}
+               {/* Selected Item Inline Display */}
               {(selectedIssue || selectedPr) && (
                 <div className="flex items-center gap-2 px-2 py-1 rounded-md bg-muted/50 border border-border/50">
                   <RiCheckLine className="h-3.5 w-3.5 text-status-success shrink-0" />
                   <span className="typography-small truncate flex-1">
-                    {selectedIssue ? `Issue #${selectedIssue.number}` : `PR #${selectedPr?.number}`}
+                    {selectedIssue ? m.giIssue({ number: selectedIssue.number }) : m.giPr({ number: selectedPr?.number ?? 0 })}
                   </span>
                   <button
                     onClick={handleClear}
@@ -578,19 +579,19 @@ export function GitHubIntegrationDialog({
       ) : (
         <Dialog open={open} onOpenChange={onOpenChange}>
           <DialogContent className="max-w-2xl max-h-[70vh] flex flex-col">
-            <DialogHeader className="flex flex-row items-center justify-between">
+             <DialogHeader className="flex flex-row items-center justify-between">
               <div className="flex items-center gap-3">
                 <DialogTitle className="flex items-center gap-2 shrink-0">
                   <RiGithubLine className="h-5 w-5" />
-                  Select from GitHub
+                  {m.giSelectFromGitHub()}
                 </DialogTitle>
                 
                 {/* Tabs - using SortableTabsStrip */}
                 <div className="w-[220px]">
                   <SortableTabsStrip
                     items={[
-                      { id: 'issues', label: 'Issues', icon: <RiGitBranchLine className="h-3.5 w-3.5" /> },
-                      { id: 'prs', label: 'Pull Requests', icon: <RiGitPullRequestLine className="h-3.5 w-3.5" /> },
+                      { id: 'issues', label: m.giIssues(), icon: <RiGitBranchLine className="h-3.5 w-3.5" /> },
+                      { id: 'prs', label: m.giPullRequests(), icon: <RiGitPullRequestLine className="h-3.5 w-3.5" /> },
                     ]}
                     activeId={activeTab}
                     onSelect={(id) => {

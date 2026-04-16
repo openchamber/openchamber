@@ -1,4 +1,5 @@
 import React from 'react';
+import { m } from '@/lib/i18n/messages';
 import type { Session } from '@opencode-ai/sdk/v2';
 import type { SessionSummaryMeta } from './types';
 
@@ -14,10 +15,10 @@ const formatDateLabel = (value: string | number) => {
   yesterday.setDate(today.getDate() - 1);
 
   if (isSameDay(targetDate, today)) {
-    return 'Today';
+    return m.suToday();
   }
   if (isSameDay(targetDate, yesterday)) {
-    return 'Yesterday';
+    return m.suYesterday();
   }
   const formatted = targetDate.toLocaleDateString('en-US', {
     month: 'short',
@@ -37,9 +38,9 @@ export const formatSessionDateLabel = (updatedMs: number): string => {
 
   if (isSameDay(updatedDate, today)) {
     const diff = Date.now() - updatedMs;
-    if (diff < 60_000) return 'Just now';
-    if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}min ago`;
-    return `${Math.floor(diff / 3_600_000)}h ago`;
+    if (diff < 60_000) return m.suJustNow();
+    if (diff < 3_600_000) return m.suMinAgo({ min: Math.floor(diff / 60_000) });
+    return m.suHourAgo({ hour: Math.floor(diff / 3_600_000) });
   }
 
   return formatDateLabel(updatedMs);
@@ -162,16 +163,16 @@ export const resolveArchivedFolderName = (session: Session, projectRoot: string 
   const projectWorktree = normalizePath((session as Session & { project?: { worktree?: string | null } | null }).project?.worktree ?? null);
   const resolved = sessionDirectory ?? projectWorktree;
   if (!resolved) {
-    return 'unassigned';
+    return m.suUnassigned();
   }
   if (projectRoot && resolved === projectRoot) {
-    return 'project root';
+    return m.suProjectRoot();
   }
   const source = projectRoot && resolved.startsWith(`${projectRoot}/`)
     ? resolved.slice(projectRoot.length + 1)
     : resolved;
   const segments = source.split('/').filter(Boolean);
-  return segments[segments.length - 1] ?? 'unassigned';
+  return segments[segments.length - 1] ?? m.suUnassigned();
 };
 
 export const isSessionRelatedToProject = (

@@ -10,6 +10,7 @@ import { QUOTA_PROVIDERS, resolveUsageTone } from '@/lib/quota';
 import { useQuotaStore } from '@/stores/useQuotaStore';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { RiRefreshLine } from '@remixicon/react';
+import { m } from '@/lib/i18n/messages';
 
 interface UsageSidebarProps {
   onItemSelect?: () => void;
@@ -48,7 +49,7 @@ export const UsageSidebar: React.FC<UsageSidebarProps> = ({ onItemSelect }) => {
     try {
       await updateDesktopSettings(changes);
     } catch (error) {
-      console.warn('Failed to save usage settings:', error);
+      console.warn(m.usageFailedSaveSettings(), error);
     }
   }, []);
 
@@ -79,7 +80,7 @@ export const UsageSidebar: React.FC<UsageSidebarProps> = ({ onItemSelect }) => {
   return (
     <div className={cn('flex h-full flex-col', bgClass)}>
       <div className="border-b px-3 pt-4 pb-3">
-        <h2 className="text-base font-semibold text-foreground mb-3">Usage</h2>
+        <h2 className="text-base font-semibold text-foreground mb-3">{m.usageTitle()}</h2>
         <div className="flex items-center justify-between gap-2">
           <span className="typography-meta text-muted-foreground">Total {QUOTA_PROVIDERS.length}</span>
           <div className="flex items-center gap-2">
@@ -89,7 +90,7 @@ export const UsageSidebar: React.FC<UsageSidebarProps> = ({ onItemSelect }) => {
                   <Checkbox
                     checked={usageAutoRefresh}
                     onChange={handleUsageAutoRefreshChange}
-                    ariaLabel="Toggle auto refresh"
+                    ariaLabel={m.usageToggleAutoRefresh()}
                   />
                 </span>
               </TooltipTrigger>
@@ -103,7 +104,7 @@ export const UsageSidebar: React.FC<UsageSidebarProps> = ({ onItemSelect }) => {
               disabled={!usageAutoRefresh}
             >
               <SelectTrigger className="w-fit">
-                <SelectValue placeholder="Interval" />
+                <SelectValue placeholder={m.usageIntervalPlaceholder()} />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="30000">30s</SelectItem>
@@ -115,8 +116,8 @@ export const UsageSidebar: React.FC<UsageSidebarProps> = ({ onItemSelect }) => {
               variant="ghost"
               className="h-7 w-7 px-0 text-muted-foreground"
               onClick={() => fetchAllQuotas()}
-              aria-label="Refresh usage"
-              title="Refresh usage"
+              aria-label={m.usageRefreshAria()}
+              title={m.usageRefreshAria()}
               disabled={isLoading}
             >
               <RiRefreshLine className={cn('h-3.5 w-3.5', isLoading && 'animate-spin')} />
@@ -124,14 +125,14 @@ export const UsageSidebar: React.FC<UsageSidebarProps> = ({ onItemSelect }) => {
           </div>
         </div>
         <div className="mt-2 flex items-center justify-between gap-2">
-          <span className="typography-micro text-muted-foreground">Display</span>
+          <span className="typography-micro text-muted-foreground">{m.usageDisplay()}</span>
           <Select value={usageDisplayMode} onValueChange={handleUsageDisplayModeChange}>
             <SelectTrigger className="w-fit">
-              <SelectValue placeholder="Display mode" />
+              <SelectValue placeholder={m.usageDisplayModePlaceholder()} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="usage">Usage</SelectItem>
-              <SelectItem value="remaining">Quota remaining</SelectItem>
+              <SelectItem value="usage">{m.usageDisplayUsage()}</SelectItem>
+              <SelectItem value="remaining">{m.usageDisplayQuota()}</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -174,9 +175,9 @@ export const UsageSidebar: React.FC<UsageSidebarProps> = ({ onItemSelect }) => {
                 <span className="typography-ui-label font-normal truncate flex-1 min-w-0 text-foreground">
                   {provider.name}
                 </span>
-              {!configured && (
-                <span className="typography-micro text-muted-foreground/60 flex-shrink-0">Not set</span>
-              )}
+                {!configured && (
+                  <span className="typography-micro text-muted-foreground/60 flex-shrink-0">{m.usageNotSet()}</span>
+                )}
             </button>
           </div>
           );

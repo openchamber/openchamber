@@ -1,5 +1,7 @@
 import React from 'react';
 import { RiDiscordFill, RiDownloadLine, RiGithubFill, RiLoaderLine, RiTwitterXFill } from '@remixicon/react';
+import { m } from '@/lib/i18n/messages';
+
 import { useUpdateStore } from '@/stores/useUpdateStore';
 import { UpdateDialog } from '@/components/ui/UpdateDialog';
 import { useDeviceInfo } from '@/lib/device';
@@ -32,7 +34,7 @@ export const AboutSettings: React.FC = () => {
         setShowChecking(false);
         // Show toast if check completed with no update available
         if (didInitiateCheck.current && !updateStore.available && !updateStore.error) {
-          toast.success('You are on the latest version');
+          toast.success(m.aboutLatestVersion());
           didInitiateCheck.current = false;
         }
       }, MIN_CHECKING_DURATION);
@@ -89,7 +91,7 @@ export const AboutSettings: React.FC = () => {
             className="flex items-center gap-1 typography-meta text-muted-foreground hover:text-foreground transition-colors"
           >
             <RiGithubFill className="h-3.5 w-3.5" />
-            <span>GitHub</span>
+            <span>{m.aboutGithubLink()}</span>
           </a>
 
           <a
@@ -99,7 +101,7 @@ export const AboutSettings: React.FC = () => {
             className="flex items-center gap-1 typography-meta text-muted-foreground hover:text-foreground transition-colors"
           >
             <RiDiscordFill className="h-3.5 w-3.5" />
-            <span>Discord</span>
+            <span>{m.aboutDiscord()}</span>
           </a>
 
           <a
@@ -142,7 +144,7 @@ export const AboutSettings: React.FC = () => {
       <div className="rounded-lg bg-[var(--surface-elevated)]/70 overflow-hidden flex flex-col">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-4 py-3 border-b border-[var(--surface-subtle)]">
           <div className="flex min-w-0 flex-col">
-            <span className="typography-ui-label text-foreground">Version</span>
+            <span className="typography-ui-label text-foreground">{m.aboutVersion({ version: "" })}</span>
             <span className="typography-meta text-muted-foreground font-mono">{currentVersion}</span>
           </div>
           
@@ -150,7 +152,7 @@ export const AboutSettings: React.FC = () => {
             {updateStore.checking && (
               <div className="flex items-center gap-2 text-muted-foreground">
                 <RiLoaderLine className="h-4 w-4 animate-spin" />
-                <span className="typography-meta">Checking...</span>
+                <span className="typography-meta">{m.aboutChecking()}</span>
               </div>
             )}
 
@@ -165,7 +167,7 @@ export const AboutSettings: React.FC = () => {
             )}
 
             {!updateStore.checking && !updateStore.available && !updateStore.error && (
-              <span className="typography-meta text-muted-foreground">Up to date</span>
+              <span className="typography-meta text-muted-foreground">{m.aboutUpToDate()}</span>
             )}
 
             <Button size="sm"
@@ -192,7 +194,7 @@ export const AboutSettings: React.FC = () => {
             className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground typography-meta transition-colors"
           >
             <RiGithubFill className="h-4 w-4" />
-            <span>GitHub</span>
+            <span>{m.aboutGithubLink()}</span>
           </a>
 
           <a

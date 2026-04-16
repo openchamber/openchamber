@@ -7,6 +7,7 @@ import {
   getDesktopRecoveryConfig,
   type RecoveryVariant,
 } from './desktopRecoveryConfig';
+import { m } from '@/lib/i18n/messages';
 
 export type { RecoveryVariant } from './desktopRecoveryConfig';
 
@@ -68,7 +69,7 @@ export function DesktopConnectionRecovery({
         {/* Host info if available */}
         {hostUrl && (variant === 'remote-unreachable' || variant === 'remote-wrong-service') && (
           <div className="rounded-lg border border-border bg-background/50 p-3">
-            <div className="text-xs text-muted-foreground mb-1">Server Address</div>
+            <div className="text-xs text-muted-foreground mb-1">{m.obServerAddress()}</div>
             <div className="font-mono text-sm text-foreground truncate">{redactSensitiveUrl(hostUrl)}</div>
           </div>
         )}
@@ -82,7 +83,7 @@ export function DesktopConnectionRecovery({
               className="w-full"
             >
               <RiRefreshLine className={cn('h-4 w-4', isRetrying && 'animate-spin')} />
-              {isRetrying ? 'Retrying…' : (config.retryLabel ?? 'Retry Connection')}
+              {isRetrying ? m.obRetrying() : (config.retryLabel ?? m.obRetryConnection())}
             </Button>
           )}
 

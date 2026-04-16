@@ -67,6 +67,8 @@ import { useGitBranches, useGitStore } from '@/stores/useGitStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { createWorktreeDraft } from '@/lib/worktreeSessionCreator';
 import { usePermissionStore } from '@/stores/permissionStore';
+import { chatAttachFiles, chatAddAttachment, chatLinkGithubIssue, chatLinkGithubPr, chatModelAgentSettings, chatPermissionAutoAcceptDisable, chatPermissionAutoAcceptEnable, chatPermissionAutoAcceptOn, chatPermissionAutoAcceptOff, chatFocusMode, chatSendMessage, chatQueueMessage, chatOpenSessionFirst, chatFailedTogglePermissionAutoAccept, chatAttachmentsTooLarge, chatFailedToSendAttachments, sidebarCommands, actionStop } from '@/lib/i18n/messages';
+import { m } from '@/lib/i18n/messages';
 
 const MAX_VISIBLE_TEXTAREA_LINES = 8;
 const EMPTY_QUEUE: QueuedMessage[] = [];
@@ -275,8 +277,8 @@ const ComposerAttachmentControls = React.memo(function ComposerAttachmentControl
                         }
                     }}
                     onClick={handleOpenCommandMenu}
-                    title="Commands"
-                    aria-label="Commands"
+                    title={sidebarCommands()}
+                    aria-label={sidebarCommands()}
                 >
                     <RiCommandLine className={cn(iconSizeClass)} />
                 </button>
@@ -296,8 +298,8 @@ const ComposerAttachmentControls = React.memo(function ComposerAttachmentControl
                         type="button"
                         className={footerIconButtonClass}
                         onClick={handlePickLocalFiles}
-                        title="Attach files"
-                        aria-label="Attach files"
+                        title={chatAttachFiles()}
+                        aria-label={chatAttachFiles()}
                     >
                         <RiAttachment2 className={cn(iconSizeClass, 'text-current')} />
                     </button>
@@ -307,8 +309,8 @@ const ComposerAttachmentControls = React.memo(function ComposerAttachmentControl
                             <button
                                 type="button"
                                 className={footerIconButtonClass}
-                                title="Add attachment"
-                                aria-label="Add attachment"
+                                title={chatAddAttachment()}
+                                aria-label={chatAddAttachment()}
                             >
                                 <RiAddCircleLine className={cn(iconSizeClass, 'text-current')} />
                             </button>
@@ -320,7 +322,7 @@ const ComposerAttachmentControls = React.memo(function ComposerAttachmentControl
                                 }}
                             >
                                 <RiAttachment2 />
-                                Attach files
+                                {chatAttachFiles()}
                             </DropdownMenuItem>
                             <DropdownMenuItem
                                 onSelect={() => {
@@ -328,7 +330,7 @@ const ComposerAttachmentControls = React.memo(function ComposerAttachmentControl
                                 }}
                             >
                                 <RiGithubLine />
-                                Link GitHub Issue
+                                {chatLinkGithubIssue()}
                             </DropdownMenuItem>
                             <DropdownMenuItem
                                 onSelect={() => {
@@ -336,7 +338,7 @@ const ComposerAttachmentControls = React.memo(function ComposerAttachmentControl
                                 }}
                             >
                                 <RiGitPullRequestLine />
-                                Link GitHub PR
+                                {chatLinkGithubPr()}
                             </DropdownMenuItem>
                         </DropdownMenuContent>
                     </DropdownMenu>
@@ -348,8 +350,8 @@ const ComposerAttachmentControls = React.memo(function ComposerAttachmentControl
                     type="button"
                     onClick={onOpenSettings}
                     className={footerIconButtonClass}
-                    title="Model and agent settings"
-                    aria-label="Model and agent settings"
+                    title={chatModelAgentSettings()}
+                    aria-label={chatModelAgentSettings()}
                 >
                     <RiAiAgentLine className={cn(iconSizeClass, 'text-current')} />
                 </button>
@@ -384,11 +386,11 @@ const PermissionAutoAcceptButton = React.memo(function PermissionAutoAcceptButto
     } = props;
 
     const ariaLabel = permissionAutoAcceptEnabled
-        ? 'Disable permission auto-accept'
-        : 'Enable permission auto-accept';
+        ? chatPermissionAutoAcceptDisable()
+        : chatPermissionAutoAcceptEnable();
     const tooltipLabel = permissionAutoAcceptEnabled
-        ? 'Permission auto-accept: on'
-        : 'Permission auto-accept: off';
+        ? chatPermissionAutoAcceptOn()
+        : chatPermissionAutoAcceptOff();
 
     const button = (
         <button
@@ -462,7 +464,7 @@ const FocusModeButton = React.memo(function FocusModeButton(props: FocusModeButt
                         event.preventDefault();
                     }}
                     onClick={onToggle}
-                    aria-label="Toggle focus mode"
+                    aria-label={m.ciToggleFocusMode()}
                     aria-pressed={isExpandedInput}
                 >
                     <RiFullscreenLine className={cn(iconSizeClass)} />
@@ -470,7 +472,7 @@ const FocusModeButton = React.memo(function FocusModeButton(props: FocusModeButt
             </TooltipTrigger>
             <TooltipContent side="top" sideOffset={8}>
                 <div className="flex flex-col gap-0.5 text-center">
-                    <span>Focus mode</span>
+                    <span>{chatFocusMode()}</span>
                     <span className="font-mono opacity-60">
                         {isMacOS() ? '⌘⇧E' : 'Ctrl+Shift+E'}
                     </span>
@@ -529,7 +531,7 @@ const ComposerActionButtons = React.memo(function ComposerActionButtons(props: C
                     ? 'text-primary hover:text-primary'
                     : 'opacity-30'
             )}
-            aria-label="Send message"
+            aria-label={chatSendMessage()}
         >
             <RiSendPlane2Line className={cn(sendIconSizeClass)} />
         </button>
@@ -556,7 +558,7 @@ const ComposerActionButtons = React.memo(function ComposerActionButtons(props: C
                         'absolute z-20 bottom-full left-1/2 -translate-x-1/2 mb-1',
                         currentSessionId ? 'text-primary hover:text-primary' : 'opacity-30'
                     )}
-                    aria-label="Queue message"
+                    aria-label={chatQueueMessage()}
                 >
                     <RiSendPlane2Line className={cn(sendIconSizeClass, '-rotate-90')} />
                 </button>
@@ -568,7 +570,7 @@ const ComposerActionButtons = React.memo(function ComposerActionButtons(props: C
                     footerIconButtonClass,
                     'text-[var(--status-error)] hover:text-[var(--status-error)]'
                 )}
-                aria-label="Stop generating"
+                aria-label={actionStop()}
             >
                 <StopIcon className={cn(stopIconSizeClass)} />
             </button>
@@ -1531,7 +1533,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 normalized === 'failed to send message';
 
             if (normalized.includes('payload too large') || normalized.includes('413') || normalized.includes('entity too large')) {
-                toast.error('Attachments are too large to send. Please try reducing the number or size of images.');
+                toast.error(chatAttachmentsTooLarge());
                 if (allAttachments.length > 0) {
                     useInputStore.setState({ attachedFiles: allAttachments });
                 }
@@ -1541,7 +1543,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             if (isSoftNetworkError) {
                 if (allAttachments.length > 0) {
                     useInputStore.setState({ attachedFiles: allAttachments });
-                    toast.error('Failed to send attachments. Try fewer files or smaller images.');
+                    toast.error(chatFailedToSendAttachments());
                 }
                 return;
             }
@@ -3115,13 +3117,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
     const handlePermissionAutoAcceptToggle = React.useCallback(() => {
         if (!permissionScopeSessionId) {
-            toast.error('Open a session first');
+            toast.error(chatOpenSessionFirst());
             return;
         }
 
         const nextEnabled = !permissionAutoAcceptEnabled;
         setSessionAutoAccept(permissionScopeSessionId, nextEnabled).catch(() => {
-            toast.error('Failed to toggle permission auto-accept');
+            toast.error(chatFailedTogglePermissionAutoAccept());
         });
     }, [permissionAutoAcceptEnabled, permissionScopeSessionId, setSessionAutoAccept]);
 
@@ -3177,7 +3179,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                 borderColor: currentTheme?.colors?.interactive?.border,
                             }}
                         >
-                            <span className="text-xs font-medium text-muted-foreground">Review comments:</span>
+                            <span className="text-xs font-medium text-muted-foreground">{m.ciReviewComments()}</span>
                             <span className="text-xs font-semibold" style={{ color: currentTheme?.colors?.status?.info }}>
                                 {draftCount}
                             </span>
@@ -3216,7 +3218,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                     rel="noopener noreferrer"
                                     onClick={(e) => e.stopPropagation()}
                                     className="flex items-center justify-center h-6 w-6 hover:bg-[var(--interactive-hover)] rounded-full transition-colors"
-                                    aria-label="Open issue in browser"
+                                    aria-label={m.ciOpenIssueInBrowser()}
                                 >
                                     <RiExternalLinkLine className="h-4 w-4 text-muted-foreground" />
                                 </a>
@@ -3226,7 +3228,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                         setLinkedIssue(null);
                                     }}
                                     className="flex items-center justify-center h-6 w-6 hover:bg-[var(--interactive-hover)] rounded-full transition-colors cursor-pointer"
-                                    aria-label="Remove linked issue"
+                                    aria-label={m.ciRemoveLinkedIssue()}
                                 >
                                     <RiCloseLine className="h-4 w-4 text-muted-foreground" />
                                 </span>
@@ -3267,7 +3269,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                     rel="noopener noreferrer"
                                     onClick={(e) => e.stopPropagation()}
                                     className="flex items-center justify-center h-6 w-6 hover:bg-[var(--interactive-hover)] rounded-full transition-colors"
-                                    aria-label="Open pull request in browser"
+                                    aria-label={m.ciOpenPullRequestInBrowser()}
                                 >
                                     <RiExternalLinkLine className="h-4 w-4 text-muted-foreground" />
                                 </a>
@@ -3277,7 +3279,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                         setLinkedPr(null);
                                     }}
                                     className="flex items-center justify-center h-6 w-6 hover:bg-[var(--interactive-hover)] rounded-full transition-colors cursor-pointer"
-                                    aria-label="Remove linked pull request"
+                                    aria-label={m.ciRemoveLinkedPullRequest()}
                                 >
                                     <RiCloseLine className="h-4 w-4 text-muted-foreground" />
                                 </span>
@@ -3323,13 +3325,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                     className="h-7 min-w-0 w-fit max-w-[48vw] sm:max-w-[20rem] border-transparent bg-transparent px-1.5 hover:bg-transparent data-[state=open]:bg-transparent"
                                 >
                                     <SelectValue>
-                                        {selectedDraftBranchLabel ?? 'Branch'}
+                                        {selectedDraftBranchLabel ?? m.ciBranch()}
                                     </SelectValue>
                                 </SelectTrigger>
                                 <SelectContent fitContent>
                                     {projectRootBranchOption ? (
                                         <SelectGroup>
-                                            <SelectLabel>Project root</SelectLabel>
+                                            <SelectLabel>{m.ciProjectRoot()}</SelectLabel>
                                             <SelectItem key={projectRootBranchOption.value} value={projectRootBranchOption.value} className="max-w-[24rem] truncate">
                                                 {projectRootBranchOption.label}
                                             </SelectItem>
@@ -3338,14 +3340,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                     {projectRootBranchOption ? <SelectSeparator /> : null}
                                     <SelectGroup>
                                         <div className="flex items-center justify-between px-2 py-1.5">
-                                            <span className="text-muted-foreground typography-meta">Worktrees</span>
+                                            <span className="text-muted-foreground typography-meta">{m.ciWorktrees()}</span>
                                             <button
                                                 type="button"
                                                 className="text-muted-foreground typography-meta hover:text-foreground cursor-pointer"
                                                 onPointerDown={(e) => { e.stopPropagation(); }}
                                                 onClick={(e) => { e.preventDefault(); e.stopPropagation(); void createWorktreeDraft(); }}
                                             >
-                                                + New
+                                                {m.ciNew()}
                                             </button>
                                         </div>
                                         {worktreeBranchOptions.map((option) => (
@@ -3388,20 +3390,20 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                 >
                     {isDragging && (
                         <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/90 rounded-xl">
-                            <div className="text-center">
-                                <div className="inline-flex justify-center">
-                                    <button
-                                        type="button"
-                                        className={iconButtonBaseClass}
-                                        onClick={() => handlePickLocalFiles()}
-                                        title="Attach files"
-                                        aria-label="Attach files"
-                                    >
-                                        <RiAttachment2 className={cn(iconSizeClass, 'text-current')} />
-                                    </button>
+                                <div className="text-center">
+                                    <div className="inline-flex justify-center">
+                                        <button
+                                            type="button"
+                                            className={iconButtonBaseClass}
+                                            onClick={() => handlePickLocalFiles()}
+                                            title={chatAttachFiles()}
+                                            aria-label={chatAttachFiles()}
+                                        >
+                                            <RiAttachment2 className={cn(iconSizeClass, 'text-current')} />
+                                        </button>
+                                    </div>
+                                    <p className="mt-2 typography-ui-label text-muted-foreground">{m.ciDropFilesHereToAttach()}</p>
                                 </div>
-                                <p className="mt-2 typography-ui-label text-muted-foreground">Drop files here to attach</p>
-                            </div>
                         </div>
                     )}
 
@@ -3525,9 +3527,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                             onSelect={updateAutocompleteOverlayPosition}
                             placeholder={currentSessionId || newSessionDraftOpen
                                 ? inputMode === 'shell'
-                                    ? "Enter shell command..."
-                                    : "@ for files/agents; / for commands; ! for shell"
-                                : "Select or create a session to start chatting"}
+                                    ? m.ciEnterShellCommand()
+                                    : m.ciInputHelpText()
+                                : m.ciSelectOrCreateSession()}
                             disabled={!currentSessionId && !newSessionDraftOpen}
                             autoCorrect={isMobile ? "on" : "off"}
                             autoCapitalize={isMobile ? "sentences" : "off"}

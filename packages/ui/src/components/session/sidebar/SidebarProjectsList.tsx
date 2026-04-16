@@ -15,6 +15,7 @@ import type { SessionGroup } from './types';
 import type { SortableDragHandleProps } from './sortableItems';
 import { SortableGroupItem, SortableProjectItem } from './sortableItems';
 import { formatProjectLabel } from './utils';
+import { m } from '@/lib/i18n/messages';
 
 type ProjectSection = {
   project: {
@@ -96,7 +97,7 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
               ?? activeSection.groups.find((candidate) => candidate.isMain)
               ?? activeSection.groups[0];
             if (!primaryGroup) {
-              return <div className="py-1 text-left typography-micro text-muted-foreground">No sessions yet.</div>;
+              return <div className="py-1 text-left typography-micro text-muted-foreground">{m.sidebarProjectsNoSessions()}</div>;
             }
             const archivedGroup = activeSection.groups.find((candidate) => candidate.isArchivedBucket);
             const groupsToRender = [
@@ -222,7 +223,7 @@ export function SidebarProjectsList(props: Props): React.ReactNode {
                             <DragOverlay dropAnimation={null} />
                           </DndContext>
                         ) : (
-                          <div className="py-1 text-left typography-micro text-muted-foreground">No sessions yet.</div>
+                          <div className="py-1 text-left typography-micro text-muted-foreground">{m.sidebarProjectsNoSessions()}</div>
                         )}
                       </div>
                     ) : null}

@@ -8,6 +8,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
+import { m } from '@/lib/i18n/messages';
 import { useConfigStore } from '@/stores/useConfigStore';
 
 export interface AgentSelectorProps {
@@ -91,7 +92,7 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
           className,
         )}
       >
-        <SelectValue placeholder="Select an agent" />
+        <SelectValue placeholder={m.mrSelectAgent()} />
       </SelectTrigger>
       <SelectContent fitContent>
         {selectableAgents.length > 0 && (

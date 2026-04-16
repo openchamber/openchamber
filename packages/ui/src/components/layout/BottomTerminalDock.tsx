@@ -2,6 +2,7 @@ import React from 'react';
 import { RiCloseLine, RiFullscreenExitLine, RiFullscreenLine } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
+import { m } from '@/lib/i18n/messages';
 
 const BOTTOM_DOCK_MIN_HEIGHT = 180;
 const BOTTOM_DOCK_MAX_HEIGHT = 640;
@@ -152,7 +153,7 @@ export const BottomTerminalDock: React.FC<BottomTerminalDockProps> = ({ isOpen, 
           onPointerDown={handlePointerDown}
           role="separator"
           aria-orientation="horizontal"
-          aria-label="Resize terminal panel"
+          aria-label={m.lyResizeTerminalPanel()}
         />
       )}
 
@@ -162,8 +163,8 @@ export const BottomTerminalDock: React.FC<BottomTerminalDockProps> = ({ isOpen, 
             type="button"
             onClick={toggleFullscreen}
             className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[var(--surface-muted-foreground)] transition-colors hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-            title={isFullscreen ? 'Restore terminal panel height' : 'Expand terminal panel'}
-            aria-label={isFullscreen ? 'Restore terminal panel height' : 'Expand terminal panel'}
+            title={isFullscreen ? m.lyRestoreTerminalPanelHeight() : m.lyExpandTerminalPanel()}
+            aria-label={isFullscreen ? m.lyRestoreTerminalPanelHeight() : m.lyExpandTerminalPanel()}
           >
             {isFullscreen ? <RiFullscreenExitLine className="h-5 w-5" /> : <RiFullscreenLine className="h-5 w-5" />}
           </button>
@@ -171,8 +172,8 @@ export const BottomTerminalDock: React.FC<BottomTerminalDockProps> = ({ isOpen, 
             type="button"
             onClick={() => setBottomTerminalOpen(false)}
             className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[var(--surface-muted-foreground)] transition-colors hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-            title="Close terminal panel"
-            aria-label="Close terminal panel"
+            title={m.lyCloseTerminalPanel()}
+            aria-label={m.lyCloseTerminalPanel()}
           >
             <RiCloseLine className="h-6 w-6" />
           </button>

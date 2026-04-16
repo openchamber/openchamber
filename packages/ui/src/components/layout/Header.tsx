@@ -17,6 +17,7 @@ import {
 import { SortableTabsStrip, type SortableTabsStripItem } from '@/components/ui/sortable-tabs-strip';
 
 import { RiArrowLeftSLine, RiChat4Line, RiChatNewLine, RiCheckLine, RiCloseLine, RiCommandLine, RiFileTextLine, RiFolder6Line, RiGitBranchLine, RiGithubFill, RiLayoutLeftLine, RiLayoutRightLine, RiPlayListAddLine, RiRefreshLine, RiServerLine, RiStackLine, RiTerminalBoxLine, RiTimerLine, type RemixiconComponentType } from '@remixicon/react';
+import { m } from '@/lib/i18n/messages';
 import { DiffIcon } from '@/components/icons/DiffIcon';
 import { useUIStore, type MainTab } from '@/stores/useUIStore';
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -145,13 +146,13 @@ const DesktopGitHubControl = React.memo(function DesktopGitHubControl({
               DESKTOP_HEADER_ICON_BUTTON_CLASS,
               'h-7 w-7 overflow-hidden rounded-full border border-border/60 bg-muted/80 p-0'
             )}
-            title={githubLogin ? `GitHub: ${githubLogin}` : 'GitHub connected'}
+            title={githubLogin ? m.headerGithubConnected({ login: githubLogin }) : m.headerGithubConnectedNoLogin()}
             disabled={isSwitchingGitHubAccount}
           >
             {githubAvatarUrl ? (
               <img
                 src={githubAvatarUrl}
-                alt={githubLogin ? `${githubLogin} avatar` : 'GitHub avatar'}
+                alt={githubLogin ? m.headerGithubAvatar({ login: githubLogin }) : m.headerGithubAvatarNoLogin()}
                 className="h-full w-full object-cover"
                 loading="lazy"
                 referrerPolicy="no-referrer"
@@ -163,7 +164,7 @@ const DesktopGitHubControl = React.memo(function DesktopGitHubControl({
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-64">
           <DropdownMenuLabel className="typography-ui-header font-semibold text-foreground">
-            GitHub Accounts
+            {m.headerGithubAccounts()}
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
           {githubAccounts.map((account) => {
@@ -183,7 +184,7 @@ const DesktopGitHubControl = React.memo(function DesktopGitHubControl({
                 {accountUser?.avatarUrl ? (
                   <img
                     src={accountUser.avatarUrl}
-                    alt={accountUser.login ? `${accountUser.login} avatar` : 'GitHub avatar'}
+                    alt={accountUser.login ? m.headerGithubAvatar({ login: accountUser.login }) : m.headerGithubAvatarNoLogin()}
                     className="h-6 w-6 rounded-full border border-border/60 bg-muted object-cover"
                     loading="lazy"
                     referrerPolicy="no-referrer"
@@ -195,7 +196,7 @@ const DesktopGitHubControl = React.memo(function DesktopGitHubControl({
                 )}
                 <span className="flex min-w-0 flex-1 flex-col">
                   <span className="truncate typography-ui-label text-foreground">
-                    {accountUser?.name?.trim() || accountUser?.login || 'GitHub'}
+                    {accountUser?.name?.trim() || accountUser?.login || m.headerGithub()}
                   </span>
                   {accountUser?.login ? (
                     <span className="truncate typography-micro font-mono text-muted-foreground">
@@ -215,12 +216,12 @@ const DesktopGitHubControl = React.memo(function DesktopGitHubControl({
   return (
     <div
       className="app-region-no-drag flex h-7 w-7 items-center justify-center overflow-hidden rounded-full border border-border/60 bg-muted/80"
-      title={githubLogin ? `GitHub: ${githubLogin}` : 'GitHub connected'}
+      title={githubLogin ? m.headerGithubConnected({ login: githubLogin }) : m.headerGithubConnectedNoLogin()}
     >
       {githubAvatarUrl ? (
         <img
           src={githubAvatarUrl}
-          alt={githubLogin ? `${githubLogin} avatar` : 'GitHub avatar'}
+          alt={githubLogin ? m.headerGithubAvatar({ login: githubLogin }) : m.headerGithubAvatarNoLogin()}
           className="h-full w-full object-cover"
           loading="lazy"
           referrerPolicy="no-referrer"
@@ -302,8 +303,8 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
             <button
               type="button"
               aria-label={isDesktopApp
-                ? `Open instance, usage and MCP (current: ${currentInstanceLabel})`
-                : 'Open services, usage and MCP'}
+                ? m.headerOpenInstanceUsageMcp({ instance: currentInstanceLabel })
+                : m.headerOpenServicesUsageMcp()}
               className={cn(
                 DESKTOP_HEADER_ICON_BUTTON_CLASS,
                 isDesktopApp ? 'w-auto max-w-[14rem] justify-start gap-1.5 px-2.5' : 'h-8 w-8'
@@ -318,7 +319,7 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
         </TooltipTrigger>
         <TooltipContent>
           <p>
-            {isDesktopApp ? `Current instance: ${currentInstanceLabel}` : 'Services'} ({shortcutLabel('toggle_services_menu')}; next tab {shortcutLabel('cycle_services_tab')})
+            {isDesktopApp ? m.headerCurrentInstance({ instance: currentInstanceLabel }) : m.headerServices()} ({shortcutLabel('toggle_services_menu')}; {m.headerNextTab()} {shortcutLabel('cycle_services_tab')})
           </p>
         </TooltipContent>
       </Tooltip>
@@ -364,7 +365,7 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
           <div className="overflow-x-hidden">
             <div className="flex items-center justify-between gap-3 border-b border-[var(--interactive-border)] px-4 py-2.5">
               <div className="flex min-w-0 items-baseline gap-2">
-                <span className="typography-ui-header font-semibold text-foreground">Rate limits</span>
+                <span className="typography-ui-header font-semibold text-foreground">{m.headerRateLimits()}</span>
                 <span className="truncate typography-micro text-muted-foreground">{formatTime(quotaLastUpdated)}</span>
               </div>
               <div className="flex items-center gap-1.5">
@@ -397,7 +398,7 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
 
             {!hasRateLimits ? (
               <div className="px-4 py-5 text-center">
-                <span className="typography-ui-label text-muted-foreground">No rate limits available.</span>
+                <span className="typography-ui-label text-muted-foreground">{m.headerNoRateLimitsAvailable()}</span>
               </div>
             ) : null}
 
@@ -413,7 +414,7 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
                     </div>
                     {group.entries.length === 0 && (!group.modelFamilies || group.modelFamilies.length === 0) ? (
                       <div className="px-4 pb-2">
-                        <span className="typography-ui-label text-muted-foreground">{group.error ?? 'No rate limits reported.'}</span>
+                        <span className="typography-ui-label text-muted-foreground">{group.error ?? m.headerNoRateLimitsReported()}</span>
                       </div>
                     ) : (
                       <div className="space-y-3 px-4 pb-2">
@@ -900,11 +901,11 @@ export const Header: React.FC<HeaderProps> = ({
             }
           }
           if (otherModels.length > 0) {
-            group.modelFamilies.push({
-              familyId: null,
-              familyLabel: 'Other',
-              models: otherModels,
-            });
+              group.modelFamilies.push({
+                familyId: null,
+                familyLabel: m.headerOther(),
+                models: otherModels,
+              });
           }
         }
       }
@@ -2010,7 +2011,7 @@ export const Header: React.FC<HeaderProps> = ({
                               )}
                               onClick={handleUsageRefresh}
                               disabled={isQuotaLoading || isUsageRefreshSpinning}
-                              aria-label="Refresh rate limits"
+                  aria-label={m.headerRefreshRateLimits()}
                             >
                               <RiRefreshLine className={cn('h-4 w-4', isUsageRefreshSpinning && 'animate-spin')} />
                             </button>

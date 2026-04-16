@@ -1,6 +1,7 @@
 import React from 'react';
 import { RiGitBranchLine, RiEditLine, RiCheckLine, RiCloseLine, RiLoader4Line } from '@remixicon/react';
 import { Button } from '@/components/ui/button';
+import { m } from '@/lib/i18n/messages';
 
 interface WorktreeBranchDisplayProps {
   currentBranch: string | null | undefined;
@@ -90,7 +91,7 @@ export const WorktreeBranchDisplay: React.FC<WorktreeBranchDisplayProps> = ({
             value={editBranchName}
             onChange={(e) => setEditBranchName(e.target.value)}
             className="flex-1 min-w-0 bg-transparent typography-ui-label outline-none placeholder:text-muted-foreground"
-            placeholder="Branch name"
+            placeholder={m.wbdBranchName()}
             onKeyDown={handleKeyDown}
             autoFocus
           />
@@ -131,7 +132,7 @@ export const WorktreeBranchDisplay: React.FC<WorktreeBranchDisplayProps> = ({
             size="sm"
             className="h-7 w-7 p-0 shrink-0"
             onClick={handleStartEdit}
-            title="Rename branch"
+            title={m.wbdRenameBranch()}
           >
             <RiEditLine className="size-4" />
           </Button>

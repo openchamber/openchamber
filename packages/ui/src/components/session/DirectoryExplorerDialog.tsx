@@ -26,6 +26,7 @@ import {
   setDirectoryShowHidden,
   useDirectoryShowHidden,
 } from '@/lib/directoryShowHidden';
+import { m } from '@/lib/i18n/messages';
 
 interface DirectoryExplorerDialogProps {
   open: boolean;
@@ -97,8 +98,8 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
       if (isDesktop) {
         const accessResult = await requestAccess(targetPath);
         if (!accessResult.success) {
-          toast.error('Unable to access directory', {
-            description: accessResult.error || 'Desktop denied directory access.',
+          toast.error(m.deUnableToAccessDirectory(), {
+            description: accessResult.error || m.deDesktopDeniedDirectoryAccess(),
           });
           return;
         }
@@ -107,8 +108,8 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
 
         const startResult = await startAccessing(resolvedPath);
         if (!startResult.success) {
-          toast.error('Failed to open directory', {
-            description: startResult.error || 'Desktop could not grant file access.',
+          toast.error(m.deFailedToOpenDirectory(), {
+            description: startResult.error || m.deDesktopCouldNotGrantFileAccess(),
           });
           return;
         }
@@ -116,16 +117,16 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
 
       const added = addProject(resolvedPath, { id: projectId });
       if (!added) {
-        toast.error('Failed to add project', {
-          description: 'Please select a valid directory path.',
+        toast.error(m.deFailedToAddProject(), {
+          description: m.deSelectValidDirectoryPath(),
         });
         return;
       }
 
       handleClose();
     } catch (error) {
-      toast.error('Failed to select directory', {
-        description: error instanceof Error ? error.message : 'Unknown error occurred.',
+      toast.error(m.deFailedToSelectDirectory(), {
+        description: error instanceof Error ? error.message : m.deUnknownErrorOccurred(),
       });
     } finally {
       setIsConfirming(false);
@@ -215,16 +216,16 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
       ) : (
         <RiCheckboxBlankLine className="h-4 w-4" />
       )}
-      Show hidden
+      {m.deShowHidden()}
     </button>
   );
 
   const dialogHeader = (
     <DialogHeader className="flex-shrink-0 px-4 pb-2 pt-[calc(var(--oc-safe-area-top,0px)+0.5rem)] sm:px-0 sm:pb-3 sm:pt-0">
-      <DialogTitle>Add project directory</DialogTitle>
+      <DialogTitle>{m.deAddProjectDirectory()}</DialogTitle>
       <div className="hidden sm:flex sm:items-center sm:justify-between sm:gap-4">
         <DialogDescription className="flex-1">
-          Choose a folder to add as a project.
+          {m.deChooseFolderToAddAsProject()}
         </DialogDescription>
         {showHiddenToggle}
       </div>
@@ -237,7 +238,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
         value={pathInputValue}
         onChange={handlePathInputChange}
         onKeyDown={handlePathInputKeyDown}
-        placeholder="Enter path or select from tree..."
+        placeholder={m.deEnterPathOrSelectFromTree()}
         className="font-mono typography-meta"
         spellCheck={false}
         autoComplete="off"
@@ -311,14 +312,14 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
         disabled={isConfirming}
         className="flex-1 sm:flex-none sm:w-auto"
       >
-        Cancel
+        {m.deCancel()}
       </Button>
       <Button
         onClick={handleConfirm}
         disabled={isConfirming || !hasUserSelection || (!pendingPath && !pathInputValue.trim())}
         className="flex-1 sm:flex-none sm:w-auto sm:min-w-[140px]"
       >
-        {isConfirming ? 'Adding...' : 'Add Project'}
+        {isConfirming ? m.deAdding() : m.deAddProject()}
       </Button>
     </>
   );
@@ -328,7 +329,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
       <MobileOverlayPanel
         open={open}
         onClose={() => onOpenChange(false)}
-        title="Add project directory"
+        title={m.deAddProjectDirectory()}
         className="max-w-full"
         contentMaxHeightClassName="max-h-[min(70vh,520px)] h-[min(70vh,520px)]"
         footer={<div className="flex flex-row gap-2">{renderActionButtons()}</div>}

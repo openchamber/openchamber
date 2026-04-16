@@ -24,21 +24,22 @@ import {
   RiLock2Line,
 } from '@remixicon/react';
 import { cn } from '@/lib/utils';
+import { m } from '@/lib/i18n/messages';
 
 const PROFILE_COLORS = [
-  { key: 'keyword', label: 'Green', cssVar: 'var(--syntax-keyword)' },
-  { key: 'error', label: 'Red', cssVar: 'var(--status-error)' },
-  { key: 'string', label: 'Cyan', cssVar: 'var(--syntax-string)' },
-  { key: 'function', label: 'Orange', cssVar: 'var(--syntax-function)' },
-  { key: 'type', label: 'Yellow', cssVar: 'var(--syntax-type)' },
+  { key: 'keyword', label: m.gitIdentityColorGreen(), cssVar: 'var(--syntax-keyword)' },
+  { key: 'error', label: m.gitIdentityColorRed(), cssVar: 'var(--status-error)' },
+  { key: 'string', label: m.gitIdentityColorCyan(), cssVar: 'var(--syntax-string)' },
+  { key: 'function', label: m.gitIdentityColorOrange(), cssVar: 'var(--syntax-function)' },
+  { key: 'type', label: m.gitIdentityColorYellow(), cssVar: 'var(--syntax-type)' },
 ];
 
 const PROFILE_ICONS = [
-  { key: 'branch', Icon: RiGitBranchLine, label: 'Branch' },
-  { key: 'briefcase', Icon: RiBriefcaseLine, label: 'Work' },
-  { key: 'house', Icon: RiHomeLine, label: 'Personal' },
-  { key: 'graduation', Icon: RiGraduationCapLine, label: 'School' },
-  { key: 'code', Icon: RiCodeLine, label: 'Code' },
+  { key: 'branch', Icon: RiGitBranchLine, label: m.gitIdentityCategoryBranch() },
+  { key: 'briefcase', Icon: RiBriefcaseLine, label: m.gitIdentityCategoryWork() },
+  { key: 'house', Icon: RiHomeLine, label: m.gitIdentityCategoryPersonal() },
+  { key: 'graduation', Icon: RiGraduationCapLine, label: m.gitIdentityCategorySchool() },
+  { key: 'code', Icon: RiCodeLine, label: m.gitIdentityCategoryCode() },
 ];
 
 interface GitIdentityEditorDialogProps {
@@ -130,11 +131,11 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
 
   const handleSave = async () => {
     if (!userName.trim() || !userEmail.trim()) {
-      toast.error('User name and email are required');
+      toast.error(m.gitIdentityNameEmailRequired());
       return;
     }
     if (authType === 'token' && !host.trim()) {
-      toast.error('Host is required for token-based authentication');
+      toast.error(m.gitIdentityHostRequiredToken());
       return;
     }
 
@@ -161,14 +162,14 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
       }
 
       if (success) {
-        toast.success(isNewProfile ? 'Profile created' : 'Profile updated');
+        toast.success(isNewProfile ? m.gitIdentityProfileCreated() : m.gitIdentityProfileUpdated());
         onOpenChange(false);
       } else {
-        toast.error(isNewProfile ? 'Failed to create profile' : 'Failed to update profile');
+        toast.error(isNewProfile ? m.gitIdentityFailedCreateProfile() : m.gitIdentityFailedUpdateProfile());
       }
     } catch (error) {
       console.error('Error saving profile:', error);
-      toast.error('An error occurred while saving');
+      toast.error(m.gitIdentityErrorSaving());
     } finally {
       setIsSaving(false);
     }
@@ -180,15 +181,15 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
     try {
       const success = await deleteProfile(profileId);
       if (success) {
-        toast.success('Profile deleted');
+        toast.success(m.gitIdentityProfileDeleted());
         setIsDeleteDialogOpen(false);
         onOpenChange(false);
       } else {
-        toast.error('Failed to delete profile');
+        toast.error(m.gitIdentityFailedDeleteProfile());
       }
     } catch (error) {
       console.error('Error deleting profile:', error);
-      toast.error('An error occurred while deleting');
+      toast.error(m.gitIdentityErrorDeleting());
     } finally {
       setIsDeleting(false);
     }
@@ -200,12 +201,12 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
   }, [color]);
 
   const title = importData
-    ? 'Import Credential'
+    ? m.gitIdentityImportCredential()
     : isNewProfile
-    ? 'New Identity'
+    ? m.gitIdentityNewIdentity()
     : isGlobalProfile
-    ? 'Global Identity'
-    : (selectedProfile?.name || 'Edit Identity');
+    ? m.gitIdentityGlobalIdentity()
+    : (selectedProfile?.name || m.gitIdentityEditIdentity());
 
   return (
     <>
@@ -215,10 +216,10 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
             <DialogTitle>{title}</DialogTitle>
             <DialogDescription>
               {isGlobalProfile
-                ? 'System-wide Git identity (read-only)'
+                ? m.gitIdentitySystemWideReadonly()
                 : isNewProfile
-                ? 'Create a new Git identity profile'
-                : 'Edit identity profile settings'}
+                ? m.gitIdentityCreateNew()
+                : m.gitIdentityEditProfile()}
             </DialogDescription>
           </DialogHeader>
 
@@ -227,17 +228,17 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
             {!isGlobalProfile && (
               <div className="space-y-3">
                 <div>
-                  <label className="typography-ui-label text-foreground block mb-1.5">Profile Name</label>
+                  <label className="typography-ui-label text-foreground block mb-1.5">{m.gitIdentityProfileName()}</label>
                   <Input
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    placeholder="Work Profile, Personal, etc."
+                    placeholder={m.gitIdentityProfileNamePlaceholder()}
                     className="h-8"
                   />
                 </div>
 
                 <div className="flex items-center justify-between gap-4">
-                  <span className="typography-ui-label text-foreground">Color</span>
+                  <span className="typography-ui-label text-foreground">{m.gitIdentityColor()}</span>
                   <div className="flex gap-1.5">
                     {PROFILE_COLORS.map((c) => (
                       <button
@@ -258,7 +259,7 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
                 </div>
 
                 <div className="flex items-center justify-between gap-4">
-                  <span className="typography-ui-label text-foreground">Icon</span>
+                  <span className="typography-ui-label text-foreground">{m.gitIdentityIcon()}</span>
                   <div className="flex gap-1.5">
                     {PROFILE_ICONS.map((i) => {
                       const IconComponent = i.Icon;
@@ -294,7 +295,7 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
             <div className="space-y-3">
               <div>
                 <div className="flex items-center gap-1.5 mb-1.5">
-                  <label className="typography-ui-label text-foreground">User Name</label>
+                  <label className="typography-ui-label text-foreground">{m.gitIdentityUserName()}</label>
                   {!isGlobalProfile && <span className="text-[var(--status-error)] text-xs">*</span>}
                   <Tooltip delayDuration={1000}>
                     <TooltipTrigger asChild>
@@ -308,7 +309,7 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
                 <Input
                   value={userName}
                   onChange={(e) => setUserName(e.target.value)}
-                  placeholder="John Doe"
+                  placeholder={m.gitIdentityUserNamePlaceholder()}
                   required={!isGlobalProfile}
                   readOnly={isGlobalProfile}
                   disabled={isGlobalProfile}
@@ -318,7 +319,7 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
 
               <div>
                 <div className="flex items-center gap-1.5 mb-1.5">
-                  <label className="typography-ui-label text-foreground">Email Address</label>
+                  <label className="typography-ui-label text-foreground">{m.gitIdentityEmail()}</label>
                   {!isGlobalProfile && <span className="text-[var(--status-error)] text-xs">*</span>}
                   <Tooltip delayDuration={1000}>
                     <TooltipTrigger asChild>
@@ -333,7 +334,7 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
                   type="email"
                   value={userEmail}
                   onChange={(e) => setUserEmail(e.target.value)}
-                  placeholder="john@example.com"
+                  placeholder={m.gitIdentityEmailPlaceholder()}
                   required={!isGlobalProfile}
                   readOnly={isGlobalProfile}
                   disabled={isGlobalProfile}
@@ -348,7 +349,7 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
                 <div className="border-t border-border/40" />
                 <div className="space-y-3">
                   <div className="flex items-center justify-between gap-4">
-                    <span className="typography-ui-label text-foreground">Auth Method</span>
+                    <span className="typography-ui-label text-foreground">{m.gitIdentityAuthMethod()}</span>
                     <div className="flex items-center gap-1">
                       <Button size="sm"
                         type="button"
@@ -380,7 +381,7 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
                   {authType === 'ssh' && (
                     <div>
                       <div className="flex items-center gap-1.5 mb-1.5">
-                        <label className="typography-ui-label text-foreground">SSH Key Path</label>
+                        <label className="typography-ui-label text-foreground">{m.gitIdentitySshKeyPath()}</label>
                         <Tooltip delayDuration={1000}>
                           <TooltipTrigger asChild>
                             <RiInformationLine className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
@@ -402,7 +403,7 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
                   {authType === 'token' && (
                     <div>
                       <div className="flex items-center gap-1.5 mb-1.5">
-                        <label className="typography-ui-label text-foreground">Host</label>
+                        <label className="typography-ui-label text-foreground">{m.gitIdentityHost()}</label>
                         <span className="text-[var(--status-error)] text-xs">*</span>
                         <Tooltip delayDuration={1000}>
                           <TooltipTrigger asChild>
@@ -416,7 +417,7 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
                       <Input
                         value={host}
                         onChange={(e) => setHost(e.target.value)}
-                        placeholder="github.com"
+                        placeholder={m.gitIdentityHostPlaceholder()}
                         required
                         className="h-8 font-mono text-xs"
                       />
@@ -439,11 +440,11 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
               </Button>
             )}
             <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)} className="text-foreground hover:bg-interactive-hover hover:text-foreground">
-              {isGlobalProfile ? 'Close' : 'Cancel'}
+              {isGlobalProfile ? m.commonClose() : m.commonCancel()}
             </Button>
             {!isGlobalProfile && (
               <Button size="sm" onClick={handleSave} disabled={isSaving}>
-                {isSaving ? 'Saving...' : isNewProfile ? 'Create' : 'Save'}
+                {isSaving ? m.commonLoading() : isNewProfile ? m.commonKeyCreate() : m.commonSave()}
               </Button>
             )}
           </DialogFooter>
@@ -457,17 +458,17 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
       >
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Delete Profile</DialogTitle>
+            <DialogTitle>{m.gitIdentityDeleteProfile()}</DialogTitle>
             <DialogDescription>
               Are you sure you want to delete "{selectedProfile?.name || name}"?
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setIsDeleteDialogOpen(false)} disabled={isDeleting}>
-              Cancel
+              {m.commonCancel()}
             </Button>
             <Button size="sm" variant="destructive" onClick={() => void handleConfirmDelete()} disabled={isDeleting}>
-              Delete
+              {m.commonDelete()}
             </Button>
           </DialogFooter>
         </DialogContent>

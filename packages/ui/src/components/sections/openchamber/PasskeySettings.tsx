@@ -14,10 +14,11 @@ import {
   type PasskeyStatus,
   type StoredPasskey,
 } from '@/lib/passkeys';
+import { m } from '@/lib/i18n/messages';
 
 const formatTimestamp = (timestamp: number | null) => {
   if (!timestamp || !Number.isFinite(timestamp)) {
-    return 'Never used';
+    return m.passkeyNeverUsed();
   }
 
   return new Intl.DateTimeFormat(undefined, {
@@ -45,7 +46,7 @@ export const PasskeySettings: React.FC = () => {
       const nextPasskeys = await fetchStoredPasskeys();
       setPasskeys(nextPasskeys);
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Could not load passkeys.';
+      const message = error instanceof Error ? error.message : m.passkeyFailedLoad();
       setErrorMessage(message);
     } finally {
       setIsLoading(false);
@@ -93,7 +94,7 @@ export const PasskeySettings: React.FC = () => {
 
   const handleRegisterPasskey = React.useCallback(async () => {
     if (!status.enabled) {
-      const message = 'Enable the UI password lock before adding passkeys.';
+      const message = m.passkeyEnableLockFirst();
       setErrorMessage(message);
       toast.message(message);
       return;
@@ -118,14 +119,14 @@ export const PasskeySettings: React.FC = () => {
       await registerCurrentDevicePasskey();
       setStatus(await fetchPasskeyStatus());
       await loadPasskeys();
-      toast.success('Passkey added');
+      toast.success(m.passkeyToastAdded());
     } catch (error) {
       if (isPasskeyCeremonyAbort(error)) {
-        toast.message('Passkey setup canceled');
+        toast.message(m.passkeyToastCanceled());
         return;
       }
 
-      const message = error instanceof Error ? error.message : 'Could not add passkey.';
+      const message = error instanceof Error ? error.message : m.passkeyFailedAdd();
       setErrorMessage(message);
       toast.error(message);
     } finally {
@@ -141,9 +142,9 @@ export const PasskeySettings: React.FC = () => {
       await revokeStoredPasskey(id);
       setStatus(await fetchPasskeyStatus());
       await loadPasskeys();
-      toast.success('Passkey removed');
+      toast.success(m.passkeyToastRemoved());
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Could not remove passkey.';
+      const message = error instanceof Error ? error.message : m.passkeyFailedRemove();
       setErrorMessage(message);
       toast.error(message);
     } finally {
@@ -159,7 +160,7 @@ export const PasskeySettings: React.FC = () => {
       await resetAllAuth();
       window.location.reload();
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Could not clear saved authentication.';
+      const message = error instanceof Error ? error.message : m.passkeyFailedClearAuth();
       setErrorMessage(message);
       toast.error(message);
       setIsResetting(false);
@@ -169,13 +170,13 @@ export const PasskeySettings: React.FC = () => {
   return (
     <div className="mb-8">
       <div className="mb-1 px-1">
-        <h3 className="typography-ui-header font-medium text-foreground">Passkeys</h3>
+        <h3 className="typography-ui-header font-medium text-foreground">{m.passkeyTitle()}</h3>
       </div>
 
       <section className="px-2 pb-2 pt-0 space-y-2">
         <div className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
           <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
-            <span className="typography-ui-label text-foreground">Current device</span>
+            <span className="typography-ui-label text-foreground">{m.passkeyCurrentDevice()}</span>
           </div>
           <div className="flex items-center gap-2 sm:w-fit">
             <Button
@@ -186,7 +187,7 @@ export const PasskeySettings: React.FC = () => {
               disabled={isLoading || isResetting}
               className="!font-normal"
             >
-              {isRegistering ? 'Cancel passkey setup' : 'Add passkey'}
+              {isRegistering ? m.passkeyCancelSetup() : m.passkeyAdd()}
             </Button>
             <Button
               type="button"
@@ -196,14 +197,14 @@ export const PasskeySettings: React.FC = () => {
               disabled={isLoading || isRegistering || isResetting}
               className="!font-normal text-muted-foreground hover:text-foreground"
             >
-              {isResetting ? 'Signing out…' : 'Sign out everywhere'}
+              {isResetting ? m.passkeySigningOut() : m.passkeySignOut()}
             </Button>
           </div>
         </div>
 
         {!status.enabled && (
           <p className="typography-meta text-muted-foreground">
-            Passkeys are available only when the UI password lock is enabled.
+            {m.passkeyLockRequired()}
           </p>
         )}
 
@@ -214,9 +215,9 @@ export const PasskeySettings: React.FC = () => {
         )}
 
         {isLoading ? (
-          <p className="typography-meta text-muted-foreground">Loading passkeys…</p>
+          <p className="typography-meta text-muted-foreground">{m.passkeyLoading()}</p>
         ) : passkeys.length === 0 ? (
-          <p className="typography-meta text-muted-foreground">No passkeys saved for this host yet.</p>
+          <p className="typography-meta text-muted-foreground">{m.passkeyNone()}</p>
         ) : (
           <div className="space-y-1 pt-1">
             {passkeys.map((passkey) => (
@@ -226,7 +227,7 @@ export const PasskeySettings: React.FC = () => {
                 </div>
                 <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
                   <span className="typography-meta text-muted-foreground truncate">
-                    {passkey.lastUsedAt ? `Last used ${formatTimestamp(passkey.lastUsedAt)}` : `Added ${formatTimestamp(passkey.createdAt)}`}
+                    {passkey.lastUsedAt ? m.passkeyLastUsed({ time: formatTimestamp(passkey.lastUsedAt) }) : m.passkeyAdded({ time: formatTimestamp(passkey.createdAt) })}
                   </span>
                   <Button
                     type="button"
@@ -236,7 +237,7 @@ export const PasskeySettings: React.FC = () => {
                     disabled={revokingId === passkey.id}
                     className="!font-normal text-muted-foreground hover:text-foreground"
                   >
-                    {revokingId === passkey.id ? 'Removing…' : 'Remove'}
+                    {revokingId === passkey.id ? m.passkeyRemoving() : m.passkeyRemove()}
                   </Button>
                 </div>
               </div>

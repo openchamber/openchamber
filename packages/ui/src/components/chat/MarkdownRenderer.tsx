@@ -23,6 +23,7 @@ import { useDeviceInfo } from '@/lib/device';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { EditorAPI } from '@/lib/api/types';
+import { actionCopy, chatDownloadTable, chatFailedDownloadDiagram, chatCopySource, chatDownloadSvg } from '@/lib/i18n/messages';
 
 const useCurrentMermaidTheme = () => {
   const themeSystem = useOptionalThemeSystem();
@@ -221,7 +222,7 @@ const TableCopyButton: React.FC<{ tableRef: React.RefObject<HTMLDivElement | nul
       <button
         onClick={() => setShowMenu(!showMenu)}
         className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
-        title="Copy table"
+        title={actionCopy()}
       >
         {copied ? <RiCheckLine className="size-3.5" /> : <RiFileCopyLine className="size-3.5" />}
       </button>
@@ -278,7 +279,7 @@ const TableDownloadButton: React.FC<{ tableRef: React.RefObject<HTMLDivElement |
       <button
         onClick={() => setShowMenu(!showMenu)}
         className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
-        title="Download table"
+        title={chatDownloadTable()}
       >
         <RiDownloadLine className="size-3.5" />
       </button>
@@ -390,7 +391,7 @@ const MermaidBlock: React.FC<{ source: string; mode: 'svg' | 'ascii' }> = ({ sou
       setDownloaded(true);
       setTimeout(() => setDownloaded(false), 2000);
     } catch {
-      toast.error('Failed to download diagram');
+      toast.error(chatFailedDownloadDiagram());
     }
   };
 
@@ -411,7 +412,7 @@ const MermaidBlock: React.FC<{ source: string; mode: 'svg' | 'ascii' }> = ({ sou
           <button
             onClick={() => handleCopyAscii(asciiText)}
             className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
-            title="Copy"
+            title={actionCopy()}
           >
             {copied ? <RiCheckLine className="size-3.5" /> : <RiFileCopyLine className="size-3.5" />}
           </button>
@@ -435,7 +436,7 @@ const MermaidBlock: React.FC<{ source: string; mode: 'svg' | 'ascii' }> = ({ sou
           <button
             onClick={() => handleCopyAscii(source)}
             className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
-            title="Copy"
+            title={actionCopy()}
           >
             {copied ? <RiCheckLine className="size-3.5" /> : <RiFileCopyLine className="size-3.5" />}
           </button>
@@ -458,14 +459,14 @@ const MermaidBlock: React.FC<{ source: string; mode: 'svg' | 'ascii' }> = ({ sou
         <button
           onClick={handleCopyMermaidSource}
           className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
-          title="Copy source"
+          title={chatCopySource()}
         >
           {copied ? <RiCheckLine className="size-3.5" /> : <RiFileCopyLine className="size-3.5" />}
         </button>
         <button
           onClick={handleDownloadSvg}
           className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
-          title="Download SVG"
+          title={chatDownloadSvg()}
         >
           {downloaded ? <RiCheckLine className="size-3.5" /> : <RiDownloadLine className="size-3.5" />}
         </button>
@@ -700,7 +701,7 @@ const MarkdownCodeBlock: React.FC<{
             type="button"
             onClick={() => { void handleCopy(); }}
             className="p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors"
-            title={copied ? 'Copied' : 'Copy code'}
+            title={actionCopy()}
           >
             {copied ? <RiCheckLine className="size-3.5" /> : <RiFileCopyLine className="size-3.5" />}
           </button>

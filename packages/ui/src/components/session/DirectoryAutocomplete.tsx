@@ -1,5 +1,6 @@
 import React from 'react';
 import { RiFolderLine, RiRefreshLine } from '@remixicon/react';
+import { m } from '@/lib/i18n/messages';
 import { cn } from '@/lib/utils';
 import { opencodeClient, type FilesystemEntry } from '@/lib/opencode/client';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
@@ -305,7 +306,7 @@ export const DirectoryAutocomplete = React.forwardRef<DirectoryAutocompleteHandl
         </div>
       )}
       <div className="px-3 py-1.5 border-t typography-meta text-muted-foreground bg-sidebar/50">
-        Tab cycle • ↑↓ navigate • Enter select
+        {m.daTabCycleNavigateSelect()}
       </div>
     </div>
   );

@@ -26,6 +26,7 @@ import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
 import { updateDesktopSettings } from '@/lib/persistence';
 import type { UsageWindow } from '@/types';
 import { RiAddLine, RiArrowLeftLine, RiRefreshLine, RiRobot2Line, RiSettings3Line, RiTimerLine } from '@remixicon/react';
+import { m } from '@/lib/i18n/messages';
 
 const formatTime = (timestamp: number | null) => {
   if (!timestamp) return '-';
@@ -97,7 +98,7 @@ export const VSCodeLayout: React.FC = () => {
     if (!currentSessionId) {
       return null;
     }
-    return sessions.find((session) => session.id === currentSessionId)?.title || 'Session';
+    return sessions.find((session) => session.id === currentSessionId)?.title || m.lySession();
   }, [currentSessionId, sessions]);
   const newSessionDraftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
   const isSyncingMessages = useViewportStore((state) => state.isSyncing);
@@ -376,7 +377,7 @@ export const VSCodeLayout: React.FC = () => {
         // Editor mode: just chat, no sidebar
         <div className="flex flex-col h-full">
           <VSCodeHeader
-            title={sessions.find((session) => session.id === currentSessionId)?.title || 'Chat'}
+            title={sessions.find((session) => session.id === currentSessionId)?.title || m.lyChat()}
             showMcp
             showContextUsage
           />
@@ -417,15 +418,15 @@ export const VSCodeLayout: React.FC = () => {
               onPointerCancel={handleExpandedSidebarResizeEnd}
               role="separator"
               aria-orientation="vertical"
-              aria-label="Resize sessions sidebar"
+              aria-label={m.lyResizeSessionsSidebar()}
             />
           </div>
           {/* Chat content */}
           <div className="flex-1 flex flex-col min-w-0">
             <VSCodeHeader
               title={newSessionDraftOpen && !currentSessionId
-                ? 'New session'
-                : sessions.find((session) => session.id === currentSessionId)?.title || 'Chat'}
+                ? m.lyNewSession()
+                : sessions.find((session) => session.id === currentSessionId)?.title || m.lyChat()}
               showMcp
               showContextUsage
             />
@@ -442,7 +443,7 @@ export const VSCodeLayout: React.FC = () => {
           {/* Sessions list view */}
           <div className={cn('flex flex-col h-full', currentView !== 'sessions' && 'hidden')}>
             <VSCodeHeader
-              title="Sessions"
+              title={m.lySessions()}
             />
             <div className="flex-1 overflow-hidden">
               <SessionSidebar
@@ -458,8 +459,8 @@ export const VSCodeLayout: React.FC = () => {
           <div className={cn('flex flex-col h-full', currentView !== 'chat' && 'hidden')}>
             <VSCodeHeader
               title={newSessionDraftOpen && !currentSessionId
-                ? 'New session'
-                : sessions.find((session) => session.id === currentSessionId)?.title || 'Chat'}
+                ? m.lyNewSession()
+                : sessions.find((session) => session.id === currentSessionId)?.title || m.lyChat()}
               showBack
               onBack={handleBackToSessions}
               showMcp
@@ -556,7 +557,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
         <button
           onClick={onBack}
           className="inline-flex h-7 w-7 items-center justify-center text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-          aria-label="Back to sessions"
+          aria-label={m.lyBackToSessions()}
         >
           <RiArrowLeftLine className="h-5 w-5" />
         </button>
@@ -566,7 +567,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
         <button
           onClick={onNewSession}
           className="inline-flex h-9 w-9 items-center justify-center p-2 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-          aria-label="New session"
+          aria-label={m.lyNewSession()}
         >
           <RiAddLine className="h-5 w-5" />
         </button>
@@ -575,7 +576,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
         <button
           onClick={onAgentManager}
           className="inline-flex h-9 w-9 items-center justify-center p-2 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-          aria-label="Open Agent Manager"
+          aria-label={m.lyOpenAgentManager()}
         >
           <RiRobot2Line className="h-5 w-5" />
         </button>
@@ -596,7 +597,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              aria-label="Rate limits"
+              aria-label={m.lyRateLimits()}
               className="inline-flex h-9 w-9 items-center justify-center p-2 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               disabled={isQuotaLoading}
             >
@@ -609,7 +610,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
           >
             <div className="sticky top-0 z-20 bg-[var(--surface-elevated)]">
               <DropdownMenuLabel className="flex items-center justify-between gap-3 typography-ui-header font-semibold text-foreground">
-                <span>Rate limits</span>
+                <span>{m.lyRateLimits()}</span>
                 <div className="flex items-center gap-1">
                   <div className="flex items-center rounded-md border border-[var(--interactive-border)] p-0.5">
                     <button
@@ -622,9 +623,9 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
                         }`
                       }
                       onClick={() => void handleDisplayModeChange('usage')}
-                      aria-label="Show used quota"
+                      aria-label={m.lyShowUsedQuota()}
                     >
-                      Used
+                      {m.lyUsed()}
                     </button>
                     <button
                       type="button"
@@ -636,9 +637,9 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
                         }`
                       }
                       onClick={() => void handleDisplayModeChange('remaining')}
-                      aria-label="Show remaining quota"
+                      aria-label={m.lyShowRemainingQuota()}
                     >
-                      Remaining
+                      {m.lyRemaining()}
                     </button>
                   </div>
                   <button
@@ -646,7 +647,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
                     className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                     onClick={() => fetchAllQuotas()}
                     disabled={isQuotaLoading}
-                    aria-label="Refresh rate limits"
+                    aria-label={m.lyRefreshRateLimits()}
                   >
                     <RiRefreshLine className="h-4 w-4" />
                   </button>
@@ -654,11 +655,11 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
               </DropdownMenuLabel>
             </div>
             <div className="border-b border-[var(--interactive-border)] px-2 pb-2 typography-micro text-muted-foreground text-[10px]">
-              Last updated {formatTime(quotaLastUpdated)}
+              {m.lyLastUpdated().replace('{time}', formatTime(quotaLastUpdated))}
             </div>
             {!hasRateLimits && (
               <DropdownMenuItem className="cursor-default" onSelect={(event) => event.preventDefault()}>
-                <span className="typography-ui-label text-muted-foreground">No rate limits available.</span>
+                <span className="typography-ui-label text-muted-foreground">{m.lyNoRateLimitsAvailable()}</span>
               </DropdownMenuItem>
             )}
             {rateLimitGroups.map((group, index) => (
@@ -667,14 +668,14 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
                   <ProviderLogo providerId={group.providerId} className="h-4 w-4" />
                   {group.providerName}
                 </DropdownMenuLabel>
-                {group.entries.length === 0 ? (
+                 {group.entries.length === 0 ? (
                   <DropdownMenuItem
                     key={`${group.providerId}-empty`}
                     className="cursor-default"
                     onSelect={(event) => event.preventDefault()}
                   >
                     <span className="typography-ui-label text-muted-foreground">
-                      {group.error ?? 'No rate limits reported.'}
+                      {group.error ?? m.lyNoRateLimitsReported()}
                     </span>
                   </DropdownMenuItem>
                 ) : (
@@ -730,7 +731,7 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
         <button
           onClick={onSettings}
           className="inline-flex h-9 w-9 items-center justify-center p-2 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-          aria-label="Settings"
+          aria-label={m.lySettings()}
         >
           <RiSettings3Line className="h-5 w-5" />
         </button>

@@ -10,6 +10,7 @@ import { RiArrowDownSLine, RiFolderLine } from '@remixicon/react';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { cn } from '@/lib/utils';
+import { m } from '@/lib/i18n/messages';
 
 const formatProjectLabel = (label: string): string => {
   return label.replace(/[-_]/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
@@ -39,7 +40,7 @@ export const SettingsProjectSelector: React.FC<{ className?: string }> = ({ clas
 
   const rawLabel = activeProject?.label && activeProject.label.trim().length > 0
     ? activeProject.label
-    : (activeProject?.path.split('/').filter(Boolean).pop() || activeProject?.path || 'Project');
+    : (activeProject?.path.split('/').filter(Boolean).pop() || activeProject?.path || m.settingsProjectSelector());
   const label = formatProjectLabel(rawLabel);
 
   return (
@@ -48,8 +49,8 @@ export const SettingsProjectSelector: React.FC<{ className?: string }> = ({ clas
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              aria-label="Switch project"
-              title="Switch project"
+              aria-label={m.settingsSwitchProjectAria()}
+              title={m.settingsSwitchProjectAria()}
               className={cn(
                 // Mirror Input sizing so headers align visually.
                 'text-foreground border border-border/80 appearance-none flex h-8 w-full min-w-0 rounded-lg bg-transparent px-3 py-1 outline-none',

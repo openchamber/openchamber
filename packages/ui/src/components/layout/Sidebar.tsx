@@ -2,6 +2,7 @@ import React from 'react';
 import { cn } from '@/lib/utils';
 import { ErrorBoundary } from '../ui/ErrorBoundary';
 import { useUIStore } from '@/stores/useUIStore';
+import { sidebarResizeLeftPanel } from '@/lib/i18n/messages';
 
 export const SIDEBAR_CONTENT_WIDTH = 250;
 const SIDEBAR_MIN_WIDTH = 250;
@@ -143,7 +144,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
                     onPointerCancel={handlePointerEnd}
                     role="separator"
                     aria-orientation="vertical"
-                    aria-label="Resize left panel"
+                    aria-label={sidebarResizeLeftPanel()}
                 />
             )}
             <div

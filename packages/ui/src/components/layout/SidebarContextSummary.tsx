@@ -3,6 +3,11 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessions } from '@/sync/sync-context';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { cn } from '@/lib/utils';
+import {
+  ctxSummarySession,
+  ctxSummaryNoActiveSession,
+  ctxSummaryUntitledSession,
+} from '@/lib/i18n/messages';
 
 interface SidebarContextSummaryProps {
     className?: string;
@@ -10,10 +15,10 @@ interface SidebarContextSummaryProps {
 
 const formatSessionTitle = (title?: string | null) => {
     if (!title) {
-        return 'Untitled Session';
+        return ctxSummaryUntitledSession();
     }
     const trimmed = title.trim();
-    return trimmed.length > 0 ? trimmed : 'Untitled Session';
+    return trimmed.length > 0 ? trimmed : ctxSummaryUntitledSession();
 };
 
 const formatDirectoryPath = (path?: string) => {
@@ -30,10 +35,10 @@ export const SidebarContextSummary: React.FC<SidebarContextSummaryProps> = ({ cl
 
     const activeSessionTitle = React.useMemo(() => {
         if (!currentSessionId) {
-            return 'No active session';
+            return ctxSummaryNoActiveSession();
         }
         const session = sessions.find((item) => item.id === currentSessionId);
-        return session ? formatSessionTitle(session.title) : 'No active session';
+        return session ? formatSessionTitle(session.title) : ctxSummaryNoActiveSession();
     }, [currentSessionId, sessions]);
 
     const directoryFull = React.useMemo(() => {
@@ -50,7 +55,7 @@ export const SidebarContextSummary: React.FC<SidebarContextSummaryProps> = ({ cl
 
     return (
         <div className={cn('hidden min-h-[48px] flex-col justify-center gap-0.5 border-b bg-sidebar px-3 py-2 md:flex md:pb-2', className)}>
-            <span className="typography-meta text-muted-foreground">Session</span>
+            <span className="typography-meta text-muted-foreground">{ctxSummarySession()}</span>
             <span className="typography-ui-label font-semibold text-foreground truncate" title={activeSessionTitle}>
                 {activeSessionTitle}
             </span>

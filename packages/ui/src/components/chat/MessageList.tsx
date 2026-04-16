@@ -8,6 +8,7 @@ import TurnItem from './components/TurnItem';
 import type { AnimationHandlers, ContentChangeReason } from '@/hooks/useChatScrollManager';
 import { filterSyntheticParts } from '@/lib/messages/synthetic';
 import type { ChatMessageEntry, TurnRecord, TurnGroupingContext } from './lib/turns/types';
+import { m } from '@/lib/i18n/messages';
 import { useTurnRecords } from './hooks/useTurnRecords';
 import { applyRetryOverlay } from './lib/turns/applyRetryOverlay';
 import { useUIStore } from '@/stores/useUIStore';
@@ -40,7 +41,7 @@ const useStableEvent = <TArgs extends unknown[], TResult>(handler: (...args: TAr
     return React.useCallback((...args: TArgs) => handlerRef.current(...args), []);
 };
 
-const USER_SHELL_MARKER = 'The following tool was executed by the user';
+const USER_SHELL_MARKER = m.chatToolExecutedByUser();
 
 const resolveMessageRole = (message: ChatMessageEntry): string | null => {
     const info = message.info as unknown as { clientRole?: string | null | undefined; role?: string | null | undefined };
@@ -1171,7 +1172,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(({
     const displayMessages = React.useMemo(() => streamPerfMeasure('ui.message_list.retry_overlay_ms', () => {
         return applyRetryOverlay(baseDisplayMessages, {
             sessionId: retryOverlay?.sessionId ?? null,
-            message: retryOverlay?.message ?? 'Quota limit reached. Retrying automatically.',
+            message: retryOverlay?.message ?? m.chatQuotaLimitRetrying(),
             confirmedAt: retryOverlay?.confirmedAt,
             fallbackTimestamp: retryOverlay?.fallbackTimestamp ?? 0,
         });

@@ -21,6 +21,7 @@ import { useUIStore } from "@/stores/useUIStore";
 import { WorkingPlaceholder } from "./message/parts/WorkingPlaceholder";
 import { isVSCodeRuntime } from "@/lib/desktop";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { m } from '@/lib/i18n/messages';
 
 const statusConfig: Record<TodoStatus, { textClassName: string }> = {
   in_progress: {
@@ -50,16 +51,16 @@ const priorityIcon: Record<TodoPriority, React.ReactNode> = {
 };
 
 const statusLabel: Record<TodoStatus, string> = {
-  in_progress: "In progress",
-  pending: "Pending",
-  completed: "Completed",
-  cancelled: "Cancelled",
+  in_progress: m.srStatusInProgress(),
+  pending: m.srStatusPending(),
+  completed: m.srStatusCompleted(),
+  cancelled: m.srStatusCancelled(),
 };
 
 const priorityLabel: Record<TodoPriority, string> = {
-  high: "High priority",
-  medium: "Medium priority",
-  low: "Low priority",
+  high: m.srStatusHighPriority(),
+  medium: m.srStatusMediumPriority(),
+  low: m.srStatusLowPriority(),
 };
 
 interface TodoItemRowProps {
@@ -224,7 +225,7 @@ export const StatusRow: React.FC<StatusRowProps> = ({
       type="button"
       onClick={onAbort}
       className="flex items-center justify-center h-[1.2rem] w-[1.2rem] text-[var(--status-error)] transition-opacity hover:opacity-80 focus-visible:outline-none flex-shrink-0"
-      aria-label="Stop generating"
+      aria-label={m.srActionStop()}
     >
       <RiCloseCircleLine size={18} aria-hidden="true" />
     </button>
@@ -243,10 +244,10 @@ export const StatusRow: React.FC<StatusRowProps> = ({
           {activeTodo.content}
         </span>
       ) : (
-        <span className="typography-ui-label">Tasks</span>
+        <span className="typography-ui-label">{m.srTasks()}</span>
       )}
       <span className="typography-meta">
-        {statusSummary.active} active · {statusSummary.left} left
+          {statusSummary.active} active · {statusSummary.left} left
       </span>
       {isExpanded ? (
         <RiArrowUpSLine className="h-3.5 w-3.5" />
@@ -266,11 +267,11 @@ export const StatusRow: React.FC<StatusRowProps> = ({
       <div className="flex items-center justify-between py-0.5 gap-2 h-[1.2rem]">
         {/* Left: Abort status or Working placeholder */}
         <div className="flex-1 flex items-center overflow-hidden min-w-0">
-          {showAssistantStatus && showAbortStatus ? (
+           {showAssistantStatus && showAbortStatus ? (
             <div className="flex h-full items-center text-[var(--status-error)] pl-0.5">
               <span className="flex items-center gap-1.5 typography-ui-label">
                 <RiCloseCircleLine size={16} aria-hidden="true" />
-                Aborted
+                 {m.srStatusAborted()}
               </span>
             </div>
           ) : showAssistantStatus && shouldRenderPlaceholder ? (
@@ -305,7 +306,7 @@ export const StatusRow: React.FC<StatusRowProps> = ({
             >
               {/* Header */}
               <div className="flex items-center justify-between px-3 py-2 border-b border-border">
-                <span className="typography-ui-label text-muted-foreground">Tasks</span>
+                <span className="typography-ui-label text-muted-foreground">{m.srTasks()}</span>
                 <span className="typography-meta text-muted-foreground">
                   {progress.completed}/{progress.total}
                 </span>

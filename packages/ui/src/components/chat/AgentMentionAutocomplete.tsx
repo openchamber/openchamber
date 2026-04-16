@@ -3,6 +3,7 @@ import { cn, fuzzyMatch } from '@/lib/utils';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useAgentsStore, isAgentBuiltIn, type AgentWithExtras } from '@/stores/useAgentsStore';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { chatNoAgentsFound } from '@/lib/i18n/messages';
 
 interface AgentInfo {
   name: string;
@@ -232,7 +233,7 @@ export const AgentMentionAutocomplete = React.forwardRef<AgentMentionAutocomplet
           </div>
         ) : (
           <div className="px-3 py-2 typography-ui-label text-muted-foreground">
-            No agents found
+            {chatNoAgentsFound()}
           </div>
         )}
       </ScrollableOverlay>

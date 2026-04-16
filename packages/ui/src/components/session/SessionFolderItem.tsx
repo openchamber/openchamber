@@ -11,6 +11,7 @@ import {
   RiAddLine,
   RiFolderAddLine,
 } from '@remixicon/react';
+import { m } from '@/lib/i18n/messages';
 import { cn } from '@/lib/utils';
 import type { SessionFolder } from '@/stores/useSessionFoldersStore';
 
@@ -192,7 +193,7 @@ const SessionFolderItemBase = <TSessionNode,>({
                 onChange={(event) => handleDraftChange(event.target.value)}
                 className="flex-1 min-w-0 bg-transparent typography-ui-label outline-none placeholder:text-muted-foreground"
                 autoFocus
-                placeholder="Folder name"
+                placeholder={m.sfiFolderName()}
                 onClick={(event) => event.stopPropagation()}
                 onPointerDown={(event) => event.stopPropagation()}
                 onMouseDown={(event) => event.stopPropagation()}
@@ -265,8 +266,8 @@ const SessionFolderItemBase = <TSessionNode,>({
                     onNewSession();
                   }}
                   className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-                  aria-label={`New session in ${folder.name}`}
-                  title="New session"
+                  aria-label={m.sfiNewSessionIn({ name: folder.name })}
+                  title={m.sfiNewSession()}
                 >
                   <RiAddLine className="h-3.5 w-3.5" />
                 </button>
@@ -280,8 +281,8 @@ const SessionFolderItemBase = <TSessionNode,>({
                     onNewSubFolder();
                   }}
                   className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-                  aria-label={`New sub-folder in ${folder.name}`}
-                  title="New sub-folder"
+                  aria-label={m.sfiNewSubFolderIn({ name: folder.name })}
+                  title={m.sfiNewSubFolder()}
                 >
                   <RiFolderAddLine className="h-3.5 w-3.5" />
                 </button>
@@ -327,7 +328,7 @@ const SessionFolderItemBase = <TSessionNode,>({
             )
           ) : !subFolderItems ? (
             <div className="py-1 pl-1.5 text-left typography-micro text-muted-foreground/70">
-              Empty folder
+              {m.sfiEmptyFolder()}
             </div>
           ) : null}
         </div>

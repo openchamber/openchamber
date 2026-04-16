@@ -1,5 +1,6 @@
 import React from 'react';
 import { RiArrowDownSLine, RiArrowRightSLine } from '@remixicon/react';
+import { m } from '@/lib/i18n/messages';
 import { cn } from '@/lib/utils';
 import type { SessionNode } from './types';
 
@@ -88,7 +89,7 @@ export function SidebarActivitySections({ sections, renderSessionNode }: Props):
                     onClick={() => toggleSectionLimit(section.key)}
                     className="mt-0.5 flex items-center justify-start rounded-md px-1.5 py-0.5 text-left text-xs text-muted-foreground/70 leading-tight hover:text-foreground hover:underline"
                   >
-                    Show {remainingCount} more {remainingCount === 1 ? 'session' : 'sessions'}
+                    {m.sasShowMoreSessions({ count: remainingCount })}
                   </button>
                 ) : null}
                 {isExpanded && section.items.length > MAX_VISIBLE_RECENT_SESSIONS ? (
@@ -97,7 +98,7 @@ export function SidebarActivitySections({ sections, renderSessionNode }: Props):
                     onClick={() => toggleSectionLimit(section.key)}
                     className="mt-0.5 flex items-center justify-start rounded-md px-1.5 py-0.5 text-left text-xs text-muted-foreground/70 leading-tight hover:text-foreground hover:underline"
                   >
-                    Show fewer sessions
+                    {m.sasShowFewerSessions()}
                   </button>
                 ) : null}
               </div>

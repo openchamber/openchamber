@@ -65,6 +65,7 @@ import type {
   GitHubPullRequestSummary,
 } from '@/lib/api/types';
 import type { ProjectRef } from '@/lib/worktrees/worktreeManager';
+import { m } from '@/lib/i18n/messages';
 
 type Mode = 'new-branch' | 'existing-branch';
 
@@ -519,7 +520,7 @@ export function NewWorktreeDialog({
     const agentName = resolveDefaultAgentName() || configState.currentAgentName || undefined;
 
     if (!providerID || !modelID) {
-      toast.error('No model selected');
+      toast.error(m.wtNoModelSelected());
       return;
     }
 
@@ -540,12 +541,12 @@ export function NewWorktreeDialog({
 
       const issueRes = await github.issueGet(projectDirectory, args.issue.number);
       if (issueRes.connected === false || !issueRes.repo || !issueRes.issue) {
-        throw new Error('Failed to load issue context');
+        throw new Error(m.wtFailedToLoadIssueContext());
       }
 
       const commentsRes = await github.issueComments(projectDirectory, args.issue.number);
       if (commentsRes.connected === false) {
-        throw new Error('Failed to load issue comments');
+        throw new Error(m.wtFailedToLoadIssueComments());
       }
 
       const visiblePromptText = await renderMagicPrompt('github.issue.review.visible', {
@@ -571,7 +572,7 @@ export function NewWorktreeDialog({
         ],
       });
 
-      toast.success('Session created from issue');
+      toast.success(m.wtSessionCreatedFromIssue());
       return;
     }
 
@@ -585,7 +586,7 @@ export function NewWorktreeDialog({
         includeCheckDetails: false,
       });
       if (prContext.connected === false || !prContext.repo || !prContext.pr) {
-        throw new Error('Failed to load PR context');
+        throw new Error(m.wtFailedToLoadPrContext());
       }
 
       const visiblePromptText = await renderMagicPrompt('github.pr.review.visible', {
@@ -607,7 +608,7 @@ export function NewWorktreeDialog({
         ],
       });
 
-      toast.success('Session created from PR');
+      toast.success(m.wtSessionCreatedFromPr());
     }
   }, [
     applySessionModelAndAgentDefaults,
@@ -729,11 +730,11 @@ export function NewWorktreeDialog({
       let worktreeError: string | null = null;
       
       if (!normalizedBranch) {
-        branchError = 'Branch name is required';
+        branchError = m.wtBranchNameRequired();
       }
       
       if (!normalizedWorktree) {
-        worktreeError = 'Worktree directory is required';
+        worktreeError = m.wtWorktreeDirectoryRequired();
       }
       
       // Only run server validation if we have values
@@ -805,7 +806,7 @@ export function NewWorktreeDialog({
   // Handle worktree creation
   const handleCreate = async () => {
     if (!projectRef || !projectDirectory) {
-      toast.error('No active project');
+      toast.error(m.wtNoActiveProject());
       return;
     }
     
@@ -818,12 +819,12 @@ export function NewWorktreeDialog({
     const normalizedWorktree = slugifyWorktreeName(worktreeName);
     
     if (!normalizedBranch) {
-      toast.error('Branch name is required');
+      toast.error(m.wtBranchNameRequired());
       return;
     }
     
     if (!normalizedWorktree) {
-      toast.error('Worktree directory is required');
+      toast.error(m.wtWorktreeDirectoryRequired());
       return;
     }
 
@@ -914,8 +915,8 @@ export function NewWorktreeDialog({
         localStorage.setItem(LAST_SOURCE_BRANCH_KEY, newBranchState.sourceBranch);
       }
       
-      toast.success('Worktree created', {
-        description: `${metadata.branch || metadata.name}${sourceLabel ? ` from ${sourceLabel}` : ''} - bootstrapping in background`,
+      toast.success(m.wtWorktreeCreated(), {
+        description: `${metadata.branch || metadata.name}${sourceLabel ? ` ${m.wtFrom({ source: sourceLabel })}` : ''} - ${m.wtBootstrappingInBackground()}`,
       });
 
       onOpenChange(false);
@@ -928,15 +929,15 @@ export function NewWorktreeDialog({
           pr: linkedPrState,
           includeDiff: includePrDiff,
         }).catch((error) => {
-          const message = error instanceof Error ? error.message : 'Failed to send GitHub context';
-          toast.error('Failed to send GitHub context', { description: message });
+          const message = error instanceof Error ? error.message : m.wtFailedToSendGithubContext();
+          toast.error(m.wtFailedToSendGithubContext(), { description: message });
         });
       } else {
         onWorktreeCreated?.(metadata.path);
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to create worktree';
-      toast.error('Failed to create worktree', { description: message });
+      const message = error instanceof Error ? error.message : m.wtFailedToCreateWorktree();
+      toast.error(m.wtFailedToCreateWorktree(), { description: message });
     } finally {
       setIsCreating(false);
     }
@@ -1036,7 +1037,7 @@ export function NewWorktreeDialog({
           disabled={isCreating}
           className={cn(isMobile && 'flex-1')}
         >
-          Cancel
+          {m.commonCancel()}
         </Button>
         <Button
           size="sm"
@@ -1045,7 +1046,7 @@ export function NewWorktreeDialog({
           className={cn('gap-1.5', isMobile && 'flex-1')}
         >
           {isCreating && <RiLoader4Line className="h-3.5 w-3.5 animate-spin" />}
-          {isCreating ? 'Creating...' : 'Create Worktree'}
+          {isCreating ? m.wtCreating() : m.wtCreateWorktree()}
         </Button>
       </div>
     </div>
@@ -1056,7 +1057,7 @@ export function NewWorktreeDialog({
       {isMobile ? (
         <MobileOverlayPanel
           open={open}
-          title="New Worktree"
+          title={m.wtTitle()}
           onClose={() => onOpenChange(false)}
           footer={footerContent}
         >
@@ -1064,8 +1065,8 @@ export function NewWorktreeDialog({
           <div className="w-full mb-4">
             <SortableTabsStrip
               items={[
-                { id: 'new-branch', label: 'New Branch', icon: <RiGitBranchLine className="h-3.5 w-3.5" /> },
-                { id: 'existing-branch', label: 'Existing Branch', icon: <RiGitRepositoryLine className="h-3.5 w-3.5" /> },
+                { id: 'new-branch', label: m.wtNewBranch(), icon: <RiGitBranchLine className="h-3.5 w-3.5" /> },
+                { id: 'existing-branch', label: m.wtExistingBranch(), icon: <RiGitRepositoryLine className="h-3.5 w-3.5" /> },
               ]}
               activeId={mode}
               onSelect={(id) => handleModeChange(id as Mode)}
@@ -1090,7 +1091,7 @@ export function NewWorktreeDialog({
                     className="flex-1 justify-between h-9"
                   >
                     <span className={existingBranchState.selectedBranch ? 'text-foreground' : 'text-muted-foreground'}>
-                      {existingBranchState.selectedBranch || 'Choose a branch...'}
+                      {existingBranchState.selectedBranch || m.wtChooseBranch()}
                     </span>
                     <RiGitBranchLine className="h-4 w-4 text-muted-foreground" />
                   </Button>
@@ -1100,7 +1101,7 @@ export function NewWorktreeDialog({
                     className="h-8 w-8 px-0 shrink-0"
                     onClick={handleFetchBranches}
                     disabled={!canFetchBranches || isLoadingBranches}
-                    title="Fetch branches"
+                    title={m.wtFetchBranches()}
                   >
                     {isLoadingBranches ? <RiLoader4Line className="size-4 animate-spin" /> : <RiRefreshLine className="size-4" />}
                   </Button>
@@ -1121,18 +1122,18 @@ export function NewWorktreeDialog({
                     />
                     {isLoadingBranches ? (
                       <div className="px-2 py-8 text-center typography-small text-muted-foreground">
-                        Loading branches...
+                        {m.wtLoadingBranches()}
                       </div>
                     ) : localBranches.length === 0 && remoteBranches.length === 0 ? (
                       <div className="px-2 py-8 text-center typography-small text-muted-foreground">
-                        No branches found
+                        {m.wtNoBranchesFound()}
                       </div>
                     ) : (
                       <div className="space-y-4">
                         {hasExistingBranchQuery && hasExistingBranchMatches && (
                           <div className="space-y-2">
                             <div className="typography-small font-semibold text-foreground px-2">
-                              Matching branches
+                              {m.wtMatchingBranches()}
                             </div>
                             <div className="space-y-1">
                               {existingBranchRankedGroups.matching.map((branch) => (
@@ -1160,10 +1161,10 @@ export function NewWorktreeDialog({
                             </div>
                           </div>
                         )}
-
+                        
                         {hasExistingBranchQuery && !hasExistingBranchMatches && (
                           <div className="px-2 py-1 text-center typography-small text-muted-foreground">
-                            No matching branches
+                            {m.wtNoMatchingBranches()}
                           </div>
                         )}
 
@@ -1373,7 +1374,7 @@ export function NewWorktreeDialog({
                 {/* Mobile Source Branch Picker Overlay */}
                 <MobileOverlayPanel
                   open={sourceBranchPickerOpen}
-                  title="Select Source Branch"
+                    title={m.wtSelectSourceBranch()}
                   onClose={() => setSourceBranchPickerOpen(false)}
                 >
                   <div className="space-y-4" ref={sourceBranchMobileListWrapperRef}>
@@ -1575,7 +1576,7 @@ export function NewWorktreeDialog({
               {mode === 'existing-branch' ? (
                 <div className="space-y-1.5">
                   <label className="typography-ui-label text-foreground block font-semibold">
-                    Select Branch
+                    {m.wtSelectBranch()}
                   </label>
                   <div className="flex items-center gap-2">
                     <DropdownMenu open={existingBranchDropdownOpen} onOpenChange={setExistingBranchDropdownOpen}>
