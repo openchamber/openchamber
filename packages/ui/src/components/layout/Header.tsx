@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import { useTranslation } from 'react-i18next';
 import {
   Tooltip,
   TooltipContent,
@@ -616,6 +617,7 @@ export const Header: React.FC<HeaderProps> = ({
   rightDrawerOpen,
   desktopRightSidebarActionsHost = null,
 }) => {
+  const { t } = useTranslation();
   const setSessionSwitcherOpen = useUIStore((state) => state.setSessionSwitcherOpen);
   const toggleSidebar = useUIStore((state) => state.toggleSidebar);
   const isSidebarOpen = useUIStore((state) => state.isSidebarOpen);
@@ -1391,7 +1393,7 @@ export const Header: React.FC<HeaderProps> = ({
 
   useEffect(() => {
     updateHeaderHeight();
-  }, [updateHeaderHeight, isMobile, macosHeaderSizeClass]);
+  }, [updateHeaderHeight]);
 
   const handleDragStart = React.useCallback(async (e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
@@ -1412,17 +1414,17 @@ export const Header: React.FC<HeaderProps> = ({
   const tabs: TabConfig[] = React.useMemo(() => {
     if (isMobile) {
       const base: TabConfig[] = [
-        { id: 'chat', label: 'Chat', icon: RiChat4Line },
+        { id: 'chat', label: t('nav.chat'), icon: RiChat4Line },
       ];
 
       if (showPlanTab) {
-        base.push({ id: 'plan', label: 'Plan', icon: RiFileTextLine });
+        base.push({ id: 'plan', label: t('nav.plan'), icon: RiFileTextLine });
       }
 
       base.push(
-        { id: 'diff', label: 'Diff', icon: 'diff' },
-        { id: 'files', label: 'Files', icon: RiFolder6Line },
-        { id: 'terminal', label: 'Terminal', icon: RiTerminalBoxLine },
+        { id: 'diff', label: t('nav.diff'), icon: 'diff' },
+        { id: 'files', label: t('nav.files'), icon: RiFolder6Line },
+        { id: 'terminal', label: t('nav.terminal'), icon: RiTerminalBoxLine },
       );
 
       return base;
@@ -1430,7 +1432,7 @@ export const Header: React.FC<HeaderProps> = ({
 
     // Desktop: no tabs in header
     return [];
-  }, [isMobile, showPlanTab]);
+  }, [isMobile, showPlanTab, t]);
 
   const shortcutLabel = React.useCallback((actionId: string) => {
     return formatShortcutForDisplay(getEffectiveShortcutCombo(actionId, shortcutOverrides));
@@ -1868,7 +1870,7 @@ export const Header: React.FC<HeaderProps> = ({
                             {tab.showDot && (
                               <span
                                 className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-primary"
-                                aria-label="Changes available"
+                                title="Changes available"
                               />
                             )}
                           </button>

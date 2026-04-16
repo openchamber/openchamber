@@ -1,5 +1,6 @@
 import React from 'react';
 import { RiFolder3Line, RiGitBranchLine } from '@remixicon/react';
+import { useTranslation } from 'react-i18next';
 
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { GitView } from '@/components/views';
@@ -36,6 +37,7 @@ function useRightSidebarGitSync(directory: string | undefined, isSidebarOpen: bo
 }
 
 export const RightSidebarTabs: React.FC = () => {
+  const { t } = useTranslation();
   const rightSidebarTab = useUIStore((state) => state.rightSidebarTab);
   const setRightSidebarTab = useUIStore((state) => state.setRightSidebarTab);
   const isRightSidebarOpen = useUIStore((state) => state.isRightSidebarOpen);
@@ -46,15 +48,15 @@ export const RightSidebarTabs: React.FC = () => {
   const tabItems = React.useMemo(() => [
     {
       id: 'git',
-      label: 'Git',
+      label: t('nav.git'),
       icon: <RiGitBranchLine className="h-3.5 w-3.5" />,
     },
     {
       id: 'files',
-      label: 'Files',
+      label: t('nav.files'),
       icon: <RiFolder3Line className="h-3.5 w-3.5" />,
     },
-  ], []);
+  ], [t]);
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-sidebar">
