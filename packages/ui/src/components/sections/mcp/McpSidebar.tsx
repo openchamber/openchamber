@@ -100,6 +100,13 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
       command: [],
       url: '',
       environment: [],
+      headers: [],
+      oauthEnabled: true,
+      oauthClientId: '',
+      oauthClientSecret: '',
+      oauthScope: '',
+      oauthRedirectUri: '',
+      timeout: '',
       enabled: true,
     };
     setMcpDraft(draft);

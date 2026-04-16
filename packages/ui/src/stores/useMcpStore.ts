@@ -47,6 +47,11 @@ type RefreshOptions = {
   silent?: boolean;
 };
 
+type TestConnectionResult = {
+  status?: McpStatus;
+  error?: string;
+};
+
 interface McpStore {
   byDirectory: Record<string, McpStatusMap>;
   loadingKeys: Record<string, boolean>;
@@ -56,6 +61,9 @@ interface McpStore {
   refresh: (options?: RefreshOptions) => Promise<void>;
   connect: (name: string, directory?: string | null) => Promise<void>;
   disconnect: (name: string, directory?: string | null) => Promise<void>;
+  startAuth: (name: string, directory?: string | null) => Promise<string>;
+  clearAuth: (name: string, directory?: string | null) => Promise<void>;
+  testConnection: (name: string, directory?: string | null) => Promise<TestConnectionResult>;
 }
 
 export const useMcpStore = create<McpStore>()(
@@ -111,6 +119,53 @@ export const useMcpStore = create<McpStore>()(
       const api = getMcpApiClient(normalized);
       await api.mcp.disconnect({ name }, { throwOnError: true });
       await get().refresh({ directory: normalized, silent: true });
+    },
+
+    startAuth: async (name, directory) => {
+      const normalized = normalizeDirectory(directory ?? useDirectoryStore.getState().currentDirectory);
+      const api = getMcpApiClient(normalized);
+      const result = await api.mcp.auth.start({ name }, { throwOnError: true });
+      const authorizationUrl = result.data?.authorizationUrl;
+
+      if (!authorizationUrl) {
+        throw new Error('Authorization URL was not returned');
+      }
+
+      return authorizationUrl;
+    },
+
+    clearAuth: async (name, directory) => {
+      const normalized = normalizeDirectory(directory ?? useDirectoryStore.getState().currentDirectory);
+      const api = getMcpApiClient(normalized);
+      await api.mcp.auth.remove({ name }, { throwOnError: true });
+      await get().refresh({ directory: normalized, silent: true });
+    },
+
+    testConnection: async (name, directory) => {
+      const normalized = normalizeDirectory(directory ?? useDirectoryStore.getState().currentDirectory);
+      const api = getMcpApiClient(normalized);
+      const previousStatus = get().getStatusForDirectory(normalized)[name];
+      const wasConnected = previousStatus?.status === 'connected';
+      let errorMessage: string | undefined;
+
+      try {
+        await api.mcp.connect({ name }, { throwOnError: true });
+      } catch (error) {
+        errorMessage = error instanceof Error ? error.message : 'Connection failed';
+      }
+
+      await get().refresh({ directory: normalized, silent: true });
+      const currentStatus = get().getStatusForDirectory(normalized)[name];
+
+      if (!wasConnected && currentStatus?.status === 'connected') {
+        await api.mcp.disconnect({ name }, { throwOnError: true });
+        await get().refresh({ directory: normalized, silent: true });
+      }
+
+      return {
+        status: get().getStatusForDirectory(normalized)[name],
+        error: errorMessage,
+      };
     },
 
   }))
