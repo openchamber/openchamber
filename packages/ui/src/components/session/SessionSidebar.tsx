@@ -253,6 +253,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const setDirectory = useDirectoryStore((state) => state.setDirectory);
 
   const projects = useProjectsStore((state) => state.projects);
+  const includeProjectWorktreesInVSCode = projects.length > 1;
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
   const addProject = useProjectsStore((state) => state.addProject);
   const removeProject = useProjectsStore((state) => state.removeProject);
@@ -877,12 +878,14 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     archivedSessions,
     normalizedProjects,
     isVSCode,
+    includeWorktreesInVSCode: includeProjectWorktreesInVSCode,
     availableWorktreesByProject,
     cleanupSessions,
   });
 
   const { getSessionsForProject, getArchivedSessionsForProject } = useProjectSessionLists({
     isVSCode,
+    includeWorktreesInVSCode: includeProjectWorktreesInVSCode,
     sessions,
     archivedSessions,
     availableWorktreesByProject,
@@ -894,6 +897,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
     archivedSessions,
     availableWorktreesByProject,
     isVSCode,
+    includeWorktreesInVSCode: includeProjectWorktreesInVSCode,
     isSessionsLoading,
     foldersMap,
     createFolder,

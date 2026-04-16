@@ -4,6 +4,7 @@ import { AgentManagerPanelProvider } from './AgentManagerPanelProvider';
 import { SessionEditorPanelProvider } from './SessionEditorPanelProvider';
 import { createOpenCodeManager, type OpenCodeManager } from './opencode';
 import { startGlobalEventWatcher, stopGlobalEventWatcher, setChatViewProvider } from './sessionActivityWatcher';
+import { getWorkspaceContextPayload } from './workspaceRoots';
 
 let chatViewProvider: ChatViewProvider | undefined;
 let agentManagerProvider: AgentManagerPanelProvider | undefined;
@@ -165,6 +166,24 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('openchamber.internal.settingsSynced', (settings: unknown) => {
       chatViewProvider?.notifySettingsSynced(settings);
       sessionEditorProvider?.notifySettingsSynced(settings);
+    })
+  );
+
+  const broadcastWorkspaceContext = () => {
+    chatViewProvider?.updateWorkspaceContext();
+    agentManagerProvider?.updateWorkspaceContext();
+    sessionEditorProvider?.updateWorkspaceContext();
+  };
+
+  context.subscriptions.push(
+    vscode.window.onDidChangeActiveTextEditor(() => {
+      broadcastWorkspaceContext();
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeWorkspaceFolders(() => {
+      broadcastWorkspaceContext();
     })
   );
 
@@ -410,7 +429,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
       const extensionVersion = String(context.extension?.packageJSON?.version || '');
       const workspaceFolders = (vscode.workspace.workspaceFolders || []).map((folder) => folder.uri.fsPath);
-      const primaryWorkspace = workspaceFolders[0] || '';
+      const primaryWorkspace = getWorkspaceContextPayload().activeWorkspaceFolder || workspaceFolders[0] || '';
 
       const debug = openCodeManager?.getDebugInfo();
       const resolvedApiUrl = openCodeManager?.getApiUrl();

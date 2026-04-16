@@ -19,6 +19,7 @@ type Args = {
   archivedSessions: Session[];
   availableWorktreesByProject: Map<string, WorktreeMetadata[]>;
   isVSCode: boolean;
+  includeWorktreesInVSCode?: boolean;
   isSessionsLoading: boolean;
   foldersMap: Record<string, FolderEntry[]>;
   createFolder: (scopeKey: string, name: string, parentId?: string | null) => FolderEntry;
@@ -28,9 +29,11 @@ type Args = {
 
 const getArchivedSessionsForProject = (
   project: ProjectForArchivedFolders,
-  params: Pick<Args, 'sessions' | 'archivedSessions' | 'availableWorktreesByProject' | 'isVSCode'>,
+  params: Pick<Args, 'sessions' | 'archivedSessions' | 'availableWorktreesByProject' | 'isVSCode' | 'includeWorktreesInVSCode'>,
 ): Session[] => {
-  const worktreesForProject = params.isVSCode ? [] : (params.availableWorktreesByProject.get(project.normalizedPath) ?? []);
+  const worktreesForProject = params.isVSCode && !params.includeWorktreesInVSCode
+    ? []
+    : (params.availableWorktreesByProject.get(project.normalizedPath) ?? []);
   const validDirectories = new Set<string>([
     project.normalizedPath,
     ...worktreesForProject
@@ -64,6 +67,7 @@ export const useArchivedAutoFolders = (args: Args): void => {
     archivedSessions,
     availableWorktreesByProject,
     isVSCode,
+    includeWorktreesInVSCode,
     isSessionsLoading,
     foldersMap,
     createFolder,
@@ -83,6 +87,7 @@ export const useArchivedAutoFolders = (args: Args): void => {
         archivedSessions,
         availableWorktreesByProject,
         isVSCode,
+        includeWorktreesInVSCode,
       });
       const sessionIds = new Set(projectArchivedSessions.map((session) => session.id));
 
@@ -110,6 +115,7 @@ export const useArchivedAutoFolders = (args: Args): void => {
     sessions,
     archivedSessions,
     availableWorktreesByProject,
+    includeWorktreesInVSCode,
     isVSCode,
     isSessionsLoading,
     foldersMap,

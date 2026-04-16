@@ -6,6 +6,7 @@ import { getWebviewShikiThemes } from './shikiThemes';
 import { getWebviewHtml } from './webviewHtml';
 import { openSseProxy } from './sseProxy';
 import { resolveWebviewDevServerUrl } from './webviewDevServer';
+import { getWorkspaceContextPayload } from './workspaceRoots';
 
 type SessionPanelState = {
   panel: vscode.WebviewPanel;
@@ -148,6 +149,17 @@ export class SessionEditorPanelProvider {
     }
   }
 
+  public updateWorkspaceContext(): void {
+    const payload = getWorkspaceContextPayload();
+    for (const entry of this._panels.values()) {
+      entry.panel.webview.postMessage({
+        type: 'command',
+        command: 'vscodeWorkspaceContext',
+        payload,
+      });
+    }
+  }
+
   private _sendCachedStateToPanel(entry: SessionPanelState) {
     entry.panel.webview.postMessage({
       type: 'connectionStatus',
@@ -257,14 +269,16 @@ export class SessionEditorPanelProvider {
   }
 
   private _getHtmlForWebview(webview: vscode.Webview, sessionId: string | null) {
-    const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+    const workspaceContext = getWorkspaceContextPayload();
     const initialStatus = this._cachedStatus;
     const cliAvailable = this._openCodeManager?.isCliAvailable() ?? false;
 
     return getWebviewHtml({
       webview,
       extensionUri: this._extensionUri,
-      workspaceFolder,
+      workspaceFolder: workspaceContext.workspaceFolder,
+      activeWorkspaceFolder: workspaceContext.activeWorkspaceFolder,
+      workspaceFolders: workspaceContext.workspaceFolders,
       initialStatus,
       cliAvailable,
       panelType: 'chat',

@@ -6,6 +6,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useViewportStore } from '@/sync/viewport-store';
 import { useSessions, useDirectorySync } from '@/sync/sync-context';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { useProjectsStore } from '@/stores/useProjectsStore';
 import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
 import { McpDropdown } from '@/components/mcp/McpDropdown';
 import { cn } from '@/lib/utils';
@@ -92,6 +93,8 @@ export const VSCodeLayout: React.FC = () => {
   const expandedSidebarResizePointerIdRef = React.useRef<number | null>(null);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const sessions = useSessions();
+  const projects = useProjectsStore((state) => state.projects);
+  const showOnlyMainWorkspace = projects.length <= 1;
 
   const activeSessionTitle = React.useMemo(() => {
     if (!currentSessionId) {
@@ -404,7 +407,7 @@ export const VSCodeLayout: React.FC = () => {
               mobileVariant
               allowReselect
               hideDirectoryControls
-              showOnlyMainWorkspace
+              showOnlyMainWorkspace={showOnlyMainWorkspace}
             />
             <div
               className={cn(
@@ -450,7 +453,7 @@ export const VSCodeLayout: React.FC = () => {
                 allowReselect
                 onSessionSelected={() => setCurrentView('chat')}
                 hideDirectoryControls
-                showOnlyMainWorkspace
+                showOnlyMainWorkspace={showOnlyMainWorkspace}
               />
             </div>
           </div>

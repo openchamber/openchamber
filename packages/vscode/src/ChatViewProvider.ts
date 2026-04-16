@@ -6,6 +6,7 @@ import { getWebviewShikiThemes } from './shikiThemes';
 import { getWebviewHtml } from './webviewHtml';
 import { openSseProxy } from './sseProxy';
 import { resolveWebviewDevServerUrl } from './webviewDevServer';
+import { getWorkspaceContextPayload } from './workspaceRoots';
 
 export class ChatViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'openchamber.chatView';
@@ -291,6 +292,18 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  public updateWorkspaceContext(): void {
+    if (!this._view) {
+      return;
+    }
+
+    this._view.webview.postMessage({
+      type: 'command',
+      command: 'vscodeWorkspaceContext',
+      payload: getWorkspaceContextPayload(),
+    });
+  }
+
   private _sendCachedState() {
     if (!this._view) {
       return;
@@ -392,7 +405,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   }
 
   private _getHtmlForWebview(webview: vscode.Webview) {
-    const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+    const workspaceContext = getWorkspaceContextPayload();
     // Use cached values which are updated by onStatusChange callback
     const initialStatus = this._cachedStatus;
     const cliAvailable = this._openCodeManager?.isCliAvailable() ?? false;
@@ -400,7 +413,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     return getWebviewHtml({
       webview,
       extensionUri: this._extensionUri,
-      workspaceFolder,
+      workspaceFolder: workspaceContext.workspaceFolder,
+      activeWorkspaceFolder: workspaceContext.activeWorkspaceFolder,
+      workspaceFolders: workspaceContext.workspaceFolders,
       initialStatus,
       cliAvailable,
       devServerUrl: this._webviewDevServerUrl,
