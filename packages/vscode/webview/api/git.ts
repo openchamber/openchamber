@@ -344,6 +344,42 @@ export const createVSCodeGitAPI = (): GitAPI => ({
     }>('api:git/conflict-details', { directory });
   },
 
+  validateWorktreeDirectory: async (directory: string, worktreeRoot: string): Promise<{
+    valid: boolean;
+    insideWorktreeRoot: boolean;
+    resolvedWorktreeRoot: string | null;
+    resolvedCwd: string | null;
+  }> => {
+    return sendBridgeMessage<{
+      valid: boolean;
+      insideWorktreeRoot: boolean;
+      resolvedWorktreeRoot: string | null;
+      resolvedCwd: string | null;
+    }>('api:git/validate-directory', { directory, worktreeRoot });
+  },
+
+  canonicalizeWorktreeState: async (directory: string): Promise<{
+    worktreeRoot: string | null;
+    cwd: string | null;
+    branch: string | null;
+    headState: 'branch' | 'detached' | 'unborn';
+    worktreeStatus: 'ready' | 'missing' | 'invalid' | 'not-a-repo';
+    legacy: boolean;
+    degraded: boolean;
+    attentionReason?: 'merge' | 'rebase' | 'cherry-pick' | 'revert' | 'bisect' | null;
+  }> => {
+    return sendBridgeMessage<{
+      worktreeRoot: string | null;
+      cwd: string | null;
+      branch: string | null;
+      headState: 'branch' | 'detached' | 'unborn';
+      worktreeStatus: 'ready' | 'missing' | 'invalid' | 'not-a-repo';
+      legacy: boolean;
+      degraded: boolean;
+      attentionReason?: 'merge' | 'rebase' | 'cherry-pick' | 'revert' | 'bisect' | null;
+    }>('api:git/canonicalize-worktree-state', { directory });
+  },
+
   worktree: {
     list: async (directory: string): Promise<GitWorktreeInfo[]> => {
       return sendBridgeMessage<GitWorktreeInfo[]>('api:git/worktrees', { directory, method: 'GET' });

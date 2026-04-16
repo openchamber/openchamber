@@ -16,11 +16,13 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { SortableTabsStrip, type SortableTabsStripItem } from '@/components/ui/sortable-tabs-strip';
 
-import { RiArrowLeftSLine, RiChat4Line, RiChatNewLine, RiCheckLine, RiCloseLine, RiCommandLine, RiFileTextLine, RiFolder6Line, RiGitBranchLine, RiGithubFill, RiLayoutLeftLine, RiLayoutRightLine, RiPlayListAddLine, RiRefreshLine, RiServerLine, RiStackLine, RiTerminalBoxLine, RiTimerLine, type RemixiconComponentType } from '@remixicon/react';
+import { RiArrowLeftSLine, RiChat4Line, RiChatNewLine, RiCheckLine, RiCloseLine, RiCommandLine, RiFileTextLine, RiFolder6Line, RiGitBranchLine, RiGithubFill, RiLayoutLeftLine, RiLayoutRightLine, RiPlayListAddLine, RiRefreshLine, RiServerLine, RiStackLine, RiTerminalBoxLine, RiTimerLine, RiAlertLine, type RemixiconComponentType } from '@remixicon/react';
 import { DiffIcon } from '@/components/icons/DiffIcon';
 import { useUIStore, type MainTab } from '@/stores/useUIStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { useSessionWorktreeStore } from '@/sync/session-worktree-store';
+import { formatSessionWorktreeBadge } from '@/sync/session-worktree-contract';
 import { useAllLiveSessions, useSession, useSessionMessagesResolved } from '@/sync/sync-context';
 import { getAllSyncSessions } from '@/sync/sync-refs';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -1023,6 +1025,26 @@ export const Header: React.FC<HeaderProps> = ({
     if (!currentSessionId) return null;
     return state.worktreeMetadata.get(currentSessionId)?.branch?.trim() ?? null;
   });
+
+  // Authoritative session↔worktree attachment from session-worktree-store
+  const worktreeAttachment = useSessionWorktreeStore((state) =>
+    currentSessionId ? state.getAttachment(currentSessionId) : undefined
+  );
+
+  const worktreeBadge = React.useMemo(() => {
+    if (!worktreeAttachment) return null;
+    return formatSessionWorktreeBadge(worktreeAttachment);
+  }, [worktreeAttachment]);
+
+  const worktreeBadgeKind = React.useMemo(() => {
+    if (!worktreeAttachment) return null;
+    if (worktreeAttachment.legacy) return 'legacy';
+    if (worktreeAttachment.degraded) return 'degraded';
+    if (worktreeAttachment.worktreeStatus === 'missing') return 'missing';
+    if (worktreeAttachment.worktreeStatus === 'invalid') return 'invalid';
+    if (worktreeAttachment.attentionReason) return 'attention';
+    return null;
+  }, [worktreeAttachment]);
   const worktreeDirectory = React.useMemo(() => {
     return normalize(worktreePath || '');
   }, [worktreePath]);
@@ -1737,6 +1759,15 @@ export const Header: React.FC<HeaderProps> = ({
                     <span className="text-status-success/80">+{currentSessionChanges.additions}</span>
                     <span className="text-muted-foreground/60">/</span>
                     <span className="text-status-error/65">-{currentSessionChanges.deletions}</span>
+                  </span>
+                ) : null}
+                {worktreeBadgeKind ? (
+                  <span className={cn(
+                    "inline-flex min-w-0 items-center gap-0.5",
+                    worktreeBadgeKind === 'attention' || worktreeBadgeKind === 'invalid' || worktreeBadgeKind === 'missing' ? 'text-status-warning' : 'text-muted-foreground/60'
+                  )}>
+                    <RiAlertLine className="h-3 w-3 flex-shrink-0" />
+                    <span className="truncate">{worktreeBadge}</span>
                   </span>
                 ) : null}
               </div>
