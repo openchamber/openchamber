@@ -3,6 +3,8 @@ import { renderMermaidASCII, renderMermaidSVG } from 'beautiful-mermaid';
 import ReactMarkdown from 'react-markdown';
 import type { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
 import { marked, type Tokens } from 'marked';
 import remend from 'remend';
 import { FadeInOnReveal } from './message/FadeInOnReveal';
@@ -817,7 +819,7 @@ const MarkdownBlockView: React.FC<{
   components: Components;
 }> = React.memo(({ block, components }) => {
   return (
-    <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+    <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]} components={components}>
       {block.src}
     </ReactMarkdown>
   );

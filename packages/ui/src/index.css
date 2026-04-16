@@ -1,9 +1,29 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@import "katex/dist/katex.min.css";
 @import "./styles/design-system.css";
 @import "./styles/typography.css";
 @import "./styles/mobile.css";
 @source "./**/*.{ts,tsx,css}";
+
+/* KaTeX theme overrides for light/dark mode */
+.katex {
+  color: var(--foreground);
+}
+.katex .mord,
+.katex .mopen,
+.katex .mclose,
+.katex .mbin,
+.katex .mrel,
+.katex .mpunct,
+.katex .mord,
+.katex .mop,
+.katex .minner {
+  color: inherit;
+}
+.katex-error {
+  color: var(--destructive, #ef4444);
+}
 
 @custom-variant dark (&:is(.dark *));
 
