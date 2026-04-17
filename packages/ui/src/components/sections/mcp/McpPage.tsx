@@ -17,6 +17,8 @@ import { useMcpStore } from '@/stores/useMcpStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import {
   RiAddLine,
+  RiArrowDownSLine,
+  RiArrowRightSLine,
   RiClipboardLine,
   RiDeleteBinLine,
   RiEyeLine,
@@ -30,6 +32,7 @@ import {
 import { cn } from '@/lib/utils';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { MCP_OAUTH_CALLBACK_PATH, parseMcpOAuthCallbackContext, parseMcpOAuthCallbackStateKey } from '@/components/sections/mcp/mcpOAuth';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import {
   Dialog,
   DialogContent,
@@ -515,6 +518,30 @@ const normalizeMcpAuthErrorMessage = (error: unknown, fallback: string): string 
   return message;
 };
 
+const hasAdvancedRemoteSettings = (input: {
+  headers: Array<{ key: string; value: string }>;
+  oauthEnabled: boolean;
+  oauthClientId: string;
+  oauthClientSecret: string;
+  oauthScope: string;
+  oauthRedirectUri: string;
+  timeout: string;
+}): boolean => {
+  if (input.headers.some((entry) => entry.key.trim() || entry.value.trim())) {
+    return true;
+  }
+
+  if (!input.oauthEnabled) {
+    return true;
+  }
+
+  if (input.oauthClientId.trim() || input.oauthClientSecret.trim() || input.oauthScope.trim() || input.oauthRedirectUri.trim()) {
+    return true;
+  }
+
+  return input.timeout.trim().length > 0;
+};
+
 const buildMcpRuntimeActionKey = (name: string | null, directory?: string | null): string => {
   const normalizedDirectory = typeof directory === 'string' && directory.trim()
     ? directory.trim()
@@ -582,6 +609,7 @@ export const McpPage: React.FC = () => {
   const [isAuthPolling, setIsAuthPolling] = React.useState(false);
   const authPollAttemptsRef = React.useRef(0);
   const authPollStartsFromNeedsAuthRef = React.useRef(false);
+  const [isAdvancedRemoteOptionsOpen, setIsAdvancedRemoteOptionsOpen] = React.useState(false);
   const runtimeActionKey = React.useMemo(
     () => buildMcpRuntimeActionKey(selectedMcpName, currentDirectory),
     [currentDirectory, selectedMcpName],
@@ -630,6 +658,15 @@ export const McpPage: React.FC = () => {
       setOauthRedirectUri(mcpDraft.oauthRedirectUri);
       setTimeoutValue(mcpDraft.timeout);
       setEnabled(mcpDraft.enabled);
+      setIsAdvancedRemoteOptionsOpen(mcpDraft.type === 'remote' && hasAdvancedRemoteSettings({
+        headers: mcpDraft.headers,
+        oauthEnabled: mcpDraft.oauthEnabled,
+        oauthClientId: mcpDraft.oauthClientId,
+        oauthClientSecret: mcpDraft.oauthClientSecret,
+        oauthScope: mcpDraft.oauthScope,
+        oauthRedirectUri: mcpDraft.oauthRedirectUri,
+        timeout: mcpDraft.timeout,
+      }));
       initialRef.current = {
         mcpType: mcpDraft.type, command: mcpDraft.command,
         url: mcpDraft.url,
@@ -682,6 +719,15 @@ export const McpPage: React.FC = () => {
       setOauthRedirectUri(nextOauthEnabled ? (oauthConfig?.redirectUri ?? '') : '');
       setTimeoutValue(nextTimeout);
       setEnabled(selectedServer.enabled);
+      setIsAdvancedRemoteOptionsOpen(t === 'remote' && hasAdvancedRemoteSettings({
+        headers: headersArr,
+        oauthEnabled: nextOauthEnabled,
+        oauthClientId: nextOauthEnabled ? (oauthConfig?.clientId ?? '') : '',
+        oauthClientSecret: nextOauthEnabled ? (oauthConfig?.clientSecret ?? '') : '',
+        oauthScope: nextOauthEnabled ? (oauthConfig?.scope ?? '') : '',
+        oauthRedirectUri: nextOauthEnabled ? (oauthConfig?.redirectUri ?? '') : '',
+        timeout: nextTimeout,
+      }));
       initialRef.current = {
         mcpType: t,
         command: cmd,
@@ -1431,11 +1477,29 @@ export const McpPage: React.FC = () => {
             </div>
 
             <section className="px-2 pb-2 pt-0">
-              <details className="rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)]">
-                <summary className="cursor-pointer list-none px-3 py-2 typography-ui-label text-foreground">
-                  Configure headers, OAuth details, and request timeout
-                </summary>
-                <div className="space-y-6 border-t border-[var(--interactive-border)] px-3 py-3">
+              <Collapsible
+                open={isAdvancedRemoteOptionsOpen}
+                onOpenChange={setIsAdvancedRemoteOptionsOpen}
+                className="rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)]"
+              >
+                <CollapsibleTrigger
+                  type="button"
+                  className="group flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left transition-colors hover:bg-[var(--interactive-hover)]/50"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      {isAdvancedRemoteOptionsOpen
+                        ? <RiArrowDownSLine className="h-4 w-4 text-muted-foreground transition-colors group-hover:text-foreground" />
+                        : <RiArrowRightSLine className="h-4 w-4 text-muted-foreground transition-colors group-hover:text-foreground" />}
+                      <span className="typography-ui-label text-foreground">Configure advanced remote options</span>
+                    </div>
+                    <p className="pl-6 typography-micro text-muted-foreground">
+                      Headers, OAuth details, and request timeout
+                    </p>
+                  </div>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="border-t border-[var(--interactive-border)] px-3 py-3">
+                  <div className="space-y-6">
                   <div className="space-y-2">
                     <div className="flex items-center justify-between gap-3">
                       <span className="typography-ui-label text-foreground">Timeout (ms)</span>
@@ -1541,8 +1605,9 @@ export const McpPage: React.FC = () => {
                       </p>
                     )}
                   </div>
-                </div>
-              </details>
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
             </section>
           </div>
         )}
