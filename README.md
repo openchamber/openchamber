@@ -244,6 +244,11 @@ environment:
 
 Managed-local path note: `OPENCHAMBER_TUNNEL_CONFIG` must point to a path inside the container user home (`/home/openchamber/...`). If your Cloudflare config references a credentials JSON file, that file path must also be accessible inside the container (mount with `volumes`).
 
+### Reverse proxy notes
+
+- For a complete reverse proxy setup guide, see [`docs/REVERSE_PROXY.md`](./docs/REVERSE_PROXY.md).
+- Website docs source lives at `packages/docs/content/docs/reverse-proxy.mdx`.
+
 ### Tunnel behavior notes
 
 - OpenChamber supports one active tunnel per running instance (port).

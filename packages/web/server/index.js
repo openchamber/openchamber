@@ -96,6 +96,27 @@ const TUNNEL_BOOTSTRAP_TTL_MAX_MS = 24 * 60 * 60 * 1000;
 const TUNNEL_SESSION_TTL_DEFAULT_MS = 8 * 60 * 60 * 1000;
 const TUNNEL_SESSION_TTL_MIN_MS = 5 * 60 * 1000;
 const TUNNEL_SESSION_TTL_MAX_MS = 30 * 24 * 60 * 60 * 1000;
+
+function headerIncludesEventStream(value) {
+  if (typeof value === 'string') {
+    return value.toLowerCase().includes('text/event-stream');
+  }
+
+  if (Array.isArray(value)) {
+    return value.some((entry) => typeof entry === 'string' && entry.toLowerCase().includes('text/event-stream'));
+  }
+
+  return false;
+}
+
+function shouldSkipCompression(req, res) {
+  if (headerIncludesEventStream(req.headers.accept)) {
+    return true;
+  }
+
+  return headerIncludesEventStream(res.getHeader('Content-Type'));
+}
+
 const OPENCHAMBER_VERSION = (() => {
   try {
     const packagePath = path.resolve(__dirname, '..', 'package.json');
@@ -973,7 +994,7 @@ async function main(options = {}) {
   app.set('trust proxy', true);
   app.use(compression({
     filter: (req, res) => {
-      if (req.path === '/api/event' || req.path === '/api/global/event') return false;
+      if (shouldSkipCompression(req, res)) return false;
       return compression.filter(req, res);
     },
     threshold: 1024,
