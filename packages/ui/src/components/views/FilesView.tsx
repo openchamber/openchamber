@@ -281,6 +281,7 @@ const isHtmlFile = (path: string): boolean => {
 
 interface FileRowProps {
   node: FileNode;
+  root: string;
   isExpanded: boolean;
   isActive: boolean;
   isMobile: boolean;
@@ -304,6 +305,7 @@ interface FileRowProps {
 
 const FileRow: React.FC<FileRowProps> = ({
   node,
+  root,
   isExpanded,
   isActive,
   isMobile,
@@ -416,6 +418,19 @@ const FileRow: React.FC<FileRowProps> = ({
                 });
               }}>
                 <RiFileCopyLine className="mr-2 h-4 w-4" /> Copy Path
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={(e) => {
+                e.stopPropagation();
+                const relativePath = getDisplayPath(root, node.path) || node.path;
+                void copyTextToClipboard(relativePath).then((result) => {
+                  if (result.ok) {
+                    toast.success('Relative path copied');
+                    return;
+                  }
+                  toast.error('Copy failed');
+                });
+              }}>
+                <RiFileCopy2Line className="mr-2 h-4 w-4" /> Copy Relative Path
               </DropdownMenuItem>
               {!isDir && downloadFile && (
                 <DropdownMenuItem onClick={(e) => {
@@ -1643,6 +1658,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           )}
           <FileRow
             node={node}
+            root={root}
             isExpanded={isExpanded}
             isActive={isActive}
             isMobile={isMobile}
