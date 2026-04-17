@@ -329,7 +329,7 @@ pub fn desktop_open_in_app(
 }
 
 /// Read a file and return its content as base64 with mime type detection.
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct FileContent {
     pub(crate) mime: String,
     pub(crate) base64: String,
@@ -890,4 +890,194 @@ pub fn macos_major_version() -> Option<u32> {
 #[cfg(not(target_os = "macos"))]
 pub fn macos_major_version() -> Option<u32> {
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    // --- desktop_open_path tests ---
+
+    #[test]
+    fn open_path_rejects_empty_path() {
+        let result = desktop_open_path("".to_string(), None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn open_path_rejects_nonexistent_path() {
+        let result = desktop_open_path("/tmp/openchamber-test-nonexistent-99999".to_string(), None);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Invalid path"));
+    }
+
+    #[test]
+    fn open_path_rejects_sensitive_system_paths() {
+        let cases = ["/etc/shadow", "/etc/passwd", "/etc/ssh/sshd_config"];
+        for path in cases {
+            // These may not exist in CI, but canonicalize will fail if they don't,
+            // so test with the canonicalize success case separately
+            if std::path::Path::new(path).exists() {
+                let result = desktop_open_path(path.to_string(), None);
+                assert!(result.is_err(), "Should reject {}", path);
+                assert!(result.unwrap_err().contains("denied"), "Should say 'denied' for {}", path);
+            }
+        }
+    }
+
+    // --- desktop_open_in_app tests ---
+
+    #[test]
+    fn open_in_app_rejects_empty_project_path() {
+        let result = desktop_open_in_app(
+            "".to_string(),
+            "vscode".to_string(),
+            "Code".to_string(),
+            None,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn open_in_app_rejects_empty_app_id() {
+        let result = desktop_open_in_app(
+            "/tmp".to_string(),
+            "".to_string(),
+            "Code".to_string(),
+            None,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn open_in_app_rejects_nonexistent_project_path() {
+        let result = desktop_open_in_app(
+            "/tmp/openchamber-test-nonexistent-99999".to_string(),
+            "vscode".to_string(),
+            "Code".to_string(),
+            None,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn open_in_app_rejects_file_path_escaping_project() {
+        // Create a temp project dir
+        let dir = tempfile::Builder::new()
+            .prefix("oc-test-project")
+            .tempdir()
+            .unwrap();
+        let project_path = dir.path().to_string_lossy().to_string();
+
+        // Try to open /etc/passwd which is outside the project dir
+        let result = desktop_open_in_app(
+            project_path,
+            "vscode".to_string(),
+            "Code".to_string(),
+            Some("/etc/passwd".to_string()),
+        );
+        assert!(result.is_err(), "Should reject file path outside project");
+        let err = result.unwrap_err();
+        assert!(err.contains("escapes") || err.contains("Invalid"), "Error should mention escape or invalid: {}", err);
+    }
+
+    #[test]
+    fn open_in_app_rejects_nonexistent_file_path() {
+        let dir = tempfile::Builder::new()
+            .prefix("oc-test-project")
+            .tempdir()
+            .unwrap();
+        let project_path = dir.path().to_string_lossy().to_string();
+
+        // File doesn't exist — should error instead of silently dropping
+        let result = desktop_open_in_app(
+            project_path,
+            "vscode".to_string(),
+            "Code".to_string(),
+            Some("nonexistent-file.txt".to_string()),
+        );
+        assert!(result.is_err(), "Should reject nonexistent file path");
+        assert!(result.unwrap_err().contains("Invalid file path"), "Error should mention invalid file path");
+    }
+
+    // --- desktop_read_file tests ---
+
+    #[test]
+    fn read_file_rejects_nonexistent_path() {
+        let result = desktop_read_file("/tmp/openchamber-test-nonexistent-12345".to_string());
+        assert!(result.is_err(), "Should reject nonexistent path");
+        assert!(result.unwrap_err().contains("resolve file path"), "Error should mention path resolution");
+    }
+
+    #[test]
+    fn read_file_rejects_directory() {
+        let dir = tempfile::Builder::new()
+            .prefix("oc-test-dir")
+            .tempdir()
+            .unwrap();
+        let result = desktop_read_file(dir.path().to_string_lossy().to_string());
+        assert!(result.is_err(), "Should reject directory");
+    }
+
+    #[test]
+    fn read_file_accepts_regular_file() {
+        let dir = tempfile::Builder::new()
+            .prefix("oc-test-file")
+            .tempdir()
+            .unwrap();
+        let file_path = dir.path().join("test.txt");
+        fs::write(&file_path, b"hello world").unwrap();
+
+        let result = desktop_read_file(file_path.to_string_lossy().to_string());
+        assert!(result.is_ok(), "Should accept regular file: {:?}", result);
+        let content = result.unwrap();
+        assert_eq!(content.mime, "text/plain");
+    }
+
+    #[test]
+    fn read_file_resolves_symlink_to_real_file() {
+        let dir = tempfile::Builder::new()
+            .prefix("oc-test-sym")
+            .tempdir()
+            .unwrap();
+        let real_file = dir.path().join("real.txt");
+        let symlink = dir.path().join("link.txt");
+        fs::write(&real_file, b"symlink content").unwrap();
+        std::os::unix::fs::symlink(&real_file, &symlink).unwrap();
+
+        let result = desktop_read_file(symlink.to_string_lossy().to_string());
+        assert!(result.is_ok(), "Should resolve symlink to real file");
+    }
+
+    #[test]
+    fn read_file_detects_correct_mime_types() {
+        let dir = tempfile::Builder::new()
+            .prefix("oc-test-mime")
+            .tempdir()
+            .unwrap();
+
+        let cases = [
+            ("test.png", "image/png"),
+            ("test.jpg", "image/jpeg"),
+            ("test.pdf", "application/pdf"),
+            ("test.json", "application/json"),
+            ("test.py", "text/x-python"),
+        ];
+
+        for (filename, expected_mime) in cases {
+            let file_path = dir.path().join(filename);
+            fs::write(&file_path, b"dummy").unwrap();
+            let result = desktop_read_file(file_path.to_string_lossy().to_string());
+            assert!(result.is_ok(), "Failed for {}", filename);
+            assert_eq!(result.unwrap().mime, expected_mime, "Mime mismatch for {}", filename);
+        }
+    }
+
+    #[test]
+    fn read_file_rejects_device_file() {
+        // /dev/null is a character device, not a regular file
+        let result = desktop_read_file("/dev/null".to_string());
+        assert!(result.is_err(), "Should reject device file");
+    }
 }

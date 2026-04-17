@@ -2702,6 +2702,7 @@ dependencies = [
  "tauri-plugin-notification",
  "tauri-plugin-shell",
  "tauri-plugin-updater",
+ "tempfile",
  "tokio",
  "url",
 ]

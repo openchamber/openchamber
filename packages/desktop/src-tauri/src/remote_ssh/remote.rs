@@ -217,20 +217,9 @@ pub(crate) fn random_port_candidate(seed: &str) -> u16 {
     base + ((value % span as u64) as u16)
 }
 
-pub(crate) fn start_remote_server_managed(
-    parsed: &DesktopSshParsedCommand,
-    control_path: &std::path::Path,
-    instance: &DesktopSshInstance,
-    desired_port: u16,
-) -> Result<u16> {
-    let script = if let Some(secret) = instance
-        .auth
-        .openchamber_password
-        .as_ref()
-        .and_then(|v| if v.enabled { v.value.clone() } else { None })
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-    {
+/// Build the shell script for starting the remote server with optional password.
+fn build_remote_server_script(desired_port: u16, password: Option<&str>) -> String {
+    if let Some(secret) = password {
         // Sanitize: strip newlines and the heredoc delimiter to prevent injection.
         let safe_secret = secret.replace('\n', "").replace("OPENCHAMBER_EOF", "");
         // Write password to a mktemp file (avoids symlink races on shared /tmp),
@@ -246,7 +235,24 @@ pub(crate) fn start_remote_server_managed(
             "OPENCHAMBER_RUNTIME=ssh-remote openchamber serve --daemon --hostname 127.0.0.1 --port {}",
             desired_port
         )
-    };
+    }
+}
+
+pub(crate) fn start_remote_server_managed(
+    parsed: &DesktopSshParsedCommand,
+    control_path: &std::path::Path,
+    instance: &DesktopSshInstance,
+    desired_port: u16,
+) -> Result<u16> {
+    let password = instance
+        .auth
+        .openchamber_password
+        .as_ref()
+        .and_then(|v| if v.enabled { v.value.as_deref() } else { None })
+        .map(str::trim)
+        .filter(|v| !v.is_empty());
+
+    let script = build_remote_server_script(desired_port, password);
 
     let output = super::process::run_remote_command(parsed, control_path, &script, 60)?;
 
@@ -443,4 +449,64 @@ pub(crate) fn wait_local_forward_ready(local_port: u16) -> Result<()> {
     Err(anyhow!(
         "Timed out waiting for forwarded OpenChamber health"
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn script_without_password_has_no_heredoc() {
+        let script = build_remote_server_script(30000, None);
+        assert!(script.contains("OPENCHAMBER_RUNTIME=ssh-remote"));
+        assert!(script.contains("--port 30000"));
+        assert!(!script.contains("OPENCHAMBER_UI_PASSWORD"));
+        assert!(!script.contains("OPENCHAMBER_EOF"));
+    }
+
+    #[test]
+    fn script_with_password_uses_heredoc() {
+        let script = build_remote_server_script(30000, Some("mypassword"));
+        assert!(script.contains("cat >"));
+        assert!(script.contains("<< 'OPENCHAMBER_EOF'"));
+        assert!(script.contains("OPENCHAMBER_UI_PASSWORD=mypassword"));
+        assert!(script.contains("OPENCHAMBER_EOF"));
+        assert!(script.contains("chmod 600"));
+        assert!(script.contains("rm -f"));
+    }
+
+    #[test]
+    fn script_with_password_strips_newlines() {
+        // The safe_secret logic strips newlines and the delimiter
+        let script = build_remote_server_script(30000, Some("pass\nword"));
+        // After stripping, should not contain raw newline in the heredoc body
+        assert!(!script.contains("OPENCHAMBER_UI_PASSWORD=pass\nword"));
+    }
+
+    #[test]
+    fn script_with_password_strips_heredoc_delimiter() {
+        let script = build_remote_server_script(30000, Some("passOPENCHAMBER_EOFword"));
+        // The delimiter should be stripped from the password
+        assert!(!script.contains("passOPENCHAMBER_EOFword"));
+    }
+
+    #[test]
+    fn script_with_special_shell_chars_in_password() {
+        // Passwords with shell metacharacters should be safe in the heredoc
+        // because the heredoc delimiter is single-quoted (no expansion)
+        let script = build_remote_server_script(30000, Some("p$a`ss\"wo'rd"));
+        assert!(script.contains("<< 'OPENCHAMBER_EOF'")); // single-quoted = no expansion
+                                                          // The password appears literally in the heredoc body
+        assert!(script.contains("p$a`ss\"wo'rd"));
+    }
+
+    #[test]
+    fn script_uses_mktemp_not_hardcoded_path() {
+        let script = build_remote_server_script(30000, Some("test"));
+        assert!(script.contains("mktemp"), "Should use mktemp for temp file");
+        assert!(
+            !script.contains("/tmp/.oc-serve-env-"),
+            "Should NOT use hardcoded /tmp path"
+        );
+    }
 }
