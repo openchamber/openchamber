@@ -24,6 +24,12 @@ use std::{
 };
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
+/// Recover from a poisoned mutex by extracting the inner value.
+/// This prevents a single panic from cascading into an app-wide crash.
+fn recover_mutex<'a, T>(result: Result<std::sync::MutexGuard<'a, T>, std::sync::PoisonError<std::sync::MutexGuard<'a, T>>>) -> std::sync::MutexGuard<'a, T> {
+    result.unwrap_or_else(|e| e.into_inner())
+}
+
 /// Disable pinch-to-zoom / magnification gestures on macOS to avoid accidental
 /// zoom and the continuous gesture event processing overhead.
 #[cfg(target_os = "macos")]
@@ -700,8 +706,28 @@ fn desktop_open_path(path: String, app: Option<String>) -> Result<(), String> {
         return Err("Path is required".to_string());
     }
 
+    // Validate the path resolves to a real filesystem entry.
+    let canonical = std::path::Path::new(trimmed)
+        .canonicalize()
+        .map_err(|e| format!("Invalid path: {e}"))?;
+
+    // Block sensitive system paths.
+    let path_str = canonical.to_string_lossy();
+    let blocked_prefixes = [
+        "/etc/shadow",
+        "/etc/passwd",
+        "/etc/ssh",
+        "/private/etc",
+    ];
+    for prefix in &blocked_prefixes {
+        if path_str.starts_with(prefix) {
+            return Err("Access denied for system path".to_string());
+        }
+    }
+
     #[cfg(target_os = "macos")]
     {
+        let display_path = canonical.to_string_lossy().to_string();
         let mut command = Command::new("open");
         if let Some(app_name) = app
             .as_ref()
@@ -710,7 +736,7 @@ fn desktop_open_path(path: String, app: Option<String>) -> Result<(), String> {
         {
             command.arg("-a").arg(app_name);
         }
-        command.arg(trimmed);
+        command.arg(&display_path);
         command.spawn().map_err(|err| err.to_string())?;
         return Ok(());
     }
@@ -810,11 +836,36 @@ fn desktop_open_in_app(
         .map(|value| value.trim())
         .filter(|value| !value.is_empty());
 
+    // Validate project path resolves to a real directory.
+    let canonical_project = std::path::Path::new(trimmed_project_path)
+        .canonicalize()
+        .map_err(|e| format!("Invalid project path: {e}"))?;
+
+    // If a file path is provided, canonicalize it relative to the project root
+    // and ensure it doesn't escape the project directory.
+    let validated_file_path = match normalized_file_path {
+        Some(fp) => {
+            let file_full = if std::path::Path::new(fp).is_absolute() {
+                std::path::PathBuf::from(fp)
+            } else {
+                canonical_project.join(fp)
+            };
+            let canonical = file_full
+                .canonicalize()
+                .map_err(|e| format!("Invalid file path '{}': {e}", fp))?;
+            if !canonical.starts_with(&canonical_project) {
+                return Err("File path escapes project directory".to_string());
+            }
+            Some(canonical.to_string_lossy().to_string())
+        }
+        None => None,
+    };
+
     #[cfg(target_os = "macos")]
     {
-        let project = trimmed_project_path.to_string();
+        let project = canonical_project.to_string_lossy().to_string();
         let app_name_owned = trimmed_app_name.to_string();
-        let file = normalized_file_path.map(|value| value.to_string());
+        let file = validated_file_path;
         let mut specs: Vec<OpenCommandSpec> = Vec::new();
 
         if trimmed_app_id == "finder" {
@@ -891,7 +942,7 @@ fn desktop_open_in_app(
 
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = normalized_file_path;
+        let _ = (normalized_file_path, validated_file_path, canonical_project);
         Err("desktop_open_in_app is only supported on macOS".to_string())
     }
 }
@@ -1472,12 +1523,12 @@ impl Default for WindowFocusState {
 
 impl WindowFocusState {
     fn any_focused(&self) -> bool {
-        let guard = self.focused_windows.lock().expect("focus mutex");
+        let guard = recover_mutex(self.focused_windows.lock());
         !guard.is_empty()
     }
 
     fn set_focused(&self, label: &str, focused: bool) {
-        let mut guard = self.focused_windows.lock().expect("focus mutex");
+        let mut guard = recover_mutex(self.focused_windows.lock());
         if focused {
             guard.insert(label.to_string());
         } else {
@@ -1486,7 +1537,7 @@ impl WindowFocusState {
     }
 
     fn remove_window(&self, label: &str) {
-        let mut guard = self.focused_windows.lock().expect("focus mutex");
+        let mut guard = recover_mutex(self.focused_windows.lock());
         guard.remove(label);
     }
 }
@@ -1546,7 +1597,7 @@ fn merge_desktop_hosts_config(
 /// `input` into it, and writes the result — all while holding the process
 /// lock. Tests and the `desktop_hosts_set` command share this path.
 fn write_desktop_hosts_config_input_to_path(path: &Path, input: &DesktopHostsConfigInput) -> Result<()> {
-    let _guard = SETTINGS_FILE_MUTEX.lock().expect("desktop hosts mutex");
+    let _guard = recover_mutex(SETTINGS_FILE_MUTEX.lock());
     let existing = read_desktop_hosts_config_from_path(path);
     let merged = merge_desktop_hosts_config(&existing, input);
     write_desktop_hosts_config_to_path(path, &merged)
@@ -1651,7 +1702,7 @@ fn read_desktop_local_port_from_disk() -> Option<u16> {
 }
 
 fn write_desktop_local_port_to_disk(port: u16) -> Result<()> {
-    let _guard = SETTINGS_FILE_MUTEX.lock().expect("settings file mutex");
+    let _guard = recover_mutex(SETTINGS_FILE_MUTEX.lock());
     let path = settings_file_path();
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -1743,7 +1794,7 @@ fn read_desktop_window_state_from_disk() -> Option<DesktopWindowState> {
 }
 
 fn write_desktop_window_state_to_disk(state: &DesktopWindowState) -> Result<()> {
-    let _guard = SETTINGS_FILE_MUTEX.lock().expect("settings file mutex");
+    let _guard = recover_mutex(SETTINGS_FILE_MUTEX.lock());
     let path = settings_file_path();
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -2434,7 +2485,7 @@ fn kill_sidecar(app: tauri::AppHandle) {
         return;
     };
 
-    let sidecar_url = state.url.lock().expect("sidecar url mutex").clone();
+    let sidecar_url = recover_mutex(state.url.lock()).clone();
     if let Some(url) = sidecar_url {
         // Attempt graceful shutdown via a raw HTTP POST to avoid pulling in
         // reqwest::blocking (and its extra thread pool) just for this one call.
@@ -2462,11 +2513,11 @@ fn kill_sidecar(app: tauri::AppHandle) {
         }
     }
 
-    let mut guard = state.child.lock().expect("sidecar mutex");
+    let mut guard = recover_mutex(state.child.lock());
     if let Some(child) = guard.take() {
         let _ = child.kill();
     }
-    *state.url.lock().expect("sidecar url mutex") = None;
+    *recover_mutex(state.url.lock()) = None;
 }
 
 fn build_local_url(port: u16) -> String {
@@ -2725,8 +2776,8 @@ async fn spawn_local_server(app: &tauri::AppHandle) -> Result<String> {
         });
 
         if let Some(state) = app.try_state::<SidecarState>() {
-            *state.child.lock().expect("sidecar mutex") = Some(child);
-            *state.url.lock().expect("sidecar url mutex") = Some(url.clone());
+            *recover_mutex(state.child.lock()) = Some(child);
+            *recover_mutex(state.url.lock()) = Some(url.clone());
         }
 
         if !wait_for_health_with(
@@ -2826,7 +2877,7 @@ async fn desktop_check_for_updates(
     let current_version = app.package_info().version.to_string();
 
     let info = if let Some(update) = update {
-        *pending.0.lock().expect("pending update mutex") = Some(update.clone());
+        *recover_mutex(pending.0.lock()) = Some(update.clone());
         let mut body = update.body.clone();
         if is_placeholder_release_notes(&body) {
             if let Some(notes) = fetch_changelog_notes(&current_version, &update.version).await {
@@ -2841,7 +2892,7 @@ async fn desktop_check_for_updates(
             date: update.date.map(|date| date.to_string()),
         }
     } else {
-        *pending.0.lock().expect("pending update mutex") = None;
+        *recover_mutex(pending.0.lock()) = None;
         DesktopUpdateInfo {
             available: false,
             current_version,
@@ -2859,7 +2910,7 @@ async fn desktop_download_and_install_update(
     app: tauri::AppHandle,
     pending: tauri::State<'_, PendingUpdate>,
 ) -> Result<(), String> {
-    let Some(update) = pending.0.lock().expect("pending update mutex").take() else {
+    let Some(update) = recover_mutex(pending.0.lock()).take() else {
         return Err("No pending update".to_string());
     };
 
@@ -2937,8 +2988,8 @@ async fn desktop_new_window_at_url(app: tauri::AppHandle, url: String) -> Result
             state
                 .local_origin
                 .lock()
-                .expect("desktop local origin mutex")
-                .clone()
+                .map(|guard| guard.clone())
+                .unwrap_or_default()
         })
         .ok_or_else(|| "Local origin not yet known (sidecar may still be starting)".to_string())?;
 
@@ -3012,21 +3063,32 @@ async fn desktop_new_window_at_url(app: tauri::AppHandle, url: String) -> Result
 fn desktop_read_file(path: String) -> Result<FileContent, String> {
     use std::path::Path;
 
-    let path = Path::new(&path);
+    let raw = Path::new(&path);
+
+    // Resolve canonical path to prevent symlink traversal attacks.
+    // Only allow reading regular files (no pipes, devices, etc.).
+    let canonical = raw
+        .canonicalize()
+        .map_err(|e| format!("Failed to resolve file path: {e}"))?;
+
+    let metadata = std::fs::metadata(&canonical)
+        .map_err(|e| format!("Failed to read file metadata: {e}"))?;
+
+    if !metadata.is_file() {
+        return Err("Path does not point to a regular file".to_string());
+    }
 
     // Check file size (max 50MB)
-    let metadata =
-        std::fs::metadata(path).map_err(|e| format!("Failed to read file metadata: {e}"))?;
     let size = metadata.len();
     if size > 50 * 1024 * 1024 {
         return Err("File is too large. Maximum size is 50MB.".to_string());
     }
 
     // Read file bytes
-    let bytes = std::fs::read(path).map_err(|e| format!("Failed to read file: {e}"))?;
+    let bytes = std::fs::read(&canonical).map_err(|e| format!("Failed to read file: {e}"))?;
 
     // Detect mime type from extension
-    let ext = path
+    let ext = canonical
         .extension()
         .and_then(|e| e.to_str())
         .unwrap_or("")
@@ -3353,10 +3415,7 @@ fn schedule_window_state_persist(window: tauri::Window, immediate: bool) {
         let Some(state) = app.try_state::<WindowGeometryDebounceState>() else {
             return;
         };
-        let mut guard = state
-            .revisions
-            .lock()
-            .expect("window geometry debounce mutex");
+        let mut guard = recover_mutex(state.revisions.lock());
         let next = guard.get(&label).copied().unwrap_or(0).saturating_add(1);
         guard.insert(label.clone(), next);
         next
@@ -3407,15 +3466,11 @@ fn create_window(
     // Store the init script under this window's label so page reloads
     // re-inject the correct boot outcome for this window.
     if let Some(state) = app.try_state::<DesktopUiInjectionState>() {
-        state
+        let _ = state
             .scripts
             .lock()
-            .expect("desktop ui injection mutex")
-            .insert(label.clone(), init_script.clone());
-        *state
-            .local_origin
-            .lock()
-            .expect("desktop local origin mutex") = Some(local_origin.to_string());
+            .map(|mut guard| guard.insert(label.clone(), init_script.clone()));
+        *recover_mutex(state.local_origin.lock()) = Some(local_origin.to_string());
     }
 
     let restored_state = if restore_geometry {
@@ -3608,15 +3663,11 @@ fn activate_main_window(
     let init_script = build_init_script(local_origin, boot_outcome);
 
     if let Some(state) = app.try_state::<DesktopUiInjectionState>() {
-        state
+        let _ = state
             .scripts
             .lock()
-            .expect("desktop ui injection mutex")
-            .insert("main".to_string(), init_script);
-        *state
-            .local_origin
-            .lock()
-            .expect("desktop local origin mutex") = Some(local_origin.to_string());
+            .map(|mut guard| guard.insert("main".to_string(), init_script));
+        *recover_mutex(state.local_origin.lock()) = Some(local_origin.to_string());
     }
 
     if let Some(window) = app.get_webview_window("main") {
@@ -3655,8 +3706,8 @@ fn open_new_window(app: &tauri::AppHandle) {
             state
                 .local_origin
                 .lock()
-                .expect("desktop local origin mutex")
-                .clone()
+                .map(|guard| guard.clone())
+                .unwrap_or_default()
         });
 
     let Some(local_origin) = local_origin else {
@@ -3667,7 +3718,7 @@ fn open_new_window(app: &tauri::AppHandle) {
     // Resolve the URL the same way as initial setup: env override, then default host, else local.
     let local_url = app
         .try_state::<SidecarState>()
-        .and_then(|state| state.url.lock().expect("sidecar url mutex").clone())
+        .and_then(|state| state.url.lock().map(|guard| guard.clone()).unwrap_or_default())
         .unwrap_or_else(|| local_origin.clone());
 
     let local_ui_url = if cfg!(debug_assertions) {
@@ -3984,11 +4035,10 @@ fn main() {
                 }
 
                 if let Some(state) = app.try_state::<DesktopUiInjectionState>() {
-                    state
+                    let _ = state
                         .scripts
                         .lock()
-                        .expect("desktop ui injection mutex")
-                        .remove(&label);
+                        .map(|mut guard| guard.remove(&label));
                 }
             }
 
@@ -4059,11 +4109,10 @@ fn main() {
                     let init_script = build_startup_failure_init_script(&boot_outcome);
                     if let Some(state) = handle_for_fallback.try_state::<DesktopUiInjectionState>()
                     {
-                        state
+                        let _ = state
                             .scripts
                             .lock()
-                            .expect("desktop ui injection mutex")
-                            .insert("main".to_string(), init_script.clone());
+                            .map(|mut guard| guard.insert("main".to_string(), init_script.clone()));
                     }
                     if let Some(window) = handle_for_fallback.get_webview_window("main") {
                         let _ = window.eval(&init_script);
@@ -4108,7 +4157,7 @@ fn main() {
                 // Ensure local URL is always available to desktop commands,
                 // even when we are using the Vite dev server (no sidecar child).
                 if let Some(state) = handle.try_state::<SidecarState>() {
-                    *state.url.lock().expect("sidecar url mutex") = Some(local_url.clone());
+                    *recover_mutex(state.url.lock()) = Some(local_url.clone());
                 }
                 start_quit_risk_poller(local_url.clone());
 

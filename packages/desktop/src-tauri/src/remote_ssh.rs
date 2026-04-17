@@ -277,6 +277,7 @@ struct SshSession {
     main_forward: Child,
     main_forward_detached: bool,
     extra_forwards: Vec<Child>,
+    askpass_secret_file: Option<PathBuf>,
 }
 
 #[derive(Default)]
@@ -940,10 +941,11 @@ fn control_path_for_instance(_session_dir: &Path, instance_id: &str) -> PathBuf 
 fn askpass_script_content() -> String {
     let script = r#"#!/bin/bash
 PROMPT="$1"
+ASKPASS_FILE="${OPENCHAMBER_SSH_ASKPASS_FILE:-}"
 
-if [[ -n "$OPENCHAMBER_SSH_ASKPASS_VALUE" ]]; then
+if [[ -n "$ASKPASS_FILE" && -r "$ASKPASS_FILE" ]]; then
   if [[ "$PROMPT" == *"assword"* || "$PROMPT" == *"passphrase"* ]]; then
-    printf '%s\n' "$OPENCHAMBER_SSH_ASKPASS_VALUE"
+    cat "$ASKPASS_FILE"
     exit 0
   fi
 fi
@@ -994,8 +996,25 @@ fn spawn_master_process(
     parsed: &DesktopSshParsedCommand,
     control_path: &Path,
     askpass_path: &Path,
+    session_dir: &Path,
     ssh_password: Option<&str>,
-) -> Result<Child> {
+) -> Result<(Child, Option<PathBuf>)> {
+    let mut secret_file_path: Option<PathBuf> = None;
+
+    if let Some(secret) = ssh_password.filter(|value| !value.trim().is_empty()) {
+        // Write password to a temporary file with restrictive permissions
+        let secret_file = session_dir.join(".askpass-secret");
+        fs::write(&secret_file, secret.trim())?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perm = fs::metadata(&secret_file)?.permissions();
+            perm.set_mode(0o600);
+            fs::set_permissions(&secret_file, perm)?;
+        }
+        secret_file_path = Some(secret_file);
+    }
+
     let args = vec![
         "-o".to_string(),
         "ControlMaster=yes".to_string(),
@@ -1014,16 +1033,18 @@ fn spawn_master_process(
         .env("SSH_ASKPASS", askpass_path)
         .env("DISPLAY", "1");
 
-    if let Some(secret) = ssh_password.filter(|value| !value.trim().is_empty()) {
-        command.env("OPENCHAMBER_SSH_ASKPASS_VALUE", secret.trim());
+    if let Some(ref path) = secret_file_path {
+        command.env("OPENCHAMBER_SSH_ASKPASS_FILE", path);
     }
 
-    command.spawn().with_context(|| {
+    let child = command.spawn().with_context(|| {
         format!(
             "failed to start SSH ControlMaster for {}",
             parsed.destination
         )
-    })
+    })?;
+
+    Ok((child, secret_file_path))
 }
 
 fn wait_for_master_ready(
@@ -1374,8 +1395,7 @@ fn start_remote_server_managed(
     instance: &DesktopSshInstance,
     desired_port: u16,
 ) -> Result<u16> {
-    let mut env_prefix = "OPENCHAMBER_RUNTIME=ssh-remote".to_string();
-    if let Some(secret) = instance
+    let script = if let Some(secret) = instance
         .auth
         .openchamber_password
         .as_ref()
@@ -1383,13 +1403,25 @@ fn start_remote_server_managed(
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty())
     {
-        env_prefix.push(' ');
-        env_prefix.push_str("OPENCHAMBER_UI_PASSWORD=");
-        env_prefix.push_str(&shell_quote(&secret));
-    }
-    let script = format!(
-        "{env_prefix} openchamber serve --daemon --hostname 127.0.0.1 --port {desired_port}"
-    );
+        // Sanitize: strip newlines and the heredoc delimiter to prevent injection.
+        let safe_secret = secret
+            .replace('\n', "")
+            .replace("OPENCHAMBER_EOF", "");
+        // Write password to a mktemp file (avoids symlink races on shared /tmp),
+        // source it to set the env var, then run the daemon (which inherits it),
+        // and clean up the file after the daemon forks.
+        format!(
+            "ENV_FILE=\"$(mktemp)\" && umask 077 && chmod 600 \"$ENV_FILE\" && cat > \"$ENV_FILE\" << 'OPENCHAMBER_EOF'\nOPENCHAMBER_UI_PASSWORD={password}\nOPENCHAMBER_EOF\nOPENCHAMBER_RUNTIME=ssh-remote . \"$ENV_FILE\" && openchamber serve --daemon --hostname 127.0.0.1 --port {port} && rm -f \"$ENV_FILE\"",
+            port = desired_port,
+            password = safe_secret,
+        )
+    } else {
+        format!(
+            "OPENCHAMBER_RUNTIME=ssh-remote openchamber serve --daemon --hostname 127.0.0.1 --port {}",
+            desired_port
+        )
+    };
+
     let output = run_remote_command(
         parsed,
         control_path,
@@ -1644,7 +1676,7 @@ fn parse_ssh_config_candidates(path: &Path, source: &str) -> Vec<DesktopSshImpor
 impl DesktopSshManagerInner {
     fn append_log_with_level(&self, id: &str, level: &str, message: impl Into<String>) {
         let line = format!("[{}] [{}] {}", now_millis(), level, message.into());
-        let mut logs = self.logs.lock().expect("ssh logs mutex");
+        let mut logs = self.logs.lock().unwrap_or_else(|e| e.into_inner());
         let entry = logs.entry(id.to_string()).or_default();
         entry.push(line);
         if entry.len() > MAX_LOG_LINES_PER_INSTANCE {
@@ -1671,7 +1703,7 @@ impl DesktopSshManagerInner {
     }
 
     fn logs_for_instance(&self, id: &str, limit: usize) -> Vec<String> {
-        let logs = self.logs.lock().expect("ssh logs mutex");
+        let logs = self.logs.lock().unwrap_or_else(|e| e.into_inner());
         let mut lines = logs.get(id).cloned().unwrap_or_default();
         if limit > 0 && lines.len() > limit {
             let keep_from = lines.len() - limit;
@@ -1681,13 +1713,13 @@ impl DesktopSshManagerInner {
     }
 
     fn clear_logs_for_instance(&self, id: &str) {
-        self.logs.lock().expect("ssh logs mutex").remove(id);
+        self.logs.lock().unwrap_or_else(|e| e.into_inner()).remove(id);
     }
 
     fn status_snapshot_for_instance(&self, id: &str) -> DesktopSshInstanceStatus {
         self.statuses
             .lock()
-            .expect("ssh status mutex")
+            .unwrap_or_else(|e| e.into_inner())
             .get(id)
             .cloned()
             .unwrap_or_else(|| DesktopSshInstanceStatus::idle(id))
@@ -1741,7 +1773,7 @@ impl DesktopSshManagerInner {
 
         self.statuses
             .lock()
-            .expect("ssh status mutex")
+            .unwrap_or_else(|e| e.into_inner())
             .insert(id.to_string(), status.clone());
         let _ = app.emit(SSH_STATUS_EVENT, status);
     }
@@ -1749,12 +1781,12 @@ impl DesktopSshManagerInner {
     fn clear_retry_attempt(&self, id: &str) {
         self.reconnect_attempts
             .lock()
-            .expect("ssh retry mutex")
+            .unwrap_or_else(|e| e.into_inner())
             .remove(id);
     }
 
     fn next_retry_attempt(&self, id: &str) -> u32 {
-        let mut guard = self.reconnect_attempts.lock().expect("ssh retry mutex");
+        let mut guard = self.reconnect_attempts.lock().unwrap_or_else(|e| e.into_inner());
         let next = guard.get(id).copied().unwrap_or(0).saturating_add(1);
         guard.insert(id.to_string(), next);
         next
@@ -1763,7 +1795,7 @@ impl DesktopSshManagerInner {
     fn current_retry_attempt(&self, id: &str) -> u32 {
         self.reconnect_attempts
             .lock()
-            .expect("ssh retry mutex")
+            .unwrap_or_else(|e| e.into_inner())
             .get(id)
             .copied()
             .unwrap_or(0)
@@ -1773,7 +1805,7 @@ impl DesktopSshManagerInner {
         let mut guard = self
             .connect_attempts
             .lock()
-            .expect("ssh connect-attempt mutex");
+            .unwrap_or_else(|e| e.into_inner());
         let next = guard.get(id).copied().unwrap_or(0).saturating_add(1);
         guard.insert(id.to_string(), next);
         next
@@ -1783,7 +1815,7 @@ impl DesktopSshManagerInner {
         if let Some(handle) = self
             .connect_tasks
             .lock()
-            .expect("ssh connect task mutex")
+            .unwrap_or_else(|e| e.into_inner())
             .remove(id)
         {
             handle.abort();
@@ -1794,7 +1826,7 @@ impl DesktopSshManagerInner {
         if let Some(handle) = self
             .monitor_tasks
             .lock()
-            .expect("ssh monitor task mutex")
+            .unwrap_or_else(|e| e.into_inner())
             .remove(id)
         {
             handle.abort();
@@ -1802,7 +1834,7 @@ impl DesktopSshManagerInner {
     }
 
     fn session_is_alive(&self, id: &str) -> bool {
-        let mut sessions = self.sessions.lock().expect("ssh sessions mutex");
+        let mut sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
         let Some(session) = sessions.get_mut(id) else {
             return false;
         };
@@ -1899,7 +1931,7 @@ impl DesktopSshManagerInner {
         self.cancel_connect_task(id);
         self.cancel_monitor_task(id);
 
-        if let Some(mut session) = self.sessions.lock().expect("ssh sessions mutex").remove(id) {
+        if let Some(mut session) = self.sessions.lock().unwrap_or_else(|e| e.into_inner()).remove(id) {
             if session.started_by_us
                 && matches!(
                     session.instance.remote_openchamber.mode,
@@ -1924,6 +1956,9 @@ impl DesktopSshManagerInner {
 
             let _ = fs::remove_file(&session.control_path);
             let _ = fs::remove_file(session.session_dir.join("askpass.sh"));
+            if let Some(secret_file) = session.askpass_secret_file {
+                let _ = fs::remove_file(&secret_file);
+            }
         }
 
         self.clear_retry_attempt(id);
@@ -2159,6 +2194,8 @@ impl DesktopSshManagerInner {
         let session_dir = ensure_session_dir(&id)?;
         let control_path = control_path_for_instance(&session_dir, &id);
         let _ = fs::remove_file(&control_path);
+        // Clean up stale secret file from a previous crashed session.
+        let _ = fs::remove_file(session_dir.join(".askpass-secret"));
         let askpass_path = session_dir.join("askpass.sh");
         write_askpass_script(&askpass_path)?;
 
@@ -2175,10 +2212,11 @@ impl DesktopSshManagerInner {
             false,
         );
 
-        let mut master = spawn_master_process(
+        let (mut master, askpass_secret_file) = spawn_master_process(
             &parsed,
             &control_path,
             &askpass_path,
+            &session_dir,
             instance.auth.ssh_password.as_ref().and_then(|secret| {
                 if secret.enabled {
                     secret.value.as_deref()
@@ -2188,13 +2226,21 @@ impl DesktopSshManagerInner {
             }),
         )?;
 
+        // Helper: clean up secret file + kill master on early return.
+        let cleanup_on_error = |master: &mut Child| {
+            kill_child(master);
+            if let Some(ref p) = askpass_secret_file {
+                let _ = fs::remove_file(p);
+            }
+        };
+
         if let Err(err) = wait_for_master_ready(
             &parsed,
             &control_path,
             instance.connection_timeout_sec,
             &mut master,
         ) {
-            kill_child(&mut master);
+            cleanup_on_error(&mut master);
             return Err(err);
         }
 
@@ -2220,7 +2266,7 @@ impl DesktopSshManagerInner {
 
         let remote_os = remote_os.trim().to_ascii_lowercase();
         if remote_os != "linux" && remote_os != "darwin" {
-            kill_child(&mut master);
+            cleanup_on_error(&mut master);
             return Err(anyhow!("Unsupported remote OS: {remote_os}"));
         }
 
@@ -2228,7 +2274,7 @@ impl DesktopSshManagerInner {
             match self.ensure_remote_server(app, &instance, &parsed, &control_path) {
                 Ok(result) => result,
                 Err(err) => {
-                    kill_child(&mut master);
+                    cleanup_on_error(&mut master);
                     return Err(err);
                 }
             };
@@ -2259,7 +2305,7 @@ impl DesktopSshManagerInner {
             match spawn_main_forward(&parsed, &control_path, &bind_host, local_port, remote_port) {
                 Ok(child) => child,
                 Err(err) => {
-                    kill_child(&mut master);
+                    cleanup_on_error(&mut master);
                     return Err(err);
                 }
             };
@@ -2279,7 +2325,7 @@ impl DesktopSshManagerInner {
                 if let Some(mut stream) = main_forward.stderr.take() {
                     let _ = stream.read_to_string(&mut stderr);
                 }
-                kill_child(&mut master);
+                cleanup_on_error(&mut master);
                 return Err(anyhow!(format!(
                     "Failed to start main port forward (status: {status}): {}",
                     stderr.trim()
@@ -2317,7 +2363,7 @@ impl DesktopSshManagerInner {
             for child in &mut extra_forwards {
                 kill_child(child);
             }
-            kill_child(&mut master);
+            cleanup_on_error(&mut master);
             return Err(err);
         }
 
@@ -2328,7 +2374,7 @@ impl DesktopSshManagerInner {
             let _ = persist_local_port_for_instance(&id, local_port);
         }
 
-        self.sessions.lock().expect("ssh sessions mutex").insert(
+        self.sessions.lock().unwrap_or_else(|e| e.into_inner()).insert(
             id.clone(),
             SshSession {
                 instance: instance.clone(),
@@ -2343,6 +2389,7 @@ impl DesktopSshManagerInner {
                 main_forward,
                 main_forward_detached,
                 extra_forwards,
+                askpass_secret_file,
             },
         );
 
@@ -2388,7 +2435,7 @@ impl DesktopSshManagerInner {
                 let mut dropped_reason: Option<String> = None;
                 let mut detached_notice: Option<String> = None;
                 {
-                    let mut sessions = inner.sessions.lock().expect("ssh sessions mutex");
+                    let mut sessions = inner.sessions.lock().unwrap_or_else(|e| e.into_inner());
                     let Some(session) = sessions.get_mut(&id_for_task) else {
                         break;
                     };
@@ -2571,12 +2618,12 @@ impl DesktopSshManagerInner {
             inner
                 .monitor_tasks
                 .lock()
-                .expect("ssh monitor task mutex")
+                .unwrap_or_else(|e| e.into_inner())
                 .remove(&id_for_task);
         });
         self.monitor_tasks
             .lock()
-            .expect("ssh monitor task mutex")
+            .unwrap_or_else(|e| e.into_inner())
             .insert(id, handle);
     }
 
@@ -2589,7 +2636,7 @@ impl DesktopSshManagerInner {
         if self
             .connect_tasks
             .lock()
-            .expect("ssh connect task mutex")
+            .unwrap_or_else(|e| e.into_inner())
             .contains_key(&id)
         {
             self.append_log_with_level(&id, "INFO", "Connection already in progress");
@@ -2673,13 +2720,13 @@ impl DesktopSshManagerInner {
             inner
                 .connect_tasks
                 .lock()
-                .expect("ssh connect task mutex")
+                .unwrap_or_else(|e| e.into_inner())
                 .remove(&id_for_task);
         });
 
         self.connect_tasks
             .lock()
-            .expect("ssh connect task mutex")
+            .unwrap_or_else(|e| e.into_inner())
             .insert(id, handle);
 
         Ok(())
@@ -2687,7 +2734,7 @@ impl DesktopSshManagerInner {
 
     fn statuses_with_defaults(&self) -> Vec<DesktopSshInstanceStatus> {
         let config = read_desktop_ssh_instances_from_disk();
-        let statuses = self.statuses.lock().expect("ssh status mutex");
+        let statuses = self.statuses.lock().unwrap_or_else(|e| e.into_inner());
         let mut result = Vec::new();
 
         for instance in config.instances {
@@ -2737,7 +2784,7 @@ impl DesktopSshManagerState {
             .inner
             .sessions
             .lock()
-            .expect("ssh sessions mutex")
+            .unwrap_or_else(|e| e.into_inner())
             .keys()
             .cloned()
             .collect();
@@ -2749,7 +2796,7 @@ impl DesktopSshManagerState {
             .inner
             .connect_tasks
             .lock()
-            .expect("ssh connect task mutex")
+            .unwrap_or_else(|e| e.into_inner())
             .keys()
             .cloned()
             .collect();
@@ -2761,7 +2808,7 @@ impl DesktopSshManagerState {
             .inner
             .monitor_tasks
             .lock()
-            .expect("ssh monitor task mutex")
+            .unwrap_or_else(|e| e.into_inner())
             .keys()
             .cloned()
             .collect();

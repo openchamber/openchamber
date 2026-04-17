@@ -31,7 +31,7 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src * data: blob:; font-src * data:; connect-src * ws: wss:; media-src * blob:; worker-src 'self' blob:; object-src 'none'; frame-src 'none'; base-uri 'self'"
     },
     "withGlobalTauri": true,
     "macOSPrivateApi": true
