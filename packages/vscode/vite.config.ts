@@ -4,6 +4,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const reactCompilerToggle = (process.env.OPENCHAMBER_DISABLE_REACT_COMPILER ?? '').toLowerCase();
+const enableReactCompiler = !(reactCompilerToggle === '1' || reactCompilerToggle === 'true' || reactCompilerToggle === 'on' || reactCompilerToggle === 'yes');
 
 export default defineConfig(({ mode }) => ({
   root: path.resolve(__dirname, 'webview'),
@@ -11,7 +13,7 @@ export default defineConfig(({ mode }) => ({
   plugins: [
     react({
       babel: {
-        plugins: ['babel-plugin-react-compiler'],
+        plugins: enableReactCompiler ? ['babel-plugin-react-compiler'] : [],
       },
     }),
   ],

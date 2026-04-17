@@ -25,6 +25,7 @@ import { flattenAssistantTextParts } from "@/lib/messages/messageText"
 import { EXECUTION_FORK_META_TEXT } from "@/lib/messages/executionMeta"
 import { waitForWorktreeBootstrap } from "@/lib/worktrees/worktreeBootstrap"
 import { waitForPendingDraftWorktreeRequest } from "@/lib/worktrees/pendingDraftWorktree"
+import { isSubpath, normalizePath, pathsEqual } from "@/lib/pathUtils"
 import type { ProjectEntry } from "@/lib/api/types"
 import {
   getSyncSessions,
@@ -244,15 +245,6 @@ export type SessionUIState = {
 // Helpers
 // ---------------------------------------------------------------------------
 
-const normalizePath = (value?: string | null): string | null => {
-  if (typeof value !== "string") return null
-  const trimmed = value.trim()
-  if (!trimmed) return null
-  const replaced = trimmed.replace(/\\/g, "/")
-  if (replaced === "/") return "/"
-  return replaced.length > 1 ? replaced.replace(/\/+$/, "") : replaced
-}
-
 const resolveDirectoryKey = (session: Session): string | null => {
   const sessionRecord = session as Session & {
     directory?: string | null
@@ -294,7 +286,7 @@ const resolveProjectForDirectory = (projects: ProjectEntry[], directory: string 
   for (const p of projects) {
     const pp = normalizePath(p.path)
     if (!pp) continue
-    if (nd !== pp && !nd.startsWith(`${pp}/`)) continue
+    if (!isSubpath(nd, pp)) continue
     if (!best || pp.length > (normalizePath(best.path)?.length ?? 0)) best = p
   }
   return best
@@ -314,7 +306,7 @@ const resolveProjectFromWorktreeDirectory = (
     for (const wt of worktrees) {
       const wp = normalizePath(wt.path)
       if (!wp) continue
-      if (nd !== wp && !nd.startsWith(`${wp}/`)) continue
+      if (!isSubpath(nd, wp)) continue
       if (wp.length > bestLen) {
         bestLen = wp.length
         matchedWorktree = wt
@@ -325,7 +317,7 @@ const resolveProjectFromWorktreeDirectory = (
   if (!matchedWorktree) return null
   const candidates = [normalizePath(matchedWorktree.projectDirectory), matchedProjectPath].filter((v): v is string => Boolean(v))
   for (const c of candidates) {
-    const exact = projects.find((p) => normalizePath(p.path) === c) ?? null
+    const exact = projects.find((p) => pathsEqual(p.path, c)) ?? null
     if (exact) return exact
     const nested = resolveProjectForDirectory(projects, c)
     if (nested) return nested

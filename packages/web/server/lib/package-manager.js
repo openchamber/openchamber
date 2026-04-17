@@ -1,9 +1,10 @@
-import { spawnSync } from 'child_process';
 import crypto from 'crypto';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
+
+import { spawnOnceSync } from './SpawnUtils.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -13,10 +14,6 @@ const PACKAGE_PATH_SEGMENTS = PACKAGE_NAME.split('/');
 const NPM_REGISTRY_URL = `https://registry.npmjs.org/${PACKAGE_NAME}`;
 const CHANGELOG_URL = 'https://raw.githubusercontent.com/btriapitsyn/openchamber/main/CHANGELOG.md';
 let cachedDetectedPm = null;
-
-function getSpawnSyncBaseOptions() {
-  return process.platform === 'win32' ? { windowsHide: true } : {};
-}
 const UPDATE_CHECK_URL = process.env.OPENCHAMBER_UPDATE_API_URL || 'https://api.openchamber.dev/v1/update/check';
 
 function getOpenChamberConfigDir() {
@@ -189,14 +186,11 @@ function getUniquePaths(paths) {
 
 function getCommandOutput(command, args) {
   try {
-    const result = spawnSync(command, args, {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
+    const result = spawnOnceSync(command, args, {
       timeout: 10000,
-      ...getSpawnSyncBaseOptions(),
     });
 
-    if (result.status !== 0) {
+    if (result.exitCode !== 0) {
       return null;
     }
 
@@ -538,13 +532,10 @@ function quoteCommand(command) {
 
 function isCommandAvailable(command) {
   try {
-    const result = spawnSync(command, ['--version'], {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
+    const result = spawnOnceSync(command, ['--version'], {
       timeout: 5000,
-      ...getSpawnSyncBaseOptions(),
     });
-    return result.status === 0;
+    return result.exitCode === 0;
   } catch {
     return false;
   }
@@ -568,14 +559,11 @@ function isPackageInstalledWith(pm) {
         args = ['list', '-g', '--depth=0', PACKAGE_NAME];
     }
 
-    const result = spawnSync(pmCommand, args, {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
+    const result = spawnOnceSync(pmCommand, args, {
       timeout: 10000,
-      ...getSpawnSyncBaseOptions(),
     });
 
-    if (result.status !== 0) return false;
+    if (result.exitCode !== 0) return false;
     return result.stdout.includes(PACKAGE_NAME) || result.stdout.includes('openchamber');
   } catch {
     return false;
@@ -729,14 +717,13 @@ export function executeUpdate(pm = detectPackageManager(), options = {}) {
     console.log(`Running: ${command}`);
   }
 
-  const result = spawnSync(command, {
+  const result = spawnOnceSync(command, [], {
     stdio: 'inherit',
-    shell: true,
-    ...getSpawnSyncBaseOptions(),
+    useShell: true,
   });
 
   return {
-    success: result.status === 0,
-    exitCode: result.status,
+    success: result.exitCode === 0,
+    exitCode: result.exitCode,
   };
 }

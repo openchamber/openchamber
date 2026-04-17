@@ -1,7 +1,6 @@
 import 'reflect-metadata';
 import express from 'express';
 import path from 'path';
-import { spawn, spawnSync } from 'child_process';
 import fs from 'fs';
 import http from 'http';
 import net from 'net';
@@ -946,7 +945,6 @@ async function main(options = {}) {
     os,
     path,
     fsPromises,
-    spawn,
     resolveGitBinaryForSpawn,
     createFsSearchRuntime: createFsSearchRuntimeFactory,
     openchamberDataDir: OPENCHAMBER_DATA_DIR,

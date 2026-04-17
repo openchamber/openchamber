@@ -340,6 +340,12 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.terminalFontSize === 'number' && Number.isFinite(candidate.terminalFontSize)) {
       result.terminalFontSize = Math.max(9, Math.min(52, Math.round(candidate.terminalFontSize)));
     }
+    if (typeof candidate.terminalShell === 'string') {
+      const shell = candidate.terminalShell.trim().toLowerCase();
+      if (shell === 'default' || shell === 'powershell' || shell === 'cmd' || shell === 'bash' || shell === 'wsl') {
+        result.terminalShell = shell;
+      }
+    }
     if (typeof candidate.padding === 'number' && Number.isFinite(candidate.padding)) {
       result.padding = Math.max(50, Math.min(200, Math.round(candidate.padding)));
     }

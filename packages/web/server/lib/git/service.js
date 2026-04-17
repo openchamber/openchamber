@@ -2,14 +2,15 @@ import simpleGit from 'simple-git';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { execFile } from 'child_process';
-import { promisify } from 'util';
+import { canonicalPath, longPathPrefix, pathsEqual, toNativePath } from '../PathUtils.js';
+import { spawnOnce } from '../SpawnUtils.js';
+import { buildWorktreeRoot, clampWorktreeLeafName, worktreeDir } from './worktree-paths.js';
 
 const fsp = fs.promises;
-const execFileAsync = promisify(execFile);
 const gpgconfCandidates = ['gpgconf', '/opt/homebrew/bin/gpgconf', '/usr/local/bin/gpgconf'];
 let resolvedGitBinary = null;
 const worktreeBootstrapState = new Map();
+const GIT_CONFIG_DEFAULTS = ['core.autocrlf=false', ...(process.platform === 'win32' ? ['core.longpaths=true'] : [])];
 
 const WORKTREE_BOOTSTRAP_PENDING = 'pending';
 const WORKTREE_BOOTSTRAP_READY = 'ready';
@@ -20,7 +21,7 @@ const toBootstrapStateKey = (directory) => {
   if (!normalized) {
     return '';
   }
-  return path.resolve(normalized);
+  return canonicalPath(normalized);
 };
 
 const setWorktreeBootstrapState = (directory, status, error = null) => {
@@ -230,7 +231,11 @@ const resolveSshAuthSock = async () => {
   const runGpgconf = async (args) => {
     for (const candidate of gpgconfCandidates) {
       try {
-        const { stdout } = await execFileAsync(candidate, args);
+        const result = await spawnOnce(candidate, args, { timeout: 10000 });
+        if (result.exitCode !== 0) {
+          continue;
+        }
+        const stdout = result.stdout;
         return String(stdout || '');
       } catch {
         continue;
@@ -266,22 +271,27 @@ const buildGitEnv = async () => {
   return env;
 };
 
-const createGit = async (directory) => {
+const toDirectFsPath = (targetPath) => longPathPrefix(path.resolve(toNativePath(targetPath)));
+
+const buildSimpleGitOptions = async (directory) => {
   const env = await buildGitEnv();
   const spawnOptions = { windowsHide: true };
   const binary = getGitBinary();
   const hasCustomBinary = typeof binary === 'string' && binary.trim() && binary !== 'git' && binary !== 'git.exe';
   const unsafe = hasCustomBinary ? { allowUnsafeCustomBinary: true } : undefined;
-  if (!directory) {
-    return simpleGit({ env, spawnOptions, binary, unsafe });
-  }
-  return simpleGit({
-    baseDir: normalizeDirectoryPath(directory),
+
+  return {
+    ...(directory ? { baseDir: toNativePath(normalizeDirectoryPath(directory)) } : {}),
     env,
     spawnOptions,
     binary,
     unsafe,
-  });
+    config: GIT_CONFIG_DEFAULTS,
+  };
+};
+
+const createGit = async (directory) => {
+  return simpleGit(await buildSimpleGitOptions(directory));
 };
 
 const normalizeDirectoryPath = (value) => {
@@ -458,16 +468,9 @@ const parseWorktreePorcelain = (raw) => {
   return entries;
 };
 
-const canonicalPath = async (input) => {
-  const absolutePath = path.resolve(input);
-  const realPath = await fsp.realpath(absolutePath).catch(() => absolutePath);
-  const normalized = path.normalize(realPath);
-  return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
-};
-
 const checkPathExists = async (targetPath) => {
   try {
-    await fsp.stat(targetPath);
+    await fsp.stat(toDirectFsPath(targetPath));
     return true;
   } catch {
     return false;
@@ -570,17 +573,27 @@ const isNotGitRepositoryError = (error) => {
 
 const runGitCommand = async (cwd, args) => {
   try {
-    const { stdout, stderr } = await execFileAsync(getGitBinary(), args, {
+    const result = await spawnOnce(getGitBinary(), args, {
       cwd,
       env: await buildGitEnv(),
-      windowsHide: true,
       maxBuffer: 20 * 1024 * 1024,
     });
+    const stdout = String(result.stdout || '');
+    const stderr = String(result.stderr || '');
+    if (result.exitCode !== 0) {
+      return {
+        success: false,
+        exitCode: result.exitCode,
+        stdout,
+        stderr,
+        message: [stderr, stdout].map((chunk) => chunk.trim()).filter(Boolean).join('\n').trim() || `Git command failed with exit code ${result.exitCode}`,
+      };
+    }
     return {
       success: true,
       exitCode: 0,
-      stdout: String(stdout || ''),
-      stderr: String(stderr || ''),
+      stdout,
+      stderr,
     };
   } catch (error) {
     return {
@@ -604,7 +617,7 @@ const runGitCommandOrThrow = async (cwd, args, fallbackMessage) => {
 const ensureOpenCodeProjectId = async (primaryWorktree) => {
   const gitDir = path.join(primaryWorktree, '.git');
   const idFile = path.join(gitDir, 'opencode');
-  const existing = await fsp.readFile(idFile, 'utf8').then((value) => value.trim()).catch(() => '');
+  const existing = await fsp.readFile(toDirectFsPath(idFile), 'utf8').then((value) => value.trim()).catch(() => '');
   if (existing) {
     return existing;
   }
@@ -626,8 +639,8 @@ const ensureOpenCodeProjectId = async (primaryWorktree) => {
     throw new Error('Failed to derive OpenCode project ID');
   }
 
-  await fsp.mkdir(gitDir, { recursive: true }).catch(() => undefined);
-  await fsp.writeFile(idFile, projectId, 'utf8').catch(() => undefined);
+  await fsp.mkdir(toDirectFsPath(gitDir), { recursive: true }).catch(() => undefined);
+  await fsp.writeFile(toDirectFsPath(idFile), projectId, 'utf8').catch(() => undefined);
 
   return projectId;
 };
@@ -653,7 +666,7 @@ const resolveWorktreeProjectContext = async (directory) => {
   const commonDir = path.resolve(sandbox, commonResult.stdout.trim());
   const primaryWorktree = path.dirname(commonDir);
   const projectID = await ensureOpenCodeProjectId(primaryWorktree);
-  const worktreeRoot = path.join(getOpenCodeDataPath(), 'worktree', projectID);
+  const worktreeRoot = buildWorktreeRoot(getOpenCodeDataPath(), projectID);
 
   return {
     projectID,
@@ -673,7 +686,7 @@ const listWorktreeEntries = async (directory) => {
 };
 
 const resolveWorktreeNameCandidates = (baseName) => {
-  const normalizedBase = slugWorktreeName(baseName || '');
+  const normalizedBase = clampWorktreeLeafName(slugWorktreeName(baseName || ''));
   if (!normalizedBase) {
     return Array.from({ length: OPENCODE_WORKTREE_ATTEMPTS }, () => generateOpenCodeRandomName());
   }
@@ -689,7 +702,7 @@ const resolveCandidateDirectory = async (worktreeRoot, preferredName, explicitBr
   const candidates = resolveWorktreeNameCandidates(preferredName);
 
   for (const name of candidates) {
-    const directory = path.join(worktreeRoot, name);
+    const directory = worktreeDir(worktreeRoot, name);
     if (await checkPathExists(directory)) {
       continue;
     }
@@ -777,12 +790,14 @@ const runWorktreeStartCommand = async (directory, command) => {
   }
 
   if (process.platform === 'win32') {
-    const result = await execFileAsync('cmd', ['/c', text], {
+    const result = await spawnOnce('cmd', ['/c', text], {
       cwd: directory,
       env: await buildGitEnv(),
-      windowsHide: true,
       maxBuffer: 20 * 1024 * 1024,
-    }).then(({ stdout, stderr }) => ({ success: true, stdout, stderr })).catch((error) => ({
+    }).then((probe) => probe.exitCode === 0
+      ? ({ success: true, stdout: probe.stdout, stderr: probe.stderr })
+      : ({ success: false, stdout: probe.stdout, stderr: probe.stderr, message: [probe.stderr, probe.stdout].map((chunk) => String(chunk || '').trim()).filter(Boolean).join('\n').trim() || `Command failed with exit code ${probe.exitCode}` })
+    ).catch((error) => ({
       success: false,
       stdout: error?.stdout,
       stderr: error?.stderr,
@@ -791,11 +806,14 @@ const runWorktreeStartCommand = async (directory, command) => {
     return result;
   }
 
-  const result = await execFileAsync('bash', ['-lc', text], {
+  const result = await spawnOnce('bash', ['-lc', text], {
     cwd: directory,
     env: await buildGitEnv(),
     maxBuffer: 20 * 1024 * 1024,
-  }).then(({ stdout, stderr }) => ({ success: true, stdout, stderr })).catch((error) => ({
+  }).then((probe) => probe.exitCode === 0
+    ? ({ success: true, stdout: probe.stdout, stderr: probe.stderr })
+    : ({ success: false, stdout: probe.stdout, stderr: probe.stderr, message: [probe.stderr, probe.stdout].map((chunk) => String(chunk || '').trim()).filter(Boolean).join('\n').trim() || `Command failed with exit code ${probe.exitCode}` })
+  ).catch((error) => ({
     success: false,
     stdout: error?.stdout,
     stderr: error?.stderr,
@@ -807,7 +825,7 @@ const runWorktreeStartCommand = async (directory, command) => {
 const loadProjectStartCommand = async (projectID) => {
   const storagePath = path.join(getOpenCodeDataPath(), 'storage', 'project', `${projectID}.json`);
   try {
-    const raw = await fsp.readFile(storagePath, 'utf8');
+    const raw = await fsp.readFile(toDirectFsPath(storagePath), 'utf8');
     const parsed = JSON.parse(raw);
     const start = typeof parsed?.commands?.start === 'string' ? parsed.commands.start.trim() : '';
     return start || '';
@@ -841,7 +859,7 @@ const syncSandboxesToOpenCodeDb = (projectID, sandboxes) => {
 
 const updateProjectSandboxes = async (projectID, primaryWorktree, updater) => {
   const storagePath = getProjectStoragePath(projectID);
-  await fsp.mkdir(path.dirname(storagePath), { recursive: true });
+  await fsp.mkdir(toDirectFsPath(path.dirname(storagePath)), { recursive: true });
 
   const now = Date.now();
   const base = {
@@ -855,7 +873,7 @@ const updateProjectSandboxes = async (projectID, primaryWorktree, updater) => {
     },
   };
 
-  const parsed = await fsp.readFile(storagePath, 'utf8').then((raw) => JSON.parse(raw)).catch(() => null);
+  const parsed = await fsp.readFile(toDirectFsPath(storagePath), 'utf8').then((raw) => JSON.parse(raw)).catch(() => null);
   const current = parsed && typeof parsed === 'object' ? { ...base, ...parsed } : base;
   current.id = String(current.id || projectID);
   current.worktree = String(current.worktree || primaryWorktree);
@@ -877,7 +895,7 @@ const updateProjectSandboxes = async (projectID, primaryWorktree, updater) => {
       .filter(Boolean)
   )];
 
-  await fsp.writeFile(storagePath, `${JSON.stringify(current, null, 2)}\n`, 'utf8');
+  await fsp.writeFile(toDirectFsPath(storagePath), `${JSON.stringify(current, null, 2)}\n`, 'utf8');
 
   // Sync to OpenCode's SQLite database so project.sandboxes is visible via the SDK
   syncSandboxesToOpenCodeDb(projectID, current.sandboxes);
@@ -923,6 +941,18 @@ const runWorktreeStartScripts = async (directory, projectID, startCommand) => {
   if (!extraResult.success) {
     console.warn('Worktree start command failed:', extraResult.message || extraResult.stderr || extraResult.stdout);
   }
+};
+
+const ensureWorktreeGitattributes = async (directory) => {
+  const filePath = path.join(directory, '.gitattributes');
+  const targetPath = toDirectFsPath(filePath);
+  const existing = await fsp.readFile(targetPath, 'utf8').catch(() => '');
+  if (/^\*\s+text=auto(?:\s|$)/m.test(existing)) {
+    return;
+  }
+
+  const prefix = existing.trim().length > 0 ? `${existing.replace(/\s*$/, '')}\n` : '';
+  await fsp.writeFile(targetPath, `${prefix}* text=auto\n`, 'utf8');
 };
 
 const queueWorktreeBootstrap = (args) => {
@@ -1088,7 +1118,7 @@ const applyUpstreamConfiguration = async (args) => {
 
 export async function isGitRepository(directory) {
   const directoryPath = normalizeDirectoryPath(directory);
-  if (!directoryPath || !fs.existsSync(directoryPath)) {
+  if (!directoryPath || !await checkPathExists(directoryPath)) {
     return false;
   }
 
@@ -1278,12 +1308,12 @@ export async function getStatus(directory, options = {}) {
         const absolutePath = path.join(directoryPath, file.path);
 
         try {
-          const stat = await fsp.stat(absolutePath);
+          const stat = await fsp.stat(toDirectFsPath(absolutePath));
           if (!stat.isFile()) {
             return null;
           }
 
-          const buffer = await fsp.readFile(absolutePath);
+          const buffer = await fsp.readFile(toDirectFsPath(absolutePath));
           if (buffer.indexOf(0) !== -1) {
             return {
               path: file.path,
@@ -1391,7 +1421,7 @@ export async function getStatus(directory, options = {}) {
         const headSha = mergeHead.trim().slice(0, 7);
         // Only set mergeInProgress if we actually have a valid head SHA
         if (headSha) {
-          const mergeMsg = await fsp.readFile(path.join(directoryPath, '.git', 'MERGE_MSG'), 'utf8').catch(() => '');
+          const mergeMsg = await fsp.readFile(toDirectFsPath(path.join(directoryPath, '.git', 'MERGE_MSG')), 'utf8').catch(() => '');
           mergeInProgress = {
             head: headSha,
             message: mergeMsg.split('\n')[0] || '',
@@ -1404,13 +1434,13 @@ export async function getStatus(directory, options = {}) {
 
     try {
       // Check for rebase in progress (.git/rebase-merge or .git/rebase-apply)
-      const rebaseMergeExists = await fsp.stat(path.join(directoryPath, '.git', 'rebase-merge')).then(() => true).catch(() => false);
-      const rebaseApplyExists = await fsp.stat(path.join(directoryPath, '.git', 'rebase-apply')).then(() => true).catch(() => false);
+      const rebaseMergeExists = await fsp.stat(toDirectFsPath(path.join(directoryPath, '.git', 'rebase-merge'))).then(() => true).catch(() => false);
+      const rebaseApplyExists = await fsp.stat(toDirectFsPath(path.join(directoryPath, '.git', 'rebase-apply'))).then(() => true).catch(() => false);
       
       if (rebaseMergeExists || rebaseApplyExists) {
         const rebaseDir = rebaseMergeExists ? 'rebase-merge' : 'rebase-apply';
-        const headName = await fsp.readFile(path.join(directoryPath, '.git', rebaseDir, 'head-name'), 'utf8').catch(() => '');
-        const onto = await fsp.readFile(path.join(directoryPath, '.git', rebaseDir, 'onto'), 'utf8').catch(() => '');
+        const headName = await fsp.readFile(toDirectFsPath(path.join(directoryPath, '.git', rebaseDir, 'head-name')), 'utf8').catch(() => '');
+        const onto = await fsp.readFile(toDirectFsPath(path.join(directoryPath, '.git', rebaseDir, 'onto')), 'utf8').catch(() => '');
         
         const headNameTrimmed = headName.trim().replace('refs/heads/', '');
         const ontoTrimmed = onto.trim().slice(0, 7);
@@ -1677,12 +1707,12 @@ export async function getFileDiff(directory, { path: filePath, staged = false } 
     if (isImage) {
       // For images, use git show with raw output and convert to base64
       try {
-        const { stdout } = await execFileAsync(getGitBinary(), ['show', `HEAD:${filePath}`], {
+        const result = await spawnOnce(getGitBinary(), ['show', `HEAD:${filePath}`], {
           cwd: directoryPath,
-          encoding: 'buffer',
-          windowsHide: true,
+          encoding: null,
           maxBuffer: 50 * 1024 * 1024, // 50MB max
         });
+        const stdout = result.stdout;
         if (stdout && stdout.length > 0) {
           original = `data:${mimeType};base64,${stdout.toString('base64')}`;
         }
@@ -1699,14 +1729,14 @@ export async function getFileDiff(directory, { path: filePath, staged = false } 
   const fullPath = path.join(directoryPath, filePath);
   let modified = '';
   try {
-    const stat = await fsp.stat(fullPath);
+    const stat = await fsp.stat(toDirectFsPath(fullPath));
     if (stat.isFile()) {
       if (isImage) {
         // For images, read as binary and convert to data URL
-        const buffer = await fsp.readFile(fullPath);
+        const buffer = await fsp.readFile(toDirectFsPath(fullPath));
         modified = `data:${mimeType};base64,${buffer.toString('base64')}`;
       } else {
-        modified = await fsp.readFile(fullPath, 'utf8');
+        modified = await fsp.readFile(toDirectFsPath(fullPath), 'utf8');
       }
     }
   } catch (error) {
@@ -1747,7 +1777,7 @@ export async function revertFile(directory, filePath) {
       return;
     } catch (cleanError) {
       try {
-        await fsp.rm(absoluteTarget, { recursive: true, force: true });
+        await fsp.rm(toDirectFsPath(absoluteTarget), { recursive: true, force: true });
         return;
       } catch (fsError) {
         if (fsError && typeof fsError === 'object' && fsError.code === 'ENOENT') {
@@ -2136,7 +2166,7 @@ export async function checkoutBranch(directory, branchName) {
 
 export async function getWorktrees(directory) {
   const directoryPath = normalizeDirectoryPath(directory);
-  if (!directoryPath || !fs.existsSync(directoryPath) || !fs.existsSync(path.join(directoryPath, '.git'))) {
+  if (!directoryPath || !await checkPathExists(directoryPath) || !await checkPathExists(path.join(directoryPath, '.git'))) {
     return [];
   }
   try {
@@ -2335,7 +2365,7 @@ export async function validateWorktreeCreate(directory, input = {}) {
 export async function previewWorktreeCreate(directory, input = {}) {
   const mode = input?.mode === 'existing' ? 'existing' : 'new';
   const context = await resolveWorktreeProjectContext(directory);
-  await fsp.mkdir(context.worktreeRoot, { recursive: true });
+  await fsp.mkdir(toDirectFsPath(context.worktreeRoot), { recursive: true });
 
   const preferredName = String(input?.worktreeName || input?.name || '').trim();
   const preferredBranchName = cleanBranchName(String(input?.branchName || '').trim());
@@ -2356,7 +2386,7 @@ export async function previewWorktreeCreate(directory, input = {}) {
 export async function createWorktree(directory, input = {}) {
   const mode = input?.mode === 'existing' ? 'existing' : 'new';
   const context = await resolveWorktreeProjectContext(directory);
-  await fsp.mkdir(context.worktreeRoot, { recursive: true });
+  await fsp.mkdir(toDirectFsPath(context.worktreeRoot), { recursive: true });
 
   const preferredName = String(input?.worktreeName || input?.name || '').trim();
   const preferredBranchName = cleanBranchName(String(input?.branchName || '').trim());
@@ -2444,6 +2474,7 @@ export async function createWorktree(directory, input = {}) {
   }
 
   await runGitCommandOrThrow(context.primaryWorktree, worktreeAddArgs, 'Failed to create git worktree');
+  await ensureWorktreeGitattributes(candidate.directory);
 
   try {
     await syncProjectSandboxAdd(context.projectID, context.primaryWorktree, candidate.directory);
@@ -2508,9 +2539,9 @@ export async function removeWorktree(directory, input = {}) {
   const context = await resolveWorktreeProjectContext(directory);
   const deleteLocalBranch = input?.deleteLocalBranch === true;
 
-  const targetCanonical = await canonicalPath(targetDirectory);
-  const primaryCanonical = await canonicalPath(context.primaryWorktree);
-  if (targetCanonical === primaryCanonical) {
+  const targetCanonical = canonicalPath(targetDirectory);
+  const primaryCanonical = canonicalPath(context.primaryWorktree);
+  if (pathsEqual(targetCanonical, primaryCanonical)) {
     throw new Error('Cannot remove the primary workspace');
   }
 
@@ -2520,8 +2551,8 @@ export async function removeWorktree(directory, input = {}) {
       if (!entry?.worktree) {
         continue;
       }
-      const entryCanonical = await canonicalPath(entry.worktree);
-      if (entryCanonical === targetCanonical) {
+      const entryCanonical = canonicalPath(entry.worktree);
+      if (pathsEqual(entryCanonical, targetCanonical)) {
         return entry;
       }
     }
@@ -2531,7 +2562,7 @@ export async function removeWorktree(directory, input = {}) {
   if (!matchedEntry?.worktree) {
     const targetExists = await checkPathExists(targetDirectory);
     if (targetExists) {
-      await fsp.rm(targetDirectory, { recursive: true, force: true });
+      await fsp.rm(toDirectFsPath(targetDirectory), { recursive: true, force: true });
     }
 
     try {
@@ -3083,7 +3114,7 @@ export async function getConflictDetails(directory) {
       operation = 'merge';
       const mergeHead = await git.raw(['rev-parse', 'MERGE_HEAD']).catch(() => '');
       const mergeMsg = await fsp
-        .readFile(path.join(directoryPath, '.git', 'MERGE_MSG'), 'utf8')
+        .readFile(toDirectFsPath(path.join(directoryPath, '.git', 'MERGE_MSG')), 'utf8')
         .catch(() => '');
       headInfo = `MERGE_HEAD: ${mergeHead.trim()}\n${mergeMsg}`;
     } else {

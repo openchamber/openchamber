@@ -4,10 +4,12 @@ import {
   TERMINAL_INPUT_WS_PATH,
   TERMINAL_OUTPUT_REPLAY_MAX_BYTES,
   appendTerminalOutputReplayChunk,
+  createPtySession,
   createTerminalOutputReplayBuffer,
   createTerminalInputWsControlFrame,
   isRebindRateLimited,
   listTerminalOutputReplayChunksSince,
+  normalizeTerminalShellPreference,
   normalizeTerminalInputWsMessageToText,
   parseRequestPathname,
   pruneRebindTimestamps,
@@ -24,6 +26,7 @@ export function createTerminalRuntime({
   buildAugmentedPath,
   searchPathFor,
   isExecutable,
+  readSettingsFromDiskMigrated,
   isRequestOriginAllowed,
   rejectWebSocketUpgrade,
   TERMINAL_INPUT_WS_HEARTBEAT_INTERVAL_MS,
@@ -65,98 +68,18 @@ export function createTerminalRuntime({
     return ptyProviderPromise;
   };
 
-  const getTerminalShellCandidates = () => {
-    if (process.platform === 'win32') {
-      const windowsCandidates = [
-        process.env.OPENCHAMBER_TERMINAL_SHELL,
-        process.env.SHELL,
-        process.env.ComSpec,
-        path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
-        'pwsh.exe',
-        'powershell.exe',
-        'cmd.exe',
-      ].filter(Boolean);
-
-      const resolved = [];
-      const seen = new Set();
-      for (const candidateRaw of windowsCandidates) {
-        const candidate = String(candidateRaw).trim();
-        if (!candidate) continue;
-
-        const lookedUp = candidate.includes('\\') || candidate.includes('/')
-          ? candidate
-          : searchPathFor(candidate);
-        const executable = lookedUp && isExecutable(lookedUp) ? lookedUp : (isExecutable(candidate) ? candidate : null);
-        if (!executable || seen.has(executable)) continue;
-        seen.add(executable);
-        resolved.push(executable);
-      }
-      return resolved;
+  const resolveTerminalShellPreference = async (requestedShell) => {
+    const explicit = normalizeTerminalShellPreference(requestedShell);
+    if (explicit !== 'default') {
+      return explicit;
     }
 
-    const unixCandidates = [
-      process.env.OPENCHAMBER_TERMINAL_SHELL,
-      process.env.SHELL,
-      '/bin/zsh',
-      '/bin/bash',
-      '/bin/sh',
-      'zsh',
-      'bash',
-      'sh',
-    ].filter(Boolean);
-
-    const resolved = [];
-    const seen = new Set();
-    for (const candidateRaw of unixCandidates) {
-      const candidate = String(candidateRaw).trim();
-      if (!candidate) continue;
-
-      const lookedUp = candidate.includes('/') ? candidate : searchPathFor(candidate);
-      const executable = lookedUp && isExecutable(lookedUp) ? lookedUp : (isExecutable(candidate) ? candidate : null);
-      if (!executable || seen.has(executable)) continue;
-      seen.add(executable);
-      resolved.push(executable);
+    try {
+      const settings = await readSettingsFromDiskMigrated();
+      return normalizeTerminalShellPreference(settings?.terminalShell);
+    } catch {
+      return 'default';
     }
-
-    return resolved;
-  };
-
-  const spawnTerminalPtyWithFallback = (pty, { cols, rows, cwd, env }) => {
-    const shellCandidates = getTerminalShellCandidates();
-    if (shellCandidates.length === 0) {
-      throw new Error('No executable shell found for terminal session');
-    }
-
-    let lastError = null;
-    for (const shell of shellCandidates) {
-      try {
-        const ptyOptions = {
-          name: 'xterm-256color',
-          cols: cols || 80,
-          rows: rows || 24,
-          cwd,
-          env: {
-            ...env,
-            TERM: 'xterm-256color',
-            COLORTERM: 'truecolor',
-          },
-        };
-
-        if (process.platform === 'win32') {
-          ptyOptions.useConpty = true;
-        }
-
-        const ptyProcess = pty.spawn(shell, [], ptyOptions);
-
-        return { ptyProcess, shell };
-      } catch (error) {
-        lastError = error;
-        console.warn(`Failed to spawn PTY using shell ${shell}:`, error && error.message ? error.message : error);
-      }
-    }
-
-    const baseMessage = lastError && lastError.message ? lastError.message : 'PTY spawn failed';
-    throw new Error(`Failed to spawn terminal PTY with available shells (${shellCandidates.join(', ')}): ${baseMessage}`);
   };
 
   const terminalSessions = new Map();
@@ -468,7 +391,7 @@ export function createTerminalRuntime({
         return res.status(429).json({ error: 'Maximum terminal sessions reached' });
       }
 
-      const { cwd, cols, rows } = req.body;
+      const { cwd, cols, rows, shell } = req.body;
       if (!cwd) {
         return res.status(400).json({ error: 'cwd is required' });
       }
@@ -486,11 +409,16 @@ export function createTerminalRuntime({
       const resolvedEnv = sanitizeTerminalEnv({ ...process.env, PATH: envPath });
 
       const pty = await getPtyProvider();
-      const { ptyProcess, shell } = spawnTerminalPtyWithFallback(pty, {
+      const shellPreference = await resolveTerminalShellPreference(shell);
+      const { ptyProcess, shell: resolvedShell } = createPtySession(pty, {
         cols,
         rows,
         cwd,
         env: resolvedEnv,
+        shellPreference,
+        pathModule: path,
+        isExecutable,
+        searchPathFor,
       });
 
       const session = {
@@ -505,7 +433,7 @@ export function createTerminalRuntime({
       terminalSessions.set(sessionId, session);
       wireTerminalSession(sessionId, session);
 
-      console.log(`Created terminal session: ${sessionId} in ${cwd} using shell ${shell}`);
+      console.log(`Created terminal session: ${sessionId} in ${cwd} using shell ${resolvedShell} (preference=${shellPreference})`);
       res.json({ sessionId, cols: cols || 80, rows: rows || 24, capabilities: terminalTransportCapabilities });
     } catch (error) {
       console.error('Failed to create terminal session:', error);
@@ -664,7 +592,7 @@ export function createTerminalRuntime({
 
   app.post('/api/terminal/:sessionId/restart', async (req, res) => {
     const { sessionId } = req.params;
-    const { cwd, cols, rows } = req.body;
+    const { cwd, cols, rows, shell } = req.body;
 
     if (!cwd) {
       return res.status(400).json({ error: 'cwd is required' });
@@ -696,11 +624,16 @@ export function createTerminalRuntime({
       const resolvedEnv = sanitizeTerminalEnv({ ...process.env, PATH: envPath });
 
       const pty = await getPtyProvider();
-      const { ptyProcess, shell } = spawnTerminalPtyWithFallback(pty, {
+      const shellPreference = await resolveTerminalShellPreference(shell);
+      const { ptyProcess, shell: resolvedShell } = createPtySession(pty, {
         cols,
         rows,
         cwd,
         env: resolvedEnv,
+        shellPreference,
+        pathModule: path,
+        isExecutable,
+        searchPathFor,
       });
 
       const session = {
@@ -715,7 +648,7 @@ export function createTerminalRuntime({
       terminalSessions.set(newSessionId, session);
       wireTerminalSession(newSessionId, session);
 
-      console.log(`Restarted terminal session: ${sessionId} -> ${newSessionId} in ${cwd} using shell ${shell}`);
+      console.log(`Restarted terminal session: ${sessionId} -> ${newSessionId} in ${cwd} using shell ${resolvedShell} (preference=${shellPreference})`);
       res.json({ sessionId: newSessionId, cols: cols || 80, rows: rows || 24, capabilities: terminalTransportCapabilities });
     } catch (error) {
       console.error('Failed to restart terminal session:', error);

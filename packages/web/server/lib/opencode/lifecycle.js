@@ -1,5 +1,7 @@
-import { spawn, spawnSync } from 'node:child_process';
 import net from 'node:net';
+
+import { spawnManaged, spawnOnce } from '../SpawnUtils.js';
+import { IS_WIN } from '../platform.js';
 
 export const createOpenCodeLifecycleRuntime = (deps) => {
   const {
@@ -24,17 +26,17 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     clearResolvedOpenCodeBinary,
   } = deps;
 
-  const killProcessOnPort = (port) => {
-    if (!port || process.platform === 'win32') return;
+  const killProcessOnPort = async (port) => {
+    if (!port || IS_WIN) return;
     try {
-      const result = spawnSync('lsof', ['-ti', `:${port}`], { encoding: 'utf8', timeout: 5000, windowsHide: true });
+      const result = await spawnOnce('lsof', ['-ti', `:${port}`], { timeout: 5000 });
       const output = result.stdout || '';
       const myPid = process.pid;
       for (const pidStr of output.split(/\s+/)) {
         const pid = parseInt(pidStr.trim(), 10);
         if (pid && pid !== myPid) {
           try {
-            spawnSync('kill', ['-9', String(pid)], { stdio: 'ignore', timeout: 2000 });
+            await spawnOnce('kill', ['-9', String(pid)], { timeout: 2000 });
           } catch {
           }
         }
@@ -42,32 +44,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     } catch {
     }
   };
-
-  const hasChildProcessExited = (child) => !child || child.exitCode !== null || child.signalCode !== null;
-
-  const waitForChildProcessClose = (child, timeoutMs) => new Promise((resolve) => {
-    if (!child || hasChildProcessExited(child)) {
-      resolve(true);
-      return;
-    }
-
-    let done = false;
-    const finish = (closed) => {
-      if (done) return;
-      done = true;
-      clearTimeout(timer);
-      child.off('close', onClose);
-      child.off('error', onError);
-      resolve(closed);
-    };
-
-    const onClose = () => finish(true);
-    const onError = () => finish(hasChildProcessExited(child));
-    const timer = setTimeout(() => finish(hasChildProcessExited(child)), timeoutMs);
-
-    child.once('close', onClose);
-    child.once('error', onError);
-  });
 
   const waitForPortRelease = (port, timeoutMs, hostname = env.ENV_CONFIGURED_OPENCODE_HOSTNAME) => {
     if (!port) {
@@ -112,75 +88,11 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     });
   };
 
-  const closeManagedOpenCodeChild = async (child) => {
-    if (!child) {
-      return;
-    }
-
-    const pid = child.pid;
-    if (!pid || hasChildProcessExited(child)) {
-      await waitForChildProcessClose(child, 250);
-      return;
-    }
-
-    if (process.platform === 'win32') {
-      try {
-        child.kill();
-      } catch {
-      }
-
-      if (await waitForChildProcessClose(child, 800)) {
-        return;
-      }
-
-      try {
-        spawnSync('taskkill', ['/pid', String(pid), '/t'], {
-          stdio: 'ignore',
-          timeout: 3000,
-          windowsHide: true,
-        });
-      } catch {
-      }
-
-      if (await waitForChildProcessClose(child, 1500)) {
-        return;
-      }
-
-      try {
-        spawnSync('taskkill', ['/pid', String(pid), '/f', '/t'], {
-          stdio: 'ignore',
-          timeout: 5000,
-          windowsHide: true,
-        });
-      } catch {
-      }
-
-      await waitForChildProcessClose(child, 3000);
-      return;
-    }
-
-    try {
-      child.kill('SIGTERM');
-    } catch {
-    }
-
-    if (await waitForChildProcessClose(child, 2500)) {
-      return;
-    }
-
-    try {
-      child.kill('SIGKILL');
-    } catch {
-    }
-
-    await waitForChildProcessClose(child, 1000);
-  };
-
   const createManagedOpenCodeServerProcess = async ({ hostname, port, timeout, cwd, env: processEnv }) => {
     let binary = (process.env.OPENCODE_BINARY || 'opencode').trim() || 'opencode';
     let args = ['serve', '--hostname', hostname, '--port', String(port)];
 
-    if (process.platform === 'win32' && state.useWslForOpencode) {
+    if (IS_WIN && state.useWslForOpencode) {
       const wslBinary = state.resolvedWslBinary || resolveWslExecutablePath();
       if (!wslBinary) {
         throw new Error('WSL executable not found while attempting to launch OpenCode from WSL');
@@ -202,7 +114,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       ], state.resolvedWslDistro);
     }
 
-    if (process.platform === 'win32' && !state.useWslForOpencode) {
+    if (IS_WIN && !state.useWslForOpencode) {
       const launchSpec = resolveManagedOpenCodeLaunchSpec(binary);
       if (launchSpec?.binary) {
         if (launchSpec.wrapperType) {
@@ -213,68 +125,30 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       }
     }
 
-    const child = spawn(binary, args, {
+    const managed = await spawnManaged(binary, args, {
       cwd,
       env: processEnv,
-      windowsHide: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-
-    const url = await new Promise((resolve, reject) => {
-      let output = '';
-      let done = false;
-      const finish = (handler, value) => {
-        if (done) return;
-        done = true;
-        clearTimeout(timer);
-        child.stdout?.off('data', onStdout);
-        child.stderr?.off('data', onStderr);
-        child.off('exit', onExit);
-        child.off('error', onError);
-        handler(value);
-      };
-
-      const onStdout = (chunk) => {
-        output += chunk.toString();
-        const lines = output.split('\n');
-        for (const line of lines) {
-          if (!line.startsWith('opencode server listening')) continue;
-          const match = line.match(/on\s+(https?:\/\/[^\s]+)/);
-          if (!match) {
-            finish(reject, new Error(`Failed to parse server url from output: ${line}`));
-            return;
-          }
-          finish(resolve, match[1]);
-          return;
+      startupTimeoutMs: timeout,
+      maxRetries: 2,
+      baseRetryDelayMs: 750,
+      isReadyLine: (line) => {
+        if (!line.startsWith('opencode server listening')) {
+          return false;
         }
-      };
-
-      const onStderr = (chunk) => {
-        output += chunk.toString();
-      };
-
-      const onExit = (code) => {
-        finish(reject, new Error(`OpenCode exited with code ${code}. Output: ${output}`));
-      };
-
-      const onError = (error) => {
-        finish(reject, error);
-      };
-
-      const timer = setTimeout(() => {
-        finish(reject, new Error(`Timeout waiting for OpenCode to start after ${timeout}ms`));
-      }, timeout);
-
-      child.stdout?.on('data', onStdout);
-      child.stderr?.on('data', onStderr);
-      child.on('exit', onExit);
-      child.on('error', onError);
+        const match = line.match(/on\s+(https?:\/\/[^\s]+)/);
+        if (!match) {
+          throw new Error(`Failed to parse server url from output: ${line}`);
+        }
+        return { url: match[1] };
+      },
     });
+
+    const url = managed.readyValue?.url;
 
     return {
       url,
       async close() {
-        await closeManagedOpenCodeChild(child);
+        await managed.stop({ force: true });
       },
     };
   };
@@ -482,7 +356,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         syncToHmrState();
       }
 
-      killProcessOnPort(portToKill);
+      await killProcessOnPort(portToKill);
       if (!(await waitForPortRelease(portToKill, 5000))) {
         console.warn(`Timed out waiting for OpenCode port ${portToKill} to be released`);
       }

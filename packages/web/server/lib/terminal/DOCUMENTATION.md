@@ -5,10 +5,12 @@ This module provides WebSocket transport utilities for terminal input and output
 
 ## Entrypoints and structure
 - `packages/web/server/lib/terminal/`: Terminal module directory.
-  - `index.js`: Stable module entrypoint that re-exports protocol helpers and replay-buffer helpers.
-  - `runtime.js`: Runtime module that owns terminal session state, WS server setup, and `/api/terminal/*` route registration.
-  - `terminal-ws-protocol.js`: Single-file module containing terminal WebSocket protocol utilities.
-  - `output-replay-buffer.js`: Helper module for buffering recent terminal output so late subscribers can receive startup prompt data.
+- `index.js`: Stable module entrypoint that re-exports protocol helpers and replay-buffer helpers.
+- `runtime.js`: Runtime module that owns terminal session state, WS server setup, and `/api/terminal/*` route registration.
+- `session.js`: PTY session factory and shell preference resolution helpers.
+- `terminal-ws-protocol.js`: Single-file module containing terminal WebSocket protocol utilities.
+- `output-replay-buffer.js`: Helper module for buffering recent terminal output so late subscribers can receive startup prompt data.
+- `session.test.js`: Test file for shell preference resolution and PTY session creation behavior.
 - `packages/web/server/lib/terminal/terminal-ws-protocol.test.js`: Test file for protocol utilities.
 - `packages/web/server/lib/terminal/output-replay-buffer.test.js`: Test file for replay buffer helpers.
 
@@ -55,6 +57,8 @@ The terminal helpers are used by `packages/web/server/index.js` for:
 
 The web server combines these utilities with `bun-pty` or `node-pty` to drive full-duplex PTY sessions.
 
+Project-specific terminal abstraction rules live in `openchamber-src/docs/Platform_Abstractions.md` under **Terminal Abstractions**.
+
 ## Notes for contributors
 - Keep control frames backward-compatible when possible; use explicit `v` values for protocol changes.
 - Always normalize incoming WebSocket messages before processing them.
@@ -73,4 +77,5 @@ The web server combines these utilities with `bun-pty` or `node-pty` to drive fu
 ### Automated verification
 - Run `bun test packages/web/server/lib/terminal/terminal-ws-protocol.test.js`
 - Run `bun test packages/web/server/lib/terminal/output-replay-buffer.test.js`
+- Run `bun test packages/web/server/lib/terminal/session.test.js`
 - Run `bun run type-check`, `bun run lint`, and `bun run build` before finalizing changes.

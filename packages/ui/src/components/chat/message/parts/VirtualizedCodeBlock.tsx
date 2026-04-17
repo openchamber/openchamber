@@ -12,37 +12,7 @@
 import React from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import Prism from 'prismjs';
-
-// Ensure common languages are loaded (react-syntax-highlighter lazy-loads them,
-// but we call Prism directly so we need them registered).
-import 'prismjs/components/prism-markup';
-import 'prismjs/components/prism-markup-templating';
-import 'prismjs/components/prism-typescript';
-import 'prismjs/components/prism-javascript';
-import 'prismjs/components/prism-jsx';
-import 'prismjs/components/prism-tsx';
-import 'prismjs/components/prism-css';
-import 'prismjs/components/prism-json';
-import 'prismjs/components/prism-bash';
-import 'prismjs/components/prism-python';
-import 'prismjs/components/prism-rust';
-import 'prismjs/components/prism-go';
-import 'prismjs/components/prism-java';
-import 'prismjs/components/prism-c';
-import 'prismjs/components/prism-cpp';
-import 'prismjs/components/prism-csharp';
-import 'prismjs/components/prism-ruby';
-import 'prismjs/components/prism-yaml';
-import 'prismjs/components/prism-toml';
-import 'prismjs/components/prism-markdown';
-import 'prismjs/components/prism-sql';
-import 'prismjs/components/prism-diff';
-import 'prismjs/components/prism-docker';
-import 'prismjs/components/prism-swift';
-import 'prismjs/components/prism-kotlin';
-import 'prismjs/components/prism-lua';
-import 'prismjs/components/prism-php';
-import 'prismjs/components/prism-scss';
+import { ensurePrismLanguageLoaded, normalizePrismLanguage } from './prismLanguageLoader';
 
 // ── Threshold: files smaller than this render without virtualization ──
 const VIRTUALIZE_THRESHOLD = 80;
@@ -116,28 +86,11 @@ const buildPrismThemeCss = (theme: Record<string, React.CSSProperties>): string 
   return rules.join('\n');
 };
 
-const LANGUAGE_ALIASES: Record<string, string> = {
-  text: 'plain',
-  plaintext: 'plain',
-  shell: 'bash',
-  sh: 'bash',
-  zsh: 'bash',
-  patch: 'diff',
-  dockerfile: 'docker',
-  js: 'javascript',
-  ts: 'typescript',
-};
-
-const normalizeLanguage = (language: string): string => {
-  const lower = language.toLowerCase();
-  return LANGUAGE_ALIASES[lower] ?? lower;
-};
-
 const HIGHLIGHT_CACHE_MAX = 5000;
 const highlightCache = new Map<string, string>();
 
 const highlightLine = (text: string, language: string): string => {
-  const normalizedLanguage = normalizeLanguage(language);
+  const normalizedLanguage = normalizePrismLanguage(language);
   const cacheKey = `${normalizedLanguage}\n${text}`;
   const cached = highlightCache.get(cacheKey);
   if (cached !== undefined) {
@@ -186,6 +139,19 @@ export const VirtualizedCodeBlock: React.FC<VirtualizedCodeBlockProps> = React.m
     lineStyles,
   } = props;
   const prismThemeCss = React.useMemo(() => buildPrismThemeCss(syntaxTheme), [syntaxTheme]);
+  const [languageVersion, setLanguageVersion] = React.useState(0);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    void ensurePrismLanguageLoaded(language).then(() => {
+      if (!cancelled) {
+        setLanguageVersion((version) => version + 1);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [language]);
 
   const shouldVirtualize = lines.length > VIRTUALIZE_THRESHOLD;
 
@@ -202,6 +168,7 @@ export const VirtualizedCodeBlock: React.FC<VirtualizedCodeBlockProps> = React.m
             key={idx}
             line={line}
             language={language}
+            languageVersion={languageVersion}
             showLineNumbers={showLineNumbers}
             style={lineStyles?.(line)}
           />
@@ -215,6 +182,7 @@ export const VirtualizedCodeBlock: React.FC<VirtualizedCodeBlockProps> = React.m
     <VirtualizedRows
       lines={lines}
       language={language}
+      languageVersion={languageVersion}
       prismThemeCss={prismThemeCss}
       maxHeight={maxHeight}
       showLineNumbers={showLineNumbers}
@@ -229,6 +197,7 @@ VirtualizedCodeBlock.displayName = 'VirtualizedCodeBlock';
 interface VirtualizedRowsProps {
   lines: CodeLine[];
   language: string;
+  languageVersion: number;
   prismThemeCss: string;
   maxHeight: string;
   showLineNumbers: boolean;
@@ -238,6 +207,7 @@ interface VirtualizedRowsProps {
 const VirtualizedRows: React.FC<VirtualizedRowsProps> = React.memo(({
   lines,
   language,
+  languageVersion,
   prismThemeCss,
   maxHeight,
   showLineNumbers,
@@ -283,6 +253,7 @@ const VirtualizedRows: React.FC<VirtualizedRowsProps> = React.memo(({
               <Row
                 line={line}
                 language={language}
+                languageVersion={languageVersion}
                 showLineNumbers={showLineNumbers}
                 style={lineStyles?.(line)}
               />
@@ -300,12 +271,13 @@ VirtualizedRows.displayName = 'VirtualizedRows';
 interface RowProps {
   line: CodeLine;
   language: string;
+  languageVersion: number;
   showLineNumbers: boolean;
   style?: React.CSSProperties;
 }
 
-const Row: React.FC<RowProps> = React.memo(({ line, language, showLineNumbers, style }) => {
-  const html = React.useMemo(() => highlightLine(line.text, language), [line.text, language]);
+const Row: React.FC<RowProps> = React.memo(({ line, language, languageVersion, showLineNumbers, style }) => {
+  const html = React.useMemo(() => highlightLine(line.text, language), [line.text, language, languageVersion]);
 
   return (
     <div

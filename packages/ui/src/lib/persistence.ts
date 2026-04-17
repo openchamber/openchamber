@@ -805,6 +805,14 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.terminalFontSize === 'number' && Number.isFinite(candidate.terminalFontSize)) {
     result.terminalFontSize = candidate.terminalFontSize;
   }
+  if (typeof candidate.terminalShell === 'string'
+    && (candidate.terminalShell === 'default'
+      || candidate.terminalShell === 'powershell'
+      || candidate.terminalShell === 'cmd'
+      || candidate.terminalShell === 'bash'
+      || candidate.terminalShell === 'wsl')) {
+    result.terminalShell = candidate.terminalShell;
+  }
   if (typeof candidate.padding === 'number' && Number.isFinite(candidate.padding)) {
     result.padding = candidate.padding;
   }

@@ -69,6 +69,23 @@
         }
       }
     },
+    "windows": {
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "http://timestamp.digicert.com",
+      "nsis": {
+        "languages": [
+          "English"
+        ],
+        "displayLanguageSelector": false,
+        "installMode": "both",
+        "installerHooks": "./windows/nsis-hooks.nsh"
+      },
+      "wix": {
+        "language": [
+          "en-US"
+        ]
+      }
+    },
     "createUpdaterArtifacts": true
   },
   "plugins": {

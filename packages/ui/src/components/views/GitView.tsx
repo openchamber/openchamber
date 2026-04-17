@@ -46,6 +46,7 @@ import {
 } from '@/components/ui/command';
 
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { normalizePath, pathsEqual } from '@/lib/pathUtils';
 import { useUIStore } from '@/stores/useUIStore';
 import { useDetectedWorktreeMetadata } from '@/hooks/useDetectedWorktreeRoot';
 import { IntegrateCommitsSection } from './git/IntegrateCommitsSection';
@@ -221,9 +222,6 @@ const matchGitmojiFromSubject = (subject: string, gitmojis: GitmojiEntry[]): Git
 
 const gitViewSnapshots = new Map<string, GitViewSnapshot>();
 
-const normalizePath = (value?: string | null): string =>
-  (value || '').replace(/\\/g, '/').replace(/\/+$/, '');
-
 export const GitView: React.FC = () => {
   const { git } = useRuntimeAPIs();
   const currentDirectory = useEffectiveDirectory();
@@ -234,21 +232,21 @@ export const GitView: React.FC = () => {
   const setDraftBootstrapPendingDirectory = useSessionUIStore((s) => s.setDraftBootstrapPendingDirectory);
   const worktreeMap = useSessionUIStore((s) => s.worktreeMetadata);
   const availableWorktrees = useSessionUIStore((s) => s.availableWorktrees);
-  const normalizedCurrentDirectory = normalizePath(currentDirectory);
+  const normalizedCurrentDirectory = normalizePath(currentDirectory) ?? '';
   const inferredWorktreeMetadata = React.useMemo(() => {
     if (!normalizedCurrentDirectory) {
       return undefined;
     }
 
     const fromAvailable = availableWorktrees.find(
-      (metadata) => normalizePath(metadata.path) === normalizedCurrentDirectory
+      (metadata) => pathsEqual(metadata.path, normalizedCurrentDirectory)
     );
     if (fromAvailable) {
       return fromAvailable;
     }
 
     for (const metadata of worktreeMap.values()) {
-      if (normalizePath(metadata.path) === normalizedCurrentDirectory) {
+      if (pathsEqual(metadata.path, normalizedCurrentDirectory)) {
         return metadata;
       }
     }
@@ -358,7 +356,7 @@ export const GitView: React.FC = () => {
 
   const normalizedDraftBootstrapPendingDirectory = normalizePath(newSessionDraft?.bootstrapPendingDirectory ?? null);
   const isDraftBootstrapPendingForCurrentDirectory = Boolean(
-    currentDirectory && normalizedDraftBootstrapPendingDirectory && normalizedDraftBootstrapPendingDirectory === normalizePath(currentDirectory)
+    currentDirectory && normalizedDraftBootstrapPendingDirectory && pathsEqual(normalizedDraftBootstrapPendingDirectory, currentDirectory)
   );
   const isPendingWorktreeSetup = Boolean(
     currentDirectory && (worktreeBootstrapStatus === 'pending' || isDraftBootstrapPendingForCurrentDirectory)
@@ -737,7 +735,7 @@ export const GitView: React.FC = () => {
     }
 
     return sessionEvents.onGitRefreshHint((hint) => {
-      if (normalizePath(hint.directory) !== normalizePath(currentDirectory)) {
+      if (!pathsEqual(hint.directory, currentDirectory)) {
         return;
       }
       void fetchStatus(currentDirectory, git);

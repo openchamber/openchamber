@@ -1,6 +1,7 @@
 import * as gitHttp from '@/lib/gitApiHttp';
 import type { RuntimeAPIs } from '@/lib/api/types';
 import type { GitWorktreeBootstrapStatus } from '@/lib/api/types';
+import { normalizePath } from '@/lib/pathUtils';
 
 declare global {
   interface Window {
@@ -13,12 +14,10 @@ type WorktreeBootstrapState = GitWorktreeBootstrapStatus;
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
 const POLL_INTERVAL_MS = 250;
 
-const normalizePath = (value: string): string => value.replace(/\\/g, '/').replace(/\/+$/, '') || value;
-
 const state = new Map<string, WorktreeBootstrapState>();
 const waiters = new Map<string, Promise<void>>();
 
-const getKey = (directory: string): string => normalizePath(directory);
+const getKey = (directory: string): string => normalizePath(directory) ?? '';
 
 const getGitWorktreeBootstrapStatus = async (directory: string): Promise<GitWorktreeBootstrapStatus> => {
   const runtimeGit = typeof window !== 'undefined' ? window.__OPENCHAMBER_RUNTIME_APIS__?.git : undefined;

@@ -371,6 +371,109 @@ jobs:
           path: artifacts/latest-${{ matrix.platform }}.json
           retention-days: 1
 
+  build-desktop-windows:
+    needs: create-release
+    runs-on: windows-latest
+    outputs:
+      version: ${{ needs.create-release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: packages/desktop/src-tauri
+          key: windows-x86_64-pc-windows-msvc
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build Desktop app
+        shell: pwsh
+        run: |
+          $env:TAURI_ENV_TARGET_TRIPLE = 'x86_64-pc-windows-msvc'
+          bun run --cwd packages/desktop build:sidecar
+          bun run --cwd packages/desktop tauri build --target x86_64-pc-windows-msvc
+        env:
+          TAURI_ENV_TARGET_TRIPLE: x86_64-pc-windows-msvc
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+      - name: Prepare release artifacts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          $version = '${{ needs.create-release.outputs.version }}'
+
+          $exeFile = Get-ChildItem 'packages/desktop/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe' | Select-Object -First 1
+          if (-not $exeFile) { throw 'NSIS installer not found' }
+          Copy-Item $exeFile.FullName "artifacts/OpenChamber_${version}_windows-x86_64-setup.exe"
+
+          $msiFile = Get-ChildItem 'packages/desktop/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi' | Select-Object -First 1
+          if (-not $msiFile) { throw 'MSI installer not found' }
+          Copy-Item $msiFile.FullName "artifacts/OpenChamber_${version}_windows-x86_64.msi"
+
+          $sigFile = Get-ChildItem 'packages/desktop/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe.sig' | Select-Object -First 1
+          if (-not $sigFile) { throw 'NSIS updater signature not found' }
+          Copy-Item $sigFile.FullName "artifacts/OpenChamber_${version}_windows-x86_64-setup.exe.sig"
+
+      - name: Generate update manifest
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = '${{ needs.create-release.outputs.version }}'
+          $pubDate = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+          $repo = '${{ github.repository }}'
+          $sigFile = Get-ChildItem 'artifacts/*windows-x86_64-setup.exe.sig' | Select-Object -First 1
+          $exeFile = Get-ChildItem 'artifacts/*windows-x86_64-setup.exe' | Select-Object -First 1
+          if (-not $sigFile -or -not $exeFile) { throw 'Windows updater artifacts missing' }
+          $signature = (Get-Content $sigFile.FullName -Raw).Trim()
+
+          @{
+            version = $version
+            notes = "See release notes at https://github.com/$repo/releases/tag/v$version"
+            pub_date = $pubDate
+            platforms = @{
+              'windows-x86_64' = @{
+                signature = $signature
+                url = "https://github.com/$repo/releases/download/v$version/$($exeFile.Name)"
+              }
+            }
+          } | ConvertTo-Json -Depth 5 | Set-Content -Path 'artifacts/latest-windows-x86_64.json' -NoNewline
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.create-release.outputs.version }}
+          files: |
+            artifacts/*.exe
+            artifacts/*.exe.sig
+            artifacts/*.msi
+            artifacts/latest-windows-x86_64.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload manifest as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: manifest-windows-x86_64
+          path: artifacts/latest-windows-x86_64.json
+          retention-days: 1
+
   publish-npm:
     needs: create-release
     runs-on: ubuntu-latest
@@ -412,7 +515,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   combine-manifests:
-    needs: [create-release, build-desktop-macos]
+    needs: [create-release, build-desktop-macos, build-desktop-windows]
     runs-on: ubuntu-latest
     steps:
       - name: Download aarch64 manifest
@@ -425,6 +528,12 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: manifest-darwin-x86_64
+          path: artifacts
+
+      - name: Download windows manifest
+        uses: actions/download-artifact@v4
+        with:
+          name: manifest-windows-x86_64
           path: artifacts
 
       - name: Combine manifests
@@ -444,6 +553,11 @@ jobs:
             exit 1
           fi
 
+          if [ ! -f artifacts/latest-windows-x86_64.json ]; then
+            echo "Error: windows manifest not found"
+            exit 1
+          fi
+
           # Validate JSON structure
           if ! jq empty artifacts/latest-darwin-aarch64.json 2>/dev/null; then
             echo "Error: aarch64 manifest is not valid JSON"
@@ -452,6 +566,11 @@ jobs:
 
           if ! jq empty artifacts/latest-darwin-x86_64.json 2>/dev/null; then
             echo "Error: x86_64 manifest is not valid JSON"
+            exit 1
+          fi
+
+          if ! jq empty artifacts/latest-windows-x86_64.json 2>/dev/null; then
+            echo "Error: windows manifest is not valid JSON"
             exit 1
           fi
 
@@ -466,6 +585,11 @@ jobs:
             exit 1
           fi
 
+          if ! jq -e '.platforms["windows-x86_64"]' artifacts/latest-windows-x86_64.json > /dev/null; then
+            echo "Error: windows-x86_64 platform data not found in manifest"
+            exit 1
+          fi
+
           # Use jq to properly combine the manifests
           jq -n \
             --arg version "$VERSION" \
@@ -473,13 +597,15 @@ jobs:
             --arg pub_date "$PUB_DATE" \
             --slurpfile aarch64 artifacts/latest-darwin-aarch64.json \
             --slurpfile x86_64 artifacts/latest-darwin-x86_64.json \
+            --slurpfile winx64 artifacts/latest-windows-x86_64.json \
             '{
               version: $version,
               notes: $notes,
               pub_date: $pub_date,
               platforms: {
                 "darwin-aarch64": $aarch64[0].platforms["darwin-aarch64"],
-                "darwin-x86_64": $x86_64[0].platforms["darwin-x86_64"]
+                "darwin-x86_64": $x86_64[0].platforms["darwin-x86_64"],
+                "windows-x86_64": $winx64[0].platforms["windows-x86_64"]
               }
             }' > artifacts/latest.json
 
@@ -495,7 +621,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   finalize-release:
-    needs: [create-release, build-desktop-macos, publish-npm, combine-manifests]
+    needs: [create-release, build-desktop-macos, build-desktop-windows, publish-npm, combine-manifests]
     runs-on: ubuntu-latest
     env:
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}

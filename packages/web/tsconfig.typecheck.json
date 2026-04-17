@@ -1,0 +1,22 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "composite": true,
+    "incremental": true,
+    "tsBuildInfoFile": "./node_modules/.cache/tsc/web.tsbuildinfo",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"],
+      "@web/*": ["./src/*"],
+      "@openchamber/ui/lib/*": ["../ui/dist/types/lib/*"],
+      "@openchamber/ui/main": ["../ui/dist/types/main.d.ts"],
+      "@openchamber/ui/index.css": ["./src/types/ui-css-entry.d.ts"],
+      "@openchamber/ui/styles/fonts": ["./src/types/ui-fonts-entry.d.ts"],
+      "@openchamber/web/*": ["./src/*"]
+    }
+  },
+  "include": ["src", "../ui/src/types/**/*"],
+  "references": [
+    { "path": "../ui/tsconfig.build.json" }
+  ]
+}

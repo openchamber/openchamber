@@ -9,6 +9,7 @@ import {
   clearWorktreeBootstrapState,
   markWorktreeBootstrapPending,
 } from '@/lib/worktrees/worktreeBootstrap';
+import { normalizePath, pathsEqual } from '@/lib/pathUtils';
 import type {
   CreateGitWorktreePayload,
   GitWorktreeValidationResult,
@@ -16,17 +17,11 @@ import type {
 
 export type ProjectRef = { id: string; path: string };
 
-const normalizePath = (value: string): string => {
-  const replaced = value.replace(/\\/g, '/');
-  if (replaced === '/') {
-    return '/';
-  }
-  return replaced.length > 1 ? replaced.replace(/\/+$/, '') : replaced;
-};
+const normalizeRequiredPath = (value: string): string => normalizePath(value) ?? '';
 
 const toAbsolutePath = (baseDir: string, maybeRelativePath: string): string => {
-  const normalizedBase = normalizePath(baseDir);
-  const normalizedInput = normalizePath(maybeRelativePath);
+  const normalizedBase = normalizeRequiredPath(baseDir);
+  const normalizedInput = normalizeRequiredPath(maybeRelativePath);
   if (!normalizedInput) return normalizedBase;
   if (normalizedInput.startsWith('/')) return normalizedInput;
 
@@ -58,7 +53,7 @@ const derivePrimaryWorktreeRootFromGitDir = (gitDir: string): string | null => {
 };
 
 const resolvePrimaryWorktreeDirectory = async (directory: string): Promise<string> => {
-  const normalizedDirectory = normalizePath(directory);
+  const normalizedDirectory = normalizeRequiredPath(directory);
 
   const absoluteGitDirResult = await execCommand('git rev-parse --absolute-git-dir', normalizedDirectory);
   const absoluteGitDir = normalizePath((absoluteGitDirResult.stdout || '').trim());
@@ -108,7 +103,7 @@ const normalizeBranchName = (value: string): string => {
 };
 
 const deriveSdkWorktreeNameFromDirectory = (directory: string): string => {
-  const normalized = normalizePath(directory);
+  const normalized = normalizeRequiredPath(directory);
   const parts = normalized.split('/').filter(Boolean);
   return parts[parts.length - 1] ?? normalized;
 };
@@ -183,7 +178,7 @@ const _worktreeListInflight = new Map<string, Promise<WorktreeMetadata[]>>();
 const WORKTREE_LIST_CACHE_TTL = 30_000; // 30 seconds
 
 export async function listProjectWorktrees(project: ProjectRef): Promise<WorktreeMetadata[]> {
-  const projectDirectory = normalizePath(project.path);
+  const projectDirectory = normalizeRequiredPath(project.path);
 
   // Return cached if fresh
   const cached = _worktreeListCache.get(projectDirectory);
@@ -197,13 +192,13 @@ export async function listProjectWorktrees(project: ProjectRef): Promise<Worktre
 
   const promise = (async (): Promise<WorktreeMetadata[]> => {
     const metadataProjectDirectory = await resolvePrimaryWorktreeDirectory(projectDirectory).catch(() => projectDirectory);
-    const normalizedProjectDirectory = normalizePath(projectDirectory);
+    const normalizedProjectDirectory = normalizeRequiredPath(projectDirectory);
 
     const worktrees = await git.worktree.list(projectDirectory).catch(() => []);
     const results: WorktreeMetadata[] = worktrees
       .filter((entry) => typeof entry.path === 'string' && entry.path.trim().length > 0)
       .map((entry) => {
-        const worktreePath = normalizePath(entry.path);
+        const worktreePath = normalizeRequiredPath(entry.path);
         const branch = (entry.branch || '').replace(/^refs\/heads\//, '').trim();
         const name = (entry.name || '').trim();
         return {
@@ -215,7 +210,7 @@ export async function listProjectWorktrees(project: ProjectRef): Promise<Worktre
           label: branch || name || deriveSdkWorktreeNameFromDirectory(worktreePath),
         };
       })
-      .filter((entry) => normalizePath(entry.path) !== normalizedProjectDirectory);
+      .filter((entry) => !pathsEqual(entry.path, normalizedProjectDirectory));
 
     const sorted = results.sort((a, b) => {
       const aLabel = (a.label || a.branch || a.path).toLowerCase();
@@ -249,7 +244,7 @@ export type CreateWorktreeArgs = {
 };
 
 export async function createWorktree(project: ProjectRef, args: CreateWorktreeArgs): Promise<WorktreeMetadata> {
-  const projectDirectory = normalizePath(project.path);
+  const projectDirectory = normalizeRequiredPath(project.path);
   const metadataProjectDirectory = await resolvePrimaryWorktreeDirectory(projectDirectory).catch(() => projectDirectory);
   const payload = toCreatePayload(args, projectDirectory);
 
@@ -265,7 +260,7 @@ export async function createWorktree(project: ProjectRef, args: CreateWorktreeAr
   const metadata: WorktreeMetadata = {
     source: 'sdk',
     name: returnedName,
-    path: normalizePath(returnedPath),
+    path: normalizeRequiredPath(returnedPath),
     projectDirectory: metadataProjectDirectory,
     branch: returnedBranch,
     label: returnedBranch || returnedName,

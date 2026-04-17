@@ -5,9 +5,9 @@
   "type": "module",
   "main": "src/main.tsx",
   "scripts": {
-    "dev": "tsc --noEmit --watch",
-    "build": "tsc --noEmit",
-    "type-check": "tsc --noEmit",
+    "dev": "tsc --build --watch tsconfig.build.json",
+    "build": "tsc --build tsconfig.build.json",
+    "type-check": "tsc --build tsconfig.build.json",
     "lint": "eslint \"./src/**/*.{ts,tsx}\" --config ../../eslint.config.js"
   },
   "dependencies": {

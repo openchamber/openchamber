@@ -1,0 +1,9 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/ui/tsconfig.build.json" },
+    { "path": "./packages/web/tsconfig.typecheck.json" },
+    { "path": "./packages/vscode/tsconfig.extension.typecheck.json" },
+    { "path": "./packages/vscode/tsconfig.webview.typecheck.json" }
+  ]
+}

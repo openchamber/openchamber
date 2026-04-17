@@ -8,6 +8,7 @@ This module provides Git repository operations for the web server runtime, inclu
   - `index.js`: Public API entry point imported by `packages/web/server/index.js`.
   - `routes.js`: Express route registration for `/api/git/*` endpoints.
   - `service.js`: Core Git operations (repository, branch, worktree, commit, merge/rebase, status/diff, log).
+  - `worktree-paths.js`: Worktree naming helpers for shortened worktree root and leaf paths.
   - `credentials.js`: Git credentials management.
   - `identity-storage.js`: Git identity (user.name, user.email) storage.
 
@@ -78,11 +79,13 @@ The following functions are internal helpers used by exported functions:
 - `buildSshCommand(sshKeyPath)`: Build SSH command string for git config.
 - `buildGitEnv()`: Build Git environment with SSH_AUTH_SOCK resolution.
 - `createGit(directory)`: Create simple-git instance with environment.
+- `buildSimpleGitOptions(directory)`: Shared `simple-git` defaults including `core.autocrlf=false` and Windows `core.longpaths=true`.
 - `normalizeDirectoryPath(value)`: Normalize directory paths (supports ~ expansion).
 - `cleanBranchName(branch)`: Remove refs/heads/ or refs/ prefixes.
 - `parseWorktreePorcelain(raw)`: Parse `git worktree list --porcelain` output.
 - `resolveWorktreeProjectContext(directory)`: Resolve project context (projectID, primaryWorktree, worktreeRoot).
 - `resolveCandidateDirectory(...)`: Generate unique worktree directory candidates.
+- `worktreeDir(...)`: Build shortened worktree directory paths.
 - `resolveBranchForExistingMode(...)`: Resolve branch for existing-mode worktree creation.
 - `applyUpstreamConfiguration(...)`: Set upstream tracking for new branches.
 - And various other internal helpers for Git command execution and parsing.
@@ -129,12 +132,14 @@ The following functions are internal helpers used by exported functions:
 
 ### Worktree Naming
 - Worktree names are slugified via `slugWorktreeName`.
+- Worktree roots use shortened project IDs and shortened leaf names via `worktree-paths.js` to reduce Windows path length pressure.
 - Random names use adjectives/nouns from `OPENCODE_ADJECTIVES` and `OPENCODE_NOUNS` lists.
 - Branches created for new worktrees use `openchamber/<worktree-name>` pattern.
 
 ### Cross-Platform Considerations
 - Use `normalizeDirectoryPath` for all directory inputs to handle `~` and path separators.
 - Use `canonicalPath` for path comparisons to handle case-insensitive filesystems (Windows).
+- Use `longPathPrefix()` before direct Node filesystem calls that may hit Windows long-path limits.
 - Windows Git commands use MSYS/MinGW paths; avoid direct Windows paths in git commands.
 
 ### Error Handling

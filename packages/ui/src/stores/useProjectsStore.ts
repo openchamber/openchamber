@@ -4,6 +4,7 @@ import { opencodeClient } from '@/lib/opencode/client';
 import type { ProjectEntry } from '@/lib/api/types';
 import type { DesktopSettings } from '@/lib/desktop';
 import { updateDesktopSettings } from '@/lib/persistence';
+import { pathsEqual, resolveTildePath, normalizePath } from '@/lib/pathUtils';
 import { getSafeStorage } from './utils/safeStorage';
 import { useDirectoryStore } from './useDirectoryStore';
 import { streamDebugEnabled } from '@/stores/utils/streamDebug';
@@ -56,24 +57,18 @@ const safeStorage = getSafeStorage();
 const PROJECTS_STORAGE_KEY = 'projects';
 const ACTIVE_PROJECT_STORAGE_KEY = 'activeProjectId';
 
-const resolveTildePath = (value: string, homeDir?: string | null): string => {
-  const trimmed = value.trim();
-  if (!trimmed.startsWith('~')) {
-    return trimmed;
-  }
-  if (!homeDir) {
-    return trimmed;
-  }
-  if (trimmed === '~') {
-    return homeDir;
-  }
-  if (trimmed.startsWith('~/') || trimmed.startsWith('~\\')) {
-    return `${homeDir}${trimmed.slice(1)}`;
-  }
-  return trimmed;
-};
-
 const HEX_COLOR_PATTERN = /^#(?:[\da-fA-F]{3}|[\da-fA-F]{6})$/;
+
+const normalizeProjectPath = (value: string): string => {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return '';
+  }
+
+  const homeDirectory = safeStorage.getItem('homeDirectory') || useDirectoryStore.getState().homeDirectory || '';
+  const expanded = resolveTildePath(trimmed, homeDirectory);
+  return normalizePath(expanded) ?? '';
+};
 
 const normalizeIconBackground = (value: unknown): string | null => {
   if (typeof value !== 'string') {
@@ -84,22 +79,6 @@ const normalizeIconBackground = (value: unknown): string | null => {
     return null;
   }
   return HEX_COLOR_PATTERN.test(trimmed) ? trimmed.toLowerCase() : null;
-};
-
-const normalizeProjectPath = (value: string): string => {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return '';
-  }
-
-  const homeDirectory = safeStorage.getItem('homeDirectory') || useDirectoryStore.getState().homeDirectory || '';
-  const expanded = resolveTildePath(trimmed, homeDirectory);
-
-  const normalized = expanded.replace(/\\/g, '/');
-  if (normalized === '/') {
-    return '/';
-  }
-  return normalized.length > 1 ? normalized.replace(/\/+$/, '') : normalized;
 };
 
 const deriveProjectLabel = (path: string): string => {
@@ -368,7 +347,7 @@ export const useProjectsStore = create<ProjectsStore>()(
       }
 
       const normalizedPath = validation.normalizedPath;
-      const existing = get().projects.find((project) => project.path === normalizedPath);
+      const existing = get().projects.find((project) => pathsEqual(project.path, normalizedPath));
       if (existing) {
         get().setActiveProject(existing.id);
         return existing;

@@ -29,7 +29,6 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       os,
       path,
       fsPromises,
-      spawn,
       resolveGitBinaryForSpawn,
       createFsSearchRuntime,
       openchamberDataDir,
@@ -87,7 +86,6 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       readSettingsFromDiskMigrated,
       persistSettings,
       createFsSearchRuntime,
-      spawn,
       resolveGitBinaryForSpawn,
     });
 
@@ -206,7 +204,6 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       os,
       path,
       fsPromises,
-      spawn,
       crypto,
       normalizeDirectoryPath,
       resolveProjectDirectory,

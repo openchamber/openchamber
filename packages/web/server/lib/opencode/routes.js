@@ -1,3 +1,5 @@
+import { pathsEqual } from '../PathUtils.js';
+
 export const registerOpenCodeRoutes = (app, dependencies) => {
   const {
     crypto,
@@ -168,9 +170,10 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       }
 
       const resolvedPath = validated.directory;
-      const currentSettings = await readSettingsFromDisk();
+      const canonicalDirectory = validated.canonicalDirectory;
+      const currentSettings = await readSettingsFromDiskMigrated();
       const existingProjects = sanitizeProjects(currentSettings.projects) || [];
-      const existing = existingProjects.find((project) => project.path === resolvedPath) || null;
+      const existing = existingProjects.find((project) => pathsEqual(project.path, canonicalDirectory)) || null;
 
       const nextProjects = existing
         ? existingProjects
@@ -178,7 +181,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
             ...existingProjects,
             {
               id: crypto.randomUUID(),
-              path: resolvedPath,
+              path: canonicalDirectory,
               addedAt: Date.now(),
               lastOpenedAt: Date.now(),
             },
@@ -189,13 +192,13 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       const updated = await persistSettings({
         projects: nextProjects,
         activeProjectId,
-        lastDirectory: resolvedPath,
+        lastDirectory: canonicalDirectory,
       });
 
       return res.json({
         success: true,
         restarted: false,
-        path: resolvedPath,
+        path: canonicalDirectory,
         settings: updated,
       });
     } catch (error) {

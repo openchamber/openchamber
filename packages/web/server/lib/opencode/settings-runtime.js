@@ -1,9 +1,13 @@
+import { toNativePath } from '../PathUtils.js';
+
 const DEFAULT_NOTIFICATION_TEMPLATES = {
   completion: { title: '{agent_name} is ready', message: '{model_name} completed the task' },
   error: { title: 'Tool error', message: '{last_message}' },
   question: { title: 'Input needed', message: '{last_message}' },
   subtask: { title: '{agent_name} is ready', message: '{model_name} completed the task' },
 };
+
+const PATH_KEY_MIGRATION_VERSION = 1;
 
 const ensureNotificationTemplateShape = (templates) => {
   const input = templates && typeof templates === 'object' ? templates : {};
@@ -87,7 +91,7 @@ export const createSettingsRuntime = (deps) => {
         return null;
       }
       try {
-        const stats = await fsPromises.stat(project.path);
+        const stats = await fsPromises.stat(toNativePath(project.path));
         if (!stats.isDirectory()) {
           console.error(`[validateProjectEntries] Project path is not a directory: ${project.path}`);
           return null;
@@ -149,7 +153,7 @@ export const createSettingsRuntime = (deps) => {
     }
 
     if (nextProjects.length > 0) {
-      const active = nextProjects.find((project) => project.id === nextActiveProjectId) || null;
+        const active = nextProjects.find((project) => project.id === nextActiveProjectId) || null;
       if (!active) {
         nextActiveProjectId = nextProjects[0].id;
         changed = true;
@@ -350,6 +354,26 @@ export const createSettingsRuntime = (deps) => {
     return { settings: changed ? next : settings, changed };
   };
 
+  const migrateSettingsPathKeys = async (current) => {
+    const settings = current && typeof current === 'object' ? current : {};
+    const currentVersion = Number.isFinite(settings.pathKeyMigrationVersion)
+      ? Number(settings.pathKeyMigrationVersion)
+      : 0;
+
+    if (currentVersion >= PATH_KEY_MIGRATION_VERSION) {
+      return { settings, changed: false };
+    }
+
+    const normalized = normalizeSettingsPaths(settings);
+    const next = {
+      ...normalized.settings,
+      pathKeyMigrationVersion: PATH_KEY_MIGRATION_VERSION,
+    };
+
+    const changed = normalized.changed || next.pathKeyMigrationVersion !== settings.pathKeyMigrationVersion;
+    return { settings: changed ? next : settings, changed };
+  };
+
   const readSettingsFromDiskMigrated = async () => {
     const current = await readSettingsFromDisk();
     const migration1 = await migrateSettingsFromLegacyLastDirectory(current);
@@ -357,7 +381,7 @@ export const createSettingsRuntime = (deps) => {
     const migration3 = await migrateSettingsFromLegacyCollapsedProjects(migration2.settings);
     const migration4 = await migrateSettingsNotificationDefaults(migration3.settings);
     const migration5 = await migrateSettingsFromLegacyNamedTunnelKeys(migration4.settings);
-    const migration6 = normalizeSettingsPaths(migration5.settings);
+    const migration6 = await migrateSettingsPathKeys(migration5.settings);
     if (migration1.changed || migration2.changed || migration3.changed || migration4.changed || migration5.changed || migration6.changed) {
       await writeSettingsToDisk(migration6.settings);
     }
@@ -386,7 +410,7 @@ export const createSettingsRuntime = (deps) => {
 
       if (Array.isArray(next.projects) && next.projects.length > 0) {
         const activeId = typeof next.activeProjectId === 'string' ? next.activeProjectId : '';
-        const active = next.projects.find((project) => project.id === activeId) || null;
+      const active = next.projects.find((project) => project.id === activeId) || null;
         if (!active) {
           console.log(`[persistSettings] Active project ID ${activeId} not found, switching to ${next.projects[0].id}`);
           next = { ...next, activeProjectId: next.projects[0].id };

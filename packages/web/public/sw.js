@@ -1,29 +1,5 @@
-/// <reference lib="webworker" />
-
-// NOTE: keep the Workbox injection point so vite-plugin-pwa can build.
-// We intentionally do not use Workbox runtime helpers here: iOS Safari can be
-// fragile with more complex SW bundles. For push notifications we only need a
-// minimal SW.
-
-declare const self: ServiceWorkerGlobalScope & {
-  __WB_MANIFEST: Array<string | { url: string; revision?: string }>;
-};
-
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const __precacheManifest = self.__WB_MANIFEST;
-
-type PushPayload = {
-  title?: string;
-  body?: string;
-  tag?: string;
-  data?: {
-    url?: string;
-    sessionId?: string;
-    type?: string;
-  };
-  icon?: string;
-  badge?: string;
-};
+// We intentionally keep the service worker minimal. Phase 1 only needs push
+// notifications and an installable manifest, not Workbox-managed precaching.
 
 self.addEventListener('install', (event) => {
   event.waitUntil(self.skipWaiting());
@@ -35,7 +11,7 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('push', (event) => {
   event.waitUntil((async () => {
-    const payload = (event.data?.json() ?? null) as PushPayload | null;
+    const payload = event.data?.json() ?? null;
     if (!payload) {
       return;
     }
@@ -64,7 +40,7 @@ self.addEventListener('push', (event) => {
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
 
-  const data = (event.notification.data ?? null) as { url?: string } | null;
+  const data = event.notification.data ?? null;
   const url = data?.url ?? '/';
 
   event.waitUntil(self.clients.openWindow(url));

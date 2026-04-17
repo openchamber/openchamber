@@ -1,5 +1,6 @@
 import React from 'react';
 import type { Session } from '@opencode-ai/sdk/v2';
+import { normalizePath as sharedNormalizePath } from '@/lib/pathUtils';
 import type { SessionSummaryMeta } from './types';
 
 const formatDateLabel = (value: string | number) => {
@@ -73,13 +74,7 @@ export const formatSessionCompactDateLabel = (updatedMs: number): string => {
   return `${Math.floor(diff / year)}y`;
 };
 
-export const normalizePath = (value?: string | null) => {
-  if (!value) {
-    return null;
-  }
-  const normalized = value.replace(/\\/g, '/').replace(/\/+$/, '');
-  return normalized.length === 0 ? '/' : normalized;
-};
+export const normalizePath = (value?: string | null) => sharedNormalizePath(value);
 
 export const normalizeForBranchComparison = (value: string): string => {
   return value
