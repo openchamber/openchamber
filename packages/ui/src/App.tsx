@@ -53,7 +53,8 @@ import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import type { RuntimeAPIs } from '@/lib/api/types';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { QuickOpenDialog } from '@/components/ui/QuickOpenDialog';
-import { McpOAuthCallbackPage, MCP_OAUTH_CALLBACK_PATH } from '@/components/sections/mcp/McpOAuthCallbackPage';
+import { McpOAuthCallbackPage } from '@/components/sections/mcp/McpOAuthCallbackPage';
+import { MCP_OAUTH_CALLBACK_PATH } from '@/components/sections/mcp/mcpOAuth';
 
 const AboutDialogWrapper: React.FC = () => {
   const isAboutDialogOpen = useUIStore((s) => s.isAboutDialogOpen);

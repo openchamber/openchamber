@@ -1,6 +1,7 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { useMcpStore } from '@/stores/useMcpStore';
+import { parseMcpOAuthCallbackContext, parseMcpOAuthCallbackStateKey } from '@/components/sections/mcp/mcpOAuth';
 
 const parseQueryParam = (params: URLSearchParams, key: string): string | null => {
   const value = params.get(key);
@@ -11,8 +12,6 @@ const parseQueryParam = (params: URLSearchParams, key: string): string | null =>
   const trimmed = value.trim();
   return trimmed || null;
 };
-
-export const MCP_OAUTH_CALLBACK_PATH = '/mcp/oauth/callback';
 
 export const McpOAuthCallbackPage: React.FC = () => {
   const completeAuth = useMcpStore((state) => state.completeAuth);
@@ -28,29 +27,54 @@ export const McpOAuthCallbackPage: React.FC = () => {
 
     const params = new URLSearchParams(window.location.search);
     const code = parseQueryParam(params, 'code');
-    const name = parseQueryParam(params, 'server');
-    const directory = parseQueryParam(params, 'directory');
+    const callbackContext = parseMcpOAuthCallbackContext(params);
+    const callbackStateKey = parseMcpOAuthCallbackStateKey(params);
     const error = parseQueryParam(params, 'error');
     const errorDescription = parseQueryParam(params, 'error_description');
 
     if (error) {
+      if (callbackStateKey) {
+        void fetch(`/api/mcp/auth/pending?state=${encodeURIComponent(callbackStateKey)}`, { method: 'DELETE' }).catch(() => undefined);
+      }
       setStatus('error');
       setMessage(errorDescription ?? error);
       return;
     }
 
-    if (!code || !name) {
-      setStatus('error');
-      setMessage('Missing OAuth callback details. Start authorization again from MCP Settings.');
-      return;
-    }
-
     void (async () => {
       try {
-        await completeAuth(name, code, directory);
+        if (!code) {
+          throw new Error('Missing OAuth authorization code. Start authorization again from MCP Settings or paste the returned code into OpenChamber manually.');
+        }
+
+        let pendingContext = callbackContext;
+        if (!pendingContext && callbackStateKey) {
+          const response = await fetch(`/api/mcp/auth/pending?state=${encodeURIComponent(callbackStateKey)}`);
+          if (response.ok) {
+            const payload = await response.json().catch(() => null) as { name?: string; directory?: string | null } | null;
+            if (payload?.name?.trim()) {
+              pendingContext = {
+                name: payload.name.trim(),
+                directory: typeof payload.directory === 'string' && payload.directory.trim() ? payload.directory.trim() : null,
+              };
+            }
+          }
+        }
+
+        if (!pendingContext?.name) {
+          throw new Error('Missing OAuth callback details. Start authorization again from MCP Settings or paste the returned code into OpenChamber manually.');
+        }
+
+        await completeAuth(pendingContext.name, code, pendingContext.directory);
+        if (callbackStateKey) {
+          await fetch(`/api/mcp/auth/pending?state=${encodeURIComponent(callbackStateKey)}`, { method: 'DELETE' }).catch(() => undefined);
+        }
         setStatus('success');
         setMessage('Authorization completed. You can close this tab and return to OpenChamber.');
       } catch (authError) {
+        if (callbackStateKey) {
+          await fetch(`/api/mcp/auth/pending?state=${encodeURIComponent(callbackStateKey)}`, { method: 'DELETE' }).catch(() => undefined);
+        }
         setStatus('error');
         setMessage(authError instanceof Error ? authError.message : 'Failed to complete MCP authorization.');
       }

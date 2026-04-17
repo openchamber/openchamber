@@ -6,6 +6,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { openExternalUrl } from '@/lib/url';
+import { isVSCodeRuntime } from '@/lib/desktop';
 import {
   useMcpConfigStore,
   envRecordToArray,
@@ -28,7 +29,7 @@ import {
 } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
-import { MCP_OAUTH_CALLBACK_PATH } from '@/components/sections/mcp/McpOAuthCallbackPage';
+import { MCP_OAUTH_CALLBACK_PATH, parseMcpOAuthCallbackContext, parseMcpOAuthCallbackStateKey } from '@/components/sections/mcp/mcpOAuth';
 import {
   Dialog,
   DialogContent,
@@ -76,23 +77,35 @@ function parseShellCommand(raw: string): string[] {
   return args;
 }
 
-function extractAuthorizationCode(raw: string): string | null {
+function extractAuthorizationResponse(raw: string): {
+  code: string | null;
+  context: { name: string; directory: string | null } | null;
+  stateKey: string | null;
+} {
   const trimmed = raw.trim();
   if (!trimmed) {
-    return null;
+    return { code: null, context: null, stateKey: null };
   }
 
   try {
     const parsed = new URL(trimmed);
     const code = parsed.searchParams.get('code');
     if (typeof code === 'string' && code.trim()) {
-      return code.trim();
+      return {
+        code: code.trim(),
+        context: parseMcpOAuthCallbackContext(parsed.searchParams),
+        stateKey: parseMcpOAuthCallbackStateKey(parsed.searchParams),
+      };
     }
   } catch {
     // Fall through to treating the pasted value as a raw authorization code.
   }
 
-  return trimmed;
+  return {
+    code: trimmed,
+    context: null,
+    stateKey: null,
+  };
 }
 
 const CommandTextarea: React.FC<CommandTextareaProps> = ({ value, onChange }) => {
@@ -198,9 +211,24 @@ interface EnvEntry { key: string; value: string; }
 interface EnvEditorProps {
   value: EnvEntry[];
   onChange: (v: EnvEntry[]) => void;
+  keyTransform?: (value: string) => string;
+  keyPlaceholder?: string;
+  keyInputClassName?: string;
+  pasteLabel?: string;
+  pasteTitle?: string;
 }
 
-const EnvEditor: React.FC<EnvEditorProps> = ({ value, onChange }) => {
+const normalizeEnvKey = (value: string): string => value.toUpperCase().replace(/[^A-Z0-9_]/g, '_');
+
+const EnvEditor: React.FC<EnvEditorProps> = ({
+  value,
+  onChange,
+  keyTransform = normalizeEnvKey,
+  keyPlaceholder = 'API_KEY',
+  keyInputClassName = 'w-36 shrink-0 font-mono typography-meta uppercase',
+  pasteLabel = 'Paste .env',
+  pasteTitle = 'Paste KEY=VALUE lines from clipboard',
+}) => {
   const [revealedKeys, setRevealedKeys] = React.useState<Set<number>>(new Set());
 
   const addRow = () => onChange([...value, { key: '', value: '' }]);
@@ -280,10 +308,10 @@ const EnvEditor: React.FC<EnvEditorProps> = ({ value, onChange }) => {
           className="!font-normal gap-1 text-muted-foreground"
           onClick={handlePasteDotEnv}
           type="button"
-          title="Paste KEY=VALUE lines from clipboard"
+          title={pasteTitle}
         >
           <RiClipboardLine className="h-3 w-3" />
-          Paste .env
+          {pasteLabel}
         </Button>
       </div>
 
@@ -294,9 +322,9 @@ const EnvEditor: React.FC<EnvEditorProps> = ({ value, onChange }) => {
             {/* KEY — fixed narrow width */}
             <Input
               value={entry.key}
-              onChange={(e) => updateRow(idx, 'key', e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, '_'))}
-              placeholder="API_KEY"
-              className="w-36 shrink-0 font-mono typography-meta uppercase"
+              onChange={(e) => updateRow(idx, 'key', keyTransform(e.target.value))}
+              placeholder={keyPlaceholder}
+              className={keyInputClassName}
               data-bwignore="true"
               data-1p-ignore="true"
               data-lpignore="true"
@@ -418,17 +446,65 @@ const statusCardClass = (status: string | undefined): string => {
   }
 };
 
-const buildMcpOAuthRedirectUri = (name: string, directory?: string | null): string | null => {
+const buildMcpOAuthRedirectUri = (): string | null => {
   if (typeof window === 'undefined') {
     return null;
   }
 
-  const url = new URL(MCP_OAUTH_CALLBACK_PATH, window.location.origin);
-  url.searchParams.set('server', name);
-  if (directory) {
-    url.searchParams.set('directory', directory);
+  return new URL(MCP_OAUTH_CALLBACK_PATH, window.location.origin).toString();
+};
+
+const queuePendingMcpAuthContext = async (input: {
+  state: string;
+  name: string;
+  directory?: string | null;
+}): Promise<void> => {
+  const response = await fetch('/api/mcp/auth/pending', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      state: input.state,
+      name: input.name,
+      directory: typeof input.directory === 'string' && input.directory.trim() ? input.directory.trim() : null,
+    }),
+  });
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null);
+    throw new Error(payload?.error || 'Failed to prepare MCP authorization callback');
   }
-  return url.toString();
+};
+
+const getPendingMcpAuthContext = async (stateKey: string): Promise<{ name: string; directory: string | null } | null> => {
+  const response = await fetch(`/api/mcp/auth/pending?state=${encodeURIComponent(stateKey)}`);
+  if (!response.ok) {
+    return null;
+  }
+
+  const payload = await response.json().catch(() => null) as { name?: string; directory?: string | null } | null;
+  if (!payload?.name?.trim()) {
+    return null;
+  }
+
+  return {
+    name: payload.name.trim(),
+    directory: typeof payload.directory === 'string' && payload.directory.trim() ? payload.directory.trim() : null,
+  };
+};
+
+const clearPendingMcpAuthContext = async (stateKey: string | null | undefined): Promise<void> => {
+  if (typeof stateKey !== 'string' || !stateKey.trim()) {
+    return;
+  }
+
+  await fetch(`/api/mcp/auth/pending?state=${encodeURIComponent(stateKey.trim())}`, { method: 'DELETE' }).catch(() => undefined);
+};
+
+const buildMcpRuntimeActionKey = (name: string | null, directory?: string | null): string => {
+  const normalizedDirectory = typeof directory === 'string' && directory.trim()
+    ? directory.trim()
+    : '__global__';
+  return `${name ?? '__none__'}::${normalizedDirectory}`;
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -448,6 +524,7 @@ export const McpPage: React.FC = () => {
   } = useMcpConfigStore();
 
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
+  const isVSCodeAuthRuntime = React.useMemo(() => isVSCodeRuntime(), []);
   const mcpStatus = useMcpStore((state) => state.getStatusForDirectory(currentDirectory ?? null));
   const refreshStatus = useMcpStore((state) => state.refresh);
   const connectMcp = useMcpStore((state) => state.connect);
@@ -485,9 +562,15 @@ export const McpPage: React.FC = () => {
   const [isTestingConnection, setIsTestingConnection] = React.useState(false);
   const [isCompletingAuth, setIsCompletingAuth] = React.useState(false);
   const [authUrl, setAuthUrl] = React.useState<string | null>(null);
+  const [authStateKey, setAuthStateKey] = React.useState<string | null>(null);
   const [authCallbackInput, setAuthCallbackInput] = React.useState('');
   const [isAuthPolling, setIsAuthPolling] = React.useState(false);
   const authPollAttemptsRef = React.useRef(0);
+  const runtimeActionKey = React.useMemo(
+    () => buildMcpRuntimeActionKey(selectedMcpName, currentDirectory),
+    [currentDirectory, selectedMcpName],
+  );
+  const runtimeActionKeyRef = React.useRef(runtimeActionKey);
 
   const initialRef = React.useRef<{
     mcpType: 'local' | 'remote'; command: string[]; url: string;
@@ -710,17 +793,34 @@ export const McpPage: React.FC = () => {
     void handleRefreshRuntimeStatus(true);
   }, [handleRefreshRuntimeStatus]);
 
+  React.useEffect(() => {
+    runtimeActionKeyRef.current = runtimeActionKey;
+    setIsConnecting(false);
+    setIsRefreshingStatus(false);
+    setIsAuthorizing(false);
+    setIsClearingAuth(false);
+    setIsTestingConnection(false);
+    setIsCompletingAuth(false);
+    setAuthUrl(null);
+    setAuthStateKey(null);
+    setAuthCallbackInput('');
+    setIsAuthPolling(false);
+    authPollAttemptsRef.current = 0;
+  }, [runtimeActionKey]);
+
   const handleStartAuthorization = React.useCallback(async () => {
     if (!selectedMcpName || mcpType !== 'remote' || !requireSavedConfig()) return;
 
     setIsAuthorizing(true);
+    const actionKey = runtimeActionKey;
+    let queuedStateKey: string | null = null;
     try {
-      const redirectUri = buildMcpOAuthRedirectUri(selectedMcpName, currentDirectory);
+      const redirectUri = buildMcpOAuthRedirectUri();
       if (!redirectUri) {
         throw new Error('Unable to build MCP OAuth redirect URL');
       }
 
-      if (!oauthRedirectUri.trim()) {
+      if (!oauthRedirectUri.trim() && !isVSCodeAuthRuntime) {
         const saved = await updateMcp(selectedMcpName, {
           oauthEnabled,
           oauthClientId,
@@ -733,6 +833,10 @@ export const McpPage: React.FC = () => {
           throw new Error('Failed to save the browser callback URL for MCP authorization');
         }
 
+        if (runtimeActionKeyRef.current !== actionKey) {
+          return;
+        }
+
         setOauthRedirectUri(redirectUri);
         initialRef.current = initialRef.current
           ? { ...initialRef.current, oauthRedirectUri: redirectUri }
@@ -740,39 +844,82 @@ export const McpPage: React.FC = () => {
       }
 
       const nextAuthUrl = await startAuthMcp(selectedMcpName, currentDirectory);
+      const stateKey = parseMcpOAuthCallbackStateKey(new URL(nextAuthUrl).searchParams);
+      if (!stateKey) {
+        throw new Error('MCP authorization URL is missing state and cannot be tracked safely');
+      }
+
+      queuedStateKey = stateKey;
+      await queuePendingMcpAuthContext({
+        state: stateKey,
+        name: selectedMcpName,
+        directory: currentDirectory,
+      });
+
+      if (runtimeActionKeyRef.current !== actionKey) {
+        return;
+      }
+
       setAuthUrl(nextAuthUrl);
+      setAuthStateKey(stateKey);
       setIsAuthPolling(true);
       authPollAttemptsRef.current = 0;
 
       const opened = await openExternalUrl(nextAuthUrl);
+      if (runtimeActionKeyRef.current !== actionKey) {
+        return;
+      }
+
       if (opened) {
-        toast.message('Complete the MCP authorization flow in your browser');
+        toast.message(
+          isVSCodeAuthRuntime
+            ? 'Complete the MCP authorization flow in your browser, then paste the returned code or callback URL here'
+            : 'Complete the MCP authorization flow in your browser',
+        );
       } else {
         toast.error('Could not open the authorization URL automatically');
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to start authorization');
+      await clearPendingMcpAuthContext(queuedStateKey);
+      if (runtimeActionKeyRef.current === actionKey) {
+        toast.error(err instanceof Error ? err.message : 'Failed to start authorization');
+      }
     } finally {
-      setIsAuthorizing(false);
+      if (runtimeActionKeyRef.current === actionKey) {
+        setIsAuthorizing(false);
+      }
     }
-  }, [currentDirectory, mcpType, oauthClientId, oauthClientSecret, oauthEnabled, oauthRedirectUri, oauthScope, requireSavedConfig, selectedMcpName, startAuthMcp, updateMcp]);
+  }, [currentDirectory, isVSCodeAuthRuntime, mcpType, oauthClientId, oauthClientSecret, oauthEnabled, oauthRedirectUri, oauthScope, requireSavedConfig, runtimeActionKey, selectedMcpName, startAuthMcp, updateMcp]);
 
   const handleClearAuthorization = React.useCallback(async () => {
     if (!selectedMcpName || !requireSavedConfig()) return;
 
     setIsClearingAuth(true);
+    const actionKey = runtimeActionKey;
     try {
       await clearAuthMcp(selectedMcpName, currentDirectory);
+
+      if (runtimeActionKeyRef.current !== actionKey) {
+        return;
+      }
+
       setAuthUrl(null);
+      setAuthStateKey(null);
+      setAuthCallbackInput('');
       setIsAuthPolling(false);
       authPollAttemptsRef.current = 0;
+      await clearPendingMcpAuthContext(authStateKey);
       toast.success('Saved MCP authorization was removed');
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to clear authorization');
+      if (runtimeActionKeyRef.current === actionKey) {
+        toast.error(err instanceof Error ? err.message : 'Failed to clear authorization');
+      }
     } finally {
-      setIsClearingAuth(false);
+      if (runtimeActionKeyRef.current === actionKey) {
+        setIsClearingAuth(false);
+      }
     }
-  }, [clearAuthMcp, currentDirectory, requireSavedConfig, selectedMcpName]);
+  }, [authStateKey, clearAuthMcp, currentDirectory, requireSavedConfig, runtimeActionKey, selectedMcpName]);
 
   const handleCopyAuthUrl = React.useCallback(async () => {
     if (!authUrl) return;
@@ -785,28 +932,50 @@ export const McpPage: React.FC = () => {
   }, [authUrl]);
 
   const handleCompleteAuthorization = React.useCallback(async () => {
-    if (!selectedMcpName || !requireSavedConfig()) return;
-
-    const code = extractAuthorizationCode(authCallbackInput);
-    if (!code) {
+    const response = extractAuthorizationResponse(authCallbackInput);
+    if (!response.code) {
       toast.error('Paste the callback URL or authorization code first');
       return;
     }
 
+    const pendingContext = response.stateKey ? await getPendingMcpAuthContext(response.stateKey) : null;
+    const resolvedContext = response.context ?? pendingContext;
+    const targetName = resolvedContext?.name ?? selectedMcpName;
+    const targetDirectory = resolvedContext?.directory ?? currentDirectory;
+
+    if (!targetName) {
+      toast.error('Missing MCP server details. Select the server again or paste the full callback URL.');
+      return;
+    }
+
+    if (!resolvedContext && !requireSavedConfig()) return;
+
     setIsCompletingAuth(true);
+    const actionKey = runtimeActionKey;
     try {
-      await completeAuthMcp(selectedMcpName, code, currentDirectory);
+      await completeAuthMcp(targetName, response.code, targetDirectory);
+      await clearPendingMcpAuthContext(response.stateKey ?? authStateKey);
+
+      if (runtimeActionKeyRef.current !== actionKey) {
+        return;
+      }
+
       setAuthCallbackInput('');
       setAuthUrl(null);
+      setAuthStateKey(null);
       setIsAuthPolling(false);
       authPollAttemptsRef.current = 0;
-      toast.success('MCP authorization completed');
+      toast.success(targetName === selectedMcpName ? 'MCP authorization completed' : `MCP authorization completed for ${targetName}`);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to complete MCP authorization');
+      if (runtimeActionKeyRef.current === actionKey) {
+        toast.error(err instanceof Error ? err.message : 'Failed to complete MCP authorization');
+      }
     } finally {
-      setIsCompletingAuth(false);
+      if (runtimeActionKeyRef.current === actionKey) {
+        setIsCompletingAuth(false);
+      }
     }
-  }, [authCallbackInput, completeAuthMcp, currentDirectory, requireSavedConfig, selectedMcpName]);
+  }, [authCallbackInput, authStateKey, completeAuthMcp, currentDirectory, requireSavedConfig, runtimeActionKey, selectedMcpName]);
 
   const handleTestConnection = React.useCallback(async () => {
     if (!selectedMcpName || !requireSavedConfig()) return;
@@ -859,6 +1028,7 @@ export const McpPage: React.FC = () => {
           setIsAuthPolling(false);
           authPollAttemptsRef.current = 0;
           setAuthUrl(null);
+          setAuthCallbackInput('');
           if (nextStatus.status === 'connected') {
             toast.success('MCP authorization completed');
           }
@@ -893,7 +1063,7 @@ export const McpPage: React.FC = () => {
   const runtimeStatus = mcpStatus[selectedMcpName];
   const isConnected = runtimeStatus?.status === 'connected';
   const needsAuthorization = runtimeStatus?.status === 'needs_auth' || runtimeStatus?.status === 'needs_client_registration';
-  const suggestedRedirectUri = buildMcpOAuthRedirectUri(selectedMcpName, currentDirectory);
+  const suggestedRedirectUri = isVSCodeAuthRuntime ? null : buildMcpOAuthRedirectUri();
   const runtimeDescription = getStatusDescription(
     runtimeStatus?.status,
     runtimeStatus && 'error' in runtimeStatus ? runtimeStatus.error : undefined,
@@ -1212,7 +1382,15 @@ export const McpPage: React.FC = () => {
                         <span className="ml-1.5 typography-micro text-muted-foreground font-normal">({headerEntries.length})</span>
                       )}
                     </div>
-                    <EnvEditor value={headerEntries} onChange={setHeaderEntries} />
+                    <EnvEditor
+                      value={headerEntries}
+                      onChange={setHeaderEntries}
+                      keyTransform={(value) => value.trimStart()}
+                      keyPlaceholder="Header-Name"
+                      keyInputClassName="w-36 shrink-0 font-mono typography-meta"
+                      pasteLabel="Paste headers"
+                      pasteTitle="Paste KEY=VALUE header lines from clipboard"
+                    />
                   </div>
 
                   <div className="space-y-3">
