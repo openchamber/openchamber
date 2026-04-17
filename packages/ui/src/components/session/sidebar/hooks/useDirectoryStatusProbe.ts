@@ -86,13 +86,17 @@ export const useDirectoryStatusProbe = ({
 
   React.useEffect(() => {
     const directories = new Set<string>();
+    const normalizedProjectRoots = new Set<string>();
     sortedSessions.forEach((session) => {
       const dir = normalizePath((session as Session & { directory?: string | null }).directory ?? null);
       if (dir) directories.add(dir);
     });
     projects.forEach((project) => {
       const normalized = normalizePath(project.path);
-      if (normalized) directories.add(normalized);
+      if (normalized) {
+        directories.add(normalized);
+        normalizedProjectRoots.add(normalized);
+      }
     });
 
     const now = Date.now();
@@ -101,11 +105,16 @@ export const useDirectoryStatusProbe = ({
     const preseeded = new Map<string, DirectoryStatusValue>();
 
     for (const directory of directories) {
+      const isProjectRoot = normalizedProjectRoots.has(directory);
       const known = directoryStatusRef.current.get(directory);
       if (known === 'exists') continue;
 
       const cachedAt = missingCache[directory];
       if (known === 'missing') {
+        if (isProjectRoot) {
+          toProbe.push(directory);
+          continue;
+        }
         if (cachedAt && now - cachedAt < MISSING_REPROBE_MS) {
           continue;
         }
@@ -114,7 +123,7 @@ export const useDirectoryStatusProbe = ({
       }
 
       // Use cached "missing" status if fresh enough — skip the HTTP probe
-      if (cachedAt && now - cachedAt < MISSING_REPROBE_MS) {
+      if (!isProjectRoot && cachedAt && now - cachedAt < MISSING_REPROBE_MS) {
         preseeded.set(directory, 'missing');
         continue;
       }
