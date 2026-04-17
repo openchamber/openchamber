@@ -17,6 +17,7 @@ import {
   RiSearchLine,
   RiSave3Line,
   RiTextWrap,
+  RiCommandLine,
   RiMore2Fill,
   RiFileAddLine,
   RiFolderAddLine,
@@ -42,6 +43,7 @@ import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { CodeMirrorEditor } from '@/components/ui/CodeMirrorEditor';
+import { GoToLineDialog } from './GoToLineDialog';
 import { PreviewToggleButton } from './PreviewToggleButton';
 import { JsonTreeView } from '@/components/ui/JsonTreeView';
 import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
@@ -609,6 +611,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const [contextMenuPath, setContextMenuPath] = React.useState<string | null>(null);
   const [copiedContent, setCopiedContent] = React.useState(false);
   const [copiedPath, setCopiedPath] = React.useState(false);
+  const [isGoToLineOpen, setIsGoToLineOpen] = React.useState(false);
 
   const canCreateFile = Boolean(files.writeFile);
   const canCreateFolder = Boolean(files.createDirectory);
@@ -2063,6 +2066,27 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     };
   }, [isMobile, nudgeEditorSelectionAboveKeyboard]);
 
+  React.useEffect(() => {
+    if (!canEdit || textViewMode !== 'edit' || isMobile) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as Element | null;
+      if (target?.closest('[role="dialog"]')) {
+        return;
+      }
+
+      if (event.altKey && !event.metaKey && !event.ctrlKey && !event.shiftKey && event.code === 'KeyG') {
+        event.preventDefault();
+        setIsGoToLineOpen(true);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [canEdit, isMobile, textViewMode]);
+
   const editorExtensions = React.useMemo(() => {
     if (!selectedFile?.path) {
       return [createFlexokiCodeMirrorTheme(currentTheme)];
@@ -2333,18 +2357,29 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
               <RiTextWrap className="size-4" />
             </Button>
             {textViewMode === 'edit' && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setIsSearchOpen(!isSearchOpen)}
-                className={cn(
-                  'h-6 w-6 p-0 transition-opacity',
-                  isSearchOpen ? 'text-foreground opacity-100' : 'text-muted-foreground opacity-65 hover:opacity-100'
-                )}
-                title="Find in file"
-              >
-                <RiSearchLine className="size-4" />
-              </Button>
+              <>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setIsSearchOpen(!isSearchOpen)}
+                  className={cn(
+                    'h-6 w-6 p-0 transition-opacity',
+                    isSearchOpen ? 'text-foreground opacity-100' : 'text-muted-foreground opacity-65 hover:opacity-100'
+                  )}
+                  title="Find in file"
+                >
+                  <RiSearchLine className="size-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setIsGoToLineOpen(true)}
+                  className="h-6 w-6 p-0 text-muted-foreground opacity-65 hover:opacity-100"
+                  title="Go to line"
+                >
+                  <RiCommandLine className="size-4" />
+                </Button>
+              </>
             )}
           </>
         )}
@@ -2756,6 +2791,11 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
               data-keyboard-avoid="none"
               style={isMobile ? { height: 'calc(100% - var(--oc-keyboard-inset, 0px))' } : undefined}
             >
+              <GoToLineDialog
+                open={isGoToLineOpen}
+                onOpenChange={setIsGoToLineOpen}
+                view={editorViewRef.current}
+              />
               <div className={cn('h-full', shouldMaskEditorForPendingNavigation && 'invisible')}>
                 <CodeMirrorEditor
                   value={draftContent}
