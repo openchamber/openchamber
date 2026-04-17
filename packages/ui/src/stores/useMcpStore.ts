@@ -62,6 +62,7 @@ interface McpStore {
   connect: (name: string, directory?: string | null) => Promise<void>;
   disconnect: (name: string, directory?: string | null) => Promise<void>;
   startAuth: (name: string, directory?: string | null) => Promise<string>;
+  completeAuth: (name: string, code: string, directory?: string | null) => Promise<void>;
   clearAuth: (name: string, directory?: string | null) => Promise<void>;
   testConnection: (name: string, directory?: string | null) => Promise<TestConnectionResult>;
 }
@@ -132,6 +133,13 @@ export const useMcpStore = create<McpStore>()(
       }
 
       return authorizationUrl;
+    },
+
+    completeAuth: async (name, code, directory) => {
+      const normalized = normalizeDirectory(directory ?? useDirectoryStore.getState().currentDirectory);
+      const api = getMcpApiClient(normalized);
+      await api.mcp.auth.callback({ name, code }, { throwOnError: true });
+      await get().refresh({ directory: normalized, silent: true });
     },
 
     clearAuth: async (name, directory) => {

@@ -28,6 +28,7 @@ import {
 } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
+import { MCP_OAUTH_CALLBACK_PATH } from '@/components/sections/mcp/McpOAuthCallbackPage';
 import {
   Dialog,
   DialogContent,
@@ -75,6 +76,25 @@ function parseShellCommand(raw: string): string[] {
   return args;
 }
 
+function extractAuthorizationCode(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(trimmed);
+    const code = parsed.searchParams.get('code');
+    if (typeof code === 'string' && code.trim()) {
+      return code.trim();
+    }
+  } catch {
+    // Fall through to treating the pasted value as a raw authorization code.
+  }
+
+  return trimmed;
+}
+
 const CommandTextarea: React.FC<CommandTextareaProps> = ({ value, onChange }) => {
   // Internal: one arg per line
   const [text, setText] = React.useState(() => value.join('\n'));
@@ -110,7 +130,7 @@ const CommandTextarea: React.FC<CommandTextareaProps> = ({ value, onChange }) =>
   };
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-2" data-bwignore="true" data-1p-ignore="true" data-lpignore="true">
       <div className="flex items-center justify-end gap-2">
         <Button
           variant="ghost"
@@ -277,6 +297,9 @@ const EnvEditor: React.FC<EnvEditorProps> = ({ value, onChange }) => {
               onChange={(e) => updateRow(idx, 'key', e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, '_'))}
               placeholder="API_KEY"
               className="w-36 shrink-0 font-mono typography-meta uppercase"
+              data-bwignore="true"
+              data-1p-ignore="true"
+              data-lpignore="true"
               spellCheck={false}
             />
             {/* VALUE — takes remaining space */}
@@ -287,6 +310,10 @@ const EnvEditor: React.FC<EnvEditorProps> = ({ value, onChange }) => {
                 onChange={(e) => updateRow(idx, 'value', e.target.value)}
                 placeholder="value"
                 className="font-mono typography-meta pr-8 w-full"
+                autoComplete="new-password"
+                data-bwignore="true"
+                data-1p-ignore="true"
+                data-lpignore="true"
                 spellCheck={false}
               />
               <button
@@ -391,6 +418,19 @@ const statusCardClass = (status: string | undefined): string => {
   }
 };
 
+const buildMcpOAuthRedirectUri = (name: string, directory?: string | null): string | null => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  const url = new URL(MCP_OAUTH_CALLBACK_PATH, window.location.origin);
+  url.searchParams.set('server', name);
+  if (directory) {
+    url.searchParams.set('directory', directory);
+  }
+  return url.toString();
+};
+
 // ─────────────────────────────────────────────────────────────
 // McpPage
 // ─────────────────────────────────────────────────────────────
@@ -413,6 +453,7 @@ export const McpPage: React.FC = () => {
   const connectMcp = useMcpStore((state) => state.connect);
   const disconnectMcp = useMcpStore((state) => state.disconnect);
   const startAuthMcp = useMcpStore((state) => state.startAuth);
+  const completeAuthMcp = useMcpStore((state) => state.completeAuth);
   const clearAuthMcp = useMcpStore((state) => state.clearAuth);
   const testConnectionMcp = useMcpStore((state) => state.testConnection);
 
@@ -442,7 +483,9 @@ export const McpPage: React.FC = () => {
   const [isAuthorizing, setIsAuthorizing] = React.useState(false);
   const [isClearingAuth, setIsClearingAuth] = React.useState(false);
   const [isTestingConnection, setIsTestingConnection] = React.useState(false);
+  const [isCompletingAuth, setIsCompletingAuth] = React.useState(false);
   const [authUrl, setAuthUrl] = React.useState<string | null>(null);
+  const [authCallbackInput, setAuthCallbackInput] = React.useState('');
   const [isAuthPolling, setIsAuthPolling] = React.useState(false);
   const authPollAttemptsRef = React.useRef(0);
 
@@ -663,11 +706,39 @@ export const McpPage: React.FC = () => {
     }
   }, [currentDirectory, refreshStatus]);
 
+  React.useEffect(() => {
+    void handleRefreshRuntimeStatus(true);
+  }, [handleRefreshRuntimeStatus]);
+
   const handleStartAuthorization = React.useCallback(async () => {
     if (!selectedMcpName || mcpType !== 'remote' || !requireSavedConfig()) return;
 
     setIsAuthorizing(true);
     try {
+      const redirectUri = buildMcpOAuthRedirectUri(selectedMcpName, currentDirectory);
+      if (!redirectUri) {
+        throw new Error('Unable to build MCP OAuth redirect URL');
+      }
+
+      if (!oauthRedirectUri.trim()) {
+        const saved = await updateMcp(selectedMcpName, {
+          oauthEnabled,
+          oauthClientId,
+          oauthClientSecret,
+          oauthScope,
+          oauthRedirectUri: redirectUri,
+        });
+
+        if (!saved) {
+          throw new Error('Failed to save the browser callback URL for MCP authorization');
+        }
+
+        setOauthRedirectUri(redirectUri);
+        initialRef.current = initialRef.current
+          ? { ...initialRef.current, oauthRedirectUri: redirectUri }
+          : initialRef.current;
+      }
+
       const nextAuthUrl = await startAuthMcp(selectedMcpName, currentDirectory);
       setAuthUrl(nextAuthUrl);
       setIsAuthPolling(true);
@@ -684,7 +755,7 @@ export const McpPage: React.FC = () => {
     } finally {
       setIsAuthorizing(false);
     }
-  }, [currentDirectory, mcpType, requireSavedConfig, selectedMcpName, startAuthMcp]);
+  }, [currentDirectory, mcpType, oauthClientId, oauthClientSecret, oauthEnabled, oauthRedirectUri, oauthScope, requireSavedConfig, selectedMcpName, startAuthMcp, updateMcp]);
 
   const handleClearAuthorization = React.useCallback(async () => {
     if (!selectedMcpName || !requireSavedConfig()) return;
@@ -712,6 +783,30 @@ export const McpPage: React.FC = () => {
     }
     toast.error('Failed to copy authorization URL');
   }, [authUrl]);
+
+  const handleCompleteAuthorization = React.useCallback(async () => {
+    if (!selectedMcpName || !requireSavedConfig()) return;
+
+    const code = extractAuthorizationCode(authCallbackInput);
+    if (!code) {
+      toast.error('Paste the callback URL or authorization code first');
+      return;
+    }
+
+    setIsCompletingAuth(true);
+    try {
+      await completeAuthMcp(selectedMcpName, code, currentDirectory);
+      setAuthCallbackInput('');
+      setAuthUrl(null);
+      setIsAuthPolling(false);
+      authPollAttemptsRef.current = 0;
+      toast.success('MCP authorization completed');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to complete MCP authorization');
+    } finally {
+      setIsCompletingAuth(false);
+    }
+  }, [authCallbackInput, completeAuthMcp, currentDirectory, requireSavedConfig, selectedMcpName]);
 
   const handleTestConnection = React.useCallback(async () => {
     if (!selectedMcpName || !requireSavedConfig()) return;
@@ -798,6 +893,7 @@ export const McpPage: React.FC = () => {
   const runtimeStatus = mcpStatus[selectedMcpName];
   const isConnected = runtimeStatus?.status === 'connected';
   const needsAuthorization = runtimeStatus?.status === 'needs_auth' || runtimeStatus?.status === 'needs_client_registration';
+  const suggestedRedirectUri = buildMcpOAuthRedirectUri(selectedMcpName, currentDirectory);
   const runtimeDescription = getStatusDescription(
     runtimeStatus?.status,
     runtimeStatus && 'error' in runtimeStatus ? runtimeStatus.error : undefined,
@@ -840,41 +936,21 @@ export const McpPage: React.FC = () => {
         {!isNewServer && (
           <div className="mb-8 px-2">
             <div className={cn('rounded-lg border p-3', statusCardClass(runtimeStatus?.status))}>
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
+              <div className="space-y-4">
+                <div className="min-w-0 space-y-1">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                     <span className="typography-ui-label text-foreground">Runtime Status</span>
                     <StatusBadge status={runtimeStatus?.status} enabled={enabled} />
                   </div>
-                  <p className="mt-1 typography-meta text-muted-foreground">{runtimeDescription}</p>
-                  <p className="mt-1 typography-micro text-muted-foreground/80">
+                  <p className="typography-meta text-muted-foreground">{runtimeDescription}</p>
+                  <p className="typography-micro text-muted-foreground/80">
                     {draftScope === 'project'
                       ? `Project-scoped to ${currentDirectory ?? 'the active project'}`
                       : 'User-scoped configuration'}
                   </p>
-                  {authUrl && (
-                    <div className="mt-3 rounded-md border border-[var(--interactive-border)] bg-[var(--surface-background)] px-3 py-2">
-                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                        <div className="min-w-0 flex-1">
-                          <div className="typography-micro text-muted-foreground">Authorization URL</div>
-                          <div className="truncate typography-micro text-foreground font-mono">{authUrl}</div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Button variant="outline" size="xs" className="!font-normal" onClick={() => void openExternalUrl(authUrl)}>
-                            <RiExternalLinkLine className="h-3.5 w-3.5" />
-                            Open
-                          </Button>
-                          <Button variant="outline" size="xs" className="!font-normal" onClick={() => void handleCopyAuthUrl()}>
-                            <RiClipboardLine className="h-3.5 w-3.5" />
-                            Copy
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  )}
                 </div>
 
-                <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                <div className="flex flex-wrap items-center gap-2">
                   <Button
                     variant="outline"
                     size="xs"
@@ -917,10 +993,63 @@ export const McpPage: React.FC = () => {
                     </>
                   )}
                 </div>
+
+                {authUrl && (
+                  <div className="rounded-md border border-[var(--interactive-border)] bg-[var(--surface-background)] px-3 py-2">
+                    <div className="space-y-2">
+                      <div className="typography-micro text-muted-foreground">Authorization URL</div>
+                      <div className="break-all typography-micro text-foreground font-mono">{authUrl}</div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Button variant="outline" size="xs" className="!font-normal" onClick={() => void openExternalUrl(authUrl)}>
+                          <RiExternalLinkLine className="h-3.5 w-3.5" />
+                          Open in Browser
+                        </Button>
+                        <Button variant="outline" size="xs" className="!font-normal" onClick={() => void handleCopyAuthUrl()}>
+                          <RiClipboardLine className="h-3.5 w-3.5" />
+                          Copy Link
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {mcpType === 'remote' && needsAuthorization && (
+                  <div className="rounded-md border border-[var(--interactive-border)] bg-[var(--surface-background)] px-3 py-3">
+                    <div className="space-y-2">
+                      <div>
+                        <div className="typography-ui-label text-foreground">Manual Authorization Fallback</div>
+                        <p className="mt-1 typography-micro text-muted-foreground">
+                          If the browser returns to a different machine or shows a callback URL with a code, paste that full URL or the raw code here.
+                        </p>
+                      </div>
+                      <Textarea
+                        value={authCallbackInput}
+                        onChange={(event) => setAuthCallbackInput(event.target.value)}
+                        placeholder="Paste the callback URL or authorization code"
+                        rows={3}
+                        className="font-mono typography-meta resize-y"
+                        data-bwignore="true"
+                        data-1p-ignore="true"
+                        spellCheck={false}
+                      />
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="xs"
+                          className="!font-normal"
+                          onClick={() => void handleCompleteAuthorization()}
+                          disabled={isCompletingAuth}
+                        >
+                          {isCompletingAuth ? 'Completing...' : 'Complete Authorization'}
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {isAuthPolling && (
-                <p className="mt-3 typography-micro text-muted-foreground">
+                <p className="mt-4 typography-micro text-muted-foreground">
                   Waiting for OpenCode to observe the completed browser authorization flow...
                 </p>
               )}
@@ -1075,6 +1204,8 @@ export const McpPage: React.FC = () => {
                         onChange={(e) => setTimeoutValue(e.target.value)}
                         placeholder="5000"
                         className="h-7 w-32 font-mono px-2"
+                        data-bwignore="true"
+                        data-1p-ignore="true"
                       />
                     </div>
                     <p className="typography-micro text-muted-foreground">
@@ -1117,6 +1248,8 @@ export const McpPage: React.FC = () => {
                         placeholder="OAuth client ID"
                         className="font-mono typography-meta"
                         disabled={!oauthEnabled}
+                        data-bwignore="true"
+                        data-1p-ignore="true"
                       />
                       <Input
                         value={oauthClientSecret}
@@ -1124,6 +1257,8 @@ export const McpPage: React.FC = () => {
                         placeholder="OAuth client secret"
                         className="font-mono typography-meta"
                         disabled={!oauthEnabled}
+                        data-bwignore="true"
+                        data-1p-ignore="true"
                       />
                       <Input
                         value={oauthScope}
@@ -1131,6 +1266,8 @@ export const McpPage: React.FC = () => {
                         placeholder="Scopes (space-delimited)"
                         className="font-mono typography-meta"
                         disabled={!oauthEnabled}
+                        data-bwignore="true"
+                        data-1p-ignore="true"
                       />
                       <Input
                         value={oauthRedirectUri}
@@ -1138,12 +1275,20 @@ export const McpPage: React.FC = () => {
                         placeholder="Redirect URI"
                         className="font-mono typography-meta"
                         disabled={!oauthEnabled}
+                        data-bwignore="true"
+                        data-1p-ignore="true"
                       />
                     </div>
 
                     <p className="typography-micro text-muted-foreground">
                       Leave these fields blank to let OpenCode infer OAuth settings from the MCP server.
                     </p>
+                    {suggestedRedirectUri && (
+                      <p className="typography-micro text-muted-foreground">
+                        Browser-based MCP authorization uses this callback URL when the redirect URI is blank:
+                        <span className="mt-1 block break-all font-mono text-foreground/80">{suggestedRedirectUri}</span>
+                      </p>
+                    )}
                   </div>
                 </div>
               </details>

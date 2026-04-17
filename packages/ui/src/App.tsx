@@ -52,6 +52,7 @@ import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import type { RuntimeAPIs } from '@/lib/api/types';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { QuickOpenDialog } from '@/components/ui/QuickOpenDialog';
+import { McpOAuthCallbackPage, MCP_OAUTH_CALLBACK_PATH } from '@/components/sections/mcp/McpOAuthCallbackPage';
 
 const AboutDialogWrapper: React.FC = () => {
   const isAboutDialogOpen = useUIStore((s) => s.isAboutDialogOpen);
@@ -102,6 +103,14 @@ const readEmbeddedSessionChatConfig = (): EmbeddedSessionChatConfig | null => {
     sessionId,
     directory,
   };
+};
+
+const isMcpOAuthCallbackPath = (): boolean => {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  return window.location.pathname === MCP_OAUTH_CALLBACK_PATH;
 };
 
 const EmbeddedSessionSelectionGate: React.FC<{
@@ -191,6 +200,7 @@ function App({ apis }: AppProps) {
   const appReadyDispatchedRef = React.useRef(false);
   const embeddedSessionChat = React.useMemo<EmbeddedSessionChatConfig | null>(() => readEmbeddedSessionChatConfig(), []);
   const embeddedBackgroundWorkEnabled = !embeddedSessionChat || isEmbeddedVisible;
+  const isMcpOAuthCallback = React.useMemo(() => isMcpOAuthCallbackPath(), []);
 
   React.useEffect(() => {
     setStreamPerfEnabled(showMemoryDebug);
@@ -645,6 +655,14 @@ function App({ apis }: AppProps) {
             </TooltipProvider>
           </RuntimeAPIProvider>
         </SyncProvider>
+      </ErrorBoundary>
+    );
+  }
+
+  if (isMcpOAuthCallback) {
+    return (
+      <ErrorBoundary>
+        <McpOAuthCallbackPage />
       </ErrorBoundary>
     );
   }
