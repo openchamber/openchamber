@@ -6,6 +6,7 @@ import { getWebviewShikiThemes } from './shikiThemes';
 import { getWebviewHtml } from './webviewHtml';
 import { openSseProxy } from './sseProxy';
 import { resolveWebviewDevServerUrl } from './webviewDevServer';
+import { getWorkspaceContextPayload } from './workspaceRoots';
 
 export class AgentManagerPanelProvider {
   public static readonly viewType = 'openchamber.agentManager';
@@ -119,6 +120,18 @@ export class AgentManagerPanelProvider {
     // Send to webview if it exists
     this._sendCachedState();
   }
+
+  public updateWorkspaceContext(): void {
+    if (!this._panel) {
+      return;
+    }
+
+    this._panel.webview.postMessage({
+      type: 'command',
+      command: 'vscodeWorkspaceContext',
+      payload: getWorkspaceContextPayload(),
+    });
+  }
   
   private _sendCachedState() {
     if (!this._panel) {
@@ -221,13 +234,15 @@ export class AgentManagerPanelProvider {
   }
 
   private _getHtmlForWebview(webview: vscode.Webview): string {
-    const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+    const workspaceContext = getWorkspaceContextPayload();
     const cliAvailable = this._openCodeManager?.isCliAvailable() ?? false;
 
     return getWebviewHtml({
       webview,
       extensionUri: this._extensionUri,
-      workspaceFolder,
+      workspaceFolder: workspaceContext.workspaceFolder,
+      activeWorkspaceFolder: workspaceContext.activeWorkspaceFolder,
+      workspaceFolders: workspaceContext.workspaceFolders,
       initialStatus: this._cachedStatus,
       cliAvailable,
       panelType: 'agentManager',

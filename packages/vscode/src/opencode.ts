@@ -7,6 +7,7 @@ import { execSync } from 'child_process';
 import { spawnSync } from 'child_process';
 import { spawn } from 'child_process';
 import { randomBytes } from 'crypto';
+import { getWorkspaceFallbackPath } from './workspaceRoots';
 
 const READY_CHECK_TIMEOUT_MS = 30000;
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
@@ -632,7 +633,7 @@ export function createOpenCodeManager(_context: vscode.ExtensionContext): OpenCo
   const normalizeWindowsDriveLetter = (p: string): string =>
     p.replace(/^([a-z]):/, (_, letter: string) => letter.toUpperCase() + ':');
   const workspaceDirectory = (): string =>
-    normalizeWindowsDriveLetter(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir());
+    normalizeWindowsDriveLetter(getWorkspaceFallbackPath() || os.homedir());
   let workingDirectory: string = workspaceDirectory();
   let startCount = 0;
   let restartCount = 0;
@@ -940,9 +941,7 @@ export function createOpenCodeManager(_context: vscode.ExtensionContext): OpenCo
   }
 
   async function setWorkingDirectory(newPath: string): Promise<{ success: boolean; restarted: boolean; path: string }> {
-    void newPath;
-    const workspacePath = workspaceDirectory();
-    const nextDirectory = workspacePath;
+    const nextDirectory = normalizeWindowsDriveLetter((newPath || '').trim()) || workspaceDirectory();
 
     if (workingDirectory === nextDirectory) {
       return { success: true, restarted: false, path: nextDirectory };

@@ -2825,6 +2825,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
     const footerGapClass = 'gap-x-1.5 gap-y-0';
     const isVSCode = isVSCodeRuntime();
+    const showWorkspaceSelector = isVSCode && projects.length > 1;
     const showDraftTargetSelectors = newSessionDraftOpen && !isVSCode;
 
     const selectedDraftProject = React.useMemo(() => {
@@ -2844,6 +2845,18 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
         return projects[0] ?? null;
     }, [activeProjectId, newSessionDraft?.selectedProjectId, projects]);
+
+    const activeProject = React.useMemo(
+        () => activeProjectId
+            ? projects.find((project) => project.id === activeProjectId) ?? null
+            : (projects[0] ?? null),
+        [activeProjectId, projects],
+    );
+
+    const selectedWorkspaceProject = React.useMemo(
+        () => (newSessionDraftOpen ? selectedDraftProject : activeProject) ?? selectedDraftProject ?? activeProject,
+        [activeProject, newSessionDraftOpen, selectedDraftProject],
+    );
 
     const selectedDraftProjectPath = React.useMemo(
         () => normalizePath(selectedDraftProject?.path ?? null),
@@ -3029,6 +3042,24 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             directoryOverride: directory,
         }, { force: true });
     }, [selectedDraftProject, setNewSessionDraftTarget]);
+
+    const handleWorkspaceProjectChange = React.useCallback((projectId: string) => {
+        const project = projects.find((entry) => entry.id === projectId);
+        if (!project) {
+            return;
+        }
+
+        if (activeProjectId !== projectId) {
+            setActiveProjectIdOnly(projectId);
+        }
+
+        if (newSessionDraftOpen) {
+            setNewSessionDraftTarget({
+                projectId,
+                directoryOverride: project.path,
+            }, { force: true });
+        }
+    }, [activeProjectId, newSessionDraftOpen, projects, setActiveProjectIdOnly, setNewSessionDraftTarget]);
 
     const renderProjectLabelWithIcon = React.useCallback((project: {
         id: string;
@@ -3278,30 +3309,53 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     showAssistantStatus={false}
                     showTodos
                 />
-                {showDraftTargetSelectors && selectedDraftProject ? (
+                {(showWorkspaceSelector && selectedWorkspaceProject) || (showDraftTargetSelectors && selectedDraftProject) ? (
                     <div className="mb-1.5 flex min-w-0 items-center gap-1.5 px-0.5">
-                        <Select
-                            value={selectedDraftProject.id}
-                            onValueChange={handleDraftProjectChange}
-                        >
-                            <SelectTrigger
-                                size="sm"
-                                className="h-7 min-w-0 w-fit max-w-[42vw] sm:max-w-[18rem] border-transparent bg-transparent px-1.5 hover:bg-transparent data-[state=open]:bg-transparent"
+                        {showWorkspaceSelector && selectedWorkspaceProject ? (
+                            <Select
+                                value={selectedWorkspaceProject.id}
+                                onValueChange={handleWorkspaceProjectChange}
                             >
-                                <SelectValue>
-                                    {renderProjectLabelWithIcon(selectedDraftProject)}
-                                </SelectValue>
-                            </SelectTrigger>
-                            <SelectContent fitContent>
-                                {projects.map((project) => (
-                                    <SelectItem key={project.id} value={project.id} className="max-w-[24rem] truncate">
-                                        {renderProjectLabelWithIcon(project)}
-                                    </SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
+                                <SelectTrigger
+                                    size="sm"
+                                    className="h-7 min-w-0 w-fit max-w-[42vw] sm:max-w-[18rem] border-transparent bg-transparent px-1.5 hover:bg-transparent data-[state=open]:bg-transparent"
+                                >
+                                    <SelectValue>
+                                        {renderProjectLabelWithIcon(selectedWorkspaceProject)}
+                                    </SelectValue>
+                                </SelectTrigger>
+                                <SelectContent fitContent>
+                                    {projects.map((project) => (
+                                        <SelectItem key={project.id} value={project.id} className="max-w-[24rem] truncate">
+                                            {renderProjectLabelWithIcon(project)}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        ) : showDraftTargetSelectors && selectedDraftProject ? (
+                            <Select
+                                value={selectedDraftProject.id}
+                                onValueChange={handleDraftProjectChange}
+                            >
+                                <SelectTrigger
+                                    size="sm"
+                                    className="h-7 min-w-0 w-fit max-w-[42vw] sm:max-w-[18rem] border-transparent bg-transparent px-1.5 hover:bg-transparent data-[state=open]:bg-transparent"
+                                >
+                                    <SelectValue>
+                                        {renderProjectLabelWithIcon(selectedDraftProject)}
+                                    </SelectValue>
+                                </SelectTrigger>
+                                <SelectContent fitContent>
+                                    {projects.map((project) => (
+                                        <SelectItem key={project.id} value={project.id} className="max-w-[24rem] truncate">
+                                            {renderProjectLabelWithIcon(project)}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        ) : null}
 
-                        {shouldShowDraftBranchSelector ? (
+                        {showDraftTargetSelectors && shouldShowDraftBranchSelector ? (
                             <Select
                                 value={selectedDraftDirectory ?? draftBranchItems[0]?.value ?? normalizePath(selectedDraftProject.path) ?? ''}
                                 onValueChange={handleDraftDirectoryChange}

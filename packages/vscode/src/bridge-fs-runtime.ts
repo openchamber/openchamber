@@ -3,6 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
 import type { BridgeResponse } from './bridge';
+import { getActiveWorkspaceFolderPath, getWorkspaceContextPayload } from './workspaceRoots';
 
 type BridgeMessageInput = {
   id: string;
@@ -38,6 +39,9 @@ type DirectoryEntry = {
 
 type FsDeps = {
   resolveUserPath: (value: string, baseDirectory: string) => string;
+  resolveWorkspacePath: (value: string, baseDirectory?: string | null) =>
+    | { ok: true; resolvedPath: string; workspaceRoot: string | null }
+    | { ok: false; status: number; error: string };
   listDirectoryEntries: (directoryPath: string) => Promise<DirectoryEntry[]>;
   normalizeFsPath: (value: string) => string;
   execGit: (args: string[], cwd: string) => Promise<{ stdout: string; stderr: string; exitCode: number }>;
@@ -61,12 +65,18 @@ export async function handleFsBridgeMessage(
   deps: FsDeps,
 ): Promise<BridgeResponse | null> {
   const { id, type, payload } = message;
+  const getDefaultWorkspaceRoot = () => getActiveWorkspaceFolderPath() || os.homedir();
 
   switch (type) {
     case 'files:list': {
       const { path: dirPath } = payload as { path: string };
-      const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir();
-      const resolvedPath = deps.resolveUserPath(dirPath, workspaceRoot);
+      const workspaceRoot = getDefaultWorkspaceRoot();
+      const target = typeof dirPath === 'string' && dirPath.trim() ? dirPath : workspaceRoot;
+      const resolution = deps.resolveWorkspacePath(target, workspaceRoot);
+      if (!resolution.ok) {
+        return { id, type, success: false, error: resolution.error };
+      }
+      const resolvedPath = resolution.resolvedPath;
       const uri = vscode.Uri.file(resolvedPath);
       const entries = await vscode.workspace.fs.readDirectory(uri);
       const result = entries.map(([name, fileType]) => ({
@@ -79,8 +89,16 @@ export async function handleFsBridgeMessage(
 
     case 'files:search': {
       const { query, maxResults = 50 } = payload as { query: string; maxResults?: number };
+      const workspaceRoot = getActiveWorkspaceFolderPath();
+      if (!workspaceRoot) {
+        return { id, type, success: true, data: [] };
+      }
       const pattern = `**/*${query}*`;
-      const files = await vscode.workspace.findFiles(pattern, '**/node_modules/**', maxResults);
+      const files = await vscode.workspace.findFiles(
+        new vscode.RelativePattern(vscode.Uri.file(workspaceRoot), pattern),
+        '**/node_modules/**',
+        maxResults,
+      );
       const results = files.map((file) => ({
         path: file.fsPath,
       }));
@@ -88,8 +106,17 @@ export async function handleFsBridgeMessage(
     }
 
     case 'workspace:folder': {
-      const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
-      return { id, type, success: true, data: { folder } };
+      const context = getWorkspaceContextPayload();
+      return {
+        id,
+        type,
+        success: true,
+        data: {
+          folder: context.workspaceFolder,
+          activeFolder: context.activeWorkspaceFolder,
+          folders: context.workspaceFolders,
+        },
+      };
     }
 
     case 'config:get': {
@@ -100,10 +127,14 @@ export async function handleFsBridgeMessage(
     }
 
     case 'api:fs:list': {
-      const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir();
+      const workspaceRoot = getDefaultWorkspaceRoot();
       const { path: targetPath, respectGitignore } = (payload || {}) as { path?: string; respectGitignore?: boolean };
       const target = targetPath || workspaceRoot;
-      const resolvedPath = deps.resolveUserPath(target, workspaceRoot) || workspaceRoot;
+      const resolution = deps.resolveWorkspacePath(target, workspaceRoot);
+      if (!resolution.ok) {
+        return { id, type, success: false, error: resolution.error };
+      }
+      const resolvedPath = resolution.resolvedPath;
 
       const entries = await deps.listDirectoryEntries(resolvedPath);
       const normalized = deps.normalizeFsPath(resolvedPath);
@@ -150,8 +181,12 @@ export async function handleFsBridgeMessage(
       if (!target) {
         return { id, type, success: false, error: 'Path is required' };
       }
-      const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir();
-      const resolvedPath = deps.resolveUserPath(target, workspaceRoot);
+      const workspaceRoot = getDefaultWorkspaceRoot();
+      const resolution = deps.resolveWorkspacePath(target, workspaceRoot);
+      if (!resolution.ok) {
+        return { id, type, success: false, error: resolution.error };
+      }
+      const resolvedPath = resolution.resolvedPath;
       await vscode.workspace.fs.createDirectory(vscode.Uri.file(resolvedPath));
       return { id, type, success: true, data: { success: true, path: deps.normalizeFsPath(resolvedPath) } };
     }
@@ -222,8 +257,12 @@ export async function handleFsBridgeMessage(
         return { id, type, success: false, error: 'Content is required' };
       }
       try {
-        const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir();
-        const resolvedPath = deps.resolveUserPath(targetPath, workspaceRoot);
+        const workspaceRoot = getDefaultWorkspaceRoot();
+        const resolution = deps.resolveWorkspacePath(targetPath, workspaceRoot);
+        if (!resolution.ok) {
+          return { id, type, success: false, error: resolution.error };
+        }
+        const resolvedPath = resolution.resolvedPath;
         const uri = vscode.Uri.file(resolvedPath);
         const parentUri = vscode.Uri.file(path.dirname(resolvedPath));
         try {
@@ -245,8 +284,12 @@ export async function handleFsBridgeMessage(
         return { id, type, success: false, error: 'Path is required' };
       }
       try {
-        const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir();
-        const resolvedPath = deps.resolveUserPath(targetPath, workspaceRoot);
+        const workspaceRoot = getDefaultWorkspaceRoot();
+        const resolution = deps.resolveWorkspacePath(targetPath, workspaceRoot);
+        if (!resolution.ok) {
+          return { id, type, success: false, error: resolution.error };
+        }
+        const resolvedPath = resolution.resolvedPath;
         const uri = vscode.Uri.file(resolvedPath);
         await vscode.workspace.fs.delete(uri, { recursive: true, useTrash: false });
         return { id, type, success: true, data: { success: true } };
@@ -265,9 +308,17 @@ export async function handleFsBridgeMessage(
         return { id, type, success: false, error: 'newPath is required' };
       }
       try {
-        const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir();
-        const resolvedOld = deps.resolveUserPath(oldPath, workspaceRoot);
-        const resolvedNew = deps.resolveUserPath(newPath, workspaceRoot);
+        const workspaceRoot = getDefaultWorkspaceRoot();
+        const oldResolution = deps.resolveWorkspacePath(oldPath, workspaceRoot);
+        if (!oldResolution.ok) {
+          return { id, type, success: false, error: oldResolution.error };
+        }
+        const newResolution = deps.resolveWorkspacePath(newPath, workspaceRoot);
+        if (!newResolution.ok) {
+          return { id, type, success: false, error: newResolution.error };
+        }
+        const resolvedOld = oldResolution.resolvedPath;
+        const resolvedNew = newResolution.resolvedPath;
         const oldUri = vscode.Uri.file(resolvedOld);
         const newUri = vscode.Uri.file(resolvedNew);
         await vscode.workspace.fs.rename(oldUri, newUri, { overwrite: false });
@@ -287,8 +338,12 @@ export async function handleFsBridgeMessage(
         return { id, type, success: false, error: 'Working directory (cwd) is required' };
       }
       try {
-        const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir();
-        const resolvedCwd = deps.resolveUserPath(cwd, workspaceRoot);
+        const workspaceRoot = getDefaultWorkspaceRoot();
+        const resolution = deps.resolveWorkspacePath(cwd, workspaceRoot);
+        if (!resolution.ok) {
+          return { id, type, success: false, error: resolution.error };
+        }
+        const resolvedCwd = resolution.resolvedPath;
         const { exec } = await import('child_process');
         const { promisify } = await import('util');
         const execAsync = promisify(exec);
@@ -350,7 +405,8 @@ export async function handleFsBridgeMessage(
 
     case 'api:files/pick': {
       const allowMany = (payload as { allowMany?: boolean })?.allowMany !== false;
-      const defaultUri = vscode.workspace.workspaceFolders?.[0]?.uri;
+      const defaultFolder = getActiveWorkspaceFolderPath();
+      const defaultUri = defaultFolder ? vscode.Uri.file(defaultFolder) : undefined;
 
       const picks = await vscode.window.showOpenDialog({
         canSelectFiles: true,
@@ -421,11 +477,12 @@ export async function handleFsBridgeMessage(
       const defaultFileName = typeof rawFileName === 'string' && rawFileName.trim().length > 0
         ? rawFileName.trim()
         : `message-${Date.now()}.png`;
+      const defaultFolder = getActiveWorkspaceFolderPath();
 
       const saveUri = await vscode.window.showSaveDialog({
         saveLabel: 'Save image',
-        defaultUri: vscode.workspace.workspaceFolders?.[0]
-          ? vscode.Uri.joinPath(vscode.workspace.workspaceFolders[0].uri, defaultFileName)
+        defaultUri: defaultFolder
+          ? vscode.Uri.joinPath(vscode.Uri.file(defaultFolder), defaultFileName)
           : undefined,
         filters: { Images: ['png'] },
       });

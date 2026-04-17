@@ -3,6 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { execGit } from './bridge-git-process-runtime';
+import { findWorkspaceFolderForPath, getActiveWorkspaceFolderPath, getWorkspaceFolders } from './workspaceRoots';
 
 const MAX_FILE_ATTACH_SIZE_BYTES = 10 * 1024 * 1024;
 
@@ -114,6 +115,10 @@ const isPathInside = (candidatePath: string, parentPath: string): boolean => {
 
 export const normalizeFsPath = (value: string) => value.replace(/\\/g, '/');
 
+export type WorkspacePathResolution =
+  | { ok: true; resolvedPath: string; workspaceRoot: string | null }
+  | { ok: false; status: number; error: string };
+
 const gitCheckIgnoreNames = async (cwd: string, names: string[]): Promise<Set<string>> => {
   if (names.length === 0) {
     return new Set();
@@ -176,6 +181,62 @@ export const resolveUserPath = (value: string, baseDirectory: string) => {
     return expanded;
   }
   return path.resolve(baseDirectory, expanded);
+};
+
+const getWorkspaceAccessRoots = (fallbackBase?: string | null): string[] => {
+  const roots = getWorkspaceFolders().map((folder) => path.resolve(folder.path));
+  if (roots.length > 0) {
+    return roots;
+  }
+
+  if (fallbackBase && fallbackBase.trim()) {
+    return [path.resolve(fallbackBase)];
+  }
+
+  return [path.resolve(os.homedir())];
+};
+
+const getPreferredWorkspaceRoot = (hintPath?: string | null): string => {
+  const matched = findWorkspaceFolderForPath(hintPath)?.path;
+  if (matched) {
+    return matched;
+  }
+
+  return getActiveWorkspaceFolderPath() || getWorkspaceFolders()[0]?.path || os.homedir();
+};
+
+export const resolveWorkspacePath = (targetPath: string, baseDirectory?: string | null): WorkspacePathResolution => {
+  const trimmed = targetPath.trim();
+  if (!trimmed) {
+    return { ok: false, status: 400, error: 'Path is required' };
+  }
+
+  const expanded = expandTildePath(trimmed);
+  if (!expanded) {
+    return { ok: false, status: 400, error: 'Path is required' };
+  }
+
+  const preferredRoot = getPreferredWorkspaceRoot(baseDirectory);
+  const resolvedPath = path.isAbsolute(expanded)
+    ? path.resolve(expanded)
+    : path.resolve(preferredRoot, expanded);
+
+  const workspaceRoot = findWorkspaceFolderForPath(resolvedPath)?.path ?? null;
+  const accessRoots = getWorkspaceAccessRoots(baseDirectory);
+
+  if (getWorkspaceFolders().length > 0) {
+    if (!workspaceRoot) {
+      return { ok: false, status: 403, error: 'Path is outside of active workspace' };
+    }
+    return { ok: true, resolvedPath, workspaceRoot };
+  }
+
+  const fallbackRoot = accessRoots[0] ?? path.resolve(os.homedir());
+  if (!isPathInside(resolvedPath, fallbackRoot)) {
+    return { ok: false, status: 403, error: 'Path is outside of active workspace' };
+  }
+
+  return { ok: true, resolvedPath, workspaceRoot: fallbackRoot };
 };
 
 export const listDirectoryEntries = async (dirPath: string) => {
@@ -400,10 +461,13 @@ export const searchDirectory = async (
   includeHidden = false,
   respectGitignore = true,
 ) => {
-  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir();
+  const workspaceRoot = getPreferredWorkspaceRoot(directory);
   const rootPath = directory
-    ? resolveUserPath(directory, workspaceRoot)
-    : vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+    ? (() => {
+        const resolution = resolveWorkspacePath(directory, workspaceRoot);
+        return resolution.ok ? resolution.resolvedPath : '';
+      })()
+    : getActiveWorkspaceFolderPath() || getWorkspaceFolders()[0]?.path || '';
   if (!rootPath) return [];
 
   const sanitizedQuery = query?.trim() || '';
@@ -504,7 +568,7 @@ export const fetchModelsMetadata = async () => {
   }
 };
 
-const getFsAccessRoot = (): string => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir();
+const getFsAccessRoot = (): string => getActiveWorkspaceFolderPath() || getWorkspaceFolders()[0]?.path || os.homedir();
 
 export const getFsMimeType = (filePath: string): string => {
   const ext = path.extname(filePath).toLowerCase();
@@ -537,15 +601,18 @@ export const resolveFileReadPath = async (targetPath: string): Promise<FsReadPat
   }
 
   const baseRoot = getFsAccessRoot();
-  const resolved = resolveUserPath(trimmed, baseRoot);
-  if (!resolved) {
-    return { ok: false, status: 400, error: 'Path is required' };
+  const resolution = resolveWorkspacePath(trimmed, baseRoot);
+  if (!resolution.ok) {
+    return { ok: false, status: resolution.status, error: resolution.error };
   }
+
+  const resolved = resolution.resolvedPath;
+  const allowedRoot = resolution.workspaceRoot || baseRoot;
 
   try {
     const [canonicalPath, canonicalBase] = await Promise.all([
       fs.promises.realpath(resolved),
-      fs.promises.realpath(baseRoot).catch(() => path.resolve(baseRoot)),
+      fs.promises.realpath(allowedRoot).catch(() => path.resolve(allowedRoot)),
     ]);
 
     if (!isPathInside(canonicalPath, canonicalBase)) {

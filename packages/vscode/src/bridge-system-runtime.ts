@@ -8,6 +8,7 @@ import { getProviderAuth, removeProviderAuth } from './opencodeAuth';
 import { fetchQuotaForProvider, listConfiguredQuotaProviders } from './quotaProviders';
 import { getSessionActivitySnapshot } from './sessionActivityWatcher';
 import type { BridgeContext, BridgeResponse } from './bridge';
+import { getActiveWorkspaceFolderPath } from './workspaceRoots';
 
 type BridgeMessageInput = {
   id: string;
@@ -253,7 +254,7 @@ export async function handleSystemBridgeMessage(
         return { id, type, success: false, error: 'Path is required' };
       }
       const baseDirectory =
-        ctx?.manager?.getWorkingDirectory() || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir();
+        ctx?.manager?.getWorkingDirectory() || getActiveWorkspaceFolderPath() || os.homedir();
       const resolvedPath = deps.resolveUserPath(target, baseDirectory);
       const result = await ctx?.manager?.setWorkingDirectory(resolvedPath);
       if (!result) {
