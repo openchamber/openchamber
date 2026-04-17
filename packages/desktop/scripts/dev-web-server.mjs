@@ -1,6 +1,8 @@
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { inferTargetTriple } from './lib/target.mjs';
+import { waitForExit, signalChild, stopChildTree } from './lib/process-manager.mjs';
 
 const DESKTOP_DEV_PORT = 3901;
 
@@ -10,25 +12,6 @@ const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '..', '..', '..');
 const desktopDir = path.join(repoRoot, 'packages', 'desktop');
 const tauriDir = path.join(desktopDir, 'src-tauri');
-
-const inferTargetTriple = () => {
-  const fromEnv = typeof process.env.TAURI_ENV_TARGET_TRIPLE === 'string' ? process.env.TAURI_ENV_TARGET_TRIPLE.trim() : '';
-  if (fromEnv) return fromEnv;
-
-  if (process.platform === 'darwin') {
-    return process.arch === 'arm64' ? 'aarch64-apple-darwin' : 'x86_64-apple-darwin';
-  }
-
-  if (process.platform === 'win32') {
-    return 'x86_64-pc-windows-msvc';
-  }
-
-  if (process.platform === 'linux') {
-    return process.arch === 'arm64' ? 'aarch64-unknown-linux-gnu' : 'x86_64-unknown-linux-gnu';
-  }
-
-  return `${process.arch}-${process.platform}`;
-};
 
 const targetTriple = inferTargetTriple();
 const sidecarName = process.platform === 'win32'
@@ -81,70 +64,11 @@ const webChild = spawn('bun', ['x', 'vite', '--host', '127.0.0.1', '--port', '51
 
 let shuttingDown = false;
 
-function waitForExit(child, timeoutMs) {
-  return new Promise((resolve) => {
-    if (!child || child.exitCode !== null || child.signalCode !== null) {
-      resolve();
-      return;
-    }
-
-    const onExit = () => {
-      clearTimeout(timer);
-      resolve();
-    };
-
-    const timer = setTimeout(() => {
-      child.off('exit', onExit);
-      resolve();
-    }, timeoutMs);
-
-    child.once('exit', onExit);
-  });
-}
-
-function signalChild(child, signal) {
-  if (!child || child.exitCode !== null || child.signalCode !== null) {
-    return;
-  }
-
-  try {
-    if (process.platform !== 'win32') {
-      process.kill(-child.pid, signal);
-      return;
-    }
-  } catch {
-  }
-
-  try {
-    child.kill(signal);
-  } catch {
-  }
-}
-
 async function requestApiShutdown() {
   const url = `http://127.0.0.1:${DESKTOP_DEV_PORT}/api/system/shutdown`;
   try {
     await fetch(url, { method: 'POST' });
   } catch {
-  }
-}
-
-async function stopChildTree(child) {
-  if (!child || child.exitCode !== null || child.signalCode !== null) {
-    return;
-  }
-
-  signalChild(child, 'SIGINT');
-  await waitForExit(child, 2500);
-
-  if (child.exitCode === null && child.signalCode === null) {
-    signalChild(child, 'SIGTERM');
-    await waitForExit(child, 2500);
-  }
-
-  if (child.exitCode === null && child.signalCode === null) {
-    signalChild(child, 'SIGKILL');
-    await waitForExit(child, 1000);
   }
 }
 
