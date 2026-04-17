@@ -13,6 +13,14 @@ const parseQueryParam = (params: URLSearchParams, key: string): string | null =>
   return trimmed || null;
 };
 
+const normalizeMcpAuthErrorMessage = (error: unknown, fallback: string): string => {
+  const message = error instanceof Error ? error.message : fallback;
+  if (/oauth state required/i.test(message)) {
+    return 'Authorization session expired or was cleared during reload. Return to OpenChamber and click Authorize again.';
+  }
+  return message;
+};
+
 export const McpOAuthCallbackPage: React.FC = () => {
   const completeAuth = useMcpStore((state) => state.completeAuth);
   const [status, setStatus] = React.useState<'working' | 'success' | 'error'>('working');
@@ -62,7 +70,7 @@ export const McpOAuthCallbackPage: React.FC = () => {
         }
 
         if (!pendingContext?.name) {
-          throw new Error('Missing OAuth callback details. Start authorization again from MCP Settings or paste the returned code into OpenChamber manually.');
+          throw new Error('Authorization session details were not available. Start authorization again from MCP Settings or paste the returned code into OpenChamber manually.');
         }
 
         await completeAuth(pendingContext.name, code, pendingContext.directory);
@@ -76,7 +84,7 @@ export const McpOAuthCallbackPage: React.FC = () => {
           await fetch(`/api/mcp/auth/pending?state=${encodeURIComponent(callbackStateKey)}`, { method: 'DELETE' }).catch(() => undefined);
         }
         setStatus('error');
-        setMessage(authError instanceof Error ? authError.message : 'Failed to complete MCP authorization.');
+        setMessage(normalizeMcpAuthErrorMessage(authError, 'Failed to complete MCP authorization.'));
       }
     })();
   }, [completeAuth]);

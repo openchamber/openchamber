@@ -101,7 +101,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
 
       const state = normalizePendingMcpState(req.body?.state);
       if (!state) {
-        return res.status(400).json({ error: 'OAuth state is required' });
+        return res.json({ success: true, context: null });
       }
 
       const name = normalizePendingMcpName(req.body?.name);
@@ -135,7 +135,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
 
       const state = normalizePendingMcpState(Array.isArray(req.query?.state) ? req.query.state[0] : req.query?.state);
       if (!state) {
-        return res.status(400).json({ error: 'OAuth state is required' });
+        return res.json(null);
       }
 
       const pendingMcpAuthContext = pendingMcpAuthContextByState.get(state) ?? null;
@@ -154,7 +154,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     try {
       const state = normalizePendingMcpState(Array.isArray(req.query?.state) ? req.query.state[0] : req.query?.state);
       if (!state) {
-        return res.status(400).json({ error: 'OAuth state is required' });
+        return res.json({ success: true });
       }
 
       pendingMcpAuthContextByState.delete(state);
