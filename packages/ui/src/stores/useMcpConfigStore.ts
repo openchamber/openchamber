@@ -11,6 +11,13 @@ import { opencodeClient } from '@/lib/opencode/client';
 
 export type McpScope = 'user' | 'project';
 
+type McpMutationResult = {
+  ok: boolean;
+  reloadFailed?: boolean;
+  message?: string;
+  warning?: string;
+};
+
 const getConfigDirectory = (): string | null => {
   try {
     const projectsStore = useProjectsStore.getState();
@@ -114,12 +121,16 @@ interface McpConfigStore {
 
   setSelectedMcp: (name: string | null) => void;
   setMcpDraft: (draft: McpDraft | null) => void;
-  loadMcpConfigs: () => Promise<boolean>;
-  createMcp: (config: McpDraft) => Promise<boolean>;
-  updateMcp: (name: string, config: Partial<McpDraft>) => Promise<boolean>;
-  deleteMcp: (name: string) => Promise<boolean>;
+  loadMcpConfigs: (options?: { force?: boolean }) => Promise<boolean>;
+  createMcp: (config: McpDraft) => Promise<McpMutationResult>;
+  updateMcp: (name: string, config: Partial<McpDraft>) => Promise<McpMutationResult>;
+  deleteMcp: (name: string) => Promise<McpMutationResult>;
   getMcpByName: (name: string) => McpServerWithScope | undefined;
 }
+
+const invalidateMcpCache = (directory: string | null) => {
+  mcpLastLoadedAt.delete(getMcpCacheKey(directory));
+};
 
 export const useMcpConfigStore = create<McpConfigStore>()(
   devtools(
@@ -134,19 +145,19 @@ export const useMcpConfigStore = create<McpConfigStore>()(
 
         setMcpDraft: (draft) => set({ mcpDraft: draft }),
 
-        loadMcpConfigs: async () => {
+        loadMcpConfigs: async (options) => {
           const configDirectory = getConfigDirectory();
           const cacheKey = getMcpCacheKey(configDirectory);
           const now = Date.now();
           const loadedAt = mcpLastLoadedAt.get(cacheKey) ?? 0;
           const hasCachedConfigs = get().mcpServers.length > 0;
 
-          if (hasCachedConfigs && now - loadedAt < MCP_LOAD_CACHE_TTL_MS) {
+          if (!options?.force && hasCachedConfigs && now - loadedAt < MCP_LOAD_CACHE_TTL_MS) {
             return true;
           }
 
           const inFlight = mcpLoadInFlight.get(cacheKey);
-          if (inFlight) {
+          if (!options?.force && inFlight) {
             return inFlight;
           }
 
@@ -200,6 +211,8 @@ export const useMcpConfigStore = create<McpConfigStore>()(
               throw new Error(payload?.error || 'Failed to create MCP server');
             }
 
+            invalidateMcpCache(configDirectory);
+
             if (payload?.requiresReload) {
               requiresReload = true;
               await refreshAfterOpenCodeRestart({
@@ -207,14 +220,25 @@ export const useMcpConfigStore = create<McpConfigStore>()(
                 delayMs: payload.reloadDelayMs ?? CLIENT_RELOAD_DELAY_MS,
                 scopes: ['all'],
               });
-              return true;
+              await get().loadMcpConfigs({ force: true });
+              return {
+                ok: true,
+                reloadFailed: payload?.reloadFailed === true,
+                message: payload?.message,
+                warning: payload?.warning,
+              };
             }
 
-            await get().loadMcpConfigs();
-            return true;
+            await get().loadMcpConfigs({ force: true });
+            return {
+              ok: true,
+              reloadFailed: payload?.reloadFailed === true,
+              message: payload?.message,
+              warning: payload?.warning,
+            };
           } catch (error) {
             console.error('[McpConfigStore] Failed to create MCP:', error);
-            return false;
+            return { ok: false };
           } finally {
             if (!requiresReload) finishConfigUpdate();
           }
@@ -241,6 +265,8 @@ export const useMcpConfigStore = create<McpConfigStore>()(
               throw new Error(payload?.error || 'Failed to update MCP server');
             }
 
+            invalidateMcpCache(configDirectory);
+
             if (payload?.requiresReload) {
               requiresReload = true;
               await refreshAfterOpenCodeRestart({
@@ -248,11 +274,22 @@ export const useMcpConfigStore = create<McpConfigStore>()(
                 delayMs: payload.reloadDelayMs ?? CLIENT_RELOAD_DELAY_MS,
                 scopes: ['all'],
               });
-              return true;
+              await get().loadMcpConfigs({ force: true });
+              return {
+                ok: true,
+                reloadFailed: payload?.reloadFailed === true,
+                message: payload?.message,
+                warning: payload?.warning,
+              };
             }
 
-            await get().loadMcpConfigs();
-            return true;
+            await get().loadMcpConfigs({ force: true });
+            return {
+              ok: true,
+              reloadFailed: payload?.reloadFailed === true,
+              message: payload?.message,
+              warning: payload?.warning,
+            };
           } catch (error) {
             console.error('[McpConfigStore] Failed to update MCP:', error);
             throw error;
@@ -277,6 +314,8 @@ export const useMcpConfigStore = create<McpConfigStore>()(
               throw new Error(payload?.error || 'Failed to delete MCP server');
             }
 
+            invalidateMcpCache(configDirectory);
+
             if (payload?.requiresReload) {
               requiresReload = true;
               await refreshAfterOpenCodeRestart({
@@ -284,17 +323,21 @@ export const useMcpConfigStore = create<McpConfigStore>()(
                 delayMs: payload.reloadDelayMs ?? CLIENT_RELOAD_DELAY_MS,
                 scopes: ['all'],
               });
-              return true;
             }
 
             if (get().selectedMcpName === name) {
               set({ selectedMcpName: null });
             }
-            await get().loadMcpConfigs();
-            return true;
+            await get().loadMcpConfigs({ force: true });
+            return {
+              ok: true,
+              reloadFailed: payload?.reloadFailed === true,
+              message: payload?.message,
+              warning: payload?.warning,
+            };
           } catch (error) {
             console.error('[McpConfigStore] Failed to delete MCP:', error);
-            return false;
+            return { ok: false };
           } finally {
             if (!requiresReload) finishConfigUpdate();
           }
