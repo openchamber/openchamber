@@ -2880,6 +2880,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         };
     }, [fetchBranches, runtimeGit, selectedDraftProject, selectedDraftProjectBranches?.all, selectedDraftProjectPath, showDraftTargetSelectors]);
 
+    const selectedDraftProjectCurrentBranch = selectedDraftProjectBranches?.current?.trim() ?? '';
+
     const projectRootBranchOption = React.useMemo(() => {
         if (!selectedDraftProject) {
             return null;
@@ -2888,15 +2890,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (!value) {
             return null;
         }
-        const projectRootBranch = selectedDraftProjectBranches?.current?.trim() ?? '';
-        if (!projectRootBranch) {
+        if (!selectedDraftProjectCurrentBranch) {
             return null;
         }
         return {
             value,
-            label: projectRootBranch,
+            label: selectedDraftProjectCurrentBranch,
         };
-    }, [selectedDraftProject, selectedDraftProjectBranches]);
+    }, [selectedDraftProject, selectedDraftProjectCurrentBranch]);
 
     const worktreeBranchOptions = React.useMemo(() => {
         if (!selectedDraftProject) {
@@ -2914,11 +2915,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
         return buildSessionTargetOptions({
             projectRoot: normalizePath(selectedDraftProject.path) ?? '',
-            rootBranch: selectedDraftProjectBranches?.current?.trim() ?? '',
+            rootBranch: selectedDraftProjectCurrentBranch,
             worktrees,
             pendingBootstrapDirectory: newSessionDraft?.bootstrapPendingDirectory ?? null,
         });
-    }, [availableWorktreesByProject, newSessionDraft?.bootstrapPendingDirectory, selectedDraftProject, selectedDraftProjectBranches?.current, selectedDraftProjectPath]);
+    }, [availableWorktreesByProject, newSessionDraft?.bootstrapPendingDirectory, selectedDraftProject, selectedDraftProjectCurrentBranch, selectedDraftProjectPath]);
 
     const selectedDraftDirectory = React.useMemo(
         () => normalizePath(newSessionDraft?.bootstrapPendingDirectory ?? null)
