@@ -8,7 +8,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { RiAddLine, RiDeleteBinLine, RiMore2Line, RiPlugLine } from '@remixicon/react';
+import { RiAddLine, RiDeleteBinLine, RiMore2Line, RiPlugLine, RiRefreshLine } from '@remixicon/react';
 import { useMcpConfigStore, type McpDraft, type McpServerConfig } from '@/stores/useMcpConfigStore';
 import { useMcpStore } from '@/stores/useMcpStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -66,10 +66,12 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
 
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const mcpStatus = useMcpStore((state) => state.getStatusForDirectory(currentDirectory ?? null));
+  const refreshStatus = useMcpStore((state) => state.refresh);
 
   const [deleteTarget, setDeleteTarget] = React.useState<McpServerConfig | null>(null);
   const [isDeleting, setIsDeleting] = React.useState(false);
   const [openMenuMcp, setOpenMenuMcp] = React.useState<string | null>(null);
+  const [isRefreshingStatus, setIsRefreshingStatus] = React.useState(false);
 
   const projectServers = React.useMemo(
     () => mcpServers.filter((server) => server.scope === 'project'),
@@ -83,6 +85,20 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
   React.useEffect(() => {
     void loadMcpConfigs();
   }, [loadMcpConfigs]);
+
+  const handleRefresh = React.useCallback(() => {
+    if (isRefreshingStatus) return;
+
+    setIsRefreshingStatus(true);
+    const minSpinPromise = new Promise((resolve) => setTimeout(resolve, 500));
+
+    Promise.all([
+      refreshStatus({ directory: currentDirectory, silent: true }),
+      minSpinPromise,
+    ]).finally(() => {
+      setIsRefreshingStatus(false);
+    });
+  }, [currentDirectory, isRefreshingStatus, refreshStatus]);
 
   const handleCreateNew = () => {
     const baseName = 'new-mcp-server';
@@ -130,7 +146,19 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
   return (
     <div className={cn('flex h-full flex-col', bgClass)}>
       <div className="border-b px-3 pt-4 pb-3">
-        <h2 className="text-base font-semibold text-foreground mb-3">MCP Servers</h2>
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <h2 className="text-base font-semibold text-foreground">MCP Servers</h2>
+          <button
+            type="button"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            disabled={isRefreshingStatus}
+            onClick={handleRefresh}
+            aria-label="Refresh MCP status"
+            title="Refresh MCP status"
+          >
+            <RiRefreshLine className={cn('h-4 w-4', isRefreshingStatus && 'animate-spin')} />
+          </button>
+        </div>
         <SettingsProjectSelector className="mb-3" />
         <div className="flex items-center justify-between gap-2">
           <span className="typography-meta text-muted-foreground">
