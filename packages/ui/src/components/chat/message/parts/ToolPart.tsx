@@ -161,6 +161,7 @@ const TASK_TOOL_ACTIVE_FETCH_LIMIT = 160;
 const TASK_TOOL_IDLE_FETCH_LIMIT = 80;
 const TASK_TOOL_NO_CHANGE_BACKOFF_AFTER_POLLS = 3;
 const TASK_TOOL_SETTLE_GRACE_MS = 2500;
+const TASK_TOOL_FALLBACK_RETRY_MS = 3000;
 const GIT_REFRESH_MUTATING_TOOLS = new Set([
     'bash',
     'edit',
@@ -1526,7 +1527,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
             );
         };
 
-        // Question tool: show parsed Q&A summary
+        // Question tool: show parsed Q&A summary or question content from input
         if (part.tool === 'question') {
             if (state.status === 'completed' && hasStringOutput) {
                 const parsedQA = parseQuestionOutput(outputString);
@@ -1557,6 +1558,35 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                             {state.error}
                         </div>
                     </div>
+                );
+            }
+
+            // Show question content from input whenever available, whether the tool is
+            // pending/running or completed without parseable output. This ensures question
+            // text persists across refreshes even if the QuestionCard store data is lost.
+            const questionInput = input as { questions?: Array<{ question?: string; header?: string; options?: Array<{ label: string; description: string }>; multiple?: boolean }> } | undefined;
+            if (questionInput?.questions && Array.isArray(questionInput.questions) && questionInput.questions.length > 0) {
+                return renderScrollableBlock(
+                    <div className="space-y-2">
+                        {questionInput.questions.map((q, index) => (
+                            <div key={index} className="space-y-0.5">
+                                {q.header ? (
+                                    <div className="typography-micro text-muted-foreground">{q.header}</div>
+                                ) : null}
+                                <div className="typography-meta text-foreground">{q.question}</div>
+                                {Array.isArray(q.options) && q.options.length > 0 ? (
+                                    <div className="flex flex-wrap gap-1 mt-0.5">
+                                        {q.options.map((opt) => (
+                                            <span key={opt.label} className="typography-micro px-1.5 py-0.5 rounded bg-muted/30 border border-border/30 text-muted-foreground">
+                                                {opt.label}
+                                            </span>
+                                        ))}
+                                    </div>
+                                ) : null}
+                            </div>
+                        ))}
+                    </div>,
+                    { maxHeightClass: 'max-h-[40vh]' }
                 );
             }
 
@@ -1851,6 +1881,10 @@ const ToolPart: React.FC<ToolPartProps> = ({
         return parseTaskMetadataBlock(taskOutputString);
     }, [taskOutputString]);
 
+    // Track whether fallback session resolution has failed at least once.
+    // When true, resolveFallbackTaskSessionId widens its time window (3s → 8s).
+    const [taskFallbackRetried, setTaskFallbackRetried] = React.useState(false);
+
     const explicitTaskSessionId = React.useMemo<string | undefined>(() => {
         if (!isTaskTool) {
             return undefined;
@@ -1885,8 +1919,9 @@ const ToolPart: React.FC<ToolPartProps> = ({
                 isTaskFinalized: isFinalized,
                 sessions: storeState.session,
                 sessionStatusMap: storeState.session_status,
+                hasRetried: taskFallbackRetried,
             });
-        }, [explicitTaskSessionId, isTaskTool, currentSessionId, taskSessionResolutionStart, isFinalized]),
+        }, [explicitTaskSessionId, isTaskTool, currentSessionId, taskSessionResolutionStart, isFinalized, taskFallbackRetried]),
         currentDirectory,
     );
 
@@ -1950,16 +1985,54 @@ const ToolPart: React.FC<ToolPartProps> = ({
     const childSessionActivity = useSessionActivity(taskSessionId, currentDirectory);
     const [taskChildSeenActive, setTaskChildSeenActive] = React.useState(false);
     const [taskChildPollingStopped, setTaskChildPollingStopped] = React.useState(false);
+    const [taskPendingFinalFetch, setTaskPendingFinalFetch] = React.useState(false);
 
     const taskPollNoChangeCountRef = React.useRef(0);
     const taskPollLastSignatureRef = React.useRef<string>('');
+    const taskFinalFetchDoneRef = React.useRef(false);
 
     React.useEffect(() => {
         setTaskChildSeenActive(false);
         setTaskChildPollingStopped(false);
+        setTaskPendingFinalFetch(false);
         taskPollNoChangeCountRef.current = 0;
         taskPollLastSignatureRef.current = '';
+        taskFinalFetchDoneRef.current = false;
+        setTaskFallbackRetried(false);
     }, [taskSessionId]);
+
+    // Widen fallback resolution window only after a real retry boundary.
+    React.useEffect(() => {
+        if (!isTaskTool || taskFallbackRetried || explicitTaskSessionId != null || taskSessionId != null || isFinalized) {
+            return;
+        }
+
+        const sinceStart =
+            typeof taskSessionResolutionStart === 'number'
+                ? Date.now() - taskSessionResolutionStart
+                : 0;
+        const delay = Math.max(0, TASK_TOOL_FALLBACK_RETRY_MS - sinceStart);
+
+        if (typeof window === 'undefined') {
+            setTaskFallbackRetried(true);
+            return;
+        }
+
+        const timer = window.setTimeout(() => {
+            setTaskFallbackRetried(true);
+        }, delay);
+
+        return () => {
+            window.clearTimeout(timer);
+        };
+    }, [
+        explicitTaskSessionId,
+        isFinalized,
+        isTaskTool,
+        taskFallbackRetried,
+        taskSessionId,
+        taskSessionResolutionStart,
+    ]);
 
     React.useEffect(() => {
         if (!isTaskTool || !taskSessionId) {
@@ -1978,34 +2051,126 @@ const ToolPart: React.FC<ToolPartProps> = ({
             if (taskChildPollingStopped) {
                 setTaskChildPollingStopped(false);
             }
+            if (taskPendingFinalFetch) {
+                setTaskPendingFinalFetch(false);
+            }
             return;
         }
 
-        if (!taskChildSeenActive || taskChildPollingStopped || childSessionTaskSummaryEntries.length === 0) {
+        // Always stop polling if already done.
+        if (taskChildPollingStopped && taskFinalFetchDoneRef.current) {
             return;
         }
 
-        if (typeof window === 'undefined') {
-            setTaskChildPollingStopped(true);
-            return;
+        // Normal settle path: child went idle after we saw it active, and we have entries.
+        // Schedule a grace period before marking polling as stopped.
+        if (taskChildSeenActive && childSessionTaskSummaryEntries.length > 0 && !taskChildPollingStopped) {
+            if (typeof window === 'undefined') {
+                setTaskChildPollingStopped(true);
+                return;
+            }
+
+            const timer = window.setTimeout(() => {
+                setTaskChildPollingStopped(true);
+            }, TASK_TOOL_SETTLE_GRACE_MS);
+
+            return () => {
+                window.clearTimeout(timer);
+            };
         }
 
-        const timer = window.setTimeout(() => {
-            setTaskChildPollingStopped(true);
-        }, TASK_TOOL_SETTLE_GRACE_MS);
+        // Final-fetch path: child went idle before parent saw it active, or we have no
+        // entries yet. First stop polling after the settle grace period. A separate
+        // effect performs the final fetch once polling has fully stopped, avoiding
+        // races with any in-flight polling response.
+        if (!taskChildPollingStopped && !taskFinalFetchDoneRef.current) {
+            if (typeof window === 'undefined') {
+                setTaskPendingFinalFetch(true);
+                setTaskChildPollingStopped(true);
+                return;
+            }
 
-        return () => {
-            window.clearTimeout(timer);
-        };
+            const timer = window.setTimeout(() => {
+                setTaskPendingFinalFetch(true);
+                setTaskChildPollingStopped(true);
+            }, TASK_TOOL_SETTLE_GRACE_MS);
+
+            return () => {
+                window.clearTimeout(timer);
+            };
+        }
     }, [
         childSessionActivity.phase,
         childSessionHasInFlightTools,
         childSessionTaskSummaryEntries.length,
+        currentDirectory,
         activeLatched,
         isFinalized,
         isTaskTool,
+        taskPendingFinalFetch,
         taskChildPollingStopped,
         taskChildSeenActive,
+        taskSessionId,
+    ]);
+
+    React.useEffect(() => {
+        if (!isTaskTool || !taskSessionId || !taskChildPollingStopped || !taskPendingFinalFetch || taskFinalFetchDoneRef.current) {
+            return;
+        }
+
+        let cancelled = false;
+        const capturedSessionId = taskSessionId;
+
+        const runFinalFetch = async () => {
+            try {
+                const scopedClient = opencodeClient.getScopedSdkClient(currentDirectory);
+                const response = await scopedClient.session.messages({
+                    sessionID: capturedSessionId,
+                    limit: TASK_TOOL_INITIAL_FETCH_LIMIT,
+                });
+
+                if (cancelled) {
+                    return;
+                }
+
+                const messages = response.data ?? [];
+                if (Array.isArray(messages) && messages.length > 0) {
+                    const childStores = getSyncChildStores();
+                    childStores.update(currentDirectory, (prev) => {
+                        const records = messages as SessionMessageWithParts[];
+                        const partPatch: Record<string, import('@opencode-ai/sdk/v2').Part[]> = { ...prev.part };
+                        for (const rec of records) {
+                            partPatch[rec.info.id] = rec.parts;
+                        }
+                        return {
+                            message: { ...prev.message, [capturedSessionId]: records.map((r) => r.info) as import('@opencode-ai/sdk/v2').Message[] },
+                            part: partPatch,
+                        };
+                    });
+                }
+
+                taskFinalFetchDoneRef.current = true;
+                setTaskPendingFinalFetch(false);
+            } catch {
+                if (cancelled) {
+                    return;
+                }
+
+                setTaskPendingFinalFetch(false);
+                setTaskChildPollingStopped(false);
+            }
+        };
+
+        void runFinalFetch();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [
+        currentDirectory,
+        isTaskTool,
+        taskChildPollingStopped,
+        taskPendingFinalFetch,
         taskSessionId,
     ]);
 
@@ -2051,7 +2216,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
         const shouldPoll =
             !taskChildPollingStopped
             && (childSessionHasInFlightTools || childSessionActive || childSessionTaskSummaryEntries.length === 0);
-        const shouldFetchSnapshot = childSessionTaskSummaryEntries.length === 0 || shouldPoll;
+        const shouldFetchSnapshot = !taskPendingFinalFetch && (childSessionTaskSummaryEntries.length === 0 || shouldPoll);
         if (!shouldFetchSnapshot) {
             return;
         }
@@ -2151,6 +2316,7 @@ const ToolPart: React.FC<ToolPartProps> = ({
         currentDirectory,
         isActive,
         isTaskTool,
+        taskPendingFinalFetch,
         taskChildPollingStopped,
         taskSessionId,
     ]);

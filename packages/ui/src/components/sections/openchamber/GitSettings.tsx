@@ -1,7 +1,9 @@
 import React from 'react';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Radio } from '@/components/ui/radio';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { useUIStore } from '@/stores/useUIStore';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { setFilesViewShowGitignored, useFilesViewShowGitignored } from '@/lib/filesViewShowGitignored';
 
@@ -9,14 +11,21 @@ export const GitSettings: React.FC = () => {
   const settingsGitmojiEnabled = useConfigStore((state) => state.settingsGitmojiEnabled);
   const setSettingsGitmojiEnabled = useConfigStore((state) => state.setSettingsGitmojiEnabled);
   const showGitignored = useFilesViewShowGitignored();
+  const gitChangesViewMode = useUIStore((state) => state.gitChangesViewMode);
+  const setGitChangesViewMode = useUIStore((state) => state.setGitChangesViewMode);
 
   const [isLoading, setIsLoading] = React.useState(true);
+
+  type GitSettingsPayload = {
+    gitmojiEnabled?: boolean;
+    gitChangesViewMode?: 'flat' | 'tree';
+  };
 
   // Load current settings
   React.useEffect(() => {
     const loadSettings = async () => {
       try {
-        let data: { gitmojiEnabled?: boolean } | null = null;
+        let data: GitSettingsPayload | null = null;
 
         // 1. Runtime settings API (VSCode)
         if (!data) {
@@ -30,6 +39,11 @@ export const GitSettings: React.FC = () => {
                   gitmojiEnabled: typeof (settings as Record<string, unknown>).gitmojiEnabled === 'boolean'
                     ? ((settings as Record<string, unknown>).gitmojiEnabled as boolean)
                     : undefined,
+                  gitChangesViewMode:
+                    (settings as Record<string, unknown>).gitChangesViewMode === 'flat'
+                    || (settings as Record<string, unknown>).gitChangesViewMode === 'tree'
+                      ? ((settings as Record<string, unknown>).gitChangesViewMode as 'flat' | 'tree')
+                      : undefined,
                 };
               }
             } catch {
@@ -53,6 +67,9 @@ export const GitSettings: React.FC = () => {
           if (typeof data.gitmojiEnabled === 'boolean') {
             setSettingsGitmojiEnabled(data.gitmojiEnabled);
           }
+          if (data.gitChangesViewMode === 'flat' || data.gitChangesViewMode === 'tree') {
+            setGitChangesViewMode(data.gitChangesViewMode);
+          }
         }
 
       } catch (error) {
@@ -62,7 +79,7 @@ export const GitSettings: React.FC = () => {
       }
     };
     loadSettings();
-  }, [setSettingsGitmojiEnabled]);
+  }, [setGitChangesViewMode, setSettingsGitmojiEnabled]);
 
   const handleGitmojiChange = React.useCallback(async (enabled: boolean) => {
     setSettingsGitmojiEnabled(enabled);
@@ -75,6 +92,15 @@ export const GitSettings: React.FC = () => {
     }
   }, [setSettingsGitmojiEnabled]);
 
+  const handleGitChangesViewModeChange = React.useCallback((mode: 'flat' | 'tree') => {
+    if (mode === gitChangesViewMode) {
+      return;
+    }
+
+    setGitChangesViewMode(mode);
+    void updateDesktopSettings({ gitChangesViewMode: mode });
+  }, [gitChangesViewMode, setGitChangesViewMode]);
+
   if (isLoading) {
     return null;
   }
@@ -86,6 +112,43 @@ export const GitSettings: React.FC = () => {
       </div>
 
       <section className="px-2 pb-2 pt-0 space-y-0.5">
+        <div className="pt-1 pb-1">
+          <h4 className="typography-ui-header font-medium text-foreground">Changes View</h4>
+          <div role="radiogroup" aria-label="Git changes view mode" className="mt-0.5 space-y-0">
+            {[
+              { id: 'flat' as const, label: 'Flat List' },
+              { id: 'tree' as const, label: 'Tree View' },
+            ].map((option) => {
+              const selected = gitChangesViewMode === option.id;
+              return (
+                <div
+                  key={option.id}
+                  role="button"
+                  tabIndex={0}
+                  aria-pressed={selected}
+                  onClick={() => { handleGitChangesViewModeChange(option.id); }}
+                  onKeyDown={(event) => {
+                    if (event.key === ' ' || event.key === 'Enter') {
+                      event.preventDefault();
+                      handleGitChangesViewModeChange(option.id);
+                    }
+                  }}
+                  className="flex w-full items-center gap-2 py-0 text-left"
+                >
+                  <Radio
+                    checked={selected}
+                    onChange={() => { handleGitChangesViewModeChange(option.id); }}
+                    ariaLabel={`Git changes view mode: ${option.label}`}
+                  />
+                  <span className={selected ? 'typography-ui-label font-normal text-foreground' : 'typography-ui-label font-normal text-foreground/50'}>
+                    {option.label}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
         <div
           className="group flex cursor-pointer items-center gap-2 py-1.5"
           role="button"

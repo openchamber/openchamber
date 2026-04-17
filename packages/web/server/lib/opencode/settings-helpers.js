@@ -307,6 +307,18 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.showExpandedEditTools === 'boolean') {
       result.showExpandedEditTools = candidate.showExpandedEditTools;
     }
+    if (typeof candidate.timeFormatPreference === 'string') {
+      const mode = candidate.timeFormatPreference.trim();
+      if (mode === 'auto' || mode === '12h' || mode === '24h') {
+        result.timeFormatPreference = mode;
+      }
+    }
+    if (typeof candidate.weekStartPreference === 'string') {
+      const mode = candidate.weekStartPreference.trim();
+      if (mode === 'auto' || mode === 'sunday' || mode === 'monday') {
+        result.weekStartPreference = mode;
+      }
+    }
     if (typeof candidate.chatRenderMode === 'string') {
       const mode = candidate.chatRenderMode.trim();
       if (mode === 'sorted' || mode === 'live') {
@@ -375,6 +387,12 @@ export const createSettingsHelpers = (dependencies) => {
       const mode = candidate.diffViewMode.trim();
       if (mode === 'single' || mode === 'stacked') {
         result.diffViewMode = mode;
+      }
+    }
+    if (typeof candidate.gitChangesViewMode === 'string') {
+      const mode = candidate.gitChangesViewMode.trim();
+      if (mode === 'flat' || mode === 'tree') {
+        result.gitChangesViewMode = mode;
       }
     }
     if (typeof candidate.directoryShowHidden === 'boolean') {

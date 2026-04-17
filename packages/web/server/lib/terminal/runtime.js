@@ -130,7 +130,7 @@ export function createTerminalRuntime({
     let lastError = null;
     for (const shell of shellCandidates) {
       try {
-        const ptyProcess = pty.spawn(shell, [], {
+        const ptyOptions = {
           name: 'xterm-256color',
           cols: cols || 80,
           rows: rows || 24,
@@ -140,7 +140,13 @@ export function createTerminalRuntime({
             TERM: 'xterm-256color',
             COLORTERM: 'truecolor',
           },
-        });
+        };
+
+        if (process.platform === 'win32') {
+          ptyOptions.useConpty = true;
+        }
+
+        const ptyProcess = pty.spawn(shell, [], ptyOptions);
 
         return { ptyProcess, shell };
       } catch (error) {

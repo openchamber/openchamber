@@ -1,6 +1,6 @@
 {
   "name": "openchamber-monorepo",
-  "version": "1.9.4",
+  "version": "1.9.5",
   "description": "OpenChamber monorepo workspace for web, ui, and desktop runtimes",
   "private": true,
   "type": "module",
@@ -89,7 +89,7 @@
     "@ibm/plex": "^6.4.1",
     "@lezer/highlight": "^1.2.3",
     "@octokit/rest": "^22.0.1",
-    "@opencode-ai/sdk": "^1.4.3",
+    "@opencode-ai/sdk": "^1.4.6",
     "@radix-ui/react-collapsible": "^1.1.12",
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-dropdown-menu": "^2.1.16",

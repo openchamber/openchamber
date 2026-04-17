@@ -60,6 +60,7 @@ import { createOpenCodeResolutionRuntime } from './lib/opencode/opencode-resolut
 import { createBootstrapRuntime } from './lib/opencode/bootstrap-runtime.js';
 import { createSessionRuntime } from './lib/opencode/session-runtime.js';
 import { createOpenCodeWatcherRuntime } from './lib/opencode/watcher.js';
+import { createScheduledTasksRuntime } from './lib/scheduled-tasks/runtime.js';
 import { createServerStartupRuntime } from './lib/opencode/server-startup-runtime.js';
 import { createTunnelWiringRuntime } from './lib/opencode/tunnel-wiring-runtime.js';
 import { createStartupPipelineRuntime } from './lib/opencode/startup-pipeline-runtime.js';
@@ -70,6 +71,7 @@ import { createNotificationTriggerRuntime } from './lib/notifications/runtime.js
 import { createPushRuntime } from './lib/notifications/push-runtime.js';
 import { createNotificationTemplateRuntime } from './lib/notifications/template-runtime.js';
 import { createGracefulShutdownRuntime } from './lib/opencode/shutdown-runtime.js';
+import { createProjectConfigRuntime } from './lib/projects/project-config.js';
 import webPush from 'web-push';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -79,6 +81,7 @@ const DEFAULT_PORT = 3000;
 const DESKTOP_NOTIFY_PREFIX = '[OpenChamberDesktopNotify] ';
 const uiNotificationClients = new Set();
 const uiNotificationWsClients = new Set();
+const uiOpenChamberEventClients = new Set();
 const HEALTH_CHECK_INTERVAL = 15000;
 const SHUTDOWN_TIMEOUT = 10000;
 const MODELS_DEV_API_URL = 'https://models.dev/api.json';
@@ -151,6 +154,7 @@ const sanitizeProjects = (...args) => settingsNormalizationRuntime.sanitizeProje
 
 const OPENCHAMBER_USER_CONFIG_ROOT = path.join(os.homedir(), '.config', 'openchamber');
 const OPENCHAMBER_USER_THEMES_DIR = path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'themes');
+const OPENCHAMBER_PROJECTS_CONFIG_DIR = path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'projects');
 
 const MAX_THEME_JSON_BYTES = 512 * 1024;
 
@@ -323,6 +327,12 @@ const sessionRuntime = createSessionRuntime({
   writeSseEvent,
   getNotificationClients: () => uiNotificationClients,
   broadcastEvent: broadcastGlobalUiEvent,
+});
+
+const projectConfigRuntime = createProjectConfigRuntime({
+  fsPromises,
+  path,
+  projectsDirPath: OPENCHAMBER_PROJECTS_CONFIG_DIR,
 });
 
 // HMR-persistent state via globalThis
@@ -812,6 +822,36 @@ const waitForOpenCodeReady = (...args) => openCodeLifecycleRuntime.waitForOpenCo
 const waitForAgentPresence = (...args) => openCodeLifecycleRuntime.waitForAgentPresence(...args);
 const refreshOpenCodeAfterConfigChange = (...args) => openCodeLifecycleRuntime.refreshOpenCodeAfterConfigChange(...args);
 const startHealthMonitoring = () => openCodeLifecycleRuntime.startHealthMonitoring(HEALTH_CHECK_INTERVAL);
+const scheduledTasksRuntime = createScheduledTasksRuntime({
+  projectConfigRuntime,
+  listProjects: async () => {
+    const settings = await readSettingsFromDiskMigrated();
+    return sanitizeProjects(settings?.projects || []);
+  },
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+  waitForOpenCodeReady,
+  emitTaskRunEvent: (event) => {
+    for (const client of uiOpenChamberEventClients) {
+      try {
+        writeSseEvent(client, {
+          type: 'openchamber:scheduled-task-ran',
+          properties: {
+            projectId: event.projectID,
+            taskId: event.taskID,
+            ranAt: event.ranAt,
+            status: event.status,
+            ...(event.sessionID ? { sessionId: event.sessionID } : {}),
+          },
+        });
+      } catch {
+        uiOpenChamberEventClients.delete(client);
+      }
+    }
+  },
+  logger: console,
+});
+
 const ensureGlobalWatcherStarted = async () => {
   if (globalWatcherStartPromise) {
     return globalWatcherStartPromise;
@@ -882,6 +922,7 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
     activeTunnelController = value;
   },
   tunnelAuthController,
+  scheduledTasksRuntime,
 });
 
 const gracefulShutdown = (...args) => gracefulShutdownRuntime.gracefulShutdown(...args);
@@ -1031,6 +1072,10 @@ async function main(options = {}) {
     getOpenCodeAuthHeaders,
     getOpenCodePort: () => openCodePort,
     buildAugmentedPath,
+    projectConfigRuntime,
+    scheduledTasksRuntime,
+    getOpenChamberEventClients: () => uiOpenChamberEventClients,
+    writeSseEvent,
   });
 
   const startupPipelineResult = await startupPipelineRuntime.run({
@@ -1080,6 +1125,12 @@ async function main(options = {}) {
   });
   terminalRuntime = startupPipelineResult.terminalRuntime;
   messageStreamRuntime = startupPipelineResult.messageStreamRuntime;
+
+  try {
+    await scheduledTasksRuntime.start();
+  } catch (error) {
+    console.warn('[ScheduledTasks] Failed to start runtime:', error?.message || error);
+  }
 
   return {
     expressApp: app,

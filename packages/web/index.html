@@ -501,9 +501,14 @@
     </div>
 
     <script>
-      // Fallback: hide loading screen after 10 seconds if React fails to load
+      // Fallback: hide loading screen after 10 seconds if React fails to load.
+      // Desktop shells manage their own splash via the injected boot outcome;
+      // do not force-remove for desktop windows.
       setTimeout(function() {
-        const loading = document.getElementById('initial-loading');
+        if (typeof window.__OPENCHAMBER_LOCAL_ORIGIN__ === 'string' && window.__OPENCHAMBER_LOCAL_ORIGIN__.length > 0) {
+          return;
+        }
+        var loading = document.getElementById('initial-loading');
         if (loading) {
           console.warn('Loading screen timeout - forcing hide after 10s');
           loading.classList.add('fade-out');

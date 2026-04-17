@@ -13,6 +13,8 @@ export type UserMessageRenderingMode = 'markdown' | 'plain';
 export type ChatRenderMode = 'sorted' | 'live';
 export type ActivityRenderMode = 'collapsed' | 'summary';
 export type SessionRetentionAction = 'archive' | 'delete';
+export type TimeFormatPreference = 'auto' | '12h' | '24h';
+export type WeekStartPreference = 'auto' | 'sunday' | 'monday';
 
 type ContextPanelTab = {
   id: string;
@@ -481,12 +483,14 @@ interface UIStore {
   pendingFileFocusPath: string | null;
   isMobile: boolean;
   isKeyboardOpen: boolean;
+  isQuickOpenOpen: boolean;
   isCommandPaletteOpen: boolean;
   isHelpDialogOpen: boolean;
   isAboutDialogOpen: boolean;
   isOpenCodeStatusDialogOpen: boolean;
   openCodeStatusText: string;
   isSessionCreateDialogOpen: boolean;
+  isScheduledTasksDialogOpen: boolean;
   isSettingsDialogOpen: boolean;
   isModelSelectorOpen: boolean;
   sidebarSection: SidebarSection;
@@ -524,6 +528,7 @@ interface UIStore {
   diffFileLayout: Record<string, 'inline' | 'side-by-side'>;
   diffWrapLines: boolean;
   diffViewMode: 'single' | 'stacked';
+  gitChangesViewMode: 'flat' | 'tree';
   isTimelineDialogOpen: boolean;
   isImagePreviewOpen: boolean;
   nativeNotificationsEnabled: boolean;
@@ -555,6 +560,8 @@ interface UIStore {
   showToolFileIcons: boolean;
   showExpandedBashTools: boolean;
   showExpandedEditTools: boolean;
+  timeFormatPreference: TimeFormatPreference;
+  weekStartPreference: WeekStartPreference;
   mermaidRenderingMode: MermaidRenderingMode;
   userMessageRenderingMode: UserMessageRenderingMode;
   stickyUserHeader: boolean;
@@ -597,6 +604,8 @@ interface UIStore {
   navigateToDiff: (filePath: string) => void;
   consumePendingDiffFile: () => string | null;
   setIsMobile: (isMobile: boolean) => void;
+  setQuickOpenOpen: (open: boolean) => void;
+  toggleQuickOpen: () => void;
   toggleCommandPalette: () => void;
   setCommandPaletteOpen: (open: boolean) => void;
   toggleHelpDialog: () => void;
@@ -605,6 +614,7 @@ interface UIStore {
   setOpenCodeStatusDialogOpen: (open: boolean) => void;
   setOpenCodeStatusText: (text: string) => void;
   setSessionCreateDialogOpen: (open: boolean) => void;
+  setScheduledTasksDialogOpen: (open: boolean) => void;
   setSettingsDialogOpen: (open: boolean) => void;
   setModelSelectorOpen: (open: boolean) => void;
   applyTheme: () => void;
@@ -645,6 +655,7 @@ interface UIStore {
   setDiffFileLayout: (filePath: string, mode: 'inline' | 'side-by-side') => void;
   setDiffWrapLines: (wrap: boolean) => void;
   setDiffViewMode: (mode: 'single' | 'stacked') => void;
+  setGitChangesViewMode: (mode: 'flat' | 'tree') => void;
   setMultiRunLauncherOpen: (open: boolean) => void;
   setTimelineDialogOpen: (open: boolean) => void;
   setImagePreviewOpen: (open: boolean) => void;
@@ -665,6 +676,8 @@ interface UIStore {
   setShowToolFileIcons: (value: boolean) => void;
   setShowExpandedBashTools: (value: boolean) => void;
   setShowExpandedEditTools: (value: boolean) => void;
+  setTimeFormatPreference: (value: TimeFormatPreference) => void;
+  setWeekStartPreference: (value: WeekStartPreference) => void;
   setMermaidRenderingMode: (value: MermaidRenderingMode) => void;
   setUserMessageRenderingMode: (value: UserMessageRenderingMode) => void;
   setStickyUserHeader: (value: boolean) => void;
@@ -712,12 +725,14 @@ export const useUIStore = create<UIStore>()(
         pendingFileFocusPath: null,
         isMobile: false,
         isKeyboardOpen: false,
+        isQuickOpenOpen: false,
         isCommandPaletteOpen: false,
         isHelpDialogOpen: false,
         isAboutDialogOpen: false,
         isOpenCodeStatusDialogOpen: false,
         openCodeStatusText: '',
         isSessionCreateDialogOpen: false,
+        isScheduledTasksDialogOpen: false,
         isSettingsDialogOpen: false,
         isModelSelectorOpen: false,
         sidebarSection: 'sessions',
@@ -751,6 +766,7 @@ export const useUIStore = create<UIStore>()(
         diffFileLayout: {},
         diffWrapLines: false,
         diffViewMode: 'stacked',
+        gitChangesViewMode: 'flat',
         isTimelineDialogOpen: false,
         isImagePreviewOpen: false,
         nativeNotificationsEnabled: false,
@@ -780,6 +796,8 @@ export const useUIStore = create<UIStore>()(
         showToolFileIcons: true,
         showExpandedBashTools: false,
         showExpandedEditTools: false,
+        timeFormatPreference: 'auto',
+        weekStartPreference: 'auto',
         mermaidRenderingMode: 'svg',
         userMessageRenderingMode: 'markdown',
         stickyUserHeader: true,
@@ -1221,6 +1239,14 @@ export const useUIStore = create<UIStore>()(
           set({ isMobile });
         },
 
+        setQuickOpenOpen: (open) => {
+          set({ isQuickOpenOpen: open });
+        },
+
+        toggleQuickOpen: () => {
+          set((state) => ({ isQuickOpenOpen: !state.isQuickOpenOpen }));
+        },
+
         toggleCommandPalette: () => {
           set((state) => ({ isCommandPaletteOpen: !state.isCommandPaletteOpen }));
         },
@@ -1251,6 +1277,10 @@ export const useUIStore = create<UIStore>()(
 
         setSessionCreateDialogOpen: (open) => {
           set({ isSessionCreateDialogOpen: open });
+        },
+
+        setScheduledTasksDialogOpen: (open) => {
+          set({ isScheduledTasksDialogOpen: open });
         },
 
         setSettingsDialogOpen: (open) => {
@@ -1430,6 +1460,10 @@ export const useUIStore = create<UIStore>()(
 
         setDiffViewMode: (mode) => {
           set({ diffViewMode: mode });
+        },
+
+        setGitChangesViewMode: (mode) => {
+          set({ gitChangesViewMode: mode });
         },
  
         setInputBarOffset: (offset) => {
@@ -1684,6 +1718,14 @@ export const useUIStore = create<UIStore>()(
         setShowExpandedEditTools: (value) => {
           set({ showExpandedEditTools: value });
         },
+
+        setTimeFormatPreference: (value) => {
+          set({ timeFormatPreference: value });
+        },
+
+        setWeekStartPreference: (value) => {
+          set({ weekStartPreference: value });
+        },
         setMermaidRenderingMode: (value) => {
           set({ mermaidRenderingMode: value });
         },
@@ -1746,7 +1788,7 @@ export const useUIStore = create<UIStore>()(
       {
         name: 'ui-store',
         storage: createJSONStorage(() => getSafeStorage()),
-        version: 7,
+        version: 8,
         migrate: (persistedState, version) => {
           if (!persistedState || typeof persistedState !== 'object') {
             return persistedState;
@@ -1815,6 +1857,12 @@ export const useUIStore = create<UIStore>()(
             state.contextPanelByDirectory = sanitizeContextPanelByDirectory(state.contextPanelByDirectory);
           }
 
+          if (version < 8) {
+            if (state.gitChangesViewMode !== 'flat' && state.gitChangesViewMode !== 'tree') {
+              state.gitChangesViewMode = 'flat';
+            }
+          }
+
           return state;
         },
         partialize: (state) => ({
@@ -1859,6 +1907,7 @@ export const useUIStore = create<UIStore>()(
           diffLayoutPreference: state.diffLayoutPreference,
           diffWrapLines: state.diffWrapLines,
           diffViewMode: state.diffViewMode,
+          gitChangesViewMode: state.gitChangesViewMode,
           nativeNotificationsEnabled: state.nativeNotificationsEnabled,
           notificationMode: state.notificationMode,
           showTerminalQuickKeysOnDesktop: state.showTerminalQuickKeysOnDesktop,
@@ -1876,6 +1925,8 @@ export const useUIStore = create<UIStore>()(
           showToolFileIcons: state.showToolFileIcons,
           showExpandedBashTools: state.showExpandedBashTools,
           showExpandedEditTools: state.showExpandedEditTools,
+          timeFormatPreference: state.timeFormatPreference,
+          weekStartPreference: state.weekStartPreference,
           mermaidRenderingMode: state.mermaidRenderingMode,
           userMessageRenderingMode: state.userMessageRenderingMode,
           stickyUserHeader: state.stickyUserHeader,

@@ -1822,6 +1822,15 @@ async function terminateProcessTree(pid, options = {}) {
 
   if (process.platform === 'win32') {
     try {
+      process.kill(pid);
+    } catch {
+    }
+
+    if (await waitForProcessExit(pid, 800)) {
+      return true;
+    }
+
+    try {
       spawnSync('taskkill', ['/pid', String(pid), '/t'], {
         stdio: 'ignore',
         timeout: 3000,

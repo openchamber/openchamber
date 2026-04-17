@@ -29,6 +29,7 @@ type MenuAction =
   | 'about'
   | 'settings'
   | 'command-palette'
+  | 'quick-open'
   | 'new-session'
   | 'new-worktree-session'
   | 'change-workspace'
@@ -50,6 +51,7 @@ export const useMenuActions = (
 ) => {
   const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
   const toggleCommandPalette = useUIStore((s) => s.toggleCommandPalette);
+  const setQuickOpenOpen = useUIStore((s) => s.setQuickOpenOpen);
   const toggleHelpDialog = useUIStore((s) => s.toggleHelpDialog);
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
   const setSessionSwitcherOpen = useUIStore((s) => s.setSessionSwitcherOpen);
@@ -137,6 +139,10 @@ export const useMenuActions = (
 
         case 'command-palette':
           toggleCommandPalette();
+          break;
+
+        case 'quick-open':
+          setQuickOpenOpen(true);
           break;
 
         case 'new-session':
@@ -227,6 +233,7 @@ export const useMenuActions = (
       setAboutDialogOpen,
       setActiveMainTab,
       setSessionSwitcherOpen,
+      setQuickOpenOpen,
       setSettingsDialogOpen,
       setThemeMode,
       toggleCommandPalette,

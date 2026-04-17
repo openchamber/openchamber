@@ -105,6 +105,13 @@ export function keyToShortcutToken(key: string): string {
 
 const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
   {
+    id: 'open_quick_open',
+    defaultCombo: 'mod+p',
+    label: 'Open quick open',
+    description: 'Open the quick open dialog',
+    customizable: true,
+  },
+  {
     id: 'open_command_palette',
     defaultCombo: 'mod+k',
     label: 'Open command palette',

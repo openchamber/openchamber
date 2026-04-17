@@ -26,6 +26,7 @@ import {
   RiFileTransferLine,
   RiCodeSSlashLine,
   RiNodeTree,
+  RiDownloadLine,
 } from '@remixicon/react';
 import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
@@ -58,7 +59,7 @@ import {
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useFileSearchStore } from '@/stores/useFileSearchStore';
 import { useDeviceInfo } from '@/lib/device';
-import { cn, getModifierLabel, hasModifier } from '@/lib/utils';
+import { cn, getModifierLabel, getRevealLabel, hasModifier } from '@/lib/utils';
 import { getLanguageFromExtension, getImageMimeType, isImageFile } from '@/lib/toolHelpers';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { EditorView } from '@codemirror/view';
@@ -292,6 +293,7 @@ interface FileRowProps {
     canDelete: boolean;
     canReveal: boolean;
   };
+  downloadFile?: (path: string) => Promise<void>;
   contextMenuPath: string | null;
   setContextMenuPath: (path: string | null) => void;
   onSelect: (node: FileNode) => void;
@@ -308,6 +310,7 @@ const FileRow: React.FC<FileRowProps> = ({
   status,
   badge,
   permissions,
+  downloadFile,
   contextMenuPath,
   setContextMenuPath,
   onSelect,
@@ -414,9 +417,17 @@ const FileRow: React.FC<FileRowProps> = ({
               }}>
                 <RiFileCopyLine className="mr-2 h-4 w-4" /> Copy Path
               </DropdownMenuItem>
+              {!isDir && downloadFile && (
+                <DropdownMenuItem onClick={(e) => {
+                  e.stopPropagation();
+                  void downloadFile(node.path);
+                }}>
+                  <RiDownloadLine className="mr-2 h-4 w-4" /> Save
+                </DropdownMenuItem>
+              )}
               {canReveal && (
                 <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onRevealPath(node.path); }}>
-                  <RiFolderReceivedLine className="mr-2 h-4 w-4" /> Reveal in Finder
+                  <RiFolderReceivedLine className="mr-2 h-4 w-4" /> {getRevealLabel()}
                 </DropdownMenuItem>
               )}
               {isDir && (canCreateFile || canCreateFolder) && (
@@ -906,6 +917,37 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       void loadDirectory(root);
     }
   }, [loadDirectory, root, showGitignored, showHidden]);
+
+  // Auto-refresh expanded directories when user returns to the tab
+  React.useEffect(() => {
+    if (!files.listDirectory) return;
+
+    const handleVisibilityChange = () => {
+      if (!document.hidden && expandedPaths.length > 0) {
+        for (const dir of expandedPaths) {
+          void refreshDirectory(dir);
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [expandedPaths, files.listDirectory, refreshDirectory]);
+
+  // Poll expanded directories for external changes
+  React.useEffect(() => {
+    if (!files.listDirectory) return;
+    if (expandedPaths.length === 0) return;
+
+    const interval = setInterval(() => {
+      if (document.hidden) return;
+      for (const dir of expandedPaths) {
+        void refreshDirectory(dir);
+      }
+    }, 8000);
+
+    return () => clearInterval(interval);
+  }, [expandedPaths, files.listDirectory, refreshDirectory]);
 
   const handleDialogSubmit = React.useCallback(async (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -1607,6 +1649,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
             status={!isDir ? getFileStatus(node.path) : undefined}
             badge={isDir ? getFolderBadge(node.path) : undefined}
             permissions={{ canRename, canCreateFile, canCreateFolder, canDelete, canReveal }}
+            downloadFile={files.downloadFile}
             contextMenuPath={contextMenuPath}
             setContextMenuPath={setContextMenuPath}
             onSelect={handleSelectFile}
@@ -2392,6 +2435,22 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
             ) : (
               <RiFileCopy2Line className="h-4 w-4" />
             )}
+          </Button>
+        )}
+
+        {files.downloadFile && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              const fn = files.downloadFile;
+              if (fn) void fn(selectedFile.path);
+            }}
+            className="h-6 w-6 p-0"
+            title="Save file"
+            aria-label="Save file"
+          >
+            <RiDownloadLine className="h-4 w-4" />
           </Button>
         )}
 

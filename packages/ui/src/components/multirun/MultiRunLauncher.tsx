@@ -19,7 +19,9 @@ import type { CreateMultiRunParams, MultiRunModelSelection } from '@/types/multi
 import { ModelMultiSelect, generateInstanceId, type ModelSelectionWithId } from './ModelMultiSelect';
 import { BranchSelector, useBranchOptions } from './BranchSelector';
 import { AgentSelector } from './AgentSelector';
-import { isDesktopShell } from '@/lib/desktop';
+import { CommandAutocomplete, type CommandAutocompleteHandle } from '@/components/chat/CommandAutocomplete';
+import { FileMentionAutocomplete, type FileMentionHandle } from '@/components/chat/FileMentionAutocomplete';
+import { isDesktopShell, startDesktopWindowDrag } from '@/lib/desktop';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { PROJECT_ICON_MAP, PROJECT_COLOR_MAP, getProjectIconImageUrl } from '@/lib/projectMeta';
 import type { ProjectEntry } from '@/lib/api/types';
@@ -99,7 +101,14 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
   const [setupCommands, setSetupCommands] = React.useState<string[]>([]);
   const [isSetupCommandsOpen, setIsSetupCommandsOpen] = React.useState(false);
   const [isLoadingSetupCommands, setIsLoadingSetupCommands] = React.useState(false);
+  const [showFileMention, setShowFileMention] = React.useState(false);
+  const [mentionQuery, setMentionQuery] = React.useState('');
+  const [showCommandAutocomplete, setShowCommandAutocomplete] = React.useState(false);
+  const [commandQuery, setCommandQuery] = React.useState('');
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const promptTextareaRef = React.useRef<HTMLTextAreaElement>(null);
+  const mentionRef = React.useRef<FileMentionHandle>(null);
+  const commandRef = React.useRef<CommandAutocompleteHandle>(null);
 
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory ?? null);
   const homeDirectory = useDirectoryStore((state) => state.homeDirectory ?? null);
@@ -266,13 +275,7 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
       return;
     }
     if (isDesktopApp) {
-      try {
-        const { getCurrentWindow } = await import('@tauri-apps/api/window');
-        const window = getCurrentWindow();
-        await window.startDragging();
-      } catch {
-        // ignore
-      }
+      await startDesktopWindowDrag();
     }
   }, [isDesktopApp]);
 
@@ -394,6 +397,129 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
   const handleRemoveFile = (id: string) => {
     setAttachedFiles((prev) => prev.filter((f) => f.id !== id));
   };
+
+  const updateAutocompleteState = React.useCallback((value: string, cursorPosition: number) => {
+    if (value.startsWith('/')) {
+      const firstSpace = value.indexOf(' ');
+      const firstNewline = value.indexOf('\n');
+      const commandEnd = Math.min(
+        firstSpace === -1 ? value.length : firstSpace,
+        firstNewline === -1 ? value.length : firstNewline,
+      );
+
+      if (cursorPosition <= commandEnd && firstSpace === -1) {
+        setCommandQuery(value.substring(1, commandEnd));
+        setShowCommandAutocomplete(true);
+        setShowFileMention(false);
+        return;
+      }
+    }
+
+    setShowCommandAutocomplete(false);
+
+    const textBeforeCursor = value.substring(0, cursorPosition);
+    const lastAtSymbol = textBeforeCursor.lastIndexOf('@');
+    if (lastAtSymbol !== -1) {
+      const charBefore = lastAtSymbol > 0 ? textBeforeCursor[lastAtSymbol - 1] : null;
+      const textAfterAt = textBeforeCursor.substring(lastAtSymbol + 1);
+      const isWordBoundary = !charBefore || /\s/.test(charBefore);
+      if (isWordBoundary && !textAfterAt.includes(' ') && !textAfterAt.includes('\n')) {
+        setMentionQuery(textAfterAt);
+        setShowFileMention(true);
+      } else {
+        setShowFileMention(false);
+      }
+      return;
+    }
+
+    setShowFileMention(false);
+  }, []);
+
+  const handlePromptKeyDown = React.useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (showCommandAutocomplete && commandRef.current) {
+      if (event.key === 'Enter' || event.key === 'ArrowUp' || event.key === 'ArrowDown' || event.key === 'Escape' || event.key === 'Tab') {
+        event.preventDefault();
+        commandRef.current.handleKeyDown(event.key);
+        return;
+      }
+    }
+
+    if (showFileMention && mentionRef.current) {
+      if (event.key === 'Enter' || event.key === 'ArrowUp' || event.key === 'ArrowDown' || event.key === 'Escape' || event.key === 'Tab') {
+        event.preventDefault();
+        mentionRef.current.handleKeyDown(event.key);
+      }
+    }
+  }, [showCommandAutocomplete, showFileMention]);
+
+  const handleAutocompleteFileSelect = React.useCallback((file: { name: string; path: string; relativePath?: string }) => {
+    const textarea = promptTextareaRef.current;
+    const cursorPosition = textarea?.selectionStart ?? prompt.length;
+    const textBeforeCursor = prompt.substring(0, cursorPosition);
+    const lastAtSymbol = textBeforeCursor.lastIndexOf('@');
+    const mentionPath = (file.relativePath && file.relativePath.trim().length > 0)
+      ? file.relativePath.trim()
+      : (file.path || file.name);
+
+    const startIndex = lastAtSymbol !== -1 ? lastAtSymbol : cursorPosition;
+    const nextPrompt = `${prompt.substring(0, startIndex)}@${mentionPath} ${prompt.substring(cursorPosition)}`;
+    const nextCursor = startIndex + mentionPath.length + 2;
+
+    setPrompt(nextPrompt);
+    setShowFileMention(false);
+    setMentionQuery('');
+
+    requestAnimationFrame(() => {
+      const currentTextarea = promptTextareaRef.current;
+      if (currentTextarea) {
+        currentTextarea.selectionStart = nextCursor;
+        currentTextarea.selectionEnd = nextCursor;
+        currentTextarea.focus();
+      }
+      updateAutocompleteState(nextPrompt, nextCursor);
+    });
+  }, [prompt, updateAutocompleteState]);
+
+  const handleAutocompleteAgentSelect = React.useCallback((agentName: string) => {
+    const textarea = promptTextareaRef.current;
+    const cursorPosition = textarea?.selectionStart ?? prompt.length;
+    const textBeforeCursor = prompt.substring(0, cursorPosition);
+    const lastAtSymbol = textBeforeCursor.lastIndexOf('@');
+    const startIndex = lastAtSymbol !== -1 ? lastAtSymbol : cursorPosition;
+    const nextPrompt = `${prompt.substring(0, startIndex)}@${agentName} ${prompt.substring(cursorPosition)}`;
+    const nextCursor = startIndex + agentName.length + 2;
+
+    setPrompt(nextPrompt);
+    setShowFileMention(false);
+    setMentionQuery('');
+
+    requestAnimationFrame(() => {
+      const currentTextarea = promptTextareaRef.current;
+      if (currentTextarea) {
+        currentTextarea.selectionStart = nextCursor;
+        currentTextarea.selectionEnd = nextCursor;
+        currentTextarea.focus();
+      }
+      updateAutocompleteState(nextPrompt, nextCursor);
+    });
+  }, [prompt, updateAutocompleteState]);
+
+  const handleAutocompleteCommandSelect = React.useCallback((command: { name: string }) => {
+    const nextPrompt = `/${command.name} `;
+    setPrompt(nextPrompt);
+    setShowCommandAutocomplete(false);
+    setCommandQuery('');
+
+    requestAnimationFrame(() => {
+      const currentTextarea = promptTextareaRef.current;
+      if (currentTextarea) {
+        currentTextarea.focus();
+        currentTextarea.selectionStart = currentTextarea.value.length;
+        currentTextarea.selectionEnd = currentTextarea.value.length;
+      }
+      updateAutocompleteState(nextPrompt, nextPrompt.length);
+    });
+  }, [updateAutocompleteState]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -651,14 +777,56 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
             {/* ── Prompt ── */}
             <div className="flex flex-col gap-1.5">
               <FieldLabel htmlFor="prompt" required>Prompt</FieldLabel>
-              <Textarea
-                id="prompt"
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                placeholder="Enter the prompt to send to all models..."
-                className="typography-meta min-h-[100px] max-h-[300px] resize-none overflow-y-auto field-sizing-content"
-                required
-              />
+              <div className="relative">
+                <Textarea
+                  id="prompt"
+                  ref={promptTextareaRef}
+                  value={prompt}
+                  onChange={(event) => {
+                    const nextPrompt = event.target.value;
+                    setPrompt(nextPrompt);
+                    const cursorPosition = event.target.selectionStart ?? nextPrompt.length;
+                    updateAutocompleteState(nextPrompt, cursorPosition);
+                  }}
+                  onKeyDown={handlePromptKeyDown}
+                  placeholder="Enter the prompt to send to all models..."
+                  className="typography-meta min-h-[100px] max-h-[300px] resize-none overflow-y-auto field-sizing-content"
+                  required
+                />
+
+                {showCommandAutocomplete ? (
+                  <CommandAutocomplete
+                    ref={commandRef}
+                    searchQuery={commandQuery}
+                    onCommandSelect={handleAutocompleteCommandSelect}
+                    onClose={() => setShowCommandAutocomplete(false)}
+                    style={{
+                      left: 0,
+                      top: 'auto',
+                      bottom: 'calc(100% + 6px)',
+                      marginBottom: 0,
+                      maxWidth: '100%',
+                    }}
+                  />
+                ) : null}
+
+                {showFileMention ? (
+                  <FileMentionAutocomplete
+                    ref={mentionRef}
+                    searchQuery={mentionQuery}
+                    onFileSelect={handleAutocompleteFileSelect}
+                    onAgentSelect={handleAutocompleteAgentSelect}
+                    onClose={() => setShowFileMention(false)}
+                    style={{
+                      left: 0,
+                      top: 'auto',
+                      bottom: 'calc(100% + 6px)',
+                      marginBottom: 0,
+                      maxWidth: '100%',
+                    }}
+                  />
+                ) : null}
+              </div>
 
               {/* File attachments inline */}
               <div className="flex flex-wrap items-center gap-1.5">
