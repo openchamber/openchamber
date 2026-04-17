@@ -182,6 +182,7 @@ function buildMcpEntry(data) {
     delete entry.url;
     delete entry.headers;
     delete entry.oauth;
+    delete entry.timeout;
   } else {
     // remote: url required
     if (data.url && typeof data.url === 'string') {

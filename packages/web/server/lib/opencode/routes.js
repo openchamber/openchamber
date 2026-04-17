@@ -18,11 +18,49 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
   } = dependencies;
 
   let authLibrary = null;
+  const pendingMcpAuthContextByState = new Map();
+  const PENDING_MCP_AUTH_TTL_MS = 30 * 60 * 1000;
   const getAuthLibrary = async () => {
     if (!authLibrary) {
       authLibrary = await import('./auth.js');
     }
     return authLibrary;
+  };
+
+  const normalizePendingDirectory = (value) => {
+    if (typeof value !== 'string') {
+      return null;
+    }
+
+    const trimmed = value.trim();
+    return trimmed || null;
+  };
+
+  const normalizePendingMcpName = (value) => {
+    if (typeof value !== 'string') {
+      return null;
+    }
+
+    const trimmed = value.trim();
+    return trimmed || null;
+  };
+
+  const normalizePendingMcpState = (value) => {
+    if (typeof value !== 'string') {
+      return null;
+    }
+
+    const trimmed = value.trim();
+    return trimmed || null;
+  };
+
+  const pruneExpiredPendingMcpAuthContexts = () => {
+    const now = Date.now();
+    for (const [state, entry] of pendingMcpAuthContextByState.entries()) {
+      if (!entry || typeof entry.expiresAt !== 'number' || entry.expiresAt <= now) {
+        pendingMcpAuthContextByState.delete(state);
+      }
+    }
   };
 
   app.get('/api/config/settings', async (_req, res) => {
@@ -56,6 +94,76 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       console.error('[API:PUT /api/config/settings] Failed to save settings:', error);
       console.error('[API:PUT /api/config/settings] Error stack:', error.stack);
       res.status(500).json({ error: 'Failed to save settings' });
+    }
+  });
+
+  app.post('/api/mcp/auth/pending', async (req, res) => {
+    try {
+      pruneExpiredPendingMcpAuthContexts();
+
+      const state = normalizePendingMcpState(req.body?.state);
+      if (!state) {
+        return res.status(400).json({ error: 'OAuth state is required' });
+      }
+
+      const name = normalizePendingMcpName(req.body?.name);
+      if (!name) {
+        return res.status(400).json({ error: 'MCP server name is required' });
+      }
+
+      const entry = {
+        name,
+        directory: normalizePendingDirectory(req.body?.directory),
+        expiresAt: Date.now() + PENDING_MCP_AUTH_TTL_MS,
+      };
+      pendingMcpAuthContextByState.set(state, entry);
+
+      return res.json({
+        success: true,
+        context: {
+          name: entry.name,
+          directory: entry.directory,
+        },
+      });
+    } catch (error) {
+      console.error('Failed to store pending MCP auth context:', error);
+      return res.status(500).json({ error: error.message || 'Failed to store pending MCP auth context' });
+    }
+  });
+
+  app.get('/api/mcp/auth/pending', async (req, res) => {
+    try {
+      pruneExpiredPendingMcpAuthContexts();
+
+      const state = normalizePendingMcpState(Array.isArray(req.query?.state) ? req.query.state[0] : req.query?.state);
+      if (!state) {
+        return res.status(400).json({ error: 'OAuth state is required' });
+      }
+
+      const pendingMcpAuthContext = pendingMcpAuthContextByState.get(state) ?? null;
+      if (!pendingMcpAuthContext) {
+        return res.status(404).json({ error: 'No pending MCP auth context' });
+      }
+
+      return res.json(pendingMcpAuthContext);
+    } catch (error) {
+      console.error('Failed to read pending MCP auth context:', error);
+      return res.status(500).json({ error: error.message || 'Failed to read pending MCP auth context' });
+    }
+  });
+
+  app.delete('/api/mcp/auth/pending', async (req, res) => {
+    try {
+      const state = normalizePendingMcpState(Array.isArray(req.query?.state) ? req.query.state[0] : req.query?.state);
+      if (!state) {
+        return res.status(400).json({ error: 'OAuth state is required' });
+      }
+
+      pendingMcpAuthContextByState.delete(state);
+      return res.json({ success: true });
+    } catch (error) {
+      console.error('Failed to clear pending MCP auth context:', error);
+      return res.status(500).json({ error: error.message || 'Failed to clear pending MCP auth context' });
     }
   });
 
