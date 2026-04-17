@@ -295,6 +295,52 @@ Also enable `Websockets Support` in Nginx Proxy Manager for this host.
 - the proxy is compressing and buffering live traffic
 - the proxy is missing WebSocket support
 
+## Example: Caddy
+
+<details>
+<summary>Show example config</summary>
+
+```caddy
+reverse_proxy 127.0.0.1:3000 {
+    # WebSocket support is automatic in Caddy
+
+    # Flush SSE responses immediately
+    flush_interval -1
+
+    # Pass through Host and proxy headers
+    header_up Host {host}
+    header_up X-Real-IP {remote_host}
+    header_up X-Forwarded-For {remote_host}
+    header_up X-Forwarded-Proto {scheme}
+
+    # Increase timeouts for long-lived streams
+    transport http {
+        read_timeout 3600s
+        write_timeout 3600s
+    }
+}
+```
+
+</details>
+
+Caddy handles WebSocket upgrades automatically — no extra configuration needed. The `flush_interval -1` directive ensures SSE chunks are forwarded immediately without buffering.
+
+## CDN and double-compression warning
+
+If you place a CDN (such as Cloudflare) in front of your reverse proxy, be aware of double compression:
+
+- OpenChamber compresses HTTP responses with gzip (threshold 1 KB).
+- Cloudflare and other CDNs also compress responses by default.
+- This can cause double-compressed responses or incorrect `Content-Encoding` headers.
+
+To avoid this, disable compression at **one** layer:
+
+- **Cloudflare:** Rules → Compression → disable (or use "Passthrough" mode).
+- **Nginx:** `gzip off` (already shown in the examples above).
+- **Caddy:** Caddy does not re-compress by default if the upstream already sends compressed content.
+
+SSE streaming routes are excluded from compression by OpenChamber, but the CDN may still buffer them. Check your CDN documentation for how to disable buffering on SSE paths.
+
 ## Related
 
 - [Tunnels](/tunnels/)
