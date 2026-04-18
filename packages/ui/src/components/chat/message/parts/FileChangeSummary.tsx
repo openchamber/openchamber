@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { DiffViewToggle, type DiffViewMode } from '../DiffViewToggle';
 import { revertGitFile } from '@/lib/gitApi';
+import { parsePatchStats, parseCount } from './fileChangeHelpers';
 
 // ---- Types ----
 
@@ -41,28 +42,6 @@ const FILE_DIFF_UNSAFE_CSS = `
     }
   }
 `;
-
-// ---- Helpers ----
-
-/** Parse added/removed line counts from a unified diff string (fallback) */
-const parsePatchStats = (patch: string): { added: number; removed: number } => {
-    let added = 0;
-    let removed = 0;
-    for (const line of patch.split('\n')) {
-        if (line.startsWith('+') && !line.startsWith('+++')) added++;
-        if (line.startsWith('-') && !line.startsWith('---')) removed++;
-    }
-    return { added, removed };
-};
-
-const parseCount = (value: unknown): number | null => {
-    if (typeof value === 'number' && Number.isFinite(value)) return Math.max(0, Math.trunc(value));
-    if (typeof value === 'string') {
-        const parsed = Number.parseInt(value, 10);
-        if (Number.isFinite(parsed)) return Math.max(0, parsed);
-    }
-    return null;
-};
 
 // ---- Sub-components ----
 
@@ -106,7 +85,7 @@ const FileRow: React.FC<{
     const removed = parseCount(entry.deletions) ?? parsePatchStats(entry.patch).removed;
 
     return (
-        <div className="rounded-lg overflow-hidden">
+        <div className="group/row rounded-lg overflow-hidden">
             {/* File row (clickable) */}
             <button
                 type="button"

@@ -3,11 +3,13 @@ import { RiFileEditLine, RiArrowDownSLine, RiArrowRightSLine, RiCloseLine } from
 import type { ToolPart } from '@opencode-ai/sdk/v2';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionMessageRecords } from '@/sync/sync-context';
+import { useStreamingStore, selectIsStreaming } from '@/sync/streaming';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useGitStore, useIsGitRepo } from '@/stores/useGitStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
+import { parsePatchStats, parseCount } from './message/parts/fileChangeHelpers';
 
 // ---- Types ----
 
@@ -37,21 +39,6 @@ type ChangedFileEntry = ChangedFile | GitChangedFile;
 
 const FILE_EDIT_TOOLS = new Set(['edit', 'multiedit', 'write', 'apply_patch', 'create', 'file_write']);
 
-const parseCount = (value: unknown): number | undefined => {
-    if (typeof value === 'number' && Number.isFinite(value)) return Math.max(0, Math.trunc(value));
-    return undefined;
-};
-
-const parsePatchStats = (patch: string): { added: number; removed: number } => {
-    let added = 0;
-    let removed = 0;
-    for (const line of patch.split('\n')) {
-        if (line.startsWith('+') && !line.startsWith('+++')) added++;
-        if (line.startsWith('-') && !line.startsWith('---')) removed++;
-    }
-    return { added, removed };
-};
-
 /** Extract changed files from tool parts of a single assistant message */
 const extractChangedFiles = (parts: ToolPart[]): ChangedFile[] => {
     const files: ChangedFile[] = [];
@@ -79,8 +66,8 @@ const extractChangedFiles = (parts: ToolPart[]): ChangedFile[] => {
                 tool: part.tool,
                 partId: part.id,
                 messageID: part.messageID,
-                additions: parseCount(record.additions),
-                deletions: parseCount(record.deletions),
+                additions: parseCount(record.additions) ?? undefined,
+                deletions: parseCount(record.deletions) ?? undefined,
                 patch: typeof record.patch === 'string' ? record.patch : undefined,
             });
         }
@@ -96,8 +83,8 @@ const extractChangedFiles = (parts: ToolPart[]): ChangedFile[] => {
                     tool: part.tool,
                     partId: part.id,
                     messageID: part.messageID,
-                    additions: parseCount(fd.additions),
-                    deletions: parseCount(fd.deletions),
+                    additions: parseCount(fd.additions) ?? undefined,
+                    deletions: parseCount(fd.deletions) ?? undefined,
                     patch: typeof fd.patch === 'string' ? fd.patch : undefined,
                 });
             }
@@ -117,8 +104,8 @@ const extractChangedFiles = (parts: ToolPart[]): ChangedFile[] => {
                     tool: part.tool,
                     partId: part.id,
                     messageID: part.messageID,
-                    additions: parseCount(fd.additions),
-                    deletions: parseCount(fd.deletions),
+                    additions: parseCount(fd.additions) ?? undefined,
+                    deletions: parseCount(fd.deletions) ?? undefined,
                     patch: typeof fd.patch === 'string' ? fd.patch : undefined,
                 });
             }
@@ -178,8 +165,16 @@ const toRelativePath = (absolutePath: string, baseDirectory: string): string => 
 };
 
 /** Compute a simple signature hash for dismiss tracking */
-const computeSignature = (paths: string[]): string => {
-    return paths.slice().sort().join('|');
+const computeSignature = (files: ChangedFileEntry[]): string => {
+    return files
+        .slice()
+        .sort((a, b) => a.path.localeCompare(b.path))
+        .map((f) => {
+            const adds = isGitFile(f) ? f.insertions : (f.additions ?? 0);
+            const dels = isGitFile(f) ? f.deletions : (f.deletions ?? 0);
+            return `${f.path}:${adds}:${dels}`;
+        })
+        .join('|');
 };
 
 /** Extract changed files from GitStatus */
@@ -221,20 +216,24 @@ export const PendingChangesBar: React.FC = React.memo(() => {
     const gitStatus = useGitStore((s) =>
         currentDirectory ? s.directories.get(currentDirectory)?.status ?? null : null,
     );
-    const dismissedSignature = useSessionUIStore((s) => s.pendingChangesBarDismissed);
+    const isStreaming = useStreamingStore(selectIsStreaming(currentSessionId ?? ''));
+    const dismissedSignature = useSessionUIStore((s) => {
+        const sid = s.currentSessionId;
+        return sid ? s.pendingChangesBarDismissed.get(sid) ?? null : null;
+    });
 
     // ---- Mode selection ----
     const mode: 'git' | 'non-git' = isGitRepo === true ? 'git' : 'non-git';
 
     // ---- Git mode data ----
     const gitChangedFiles = React.useMemo(() => {
-        if (mode !== 'git' || !gitStatus || gitStatus.isClean) return [];
+        if (isGitRepo !== true || mode !== 'git' || !gitStatus || gitStatus.isClean) return [];
         return extractGitChangedFiles(gitStatus.files, gitStatus.diffStats, currentDirectory);
-    }, [mode, gitStatus, currentDirectory]);
+    }, [isGitRepo, mode, gitStatus, currentDirectory]);
 
     // ---- Non-Git mode data (latest assistant turn only) ----
     const nonGitChangedFiles = React.useMemo(() => {
-        if (mode !== 'non-git' || !currentSessionId) return [];
+        if (isGitRepo !== false || mode !== 'non-git' || !currentSessionId || isStreaming) return [];
 
         for (let i = sessionMessageRecords.length - 1; i >= 0; i--) {
             const record = sessionMessageRecords[i];
@@ -248,14 +247,14 @@ export const PendingChangesBar: React.FC = React.memo(() => {
             return extractChangedFiles(toolParts);
         }
         return [];
-    }, [mode, sessionMessageRecords, currentSessionId]);
+    }, [isGitRepo, mode, sessionMessageRecords, currentSessionId, isStreaming]);
 
     // ---- Merged view ----
     const changedFiles: ChangedFileEntry[] = mode === 'git' ? gitChangedFiles : nonGitChangedFiles;
 
     // ---- Signature for dismiss tracking ----
     const currentSignature = React.useMemo(
-        () => computeSignature(changedFiles.map((f) => f.path)),
+        () => computeSignature(changedFiles),
         [changedFiles],
     );
 
@@ -274,6 +273,9 @@ export const PendingChangesBar: React.FC = React.memo(() => {
         }
         return { totalAdded: added, totalRemoved: removed };
     }, [changedFiles]);
+
+    // Don't render while git status is still loading
+    if (isGitRepo === null) return null;
 
     // ---- Dismiss logic ----
     const isDismissed = dismissedSignature !== null && dismissedSignature === currentSignature;
@@ -299,7 +301,10 @@ export const PendingChangesBar: React.FC = React.memo(() => {
 
     const handleDismiss = (e: React.MouseEvent) => {
         e.stopPropagation();
-        useSessionUIStore.getState().dismissPendingChangesBar(currentSignature);
+        const sid = useSessionUIStore.getState().currentSessionId;
+        if (sid) {
+            useSessionUIStore.getState().dismissPendingChangesBar(sid, currentSignature);
+        }
     };
 
     // ---- Label ----
