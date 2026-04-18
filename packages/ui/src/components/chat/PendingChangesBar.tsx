@@ -9,8 +9,6 @@ import { useGitStore, useIsGitRepo } from '@/stores/useGitStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
-import { parsePatchStats, parseCount } from './message/parts/fileChangeHelpers';
-
 // ---- Types ----
 
 /** File changed by an AI tool (non-Git mode) */
@@ -38,6 +36,21 @@ type ChangedFileEntry = ChangedFile | GitChangedFile;
 // ---- Helpers ----
 
 const FILE_EDIT_TOOLS = new Set(['edit', 'multiedit', 'write', 'apply_patch', 'create', 'file_write']);
+
+const parseCount = (value: unknown): number | undefined => {
+    if (typeof value === 'number' && Number.isFinite(value)) return Math.max(0, Math.trunc(value));
+    return undefined;
+};
+
+const parsePatchStats = (patch: string): { added: number; removed: number } => {
+    let added = 0;
+    let removed = 0;
+    for (const line of patch.split('\n')) {
+        if (line.startsWith('+') && !line.startsWith('+++')) added++;
+        if (line.startsWith('-') && !line.startsWith('---')) removed++;
+    }
+    return { added, removed };
+};
 
 /** Extract changed files from tool parts of a single assistant message */
 const extractChangedFiles = (parts: ToolPart[]): ChangedFile[] => {
