@@ -1805,11 +1805,6 @@ export const McpPage: React.FC = () => {
               </Button>
             </div>
 
-            <p className="typography-micro text-muted-foreground">
-              Accepts full MCP JSON snippets like <code className="font-mono text-foreground/80">&#123; "mcpServers": &#123; "name": &#123;...&#125; &#125; &#125;</code>,{' '}
-              <code className="font-mono text-foreground/80">&#123; "name": &#123;...&#125; &#125;</code>, or bare{' '}
-              <code className="font-mono text-foreground/80">&#123; "command": ..., "args": ... &#125;</code>
-            </p>
           </div>
 
           <DialogFooter>
