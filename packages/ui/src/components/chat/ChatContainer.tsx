@@ -10,6 +10,7 @@ import MessageList, { type MessageListHandle } from './MessageList';
 import { PermissionCard } from './PermissionCard';
 import { QuestionCard } from './QuestionCard';
 import { StatusRowContainer } from './StatusRowContainer';
+import { PendingChangesBar } from './PendingChangesBar';
 import ScrollToBottomButton from './components/ScrollToBottomButton';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { useChatScrollManager, type AnimationHandlers, type ContentChangeReason } from '@/hooks/useChatScrollManager';
@@ -667,7 +668,8 @@ export const ChatContainer: React.FC = () => {
                             : 'bg-background'
                     )}
                 >
-                        <ChatInput scrollToBottom={resumeToLatestInstant} />
+                <PendingChangesBar />
+                <ChatInput scrollToBottom={resumeToLatestInstant} />
                 </div>
             </div>
         );
@@ -817,6 +819,7 @@ export const ChatContainer: React.FC = () => {
                         onClick={navigation.resumeToLatest}
                     />
                 )}
+                <PendingChangesBar />
                 <ChatInput scrollToBottom={resumeToLatestInstant} />
             </div>
         </div>
