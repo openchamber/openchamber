@@ -187,6 +187,10 @@ export type SessionUIState = {
   markSessionPlanAvailable: (sessionId: string) => void
   isSessionPlanAvailable: (sessionId: string) => boolean
 
+  // Non-Git mode: dismissed signature hash, hides bar until new turn arrives
+  pendingChangesBarDismissed: string | null
+  dismissPendingChangesBar: (signature: string | null) => void
+
   // Actions — UI state management
   setCurrentSession: (id: string | null, directoryHint?: string | null) => void
   openNewSessionDraft: (options?: Partial<NewSessionDraftState>) => void
@@ -395,6 +399,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   isLoading: false,
   lastLoadedDirectory: null,
   sessionPlanAvailable: new Map(),
+  pendingChangesBarDismissed: null,
 
   // ---------------------------------------------------------------------------
   // setCurrentSession
@@ -702,6 +707,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
   getWorktreeMetadata: (sessionId) => get().worktreeMetadata.get(sessionId),
 
+  dismissPendingChangesBar: (signature) => set({ pendingChangesBarDismissed: signature }),
+
   // ---------------------------------------------------------------------------
   // sendMessage — calls SDK, reads domain data from sync
   // ---------------------------------------------------------------------------
@@ -716,6 +723,9 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     variant?: string,
     inputMode?: "normal" | "shell",
   ) => {
+    // Clear non-Git changed-files bar on new user message
+    set({ pendingChangesBarDismissed: null });
+
     const draft = get().newSessionDraft
     const trimmedAgent = typeof agent === "string" && agent.trim().length > 0 ? agent.trim() : undefined
 
