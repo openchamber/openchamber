@@ -6,6 +6,7 @@ import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { DiffViewToggle, type DiffViewMode } from '../DiffViewToggle';
 import { revertGitFile } from '@/lib/gitApi';
 import { parsePatchStats, parseCount } from './fileChangeHelpers';
+import { useIsGitRepo } from '@/stores/useGitStore';
 
 // ---- Types ----
 
@@ -67,13 +68,14 @@ const FileRow: React.FC<{
     entry: FileDiffEntry;
     isExpanded: boolean;
     isRejected: boolean;
+    isGitRepo: boolean;
     onToggle: (id: string) => void;
     onReject: (id: string) => void;
     diffViewMode: DiffViewMode;
     onDiffViewModeChange: (mode: DiffViewMode) => void;
     pierreTheme: { light: string; dark: string };
     pierreThemeType: 'light' | 'dark';
-}> = React.memo(({ entry, isExpanded, isRejected, onToggle, onReject, diffViewMode, onDiffViewModeChange, pierreTheme, pierreThemeType }) => {
+}> = React.memo(({ entry, isExpanded, isRejected, isGitRepo, onToggle, onReject, diffViewMode, onDiffViewModeChange, pierreTheme, pierreThemeType }) => {
     const lastSlash = entry.title.lastIndexOf('/');
     const fileName = lastSlash === -1 ? entry.title : entry.title.slice(lastSlash + 1);
     const dirPath = lastSlash === -1 ? '' : entry.title.slice(0, lastSlash);
@@ -133,7 +135,7 @@ const FileRow: React.FC<{
                 </span>
 
                 {/* Reject action */}
-                {!isRejected && (
+                {!isRejected && isGitRepo && (
                     <button
                         type="button"
                         className="h-5 w-5 flex items-center justify-center rounded hover:bg-muted/50 transition-colors opacity-0 group-hover/row:opacity-100"
@@ -197,6 +199,7 @@ export const FileChangeSummary: React.FC<FileChangeSummaryProps> = ({
     pierreTheme,
     pierreThemeType,
 }) => {
+    const isGitRepo = useIsGitRepo(directory);
     const [expandedIds, setExpandedIds] = React.useState<Set<string>>(new Set());
     const [diffViewMode, setDiffViewMode] = React.useState<DiffViewMode>('unified');
     const [rejectedIds, setRejectedIds] = React.useState<Set<string>>(new Set());
@@ -254,6 +257,7 @@ export const FileChangeSummary: React.FC<FileChangeSummaryProps> = ({
                         entry={entry}
                         isExpanded={expandedIds.has(entry.id)}
                         isRejected={rejectedIds.has(entry.id)}
+                        isGitRepo={isGitRepo ?? false}
                         onToggle={handleToggle}
                         onReject={handleReject}
                         diffViewMode={diffViewMode}

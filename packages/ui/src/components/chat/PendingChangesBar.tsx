@@ -51,6 +51,8 @@ const extractChangedFiles = (parts: ToolPart[]): ChangedFile[] => {
         const state = part.state as { metadata?: Record<string, unknown>; input?: Record<string, unknown>; status?: string };
         if (state.status && state.status !== 'completed') continue;
 
+        const sizeBeforeThisPart = files.length;
+
         const metadata = state.metadata;
 
         // Extract from metadata.files[] (apply_patch)
@@ -112,7 +114,7 @@ const extractChangedFiles = (parts: ToolPart[]): ChangedFile[] => {
         }
 
         // Fallback 3: extract from input.filePath for write-like tools
-        if (files.length === 0) {
+        if (files.length === sizeBeforeThisPart) {
             const input = state.input;
             const filePath = typeof input?.filePath === 'string' ? input.filePath
                 : typeof input?.file_path === 'string' ? input.file_path
@@ -130,7 +132,7 @@ const extractChangedFiles = (parts: ToolPart[]): ChangedFile[] => {
         }
 
         // Fallback 4: parse top-level patch/diff for stats
-        if (files.length === 0) {
+        if (files.length === sizeBeforeThisPart) {
             const patchText = typeof metadata?.patch === 'string' ? metadata.patch.trim()
                 : typeof metadata?.diff === 'string' ? metadata.diff.trim() : '';
             if (patchText) {
