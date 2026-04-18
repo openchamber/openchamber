@@ -1281,9 +1281,31 @@ export const McpPage: React.FC = () => {
                     className="!font-normal"
                     onClick={handleToggleConnect}
                     disabled={isConnecting || !enabled}
-                  >
-                    {isConnecting ? 'Working...' : isConnected ? 'Disconnect' : 'Connect'}
-                  </Button>
+                    >
+                      {isConnecting ? 'Working...' : isConnected ? 'Disconnect' : 'Connect'}
+                    </Button>
+                  {mcpType === 'remote' && (
+                    <>
+                      <Button
+                        variant={needsAuthorization ? 'default' : 'outline'}
+                        size="xs"
+                        className="!font-normal"
+                        onClick={() => void handleStartAuthorization()}
+                        disabled={isAuthorizing || !enabled}
+                      >
+                        {isAuthorizing ? 'Starting...' : needsAuthorization ? 'Authorize' : 'Reauthorize'}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        className="!font-normal gap-1 text-muted-foreground"
+                        onClick={() => void handleClearAuthorization()}
+                        disabled={isClearingAuth || !enabled}
+                      >
+                        {isClearingAuth ? 'Clearing...' : 'Clear Auth'}
+                      </Button>
+                    </>
+                  )}
                   {isConnected && (
                     <Button
                       variant="ghost"
@@ -1320,36 +1342,16 @@ export const McpPage: React.FC = () => {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="xs"
-                    className="!font-normal"
-                    onClick={() => void handleTestConnection()}
-                    disabled={isTestingConnection || !enabled}
-                  >
-                    {isTestingConnection ? 'Testing...' : 'Test Connection'}
-                  </Button>
-                  {mcpType === 'remote' && (
-                    <>
-                      <Button
-                        variant={needsAuthorization ? 'default' : 'outline'}
-                        size="xs"
-                        className="!font-normal"
-                        onClick={() => void handleStartAuthorization()}
-                        disabled={isAuthorizing || !enabled}
-                      >
-                        {isAuthorizing ? 'Starting...' : needsAuthorization ? 'Authorize' : 'Reauthorize'}
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="xs"
-                        className="!font-normal"
-                        onClick={() => void handleClearAuthorization()}
-                        disabled={isClearingAuth || !enabled}
-                      >
-                        {isClearingAuth ? 'Clearing...' : 'Clear Auth'}
-                      </Button>
-                    </>
+                  {!isConnected && (
+                    <Button
+                      variant="outline"
+                      size="xs"
+                      className="!font-normal"
+                      onClick={() => void handleTestConnection()}
+                      disabled={isTestingConnection || !enabled}
+                    >
+                      {isTestingConnection ? 'Testing...' : 'Test Connection'}
+                    </Button>
                   )}
                 </div>
 
