@@ -18,7 +18,7 @@ export const registerServerStatusRoutes = (app, dependencies) => {
 
   app.post('/api/system/shutdown', (_req, res) => {
     res.json({ ok: true });
-    gracefulShutdown({ exitProcess: false }).catch((error) => {
+    gracefulShutdown({ exitProcess: true }).catch((error) => {
       console.error('Shutdown request failed:', error?.message || error);
     });
   });

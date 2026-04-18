@@ -82,6 +82,7 @@
     "@types/node": "^24.3.1",
     "@types/react": "^19.1.10",
     "@types/react-dom": "^19.1.7",
+    "@types/supertest": "^7.2.0",
     "@vitejs/plugin-react": "^5.0.0",
     "autoprefixer": "^10.4.21",
     "concurrently": "^9.2.1",
@@ -92,6 +93,7 @@
     "eslint-plugin-react-refresh": "^0.4.20",
     "globals": "^16.3.0",
     "nodemon": "^3.1.7",
+    "supertest": "^7.2.2",
     "tailwindcss": "^4.0.0",
     "tsx": "^4.20.6",
     "tw-animate-css": "^1.3.8",
@@ -99,6 +101,7 @@
     "typescript-eslint": "^8.39.1",
     "vite": "^7.1.2",
     "vite-plugin-pwa": "^1.0.3",
+    "vitest": "^4.1.4",
     "workbox-window": "^7.4.0"
   },
   "files": [
