@@ -13,6 +13,10 @@ import {
   type McpDraft,
   type McpScope,
 } from '@/stores/useMcpConfigStore';
+import {
+  parseImportedMcpSnippet,
+  applyImportedMcpToDraft,
+} from './mcpImport';
 import { useMcpStore } from '@/stores/useMcpStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import {
@@ -24,6 +28,7 @@ import {
   RiEyeLine,
   RiEyeOffLine,
   RiExternalLinkLine,
+  RiFileCodeLine,
   RiFolderLine,
   RiPlugLine,
   RiRefreshLine,
@@ -154,10 +159,10 @@ const CommandTextarea: React.FC<CommandTextareaProps> = ({ value, onChange }) =>
           className="!font-normal gap-1 text-muted-foreground"
           onClick={handlePasteFromClipboard}
           type="button"
-          title="Paste full command from clipboard and auto-split"
+          title="Paste a local command from clipboard and auto-split"
         >
           <RiClipboardLine className="h-3 w-3" />
-          Paste command
+          Paste Command
         </Button>
       </div>
 
@@ -518,30 +523,6 @@ const normalizeMcpAuthErrorMessage = (error: unknown, fallback: string): string 
   return message;
 };
 
-const hasAdvancedRemoteSettings = (input: {
-  headers: Array<{ key: string; value: string }>;
-  oauthEnabled: boolean;
-  oauthClientId: string;
-  oauthClientSecret: string;
-  oauthScope: string;
-  oauthRedirectUri: string;
-  timeout: string;
-}): boolean => {
-  if (input.headers.some((entry) => entry.key.trim() || entry.value.trim())) {
-    return true;
-  }
-
-  if (!input.oauthEnabled) {
-    return true;
-  }
-
-  if (input.oauthClientId.trim() || input.oauthClientSecret.trim() || input.oauthScope.trim() || input.oauthRedirectUri.trim()) {
-    return true;
-  }
-
-  return input.timeout.trim().length > 0;
-};
-
 const buildMcpRuntimeActionKey = (name: string | null, directory?: string | null): string => {
   const normalizedDirectory = typeof directory === 'string' && directory.trim()
     ? directory.trim()
@@ -568,6 +549,7 @@ export const McpPage: React.FC = () => {
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const isVSCodeAuthRuntime = React.useMemo(() => isVSCodeRuntime(), []);
   const mcpStatus = useMcpStore((state) => state.getStatusForDirectory(currentDirectory ?? null));
+  const mcpDiagnostics = useMcpStore((state) => state.getDiagnosticForDirectory(currentDirectory ?? null));
   const refreshStatus = useMcpStore((state) => state.refresh);
   const connectMcp = useMcpStore((state) => state.connect);
   const disconnectMcp = useMcpStore((state) => state.disconnect);
@@ -610,6 +592,9 @@ export const McpPage: React.FC = () => {
   const authPollAttemptsRef = React.useRef(0);
   const authPollStartsFromNeedsAuthRef = React.useRef(false);
   const [isAdvancedRemoteOptionsOpen, setIsAdvancedRemoteOptionsOpen] = React.useState(false);
+  const [showImportDialog, setShowImportDialog] = React.useState(false);
+  const [importJsonText, setImportJsonText] = React.useState('');
+  const [importError, setImportError] = React.useState<string | null>(null);
   const runtimeActionKey = React.useMemo(
     () => buildMcpRuntimeActionKey(selectedMcpName, currentDirectory),
     [currentDirectory, selectedMcpName],
@@ -641,6 +626,90 @@ export const McpPage: React.FC = () => {
     authPollStartsFromNeedsAuthRef.current = false;
   }, []);
 
+  const handleOpenImportDialog = React.useCallback(() => {
+    setImportJsonText('');
+    setImportError(null);
+    setShowImportDialog(true);
+  }, []);
+
+  const handlePasteImportClipboard = React.useCallback(async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      setImportJsonText(text);
+      setImportError(null);
+    } catch {
+      toast.error('Cannot read clipboard');
+    }
+  }, []);
+
+  const handleImportJson = React.useCallback(() => {
+    const outcome = parseImportedMcpSnippet(importJsonText, { fallbackName: draftName });
+    if (!outcome.ok) {
+      setImportError(outcome.error);
+      return;
+    }
+
+    const partial = {
+      name: draftName,
+      scope: draftScope,
+      type: mcpType,
+      command,
+      url,
+      environment: envEntries,
+      headers: headerEntries,
+      oauthEnabled,
+      oauthClientId,
+      oauthClientSecret,
+      oauthScope,
+      oauthRedirectUri,
+      timeout,
+      enabled,
+    };
+
+    const next = applyImportedMcpToDraft(outcome, partial, { isNewServer });
+
+    setDraftName(next.name);
+    setMcpType(next.type as 'local' | 'remote');
+    setCommand(next.command ?? []);
+    setUrl(next.url ?? '');
+    setEnvEntries(next.environment ?? []);
+    setHeaderEntries(next.headers ?? []);
+    setOauthEnabled(next.oauthEnabled ?? false);
+    setOauthClientId(next.oauthClientId ?? '');
+    setOauthClientSecret(next.oauthClientSecret ?? '');
+    setOauthScope(next.oauthScope ?? '');
+    setOauthRedirectUri(next.oauthRedirectUri ?? '');
+    setTimeoutValue(next.timeout ?? '');
+    setEnabled(next.enabled ?? true);
+
+    setShowImportDialog(false);
+    setImportJsonText('');
+    setImportError(null);
+
+    if (next.name && next.name !== draftName && isNewServer) {
+      setDraftName(next.name);
+    }
+
+    toast.success('MCP configuration imported');
+  }, [
+    importJsonText,
+    draftName,
+    draftScope,
+    mcpType,
+    command,
+    url,
+    envEntries,
+    headerEntries,
+    oauthEnabled,
+    oauthClientId,
+    oauthClientSecret,
+    oauthScope,
+    oauthRedirectUri,
+    timeout,
+    enabled,
+    isNewServer,
+  ]);
+
   // Populate form when selection changes
   React.useEffect(() => {
     if (isNewServer && mcpDraft) {
@@ -658,15 +727,7 @@ export const McpPage: React.FC = () => {
       setOauthRedirectUri(mcpDraft.oauthRedirectUri);
       setTimeoutValue(mcpDraft.timeout);
       setEnabled(mcpDraft.enabled);
-      setIsAdvancedRemoteOptionsOpen(mcpDraft.type === 'remote' && hasAdvancedRemoteSettings({
-        headers: mcpDraft.headers,
-        oauthEnabled: mcpDraft.oauthEnabled,
-        oauthClientId: mcpDraft.oauthClientId,
-        oauthClientSecret: mcpDraft.oauthClientSecret,
-        oauthScope: mcpDraft.oauthScope,
-        oauthRedirectUri: mcpDraft.oauthRedirectUri,
-        timeout: mcpDraft.timeout,
-      }));
+      setIsAdvancedRemoteOptionsOpen(false);
       initialRef.current = {
         mcpType: mcpDraft.type, command: mcpDraft.command,
         url: mcpDraft.url,
@@ -719,15 +780,7 @@ export const McpPage: React.FC = () => {
       setOauthRedirectUri(nextOauthEnabled ? (oauthConfig?.redirectUri ?? '') : '');
       setTimeoutValue(nextTimeout);
       setEnabled(selectedServer.enabled);
-      setIsAdvancedRemoteOptionsOpen(t === 'remote' && hasAdvancedRemoteSettings({
-        headers: headersArr,
-        oauthEnabled: nextOauthEnabled,
-        oauthClientId: nextOauthEnabled ? (oauthConfig?.clientId ?? '') : '',
-        oauthClientSecret: nextOauthEnabled ? (oauthConfig?.clientSecret ?? '') : '',
-        oauthScope: nextOauthEnabled ? (oauthConfig?.scope ?? '') : '',
-        oauthRedirectUri: nextOauthEnabled ? (oauthConfig?.redirectUri ?? '') : '',
-        timeout: nextTimeout,
-      }));
+      setIsAdvancedRemoteOptionsOpen(false);
       initialRef.current = {
         mcpType: t,
         command: cmd,
@@ -1180,12 +1233,14 @@ export const McpPage: React.FC = () => {
   }
 
   const runtimeStatus = mcpStatus[selectedMcpName];
+  const runtimeDiagnostic = selectedMcpName ? mcpDiagnostics[selectedMcpName] : undefined;
+  const effectiveRuntimeStatus = runtimeStatus ?? runtimeDiagnostic;
   const isConnected = runtimeStatus?.status === 'connected';
   const needsAuthorization = runtimeStatus?.status === 'needs_auth' || runtimeStatus?.status === 'needs_client_registration';
   const suggestedRedirectUri = isVSCodeAuthRuntime ? null : buildMcpOAuthRedirectUri(selectedMcpName, currentDirectory);
   const runtimeDescription = getStatusDescription(
-    runtimeStatus?.status,
-    runtimeStatus && 'error' in runtimeStatus ? runtimeStatus.error : undefined,
+    effectiveRuntimeStatus?.status,
+    effectiveRuntimeStatus && 'error' in effectiveRuntimeStatus ? effectiveRuntimeStatus.error : undefined,
   );
 
   return (
@@ -1200,7 +1255,7 @@ export const McpPage: React.FC = () => {
             ) : (
               <div className="flex items-center gap-2 min-w-0">
                 <h2 className="typography-ui-header font-semibold text-foreground truncate">{selectedMcpName}</h2>
-                <StatusBadge status={runtimeStatus?.status} enabled={enabled} />
+                <StatusBadge status={effectiveRuntimeStatus?.status} enabled={enabled} />
               </div>
             )}
             <div className="flex items-center gap-2 mt-0.5">
@@ -1224,12 +1279,12 @@ export const McpPage: React.FC = () => {
 
         {!isNewServer && (
           <div className="mb-8 px-2">
-            <div className={cn('rounded-lg border p-3', statusCardClass(runtimeStatus?.status))}>
+            <div className={cn('rounded-lg border p-3', statusCardClass(effectiveRuntimeStatus?.status))}>
               <div className="space-y-4">
                 <div className="min-w-0 space-y-1">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                     <span className="typography-ui-label text-foreground">Runtime Status</span>
-                    <StatusBadge status={runtimeStatus?.status} enabled={enabled} />
+                    <StatusBadge status={effectiveRuntimeStatus?.status} enabled={enabled} />
                   </div>
                   <p className="typography-meta text-muted-foreground">{runtimeDescription}</p>
                   <p className="typography-micro text-muted-foreground/80">
@@ -1240,16 +1295,6 @@ export const McpPage: React.FC = () => {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="xs"
-                    className="!font-normal"
-                    onClick={() => void handleRefreshRuntimeStatus()}
-                    disabled={isRefreshingStatus}
-                  >
-                    <RiRefreshLine className={cn('h-3.5 w-3.5', isRefreshingStatus && 'animate-spin')} />
-                    Refresh
-                  </Button>
                   <Button
                     variant="outline"
                     size="xs"
@@ -1348,8 +1393,19 @@ export const McpPage: React.FC = () => {
 
         {/* Server Identity */}
         <div className="mb-8">
-          <div className="mb-1 px-1">
+          <div className="mb-1 px-1 flex items-center justify-between gap-2">
             <h3 className="typography-ui-header font-medium text-foreground">Server</h3>
+            <Button
+              variant="ghost"
+              size="xs"
+              className="!font-normal gap-1 text-muted-foreground"
+              onClick={handleOpenImportDialog}
+              type="button"
+              title="Import a full MCP server configuration from a JSON snippet"
+            >
+              <RiFileCodeLine className="h-3.5 w-3.5" />
+              Import JSON Snippet
+            </Button>
           </div>
 
           <section className="px-2 pb-2 pt-0 space-y-0">
@@ -1652,6 +1708,87 @@ export const McpPage: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Import JSON dialog */}
+      <Dialog
+        open={showImportDialog}
+        onOpenChange={(open) => {
+          if (!open) {
+            setShowImportDialog(false);
+            setImportJsonText('');
+            setImportError(null);
+          }
+        }}
+      >
+        <DialogContent className="max-w-md" keyboardAvoid>
+          <DialogHeader>
+            <DialogTitle>Import JSON Snippet</DialogTitle>
+            <DialogDescription>
+              Paste a full MCP JSON snippet from docs or another config file. The parsed values will populate this form for review before saving.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            <Textarea
+              value={importJsonText}
+              onChange={(e) => {
+                setImportJsonText(e.target.value);
+                setImportError(null);
+              }}
+              placeholder={'{\n  "mcpServers": {\n    "postgres": {\n      "command": "npx",\n      "args": ["-y", "@modelcontextprotocol/server-postgres"]\n    }\n  }\n}'}
+              rows={8}
+              className="font-mono typography-meta resize-y"
+              spellCheck={false}
+              data-bwignore="true"
+              data-1p-ignore="true"
+            />
+
+            {importError && (
+              <p className="typography-micro text-[var(--status-error)]">{importError}</p>
+            )}
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="outline"
+                size="xs"
+                className="!font-normal gap-1"
+                onClick={handlePasteImportClipboard}
+                type="button"
+              >
+                <RiClipboardLine className="h-3.5 w-3.5" />
+                Paste JSON from Clipboard
+              </Button>
+            </div>
+
+            <p className="typography-micro text-muted-foreground">
+              Accepts full MCP JSON snippets like <code className="font-mono text-foreground/80">&#123; "mcpServers": &#123; "name": &#123;...&#125; &#125; &#125;</code>,{' '}
+              <code className="font-mono text-foreground/80">&#123; "name": &#123;...&#125; &#125;</code>, or bare{' '}
+              <code className="font-mono text-foreground/80">&#123; "command": ..., "args": ... &#125;</code>
+            </p>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowImportDialog(false);
+                setImportJsonText('');
+                setImportError(null);
+              }}
+              className="text-foreground"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleImportJson}
+              disabled={!importJsonText.trim()}
+              size="sm"
+            >
+              Import
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Delete confirm */}
       <Dialog

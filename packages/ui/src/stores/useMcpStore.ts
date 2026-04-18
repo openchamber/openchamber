@@ -5,8 +5,14 @@ import { opencodeClient } from '@/lib/opencode/client';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 
 export type McpStatusMap = Record<string, McpStatus>;
+export type McpRuntimeDiagnostic = {
+  status: 'failed';
+  error: string;
+};
+export type McpRuntimeDiagnosticMap = Record<string, McpRuntimeDiagnostic>;
 
 const EMPTY_STATUS: McpStatusMap = {};
+const EMPTY_DIAGNOSTICS: McpRuntimeDiagnosticMap = {};
 
 type McpHealth = {
   connected: number;
@@ -54,10 +60,12 @@ type TestConnectionResult = {
 
 interface McpStore {
   byDirectory: Record<string, McpStatusMap>;
+  diagnosticsByDirectory: Record<string, McpRuntimeDiagnosticMap>;
   loadingKeys: Record<string, boolean>;
   lastErrorKeys: Record<string, string | null>;
 
   getStatusForDirectory: (directory?: string | null) => McpStatusMap;
+  getDiagnosticForDirectory: (directory?: string | null) => McpRuntimeDiagnosticMap;
   refresh: (options?: RefreshOptions) => Promise<void>;
   connect: (name: string, directory?: string | null) => Promise<void>;
   disconnect: (name: string, directory?: string | null) => Promise<void>;
@@ -70,12 +78,18 @@ interface McpStore {
 export const useMcpStore = create<McpStore>()(
   devtools((set, get) => ({
     byDirectory: {},
+    diagnosticsByDirectory: {},
     loadingKeys: {},
     lastErrorKeys: {},
 
     getStatusForDirectory: (directory) => {
       const key = toKey(directory ?? useDirectoryStore.getState().currentDirectory);
       return get().byDirectory[key] ?? EMPTY_STATUS;
+    },
+
+    getDiagnosticForDirectory: (directory) => {
+      const key = toKey(directory ?? useDirectoryStore.getState().currentDirectory);
+      return get().diagnosticsByDirectory[key] ?? EMPTY_DIAGNOSTICS;
     },
 
     refresh: async (options) => {
@@ -96,6 +110,12 @@ export const useMcpStore = create<McpStore>()(
 
         set((state) => ({
           byDirectory: { ...state.byDirectory, [key]: data },
+          diagnosticsByDirectory: {
+            ...state.diagnosticsByDirectory,
+            [key]: Object.fromEntries(
+              Object.entries(state.diagnosticsByDirectory[key] ?? {}).filter(([name]) => !data[name])
+            ),
+          },
           loadingKeys: { ...state.loadingKeys, [key]: false },
           lastErrorKeys: { ...state.lastErrorKeys, [key]: null },
         }));
@@ -110,8 +130,23 @@ export const useMcpStore = create<McpStore>()(
 
     connect: async (name, directory) => {
       const normalized = normalizeDirectory(directory ?? useDirectoryStore.getState().currentDirectory);
+      const key = toKey(normalized);
       const api = getMcpApiClient(normalized);
-      await api.mcp.connect({ name }, { throwOnError: true });
+      try {
+        await api.mcp.connect({ name }, { throwOnError: true });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Connection failed';
+        set((state) => ({
+          diagnosticsByDirectory: {
+            ...state.diagnosticsByDirectory,
+            [key]: {
+              ...(state.diagnosticsByDirectory[key] ?? {}),
+              [name]: { status: 'failed', error: message },
+            },
+          },
+        }));
+        throw error;
+      }
       await get().refresh({ directory: normalized, silent: true });
     },
 
@@ -151,6 +186,7 @@ export const useMcpStore = create<McpStore>()(
 
     testConnection: async (name, directory) => {
       const normalized = normalizeDirectory(directory ?? useDirectoryStore.getState().currentDirectory);
+      const key = toKey(normalized);
       const api = getMcpApiClient(normalized);
       const previousStatus = get().getStatusForDirectory(normalized)[name];
       const wasConnected = previousStatus?.status === 'connected';
@@ -160,10 +196,20 @@ export const useMcpStore = create<McpStore>()(
         await api.mcp.connect({ name }, { throwOnError: true });
       } catch (error) {
         errorMessage = error instanceof Error ? error.message : 'Connection failed';
+        set((state) => ({
+          diagnosticsByDirectory: {
+            ...state.diagnosticsByDirectory,
+            [key]: {
+              ...(state.diagnosticsByDirectory[key] ?? {}),
+              [name]: { status: 'failed', error: errorMessage ?? 'Connection failed' },
+            },
+          },
+        }));
       }
 
       await get().refresh({ directory: normalized, silent: true });
       const currentStatus = get().getStatusForDirectory(normalized)[name];
+      const observedStatus = currentStatus;
 
       if (!wasConnected && currentStatus?.status === 'connected') {
         await api.mcp.disconnect({ name }, { throwOnError: true });
@@ -171,7 +217,7 @@ export const useMcpStore = create<McpStore>()(
       }
 
       return {
-        status: get().getStatusForDirectory(normalized)[name],
+        status: observedStatus ?? get().getStatusForDirectory(normalized)[name],
         error: errorMessage,
       };
     },
