@@ -1652,10 +1652,12 @@ export const GitView: React.FC = () => {
 
       const currentBranch = status?.current;
 
+      const knownRemoteNames = new Set(effectiveRemotes.map((r) => r.name));
+
       try {
-        // If it's a remote branch (contains '/'), fetch latest first
+        // If it's a remote-tracking branch (prefix matches a known remote), fetch latest first
         const slashIndex = branch.indexOf('/');
-        if (slashIndex > 0) {
+        if (slashIndex > 0 && knownRemoteNames.has(branch.substring(0, slashIndex))) {
           const remote = branch.substring(0, slashIndex);
           const remoteBranch = branch.substring(slashIndex + 1);
           addOperationLog(`Fetching ${remote}/${remoteBranch}...`, 'running');
@@ -1693,7 +1695,7 @@ export const GitView: React.FC = () => {
       }
       // Note: branchOperation is cleared when dialog closes via handleOperationComplete
     },
-    [currentDirectory, git, status, refreshStatusAndBranches, refreshLog, isUncommittedChangesError, persistConflictState, clearConflictState, addOperationLog, updateLastLog, resetOperationLogs]
+    [currentDirectory, git, status, effectiveRemotes, refreshStatusAndBranches, refreshLog, isUncommittedChangesError, persistConflictState, clearConflictState, addOperationLog, updateLastLog, resetOperationLogs]
   );
 
   const handleRebase = React.useCallback(
@@ -1704,10 +1706,12 @@ export const GitView: React.FC = () => {
 
       const currentBranch = status?.current;
 
+      const knownRemoteNames = new Set(effectiveRemotes.map((r) => r.name));
+
       try {
-        // If it's a remote branch (contains '/'), fetch latest first
+        // If it's a remote-tracking branch (prefix matches a known remote), fetch latest first
         const slashIndex = branch.indexOf('/');
-        if (slashIndex > 0) {
+        if (slashIndex > 0 && knownRemoteNames.has(branch.substring(0, slashIndex))) {
           const remote = branch.substring(0, slashIndex);
           const remoteBranch = branch.substring(slashIndex + 1);
           addOperationLog(`Fetching ${remote}/${remoteBranch}...`, 'running');
@@ -1745,7 +1749,7 @@ export const GitView: React.FC = () => {
       }
       // Note: branchOperation is cleared when dialog closes via handleOperationComplete
     },
-    [currentDirectory, git, status, refreshStatusAndBranches, refreshLog, isUncommittedChangesError, persistConflictState, clearConflictState, addOperationLog, updateLastLog, resetOperationLogs]
+    [currentDirectory, git, status, effectiveRemotes, refreshStatusAndBranches, refreshLog, isUncommittedChangesError, persistConflictState, clearConflictState, addOperationLog, updateLastLog, resetOperationLogs]
   );
 
   const handleAbortConflict = React.useCallback(async () => {
