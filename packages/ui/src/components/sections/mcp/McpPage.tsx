@@ -31,7 +31,6 @@ import {
   RiFileCodeLine,
   RiFolderLine,
   RiPlugLine,
-  RiRefreshLine,
   RiUser3Line,
 } from '@remixicon/react';
 import { cn } from '@/lib/utils';
@@ -405,19 +404,29 @@ const STATUS_LABEL: Record<string, string> = {
   needs_client_registration: 'Needs registration',
 };
 
-const StatusBadge: React.FC<{ status: string | undefined; enabled: boolean }> = ({ status, enabled }) => {
+const StatusBadge: React.FC<{ status: string | undefined; enabled: boolean; variant?: 'compact' | 'pill' }> = ({ status, enabled, variant = 'compact' }) => {
   if (!enabled) return null;
   if (!status) return null;
 
-  const colorMap: Record<string, string> = {
-    connected: 'text-[var(--status-success)]',
-    failed: 'text-[var(--status-error)]',
-    needs_auth: 'text-[var(--status-warning)]',
-    needs_client_registration: 'text-[var(--status-warning)]',
+  const colorClassMap: Record<string, { text: string; bg: string }> = {
+    connected: { text: 'text-[var(--status-success)]', bg: 'bg-[var(--status-success)]/10' },
+    failed: { text: 'text-[var(--status-error)]', bg: 'bg-[var(--status-error)]/10' },
+    needs_auth: { text: 'text-[var(--status-warning)]', bg: 'bg-[var(--status-warning)]/10' },
+    needs_client_registration: { text: 'text-[var(--status-warning)]', bg: 'bg-[var(--status-warning)]/10' },
   };
 
+  const colors = colorClassMap[status] ?? { text: 'text-muted-foreground', bg: '' };
+
+  if (variant === 'pill') {
+    return (
+      <span className={cn('typography-micro font-medium rounded-full px-2 py-0.5', colors.text, colors.bg)}>
+        ● {STATUS_LABEL[status] ?? status}
+      </span>
+    );
+  }
+
   return (
-    <span className={cn('typography-micro font-medium', colorMap[status] ?? 'text-muted-foreground')}>
+    <span className={cn('typography-micro font-medium', colors.text)}>
       ● {STATUS_LABEL[status] ?? status}
     </span>
   );
@@ -442,8 +451,6 @@ const getStatusDescription = (status: string | undefined, error?: string): strin
 
 const statusCardClass = (status: string | undefined): string => {
   switch (status) {
-    case 'connected':
-      return 'border-[var(--status-success-border)] bg-[var(--status-success-background)]';
     case 'failed':
       return 'border-[var(--status-error-border)] bg-[var(--status-error-background)]';
     case 'needs_auth':
@@ -452,6 +459,14 @@ const statusCardClass = (status: string | undefined): string => {
     default:
       return 'border-[var(--interactive-border)] bg-[var(--surface-elevated)]';
   }
+};
+
+const shouldShowFullStatusCard = (status: string | undefined, authUrl: string | null, needsAuthorization: boolean, isAuthPolling: boolean): boolean => {
+  // Only show full card for error/warning states or when auth is in progress
+  if (status === 'failed' || status === 'needs_auth' || status === 'needs_client_registration') return true;
+  if (authUrl) return true;
+  if (needsAuthorization || isAuthPolling) return true;
+  return false;
 };
 
 const buildMcpOAuthRedirectUri = (name?: string | null, directory?: string | null): string | null => {
@@ -580,7 +595,7 @@ export const McpPage: React.FC = () => {
   const [showDeleteConfirm, setShowDeleteConfirm] = React.useState(false);
   const [isDeleting, setIsDeleting] = React.useState(false);
   const [isConnecting, setIsConnecting] = React.useState(false);
-  const [isRefreshingStatus, setIsRefreshingStatus] = React.useState(false);
+
   const [isAuthorizing, setIsAuthorizing] = React.useState(false);
   const [isClearingAuth, setIsClearingAuth] = React.useState(false);
   const [isTestingConnection, setIsTestingConnection] = React.useState(false);
@@ -936,15 +951,12 @@ export const McpPage: React.FC = () => {
   }, [isDirty, isNewServer]);
 
   const handleRefreshRuntimeStatus = React.useCallback(async (silent = false) => {
-    setIsRefreshingStatus(!silent);
     try {
       await refreshStatus({ directory: currentDirectory, silent });
     } catch (err) {
       if (!silent) {
         toast.error(err instanceof Error ? err.message : 'Failed to refresh MCP status');
       }
-    } finally {
-      setIsRefreshingStatus(false);
     }
   }, [currentDirectory, refreshStatus]);
 
@@ -955,7 +967,6 @@ export const McpPage: React.FC = () => {
   React.useEffect(() => {
     runtimeActionKeyRef.current = runtimeActionKey;
     setIsConnecting(false);
-    setIsRefreshingStatus(false);
     setIsTestingConnection(false);
     resetTransientAuthState();
   }, [resetTransientAuthState, runtimeActionKey]);
@@ -1255,7 +1266,7 @@ export const McpPage: React.FC = () => {
             ) : (
               <div className="flex items-center gap-2 min-w-0">
                 <h2 className="typography-ui-header font-semibold text-foreground truncate">{selectedMcpName}</h2>
-                <StatusBadge status={effectiveRuntimeStatus?.status} enabled={enabled} />
+                <StatusBadge status={effectiveRuntimeStatus?.status} enabled={enabled} variant="pill" />
               </div>
             )}
             <div className="flex items-center gap-2 mt-0.5">
@@ -1263,22 +1274,36 @@ export const McpPage: React.FC = () => {
                 {isNewServer ? 'Configure a new MCP server' : `${mcpType === 'local' ? 'Local · stdio' : 'Remote · SSE'} transport`}
               </p>
               {!isNewServer && (
-                <Button
-                  variant={isConnected ? 'outline' : 'default'}
-                  size="xs"
-                  className="!font-normal"
-                  onClick={handleToggleConnect}
-                  disabled={isConnecting || !enabled}
-                >
-                  {isConnecting ? 'Working...' : isConnected ? 'Disconnect' : 'Connect'}
-                </Button>
+                <>
+                  <Button
+                    variant={isConnected ? 'outline' : 'default'}
+                    size="xs"
+                    className="!font-normal"
+                    onClick={handleToggleConnect}
+                    disabled={isConnecting || !enabled}
+                  >
+                    {isConnecting ? 'Working...' : isConnected ? 'Disconnect' : 'Connect'}
+                  </Button>
+                  {isConnected && (
+                    <Button
+                      variant="ghost"
+                      size="xs"
+                      className="!font-normal gap-1 text-muted-foreground"
+                      onClick={() => void handleTestConnection()}
+                      disabled={isTestingConnection || !enabled}
+                    >
+                      {isTestingConnection ? 'Testing...' : 'Test'}
+                    </Button>
+                  )}
+                </>
               )}
             </div>
           </div>
         </div>
 
-        {!isNewServer && (
-          <div className="mb-8 px-2">
+        {/* Runtime Status - Simplified for connected, expanded for errors */}
+        {!isNewServer && shouldShowFullStatusCard(effectiveRuntimeStatus?.status, authUrl, needsAuthorization, isAuthPolling) && (
+          <div className="mb-6 px-2">
             <div className={cn('rounded-lg border p-3', statusCardClass(effectiveRuntimeStatus?.status))}>
               <div className="space-y-4">
                 <div className="min-w-0 space-y-1">
@@ -1392,20 +1417,9 @@ export const McpPage: React.FC = () => {
         )}
 
         {/* Server Identity */}
-        <div className="mb-8">
-          <div className="mb-1 px-1 flex items-center justify-between gap-2">
+        <div className="mb-6">
+          <div className="mb-1 px-1">
             <h3 className="typography-ui-header font-medium text-foreground">Server</h3>
-            <Button
-              variant="ghost"
-              size="xs"
-              className="!font-normal gap-1 text-muted-foreground"
-              onClick={handleOpenImportDialog}
-              type="button"
-              title="Import a full MCP server configuration from a JSON snippet"
-            >
-              <RiFileCodeLine className="h-3.5 w-3.5" />
-              Import JSON Snippet
-            </Button>
           </div>
 
           <section className="px-2 pb-2 pt-0 space-y-0">
@@ -1446,6 +1460,23 @@ export const McpPage: React.FC = () => {
               </div>
             )}
 
+            {/* Import JSON - prominent placement for new servers */}
+            {isNewServer && (
+              <div className="py-1.5">
+                <Button
+                  variant="outline"
+                  size="xs"
+                  className="!font-normal gap-1.5"
+                  onClick={handleOpenImportDialog}
+                  type="button"
+                  title="Import a full MCP server configuration from a JSON snippet"
+                >
+                  <RiFileCodeLine className="h-3.5 w-3.5" />
+                  Import from JSON Snippet
+                </Button>
+              </div>
+            )}
+
             <div
               className="group flex cursor-pointer items-center gap-2 py-1.5"
               role="button"
@@ -1467,8 +1498,8 @@ export const McpPage: React.FC = () => {
               <span className="typography-ui-label text-foreground">Enable Server</span>
             </div>
 
-            <div className="pb-1.5 pt-0.5">
-              <div className="flex min-w-0 flex-col gap-1.5">
+            <div className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
+              <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
                 <span className="typography-ui-label text-foreground">Transport Mode</span>
                 <div className="flex flex-wrap items-center gap-1">
                   <Button
@@ -1491,13 +1522,14 @@ export const McpPage: React.FC = () => {
                   </Button>
                 </div>
               </div>
+              </div>
             </div>
 
           </section>
         </div>
 
         {/* Connection */}
-        <div className="mb-8">
+        <div className="mb-6">
           <div className="mb-1 px-1">
             <h3 className="typography-ui-header font-medium text-foreground">
               {mcpType === 'local' ? 'Command' : 'Server URL'}
@@ -1519,7 +1551,7 @@ export const McpPage: React.FC = () => {
         </div>
 
         {mcpType === 'remote' && (
-          <div className="mb-8">
+          <div className="mb-6">
             <div className="mb-1 px-1">
               <h3 className="typography-ui-header font-medium text-foreground">Advanced Remote Options</h3>
             </div>
@@ -1528,131 +1560,131 @@ export const McpPage: React.FC = () => {
               <Collapsible
                 open={isAdvancedRemoteOptionsOpen}
                 onOpenChange={setIsAdvancedRemoteOptionsOpen}
-                className="rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)]"
               >
-                <CollapsibleTrigger
-                  type="button"
-                  className="group flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left transition-colors hover:bg-[var(--interactive-hover)]/50"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      {isAdvancedRemoteOptionsOpen
-                        ? <RiArrowDownSLine className="h-4 w-4 text-muted-foreground transition-colors group-hover:text-foreground" />
-                        : <RiArrowRightSLine className="h-4 w-4 text-muted-foreground transition-colors group-hover:text-foreground" />}
-                      <span className="typography-ui-label text-foreground">Configure advanced remote options</span>
-                    </div>
-                    <p className="pl-6 typography-micro text-muted-foreground">
-                      Headers, OAuth details, and request timeout
-                    </p>
+                <CollapsibleTrigger className="flex w-full items-center justify-between py-0.5 group">
+                  <div className="flex items-center gap-1.5 text-left">
+                    <span className="typography-ui-label font-normal text-foreground">Configure advanced options</span>
+                    <span className="typography-micro text-muted-foreground">
+                      ({oauthEnabled ? 'Auto-detect' : 'Custom'} · {headerEntries.length} headers{timeout ? ` · ${timeout}ms` : ''})
+                    </span>
                   </div>
+                  {isAdvancedRemoteOptionsOpen ? (
+                    <RiArrowDownSLine className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
+                  ) : (
+                    <RiArrowRightSLine className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
+                  )}
                 </CollapsibleTrigger>
-                <CollapsibleContent className="border-t border-[var(--interactive-border)] px-3 py-3">
-                  <div className="space-y-6">
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="typography-ui-label text-foreground">Timeout (ms)</span>
-                      <Input
-                        type="number"
-                        min="1"
-                        step="1"
-                        value={timeout}
-                        onChange={(e) => setTimeoutValue(e.target.value)}
-                        placeholder="5000"
-                        className="h-7 w-32 font-mono px-2"
-                        data-bwignore="true"
-                        data-1p-ignore="true"
+                <CollapsibleContent className="pt-2">
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-8">
+                        <div className="flex min-w-0 flex-col sm:w-56 shrink-0">
+                          <span className="typography-ui-label text-foreground">Timeout (ms)</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Input
+                            type="number"
+                            min="1"
+                            step="1"
+                            value={timeout}
+                            onChange={(e) => setTimeoutValue(e.target.value)}
+                            placeholder="5000"
+                            className="h-7 w-32 font-mono px-2"
+                            data-bwignore="true"
+                            data-1p-ignore="true"
+                          />
+                        </div>
+                      </div>
+                      <p className="typography-micro text-muted-foreground sm:pl-64">
+                        Leave blank to use OpenCode&apos;s default MCP timeout.
+                      </p>
+                    </div>
+
+                    <div>
+                      <div className="mb-2 typography-ui-label text-foreground">
+                        Request Headers
+                        {headerEntries.length > 0 && (
+                          <span className="ml-1.5 typography-micro text-muted-foreground font-normal">({headerEntries.length})</span>
+                        )}
+                      </div>
+                      <EnvEditor
+                        value={headerEntries}
+                        onChange={setHeaderEntries}
+                        keyTransform={(value) => value.trimStart()}
+                        keyPlaceholder="Header-Name"
+                        keyInputClassName="w-36 shrink-0 font-mono typography-meta"
+                        pasteLabel="Paste headers"
+                        pasteTitle="Paste KEY=VALUE header lines from clipboard"
                       />
                     </div>
-                    <p className="typography-micro text-muted-foreground">
-                      Leave blank to use OpenCode&apos;s default MCP timeout.
-                    </p>
-                  </div>
 
-                  <div>
-                    <div className="mb-2 typography-ui-label text-foreground">
-                      Request Headers
-                      {headerEntries.length > 0 && (
-                        <span className="ml-1.5 typography-micro text-muted-foreground font-normal">({headerEntries.length})</span>
+                    <div className="space-y-3">
+                      <div
+                        className="group flex cursor-pointer items-center gap-2 py-1.5"
+                        role="button"
+                        tabIndex={0}
+                        aria-pressed={oauthEnabled}
+                        onClick={() => setOauthEnabled(!oauthEnabled)}
+                        onKeyDown={(event) => {
+                          if (event.key === ' ' || event.key === 'Enter') {
+                            event.preventDefault();
+                            setOauthEnabled(!oauthEnabled);
+                          }
+                        }}
+                      >
+                        <Checkbox checked={oauthEnabled} onChange={setOauthEnabled} ariaLabel="Enable OAuth auto-detection" />
+                        <span className="typography-ui-label text-foreground">Enable OAuth auto-detection</span>
+                      </div>
+
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <Input
+                          value={oauthClientId}
+                          onChange={(e) => setOauthClientId(e.target.value)}
+                          placeholder="OAuth client ID"
+                          className="font-mono typography-meta"
+                          disabled={!oauthEnabled}
+                          data-bwignore="true"
+                          data-1p-ignore="true"
+                        />
+                        <Input
+                          value={oauthClientSecret}
+                          onChange={(e) => setOauthClientSecret(e.target.value)}
+                          placeholder="OAuth client secret"
+                          className="font-mono typography-meta"
+                          disabled={!oauthEnabled}
+                          data-bwignore="true"
+                          data-1p-ignore="true"
+                        />
+                        <Input
+                          value={oauthScope}
+                          onChange={(e) => setOauthScope(e.target.value)}
+                          placeholder="Scopes (space-delimited)"
+                          className="font-mono typography-meta"
+                          disabled={!oauthEnabled}
+                          data-bwignore="true"
+                          data-1p-ignore="true"
+                        />
+                        <Input
+                          value={oauthRedirectUri}
+                          onChange={(e) => setOauthRedirectUri(e.target.value)}
+                          placeholder="Redirect URI"
+                          className="font-mono typography-meta"
+                          disabled={!oauthEnabled}
+                          data-bwignore="true"
+                          data-1p-ignore="true"
+                        />
+                      </div>
+
+                      <p className="typography-micro text-muted-foreground">
+                        Leave these fields blank to let OpenCode infer OAuth settings from the MCP server.
+                      </p>
+                      {suggestedRedirectUri && (
+                        <p className="typography-micro text-muted-foreground">
+                          Browser-based MCP authorization uses this callback URL when the redirect URI is blank:
+                          <span className="mt-1 block break-all font-mono text-foreground/80">{suggestedRedirectUri}</span>
+                        </p>
                       )}
                     </div>
-                    <EnvEditor
-                      value={headerEntries}
-                      onChange={setHeaderEntries}
-                      keyTransform={(value) => value.trimStart()}
-                      keyPlaceholder="Header-Name"
-                      keyInputClassName="w-36 shrink-0 font-mono typography-meta"
-                      pasteLabel="Paste headers"
-                      pasteTitle="Paste KEY=VALUE header lines from clipboard"
-                    />
-                  </div>
-
-                  <div className="space-y-3">
-                    <div
-                      className="group flex cursor-pointer items-center gap-2 py-1.5"
-                      role="button"
-                      tabIndex={0}
-                      aria-pressed={oauthEnabled}
-                      onClick={() => setOauthEnabled(!oauthEnabled)}
-                      onKeyDown={(event) => {
-                        if (event.key === ' ' || event.key === 'Enter') {
-                          event.preventDefault();
-                          setOauthEnabled(!oauthEnabled);
-                        }
-                      }}
-                    >
-                      <Checkbox checked={oauthEnabled} onChange={setOauthEnabled} ariaLabel="Enable OAuth auto-detection" />
-                      <span className="typography-ui-label text-foreground">Enable OAuth auto-detection</span>
-                    </div>
-
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <Input
-                        value={oauthClientId}
-                        onChange={(e) => setOauthClientId(e.target.value)}
-                        placeholder="OAuth client ID"
-                        className="font-mono typography-meta"
-                        disabled={!oauthEnabled}
-                        data-bwignore="true"
-                        data-1p-ignore="true"
-                      />
-                      <Input
-                        value={oauthClientSecret}
-                        onChange={(e) => setOauthClientSecret(e.target.value)}
-                        placeholder="OAuth client secret"
-                        className="font-mono typography-meta"
-                        disabled={!oauthEnabled}
-                        data-bwignore="true"
-                        data-1p-ignore="true"
-                      />
-                      <Input
-                        value={oauthScope}
-                        onChange={(e) => setOauthScope(e.target.value)}
-                        placeholder="Scopes (space-delimited)"
-                        className="font-mono typography-meta"
-                        disabled={!oauthEnabled}
-                        data-bwignore="true"
-                        data-1p-ignore="true"
-                      />
-                      <Input
-                        value={oauthRedirectUri}
-                        onChange={(e) => setOauthRedirectUri(e.target.value)}
-                        placeholder="Redirect URI"
-                        className="font-mono typography-meta"
-                        disabled={!oauthEnabled}
-                        data-bwignore="true"
-                        data-1p-ignore="true"
-                      />
-                    </div>
-
-                    <p className="typography-micro text-muted-foreground">
-                      Leave these fields blank to let OpenCode infer OAuth settings from the MCP server.
-                    </p>
-                    {suggestedRedirectUri && (
-                      <p className="typography-micro text-muted-foreground">
-                        Browser-based MCP authorization uses this callback URL when the redirect URI is blank:
-                        <span className="mt-1 block break-all font-mono text-foreground/80">{suggestedRedirectUri}</span>
-                      </p>
-                    )}
-                  </div>
                   </div>
                 </CollapsibleContent>
               </Collapsible>
@@ -1674,7 +1706,19 @@ export const McpPage: React.FC = () => {
           </div>
 
           <section className="px-2 pb-2 pt-0">
-            <EnvEditor value={envEntries} onChange={setEnvEntries} />
+            {envEntries.length === 0 ? (
+              <Button
+                variant="outline"
+                size="xs"
+                className="!font-normal gap-1.5"
+                onClick={() => setEnvEntries([{ key: '', value: '' }])}
+              >
+                <RiAddLine className="h-3.5 w-3.5" />
+                Add environment variable
+              </Button>
+            ) : (
+              <EnvEditor value={envEntries} onChange={setEnvEntries} />
+            )}
           </section>
         </div>
 

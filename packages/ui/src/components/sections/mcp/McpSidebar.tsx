@@ -8,7 +8,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { RiAddLine, RiDeleteBinLine, RiMore2Line, RiPlugLine, RiRefreshLine } from '@remixicon/react';
+import { RiAddLine, RiDeleteBinLine, RiMore2Line, RiPlugLine, RiRefreshLine, RiServerLine, RiGlobalLine } from '@remixicon/react';
 import { useMcpConfigStore, type McpDraft, type McpServerConfig } from '@/stores/useMcpConfigStore';
 import { useMcpStore } from '@/stores/useMcpStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -225,8 +225,12 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
                         <div className="flex items-center gap-2">
                           <StatusDot tone={tone} enabled={server.enabled} />
                           <span className="typography-ui-label font-normal truncate text-foreground">{server.name}</span>
-                          <span className="typography-micro text-muted-foreground bg-muted px-1 rounded flex-shrink-0 leading-none pb-px border border-border/50">
-                            {server.type}
+                          <span title={server.type === 'local' ? 'Local server' : 'Remote server'}>
+                            {server.type === 'local' ? (
+                              <RiServerLine className="h-3 w-3 text-muted-foreground/60 flex-shrink-0" />
+                            ) : (
+                              <RiGlobalLine className="h-3 w-3 text-muted-foreground/60 flex-shrink-0" />
+                            )}
                           </span>
                         </div>
                         <div className="typography-micro text-muted-foreground/60 truncate leading-tight pl-4">
@@ -295,8 +299,12 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
                         <div className="flex items-center gap-2">
                           <StatusDot tone={tone} enabled={server.enabled} />
                           <span className="typography-ui-label font-normal truncate text-foreground">{server.name}</span>
-                          <span className="typography-micro text-muted-foreground bg-muted px-1 rounded flex-shrink-0 leading-none pb-px border border-border/50">
-                            {server.type}
+                          <span title={server.type === 'local' ? 'Local server' : 'Remote server'}>
+                            {server.type === 'local' ? (
+                              <RiServerLine className="h-3 w-3 text-muted-foreground/60 flex-shrink-0" />
+                            ) : (
+                              <RiGlobalLine className="h-3 w-3 text-muted-foreground/60 flex-shrink-0" />
+                            )}
                           </span>
                         </div>
                         <div className="typography-micro text-muted-foreground/60 truncate leading-tight pl-4">
