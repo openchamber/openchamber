@@ -327,7 +327,7 @@ export const PendingChangesBar: React.FC = React.memo(() => {
     const fileCount = changedFiles.length;
     const label = mode === 'git'
         ? `${fileCount} file${fileCount !== 1 ? 's' : ''} changed in workspace`
-        : `AI updated ${fileCount} file${fileCount !== 1 ? 's' : ''} in the last reply`;
+        : `${fileCount} file${fileCount !== 1 ? 's' : ''} changed in the last reply`;
 
     // ---- Display helpers ----
     const getDisplayPath = (file: ChangedFileEntry): { fileName: string; dirPart: string } => {
