@@ -20,6 +20,29 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
     deleteMcpConfig,
   } = dependencies;
 
+  const completeMcpMutation = async (res, action, name, applyChange) => {
+    applyChange();
+
+    try {
+      await refreshOpenCodeAfterConfigChange(`mcp ${action}`);
+      return res.json({
+        success: true,
+        requiresReload: true,
+        message: `MCP server "${name}" ${action}d. Reloading interface…`,
+        reloadDelayMs: clientReloadDelayMs,
+      });
+    } catch (error) {
+      console.error(`[API:MCP ${action}] Reload failed after config write:`, error);
+      return res.json({
+        success: true,
+        requiresReload: false,
+        reloadFailed: true,
+        message: `MCP server "${name}" ${action}d, but OpenCode reload failed.`,
+        warning: error.message || 'OpenCode reload failed after the MCP configuration changed',
+      });
+    }
+  };
+
   app.get('/api/config/agents/:name', async (req, res) => {
     try {
       const agentName = req.params.name;
@@ -187,14 +210,8 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
       }
       console.log(`[API:POST /api/config/mcp] Creating MCP server: ${name}`);
 
-      createMcpConfig(name, config, directory, scope);
-      await refreshOpenCodeAfterConfigChange('mcp creation', { mcpName: name });
-
-      res.json({
-        success: true,
-        requiresReload: true,
-        message: `MCP server "${name}" created. Reloading interface…`,
-        reloadDelayMs: clientReloadDelayMs,
+      await completeMcpMutation(res, 'create', name, () => {
+        createMcpConfig(name, config, directory, scope);
       });
     } catch (error) {
       console.error('[API:POST /api/config/mcp/:name] Failed:', error);
@@ -212,17 +229,14 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
       }
       console.log(`[API:PATCH /api/config/mcp] Updating MCP server: ${name}`);
 
-      updateMcpConfig(name, updates, directory);
-      await refreshOpenCodeAfterConfigChange('mcp update');
-
-      res.json({
-        success: true,
-        requiresReload: true,
-        message: `MCP server "${name}" updated. Reloading interface…`,
-        reloadDelayMs: clientReloadDelayMs,
+      await completeMcpMutation(res, 'update', name, () => {
+        updateMcpConfig(name, updates, directory);
       });
     } catch (error) {
       console.error('[API:PATCH /api/config/mcp/:name] Failed:', error);
+      if (error?.message === `MCP server "${req.params.name}" not found`) {
+        return res.status(404).json({ error: error.message });
+      }
       res.status(500).json({ error: error.message || 'Failed to update MCP server' });
     }
   });
@@ -236,14 +250,8 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
       }
       console.log(`[API:DELETE /api/config/mcp] Deleting MCP server: ${name}`);
 
-      deleteMcpConfig(name, directory);
-      await refreshOpenCodeAfterConfigChange('mcp deletion');
-
-      res.json({
-        success: true,
-        requiresReload: true,
-        message: `MCP server "${name}" deleted. Reloading interface…`,
-        reloadDelayMs: clientReloadDelayMs,
+      await completeMcpMutation(res, 'delete', name, () => {
+        deleteMcpConfig(name, directory);
       });
     } catch (error) {
       console.error('[API:DELETE /api/config/mcp/:name] Failed:', error);

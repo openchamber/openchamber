@@ -29,7 +29,6 @@ import { EXECUTION_FORK_META_TEXT } from "@/lib/messages/executionMeta"
 import { waitForWorktreeBootstrap } from "@/lib/worktrees/worktreeBootstrap"
 import { waitForPendingDraftWorktreeRequest } from "@/lib/worktrees/pendingDraftWorktree"
 import { resolveProjectForSessionDirectory } from "@/lib/projectResolution"
-import type { ProjectEntry } from "@/lib/api/types"
 import {
   getSyncSessions,
   getAllSyncSessions,
