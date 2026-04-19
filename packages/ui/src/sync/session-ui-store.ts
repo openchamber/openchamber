@@ -187,6 +187,10 @@ export type SessionUIState = {
   markSessionPlanAvailable: (sessionId: string) => void
   isSessionPlanAvailable: (sessionId: string) => boolean
 
+  // Non-Git mode: dismissed signature hash per session, hides bar until new turn arrives
+  pendingChangesBarDismissed: Map<string, string>
+  dismissPendingChangesBar: (sessionId: string, signature: string | null) => void
+
   // Actions — UI state management
   setCurrentSession: (id: string | null, directoryHint?: string | null) => void
   openNewSessionDraft: (options?: Partial<NewSessionDraftState>) => void
@@ -343,6 +347,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   isLoading: false,
   lastLoadedDirectory: null,
   sessionPlanAvailable: new Map(),
+  pendingChangesBarDismissed: new Map(),
 
   // ---------------------------------------------------------------------------
   // setCurrentSession
@@ -650,6 +655,16 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
 
   getWorktreeMetadata: (sessionId) => get().worktreeMetadata.get(sessionId),
 
+  dismissPendingChangesBar: (sessionId, signature) => {
+    const map = new Map(get().pendingChangesBarDismissed);
+    if (signature === null) {
+      map.delete(sessionId);
+    } else {
+      map.set(sessionId, signature);
+    }
+    set({ pendingChangesBarDismissed: map });
+  },
+
   // ---------------------------------------------------------------------------
   // sendMessage — calls SDK, reads domain data from sync
   // ---------------------------------------------------------------------------
@@ -664,6 +679,14 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     variant?: string,
     inputMode?: "normal" | "shell",
   ) => {
+    // Clear non-Git changed-files bar on new user message for current session
+    const sid = get().currentSessionId;
+    if (sid) {
+      const map = new Map(get().pendingChangesBarDismissed);
+      map.delete(sid);
+      set({ pendingChangesBarDismissed: map });
+    }
+
     const draft = get().newSessionDraft
     const trimmedAgent = typeof agent === "string" && agent.trim().length > 0 ? agent.trim() : undefined
 
