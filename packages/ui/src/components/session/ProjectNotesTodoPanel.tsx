@@ -569,64 +569,65 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
               {todos.map((todo) => {
                 const isExpandedTodo = expandedTodoIds.has(todo.id);
                 return (
-                <li key={todo.id} className="flex items-start gap-1.5 px-2.5 py-1.5">
-                  <Checkbox
-                    checked={todo.completed}
-                    onChange={(checked) => handleToggleTodo(todo.id, checked)}
-                    ariaLabel={`Mark "${todo.text}" complete`}
-                    className="mt-[3px] self-start"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => handleToggleTodoExpanded(todo.id)}
-                    className={cn(
-                      'mt-[3px] min-w-0 flex-1 self-start bg-transparent p-0 text-left typography-ui-label text-foreground',
-                      isExpandedTodo ? 'whitespace-normal break-words' : 'truncate',
-                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
-                      todo.completed && 'text-muted-foreground line-through'
-                    )}
-                    title={isExpandedTodo ? undefined : todo.text}
-                    aria-label={isExpandedTodo ? `Collapse todo "${todo.text}"` : `Expand todo "${todo.text}"`}
-                  >
-                    {todo.text}
-                  </button>
-                  <div className="mt-0.5 flex self-start items-center gap-0.5">
+                  <li key={todo.id} className="flex items-start gap-1.5 px-2.5 py-1.5">
+                    <div className="flex h-6 items-center">
+                      <Checkbox
+                        checked={todo.completed}
+                        onChange={(checked) => handleToggleTodo(todo.id, checked)}
+                        ariaLabel={`Mark "${todo.text}" complete`}
+                      />
+                    </div>
                     <button
                       type="button"
-                      onClick={() => handleDeleteTodo(todo.id)}
-                      className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-                      aria-label={`Delete "${todo.text}"`}
+                      onClick={() => handleToggleTodoExpanded(todo.id)}
+                      className={cn(
+                        'block min-h-6 min-w-0 flex-1 bg-transparent p-0 text-left typography-ui-label leading-6 text-foreground',
+                        isExpandedTodo ? 'whitespace-normal break-words' : 'overflow-hidden text-ellipsis whitespace-nowrap',
+                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
+                        todo.completed && 'text-muted-foreground line-through'
+                      )}
+                      title={isExpandedTodo ? undefined : todo.text}
+                      aria-label={isExpandedTodo ? `Collapse todo "${todo.text}"` : `Expand todo "${todo.text}"`}
                     >
-                      <RiDeleteBinLine className="h-3.5 w-3.5" />
+                      {todo.text}
                     </button>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <button
-                          type="button"
-                          disabled={sendingTodoId === todo.id}
-                          className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed disabled:opacity-50"
-                          aria-label={`Send "${todo.text}"`}
-                        >
-                          <RiSendPlaneLine className="h-3.5 w-3.5" />
-                        </button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="w-56">
-                        <DropdownMenuItem onClick={() => handleSendToCurrentSession(todo.text)}>
-                          Send to current session
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => handleSendToNewSession(todo.id, todo.text)}>
-                          Send to new session
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => void handleSendToNewWorktreeSession(todo.id, todo.text)}
-                          disabled={!canCreateWorktree}
-                        >
-                          Send to new worktree session
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                </li>
+                    <div className="flex h-6 items-center gap-0.5">
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteTodo(todo.id)}
+                        className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                        aria-label={`Delete "${todo.text}"`}
+                      >
+                        <RiDeleteBinLine className="h-3.5 w-3.5" />
+                      </button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            type="button"
+                            disabled={sendingTodoId === todo.id}
+                            className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed disabled:opacity-50"
+                            aria-label={`Send "${todo.text}"`}
+                          >
+                            <RiSendPlaneLine className="h-3.5 w-3.5" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-56">
+                          <DropdownMenuItem onClick={() => handleSendToCurrentSession(todo.text)}>
+                            Send to current session
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleSendToNewSession(todo.id, todo.text)}>
+                            Send to new session
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => void handleSendToNewWorktreeSession(todo.id, todo.text)}
+                            disabled={!canCreateWorktree}
+                          >
+                            Send to new worktree session
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  </li>
                 );
               })}
             </ul>
