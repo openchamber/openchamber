@@ -323,7 +323,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
           usesActivePillIndicator && 'pill-tabs__track',
           usesActivePillIndicator && (activePillInsetClassName ?? 'gap-0.5 py-0.5'),
           useUnderlineIndicator && 'items-center overflow-y-hidden',
-          showPillTrackBackground && 'rounded-[10px] bg-[var(--surface-subtle)] p-1 gap-1',
+          showPillTrackBackground && 'rounded-[10px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] bg-[var(--surface-subtle)] p-0.5 gap-0.5',
           isScrollable
             ? 'overflow-x-auto scrollbar-none'
             : 'overflow-x-hidden',
@@ -335,8 +335,8 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
         {usesActivePillIndicator && pillRect ? (
           <div
             className={cn(
-              'pointer-events-none absolute left-0 top-0 z-0 rounded-md bg-[color-mix(in_srgb,var(--interactive-selection)_55%,transparent)]',
-              'border border-[color-mix(in_srgb,var(--interactive-selection)_35%,transparent)]'
+              'pointer-events-none absolute left-0 top-0 z-0 rounded-[9px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] bg-[var(--surface-elevated)]',
+              'border border-border/60'
             )}
             style={{
               transform: `translate3d(${pillRect.left}px, ${pillRect.top}px, 0)`,
@@ -397,7 +397,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                   onClick={() => onSelect(item.id)}
                   className={cn(
                     usesActivePillIndicator
-                      ? 'animated-tabs__button pill-tabs__button relative z-10 flex flex-1 items-center justify-center rounded-lg text-sm font-medium transition-colors duration-150 !min-h-0'
+                      ? 'animated-tabs__button pill-tabs__button relative z-10 flex flex-1 items-center justify-center rounded-[9px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] text-sm font-medium transition-colors duration-150 !min-h-0'
                       : 'flex h-full min-w-0 items-center typography-micro',
                     usesActivePillIndicator && closable && '!flex-none',
                     usesActivePillIndicator && activePillLowercase ? 'lowercase' : null,
@@ -416,7 +416,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                         ? 'max-w-56 justify-start truncate px-3 text-left'
                         : 'w-full justify-center truncate px-3 text-center',
                     usesActivePillIndicator
-                      ? (activePillButtonClassName ?? (isActivePillVariant ? (isMobile ? 'h-[34px]' : 'h-[27px]') : 'h-7'))
+                      ? (activePillButtonClassName ?? (isActivePillVariant ? (isMobile ? 'h-[38px]' : 'h-[31px]') : 'h-7'))
                       : null,
                     usesActivePillIndicator
                       ? isActive

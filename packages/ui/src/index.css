@@ -877,7 +877,7 @@ html:not(.dark) .chat-scroll {
 }
 
 .pill-tabs__track {
-  padding-inline: 0.375rem;
+  padding-inline: 0.125rem;
 }
 
 @container pill-tabs (max-width: 23rem) {
