@@ -7,6 +7,7 @@
   "type": "module",
   "main": "./dist-bundle/main.mjs",
   "dependencies": {
+    "@openchamber/web": "workspace:*",
     "electron-context-menu": "^4.1.2",
     "electron-log": "^5.4.3",
     "electron-updater": "^6.8.3"
@@ -21,10 +22,10 @@
   ],
   "scripts": {
     "dev": "node ./scripts/electron-dev.mjs",
-    "build:sidecar": "node ./scripts/build-sidecar.mjs",
+    "build:web-assets": "node ./scripts/build-web-assets.mjs",
     "build": "bun -e \"process.exit(0)\"",
     "bundle:main": "bun ./scripts/bundle-main.mjs",
-    "package": "bun run build:sidecar && bun run bundle:main && electron-builder",
+    "package": "bun run build:web-assets && bun run bundle:main && electron-builder",
     "finalize:latest-yml": "node ./scripts/finalize-latest-yml.mjs",
     "type-check": "node --check ./main.mjs && node --check ./preload.mjs",
     "lint": "node -e \"process.exit(0)\""
@@ -40,10 +41,6 @@
       {
         "from": "resources/web-dist",
         "to": "web-dist"
-      },
-      {
-        "from": "resources/sidecar",
-        "to": "sidecar"
       }
     ],
     "directories": {

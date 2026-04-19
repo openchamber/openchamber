@@ -106,6 +106,7 @@
       "name": "@openchamber/electron",
       "version": "1.9.6",
       "dependencies": {
+        "@openchamber/web": "workspace:*",
         "electron-context-menu": "^4.1.2",
         "electron-log": "^5.4.3",
         "electron-updater": "^6.8.3",

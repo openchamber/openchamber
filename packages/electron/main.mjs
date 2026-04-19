@@ -87,7 +87,6 @@ const readAppMetadata = () => {
 const APP_METADATA = readAppMetadata();
 const APP_VERSION = APP_METADATA.version;
 
-const SIDECAR_NOTIFY_PREFIX = '[OpenChamberDesktopNotify] ';
 const DEFAULT_DESKTOP_PORT = 57123;
 const MIN_WINDOW_WIDTH = 800;
 const MIN_WINDOW_HEIGHT = 520;
@@ -106,7 +105,7 @@ const INSTALLED_APPS_CACHE_FILE = 'discovered-apps.json';
 const { autoUpdater } = updaterPkg;
 
 const state = {
-  sidecarChild: null,
+  serverHandle: null,
   sidecarUrl: null,
   localOrigin: null,
   bootOutcome: null,
@@ -473,20 +472,24 @@ const pickUnusedPort = async () => {
   });
 };
 
+const isPortFree = async (port) => {
+  if (!Number.isFinite(port) || port <= 0) return false;
+  const net = await import('node:net');
+  return await new Promise((resolve) => {
+    const test = net.createServer();
+    const done = (value) => {
+      try { test.close(); } catch {}
+      resolve(value);
+    };
+    test.once('error', () => done(false));
+    test.listen(port, '127.0.0.1', () => done(true));
+  });
+};
+
 const buildLocalUrl = (port) => `http://127.0.0.1:${port}`;
 
 const resourceRoot = () => isDev ? path.join(__dirname, 'resources') : process.resourcesPath;
 const resolveWebDistDir = () => path.join(resourceRoot(), 'web-dist');
-const resolveSidecarPath = () => path.join(resourceRoot(), 'sidecar', process.platform === 'win32' ? 'openchamber-server.exe' : 'openchamber-server');
-
-const killStaleSidecarProcesses = () => {
-  const processName = process.platform === 'win32' ? 'openchamber-server.exe' : 'openchamber-server';
-  if (process.platform === 'win32') {
-    spawnSync('taskkill', ['/F', '/IM', processName], { stdio: 'ignore' });
-  } else {
-    spawnSync('pkill', ['-x', processName], { stdio: 'ignore' });
-  }
-};
 
 const normalizeNotificationInput = (raw) => {
   if (!raw || typeof raw !== 'object') return {};
@@ -599,18 +602,17 @@ const loadShellEnv = () => {
   return cachedShellEnv;
 };
 
-const spawnLocalServer = async () => {
-  killStaleSidecarProcesses();
-
-  const settings = readSettingsRoot();
-  const storedPort = Number.isFinite(settings.desktopLocalPort) ? settings.desktopLocalPort : null;
-  const candidates = [storedPort, DEFAULT_DESKTOP_PORT, null].filter((value, index, array) => value !== undefined && array.indexOf(value) === index);
+// Merge the user's login-shell env (PATH, etc.) into this process before we
+// import/start the server in-process. The server and its children (opencode
+// CLI, git, etc.) inherit process.env directly now — there is no sidecar
+// subprocess to hand a custom env to.
+const inheritUserShellEnv = () => {
+  const shellEnv = loadShellEnv();
+  if (!shellEnv) return;
 
   const homeDir = os.homedir();
-  const shellEnv = loadShellEnv() || {};
   const shellPathSegments = typeof shellEnv.PATH === 'string' ? shellEnv.PATH.split(':') : [];
   const processPathSegments = typeof process.env.PATH === 'string' ? process.env.PATH.split(':') : [];
-
   const pathSegments = [
     ...shellPathSegments,
     '/opt/homebrew/bin',
@@ -628,71 +630,81 @@ const spawnLocalServer = async () => {
   ].filter(Boolean);
   const uniquePath = Array.from(new Set(pathSegments)).join(':');
 
-  for (const candidate of candidates) {
-    const port = candidate || await pickUnusedPort();
-    const url = buildLocalUrl(port);
-
-    const child = spawn(resolveSidecarPath(), ['--port', String(port)], {
-      env: {
-        ...process.env,
-        ...shellEnv,
-        OPENCHAMBER_HOST: '127.0.0.1',
-        OPENCHAMBER_DIST_DIR: resolveWebDistDir(),
-        OPENCHAMBER_RUNTIME: 'desktop',
-        OPENCHAMBER_DESKTOP_NOTIFY: 'true',
-        PATH: uniquePath,
-        NO_PROXY: 'localhost,127.0.0.1',
-        no_proxy: 'localhost,127.0.0.1',
-      },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-
-    child.stdout?.on('data', (chunk) => {
-      const line = chunk.toString();
-      const prefixIndex = line.indexOf(SIDECAR_NOTIFY_PREFIX);
-      if (prefixIndex >= 0) {
-        try {
-          const payload = JSON.parse(line.slice(prefixIndex + SIDECAR_NOTIFY_PREFIX.length).trim());
-          maybeShowNativeNotification(payload);
-        } catch {
-        }
-      }
-    });
-
-    child.stderr?.on('data', (chunk) => {
-      process.stderr.write(chunk);
-    });
-
-    if (await waitForHealth(url, 8_000, 100)) {
-      state.sidecarChild = child;
-      state.sidecarUrl = url;
-      const root = readSettingsRoot();
-      root.desktopLocalPort = port;
-      await writeSettingsRoot(root);
-      return url;
+  for (const [key, value] of Object.entries(shellEnv)) {
+    if (key === 'PATH') continue;
+    if (typeof process.env[key] === 'undefined') {
+      process.env[key] = value;
     }
+  }
+  process.env.PATH = uniquePath;
+};
 
-    child.kill('SIGTERM');
+const spawnLocalServer = async () => {
+  inheritUserShellEnv();
+
+  const settings = readSettingsRoot();
+  const storedPort = Number.isFinite(settings.desktopLocalPort) ? settings.desktopLocalPort : null;
+
+  // Probe before starting the server — main() in the server module sets up a
+  // lot of global state before binding, and calling it twice after a listen
+  // failure would double-wire runtimes. Pick a known-free port in one shot.
+  const candidates = [storedPort, DEFAULT_DESKTOP_PORT].filter((v) => Number.isFinite(v) && v > 0);
+  let chosenPort = 0;
+  for (const candidate of candidates) {
+    if (await isPortFree(candidate)) {
+      chosenPort = candidate;
+      break;
+    }
+  }
+  if (chosenPort === 0) {
+    chosenPort = await pickUnusedPort();
   }
 
-  throw new Error('Failed to start local OpenChamber sidecar');
+  // The server module reads ENV_DESKTOP_NOTIFY / OPENCHAMBER_DIST_DIR /
+  // OPENCHAMBER_RUNTIME at import time (top-level const), so these must be
+  // set before the first import. After this point, the same env is used by
+  // both the Electron main and the server running inside it.
+  process.env.OPENCHAMBER_HOST = '127.0.0.1';
+  process.env.OPENCHAMBER_DIST_DIR = resolveWebDistDir();
+  process.env.OPENCHAMBER_RUNTIME = 'desktop';
+  process.env.OPENCHAMBER_DESKTOP_NOTIFY = 'true';
+  process.env.NO_PROXY = process.env.NO_PROXY || 'localhost,127.0.0.1';
+  process.env.no_proxy = process.env.no_proxy || 'localhost,127.0.0.1';
+
+  const { startWebUiServer } = await import('@openchamber/web/server/index.js');
+
+  const handle = await startWebUiServer({
+    port: chosenPort,
+    host: '127.0.0.1',
+    attachSignals: false,
+    exitOnShutdown: false,
+    onDesktopNotification: (payload) => maybeShowNativeNotification(payload),
+  });
+
+  const port = handle.getPort();
+  const url = buildLocalUrl(port);
+
+  state.serverHandle = handle;
+  state.sidecarUrl = url;
+
+  const root = readSettingsRoot();
+  root.desktopLocalPort = port;
+  await writeSettingsRoot(root);
+
+  return url;
 };
 
 const killSidecar = () => {
-  if (state.sidecarUrl) {
-    void fetch(`${state.sidecarUrl.replace(/\/$/, '')}/api/system/shutdown`, {
-      method: 'POST',
-      signal: AbortSignal.timeout(1500),
-    }).catch(() => {});
-  }
-
-  if (state.sidecarChild && !state.sidecarChild.killed) {
+  if (state.serverHandle) {
     try {
-      state.sidecarChild.kill('SIGTERM');
+      const result = state.serverHandle.stop({ exitProcess: false });
+      if (result && typeof result.then === 'function') {
+        result.catch(() => {});
+      }
     } catch {
     }
+    state.serverHandle = null;
   }
-  state.sidecarChild = null;
   state.sidecarUrl = null;
 };
 

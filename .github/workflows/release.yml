@@ -550,7 +550,7 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          bun run build:sidecar
+          bun run build:web-assets
           bun run bundle:main
           ./node_modules/.bin/electron-builder --mac --arch ${{ matrix.arch }} --publish=never
 

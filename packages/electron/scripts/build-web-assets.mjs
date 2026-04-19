@@ -12,38 +12,7 @@ const electronDir = path.join(repoRoot, 'packages', 'electron');
 
 const resourcesDir = path.join(electronDir, 'resources');
 const resourcesWebDistDir = path.join(resourcesDir, 'web-dist');
-const resourcesSidecarDir = path.join(resourcesDir, 'sidecar');
 const webDistDir = path.join(webDir, 'dist');
-
-const inferTargetTriple = () => {
-  if (process.platform === 'darwin') {
-    return process.arch === 'arm64' ? 'aarch64-apple-darwin' : 'x86_64-apple-darwin';
-  }
-
-  if (process.platform === 'win32') {
-    return 'x86_64-pc-windows-msvc';
-  }
-
-  if (process.platform === 'linux') {
-    return process.arch === 'arm64' ? 'aarch64-unknown-linux-gnu' : 'x86_64-unknown-linux-gnu';
-  }
-
-  return `${process.arch}-${process.platform}`;
-};
-
-const targetTriple = inferTargetTriple();
-
-const bunCompileTargetByTriple = {
-  'aarch64-apple-darwin': 'bun-darwin-arm64',
-  'x86_64-apple-darwin': 'bun-darwin-x64',
-  'aarch64-unknown-linux-gnu': 'bun-linux-arm64',
-  'x86_64-unknown-linux-gnu': 'bun-linux-x64',
-  'x86_64-pc-windows-msvc': 'bun-windows-x64',
-};
-
-const compileTarget = bunCompileTargetByTriple[targetTriple];
-const sidecarFileName = process.platform === 'win32' ? 'openchamber-server.exe' : 'openchamber-server';
-const sidecarOutPath = path.join(resourcesSidecarDir, sidecarFileName);
 
 const run = (cmd, args, cwd) => {
   const result = spawnSync(cmd, args, { cwd, stdio: 'inherit' });
@@ -57,7 +26,6 @@ const resolveBun = () => {
   if (typeof process.env.BUN === 'string' && process.env.BUN.trim()) {
     return process.env.BUN.trim();
   }
-
   const result = spawnSync('/bin/bash', ['-lc', 'command -v bun'], { encoding: 'utf8' });
   const resolved = (result.stdout || '').trim();
   return resolved || 'bun';
@@ -71,14 +39,8 @@ const removeDir = async (target) => {
       await fs.rm(target, { recursive: true, force: true });
       return;
     } catch (error) {
-      if (attempt === 4) {
-        throw error;
-      }
-
-      if (!['ENOTEMPTY', 'EBUSY', 'EPERM'].includes(error?.code)) {
-        throw error;
-      }
-
+      if (attempt === 4) throw error;
+      if (!['ENOTEMPTY', 'EBUSY', 'EPERM'].includes(error?.code)) throw error;
       await sleep(100 * (attempt + 1));
     }
   }
@@ -103,33 +65,11 @@ const bunExe = resolveBun();
 console.log('[electron] building web UI dist...');
 run(bunExe, ['run', 'build'], webDir);
 
-console.log('[electron] preparing packaged resources...');
+console.log('[electron] staging packaged resources...');
 await fs.mkdir(resourcesDir, { recursive: true });
 const stagedWebDistDir = await fs.mkdtemp(path.join(resourcesDir, 'web-dist-staging-'));
 await copyDir(webDistDir, stagedWebDistDir);
 await removeDir(resourcesWebDistDir);
 await fs.rename(stagedWebDistDir, resourcesWebDistDir);
-await removeDir(resourcesSidecarDir);
-await fs.mkdir(resourcesSidecarDir, { recursive: true });
 
-console.log('[electron] building openchamber-server sidecar...');
-const buildArgs = [
-  'build',
-  '--compile',
-  path.join(webDir, 'server', 'index.js'),
-  '--outfile',
-  sidecarOutPath,
-];
-
-if (compileTarget) {
-  buildArgs.push('--target', compileTarget);
-}
-
-run(bunExe, buildArgs, repoRoot);
-
-if (process.platform !== 'win32') {
-  await fs.chmod(sidecarOutPath, 0o755);
-}
-
-console.log(`[electron] sidecar ready: ${sidecarOutPath}`);
 console.log(`[electron] web assets ready: ${resourcesWebDistDir}`);
