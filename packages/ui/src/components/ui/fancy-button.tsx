@@ -130,4 +130,5 @@ function FancyButtonIcon<T extends React.ElementType = "div">({
 FancyButtonIcon.displayName = "FancyButton.Icon";
 
 export { FancyButtonRoot as Root, FancyButtonIcon as Icon };
+// eslint-disable-next-line react-refresh/only-export-components
 export { fancyButtonRoot as fancyButtonVariants };

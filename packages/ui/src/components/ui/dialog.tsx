@@ -7,9 +7,15 @@ import { cn } from "@/lib/utils"
 let openDialogCount = 0;
 
 type AsChildProps = { asChild?: boolean };
+type AsChildRenderProps = {
+  render?: React.ReactElement;
+  children?: React.ReactNode;
+};
 
 function renderFromAsChild(asChild: boolean | undefined, children: React.ReactNode) {
-  if (asChild && React.isValidElement(children)) return { render: children as React.ReactElement };
+  if (asChild && React.isValidElement(children)) {
+    return { render: children as React.ReactElement } satisfies AsChildRenderProps;
+  }
   return { children };
 }
 
@@ -25,7 +31,7 @@ function DialogTrigger({
   ...props
 }: React.ComponentProps<typeof BaseDialog.Trigger> & AsChildProps) {
   const r = renderFromAsChild(asChild, children);
-  return <BaseDialog.Trigger data-slot="dialog-trigger" {...(props as any)} {...(r as any)} />
+  return <BaseDialog.Trigger data-slot="dialog-trigger" {...props} {...r} />
 }
 
 function DialogPortal({
@@ -40,7 +46,7 @@ function DialogClose({
   ...props
 }: React.ComponentProps<typeof BaseDialog.Close> & AsChildProps) {
   const r = renderFromAsChild(asChild, children);
-  return <BaseDialog.Close data-slot="dialog-close" {...(props as any)} {...(r as any)} />
+  return <BaseDialog.Close data-slot="dialog-close" {...props} {...r} />
 }
 
 const DialogOverlay = React.forwardRef<
@@ -85,10 +91,13 @@ function DialogContent({
   children,
   showCloseButton = true,
   keyboardAvoid = false,
-  onOpenAutoFocus: _onOpenAutoFocus,
-  onCloseAutoFocus: _onCloseAutoFocus,
+  onOpenAutoFocus,
+  onCloseAutoFocus,
   ...props
 }: DialogContentProps) {
+  void onOpenAutoFocus
+  void onCloseAutoFocus
+
   return (
     <DialogPortal>
       <DialogOverlay className="rounded-none" />

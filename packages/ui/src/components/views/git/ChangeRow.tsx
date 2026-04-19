@@ -81,15 +81,6 @@ export const ChangeRow = React.memo<ChangeRowProps>(function ChangeRow({
     [onToggle, onViewDiff]
   );
 
-  const handleToggleClick = useCallback(
-    (event: React.MouseEvent) => {
-      event.preventDefault();
-      event.stopPropagation();
-      onToggle();
-    },
-    [onToggle]
-  );
-
   const handleRevertClick = useCallback(
     (event: React.MouseEvent) => {
       event.preventDefault();

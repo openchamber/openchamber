@@ -6,6 +6,11 @@ import { cn } from "@/lib/utils";
 
 const Collapsible = BaseCollapsible.Root;
 
+type AsChildRenderProps = {
+  render?: React.ReactElement;
+  children?: React.ReactNode;
+};
+
 type TriggerProps = React.ComponentProps<typeof BaseCollapsible.Trigger> & { asChild?: boolean };
 
 const CollapsibleTrigger = ({
@@ -14,7 +19,7 @@ const CollapsibleTrigger = ({
   children,
   ...props
 }: TriggerProps) => {
-  const renderProps: any = asChild && React.isValidElement(children)
+  const renderProps: AsChildRenderProps = asChild && React.isValidElement(children)
     ? { render: children as React.ReactElement }
     : { children };
   return (
@@ -23,7 +28,7 @@ const CollapsibleTrigger = ({
         "flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-foreground hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
         className
       )}
-      {...(props as any)}
+      {...props}
       {...renderProps}
     />
   );

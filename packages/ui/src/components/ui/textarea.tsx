@@ -68,38 +68,6 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
     },
     ref,
   ) => {
-    // Simple mode: bare textarea, caller owns the wrapper.
-    if (simple) {
-      return (
-        <ScrollableOverlay
-          as="textarea"
-          ref={ref as React.Ref<HTMLTextAreaElement>}
-          disableHorizontal
-          fillContainer={fillContainer}
-          useScrollShadow={useScrollShadow}
-          scrollShadowSize={scrollShadowSize}
-          outerClassName={outerClassName}
-          scrollbarClassName={scrollbarClassName}
-          className={cn(
-            "block w-full appearance-none resize-none bg-transparent text-foreground typography-markdown outline-none",
-            "px-3 py-2 md:typography-ui-label",
-            "placeholder:text-muted-foreground focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50",
-            fillContainer ? "[field-sizing:fixed]" : "field-sizing-content",
-            className,
-          )}
-          spellCheck={false}
-          autoComplete="off"
-          autoCorrect="off"
-          autoCapitalize="off"
-          disabled={disabled}
-          {...props}
-        />
-      );
-    }
-
-    // Compound mode (AlignUI-style): outer ring container with a
-    // pointer-driven resize handle (gives a generous hit area instead of
-    // the native ~12px browser resizer corner).
     const wrapperRef = React.useRef<HTMLDivElement>(null);
     const dragStateRef = React.useRef<{ startY: number; startHeight: number } | null>(null);
     const [resizedHeight, setResizedHeight] = React.useState<number | null>(null);
@@ -139,9 +107,38 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
       const textarea = wrapperRef.current?.querySelector('textarea');
       if (textarea && document.activeElement !== textarea) {
         event.preventDefault();
-        (textarea as HTMLTextAreaElement).focus();
+        textarea.focus();
       }
     }, []);
+
+    // Simple mode: bare textarea, caller owns the wrapper.
+    if (simple) {
+      return (
+        <ScrollableOverlay
+          as="textarea"
+          ref={ref as React.Ref<HTMLTextAreaElement>}
+          disableHorizontal
+          fillContainer={fillContainer}
+          useScrollShadow={useScrollShadow}
+          scrollShadowSize={scrollShadowSize}
+          outerClassName={outerClassName}
+          scrollbarClassName={scrollbarClassName}
+          className={cn(
+            "block w-full appearance-none resize-none bg-transparent text-foreground typography-markdown outline-none",
+            "px-3 py-2 md:typography-ui-label",
+            "placeholder:text-muted-foreground focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50",
+            fillContainer ? "[field-sizing:fixed]" : "field-sizing-content",
+            className,
+          )}
+          spellCheck={false}
+          autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="off"
+          disabled={disabled}
+          {...props}
+        />
+      );
+    }
 
     return (
       <div

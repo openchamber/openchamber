@@ -5,9 +5,15 @@ import { RiArrowRightSLine, RiCheckLine } from '@remixicon/react';
 import { cn } from "@/lib/utils"
 
 type AsChildProps = { asChild?: boolean };
+type AsChildRenderProps = {
+  render?: React.ReactElement;
+  children?: React.ReactNode;
+};
 
 function renderFromAsChild(asChild: boolean | undefined, children: React.ReactNode) {
-  if (asChild && React.isValidElement(children)) return { render: children as React.ReactElement };
+  if (asChild && React.isValidElement(children)) {
+    return { render: children as React.ReactElement } satisfies AsChildRenderProps;
+  }
   return { children };
 }
 
@@ -32,8 +38,8 @@ function DropdownMenuTrigger({
   return (
     <BaseMenu.Trigger
       data-slot="dropdown-menu-trigger"
-      {...(props as any)}
-      {...(r as any)}
+      {...props}
+      {...r}
     />
   )
 }
@@ -57,9 +63,11 @@ function DropdownMenuContent({
   alignOffset,
   style,
   children,
-  onCloseAutoFocus: _onCloseAutoFocus,
+  onCloseAutoFocus,
   ...props
 }: ContentProps) {
+  void onCloseAutoFocus
+
   return (
     <BaseMenu.Portal>
       <BaseMenu.Positioner
@@ -107,11 +115,11 @@ function DropdownMenuItem({
 }: React.ComponentProps<typeof BaseMenu.Item> & AsChildProps & {
   inset?: boolean
   variant?: "default" | "destructive"
-  onSelect?: (event: React.MouseEvent<HTMLDivElement>) => void
+  onSelect?: React.ComponentProps<typeof BaseMenu.Item>["onClick"]
 }) {
   const r = renderFromAsChild(asChild, children);
-  const handleClick = (event: React.MouseEvent<HTMLDivElement>) => {
-    onClick?.(event as any);
+  const handleClick: NonNullable<React.ComponentProps<typeof BaseMenu.Item>["onClick"]> = (event) => {
+    onClick?.(event);
     if (!event.defaultPrevented) onSelect?.(event);
   };
   return (
@@ -123,9 +131,9 @@ function DropdownMenuItem({
         "data-[highlighted]:bg-interactive-hover hover:bg-interactive-hover data-[variant=destructive]:text-destructive data-[variant=destructive]:hover:bg-destructive/10 dark:data-[variant=destructive]:hover:bg-destructive/20 data-[variant=destructive]:hover:text-destructive data-[variant=destructive]:*:[svg]:!text-destructive [&_svg:not([class*='text-'])]:text-muted-foreground relative flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1 typography-ui-label outline-hidden select-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[inset]:pl-8 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
         className
       )}
-      {...(props as any)}
-      onClick={handleClick as any}
-      {...(r as any)}
+      {...props}
+      onClick={handleClick}
+      {...r}
     />
   )
 }

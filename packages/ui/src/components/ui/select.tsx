@@ -2,29 +2,38 @@
 
 import * as React from "react"
 import { Select as BaseSelect } from "@base-ui/react/select"
+import type { SelectRootChangeEventDetails } from "@base-ui/react/select";
 import { RiArrowDownSLine, RiArrowUpSLine, RiCheckLine } from '@remixicon/react';
 
 import { cn } from "@/lib/utils"
 import { ScrollableOverlay } from "@/components/ui/ScrollableOverlay";
 
 type AsChildProps = { asChild?: boolean };
+type AsChildRenderProps = {
+  render?: React.ReactElement;
+  children?: React.ReactNode;
+};
 
-function renderFromAsChild(asChild: boolean | undefined, children: React.ReactNode) {
-  if (asChild && React.isValidElement(children)) return { render: children as React.ReactElement };
-  return { children };
-}
-
-type SelectRootProps = Omit<
+type SelectRootProps<Value extends string = string> = Omit<
   React.ComponentProps<typeof BaseSelect.Root>,
   "value" | "defaultValue" | "onValueChange"
 > & {
-  value?: unknown;
-  defaultValue?: unknown;
-  onValueChange?: (value: any, eventDetails?: any) => void;
+  value?: Value;
+  defaultValue?: Value;
+  onValueChange?: (value: Value, eventDetails: SelectRootChangeEventDetails) => void;
 };
 
-function Select(props: SelectRootProps) {
-  return <BaseSelect.Root {...(props as React.ComponentProps<typeof BaseSelect.Root>)} />
+function Select<Value extends string = string>({ onValueChange, ...props }: SelectRootProps<Value>) {
+  const handleValueChange = React.useCallback(
+    (value: unknown, eventDetails: SelectRootChangeEventDetails) => {
+      if (typeof value === "string") {
+        onValueChange?.(value as Value, eventDetails);
+      }
+    },
+    [onValueChange]
+  );
+
+  return <BaseSelect.Root {...props} onValueChange={handleValueChange} />
 }
 
 function SelectGroup({
@@ -35,21 +44,28 @@ function SelectGroup({
 
 type SelectValueProps = Omit<React.ComponentProps<typeof BaseSelect.Value>, "children"> & {
   placeholder?: React.ReactNode;
-  children?: React.ReactNode | ((value: unknown) => React.ReactNode);
+  children?: React.ReactNode | ((value: string | undefined) => React.ReactNode);
 };
 
 function SelectValue({ placeholder, children, ...props }: SelectValueProps) {
   return (
     <BaseSelect.Value data-slot="select-value" {...props}>
       {(value: unknown) => {
+        const resolvedValue =
+          typeof value === "string" || value === undefined
+            ? value
+            : value === null
+              ? undefined
+              : String(value);
+
         if (typeof children === "function") {
-          return (children as (v: unknown) => React.ReactNode)(value);
+          return children(resolvedValue);
         }
         if (children !== undefined && children !== null) return children;
-        if (value === null || value === undefined || value === "") {
+        if (resolvedValue === undefined || resolvedValue === "") {
           return placeholder as React.ReactNode;
         }
-        return String(value);
+        return resolvedValue;
       }}
     </BaseSelect.Value>
   )
@@ -64,7 +80,7 @@ function SelectTrigger({
 }: React.ComponentProps<typeof BaseSelect.Trigger> & AsChildProps & {
   size?: "sm" | "default" | "lg" | "chip"
 }) {
-  const asChildRender: any = asChild && React.isValidElement(children)
+  const asChildRender: AsChildRenderProps | null = asChild && React.isValidElement(children)
     ? { render: children as React.ReactElement }
     : null;
   return (
@@ -75,7 +91,7 @@ function SelectTrigger({
         "border-input data-[placeholder]:text-muted-foreground [&_svg:not([class*='text-'])]:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive flex w-fit items-center justify-between gap-2 rounded-lg border bg-transparent px-2 py-2 typography-ui-label whitespace-nowrap shadow-none outline-none focus-visible:outline-none hover:bg-interactive-hover data-[popup-open]:bg-interactive-active focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50 data-[size=default]:h-6 data-[size=sm]:h-6 data-[size=lg]:h-8 data-[size=lg]:py-1.5 data-[size=chip]:h-7 data-[size=chip]:py-1 *:data-[slot=select-value]:line-clamp-1 *:data-[slot=select-value]:flex *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-2 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
         className
       )}
-      {...(props as any)}
+      {...props}
       {...(asChildRender ?? {})}
     >
       {asChildRender ? undefined : (<>

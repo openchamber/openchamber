@@ -3,6 +3,11 @@ import { Tooltip as BaseTooltip } from "@base-ui/react/tooltip"
 
 import { cn } from "@/lib/utils"
 
+type AsChildRenderProps = {
+  render?: React.ReactElement;
+  children?: React.ReactNode;
+};
+
 type ProviderProps = React.ComponentProps<typeof BaseTooltip.Provider> & {
   delayDuration?: number;
   skipDelayDuration?: number;
@@ -32,10 +37,13 @@ function Tooltip({
   delayDuration,
   ...props
 }: TooltipRootProps) {
-  const merged = delayDuration !== undefined && (props as any).delay === undefined
-    ? { ...props, delay: delayDuration }
-    : props;
-  return <BaseTooltip.Root {...(merged as any)} />
+  const tooltip = <BaseTooltip.Root {...props} />
+
+  if (delayDuration === undefined) {
+    return tooltip
+  }
+
+  return <TooltipProvider delayDuration={delayDuration}>{tooltip}</TooltipProvider>
 }
 
 function TooltipTrigger({
@@ -43,10 +51,10 @@ function TooltipTrigger({
   children,
   ...props
 }: React.ComponentProps<typeof BaseTooltip.Trigger> & { asChild?: boolean }) {
-  const renderProps: any = asChild && React.isValidElement(children)
+  const renderProps: AsChildRenderProps = asChild && React.isValidElement(children)
     ? { render: children as React.ReactElement }
     : { children };
-  return <BaseTooltip.Trigger data-slot="tooltip-trigger" {...(props as any)} {...renderProps} />
+  return <BaseTooltip.Trigger data-slot="tooltip-trigger" {...props} {...renderProps} />
 }
 
 type ContentProps = React.ComponentProps<typeof BaseTooltip.Popup> & {

@@ -8,9 +8,8 @@ import { cn } from "@/lib/utils"
 function Separator({
   className,
   orientation = "horizontal",
-  decorative: _decorative,
   ...props
-}: React.ComponentProps<typeof BaseSeparator> & { decorative?: boolean }) {
+}: React.ComponentProps<typeof BaseSeparator>) {
   return (
     <BaseSeparator
       data-slot="separator"
