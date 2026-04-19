@@ -63,7 +63,15 @@ textarea[data-chat-input="true"]:focus-visible {
 }
 
 .oc-cm-selected-line {
-  background: color-mix(in srgb, var(--accent) 70%, transparent);
+  background: color-mix(in srgb, var(--primary-base) 22%, transparent);
+}
+
+.pierre-diff-wrapper {
+  --diffs-bg-selection-override: color-mix(in srgb, var(--primary-base) 22%, transparent);
+  --diffs-bg-selection-background-override: color-mix(in srgb, var(--primary-base) 14%, transparent);
+  --diffs-bg-selection-number-override: color-mix(in srgb, var(--primary-base) 28%, transparent);
+  --diffs-bg-selection-number-background-override: color-mix(in srgb, var(--primary-base) 18%, transparent);
+  --diffs-selection-color-override: var(--primary-base);
 }
 
 /* Codemirror syntax fallback for classHighlighter tokens */

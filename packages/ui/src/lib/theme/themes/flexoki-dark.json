@@ -168,10 +168,10 @@
     },
     "radius": {
       "none": "0",
-      "sm": "0.325rem",
-      "md": "0.75rem",
-      "lg": "1.125rem",
-      "xl": "1.5rem",
+      "sm": "0.25rem",
+      "md": "0.5rem",
+      "lg": "0.625rem",
+      "xl": "0.75rem",
       "full": "9999px"
     },
     "transitions": {
