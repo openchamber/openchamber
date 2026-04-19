@@ -8,6 +8,7 @@
   "main": "./dist-bundle/main.mjs",
   "dependencies": {
     "electron-context-menu": "^4.1.2",
+    "electron-log": "^5.4.3",
     "electron-updater": "^6.8.3"
   },
   "devDependencies": {
@@ -52,10 +53,18 @@
     "mac": {
       "category": "public.app-category.developer-tools",
       "icon": "resources/icons/icon.icns",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "resources/entitlements.mac.plist",
+      "entitlementsInherit": "resources/entitlements.mac.plist",
+      "notarize": true,
       "target": [
         "dmg",
         "zip"
       ]
+    },
+    "dmg": {
+      "sign": true
     },
     "publish": {
       "provider": "github",

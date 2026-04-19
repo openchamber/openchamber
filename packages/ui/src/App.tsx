@@ -468,6 +468,20 @@ function App({ apis }: AppProps) {
 
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
+
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ projectPath?: string }>).detail;
+      const projectPath = typeof detail?.projectPath === 'string' ? detail.projectPath.trim() : '';
+      if (!projectPath) return;
+      useDirectoryStore.getState().setDirectory(projectPath, { showOverlay: true });
+    };
+
+    window.addEventListener('openchamber:open-project', handler as EventListener);
+    return () => window.removeEventListener('openchamber:open-project', handler as EventListener);
+  }, []);
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
     if (!isInitialized || isSwitchingDirectory) return;
     if (appReadyDispatchedRef.current) return;
     appReadyDispatchedRef.current = true;

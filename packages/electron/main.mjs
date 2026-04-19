@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, Notification, session, shell } from 'electron';
 import contextMenu from 'electron-context-menu';
+import log from 'electron-log/main.js';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
@@ -12,6 +13,54 @@ import { ElectronSshManager } from './ssh-manager.mjs';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const isDev = process.env.OPENCHAMBER_ELECTRON_DEV === '1' || !app.isPackaged;
+
+const DEEP_LINK_PROTOCOL = 'openchamber';
+const APP_USER_MODEL_ID = 'ai.opencode.openchamber.electron';
+
+if (!app.requestSingleInstanceLock()) {
+  app.exit(0);
+  process.exit(0);
+}
+
+app.setAppUserModelId(APP_USER_MODEL_ID);
+app.commandLine.appendSwitch('proxy-bypass-list', '<-loopback>');
+
+try {
+  process.chdir(os.homedir());
+} catch {
+}
+
+log.initialize();
+log.transports.file.maxSize = 5 * 1024 * 1024;
+log.transports.file.level = 'info';
+log.transports.console.level = isDev ? 'debug' : 'warn';
+
+const LOG_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+try {
+  const logPath = log.transports.file.getFile().path;
+  const logDir = path.dirname(logPath);
+  const cutoff = Date.now() - LOG_MAX_AGE_MS;
+  for (const entry of fs.readdirSync(logDir)) {
+    const candidate = path.join(logDir, entry);
+    try {
+      const info = fs.statSync(candidate);
+      if (info.isFile() && info.mtimeMs < cutoff) {
+        fs.unlinkSync(candidate);
+      }
+    } catch {
+    }
+  }
+} catch {
+}
+
+try {
+  if (!app.isDefaultProtocolClient(DEEP_LINK_PROTOCOL)) {
+    app.setAsDefaultProtocolClient(DEEP_LINK_PROTOCOL);
+  }
+} catch (error) {
+  // log.* not yet initialized at this point; fall back to console.
+  console.warn('[electron] failed to register deep-link protocol:', error);
+}
 
 const readAppMetadata = () => {
   const candidates = [
@@ -169,7 +218,7 @@ const requestQuitWithConfirmation = async () => {
     }
   } catch (error) {
     state.quitConfirmationPending = false;
-    console.warn('[electron] quit confirmation dialog failed:', error);
+    log.warn('[electron] quit confirmation dialog failed:', error);
   }
 };
 
@@ -500,6 +549,49 @@ const mapUpdaterProgressEvent = (payload) => ({
   data: payload.data,
 });
 
+const SHELL_ENV_TIMEOUT_MS = 5_000;
+let cachedShellEnv = null;
+let shellEnvProbed = false;
+
+const isNushell = (shell) => {
+  const name = path.basename(shell).toLowerCase();
+  return name === 'nu' || name === 'nu.exe';
+};
+
+const parseShellEnv = (buf) => {
+  const result = {};
+  for (const line of buf.toString('utf8').split('\0')) {
+    if (!line) continue;
+    const idx = line.indexOf('=');
+    if (idx <= 0) continue;
+    result[line.slice(0, idx)] = line.slice(idx + 1);
+  }
+  return result;
+};
+
+const probeShellEnv = (shell, mode) => {
+  const result = spawnSync(shell, [mode, '-c', 'env -0'], {
+    stdio: ['ignore', 'pipe', 'ignore'],
+    timeout: SHELL_ENV_TIMEOUT_MS,
+    windowsHide: true,
+  });
+  if (result.error || result.status !== 0) return null;
+  const env = parseShellEnv(result.stdout);
+  return Object.keys(env).length > 0 ? env : null;
+};
+
+// Finder-launched apps on macOS inherit a minimal PATH (no /opt/homebrew, mise, asdf, etc.).
+// Probe the user's login shell once so the sidecar sees the same PATH / tool env as `$SHELL -il`.
+const loadShellEnv = () => {
+  if (shellEnvProbed) return cachedShellEnv;
+  shellEnvProbed = true;
+  if (process.platform === 'win32') return null;
+  const shell = process.env.SHELL || '/bin/sh';
+  if (isNushell(shell)) return null;
+  cachedShellEnv = probeShellEnv(shell, '-il') || probeShellEnv(shell, '-l');
+  return cachedShellEnv;
+};
+
 const spawnLocalServer = async () => {
   killStaleSidecarProcesses();
 
@@ -508,7 +600,12 @@ const spawnLocalServer = async () => {
   const candidates = [storedPort, DEFAULT_DESKTOP_PORT, null].filter((value, index, array) => value !== undefined && array.indexOf(value) === index);
 
   const homeDir = os.homedir();
+  const shellEnv = loadShellEnv() || {};
+  const shellPathSegments = typeof shellEnv.PATH === 'string' ? shellEnv.PATH.split(':') : [];
+  const processPathSegments = typeof process.env.PATH === 'string' ? process.env.PATH.split(':') : [];
+
   const pathSegments = [
+    ...shellPathSegments,
     '/opt/homebrew/bin',
     '/usr/local/bin',
     '/usr/bin',
@@ -520,8 +617,9 @@ const spawnLocalServer = async () => {
     path.join(homeDir, '.bun', 'bin'),
     path.join(homeDir, '.cargo', 'bin'),
     path.join(homeDir, 'bin'),
-    ...(typeof process.env.PATH === 'string' ? process.env.PATH.split(':') : []),
+    ...processPathSegments,
   ].filter(Boolean);
+  const uniquePath = Array.from(new Set(pathSegments)).join(':');
 
   for (const candidate of candidates) {
     const port = candidate || await pickUnusedPort();
@@ -530,11 +628,12 @@ const spawnLocalServer = async () => {
     const child = spawn(resolveSidecarPath(), ['--port', String(port)], {
       env: {
         ...process.env,
+        ...shellEnv,
         OPENCHAMBER_HOST: '127.0.0.1',
         OPENCHAMBER_DIST_DIR: resolveWebDistDir(),
         OPENCHAMBER_RUNTIME: 'desktop',
         OPENCHAMBER_DESKTOP_NOTIFY: 'true',
-        PATH: pathSegments.join(':'),
+        PATH: uniquePath,
         NO_PROXY: 'localhost,127.0.0.1',
         no_proxy: 'localhost,127.0.0.1',
       },
@@ -713,6 +812,92 @@ const emitToAllWindows = (event, detail) => {
   }
 };
 
+const pendingDeepLinks = [];
+
+const parseDeepLink = (raw) => {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== `${DEEP_LINK_PROTOCOL}:`) return null;
+    const type = url.hostname;
+    if (!type) return null;
+    const segments = url.pathname.split('/').filter(Boolean);
+    const value = segments.length > 0
+      ? decodeURIComponent(segments.join('/'))
+      : '';
+    return { type, value };
+  } catch {
+    return null;
+  }
+};
+
+const switchToHostById = async (rawId) => {
+  const id = typeof rawId === 'string' ? rawId.trim() : '';
+  if (!id) return;
+  const config = readDesktopHostsConfig();
+  let targetUrl = null;
+  if (id === LOCAL_HOST_ID) {
+    targetUrl = state.sidecarUrl || state.localOrigin;
+  } else {
+    const host = config.hosts.find((entry) => entry.id === id);
+    if (!host) {
+      log.warn('[electron] deep-link host not found:', id);
+      return;
+    }
+    targetUrl = host.url;
+  }
+  if (!targetUrl) return;
+  const bootOutcome = id === LOCAL_HOST_ID
+    ? { target: 'local', status: 'ok' }
+    : { target: 'remote', status: 'ok', hostId: id, url: targetUrl };
+  await activateMainWindow(targetUrl, state.localOrigin, bootOutcome);
+};
+
+const dispatchDeepLink = (link) => {
+  if (!link) return;
+  if (link.type === 'session' && link.value) {
+    emitToAllWindows('openchamber:open-session', { sessionId: link.value });
+    return;
+  }
+  if (link.type === 'project' && link.value) {
+    emitToAllWindows('openchamber:open-project', { projectPath: link.value });
+    return;
+  }
+  if (link.type === 'host' && link.value) {
+    void switchToHostById(link.value);
+    return;
+  }
+  log.warn('[electron] unknown deep-link action:', link.type);
+};
+
+const flushPendingDeepLinks = () => {
+  while (pendingDeepLinks.length > 0) {
+    dispatchDeepLink(pendingDeepLinks.shift());
+  }
+};
+
+const isMainWindowReadyForDeepLink = () =>
+  Boolean(state.mainWindow)
+  && !state.mainWindow.isDestroyed()
+  && !state.mainWindow.webContents.isLoading();
+
+const handleDeepLinks = (urls) => {
+  for (const raw of urls) {
+    const parsed = parseDeepLink(raw);
+    if (!parsed) continue;
+    if (isMainWindowReadyForDeepLink()) {
+      dispatchDeepLink(parsed);
+    } else {
+      pendingDeepLinks.push(parsed);
+    }
+  }
+};
+
+const extractInitialDeepLinks = () =>
+  process.argv.filter((arg) => typeof arg === 'string' && arg.startsWith(`${DEEP_LINK_PROTOCOL}://`));
+
 const dispatchDomEventToWindow = (browserWindow, event, detail) => {
   if (!browserWindow || browserWindow.isDestroyed()) return;
 
@@ -845,9 +1030,19 @@ const createBrowserWindow = ({ label, restoreGeometry, url }) => {
     }
   });
 
+  browserWindow.webContents.setZoomFactor(1);
+  browserWindow.webContents.on('zoom-changed', () => {
+    browserWindow.webContents.setZoomFactor(1);
+  });
+
   browserWindow.webContents.on('did-finish-load', () => {
+    browserWindow.webContents.setZoomFactor(1);
     if (state.initScript) {
       void browserWindow.webContents.executeJavaScript(state.initScript).catch(() => {});
+    }
+    if (state.mainWindow && browserWindow.id === state.mainWindow.id && pendingDeepLinks.length > 0) {
+      const timer = setTimeout(flushPendingDeepLinks, 400);
+      if (typeof timer?.unref === 'function') timer.unref();
     }
   });
 
@@ -974,7 +1169,7 @@ const setupAutoUpdater = () => {
   autoUpdater.allowPrerelease = false;
   autoUpdater.fullChangelog = true;
   autoUpdater.disableWebInstaller = false;
-  autoUpdater.logger = console;
+  autoUpdater.logger = log;
 
   const { owner, repo } = parseGithubRepo();
   autoUpdater.setFeedURL({
@@ -1688,6 +1883,19 @@ app.on('before-quit', (event) => {
   void requestQuitWithConfirmation();
 });
 
+app.on('second-instance', (_event, argv) => {
+  const urls = Array.isArray(argv)
+    ? argv.filter((arg) => typeof arg === 'string' && arg.startsWith(`${DEEP_LINK_PROTOCOL}://`))
+    : [];
+  if (urls.length > 0) handleDeepLinks(urls);
+  focusForegroundWindow();
+});
+
+app.on('open-url', (event, url) => {
+  event.preventDefault();
+  handleDeepLinks([url]);
+});
+
 app.on('activate', async () => {
   const windows = BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed());
   if (windows.length > 0) {
@@ -1712,6 +1920,12 @@ app.on('activate', async () => {
 });
 
 app.whenReady().then(async () => {
+  log.info('[electron] app starting', {
+    version: APP_VERSION,
+    packaged: app.isPackaged,
+    platform: process.platform,
+    arch: process.arch,
+  });
   app.setName('OpenChamber');
   nativeTheme.themeSource = readThemeSource();
   setupAutoUpdater();
@@ -1720,10 +1934,13 @@ app.whenReady().then(async () => {
     Menu.setApplicationMenu(buildMacMenu());
   }
 
+  const initial = extractInitialDeepLinks();
+  if (initial.length > 0) handleDeepLinks(initial);
+
   const { initialUrl, localOrigin, bootOutcome } = await resolveInitialUrl();
   await activateMainWindow(initialUrl, localOrigin, bootOutcome);
   startQuitRiskPoller();
 }).catch((error) => {
-  console.error('[electron] startup failed:', error);
+  log.error('[electron] startup failed:', error);
   app.exit(1);
 });
