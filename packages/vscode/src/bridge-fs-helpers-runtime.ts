@@ -114,8 +114,11 @@ const isPathInside = (candidatePath: string, parentPath: string): boolean => {
 
 export const normalizeFsPath = (value: string) => value.replace(/\\/g, '/');
 
+// eslint-disable-next-line no-restricted-syntax
+const IS_WIN = process.platform === 'win32';
+
 const resolveCanonicalWindowsPath = (value: string) => {
-  if (process.platform !== 'win32') {
+  if (!IS_WIN) {
     return (value || '').trim();
   }
 

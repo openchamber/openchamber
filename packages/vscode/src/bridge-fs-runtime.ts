@@ -5,6 +5,8 @@ import * as fs from 'fs';
 import type { BridgeResponse } from './bridge';
 
 const WINDOWS_DRIVE_LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+// eslint-disable-next-line no-restricted-syntax
+const IS_WIN = process.platform === 'win32';
 
 type BridgeMessageInput = {
   id: string;
@@ -106,7 +108,7 @@ const mergeDriveEntries = (...groups: Array<Array<{ name: string; path: string }
 };
 
 const listMountedWindowsDrives = async () => {
-  if (process.platform !== 'win32') {
+  if (!IS_WIN) {
     return [] as Array<{ name: string; path: string }>;
   }
 
@@ -378,8 +380,8 @@ export async function handleFsBridgeMessage(
         const { exec } = await import('child_process');
         const { promisify } = await import('util');
         const execAsync = promisify(exec);
-        const shell = process.env.SHELL || (process.platform === 'win32' ? 'cmd.exe' : '/bin/sh');
-        const shellFlag = process.platform === 'win32' ? '/c' : '-c';
+        const shell = process.env.SHELL || (IS_WIN ? 'cmd.exe' : '/bin/sh');
+        const shellFlag = IS_WIN ? '/c' : '-c';
 
         const augmentedEnv = {
           ...process.env,
