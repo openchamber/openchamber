@@ -105,6 +105,20 @@ export function keyToShortcutToken(key: string): string {
 
 const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
   {
+    id: 'open_quick_open',
+    defaultCombo: 'mod+p',
+    label: 'Open quick open',
+    description: 'Open the quick open dialog',
+    customizable: true,
+  },
+  {
+    id: 'open_go_to_line',
+    defaultCombo: 'alt+g',
+    label: 'Go to line (files editor)',
+    description: 'Open go to line in the files editor',
+    customizable: true,
+  },
+  {
     id: 'open_command_palette',
     defaultCombo: 'mod+k',
     label: 'Open command palette',
@@ -564,7 +578,16 @@ export function eventMatchesShortcut(
     }
   }
 
-  const eventKey = keyToShortcutToken(event.key);
+  let eventKeyRaw = event.key;
+  if (event.altKey) {
+    if (event.code.startsWith('Key') && event.code.length === 4) {
+      eventKeyRaw = event.code.slice(3).toLowerCase();
+    } else if (event.code.startsWith('Digit') && event.code.length === 6) {
+      eventKeyRaw = event.code.slice(5);
+    }
+  }
+
+  const eventKey = keyToShortcutToken(eventKeyRaw);
   const expectedKey = keyToShortcutToken(parsed.key);
 
   return eventKey === expectedKey;

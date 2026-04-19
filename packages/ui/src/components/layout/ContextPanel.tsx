@@ -412,7 +412,7 @@ export const ContextPanel: React.FC = () => {
     : activeTab?.mode === 'context'
         ? <ContextPanelContent />
         : activeTab?.mode === 'plan'
-          ? <PlanView />
+          ? <PlanView targetPath={activeTab.targetPath} />
           : null;
 
   const chatTabs = React.useMemo(

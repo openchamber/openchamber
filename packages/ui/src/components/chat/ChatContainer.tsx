@@ -274,6 +274,12 @@ export const ChatContainer: React.FC = () => {
         ),
     );
     const sessionMessageCount = useSessionMessageCount(currentSessionId ?? '');
+    const hasLoadedSessionMessages = useDirectorySync(
+        React.useCallback(
+            (state) => (currentSessionId ? state.message[currentSessionId] !== undefined : false),
+            [currentSessionId],
+        ),
+    );
     // Messages from sync system
     const sessionMessageRecords = useSessionMessageRecords(currentSessionId ?? '');
     const sessionMessages = currentSessionId ? sessionMessageRecords : EMPTY_MESSAGES;
@@ -397,8 +403,6 @@ export const ChatContainer: React.FC = () => {
             loading: sync.isLoading(currentSessionId),
         };
     }, [currentSessionId, sessionMessages.length, sync]);
-
-    const hasSessionMessagesEntry = sessionMessages.length > 0 || (currentSessionId ? sync.hasMore(currentSessionId) : false);
 
     const { isMobile } = useDeviceInfo();
     const draftOpen = Boolean(newSessionDraft?.open);
@@ -577,12 +581,11 @@ export const ChatContainer: React.FC = () => {
         };
     }, [currentSessionId, isDesktopExpandedInput, scrollRef]);
 
-    const hasHistoryMetadata = Boolean(historyMeta);
     const lastScrolledSessionRef = React.useRef<string | null>(null);
 
     const isSessionHydrating =
         Boolean(currentSessionId)
-        && (!hasSessionMessagesEntry || !hasHistoryMetadata || historyMeta?.loading === true);
+        && !hasLoadedSessionMessages;
 
     React.useEffect(() => {
         if (!currentSessionId) {
@@ -613,7 +616,7 @@ export const ChatContainer: React.FC = () => {
 
     React.useEffect(() => {
         if (!currentSessionId) return;
-        if (hasSessionMessagesEntry && hasHistoryMetadata) return;
+        if (hasLoadedSessionMessages) return;
 
         const load = async () => {
             await loadMessages(currentSessionId).finally(() => {
@@ -635,7 +638,7 @@ export const ChatContainer: React.FC = () => {
         };
 
         void load();
-    }, [currentSessionId, hasHistoryMetadata, hasSessionMessagesEntry, isPinned, loadMessages, resumeToLatestInstant, sessionMessages.length, sessionStatusForCurrent.type]);
+    }, [currentSessionId, hasLoadedSessionMessages, isPinned, loadMessages, resumeToLatestInstant, sessionStatusForCurrent.type]);
 
     if (!currentSessionId && !draftOpen) {
         return (

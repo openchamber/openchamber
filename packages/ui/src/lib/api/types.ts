@@ -130,6 +130,8 @@ export interface GitStatus {
   mergeInProgress?: GitMergeInProgress | null;
   /** Present when a rebase is in progress */
   rebaseInProgress?: GitRebaseInProgress | null;
+  /** Phase 1: reason for attention-required state */
+  attentionReason?: 'merge' | 'rebase' | 'cherry-pick' | 'revert' | 'bisect' | null;
 }
 
 export interface GitDiffResponse {
@@ -446,6 +448,24 @@ export interface GitAPI {
   stash(directory: string, options?: { message?: string; includeUntracked?: boolean }): Promise<{ success: boolean }>;
   stashPop(directory: string): Promise<{ success: boolean }>;
   getConflictDetails(directory: string): Promise<MergeConflictDetails>;
+  /** Phase 1: validate that a cwd is inside a worktreeRoot */
+  validateWorktreeDirectory?(directory: string, worktreeRoot: string): Promise<{
+    valid: boolean;
+    insideWorktreeRoot: boolean;
+    resolvedWorktreeRoot: string | null;
+    resolvedCwd: string | null;
+  }>;
+  /** Phase 1: canonicalize a directory to full worktree state */
+  canonicalizeWorktreeState?(directory: string): Promise<{
+    worktreeRoot: string | null;
+    cwd: string | null;
+    branch: string | null;
+    headState: 'branch' | 'detached' | 'unborn';
+    worktreeStatus: 'ready' | 'missing' | 'invalid' | 'not-a-repo';
+    legacy: boolean;
+    degraded: boolean;
+    attentionReason?: 'merge' | 'rebase' | 'cherry-pick' | 'revert' | 'bisect' | null;
+  }>;
   worktree?: GitWorktreeAPI;
 }
 
@@ -501,6 +521,7 @@ export interface FilesAPI {
   rename?(oldPath: string, newPath: string): Promise<{ success: boolean; path: string }>;
   revealPath?(path: string): Promise<{ success: boolean }>;
   execCommands?(commands: string[], cwd: string): Promise<{ success: boolean; results: CommandExecResult[] }>;
+  downloadFile?(path: string): Promise<void>;
 }
 
 export interface ProjectEntry {
@@ -548,6 +569,7 @@ export interface SettingsPayload {
   showExpandedBashTools?: boolean;
   showExpandedEditTools?: boolean;
   chatRenderMode?: 'sorted' | 'live';
+  messageStreamTransport?: 'auto' | 'ws' | 'sse';
   activityRenderMode?: 'collapsed' | 'summary';
   mermaidRenderingMode?: 'svg' | 'ascii';
   fontSize?: number;

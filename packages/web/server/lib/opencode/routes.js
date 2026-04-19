@@ -1,4 +1,5 @@
 import { pathsEqual } from '../PathUtils.js';
+import { createProjectIdFromPath } from '../projects/project-id.js';
 
 export const registerOpenCodeRoutes = (app, dependencies) => {
   const {
@@ -180,7 +181,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
         : [
             ...existingProjects,
             {
-              id: crypto.randomUUID(),
+              id: createProjectIdFromPath(canonicalDirectory),
               path: canonicalDirectory,
               addedAt: Date.now(),
               lastOpenedAt: Date.now(),

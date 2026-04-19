@@ -72,6 +72,7 @@ export {
   useSessionMessageRecords,
   useSessionTextMessages,
   useUserMessageHistory,
+  buildSessionMessageRecordsSnapshot,
 } from "./sync-context"
 
 // Sync operations

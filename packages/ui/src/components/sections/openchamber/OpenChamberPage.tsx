@@ -11,10 +11,11 @@ import { VoiceSettings } from './VoiceSettings';
 import { TunnelSettings } from './TunnelSettings';
 import { OpenCodeCliSettings } from './OpenCodeCliSettings';
 import { TerminalSettings } from './TerminalSettings';
+import { DesktopNetworkSettings } from './DesktopNetworkSettings';
 import { KeyboardShortcutsSettings } from './KeyboardShortcutsSettings';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { useDeviceInfo } from '@/lib/device';
-import { isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
+import { isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
 import type { OpenChamberSection } from './types';
 
 interface OpenChamberPageProps {
@@ -26,6 +27,7 @@ export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => 
     const { isMobile } = useDeviceInfo();
     const showAbout = isMobile && isWebRuntime();
     const isVSCode = isVSCodeRuntime();
+    const showDesktopNetworkSettings = isDesktopShell() && isDesktopLocalOriginActive();
 
     // If no section specified, show all (mobile/legacy behavior)
     if (!section) {
@@ -48,6 +50,11 @@ export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => 
                     {!isVSCode && (
                         <div className="border-t border-border/40 pt-6">
                             <OpenCodeCliSettings />
+                        </div>
+                    )}
+                    {showDesktopNetworkSettings && (
+                        <div className="border-t border-border/40 pt-6">
+                            <DesktopNetworkSettings />
                         </div>
                     )}
                     <div className="border-t border-border/40 pt-6">
@@ -115,6 +122,8 @@ const VisualSectionContent: React.FC = () => {
     return <OpenChamberVisualSettings visibleSettings={[
         'theme',
         'pwaInstallName',
+        'timeFormat',
+        'weekStart',
         'fontSize',
         'terminalFontSize',
         'spacing',
@@ -126,12 +135,13 @@ const VisualSectionContent: React.FC = () => {
 
 // Chat section: User message rendering, Diff layout, Mobile status bar, Show reasoning traces, Queue mode, Persist draft
 const ChatSectionContent: React.FC = () => {
-    return <OpenChamberVisualSettings visibleSettings={['chatRenderMode', 'activityRenderMode', 'userMessageRendering', 'mermaidRendering', 'reasoning', 'showToolFileIcons', 'expandedTools', 'stickyUserHeader', 'diffLayout', 'mobileStatusBar', 'dotfiles', 'queueMode', 'persistDraft', 'inputSpellcheck']} />;
+    return <OpenChamberVisualSettings visibleSettings={['chatRenderMode', 'messageTransport', 'activityRenderMode', 'userMessageRendering', 'mermaidRendering', 'reasoning', 'showToolFileIcons', 'expandedTools', 'stickyUserHeader', 'diffLayout', 'mobileStatusBar', 'dotfiles', 'queueMode', 'persistDraft', 'inputSpellcheck']} />;
 };
 
 // Sessions section: Default model & agent, Session retention
 const SessionsSectionContent: React.FC = () => {
     const isVSCode = isVSCodeRuntime();
+    const showDesktopNetworkSettings = isDesktopShell() && isDesktopLocalOriginActive();
     return (
         <div className="space-y-6">
             <DefaultsSettings />
@@ -143,6 +153,11 @@ const SessionsSectionContent: React.FC = () => {
             {!isVSCode && (
                 <div className="border-t border-border/40 pt-6">
                     <OpenCodeCliSettings />
+                </div>
+            )}
+            {showDesktopNetworkSettings && (
+                <div className="border-t border-border/40 pt-6">
+                    <DesktopNetworkSettings />
                 </div>
             )}
             <div className="border-t border-border/40 pt-6">

@@ -721,3 +721,38 @@ export async function getConflictDetails(directory: string): Promise<import('./a
   if (runtime?.getConflictDetails) return runtime.getConflictDetails(directory);
   return gitHttp.getConflictDetails(directory);
 }
+
+export async function validateWorktreeDirectory(
+  directory: string,
+  worktreeRoot: string
+): Promise<{
+  valid: boolean;
+  insideWorktreeRoot: boolean;
+  resolvedWorktreeRoot: string | null;
+  resolvedCwd: string | null;
+}> {
+  const runtime = getRuntimeGit();
+  if (runtime?.validateWorktreeDirectory) {
+    return runtime.validateWorktreeDirectory(directory, worktreeRoot);
+  }
+  return gitHttp.validateWorktreeDirectory(directory, worktreeRoot);
+}
+
+export async function canonicalizeWorktreeState(
+  directory: string
+): Promise<{
+  worktreeRoot: string | null;
+  cwd: string | null;
+  branch: string | null;
+  headState: 'branch' | 'detached' | 'unborn';
+  worktreeStatus: 'ready' | 'missing' | 'invalid' | 'not-a-repo';
+  legacy: boolean;
+  degraded: boolean;
+  attentionReason?: 'merge' | 'rebase' | 'cherry-pick' | 'revert' | 'bisect' | null;
+}> {
+  const runtime = getRuntimeGit();
+  if (runtime?.canonicalizeWorktreeState) {
+    return runtime.canonicalizeWorktreeState(directory);
+  }
+  return gitHttp.canonicalizeWorktreeState(directory);
+}

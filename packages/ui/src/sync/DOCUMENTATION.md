@@ -20,7 +20,7 @@ There are **two distinct session data scopes** in the UI:
      - global archived sessions
      - active sessions indexed by directory
 
-These two scopes are intentionally different.
+These two scopes are intentionally different, but they are no longer equal peers for live UI truth.
 
 ### Why both exist
 
@@ -34,7 +34,8 @@ The directory-scoped sync stores are **not** a complete global view.
 So:
 
 - Use the **directory sync stores** for per-directory live session/message state
-- Use the **global sessions store** for sidebar/retention global session lists
+- Use the **global sessions store** for cold/global session coverage (especially archived pages and unopened directories)
+- Use **aggregated child-store snapshots** for live session/status truth across already initialized directories
 
 ## Ownership map
 
@@ -62,12 +63,22 @@ Examples:
 
 ### Global session list
 
-Use `useGlobalSessionsStore` when the UI needs a **shared global session view**.
+Use `useGlobalSessionsStore` when the UI needs a **shared global session cache**.
+
+Current consumers:
+
+- `useSessionAutoCleanup.ts`
+
+### Live cross-directory session/status view
+
+Use the sync hooks backed by aggregated child stores when the UI needs **live truth** for sessions or statuses across all initialized directories.
 
 Current consumers:
 
 - `SessionSidebar.tsx`
-- `useSessionAutoCleanup.ts`
+- `SessionNodeItem.tsx`
+- `Header.tsx`
+- agent/session activity surfaces using `useGlobalSessionStatus()` / `useAllSessionStatuses()`
 
 ### Mutation responsibility
 
@@ -83,7 +94,9 @@ Current consumers:
    - delete
    - retention cleanup batch archive/delete
 
-This keeps sidebar/retention UI responsive without requiring a refetch after every change.
+This keeps cold/global lists responsive without requiring a refetch after every change.
+
+Live activity/status indicators must not depend on this cache. They must derive from aggregated child-store state.
 
 ## Session action rules
 

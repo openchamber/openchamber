@@ -151,4 +151,50 @@ describe('applyDirectoryEvent', () => {
 
     expect(state.part[messageID]?.[0]?.text).toBe('haha')
   })
+
+  it('does not let a stale running tool update overwrite a completed tool part', () => {
+    const state = structuredClone(INITIAL_STATE)
+    const messageID = 'msg-5'
+    const partID = 'part-5'
+
+    applyDirectoryEvent(state, {
+      type: 'message.part.updated',
+      properties: {
+        part: {
+          id: partID,
+          type: 'tool',
+          messageID,
+          tool: 'apply_patch',
+          state: {
+            status: 'completed',
+            time: {
+              start: 10,
+              end: 20,
+            },
+          },
+        },
+      },
+    })
+
+    applyDirectoryEvent(state, {
+      type: 'message.part.updated',
+      properties: {
+        part: {
+          id: partID,
+          type: 'tool',
+          messageID,
+          tool: 'apply_patch',
+          state: {
+            status: 'running',
+            time: {
+              start: 10,
+            },
+          },
+        },
+      },
+    })
+
+    expect(state.part[messageID]?.[0]?.state?.status).toBe('completed')
+    expect(state.part[messageID]?.[0]?.state?.time?.end).toBe(20)
+  })
 })

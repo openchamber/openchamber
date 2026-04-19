@@ -26,6 +26,8 @@ import {
   RiFileTransferLine,
   RiCodeSSlashLine,
   RiNodeTree,
+  RiDownloadLine,
+  RiMenuFold2Line,
 } from '@remixicon/react';
 import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
@@ -41,6 +43,7 @@ import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { CodeMirrorEditor } from '@/components/ui/CodeMirrorEditor';
+import { GoToLineDialog } from './GoToLineDialog';
 import { PreviewToggleButton } from './PreviewToggleButton';
 import { JsonTreeView } from '@/components/ui/JsonTreeView';
 import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
@@ -58,7 +61,7 @@ import {
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useFileSearchStore } from '@/stores/useFileSearchStore';
 import { useDeviceInfo } from '@/lib/device';
-import { cn, getModifierLabel, hasModifier } from '@/lib/utils';
+import { cn, getModifierLabel, getRevealLabel, hasModifier } from '@/lib/utils';
 import { getLanguageFromExtension, getImageMimeType, isImageFile } from '@/lib/toolHelpers';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { EditorView } from '@codemirror/view';
@@ -80,6 +83,7 @@ import { getDefaultTheme } from '@/lib/theme/themes';
 import { openDesktopPath, openDesktopProjectInApp } from '@/lib/desktop';
 import { OPEN_DIRECTORY_APP_IDS } from '@/lib/openInApps';
 import { useOpenInAppsStore } from '@/stores/useOpenInAppsStore';
+import { eventMatchesShortcut, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 
 type FileNode = {
   name: string;
@@ -280,6 +284,7 @@ const isHtmlFile = (path: string): boolean => {
 
 interface FileRowProps {
   node: FileNode;
+  root: string;
   isExpanded: boolean;
   isActive: boolean;
   isMobile: boolean;
@@ -292,6 +297,7 @@ interface FileRowProps {
     canDelete: boolean;
     canReveal: boolean;
   };
+  downloadFile?: (path: string) => Promise<void>;
   contextMenuPath: string | null;
   setContextMenuPath: (path: string | null) => void;
   onSelect: (node: FileNode) => void;
@@ -302,12 +308,14 @@ interface FileRowProps {
 
 const FileRow: React.FC<FileRowProps> = ({
   node,
+  root,
   isExpanded,
   isActive,
   isMobile,
   status,
   badge,
   permissions,
+  downloadFile,
   contextMenuPath,
   setContextMenuPath,
   onSelect,
@@ -414,9 +422,30 @@ const FileRow: React.FC<FileRowProps> = ({
               }}>
                 <RiFileCopyLine className="mr-2 h-4 w-4" /> Copy Path
               </DropdownMenuItem>
+              <DropdownMenuItem onClick={(e) => {
+                e.stopPropagation();
+                const relativePath = getDisplayPath(root, node.path) || node.path;
+                void copyTextToClipboard(relativePath).then((result) => {
+                  if (result.ok) {
+                    toast.success('Relative path copied');
+                    return;
+                  }
+                  toast.error('Copy failed');
+                });
+              }}>
+                <RiFileCopy2Line className="mr-2 h-4 w-4" /> Copy Relative Path
+              </DropdownMenuItem>
+              {!isDir && downloadFile && (
+                <DropdownMenuItem onClick={(e) => {
+                  e.stopPropagation();
+                  void downloadFile(node.path);
+                }}>
+                  <RiDownloadLine className="mr-2 h-4 w-4" /> Save
+                </DropdownMenuItem>
+              )}
               {canReveal && (
                 <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onRevealPath(node.path); }}>
-                  <RiFolderReceivedLine className="mr-2 h-4 w-4" /> Reveal in Finder
+                  <RiFolderReceivedLine className="mr-2 h-4 w-4" /> {getRevealLabel()}
                 </DropdownMenuItem>
               )}
               {isDir && (canCreateFile || canCreateFolder) && (
@@ -598,6 +627,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const [contextMenuPath, setContextMenuPath] = React.useState<string | null>(null);
   const [copiedContent, setCopiedContent] = React.useState(false);
   const [copiedPath, setCopiedPath] = React.useState(false);
+  const [isGoToLineOpen, setIsGoToLineOpen] = React.useState(false);
 
   const canCreateFile = Boolean(files.writeFile);
   const canCreateFolder = Boolean(files.createDirectory);
@@ -670,6 +700,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const setPendingFileNavigation = useUIStore((state) => state.setPendingFileNavigation);
   const pendingFileFocusPath = useUIStore((state) => state.pendingFileFocusPath);
   const setPendingFileFocusPath = useUIStore((state) => state.setPendingFileFocusPath);
+  const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
 
   // Global mouseup to end drag selection
   React.useEffect(() => {
@@ -906,6 +937,37 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       void loadDirectory(root);
     }
   }, [loadDirectory, root, showGitignored, showHidden]);
+
+  // Auto-refresh expanded directories when user returns to the tab
+  React.useEffect(() => {
+    if (!files.listDirectory) return;
+
+    const handleVisibilityChange = () => {
+      if (!document.hidden && expandedPaths.length > 0) {
+        for (const dir of expandedPaths) {
+          void refreshDirectory(dir);
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [expandedPaths, files.listDirectory, refreshDirectory]);
+
+  // Poll expanded directories for external changes
+  React.useEffect(() => {
+    if (!files.listDirectory) return;
+    if (expandedPaths.length === 0) return;
+
+    const interval = setInterval(() => {
+      if (document.hidden) return;
+      for (const dir of expandedPaths) {
+        void refreshDirectory(dir);
+      }
+    }, 8000);
+
+    return () => clearInterval(interval);
+  }, [expandedPaths, files.listDirectory, refreshDirectory]);
 
   const handleDialogSubmit = React.useCallback(async (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -1601,12 +1663,14 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           )}
           <FileRow
             node={node}
+            root={root}
             isExpanded={isExpanded}
             isActive={isActive}
             isMobile={isMobile}
             status={!isDir ? getFileStatus(node.path) : undefined}
             badge={isDir ? getFolderBadge(node.path) : undefined}
             permissions={{ canRename, canCreateFile, canCreateFolder, canDelete, canReveal }}
+            downloadFile={files.downloadFile}
             contextMenuPath={contextMenuPath}
             setContextMenuPath={setContextMenuPath}
             onSelect={handleSelectFile}
@@ -2020,6 +2084,43 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     };
   }, [isMobile, nudgeEditorSelectionAboveKeyboard]);
 
+  React.useEffect(() => {
+    if (!canEdit || textViewMode !== 'edit' || isMobile) {
+      return;
+    }
+
+    const goToLineCombo = getEffectiveShortcutCombo('open_go_to_line', shortcutOverrides);
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as Element | null;
+      if (target?.closest('[role="dialog"]')) {
+        return;
+      }
+
+      const isEditorTarget = Boolean(target?.closest('.cm-editor'));
+      const isTypingTarget = Boolean(
+        target?.closest('input, textarea, [contenteditable="true"], [role="textbox"]')
+      );
+      if (isTypingTarget && !isEditorTarget) {
+        return;
+      }
+
+      const activeElement = document.activeElement as Element | null;
+      const editorHasFocus = Boolean(activeElement?.closest('.cm-editor'));
+      if (!editorHasFocus) {
+        return;
+      }
+
+      if (eventMatchesShortcut(event, goToLineCombo)) {
+        event.preventDefault();
+        setIsGoToLineOpen(true);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [canEdit, isMobile, shortcutOverrides, textViewMode]);
+
   const editorExtensions = React.useMemo(() => {
     if (!selectedFile?.path) {
       return [createFlexokiCodeMirrorTheme(currentTheme)];
@@ -2231,7 +2332,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
               variant="ghost"
               size="sm"
               onClick={() => void saveDraft()}
-              className="h-6 px-1 gap-1 text-muted-foreground opacity-80 hover:opacity-100"
+              className="h-6 gap-1 px-1 text-muted-foreground opacity-80 hover:bg-transparent hover:opacity-100 focus-visible:bg-transparent active:bg-transparent"
               title={`Save now (${getModifierLabel()}+S) - auto-saves after 1.5s`}
               aria-label={`Save (${getModifierLabel()}+S)`}
             >
@@ -2245,7 +2346,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
             <Button
               variant="ghost"
               size="sm"
-              className="h-6 w-6 p-0 text-muted-foreground opacity-80 hover:opacity-100"
+              className="h-6 w-6 p-0 text-foreground opacity-100 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
               title="Open in desktop app"
               aria-label="Open in desktop app"
             >
@@ -2282,7 +2383,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
               size="sm"
               onClick={() => setWrapLines(!wrapLines)}
               className={cn(
-                'h-6 w-6 p-0 transition-opacity',
+                'h-6 w-6 p-0 transition-opacity hover:bg-transparent focus-visible:bg-transparent active:bg-transparent',
                 wrapLines ? 'text-foreground opacity-100' : 'text-muted-foreground opacity-65 hover:opacity-100'
               )}
               title={wrapLines ? 'Disable line wrap' : 'Enable line wrap'}
@@ -2290,18 +2391,38 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
               <RiTextWrap className="size-4" />
             </Button>
             {textViewMode === 'edit' && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setIsSearchOpen(!isSearchOpen)}
-                className={cn(
-                  'h-6 w-6 p-0 transition-opacity',
-                  isSearchOpen ? 'text-foreground opacity-100' : 'text-muted-foreground opacity-65 hover:opacity-100'
-                )}
-                title="Find in file"
-              >
-                <RiSearchLine className="size-4" />
-              </Button>
+              <>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={(event) => {
+                    setIsSearchOpen(!isSearchOpen);
+                    event.currentTarget.blur();
+                  }}
+                  className="h-6 w-6 p-0 text-foreground opacity-100 transition-opacity hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
+                  title="Find in file"
+                >
+                  <RiSearchLine className="size-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={(event) => {
+                    setIsGoToLineOpen((open) => !open);
+                    event.currentTarget.blur();
+                  }}
+                  className="h-6 w-6 p-0 text-foreground opacity-100 transition-opacity hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
+                  title="Go to line"
+                >
+                  <RiMenuFold2Line className="size-4" />
+                </Button>
+                <GoToLineDialog
+                  open={isGoToLineOpen}
+                  onOpenChange={setIsGoToLineOpen}
+                  view={editorViewRef.current}
+                  variant="inline"
+                />
+              </>
             )}
           </>
         )}
@@ -2324,7 +2445,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
             variant="ghost"
             size="sm"
             onClick={() => saveJsonViewMode(jsonViewMode === 'tree' ? 'text' : 'tree')}
-            className="h-6 w-6 p-0 text-muted-foreground opacity-65 hover:opacity-100"
+            className="h-6 w-6 p-0 text-muted-foreground opacity-65 hover:bg-transparent hover:opacity-100 focus-visible:bg-transparent active:bg-transparent"
             title={jsonViewMode === 'tree' ? 'Switch to Text View' : 'Switch to Tree View'}
           >
             {jsonViewMode === 'tree' ? (
@@ -2353,7 +2474,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                 toast.error('Copy failed');
               }
             }}
-            className="h-6 w-6 p-0"
+            className="h-6 w-6 p-0 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
             title="Copy file contents"
             aria-label="Copy file contents"
           >
@@ -2383,7 +2504,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
                 toast.error('Copy failed');
               }
             }}
-            className="h-6 w-6 p-0"
+            className="h-6 w-6 p-0 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
             title={`Copy file path (${displaySelectedPath})`}
             aria-label={`Copy file path (${displaySelectedPath})`}
           >
@@ -2395,12 +2516,28 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
           </Button>
         )}
 
+        {files.downloadFile && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              const fn = files.downloadFile;
+              if (fn) void fn(selectedFile.path);
+            }}
+            className="h-6 w-6 p-0 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
+            title="Save file"
+            aria-label="Save file"
+          >
+            <RiDownloadLine className="h-4 w-4" />
+          </Button>
+        )}
+
         {exitFullscreenOnly ? (
           <Button
             variant="ghost"
             size="sm"
             onClick={() => setIsFullscreen(false)}
-            className="h-6 w-6 p-0"
+            className="h-6 w-6 p-0 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
             title="Exit fullscreen"
             aria-label="Exit fullscreen"
           >
@@ -2411,7 +2548,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
             variant="ghost"
             size="sm"
             onClick={() => setIsFullscreen(!isFullscreen)}
-            className="h-6 w-6 p-0"
+            className="h-6 w-6 p-0 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
             title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
             aria-label={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
           >

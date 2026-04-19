@@ -50,6 +50,7 @@ export type DesktopSettings = {
   homeDirectory?: string;
   // Optional absolute path to `opencode` binary.
   opencodeBinary?: string;
+  desktopLanAccessEnabled?: boolean;
   projects?: ProjectEntry[];
   activeProjectId?: string;
   approvedDirectories?: string[];
@@ -122,7 +123,10 @@ export type DesktopSettings = {
   showToolFileIcons?: boolean;
   showExpandedBashTools?: boolean;
   showExpandedEditTools?: boolean;
+  timeFormatPreference?: 'auto' | '12h' | '24h';
+  weekStartPreference?: 'auto' | 'sunday' | 'monday';
   chatRenderMode?: 'sorted' | 'live';
+  messageStreamTransport?: 'auto' | 'ws' | 'sse';
   activityRenderMode?: 'collapsed' | 'summary';
   mermaidRenderingMode?: 'svg' | 'ascii';
   userMessageRenderingMode?: 'markdown' | 'plain';
@@ -477,6 +481,21 @@ export const restartDesktopApp = async (): Promise<boolean> => {
   }
 };
 
+export const getDesktopLanAddress = async (): Promise<string | null> => {
+  if (!isTauriShell() || !isDesktopLocalOriginActive()) {
+    return null;
+  }
+
+  try {
+    const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
+    const result = await tauri?.core?.invoke?.('desktop_get_lan_address');
+    return typeof result === 'string' && result.trim().length > 0 ? result.trim() : null;
+  } catch (error) {
+    console.warn('Failed to get desktop LAN address (tauri)', error);
+    return null;
+  }
+};
+
 export const openDesktopPath = async (path: string, app?: string | null): Promise<boolean> => {
   if (!isTauriShell() || !isDesktopLocalOriginActive()) {
     return false;
@@ -497,6 +516,32 @@ export const openDesktopPath = async (path: string, app?: string | null): Promis
   } catch (error) {
     console.warn('Failed to open path (tauri)', error);
     return false;
+  }
+};
+
+export const saveDesktopMarkdownFile = async (
+  defaultFileName: string,
+  content: string,
+): Promise<string | null> => {
+  if (!isTauriShell() || !isDesktopLocalOriginActive()) {
+    return null;
+  }
+
+  const trimmedFileName = defaultFileName?.trim();
+  if (!trimmedFileName) {
+    return null;
+  }
+
+  try {
+    const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
+    const result = await tauri?.core?.invoke?.('desktop_save_markdown_file', {
+      defaultFileName: trimmedFileName,
+      content,
+    });
+    return typeof result === 'string' && result.trim().length > 0 ? result : null;
+  } catch (error) {
+    console.warn('Failed to save markdown file (tauri)', error);
+    return null;
   }
 };
 

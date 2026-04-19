@@ -398,6 +398,12 @@ export const registerFsRoutes = (app, dependencies) => {
       };
       const mimeType = mimeMap[ext] || 'application/octet-stream';
 
+      const download = req.query.download === 'true';
+      if (download) {
+        const fileName = path.basename(canonicalPath);
+        res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+      }
+
       const content = await fsPromises.readFile(toNativePath(resolvedCanonicalPath));
       res.setHeader('Cache-Control', 'no-store');
       return res.type(mimeType).send(content);
@@ -558,7 +564,24 @@ export const registerFsRoutes = (app, dependencies) => {
           launchDetached('open', ['-R', resolved]);
         }
       } else if (IS_WIN) {
-        launchDetached('explorer', ['/select,', resolved]);
+        const stat = await fsPromises.stat(resolved);
+        const escapedPath = resolved.replace(/'/g, "''");
+        const explorerArg = stat.isDirectory() ? escapedPath : `/select,${escapedPath}`;
+        const command = `Start-Process -FilePath explorer.exe -ArgumentList '${explorerArg}'`;
+        await new Promise((resolve, reject) => {
+          const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], {
+            windowsHide: true,
+            stdio: 'ignore',
+          });
+          child.once('error', reject);
+          child.once('exit', (code) => {
+            if (code === 0) {
+              resolve();
+              return;
+            }
+            reject(new Error(`Explorer launch failed with code ${code ?? 'unknown'}`));
+          });
+        });
       } else {
         const stat = await fsPromises.stat(resolved);
         const dir = stat.isDirectory() ? resolved : path.dirname(resolved);

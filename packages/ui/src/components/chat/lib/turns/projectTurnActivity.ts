@@ -36,19 +36,6 @@ const getMessageFinish = (message: ChatMessageEntry): string | undefined => {
     return typeof finish === 'string' ? finish : undefined;
 };
 
-const isAssistantMessageCompleted = (message: ChatMessageEntry): boolean => {
-    const info = message.info as { time?: { completed?: unknown }; status?: unknown };
-    const completed = info.time?.completed;
-    const status = info.status;
-    if (typeof completed !== 'number' || completed <= 0) {
-        return false;
-    }
-    if (typeof status === 'string') {
-        return status === 'completed';
-    }
-    return true;
-};
-
 const buildTurnPartRecord = (
     turnId: string,
     messageId: string,
@@ -69,6 +56,7 @@ interface ProjectActivityInput {
     turnId: string;
     assistantMessages: ChatMessageEntry[];
     summarySourceMessageId?: string;
+    summarySourcePartId?: string;
     showTextJustificationActivity: boolean;
 }
 
@@ -84,41 +72,54 @@ export const projectTurnActivity = (input: ProjectActivityInput): ProjectActivit
     let hasTools = false;
     let hasReasoning = false;
 
+    input.assistantMessages.forEach((message) => {
+        message.parts.forEach((part) => {
+            if (part.type === 'tool') {
+                hasTools = true;
+                return;
+            }
+
+            if (part.type === 'reasoning' && getPartText(part)) {
+                hasReasoning = true;
+            }
+        });
+    });
+
     const taskMessageById = new Map<string, string>();
     const taskOrder: string[] = [];
     const partsByAfterTool = new Map<string | null, TurnActivityRecord[]>();
     let currentAfterToolPartId: string | null = null;
 
     input.assistantMessages.forEach((message) => {
-        const messageCompleted = isAssistantMessageCompleted(message);
         const finish = getMessageFinish(message);
+        const messageHasTool = message.parts.some((part) => part.type === 'tool');
 
         message.parts.forEach((part, partIndex) => {
             const isTool = part.type === 'tool';
-            if (isTool) {
-                hasTools = true;
-            }
 
             const text = part.type === 'reasoning' || part.type === 'text'
                 ? getPartText(part)
                 : undefined;
-
-            if (part.type === 'reasoning' && text) {
-                hasReasoning = true;
-            }
+            const partId = part.id ?? `${message.info.id}-part-${partIndex}-${part.type}`;
 
             const toolName = isTool
                 ? (part as { tool?: unknown }).tool
                 : undefined;
             const standaloneTool = isTool && isStandaloneTool(toolName);
             if (standaloneTool) {
-                const toolPartId = part.id ?? `${message.info.id}-part-${partIndex}-${part.type}`;
+                const toolPartId = partId;
                 if (!taskMessageById.has(toolPartId)) {
                     taskMessageById.set(toolPartId, message.info.id);
                     taskOrder.push(toolPartId);
                 }
                 currentAfterToolPartId = toolPartId;
             }
+
+            const isConfirmedSummaryText = part.type === 'text'
+                && typeof text === 'string'
+                && finish === 'stop'
+                && input.summarySourceMessageId === message.info.id
+                && input.summarySourcePartId === partId;
 
             let kind: TurnActivityRecord['kind'] | null = null;
             if (isTool) {
@@ -130,10 +131,9 @@ export const projectTurnActivity = (input: ProjectActivityInput): ProjectActivit
             } else if (
                 input.showTextJustificationActivity
                 && part.type === 'text'
-                && messageCompleted
-                && typeof finish === 'string'
-                && finish !== 'stop'
                 && text
+                && !isConfirmedSummaryText
+                && (messageHasTool || (typeof finish === 'string' && finish !== 'stop'))
             ) {
                 kind = 'justification';
             }

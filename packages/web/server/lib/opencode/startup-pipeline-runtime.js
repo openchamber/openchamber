@@ -1,6 +1,7 @@
 export const createStartupPipelineRuntime = (dependencies) => {
   const {
     createTerminalRuntime,
+    createMessageStreamWsRuntime,
     createServerStartupRuntime,
   } = dependencies;
 
@@ -18,6 +19,11 @@ export const createStartupPipelineRuntime = (dependencies) => {
       readSettingsFromDiskMigrated,
       isRequestOriginAllowed,
       rejectWebSocketUpgrade,
+      buildOpenCodeUrl,
+      getOpenCodeAuthHeaders,
+      processForwardedEventPayload,
+      messageStreamWsClients,
+      triggerHealthCheck,
       terminalHeartbeatIntervalMs,
       terminalRebindWindowMs,
       terminalMaxRebindsPerWindow,
@@ -63,6 +69,18 @@ export const createStartupPipelineRuntime = (dependencies) => {
       TERMINAL_INPUT_WS_MAX_REBINDS_PER_WINDOW: terminalMaxRebindsPerWindow,
     });
 
+    const messageStreamRuntime = createMessageStreamWsRuntime({
+      server,
+      uiAuthController,
+      isRequestOriginAllowed,
+      rejectWebSocketUpgrade,
+      buildOpenCodeUrl,
+      getOpenCodeAuthHeaders,
+      processForwardedEventPayload,
+      wsClients: messageStreamWsClients,
+      triggerHealthCheck,
+    });
+
     setupProxy(app);
     scheduleOpenCodeApiDetection();
     void bootstrapOpenCodeAtStartup();
@@ -99,6 +117,7 @@ export const createStartupPipelineRuntime = (dependencies) => {
 
     return {
       terminalRuntime,
+      messageStreamRuntime,
     };
   };
 

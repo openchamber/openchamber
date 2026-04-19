@@ -100,6 +100,30 @@ const PROMPT_PAGE_MAP: Record<string, PromptPageConfig> = {
       { id: 'git.integrate.cherrypick.resolve.instructions', title: 'Instructions' },
     ],
   },
+  'plan.improve': {
+    title: 'Improve Plan',
+    description: 'Hidden prompt used when sending a saved plan into an improve flow.',
+    blocks: [
+      { id: 'plan.improve.visible', title: 'Visible Prompt' },
+      { id: 'plan.improve.instructions', title: 'Instructions' },
+    ],
+  },
+  'plan.todo': {
+    title: 'Todo Planning',
+    description: 'Hidden prompt used when sending a todo into a new planning session.',
+    blocks: [
+      { id: 'plan.todo.visible', title: 'Visible Prompt' },
+      { id: 'plan.todo.instructions', title: 'Instructions' },
+    ],
+  },
+  'plan.implement': {
+    title: 'Implement Plan',
+    description: 'Hidden prompt used when sending a saved plan into an implement flow.',
+    blocks: [
+      { id: 'plan.implement.visible', title: 'Visible Prompt' },
+      { id: 'plan.implement.instructions', title: 'Instructions' },
+    ],
+  },
 };
 
 const hasOwn = (input: Record<string, string>, key: string) => Object.prototype.hasOwnProperty.call(input, key);

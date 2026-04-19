@@ -17,6 +17,7 @@ import { syncDebug } from "./debug"
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
 const DELTA_OVERLAP_FIELDS = ["text", "output"] as const
+const FINAL_TOOL_STATUSES = new Set(["completed", "error", "aborted", "failed", "timeout", "cancelled"])
 
 type DedupeMetadata = {
   __dedupeNextDeltaFields?: string[]
@@ -48,6 +49,45 @@ function getUpdatedDeltaFields(previous: Part, next: Part) {
     }
   }
   return dedupeFields
+}
+
+function getPartEndTime(part: Part): number | undefined {
+  const stateEnd = (part as { state?: { time?: { end?: unknown } } }).state?.time?.end
+  if (typeof stateEnd === "number") {
+    return stateEnd
+  }
+
+  const timeEnd = (part as { time?: { end?: unknown } }).time?.end
+  return typeof timeEnd === "number" ? timeEnd : undefined
+}
+
+function getToolStatus(part: Part): string | undefined {
+  if (part.type !== "tool") {
+    return undefined
+  }
+
+  const status = (part as { state?: { status?: unknown } }).state?.status
+  return typeof status === "string" ? status : undefined
+}
+
+function shouldPreserveExistingPart(previous: Part, next: Part): boolean {
+  if (previous.type !== "tool" || next.type !== "tool") {
+    return false
+  }
+
+  const previousStatus = getToolStatus(previous)
+  const nextStatus = getToolStatus(next)
+  if (previousStatus && FINAL_TOOL_STATUSES.has(previousStatus) && (!nextStatus || !FINAL_TOOL_STATUSES.has(nextStatus))) {
+    return true
+  }
+
+  const previousEnd = getPartEndTime(previous)
+  const nextEnd = getPartEndTime(next)
+  if (typeof previousEnd === "number" && typeof nextEnd !== "number") {
+    return true
+  }
+
+  return false
 }
 
 // ---------------------------------------------------------------------------
@@ -239,6 +279,9 @@ export function applyDirectoryEvent(
       const result = Binary.search(next, part.id, (p) => p.id)
       if (result.found) {
         const previous = next[result.index]
+        if (shouldPreserveExistingPart(previous, part)) {
+          return false
+        }
         const dedupeFields = getUpdatedDeltaFields(previous, part)
         next[result.index] = dedupeFields.length > 0
           ? { ...part, __dedupeNextDeltaFields: dedupeFields } as unknown as Part

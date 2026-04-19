@@ -67,7 +67,7 @@ This module provides notification message preparation utilities for the web serv
   - `broadcastUiNotification(payload)`
 
 ### Template runtime API (template-runtime.js)
-- `createNotificationTemplateRuntime(dependencies)`: creates shared notification/template + zen helper runtime.
+- `createNotificationTemplateRuntime(dependencies)`: creates shared notification/template runtime and consumes shared text summarization from `packages/web/server/lib/text/summarization.js` in `notification` mode.
 - Returned API:
   - `resolveNotificationTemplate(template, variables)`
   - `shouldApplyResolvedTemplateMessage(template, resolved, variables)`

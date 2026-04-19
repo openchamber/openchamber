@@ -42,7 +42,7 @@ const deriveSessionActivityTransitions = (payload) => {
   return [];
 };
 
-export const createSessionRuntime = ({ writeSseEvent, getNotificationClients }) => {
+export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, broadcastEvent }) => {
   const sessionActivityPhases = new Map();
   const sessionActivityCooldowns = new Map();
   const sessionStates = new Map();
@@ -93,6 +93,16 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients }) 
       sessionActivityCooldowns.set(sessionId, timer);
     }
 
+    if (typeof broadcastEvent === 'function') {
+      broadcastEvent({
+        type: 'openchamber:session-activity',
+        properties: {
+          sessionId,
+          phase,
+        },
+      });
+    }
+
     return true;
   };
 
@@ -132,21 +142,27 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients }) 
     const attentionState = sessionAttentionStates.get(sessionId);
     const attentionChanged = !!attentionState && existingAttentionState?.needsAttention !== attentionState.needsAttention;
     const clients = getNotificationClients();
-    if (clients.size > 0 && (!existing || existing.status !== status || attentionChanged)) {
+    if (!existing || existing.status !== status || attentionChanged) {
       const state = sessionStates.get(sessionId);
-      for (const res of clients) {
-        try {
-          writeSseEvent(res, {
-            type: 'openchamber:session-status',
-            properties: {
-              sessionId,
-              status: state.status,
-              timestamp: state.lastUpdateAt,
-              metadata: state.metadata,
-              needsAttention: attentionState?.needsAttention ?? false,
-            },
-          });
-        } catch {
+      const syntheticPayload = {
+        type: 'openchamber:session-status',
+        properties: {
+          sessionId,
+          status: state.status,
+          timestamp: state.lastUpdateAt,
+          metadata: state.metadata,
+          needsAttention: attentionState?.needsAttention ?? false,
+        },
+      };
+
+      if (typeof broadcastEvent === 'function') {
+        broadcastEvent(syntheticPayload);
+      } else if (clients.size > 0) {
+        for (const res of clients) {
+          try {
+            writeSseEvent(res, syntheticPayload);
+          } catch {
+          }
         }
       }
     }
@@ -183,20 +199,27 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients }) 
 
     if (wasNeedsAttention) {
       state.needsAttention = false;
-      const clients = getNotificationClients();
-      for (const res of clients) {
-        try {
-          writeSseEvent(res, {
-            type: 'openchamber:session-status',
-            properties: {
-              sessionId,
-              status: state.status,
-              timestamp: Date.now(),
-              metadata: {},
-              needsAttention: false,
-            },
-          });
-        } catch {
+
+      const syntheticPayload = {
+        type: 'openchamber:session-status',
+        properties: {
+          sessionId,
+          status: state.status,
+          timestamp: Date.now(),
+          metadata: {},
+          needsAttention: false,
+        },
+      };
+
+      if (typeof broadcastEvent === 'function') {
+        broadcastEvent(syntheticPayload);
+      } else {
+        const clients = getNotificationClients();
+        for (const res of clients) {
+          try {
+            writeSseEvent(res, syntheticPayload);
+          } catch {
+          }
         }
       }
     }

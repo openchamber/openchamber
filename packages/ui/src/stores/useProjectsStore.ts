@@ -5,6 +5,7 @@ import type { ProjectEntry } from '@/lib/api/types';
 import type { DesktopSettings } from '@/lib/desktop';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { pathsEqual, resolveTildePath, normalizePath } from '@/lib/pathUtils';
+import { createProjectIdFromPath } from '@/lib/projectId';
 import { getSafeStorage } from './utils/safeStorage';
 import { useDirectoryStore } from './useDirectoryStore';
 import { streamDebugEnabled } from '@/stores/utils/streamDebug';
@@ -91,13 +92,6 @@ const deriveProjectLabel = (path: string): string => {
   return raw.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 };
 
-const createProjectId = (): string => {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID();
-  }
-  return `proj_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-};
-
 const sanitizeProjectIconImage = (value: unknown): ProjectEntry['iconImage'] | undefined => {
   if (!value || typeof value !== 'object') {
     return undefined;
@@ -164,12 +158,14 @@ const sanitizeProjects = (value: unknown): ProjectEntry[] => {
     if (!entry || typeof entry !== 'object') continue;
     const candidate = entry as Record<string, unknown>;
 
-    const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
     const rawPath = typeof candidate.path === 'string' ? candidate.path.trim() : '';
-    if (!id || !rawPath) continue;
+    if (!rawPath) continue;
 
     const normalizedPath = normalizeProjectPath(rawPath);
     if (!normalizedPath) continue;
+
+    const id = createProjectIdFromPath(normalizedPath);
+    if (!id) continue;
 
     if (seenIds.has(id) || seenPaths.has(normalizedPath)) continue;
     seenIds.add(id);
@@ -289,7 +285,7 @@ const getVSCodeWorkspaceProject = (): { projects: ProjectEntry[]; activeProjectI
     return null;
   }
 
-  const id = `vscode:${normalizedPath}`;
+  const id = createProjectIdFromPath(normalizedPath);
   const entry: ProjectEntry = {
     id,
     path: normalizedPath,
@@ -309,10 +305,10 @@ const getVSCodeWorkspaceProject = (): { projects: ProjectEntry[]; activeProjectI
 // Always prefer the workspace project over any persisted multi-project registry.
 const vscodeWorkspace = getVSCodeWorkspaceProject();
 const effectiveInitialProjects = vscodeWorkspace?.projects ?? initialProjects;
-const initialActiveProjectId = vscodeWorkspace?.activeProjectId
-  ?? readPersistedActiveProjectId()
-  ?? effectiveInitialProjects[0]?.id
-  ?? null;
+const persistedInitialActiveProjectId = vscodeWorkspace?.activeProjectId ?? readPersistedActiveProjectId();
+const initialActiveProjectId = effectiveInitialProjects.some((project) => project.id === persistedInitialActiveProjectId)
+  ? persistedInitialActiveProjectId
+  : effectiveInitialProjects[0]?.id ?? null;
 
 if (vscodeWorkspace) {
   cacheProjects(effectiveInitialProjects, initialActiveProjectId);
@@ -355,10 +351,7 @@ export const useProjectsStore = create<ProjectsStore>()(
 
       const now = Date.now();
       const label = options?.label?.trim() || deriveProjectLabel(normalizedPath);
-      const candidateId = options?.id?.trim();
-      const id = candidateId && !get().projects.some((project) => project.id === candidateId)
-        ? candidateId
-        : createProjectId();
+      const id = createProjectIdFromPath(normalizedPath);
       const entry: ProjectEntry = {
         id,
         path: normalizedPath,

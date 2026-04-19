@@ -1,4 +1,5 @@
 import { canonicalPath, pathsEqual } from '../PathUtils.js';
+import { summarizeText as summarizeSharedText } from '../text/summarization.js';
 
 export const createNotificationTemplateRuntime = (deps) => {
   const {
@@ -138,39 +139,16 @@ export const createNotificationTemplateRuntime = (deps) => {
 
   const summarizeText = async (text, targetLength, zenModel) => {
     if (!text || typeof text !== 'string' || text.trim().length === 0) return text;
-
-    try {
-      const prompt = `Summarize the following text in approximately ${targetLength} characters. Be concise and capture the key point. Output plain text only. Do not use markdown, bullets, headings, code fences, backticks, or quotes. Output only the summary text.\n\nText:\n${text}`;
-
-      const completionTimeout = createTimeoutSignal(15000);
-      let response;
-      try {
-        response = await fetch('https://opencode.ai/zen/v1/responses', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model: zenModel || ZEN_DEFAULT_MODEL,
-            input: [{ role: 'user', content: prompt }],
-            max_output_tokens: 1000,
-            stream: false,
-            reasoning: { effort: 'low' },
-          }),
-          signal: completionTimeout.signal,
-        });
-      } finally {
-        completionTimeout.cleanup();
-      }
-
-      if (!response.ok) return text;
-
-      const data = await response.json();
-      const summary = data?.output?.find((item) => item?.type === 'message')
-        ?.content?.find((item) => item?.type === 'output_text')?.text?.trim();
-
-      return summary || text;
-    } catch {
-      return text;
-    }
+    const result = await summarizeSharedText({
+      text,
+      threshold: 0,
+      maxLength: targetLength,
+      zenModel: zenModel || ZEN_DEFAULT_MODEL,
+      mode: 'notification',
+    });
+    return typeof result?.summary === 'string' && result.summary.trim().length > 0
+      ? result.summary
+      : text;
   };
 
   const extractTextFromParts = (parts, maxLength = NOTIFICATION_BODY_MAX_CHARS) => {

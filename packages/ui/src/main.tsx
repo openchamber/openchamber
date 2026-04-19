@@ -1,6 +1,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './styles/fonts'
+import 'katex/dist/katex.min.css'
 import './index.css'
 import App from './App.tsx'
 import { SessionAuthGate } from './components/auth/SessionAuthGate'

@@ -20,6 +20,8 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { ModelMultiSelect, generateInstanceId, type ModelSelectionWithId } from '@/components/multirun/ModelMultiSelect';
 import { BranchSelector, useBranchOptions } from '@/components/multirun/BranchSelector';
 import { AgentSelector } from '@/components/multirun/AgentSelector';
+import { CommandAutocomplete, type CommandAutocompleteHandle } from '@/components/chat/CommandAutocomplete';
+import { FileMentionAutocomplete, type FileMentionHandle } from '@/components/chat/FileMentionAutocomplete';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { getWorktreeSetupCommands } from '@/lib/openchamberConfig';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
@@ -63,9 +65,15 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
   const [setupCommands, setSetupCommands] = React.useState<string[]>([]);
   const [isSetupCommandsOpen, setIsSetupCommandsOpen] = React.useState(false);
   const [isLoadingSetupCommands, setIsLoadingSetupCommands] = React.useState(false);
+  const [showFileMention, setShowFileMention] = React.useState(false);
+  const [mentionQuery, setMentionQuery] = React.useState('');
+  const [showCommandAutocomplete, setShowCommandAutocomplete] = React.useState(false);
+  const [commandQuery, setCommandQuery] = React.useState('');
   
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+  const mentionRef = React.useRef<FileMentionHandle>(null);
+  const commandRef = React.useRef<CommandAutocompleteHandle>(null);
   
   const { currentTheme } = useThemeSystem();
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory ?? null);
@@ -199,6 +207,110 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
     setAttachedFiles((prev) => prev.filter((f) => f.id !== id));
   };
 
+  const updateAutocompleteState = React.useCallback((value: string, cursorPosition: number) => {
+    if (value.startsWith('/')) {
+      const firstSpace = value.indexOf(' ');
+      const firstNewline = value.indexOf('\n');
+      const commandEnd = Math.min(
+        firstSpace === -1 ? value.length : firstSpace,
+        firstNewline === -1 ? value.length : firstNewline,
+      );
+
+      if (cursorPosition <= commandEnd && firstSpace === -1) {
+        setCommandQuery(value.substring(1, commandEnd));
+        setShowCommandAutocomplete(true);
+        setShowFileMention(false);
+        return;
+      }
+    }
+
+    setShowCommandAutocomplete(false);
+
+    const textBeforeCursor = value.substring(0, cursorPosition);
+    const lastAtSymbol = textBeforeCursor.lastIndexOf('@');
+    if (lastAtSymbol !== -1) {
+      const charBefore = lastAtSymbol > 0 ? textBeforeCursor[lastAtSymbol - 1] : null;
+      const textAfterAt = textBeforeCursor.substring(lastAtSymbol + 1);
+      const isWordBoundary = !charBefore || /\s/.test(charBefore);
+      if (isWordBoundary && !textAfterAt.includes(' ') && !textAfterAt.includes('\n')) {
+        setMentionQuery(textAfterAt);
+        setShowFileMention(true);
+      } else {
+        setShowFileMention(false);
+      }
+      return;
+    }
+
+    setShowFileMention(false);
+  }, []);
+
+  const handleAutocompleteFileSelect = React.useCallback((file: { name: string; path: string; relativePath?: string }) => {
+    const cursorPosition = textareaRef.current?.selectionStart ?? prompt.length;
+    const textBeforeCursor = prompt.substring(0, cursorPosition);
+    const lastAtSymbol = textBeforeCursor.lastIndexOf('@');
+    const mentionPath = (file.relativePath && file.relativePath.trim().length > 0)
+      ? file.relativePath.trim()
+      : (file.path || file.name);
+
+    const startIndex = lastAtSymbol !== -1 ? lastAtSymbol : cursorPosition;
+    const nextPrompt = `${prompt.substring(0, startIndex)}@${mentionPath} ${prompt.substring(cursorPosition)}`;
+    const nextCursor = startIndex + mentionPath.length + 2;
+
+    setPrompt(nextPrompt);
+    setShowFileMention(false);
+    setMentionQuery('');
+
+    requestAnimationFrame(() => {
+      const currentTextarea = textareaRef.current;
+      if (currentTextarea) {
+        currentTextarea.selectionStart = nextCursor;
+        currentTextarea.selectionEnd = nextCursor;
+        currentTextarea.focus();
+      }
+      updateAutocompleteState(nextPrompt, nextCursor);
+    });
+  }, [prompt, updateAutocompleteState]);
+
+  const handleAutocompleteAgentSelect = React.useCallback((agentName: string) => {
+    const cursorPosition = textareaRef.current?.selectionStart ?? prompt.length;
+    const textBeforeCursor = prompt.substring(0, cursorPosition);
+    const lastAtSymbol = textBeforeCursor.lastIndexOf('@');
+    const startIndex = lastAtSymbol !== -1 ? lastAtSymbol : cursorPosition;
+    const nextPrompt = `${prompt.substring(0, startIndex)}@${agentName} ${prompt.substring(cursorPosition)}`;
+    const nextCursor = startIndex + agentName.length + 2;
+
+    setPrompt(nextPrompt);
+    setShowFileMention(false);
+    setMentionQuery('');
+
+    requestAnimationFrame(() => {
+      const currentTextarea = textareaRef.current;
+      if (currentTextarea) {
+        currentTextarea.selectionStart = nextCursor;
+        currentTextarea.selectionEnd = nextCursor;
+        currentTextarea.focus();
+      }
+      updateAutocompleteState(nextPrompt, nextCursor);
+    });
+  }, [prompt, updateAutocompleteState]);
+
+  const handleAutocompleteCommandSelect = React.useCallback((command: { name: string }) => {
+    const nextPrompt = `/${command.name} `;
+    setPrompt(nextPrompt);
+    setShowCommandAutocomplete(false);
+    setCommandQuery('');
+
+    requestAnimationFrame(() => {
+      const currentTextarea = textareaRef.current;
+      if (currentTextarea) {
+        currentTextarea.focus();
+        currentTextarea.selectionStart = currentTextarea.value.length;
+        currentTextarea.selectionEnd = currentTextarea.value.length;
+      }
+      updateAutocompleteState(nextPrompt, nextPrompt.length);
+    });
+  }, [updateAutocompleteState]);
+
   // Use either local submitting state or external isCreating prop
   const isSubmittingOrCreating = isSubmitting || isCreating;
 
@@ -254,6 +366,10 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
       setSelectedAgent('');
       setAttachedFiles([]);
       setBaseBranch('HEAD');
+      setShowCommandAutocomplete(false);
+      setShowFileMention(false);
+      setCommandQuery('');
+      setMentionQuery('');
     } catch (error) {
       console.error('Failed to create agent group:', error);
       toast.error('Failed to create agent group');
@@ -265,6 +381,22 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     // Early return during IME composition
     if (isIMECompositionEvent(e)) return;
+
+    if (showCommandAutocomplete && commandRef.current) {
+      if (e.key === 'Enter' || e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'Escape' || e.key === 'Tab') {
+        e.preventDefault();
+        commandRef.current.handleKeyDown(e.key);
+        return;
+      }
+    }
+
+    if (showFileMention && mentionRef.current) {
+      if (e.key === 'Enter' || e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'Escape' || e.key === 'Tab') {
+        e.preventDefault();
+        mentionRef.current.handleKeyDown(e.key);
+        return;
+      }
+    }
 
     // Enter submits if valid, Shift+Enter adds newline
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -412,20 +544,26 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
           <label htmlFor="prompt" className="typography-ui-label font-medium text-foreground">
             Prompt
           </label>
-          <div
-            className="rounded-xl border border-border/80 overflow-hidden focus-within:ring-1 focus-within:ring-primary/50"
-            style={{ backgroundColor: currentTheme?.colors?.surface?.subtle }}
-          >
-            {/* Text Area */}
-            <Textarea
-              ref={textareaRef}
-              id="prompt"
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Ask anything..."
-              className="min-h-[100px] max-h-[300px] resize-none border-0 bg-transparent dark:bg-transparent px-4 py-3 typography-markdown focus-visible:ring-0 focus-visible:ring-offset-0"
-            />
+          <div className="relative">
+            <div
+              className="rounded-xl border border-border/80 overflow-hidden focus-within:ring-1 focus-within:ring-primary/50"
+              style={{ backgroundColor: currentTheme?.colors?.surface?.subtle }}
+            >
+              {/* Text Area */}
+              <Textarea
+                ref={textareaRef}
+                id="prompt"
+                value={prompt}
+                onChange={(event) => {
+                  const nextPrompt = event.target.value;
+                  setPrompt(nextPrompt);
+                  const cursorPosition = event.target.selectionStart ?? nextPrompt.length;
+                  updateAutocompleteState(nextPrompt, cursorPosition);
+                }}
+                onKeyDown={handleKeyDown}
+                placeholder="Ask anything..."
+                className="min-h-[100px] max-h-[300px] resize-none border-0 bg-transparent dark:bg-transparent px-4 py-3 typography-markdown focus-visible:ring-0 focus-visible:ring-offset-0"
+              />
             
             {/* Attached Files Display */}
             {attachedFiles.length > 0 && (
@@ -455,8 +593,8 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
               </div>
             )}
             
-            {/* Footer Controls */}
-            <div className="flex items-center justify-between px-3 py-2 border-t border-border/40 bg-transparent">
+              {/* Footer Controls */}
+              <div className="flex items-center justify-between px-3 py-2 border-t border-border/40 bg-transparent">
               {/* Left Controls - Attachments */}
               <div className="flex items-center gap-2">
                 <input
@@ -501,7 +639,41 @@ export const AgentManagerEmptyState: React.FC<AgentManagerEmptyStateProps> = ({
                     <RiSendPlane2Line className="h-[18px] w-[18px]" />
                   )}
                 </button>
+              </div>
             </div>
+
+            {showCommandAutocomplete ? (
+              <CommandAutocomplete
+                ref={commandRef}
+                searchQuery={commandQuery}
+                onCommandSelect={handleAutocompleteCommandSelect}
+                onClose={() => setShowCommandAutocomplete(false)}
+                style={{
+                  left: 0,
+                  top: 'auto',
+                  bottom: 'calc(100% + 6px)',
+                  marginBottom: 0,
+                  maxWidth: '100%',
+                }}
+              />
+            ) : null}
+
+            {showFileMention ? (
+              <FileMentionAutocomplete
+                ref={mentionRef}
+                searchQuery={mentionQuery}
+                onFileSelect={handleAutocompleteFileSelect}
+                onAgentSelect={handleAutocompleteAgentSelect}
+                onClose={() => setShowFileMention(false)}
+                style={{
+                  left: 0,
+                  top: 'auto',
+                  bottom: 'calc(100% + 6px)',
+                  marginBottom: 0,
+                  maxWidth: '100%',
+                }}
+              />
+            ) : null}
           </div>
         </div>
       </form>
