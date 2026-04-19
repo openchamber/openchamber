@@ -2607,7 +2607,26 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         const internalPath = e.dataTransfer.getData('application/x-openchamber-file-path');
         if (internalPath) {
             const mention = `@${internalPath}`;
-            setPendingInputText(mention, 'append-inline');
+            const textarea = textareaRef.current;
+            if (textarea) {
+                const pos = textarea.selectionStart ?? message.length;
+                const end = textarea.selectionEnd ?? pos;
+                const before = message.slice(0, pos);
+                const after = message.slice(end);
+                const needSpaceBefore = before.length > 0 && !/\s$/.test(before);
+                const needSpaceAfter = after.length > 0 && !/^\s/.test(after);
+                const insert = `${needSpaceBefore ? ' ' : ''}${mention}${needSpaceAfter ? ' ' : ''}`;
+                const nextMessage = `${before}${insert}${after}`;
+                setMessage(nextMessage);
+                requestAnimationFrame(() => {
+                    const cursorPos = pos + insert.length - (needSpaceAfter ? 0 : 0);
+                    textarea.selectionStart = cursorPos;
+                    textarea.selectionEnd = cursorPos;
+                    textarea.focus();
+                });
+            } else {
+                setMessage((prev) => appendInlineText(prev, mention));
+            }
             toast.success('Added file mention');
             clearDropTextSuppression();
             return;
