@@ -3293,7 +3293,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         >
                             <SelectTrigger
                                 size="sm"
-                                className="h-7 min-w-0 w-fit max-w-[42vw] sm:max-w-[18rem] border-transparent bg-transparent px-1.5 hover:bg-transparent data-[state=open]:bg-transparent"
+                                className="h-7 min-w-0 w-fit max-w-[42vw] sm:max-w-[18rem] border-transparent bg-transparent px-1.5 hover:bg-transparent data-[popup-open]:bg-transparent"
                             >
                                 <SelectValue>
                                     {renderProjectLabelWithIcon(selectedDraftProject)}
@@ -3315,7 +3315,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                             >
                                 <SelectTrigger
                                     size="sm"
-                                    className="h-7 min-w-0 w-fit max-w-[48vw] sm:max-w-[20rem] border-transparent bg-transparent px-1.5 hover:bg-transparent data-[state=open]:bg-transparent"
+                                    className="h-7 min-w-0 w-fit max-w-[48vw] sm:max-w-[20rem] border-transparent bg-transparent px-1.5 hover:bg-transparent data-[popup-open]:bg-transparent"
                                 >
                                     <SelectValue>
                                         {selectedDraftBranchLabel ?? 'Branch'}
@@ -3496,6 +3496,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                             </div>
                         )}
                         <Textarea
+                            simple
                             ref={textareaRef}
                             data-chat-input="true"
                             value={message}
@@ -3528,7 +3529,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                             autoCapitalize={isMobile ? "sentences" : "off"}
                             spellCheck={isMobile || inputSpellcheckEnabled}
                             fillContainer={isDesktopExpanded}
-                            outerClassName={cn('focus-within:ring-0', isDesktopExpanded && 'flex-1 min-h-0')}
+                            outerClassName={cn('ring-0 bg-transparent shadow-none hover:bg-transparent focus-within:ring-0', isDesktopExpanded && 'flex-1 min-h-0')}
                             className={cn(
                                 'min-h-[52px] resize-none border-0 px-3 rounded-b-none appearance-none hover:border-transparent bg-transparent relative z-10',
                                 isDesktopExpanded
