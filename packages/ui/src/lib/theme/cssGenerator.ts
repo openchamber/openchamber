@@ -121,8 +121,8 @@ const sidebarBaseRgb = hexToRgb(theme.colors.surface.muted);
     vars.push(`  --sidebar-ring: ${theme.colors.interactive.focusRing} !important;`);
 
     const isDark = theme.metadata.variant === 'dark';
-    const strongAlpha = isDark ? 0.35 : 0.75;
-    const softAlpha = isDark ? 0.2 : 0.6;
+    const strongAlpha = isDark ? 0.15 : 0.5;
+    const softAlpha = isDark ? 0.1 : 0.3;
 
     if (sidebarBaseRgb) {
       vars.push(
