@@ -508,6 +508,19 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
   const [wrapLines, setWrapLines] = React.useState(true);
   const [isFullscreen, setIsFullscreen] = React.useState(false);
   const [isSearchOpen, setIsSearchOpen] = React.useState(false);
+  const [isFloatingToolbarOpen, setIsFloatingToolbarOpen] = React.useState(false);
+  const floatingToolbarRef = React.useRef<HTMLDivElement | null>(null);
+
+  React.useEffect(() => {
+    if (!isFloatingToolbarOpen) return;
+    const handler = (event: MouseEvent) => {
+      if (floatingToolbarRef.current && !floatingToolbarRef.current.contains(event.target as Node)) {
+        setIsFloatingToolbarOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [isFloatingToolbarOpen]);
   const [textViewMode, setTextViewMode] = React.useState<'view' | 'edit'>('edit');
   const [mdViewMode, setMdViewMode] = React.useState<'preview' | 'edit'>('edit');
   const [jsonViewMode, setJsonViewMode] = React.useState<'tree' | 'text'>('tree');
@@ -2741,8 +2754,26 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
 
       <div className="flex-1 min-h-0 min-w-0 relative">
         {selectedFile && !isSearchOpen && (
-          <div className="absolute right-3 top-3 z-30">
-            {renderFloatingFileControls()}
+          <div
+            ref={floatingToolbarRef}
+            className="absolute right-3 top-3 z-30"
+            onMouseEnter={() => setIsFloatingToolbarOpen(true)}
+            onMouseLeave={() => setIsFloatingToolbarOpen(false)}
+          >
+            {isFloatingToolbarOpen ? (
+              renderFloatingFileControls()
+            ) : (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setIsFloatingToolbarOpen(true)}
+                className="h-8 w-8 rounded-lg border border-[var(--interactive-border)] bg-[var(--surface-elevated)] p-0 text-muted-foreground shadow-sm hover:text-foreground"
+                aria-label="Show editor controls"
+                title="Editor controls"
+              >
+                <RiMore2Fill className="h-4 w-4" />
+              </Button>
+            )}
           </div>
         )}
         <ScrollableOverlay outerClassName="h-full min-w-0" className="h-full min-w-0">
