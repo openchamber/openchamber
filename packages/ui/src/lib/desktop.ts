@@ -133,6 +133,7 @@ export type DesktopSettings = {
   stickyUserHeader?: boolean;
   fontSize?: number;
   terminalFontSize?: number;
+  terminalShell?: 'default' | 'powershell' | 'cmd' | 'bash' | 'wsl';
   padding?: number;
   cornerRadius?: number;
   inputBarOffset?: number;

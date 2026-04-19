@@ -221,13 +221,15 @@
   "scripts": {
     "vscode:prepublish": "bun run build",
     "build": "bun run build:extension && bun run build:webview",
+    "build:fast": "bun run build:extension && bun run build:webview:fast",
     "build:extension": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --minify --main-fields=module,main",
     "build:webview": "VITE_OPENCODE_URL=/api vite build",
+    "build:webview:fast": "cross-env OPENCHAMBER_DISABLE_REACT_COMPILER=1 VITE_OPENCODE_URL=/api vite build",
     "dev": "concurrently -n \"ext,web\" -c \"cyan,magenta\" \"bun run watch:extension\" \"bun run dev:webview\"",
     "dev:webview": "vite --host localhost --port 5173 --strictPort",
     "watch:extension": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --watch --sourcemap --main-fields=module,main",
     "watch:webview": "vite build --watch",
-    "type-check": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.webview.json",
+    "type-check": "tsc --build tsconfig.extension.typecheck.json tsconfig.webview.typecheck.json",
     "lint": "bunx eslint --ext .ts,.tsx src webview",
     "package": "vsce package --no-dependencies"
   },

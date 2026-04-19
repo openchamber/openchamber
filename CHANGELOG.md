@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Tooling: rebuilt TypeScript validation around project references and incremental declaration output for `@openchamber/ui`, cutting warm `type-check` runs from repeated ~50s full-program checks down to about 3s at the repo root, added fast local build scripts that skip the React compiler when release-grade transforms are not needed, and serialized root workspace builds to avoid concurrent Vite memory exhaustion.
+- Tooling/Bundle Size: lazy-loaded Prism grammars for virtualized code blocks and moved CodeMirror language resolution to async per-extension loading, trimming the initial frontend module graph and improving fast local build times further.
 
 ## [1.9.6] - 2026-04-17
 

@@ -3,10 +3,12 @@ import { RiFolderLine, RiRefreshLine } from '@remixicon/react';
 import { cn } from '@/lib/utils';
 import { opencodeClient, type FilesystemEntry } from '@/lib/opencode/client';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
+import { normalizePath } from '@/lib/pathUtils';
 
 interface DirectoryAutocompleteProps {
   inputValue: string;
   homeDirectory: string | null;
+  scopeBoundary?: string | null;
   onSelectSuggestion: (path: string) => void;
   visible: boolean;
   onClose: () => void;
@@ -17,17 +19,28 @@ export interface DirectoryAutocompleteHandle {
   handleKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => boolean;
 }
 
-export const DirectoryAutocomplete = React.forwardRef<DirectoryAutocompleteHandle, DirectoryAutocompleteProps>(({
+type AutocompleteItem =
+  | { kind: 'parent'; path: string }
+  | { kind: 'directory'; entry: FilesystemEntry };
+
+export const DirectoryAutocomplete = React.forwardRef<DirectoryAutocompleteHandle, DirectoryAutocompleteProps>(({ 
   inputValue,
   homeDirectory,
+  scopeBoundary = null,
   onSelectSuggestion,
   visible,
   onClose,
   showHidden,
 }, ref) => {
+  const isWindowsRuntime = React.useMemo(
+    () => typeof navigator !== 'undefined' && /Windows/i.test(navigator.userAgent),
+    []
+  );
   const [suggestions, setSuggestions] = React.useState<FilesystemEntry[]>([]);
+  const [navigationParentPath, setNavigationParentPath] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [selectedIndex, setSelectedIndex] = React.useState(0);
+  const [mountedDriveSuggestions, setMountedDriveSuggestions] = React.useState<FilesystemEntry[] | null>(null);
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const itemRefs = React.useRef<(HTMLDivElement | null)[]>([]);
 
@@ -85,34 +98,180 @@ export const DirectoryAutocomplete = React.forwardRef<DirectoryAutocompleteHandl
 
   // Expand ~ to home directory
   const expandPath = React.useCallback((path: string): string => {
-    if (path.startsWith('~') && homeDirectory) {
-      return path.replace(/^~/, homeDirectory);
+    let normalizedPath = path.trim().replace(/\\/g, '/');
+    if (/^[A-Za-z]:$/.test(normalizedPath)) {
+      normalizedPath = `${normalizedPath}/`;
     }
-    return path;
+    if (/^%userprofile%(?:[\\/]|$)/i.test(path) && homeDirectory) {
+      return normalizedPath.replace(/^%userprofile%/i, homeDirectory);
+    }
+    if (normalizedPath.startsWith('~') && homeDirectory) {
+      return normalizedPath.replace(/^~/, homeDirectory);
+    }
+    return normalizedPath;
   }, [homeDirectory]);
 
-  // Get the directory part of the path for listing
-  const getParentDir = React.useCallback((path: string): string => {
-    const expanded = expandPath(path);
-    // If ends with /, list that directory
-    if (expanded.endsWith('/')) {
-      return expanded;
+  const normalizedScopeBoundary = React.useMemo(
+    () => normalizePath(scopeBoundary ?? null),
+    [scopeBoundary]
+  );
+
+  const isWindowsPathContext = React.useMemo(() => {
+    if (!isWindowsRuntime) {
+      return false;
     }
-    // Otherwise, get parent directory
-    const lastSlash = expanded.lastIndexOf('/');
-    if (lastSlash === -1) return '';
-    if (lastSlash === 0) return '/';
-    return expanded.substring(0, lastSlash + 1);
+
+    const values = [inputValue, homeDirectory, scopeBoundary];
+    return values.some((value) => {
+      if (typeof value !== 'string') {
+        return false;
+      }
+
+      const trimmed = value.trim();
+      return /^\/[A-Za-z](?:\/|$)?/.test(trimmed) || /^[A-Za-z]:(?:[\\/]|$)?/.test(trimmed);
+    });
+  }, [homeDirectory, inputValue, isWindowsRuntime, scopeBoundary]);
+
+  const normalizeResolvedPath = React.useCallback((path: string): string => {
+    const expanded = expandPath(path);
+    return normalizePath(expanded) ?? expanded.replace(/\\/g, '/');
   }, [expandPath]);
 
-  // Get the partial name being typed (for filtering)
-  const getPartialName = React.useCallback((path: string): string => {
-    const expanded = expandPath(path);
-    if (expanded.endsWith('/')) return '';
-    const lastSlash = expanded.lastIndexOf('/');
-    if (lastSlash === -1) return expanded;
-    return expanded.substring(lastSlash + 1);
-  }, [expandPath]);
+  const toRequestPath = React.useCallback((path: string): string => {
+    const normalized = normalizeResolvedPath(path);
+    const converted = normalized.replace(/^\/([A-Za-z])(?=\/|$)/, (_, drive: string) => `${drive.toUpperCase()}:`);
+    return /^[A-Za-z]:$/.test(converted) ? `${converted}/` : converted;
+  }, [normalizeResolvedPath]);
+
+  const isWithinScopeBoundary = React.useCallback((path: string | null | undefined): boolean => {
+    if (!normalizedScopeBoundary) {
+      return true;
+    }
+
+    if (typeof path !== 'string' || path.length === 0) {
+      return false;
+    }
+
+    const normalized = normalizeResolvedPath(path);
+    if (normalizedScopeBoundary === '/') {
+      return normalized.startsWith('/');
+    }
+
+    return normalized === normalizedScopeBoundary || normalized.startsWith(`${normalizedScopeBoundary}/`);
+  }, [normalizedScopeBoundary, normalizeResolvedPath]);
+
+  const getParentDirectory = React.useCallback((path: string): string | null => {
+    const normalized = normalizeResolvedPath(path);
+    if (!normalized) {
+      return null;
+    }
+
+    if (normalizedScopeBoundary && normalized === normalizedScopeBoundary) {
+      return null;
+    }
+
+    if (normalized === '/') {
+      return null;
+    }
+
+    if (/^\/[A-Za-z]$/.test(normalized)) {
+      if (!normalizedScopeBoundary && isWindowsPathContext && mountedDriveSuggestions && mountedDriveSuggestions.length > 0) {
+        return '/';
+      }
+      return null;
+    }
+
+    const lastSlash = normalized.lastIndexOf('/');
+    const parent = lastSlash <= 0 ? '/' : normalized.slice(0, lastSlash);
+
+    if (!normalizedScopeBoundary) {
+      return parent || '/';
+    }
+
+    if (parent === normalizedScopeBoundary || parent.startsWith(`${normalizedScopeBoundary}/`)) {
+      return parent;
+    }
+
+    return null;
+  }, [isWindowsPathContext, mountedDriveSuggestions, normalizeResolvedPath, normalizedScopeBoundary]);
+
+  const loadWindowsDriveSuggestions = React.useCallback(async (): Promise<FilesystemEntry[]> => {
+    if (!isWindowsPathContext || normalizedScopeBoundary) {
+      return [];
+    }
+
+    if (mountedDriveSuggestions) {
+      return mountedDriveSuggestions;
+    }
+
+    return opencodeClient.listMountedDrives();
+  }, [isWindowsPathContext, mountedDriveSuggestions, normalizedScopeBoundary]);
+
+  React.useEffect(() => {
+    if (!isWindowsPathContext || normalizedScopeBoundary) {
+      setMountedDriveSuggestions(null);
+      return;
+    }
+
+    let cancelled = false;
+    void loadWindowsDriveSuggestions()
+      .then((entries) => {
+        if (!cancelled) {
+          setMountedDriveSuggestions(entries);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setMountedDriveSuggestions([]);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isWindowsPathContext, loadWindowsDriveSuggestions, normalizedScopeBoundary]);
+
+  const resolveInputContext = React.useCallback((path: string) => {
+    const trimmed = path.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    const normalized = normalizeResolvedPath(trimmed);
+    const isDirectoryReference = trimmed === '~'
+      || /^%userprofile%$/i.test(trimmed)
+      || /[\\/]$/.test(trimmed)
+      || /^[A-Za-z]:$/.test(trimmed)
+      || /^\/[A-Za-z]$/.test(normalized);
+
+    if (isDirectoryReference) {
+      if (!isWithinScopeBoundary(normalized)) {
+        return null;
+      }
+
+      return {
+        directory: normalized,
+        partialName: '',
+        navigationParent: getParentDirectory(normalized),
+      };
+    }
+
+    const lastSlash = normalized.lastIndexOf('/');
+    if (lastSlash === -1) {
+      return null;
+    }
+
+    const directory = lastSlash === 0 ? '/' : normalized.slice(0, lastSlash);
+    if (!isWithinScopeBoundary(directory)) {
+      return null;
+    }
+
+    return {
+      directory,
+      partialName: normalized.slice(lastSlash + 1),
+      navigationParent: getParentDirectory(directory),
+    };
+  }, [getParentDirectory, isWithinScopeBoundary, normalizeResolvedPath]);
 
   const debouncedInputValue = useDebouncedValue(inputValue, 150);
 
@@ -120,45 +279,80 @@ export const DirectoryAutocomplete = React.forwardRef<DirectoryAutocompleteHandl
   React.useEffect(() => {
     if (!visible || !debouncedInputValue) {
       setSuggestions([]);
+      setNavigationParentPath(null);
+      setLoading(false);
       return;
     }
 
-    const parentDir = getParentDir(debouncedInputValue);
-    const partialName = getPartialName(debouncedInputValue).toLowerCase();
-
-    if (!parentDir) {
+    const context = resolveInputContext(debouncedInputValue);
+    if (!context) {
       setSuggestions([]);
+      setNavigationParentPath(null);
+      setLoading(false);
       return;
     }
+
+    const { directory, partialName, navigationParent } = context;
+    setNavigationParentPath(navigationParent);
+    const suggestionLimit = !normalizedScopeBoundary && isWindowsPathContext && directory === '/'
+      ? Math.max(mountedDriveSuggestions?.length ?? 0, 10)
+      : 10;
 
     let cancelled = false;
     setLoading(true);
 
-    opencodeClient.listLocalDirectory(parentDir)
-      .then((entries) => {
-        if (cancelled) return;
-        
-        // Filter to directories only, respect hidden setting
-        const directories = entries.filter((entry) => {
-          if (!entry.isDirectory) return false;
-          if (!showHidden && entry.name.startsWith('.')) return false;
-          return true;
+    const applySuggestions = (entries: FilesystemEntry[]) => {
+      if (cancelled) {
+        return;
+      }
+
+      const directories = entries.filter((entry) => {
+        if (!entry.isDirectory) return false;
+        if (!showHidden && entry.name.startsWith('.')) return false;
+        if (!isWithinScopeBoundary(entry.path)) return false;
+        return true;
+      });
+
+      const lowercasePartialName = partialName.toLowerCase();
+      const scored = lowercasePartialName
+        ? directories
+            .map((entry) => {
+              const score = fuzzyScore(lowercasePartialName, entry.name);
+              return score !== null ? { entry, score } : null;
+            })
+            .filter((item): item is { entry: FilesystemEntry; score: number } => item !== null)
+            .sort((a, b) => b.score - a.score || a.entry.name.localeCompare(b.entry.name))
+            .map((item) => item.entry)
+        : directories.sort((a, b) => a.name.localeCompare(b.name));
+
+      setSuggestions(scored.slice(0, suggestionLimit));
+      setSelectedIndex(0);
+    };
+
+    if (!normalizedScopeBoundary && isWindowsPathContext && directory === '/') {
+      void loadWindowsDriveSuggestions()
+        .then((entries) => {
+          applySuggestions(entries);
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setSuggestions([]);
+          }
+        })
+        .finally(() => {
+          if (!cancelled) {
+            setLoading(false);
+          }
         });
 
-        // Apply fuzzy matching and sort by score
-        const scored = partialName
-          ? directories
-              .map((entry) => {
-                const score = fuzzyScore(partialName, entry.name);
-                return score !== null ? { entry, score } : null;
-              })
-              .filter((item): item is { entry: FilesystemEntry; score: number } => item !== null)
-              .sort((a, b) => b.score - a.score || a.entry.name.localeCompare(b.entry.name))
-              .map((item) => item.entry)
-          : directories.sort((a, b) => a.name.localeCompare(b.name));
+      return () => {
+        cancelled = true;
+      };
+    }
 
-        setSuggestions(scored.slice(0, 10)); // Limit suggestions
-        setSelectedIndex(0);
+    opencodeClient.listLocalDirectory(toRequestPath(directory))
+      .then((entries) => {
+        applySuggestions(entries);
       })
       .catch(() => {
         if (!cancelled) {
@@ -174,7 +368,24 @@ export const DirectoryAutocomplete = React.forwardRef<DirectoryAutocompleteHandl
     return () => {
       cancelled = true;
     };
-  }, [visible, debouncedInputValue, getParentDir, getPartialName, showHidden, fuzzyScore]);
+  }, [visible, debouncedInputValue, resolveInputContext, toRequestPath, showHidden, fuzzyScore, isWithinScopeBoundary, normalizedScopeBoundary, isWindowsPathContext, loadWindowsDriveSuggestions, mountedDriveSuggestions?.length]);
+
+  const items = React.useMemo<AutocompleteItem[]>(() => {
+    const next: AutocompleteItem[] = [];
+    if (navigationParentPath) {
+      next.push({ kind: 'parent', path: navigationParentPath });
+    }
+    for (const entry of suggestions) {
+      next.push({ kind: 'directory', entry });
+    }
+    return next;
+  }, [navigationParentPath, suggestions]);
+
+  React.useEffect(() => {
+    if (items.length > 0 && selectedIndex >= items.length) {
+      setSelectedIndex(0);
+    }
+  }, [items.length, selectedIndex]);
 
   // Scroll selected item into view
   React.useEffect(() => {
@@ -201,20 +412,25 @@ export const DirectoryAutocomplete = React.forwardRef<DirectoryAutocompleteHandl
     };
   }, [visible, onClose]);
 
-  const handleSelectSuggestion = React.useCallback((entry: FilesystemEntry) => {
-    // Append the selected directory name to current path, with trailing slash
-    const path = entry.path.endsWith('/') ? entry.path : entry.path + '/';
-    onSelectSuggestion(path);
-  }, [onSelectSuggestion]);
+  const selectPath = React.useCallback((path: string) => {
+    const normalized = normalizeResolvedPath(path);
+    const pathWithTrailingSeparator = normalized.endsWith('/') ? normalized : `${normalized}/`;
+    onSelectSuggestion(pathWithTrailingSeparator);
+  }, [normalizeResolvedPath, onSelectSuggestion]);
+
+  const handleSelectItem = React.useCallback((item: AutocompleteItem) => {
+    const path = item.kind === 'parent' ? item.path : item.entry.path;
+    selectPath(path);
+  }, [selectPath]);
 
   // Expose key handler to parent
   React.useImperativeHandle(ref, () => ({
     handleKeyDown: (e: React.KeyboardEvent<HTMLInputElement>): boolean => {
-      if (!visible || suggestions.length === 0) {
+      if (!visible || items.length === 0) {
         return false;
       }
 
-      const total = suggestions.length;
+      const total = items.length;
 
       if (e.key === 'Tab') {
         e.preventDefault();
@@ -224,9 +440,9 @@ export const DirectoryAutocomplete = React.forwardRef<DirectoryAutocompleteHandl
         } else {
           // Tab: next suggestion or select if only one
           if (total === 1) {
-            const selected = suggestions[0];
+            const selected = items[0];
             if (selected) {
-              handleSelectSuggestion(selected);
+              handleSelectItem(selected);
             }
           } else {
             setSelectedIndex((prev) => (prev + 1) % total);
@@ -251,11 +467,13 @@ export const DirectoryAutocomplete = React.forwardRef<DirectoryAutocompleteHandl
         e.preventDefault();
         // Select current item and close autocomplete
         const safeIndex = ((selectedIndex % total) + total) % total;
-        const selected = suggestions[safeIndex];
+        const selected = items[safeIndex];
         if (selected) {
-          handleSelectSuggestion(selected);
+          handleSelectItem(selected);
+          if (selected.kind !== 'parent') {
+            onClose();
+          }
         }
-        onClose();
         return true; // Consume the event, don't let parent confirm yet
       }
 
@@ -267,9 +485,9 @@ export const DirectoryAutocomplete = React.forwardRef<DirectoryAutocompleteHandl
 
       return false;
     }
-  }), [visible, suggestions, selectedIndex, handleSelectSuggestion, onClose]);
+  }), [visible, items, selectedIndex, handleSelectItem, onClose]);
 
-  if (!visible || (suggestions.length === 0 && !loading)) {
+  if (!visible || (items.length === 0 && !loading)) {
     return null;
   }
 
@@ -284,21 +502,28 @@ export const DirectoryAutocomplete = React.forwardRef<DirectoryAutocompleteHandl
         </div>
       ) : (
         <div className="overflow-y-auto py-1">
-          {suggestions.map((entry, index) => {
+          {items.map((item, index) => {
             const isSelected = selectedIndex === index;
+            const key = item.kind === 'parent' ? `parent:${item.path}` : item.entry.path;
+            const label = item.kind === 'parent' ? '..' : item.entry.name;
             return (
               <div
-                key={entry.path}
+                key={key}
                 ref={(el) => { itemRefs.current[index] = el; }}
                 className={cn(
-                  "flex items-center gap-2 px-3 py-1.5 cursor-pointer typography-ui-label",
-                  isSelected && "bg-interactive-selection"
+                  'flex items-center gap-2 px-3 py-1.5 cursor-pointer typography-ui-label',
+                  isSelected && 'bg-interactive-selection'
                 )}
-                onClick={() => { handleSelectSuggestion(entry); onClose(); }}
+                onClick={() => {
+                  handleSelectItem(item);
+                  if (item.kind !== 'parent') {
+                    onClose();
+                  }
+                }}
                 onMouseEnter={() => setSelectedIndex(index)}
               >
                 <RiFolderLine className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                <span className="truncate">{entry.name}</span>
+                <span className="truncate">{label}</span>
               </div>
             );
           })}

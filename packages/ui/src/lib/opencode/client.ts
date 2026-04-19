@@ -14,6 +14,7 @@ import type {
 } from "@opencode-ai/sdk/v2";
 import type { PermissionRequest } from "@/types/permission";
 import type { QuestionRequest } from "@/types/question";
+import { normalizePath } from "@/lib/pathUtils";
 import { waitForWorktreeBootstrap } from "@/lib/worktrees/worktreeBootstrap";
 
 // Use relative path by default (works with both dev and nginx proxy server)
@@ -117,8 +118,9 @@ export type DirectorySwitchResult = {
   models?: unknown[];
 };
 
-const normalizeFsPath = (path: string): string => path.replace(/\\/g, "/");
+const normalizeFsPath = (path: string): string => normalizePath(path) ?? path.replace(/\\/g, "/");
 const FS_LIST_CACHE_TTL_MS = 400;
+const FS_MOUNTED_DRIVES_CACHE_TTL_MS = 5000;
 
 const getDesktopFilesApi = (): FilesAPI | null => {
   if (typeof window === "undefined") {
@@ -139,6 +141,8 @@ class OpencodeService {
   private directoryContextQueue: Promise<void> = Promise.resolve();
   private listDirectoryInFlight: Map<string, Promise<FilesystemEntry[]>> = new Map();
   private listDirectoryCache: Map<string, { entries: FilesystemEntry[]; expiresAt: number }> = new Map();
+  private mountedDrivesInFlight: Promise<FilesystemEntry[]> | null = null;
+  private mountedDrivesCache: { entries: FilesystemEntry[]; expiresAt: number } | null = null;
 
   constructor(baseUrl: string = DEFAULT_BASE_URL) {
     const desktopBase = resolveDesktopBaseUrl();
@@ -178,26 +182,29 @@ class OpencodeService {
   }
 
   private normalizeCandidatePath(path?: string | null): string | null {
-    if (typeof path !== 'string') {
-      return null;
-    }
-
-    const trimmed = path.trim();
-    if (!trimmed) {
-      return null;
-    }
-
-    // Normalize backslashes and uppercase the Windows drive letter so that
-    // d:\MyProject and D:\MyProject resolve to the same canonical form.
-    const normalized = trimmed
-      .replace(/\\/g, '/')
-      .replace(/^([a-z]):/, (_, letter: string) => letter.toUpperCase() + ':');
-    const withoutTrailingSlash = normalized.length > 1 ? normalized.replace(/\/+$/, '') : normalized;
-
-    return withoutTrailingSlash || null;
+    return normalizePath(path);
   }
 
   private deriveHomeDirectory(path: string): { homeDirectory: string; username?: string } {
+    const canonicalWindowsMatch = path.match(/^\/([A-Za-z])(?:\/|$)/);
+    if (canonicalWindowsMatch) {
+      const drive = `/${canonicalWindowsMatch[1].toLowerCase()}`;
+      const remainder = path.slice(drive.length + (path.charAt(drive.length) === '/' ? 1 : 0));
+      const segments = remainder.split('/').filter(Boolean);
+
+      if (segments.length >= 2) {
+        const homeDirectory = `${drive}/${segments[0]}/${segments[1]}`;
+        return { homeDirectory, username: segments[1] };
+      }
+
+      if (segments.length === 1) {
+        const homeDirectory = `${drive}/${segments[0]}`;
+        return { homeDirectory, username: segments[0] };
+      }
+
+      return { homeDirectory: drive, username: undefined };
+    }
+
     const windowsMatch = path.match(/^([A-Za-z]:)(?:\/|$)/);
     if (windowsMatch) {
       const drive = windowsMatch[1];
@@ -1443,7 +1450,10 @@ class OpencodeService {
         return [];
       }
 
-      const entries = result.entries as FilesystemEntry[];
+      const entries = (result.entries as FilesystemEntry[]).map((entry) => ({
+        ...entry,
+        path: typeof entry.path === 'string' ? normalizeFsPath(entry.path) : entry.path,
+      }));
       this.listDirectoryCache.set(cacheKey, {
         entries,
         expiresAt: Date.now() + FS_LIST_CACHE_TTL_MS,
@@ -1544,6 +1554,70 @@ class OpencodeService {
       console.warn('Failed to resolve filesystem home directory:', error);
       return null;
     }
+  }
+
+  async listMountedDrives(): Promise<FilesystemEntry[]> {
+    const now = Date.now();
+    if (this.mountedDrivesCache && this.mountedDrivesCache.expiresAt > now) {
+      return this.mountedDrivesCache.entries;
+    }
+
+    if (this.mountedDrivesInFlight) {
+      return this.mountedDrivesInFlight;
+    }
+
+    const task = (async () => {
+      try {
+        const response = await fetch(`${this.baseUrl}/fs/mounted-drives`, {
+          method: 'GET',
+          headers: {
+            Accept: 'application/json',
+          },
+        });
+
+        if (!response.ok) {
+          const error = await response.json().catch(() => ({}));
+          const message = typeof error.error === 'string' ? error.error : 'Failed to list mounted drives';
+          throw new Error(message);
+        }
+
+        const payload = await response.json().catch(() => null) as {
+          drives?: Array<{ name?: unknown; path?: unknown }>;
+        } | null;
+
+        const entries = Array.isArray(payload?.drives)
+          ? payload.drives
+              .filter((drive): drive is { name: string; path: string } =>
+                typeof drive?.name === 'string' && drive.name.length > 0
+                && typeof drive?.path === 'string' && drive.path.length > 0
+              )
+              .map<FilesystemEntry>((drive) => ({
+                name: drive.name,
+                path: normalizeFsPath(drive.path),
+                isDirectory: true,
+                isFile: false,
+                isSymbolicLink: false,
+              }))
+          : [];
+
+        this.mountedDrivesCache = {
+          entries,
+          expiresAt: Date.now() + FS_MOUNTED_DRIVES_CACHE_TTL_MS,
+        };
+        return entries;
+      } catch (error) {
+        console.warn('Failed to list mounted drives:', error);
+        return [];
+      }
+    })();
+
+    const trackedTask = task.finally(() => {
+      if (this.mountedDrivesInFlight === trackedTask) {
+        this.mountedDrivesInFlight = null;
+      }
+    });
+    this.mountedDrivesInFlight = trackedTask;
+    return trackedTask;
   }
 
   async setOpenCodeWorkingDirectory(directoryPath: string | null | undefined): Promise<DirectorySwitchResult | null> {

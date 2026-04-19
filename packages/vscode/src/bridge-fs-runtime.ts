@@ -4,6 +4,10 @@ import * as path from 'path';
 import * as fs from 'fs';
 import type { BridgeResponse } from './bridge';
 
+const WINDOWS_DRIVE_LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+// eslint-disable-next-line no-restricted-syntax
+const IS_WIN = process.platform === 'win32';
+
 type BridgeMessageInput = {
   id: string;
   type: string;
@@ -54,6 +58,85 @@ type FsDeps = {
   >;
   parseDroppedFileReference: (rawReference: string) => DroppedReferenceParse;
   readUriAsAttachment: (uri: vscode.Uri, name: string) => Promise<ReadUriAsAttachmentResult>;
+};
+
+const driveEntryFromPath = (value: string | null | undefined) => {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const match = trimmed.replace(/\\/g, '/').match(/^(?:\/([A-Za-z])(?=\/|$)|([A-Za-z]):)/);
+  const driveLetter = match?.[1] || match?.[2];
+  if (!driveLetter) {
+    return null;
+  }
+
+  const drive = driveLetter.toUpperCase();
+  return { name: `${drive}:`, path: `${drive}:/` };
+};
+
+const mergeDriveEntries = (...groups: Array<Array<{ name: string; path: string } | null> | null | undefined>) => {
+  const seen = new Set<string>();
+  const merged: Array<{ name: string; path: string }> = [];
+
+  for (const group of groups) {
+    if (!Array.isArray(group)) {
+      continue;
+    }
+
+    for (const entry of group) {
+      if (!entry) {
+        continue;
+      }
+
+      const key = entry.name.toUpperCase();
+      if (seen.has(key)) {
+        continue;
+      }
+
+      seen.add(key);
+      merged.push(entry);
+    }
+  }
+
+  return merged.sort((left, right) => left.name.localeCompare(right.name));
+};
+
+const listMountedWindowsDrives = async () => {
+  if (!IS_WIN) {
+    return [] as Array<{ name: string; path: string }>;
+  }
+
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+  const probed = await Promise.allSettled(
+    WINDOWS_DRIVE_LETTERS.map(async (driveLetter) => {
+      const nativeRoot = path.win32.normalize(`${driveLetter}:\\`);
+      const stats = await fs.promises.stat(nativeRoot);
+      if (!stats.isDirectory()) {
+        return null;
+      }
+
+      return { name: `${driveLetter}:`, path: `${driveLetter}:/` };
+    })
+  );
+
+  const mountedFromProbe = probed
+    .map((result) => (result.status === 'fulfilled' ? result.value : null))
+    .filter((entry): entry is { name: string; path: string } => entry !== null);
+
+  const fallbackEntries = [
+    driveEntryFromPath(process.env.SystemDrive),
+    driveEntryFromPath(os.homedir()),
+    driveEntryFromPath(workspaceRoot),
+    driveEntryFromPath(process.cwd()),
+  ];
+
+  return mergeDriveEntries(mountedFromProbe, fallbackEntries);
 };
 
 export async function handleFsBridgeMessage(
@@ -143,6 +226,11 @@ export async function handleFsBridgeMessage(
       };
       const files = await deps.searchDirectory(directory, query, limit, Boolean(includeHidden), respectGitignore !== false);
       return { id, type, success: true, data: { files } };
+    }
+
+    case 'api:fs:mounted-drives': {
+      const drives = await listMountedWindowsDrives();
+      return { id, type, success: true, data: { drives } };
     }
 
     case 'api:fs:mkdir': {
@@ -292,8 +380,8 @@ export async function handleFsBridgeMessage(
         const { exec } = await import('child_process');
         const { promisify } = await import('util');
         const execAsync = promisify(exec);
-        const shell = process.env.SHELL || (process.platform === 'win32' ? 'cmd.exe' : '/bin/sh');
-        const shellFlag = process.platform === 'win32' ? '/c' : '-c';
+        const shell = process.env.SHELL || (IS_WIN ? 'cmd.exe' : '/bin/sh');
+        const shellFlag = IS_WIN ? '/c' : '-c';
 
         const augmentedEnv = {
           ...process.env,

@@ -1,4 +1,9 @@
+import { canonicalPath, isSubpath, pathsEqual, toNativePath } from '../PathUtils.js';
+import { launchDetached, spawnOnce } from '../SpawnUtils.js';
+import { IS_MAC, IS_WIN } from '../platform.js';
+
 const EXEC_JOB_TTL_MS = 30 * 60 * 1000;
+const WINDOWS_DRIVE_LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
 
 const createCommandTimeoutMs = () => {
   const raw = Number(process.env.OPENCHAMBER_FS_EXEC_TIMEOUT_MS);
@@ -6,13 +11,87 @@ const createCommandTimeoutMs = () => {
   return 5 * 60 * 1000;
 };
 
-const isPathWithinRoot = (resolvedPath, rootPath, path, os) => {
-  const resolvedRoot = path.resolve(rootPath || os.homedir());
-  const relative = path.relative(resolvedRoot, resolvedPath);
-  if (relative.startsWith('..') || path.isAbsolute(relative)) {
-    return false;
+const driveEntryFromPath = (value) => {
+  if (typeof value !== 'string') {
+    return null;
   }
-  return true;
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const match = trimmed.replace(/\\/g, '/').match(/^(?:\/([A-Za-z])(?=\/|$)|([A-Za-z]):)/);
+  const driveLetter = match?.[1] || match?.[2];
+  if (!driveLetter) {
+    return null;
+  }
+
+  const drive = driveLetter.toUpperCase();
+  return { name: `${drive}:`, path: `${drive}:/` };
+};
+
+const mergeDriveEntries = (...groups) => {
+  const seen = new Set();
+  const merged = [];
+
+  for (const group of groups) {
+    if (!Array.isArray(group)) {
+      continue;
+    }
+
+    for (const entry of group) {
+      if (!entry || typeof entry.name !== 'string' || typeof entry.path !== 'string') {
+        continue;
+      }
+
+      const key = entry.name.toUpperCase();
+      if (seen.has(key)) {
+        continue;
+      }
+
+      seen.add(key);
+      merged.push(entry);
+    }
+  }
+
+  return merged.sort((left, right) => left.name.localeCompare(right.name));
+};
+
+const listMountedWindowsDrives = async ({ fsPromises, path, os, openchamberUserConfigRoot }) => {
+  if (!IS_WIN) {
+    return [];
+  }
+
+  const probed = await Promise.allSettled(
+    WINDOWS_DRIVE_LETTERS.map(async (driveLetter) => {
+      const nativeRoot = path.win32.normalize(`${driveLetter}:\\`);
+      const stats = await fsPromises.stat(nativeRoot);
+      if (!stats.isDirectory()) {
+        return null;
+      }
+
+      return { name: `${driveLetter}:`, path: `${driveLetter}:/` };
+    })
+  );
+
+  const mountedFromProbe = probed
+    .map((result) => result.status === 'fulfilled' ? result.value : null)
+    .filter((entry) => entry !== null);
+
+  const fallbackEntries = [
+    driveEntryFromPath(process.env.SystemDrive),
+    driveEntryFromPath(os.homedir()),
+    driveEntryFromPath(process.cwd()),
+    driveEntryFromPath(openchamberUserConfigRoot),
+  ].filter((entry) => entry !== null);
+
+  return mergeDriveEntries(mountedFromProbe, fallbackEntries);
+};
+
+const isPathWithinRoot = (resolvedPath, rootPath, _path, os) => {
+  const resolvedRoot = rootPath || os.homedir();
+  return isSubpath(resolvedPath, resolvedRoot);
 };
 
 const resolveWorkspacePath = ({ targetPath, baseDirectory, path, os, normalizeDirectoryPath, openchamberUserConfigRoot }) => {
@@ -21,15 +100,15 @@ const resolveWorkspacePath = ({ targetPath, baseDirectory, path, os, normalizeDi
     return { ok: false, error: 'Path is required' };
   }
 
-  const resolved = path.resolve(normalized);
-  const resolvedBase = path.resolve(baseDirectory || os.homedir());
+  const resolved = canonicalPath(normalized);
+  const resolvedBase = canonicalPath(baseDirectory || os.homedir());
 
   if (isPathWithinRoot(resolved, resolvedBase, path, os)) {
     return { ok: true, base: resolvedBase, resolved };
   }
 
   if (isPathWithinRoot(resolved, openchamberUserConfigRoot, path, os)) {
-    return { ok: true, base: path.resolve(openchamberUserConfigRoot), resolved };
+    return { ok: true, base: canonicalPath(openchamberUserConfigRoot), resolved };
   }
 
   return { ok: false, error: 'Path is outside of active workspace' };
@@ -41,8 +120,8 @@ const resolveWorkspacePathFromWorktrees = async ({ targetPath, baseDirectory, pa
     return { ok: false, error: 'Path is required' };
   }
 
-  const resolved = path.resolve(normalized);
-  const resolvedBase = path.resolve(baseDirectory || os.homedir());
+  const resolved = canonicalPath(normalized);
+  const resolvedBase = canonicalPath(baseDirectory || os.homedir());
 
   try {
     const { getWorktrees } = await import('../git/index.js');
@@ -56,7 +135,7 @@ const resolveWorkspacePathFromWorktrees = async ({ targetPath, baseDirectory, pa
       if (!candidate) {
         continue;
       }
-      const candidateResolved = path.resolve(candidate);
+      const candidateResolved = canonicalPath(candidate);
       if (isPathWithinRoot(resolved, candidateResolved, path, os)) {
         return { ok: true, base: candidateResolved, resolved };
       }
@@ -95,73 +174,45 @@ const resolveWorkspacePathFromContext = async ({ req, targetPath, resolveProject
   });
 };
 
-const runCommandInDirectory = ({ shell, shellFlag, command, resolvedCwd, spawn, buildAugmentedPath, commandTimeoutMs }) => {
-  return new Promise((resolve) => {
-    let stdout = '';
-    let stderr = '';
-    let timedOut = false;
+const runCommandInDirectory = async ({ shell, shellFlag, command, resolvedCwd, buildAugmentedPath, commandTimeoutMs }) => {
+  const envPath = buildAugmentedPath();
+  const execEnv = { ...process.env, PATH: envPath };
 
-    const envPath = buildAugmentedPath();
-    const execEnv = { ...process.env, PATH: envPath };
-
-    const child = spawn(shell, [shellFlag, command], {
+  try {
+    const result = await spawnOnce(shell, [shellFlag, command], {
       cwd: resolvedCwd,
       env: execEnv,
-      windowsHide: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: commandTimeoutMs,
     });
 
-    const timeout = setTimeout(() => {
-      timedOut = true;
-      try {
-        child.kill('SIGKILL');
-      } catch {
-      }
-    }, commandTimeoutMs);
+    const base = {
+      command,
+      success: result.exitCode === 0,
+      exitCode: result.exitCode,
+      stdout: result.stdout.trim(),
+      stderr: result.stderr.trim(),
+    };
 
-    child.stdout?.on('data', (chunk) => {
-      stdout += chunk.toString();
-    });
-
-    child.stderr?.on('data', (chunk) => {
-      stderr += chunk.toString();
-    });
-
-    child.on('error', (error) => {
-      clearTimeout(timeout);
-      resolve({
-        command,
+    if (result.exitCode !== 0) {
+      return {
+        ...base,
         success: false,
-        exitCode: undefined,
-        stdout: stdout.trim(),
-        stderr: stderr.trim(),
-        error: (error && error.message) || 'Command execution failed',
-      });
-    });
-
-    child.on('close', (code, signal) => {
-      clearTimeout(timeout);
-      const exitCode = typeof code === 'number' ? code : undefined;
-      const base = {
-        command,
-        success: exitCode === 0 && !timedOut,
-        exitCode,
-        stdout: stdout.trim(),
-        stderr: stderr.trim(),
+        error: result.stderr.trim() || result.stdout.trim() || `Command failed with exit code ${result.exitCode}`,
       };
+    }
 
-      if (timedOut) {
-        resolve({
-          ...base,
-          success: false,
-          error: `Command timed out after ${commandTimeoutMs}ms` + (signal ? ` (${signal})` : ''),
-        });
-        return;
-      }
-
-      resolve(base);
-    });
-  });
+    return base;
+  } catch (error) {
+    const message = (error && error.message) || 'Command execution failed';
+    return {
+      command,
+      success: false,
+      exitCode: undefined,
+      stdout: '',
+      stderr: '',
+      error: message.includes('timed out') ? `Command timed out after ${commandTimeoutMs}ms` : message,
+    };
+  }
 };
 
 export const registerFsRoutes = (app, dependencies) => {
@@ -169,7 +220,6 @@ export const registerFsRoutes = (app, dependencies) => {
     os,
     path,
     fsPromises,
-    spawn,
     crypto,
     normalizeDirectoryPath,
     resolveProjectDirectory,
@@ -212,7 +262,6 @@ export const registerFsRoutes = (app, dependencies) => {
           shellFlag: job.shellFlag,
           command,
           resolvedCwd: job.resolvedCwd,
-          spawn,
           buildAugmentedPath,
           commandTimeoutMs,
         });
@@ -249,6 +298,21 @@ export const registerFsRoutes = (app, dependencies) => {
     }
   });
 
+  app.get('/api/fs/mounted-drives', async (_req, res) => {
+    try {
+      const drives = await listMountedWindowsDrives({
+        fsPromises,
+        path,
+        os,
+        openchamberUserConfigRoot,
+      });
+      return res.json({ drives });
+    } catch (error) {
+      console.error('Failed to list mounted drives:', error);
+      return res.status(500).json({ error: (error && error.message) || 'Failed to list mounted drives' });
+    }
+  });
+
   app.post('/api/fs/mkdir', async (req, res) => {
     try {
       const { path: dirPath, allowOutsideWorkspace } = req.body ?? {};
@@ -258,7 +322,7 @@ export const registerFsRoutes = (app, dependencies) => {
 
       let resolvedPath = '';
       if (allowOutsideWorkspace) {
-        resolvedPath = path.resolve(normalizeDirectoryPath(dirPath));
+        resolvedPath = toNativePath(canonicalPath(normalizeDirectoryPath(dirPath)));
       } else {
         const resolved = await resolveWorkspacePathFromContext({
           req,
@@ -303,21 +367,21 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(400).json({ error: resolved.error });
       }
 
-      const [canonicalPath, canonicalBase] = await Promise.all([
-        fsPromises.realpath(resolved.resolved),
-        fsPromises.realpath(resolved.base).catch(() => path.resolve(resolved.base)),
+      const [resolvedCanonicalPath, resolvedCanonicalBase] = await Promise.all([
+        fsPromises.realpath(toNativePath(resolved.resolved)).then((value) => canonicalPath(value)),
+        fsPromises.realpath(toNativePath(resolved.base)).then((value) => canonicalPath(value)).catch(() => canonicalPath(resolved.base)),
       ]);
 
-      if (!isPathWithinRoot(canonicalPath, canonicalBase, path, os)) {
+      if (!isPathWithinRoot(resolvedCanonicalPath, resolvedCanonicalBase, path, os)) {
         return res.status(403).json({ error: 'Access to file denied' });
       }
 
-      const stats = await fsPromises.stat(canonicalPath);
+      const stats = await fsPromises.stat(toNativePath(resolvedCanonicalPath));
       if (!stats.isFile()) {
         return res.status(400).json({ error: 'Specified path is not a file' });
       }
 
-      return res.json({ path: canonicalPath, isFile: true, size: stats.size });
+      return res.json({ path: resolvedCanonicalPath, isFile: true, size: stats.size });
     } catch (error) {
       const err = error;
       if (err && typeof err === 'object' && err.code === 'ENOENT') {
@@ -351,21 +415,21 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(400).json({ error: resolved.error });
       }
 
-      const [canonicalPath, canonicalBase] = await Promise.all([
-        fsPromises.realpath(resolved.resolved),
-        fsPromises.realpath(resolved.base).catch(() => path.resolve(resolved.base)),
+      const [resolvedCanonicalPath, resolvedCanonicalBase] = await Promise.all([
+        fsPromises.realpath(toNativePath(resolved.resolved)).then((value) => canonicalPath(value)),
+        fsPromises.realpath(toNativePath(resolved.base)).then((value) => canonicalPath(value)).catch(() => canonicalPath(resolved.base)),
       ]);
 
-      if (!isPathWithinRoot(canonicalPath, canonicalBase, path, os)) {
+      if (!isPathWithinRoot(resolvedCanonicalPath, resolvedCanonicalBase, path, os)) {
         return res.status(403).json({ error: 'Access to file denied' });
       }
 
-      const stats = await fsPromises.stat(canonicalPath);
+      const stats = await fsPromises.stat(toNativePath(resolvedCanonicalPath));
       if (!stats.isFile()) {
         return res.status(400).json({ error: 'Specified path is not a file' });
       }
 
-      const content = await fsPromises.readFile(canonicalPath, 'utf8');
+      const content = await fsPromises.readFile(toNativePath(resolvedCanonicalPath), 'utf8');
       return res.type('text/plain').send(content);
     } catch (error) {
       const err = error;
@@ -400,21 +464,21 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(400).json({ error: resolved.error });
       }
 
-      const [canonicalPath, canonicalBase] = await Promise.all([
-        fsPromises.realpath(resolved.resolved),
-        fsPromises.realpath(resolved.base).catch(() => path.resolve(resolved.base)),
+      const [resolvedCanonicalPath, resolvedCanonicalBase] = await Promise.all([
+        fsPromises.realpath(toNativePath(resolved.resolved)).then((value) => canonicalPath(value)),
+        fsPromises.realpath(toNativePath(resolved.base)).then((value) => canonicalPath(value)).catch(() => canonicalPath(resolved.base)),
       ]);
 
-      if (!isPathWithinRoot(canonicalPath, canonicalBase, path, os)) {
+      if (!isPathWithinRoot(resolvedCanonicalPath, resolvedCanonicalBase, path, os)) {
         return res.status(403).json({ error: 'Access to file denied' });
       }
 
-      const stats = await fsPromises.stat(canonicalPath);
+      const stats = await fsPromises.stat(toNativePath(resolvedCanonicalPath));
       if (!stats.isFile()) {
         return res.status(400).json({ error: 'Specified path is not a file' });
       }
 
-      const ext = path.extname(canonicalPath).toLowerCase();
+      const ext = path.extname(toNativePath(resolvedCanonicalPath)).toLowerCase();
       const mimeMap = {
         '.png': 'image/png',
         '.jpg': 'image/jpeg',
@@ -434,7 +498,7 @@ export const registerFsRoutes = (app, dependencies) => {
         res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
       }
 
-      const content = await fsPromises.readFile(canonicalPath);
+      const content = await fsPromises.readFile(toNativePath(resolvedCanonicalPath));
       res.setHeader('Cache-Control', 'no-store');
       return res.type(mimeType).send(content);
     } catch (error) {
@@ -473,8 +537,8 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(400).json({ error: resolved.error });
       }
 
-      await fsPromises.mkdir(path.dirname(resolved.resolved), { recursive: true });
-      await fsPromises.writeFile(resolved.resolved, content, 'utf8');
+      await fsPromises.mkdir(path.dirname(toNativePath(resolved.resolved)), { recursive: true });
+      await fsPromises.writeFile(toNativePath(resolved.resolved), content, 'utf8');
       return res.json({ success: true, path: resolved.resolved });
     } catch (error) {
       const err = error;
@@ -506,7 +570,7 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(400).json({ error: resolved.error });
       }
 
-      await fsPromises.rm(resolved.resolved, { recursive: true, force: true });
+      await fsPromises.rm(toNativePath(resolved.resolved), { recursive: true, force: true });
       return res.json({ success: true, path: resolved.resolved });
     } catch (error) {
       const err = error;
@@ -557,11 +621,11 @@ export const registerFsRoutes = (app, dependencies) => {
         return res.status(400).json({ error: resolvedNew.error });
       }
 
-      if (resolvedOld.base !== resolvedNew.base) {
+      if (!pathsEqual(resolvedOld.base, resolvedNew.base)) {
         return res.status(400).json({ error: 'Source and destination must share the same workspace root' });
       }
 
-      await fsPromises.rename(resolvedOld.resolved, resolvedNew.resolved);
+      await fsPromises.rename(toNativePath(resolvedOld.resolved), toNativePath(resolvedNew.resolved));
       return res.json({ success: true, path: resolvedNew.resolved });
     } catch (error) {
       const err = error;
@@ -583,18 +647,17 @@ export const registerFsRoutes = (app, dependencies) => {
     }
 
     try {
-      const resolved = path.resolve(targetPath.trim());
+      const resolved = toNativePath(canonicalPath(targetPath.trim()));
       await fsPromises.access(resolved);
 
-      const platform = process.platform;
-      if (platform === 'darwin') {
+      if (IS_MAC) {
         const stat = await fsPromises.stat(resolved);
         if (stat.isDirectory()) {
-          spawn('open', [resolved], { windowsHide: true, stdio: 'ignore', detached: true }).unref();
+          launchDetached('open', [resolved]);
         } else {
-          spawn('open', ['-R', resolved], { windowsHide: true, stdio: 'ignore', detached: true }).unref();
+          launchDetached('open', ['-R', resolved]);
         }
-      } else if (platform === 'win32') {
+      } else if (IS_WIN) {
         const stat = await fsPromises.stat(resolved);
         const escapedPath = resolved.replace(/'/g, "''");
         const explorerArg = stat.isDirectory() ? escapedPath : `/select,${escapedPath}`;
@@ -616,7 +679,7 @@ export const registerFsRoutes = (app, dependencies) => {
       } else {
         const stat = await fsPromises.stat(resolved);
         const dir = stat.isDirectory() ? resolved : path.dirname(resolved);
-        spawn('xdg-open', [dir], { windowsHide: true, stdio: 'ignore', detached: true }).unref();
+        launchDetached('xdg-open', [dir]);
       }
 
       return res.json({ success: true, path: resolved });
@@ -642,7 +705,7 @@ export const registerFsRoutes = (app, dependencies) => {
     pruneExecJobs();
 
     try {
-      const resolvedCwd = path.resolve(normalizeDirectoryPath(cwd));
+      const resolvedCwd = toNativePath(canonicalPath(normalizeDirectoryPath(cwd)));
       const stats = await fsPromises.stat(resolvedCwd);
       if (!stats.isDirectory()) {
         return res.status(400).json({ error: 'Specified cwd is not a directory' });
@@ -738,7 +801,7 @@ export const registerFsRoutes = (app, dependencies) => {
     };
 
     try {
-      resolvedPath = path.resolve(normalizeDirectoryPath(rawPath));
+      resolvedPath = toNativePath(canonicalPath(normalizeDirectoryPath(rawPath)));
 
       const stats = await fsPromises.stat(resolvedPath);
       if (!stats.isDirectory()) {
@@ -752,20 +815,12 @@ export const registerFsRoutes = (app, dependencies) => {
           const pathsToCheck = dirents.map((d) => d.name);
           if (pathsToCheck.length > 0) {
             try {
-              const result = await new Promise((resolve) => {
-                const child = spawn(resolveGitBinaryForSpawn(), ['check-ignore', '--', ...pathsToCheck], {
-                  cwd: resolvedPath,
-                  windowsHide: true,
-                  stdio: ['ignore', 'pipe', 'pipe'],
-                });
-
-                let stdout = '';
-                child.stdout.on('data', (data) => { stdout += data.toString(); });
-                child.on('close', () => resolve(stdout));
-                child.on('error', () => resolve(''));
+              const result = await spawnOnce(resolveGitBinaryForSpawn(), ['check-ignore', '--', ...pathsToCheck], {
+                cwd: resolvedPath,
+                timeout: 10000,
               });
 
-              result.split('\n').filter(Boolean).forEach((name) => {
+              result.stdout.split('\n').filter(Boolean).forEach((name) => {
                 const fullPath = path.join(resolvedPath, name.trim());
                 ignoredPaths.add(fullPath);
               });

@@ -1,21 +1,11 @@
 import { getGitStatus } from '@/lib/gitApi';
 import { execCommand } from '@/lib/execCommands';
+import { normalizePath } from '@/lib/pathUtils';
 import type { WorktreeMetadata } from '@/types/worktree';
 
-const normalizePath = (value: string): string => {
-  if (!value) {
-    return '';
-  }
-  const replaced = value.replace(/\\/g, '/');
-  if (replaced === '/') {
-    return '/';
-  }
-  return replaced.replace(/\/+$/, '');
-};
-
 const toAbsolutePath = (baseDir: string, maybeRelativePath: string): string => {
-  const normalizedBase = normalizePath(baseDir);
-  const normalizedInput = normalizePath(maybeRelativePath);
+  const normalizedBase = normalizePath(baseDir) ?? '';
+  const normalizedInput = normalizePath(maybeRelativePath) ?? '';
   if (!normalizedInput) return normalizedBase;
   if (normalizedInput.startsWith('/')) return normalizedInput;
 
@@ -47,7 +37,7 @@ const derivePrimaryWorktreeRootFromGitDir = (gitDir: string): string | null => {
 };
 
 export async function getWorktreeStatus(worktreePath: string): Promise<WorktreeMetadata['status']> {
-  const normalizedPath = normalizePath(worktreePath);
+  const normalizedPath = normalizePath(worktreePath) ?? '';
   const status = await getGitStatus(normalizedPath);
   return {
     isDirty: !status.isClean,
@@ -58,7 +48,7 @@ export async function getWorktreeStatus(worktreePath: string): Promise<WorktreeM
 }
 
 export async function getRootBranch(projectDirectory: string): Promise<string> {
-  const normalizedPath = normalizePath(projectDirectory);
+  const normalizedPath = normalizePath(projectDirectory) ?? '';
   if (!normalizedPath) {
     return 'HEAD';
   }

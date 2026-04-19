@@ -8,7 +8,6 @@ export const registerProjectIconRoutes = (app, dependencies) => {
     readSettingsFromDiskMigrated,
     persistSettings,
     createFsSearchRuntime,
-    spawn,
     resolveGitBinaryForSpawn,
   } = dependencies;
 
@@ -172,7 +171,6 @@ export const registerProjectIconRoutes = (app, dependencies) => {
   const fsSearchRuntime = createFsSearchRuntime({
     fsPromises,
     path,
-    spawn,
     resolveGitBinaryForSpawn,
   });
 

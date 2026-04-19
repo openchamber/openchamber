@@ -1,4 +1,5 @@
 import React from 'react';
+import type { Extension } from '@codemirror/state';
 import { CodeMirrorEditor } from '@/components/ui/CodeMirrorEditor';
 import { PreviewToggleButton } from './PreviewToggleButton';
 import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
@@ -19,7 +20,7 @@ import { useDeviceInfo } from '@/lib/device';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { generateSyntaxTheme } from '@/lib/theme/syntaxThemeGenerator';
 import { createFlexokiCodeMirrorTheme } from '@/lib/codemirror/flexokiTheme';
-import { languageByExtension } from '@/lib/codemirror/languageByExtension';
+import { languageByExtension, loadLanguageByExtension } from '@/lib/codemirror/languageByExtension';
 import { RiCheckLine, RiClipboardLine, RiCodeAiLine, RiLoopRightAiLine } from '@remixicon/react';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessions } from '@/sync/sync-context';
@@ -336,15 +337,39 @@ export const PlanView: React.FC<PlanViewProps> = ({ targetPath = null }) => {
   }, [cancel, editingDraftId, isMobile, lineSelection]);
 
 
+  const [dynamicLanguageExtension, setDynamicLanguageExtension] = React.useState<Extension | null>(null);
+
   const editorExtensions = React.useMemo(() => {
     const extensions = [createFlexokiCodeMirrorTheme(currentTheme)];
-    const language = languageByExtension(resolvedPath || 'plan.md');
+    const language = dynamicLanguageExtension ?? languageByExtension(resolvedPath || 'plan.md');
     if (language) {
       extensions.push(language);
     }
     extensions.push(EditorView.lineWrapping);
     return extensions;
-  }, [currentTheme, resolvedPath]);
+  }, [currentTheme, dynamicLanguageExtension, resolvedPath]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    const selectedPath = resolvedPath || 'plan.md';
+    const staticLanguageExtension = languageByExtension(selectedPath);
+
+    if (staticLanguageExtension) {
+      setDynamicLanguageExtension(null);
+      return;
+    }
+
+    setDynamicLanguageExtension(null);
+    void loadLanguageByExtension(selectedPath).then((extension: Extension | null) => {
+      if (!cancelled) {
+        setDynamicLanguageExtension(extension);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [resolvedPath]);
 
   React.useEffect(() => {
     // Saved project plans opened via context panel should work even when session plan mode is off.

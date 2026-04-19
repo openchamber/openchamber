@@ -1,3 +1,5 @@
+import { canonicalPath } from '../PathUtils.js';
+
 export const createSettingsNormalizationRuntime = (dependencies) => {
   const {
     os,
@@ -47,11 +49,7 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
       return trimmed;
     }
 
-    if (processLike.platform !== 'win32') {
-      return trimmed;
-    }
-
-    return trimmed.replace(/\//g, '\\');
+    return canonicalPath(trimmed);
   };
 
   const areStringArraysEqual = (a, b) => {
@@ -107,8 +105,7 @@ export const createSettingsNormalizationRuntime = (dependencies) => {
       const candidate = entry;
       const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
       const rawPath = typeof candidate.path === 'string' ? candidate.path.trim() : '';
-      const resolvedPath = rawPath ? path.resolve(normalizeDirectoryPath(rawPath)) : '';
-      const normalizedPath = resolvedPath ? normalizePathForPersistence(resolvedPath) : '';
+      const normalizedPath = rawPath ? normalizePathForPersistence(rawPath) : '';
       const label = typeof candidate.label === 'string' ? candidate.label.trim() : '';
       const icon = typeof candidate.icon === 'string' ? candidate.icon.trim() : '';
       const iconImage = candidate.iconImage && typeof candidate.iconImage === 'object'

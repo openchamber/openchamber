@@ -7,6 +7,7 @@ import type {
   GitLogResponse,
   GitIdentitySummary,
 } from '@/lib/api/types';
+import { prepareForDiff } from '@/lib/normalizeEol';
 
 const LOG_STALE_THRESHOLD = 10000;
 const REPO_CHECK_STALE_THRESHOLD = 60_000;
@@ -561,7 +562,7 @@ export const useGitStore = create<GitStore>()(
         const newDirectories = new Map(get().directories);
         const dirState = newDirectories.get(directory) ?? createEmptyDirectoryState();
         const newDiffCache = new Map(dirState.diffCache);
-        newDiffCache.set(filePath, { ...diff, fetchedAt: Date.now() });
+        newDiffCache.set(filePath, { ...prepareForDiff(diff), fetchedAt: Date.now() });
         // Apply LRU eviction to prevent memory bloat
         const evictedCache = evictDiffCacheIfNeeded(newDiffCache);
         newDirectories.set(directory, { ...dirState, diffCache: evictedCache });
@@ -649,7 +650,7 @@ export const useGitStore = create<GitStore>()(
           const response = await Promise.race([fetchPromise, timeoutPromise]);
           return {
             path: filePath,
-            diff: { original: response.original ?? '', modified: response.modified ?? '', isBinary: response.isBinary },
+            diff: prepareForDiff({ original: response.original ?? '', modified: response.modified ?? '', isBinary: response.isBinary }),
           };
         };
 

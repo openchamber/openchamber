@@ -13,19 +13,21 @@ import { DirectoryTree } from './DirectoryTree';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useFileSystemAccess } from '@/hooks/useFileSystemAccess';
-import { cn, formatPathForDisplay } from '@/lib/utils';
+import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui';
 import {
   RiCheckboxBlankLine,
   RiCheckboxLine,
 } from '@remixicon/react';
 import { useDeviceInfo } from '@/lib/device';
+import { isVSCodeRuntime } from '@/lib/desktop';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { DirectoryAutocomplete, type DirectoryAutocompleteHandle } from './DirectoryAutocomplete';
 import {
   setDirectoryShowHidden,
   useDirectoryShowHidden,
 } from '@/lib/directoryShowHidden';
+import { normalizePath } from '@/lib/pathUtils';
 
 interface DirectoryExplorerDialogProps {
   open: boolean;
@@ -38,6 +40,11 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
 }) => {
   const { currentDirectory, homeDirectory, isHomeReady } = useDirectoryStore();
   const { addProject, getActiveProject } = useProjectsStore();
+  const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
+  const isWindowsRuntime = React.useMemo(
+    () => typeof navigator !== 'undefined' && /Windows/i.test(navigator.userAgent),
+    []
+  );
   const [pendingPath, setPendingPath] = React.useState<string | null>(null);
   const [pathInputValue, setPathInputValue] = React.useState('');
   const [hasUserSelection, setHasUserSelection] = React.useState(false);
@@ -48,11 +55,125 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
   const [autocompleteVisible, setAutocompleteVisible] = React.useState(false);
   const autocompleteRef = React.useRef<DirectoryAutocompleteHandle>(null);
 
-  // Helper to format path for display
-  const formatPath = React.useCallback((path: string | null) => {
-    if (!path) return '';
-    return formatPathForDisplay(path, homeDirectory);
-  }, [homeDirectory]);
+  const normalizeDirectoryPath = React.useCallback((value: string | null | undefined) => {
+    if (typeof value !== 'string') {
+      return null;
+    }
+
+    const normalized = normalizePath(value);
+    if (normalized) {
+      return normalized;
+    }
+
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed.replace(/\\/g, '/') : null;
+  }, []);
+
+  const toDirectoryRequestPath = React.useCallback((value: string) => {
+    const normalized = normalizeDirectoryPath(value) ?? value.trim().replace(/\\/g, '/');
+    const converted = normalized.replace(/^\/([A-Za-z])(?=\/|$)/, (_, drive: string) => `${drive.toUpperCase()}:`);
+    return /^[A-Za-z]:$/.test(converted) ? `${converted}/` : converted;
+  }, [normalizeDirectoryPath]);
+
+  const workspaceBoundary = React.useMemo(() => {
+    if (!isVSCode || typeof window === 'undefined') {
+      return null;
+    }
+
+    const workspaceFolder = (window as unknown as { __VSCODE_CONFIG__?: { workspaceFolder?: unknown } })
+      .__VSCODE_CONFIG__?.workspaceFolder;
+    return typeof workspaceFolder === 'string'
+      ? normalizeDirectoryPath(workspaceFolder)
+      : null;
+  }, [isVSCode, normalizeDirectoryPath]);
+
+  const defaultPickerPath = isVSCode ? workspaceBoundary : homeDirectory;
+  const isDefaultPickerPathReady = isVSCode ? Boolean(workspaceBoundary) : isHomeReady;
+
+  const isWindowsPathLike = React.useCallback((value: string | null | undefined) => {
+    if (typeof value !== 'string') {
+      return false;
+    }
+
+    const trimmed = value.trim();
+    return /^\/[A-Za-z](?:\/|$)?/.test(trimmed) || /^[A-Za-z]:(?:[\\/]|$)?/.test(trimmed);
+  }, []);
+
+  const isWindowsPathContext = React.useMemo(() => {
+    if (!isWindowsRuntime) {
+      return false;
+    }
+
+    return [currentDirectory, homeDirectory, workspaceBoundary, pathInputValue].some((value) => isWindowsPathLike(value));
+  }, [currentDirectory, homeDirectory, isWindowsPathLike, isWindowsRuntime, pathInputValue, workspaceBoundary]);
+
+  const supportsPathAutocomplete = React.useCallback((value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return false;
+    }
+
+    if (trimmed.startsWith('/') || trimmed.startsWith('\\') || trimmed.startsWith('~')) {
+      return true;
+    }
+
+    if (/^[A-Za-z]:(?:[\\/]|$)/.test(trimmed)) {
+      return true;
+    }
+
+    return /^%userprofile%(?:[\\/]|$)/i.test(trimmed);
+  }, []);
+
+  const expandTypedPath = React.useCallback((value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return '';
+    }
+
+    let expanded = trimmed.replace(/\\/g, '/');
+    if (/^[A-Za-z]:$/.test(expanded)) {
+      expanded = `${expanded}/`;
+    }
+
+    if (/^%userprofile%(?:[\\/]|$)/i.test(trimmed) && homeDirectory) {
+      expanded = expanded.replace(/^%userprofile%/i, homeDirectory);
+    } else if (expanded.startsWith('~') && homeDirectory) {
+      expanded = expanded.replace(/^~/, homeDirectory);
+    }
+
+    return normalizeDirectoryPath(expanded) ?? expanded;
+  }, [homeDirectory, normalizeDirectoryPath]);
+
+  const formatInputPath = React.useCallback((
+    path: string | null | undefined,
+    options?: { preserveTrailingSeparator?: boolean }
+  ) => {
+    const normalizedPath = normalizeDirectoryPath(path);
+    if (!normalizedPath) {
+      return '';
+    }
+
+    if (isWindowsPathContext || isWindowsPathLike(normalizedPath)) {
+      const windowsPath = toDirectoryRequestPath(normalizedPath);
+      let formatted = windowsPath === '/'
+        ? '\\'
+        : windowsPath.replace(/\//g, '\\');
+
+      if (options?.preserveTrailingSeparator && !formatted.endsWith('\\')) {
+        formatted = `${formatted}\\`;
+      }
+
+      return formatted;
+    }
+
+    if (options?.preserveTrailingSeparator) {
+      if (!normalizedPath.endsWith('/')) {
+        return `${normalizedPath}/`;
+      }
+    }
+
+    return normalizedPath;
+  }, [isWindowsPathContext, isWindowsPathLike, normalizeDirectoryPath, toDirectoryRequestPath]);
 
   // Reset state when dialog opens
   React.useEffect(() => {
@@ -62,50 +183,87 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
       setAutocompleteVisible(false);
       // Initialize with active project or current directory
       const activeProject = getActiveProject();
-      const initialPath = activeProject?.path || currentDirectory || homeDirectory || '';
+      const initialPath = activeProject?.path || currentDirectory || defaultPickerPath || '';
+      const initialInputValue = formatInputPath(initialPath);
       setPendingPath(initialPath);
-      setPathInputValue(formatPath(initialPath));
+      setPathInputValue(initialInputValue);
     }
-  }, [open, currentDirectory, homeDirectory, formatPath, getActiveProject]);
+  }, [open, currentDirectory, defaultPickerPath, formatInputPath, getActiveProject]);
 
-  // Set initial pending path to home when ready (only if not yet selected)
+  // Fill the input once the default picker path is ready and nothing has been selected yet.
   React.useEffect(() => {
     if (!open || hasUserSelection || pendingPath) {
       return;
     }
-    if (homeDirectory && isHomeReady) {
-      setPendingPath(homeDirectory);
+    if (defaultPickerPath && isDefaultPickerPathReady) {
+      const initialInputValue = formatInputPath(defaultPickerPath);
+      setPendingPath(defaultPickerPath);
       setHasUserSelection(true);
-      setPathInputValue('~');
+      setPathInputValue(initialInputValue);
     }
-  }, [open, hasUserSelection, pendingPath, homeDirectory, isHomeReady]);
+  }, [defaultPickerPath, formatInputPath, hasUserSelection, isDefaultPickerPathReady, open, pendingPath]);
 
 
   const handleClose = React.useCallback(() => {
     onOpenChange(false);
   }, [onOpenChange]);
 
+  const isWindowsDrivePickerPath = React.useCallback((path: string | null | undefined) => {
+    const normalized = normalizeDirectoryPath(path);
+    return Boolean(!workspaceBoundary && isWindowsPathContext && normalized === '/');
+  }, [isWindowsPathContext, normalizeDirectoryPath, workspaceBoundary]);
+
+  const isPathWithinWorkspaceBoundary = React.useCallback((path: string) => {
+    if (!workspaceBoundary) {
+      return true;
+    }
+
+    const normalizedTarget = normalizeDirectoryPath(path);
+    if (!normalizedTarget) {
+      return false;
+    }
+
+    if (workspaceBoundary === '/') {
+      return normalizedTarget.startsWith('/');
+    }
+
+    return normalizedTarget === workspaceBoundary || normalizedTarget.startsWith(`${workspaceBoundary}/`);
+  }, [workspaceBoundary, normalizeDirectoryPath]);
+
   const finalizeSelection = React.useCallback(async (targetPath: string) => {
-    if (!targetPath || isConfirming) {
+    const normalizedTargetPath = expandTypedPath(targetPath);
+    if (!normalizedTargetPath || isConfirming) {
       return;
     }
+
     setIsConfirming(true);
     try {
-      let resolvedPath = targetPath;
+      if (isWindowsDrivePickerPath(normalizedTargetPath)) {
+        return;
+      }
+
+      if (isVSCode && workspaceBoundary && !isPathWithinWorkspaceBoundary(normalizedTargetPath)) {
+        toast.error('Directory must stay inside the workspace', {
+          description: 'VS Code can only browse within the current workspace folder.',
+        });
+        return;
+      }
+
+      let resolvedPath = normalizedTargetPath;
       let projectId: string | undefined;
 
       if (isDesktop) {
-        const accessResult = await requestAccess(targetPath);
+        const accessResult = await requestAccess(toDirectoryRequestPath(normalizedTargetPath));
         if (!accessResult.success) {
           toast.error('Unable to access directory', {
             description: accessResult.error || 'Desktop denied directory access.',
           });
           return;
         }
-        resolvedPath = accessResult.path ?? targetPath;
+        resolvedPath = normalizeDirectoryPath(accessResult.path ?? normalizedTargetPath) ?? normalizedTargetPath;
         projectId = accessResult.projectId;
 
-        const startResult = await startAccessing(resolvedPath);
+        const startResult = await startAccessing(toDirectoryRequestPath(resolvedPath));
         if (!startResult.success) {
           toast.error('Failed to open directory', {
             description: startResult.error || 'Desktop could not grant file access.',
@@ -137,44 +295,49 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
     requestAccess,
     startAccessing,
     isConfirming,
+    expandTypedPath,
+    isPathWithinWorkspaceBoundary,
+    isVSCode,
+    isWindowsDrivePickerPath,
+    normalizeDirectoryPath,
+    toDirectoryRequestPath,
+    workspaceBoundary,
   ]);
 
   const handleConfirm = React.useCallback(async () => {
-    const pathToUse = pathInputValue.trim() || pendingPath;
+    const typedPath = pathInputValue.trim();
+    const pathToUse = typedPath ? expandTypedPath(typedPath) : pendingPath;
     if (!pathToUse) {
       return;
     }
     await finalizeSelection(pathToUse);
-  }, [finalizeSelection, pathInputValue, pendingPath]);
+  }, [expandTypedPath, finalizeSelection, pathInputValue, pendingPath]);
 
   const handleSelectPath = React.useCallback((path: string) => {
     setPendingPath(path);
     setHasUserSelection(true);
-    setPathInputValue(formatPath(path));
-  }, [formatPath]);
+    setPathInputValue(formatInputPath(path));
+  }, [formatInputPath]);
 
   const handleDoubleClickPath = React.useCallback(async (path: string) => {
     setPendingPath(path);
     setHasUserSelection(true);
-    setPathInputValue(formatPath(path));
+    setPathInputValue(formatInputPath(path));
     await finalizeSelection(path);
-  }, [finalizeSelection, formatPath]);
+  }, [finalizeSelection, formatInputPath]);
 
   const handlePathInputChange = React.useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
     setPathInputValue(value);
     setHasUserSelection(true);
     // Show autocomplete when typing a path
-    setAutocompleteVisible(value.startsWith('/') || value.startsWith('~'));
+    const supportsAutocomplete = supportsPathAutocomplete(value);
+    setAutocompleteVisible(supportsAutocomplete);
     // Update pending path if it looks like a valid path
-    if (value.startsWith('/') || value.startsWith('~')) {
-      // Expand ~ to home directory
-      const expandedPath = value.startsWith('~') && homeDirectory
-        ? value.replace(/^~/, homeDirectory)
-        : value;
-      setPendingPath(expandedPath);
+    if (supportsAutocomplete) {
+      setPendingPath(expandTypedPath(value));
     }
-  }, [homeDirectory]);
+  }, [expandTypedPath, supportsPathAutocomplete]);
 
   const handlePathInputKeyDown = React.useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
     // Let autocomplete handle the key first if visible
@@ -188,11 +351,11 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
   }, [handleConfirm]);
 
   const handleAutocompleteSuggestion = React.useCallback((path: string) => {
-    setPendingPath(path);
+    setPendingPath(normalizeDirectoryPath(path));
     setHasUserSelection(true);
-    setPathInputValue(formatPath(path));
+    setPathInputValue(formatInputPath(path, { preserveTrailingSeparator: true }));
     // Keep autocomplete open to allow further drilling down
-  }, [formatPath]);
+  }, [formatInputPath, normalizeDirectoryPath]);
 
   const handleAutocompleteClose = React.useCallback(() => {
     setAutocompleteVisible(false);
@@ -238,16 +401,17 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
         onChange={handlePathInputChange}
         onKeyDown={handlePathInputKeyDown}
         placeholder="Enter path or select from tree..."
-        className="font-mono typography-meta"
         spellCheck={false}
         autoComplete="off"
         autoCorrect="off"
         autoCapitalize="off"
+        className="font-mono typography-meta"
       />
       <DirectoryAutocomplete
         ref={autocompleteRef}
         inputValue={pathInputValue}
         homeDirectory={homeDirectory}
+        scopeBoundary={workspaceBoundary}
         onSelectSuggestion={handleAutocompleteSuggestion}
         visible={autocompleteVisible}
         onClose={handleAutocompleteClose}
@@ -266,8 +430,8 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
         className="flex-1 min-h-0 sm:min-h-[280px] sm:max-h-[380px]"
         selectionBehavior="deferred"
         showHidden={showHidden}
-        rootDirectory={isHomeReady ? homeDirectory : null}
-        isRootReady={isHomeReady}
+        rootDirectory={isVSCode ? workspaceBoundary : null}
+        isRootReady={isVSCode ? Boolean(workspaceBoundary) : true}
       />
     </div>
   );
@@ -288,8 +452,8 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
           className="flex-1 min-h-0"
           selectionBehavior="deferred"
           showHidden={showHidden}
-          rootDirectory={isHomeReady ? homeDirectory : null}
-          isRootReady={isHomeReady}
+          rootDirectory={isVSCode ? workspaceBoundary : null}
+          isRootReady={isVSCode ? Boolean(workspaceBoundary) : true}
           alwaysShowActions
         />
       </div>
@@ -315,7 +479,12 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
       </Button>
       <Button
         onClick={handleConfirm}
-        disabled={isConfirming || !hasUserSelection || (!pendingPath && !pathInputValue.trim())}
+        disabled={
+          isConfirming
+          || !hasUserSelection
+          || (!pendingPath && !pathInputValue.trim())
+          || isWindowsDrivePickerPath(pathInputValue.trim() || pendingPath)
+        }
         className="flex-1 sm:flex-none sm:w-auto sm:min-w-[140px]"
       >
         {isConfirming ? 'Adding...' : 'Add Project'}

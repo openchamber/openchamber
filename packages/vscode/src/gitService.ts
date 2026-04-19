@@ -15,10 +15,44 @@ import type { API as GitAPI, Repository, GitExtension, Status } from './git.d';
 let gitApi: GitAPI | null = null;
 let gitExtensionEnabled = false;
 const worktreeBootstrapState = new Map<string, { status: 'pending' | 'ready' | 'failed'; error: string | null; updatedAt: number }>();
+const IS_WIN = process.platform === 'win32';
+const GIT_CONFIG_ARGS = ['-c', 'core.autocrlf=false', ...(IS_WIN ? ['-c', 'core.longpaths=true'] : [])];
+const WORKTREE_NAME_MAX_LENGTH = 24;
+const PROJECT_ID_SEGMENT_LENGTH = 12;
 
 const WORKTREE_BOOTSTRAP_PENDING = 'pending' as const;
 const WORKTREE_BOOTSTRAP_READY = 'ready' as const;
 const WORKTREE_BOOTSTRAP_FAILED = 'failed' as const;
+
+const longPathPrefix = (value: string): string => {
+  if (!IS_WIN || !value.trim()) {
+    return value;
+  }
+
+  const nativePath = path.resolve(value);
+  return nativePath.startsWith('\\\\?\\') ? nativePath : `\\\\?\\${nativePath}`;
+};
+
+const toDirectFsPath = (targetPath: string): string => longPathPrefix(path.resolve(normalizeDirectoryPath(targetPath)));
+
+const shortProjectId = (value: string): string => {
+  const normalized = String(value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
+  if (!normalized) {
+    return 'default';
+  }
+  return normalized.slice(0, PROJECT_ID_SEGMENT_LENGTH);
+};
+
+const clampWorktreeLeafName = (value: string): string => {
+  const normalized = String(value || '').trim();
+  if (!normalized) {
+    return '';
+  }
+  return normalized.slice(0, WORKTREE_NAME_MAX_LENGTH).replace(/-+$/g, '');
+};
+
+const buildWorktreeRoot = (dataRoot: string, projectId: string): string => path.join(dataRoot, 'worktree', shortProjectId(projectId));
+const worktreeDir = (worktreeRoot: string, leafName: string): string => path.join(worktreeRoot, clampWorktreeLeafName(leafName));
 
 const toBootstrapStateKey = (directory: string): string => {
   const normalized = normalizeDirectoryPath(directory);
@@ -249,7 +283,7 @@ async function execGit(args: string[], cwd: string): Promise<{ stdout: string; s
     const gitPath = gitApi?.git.path || 'git';
 
     buildGitEnv().then((env) => {
-      const proc = spawn(gitPath, args, {
+      const proc = spawn(gitPath, [...GIT_CONFIG_ARGS, ...args], {
         cwd: normalizedCwd,
         env,
         windowsHide: true,
@@ -443,14 +477,14 @@ async function checkInProgressOperations(directory: string): Promise<{
   try {
     // Check MERGE_HEAD for merge in progress
     const mergeHeadPath = path.join(gitDir, 'MERGE_HEAD');
-    const mergeHeadExists = await fs.promises.stat(mergeHeadPath).then(() => true).catch(() => false);
+    const mergeHeadExists = await fs.promises.stat(toDirectFsPath(mergeHeadPath)).then(() => true).catch(() => false);
     
     if (mergeHeadExists) {
-      const mergeHead = await fs.promises.readFile(mergeHeadPath, 'utf8').catch(() => '');
+      const mergeHead = await fs.promises.readFile(toDirectFsPath(mergeHeadPath), 'utf8').catch(() => '');
       const headSha = mergeHead.trim().slice(0, 7);
       // Only set mergeInProgress if we actually have a valid head SHA
       if (headSha) {
-        const mergeMsg = await fs.promises.readFile(path.join(gitDir, 'MERGE_MSG'), 'utf8').catch(() => '');
+        const mergeMsg = await fs.promises.readFile(toDirectFsPath(path.join(gitDir, 'MERGE_MSG')), 'utf8').catch(() => '');
         result.mergeInProgress = {
           head: headSha,
           message: mergeMsg.split('\n')[0] || '',
@@ -463,13 +497,13 @@ async function checkInProgressOperations(directory: string): Promise<{
 
   try {
     // Check for rebase in progress (.git/rebase-merge or .git/rebase-apply)
-    const rebaseMergeExists = await fs.promises.stat(path.join(gitDir, 'rebase-merge')).then(() => true).catch(() => false);
-    const rebaseApplyExists = await fs.promises.stat(path.join(gitDir, 'rebase-apply')).then(() => true).catch(() => false);
+    const rebaseMergeExists = await fs.promises.stat(toDirectFsPath(path.join(gitDir, 'rebase-merge'))).then(() => true).catch(() => false);
+    const rebaseApplyExists = await fs.promises.stat(toDirectFsPath(path.join(gitDir, 'rebase-apply'))).then(() => true).catch(() => false);
     
     if (rebaseMergeExists || rebaseApplyExists) {
       const rebaseDir = rebaseMergeExists ? 'rebase-merge' : 'rebase-apply';
-      const headName = await fs.promises.readFile(path.join(gitDir, rebaseDir, 'head-name'), 'utf8').catch(() => '');
-      const onto = await fs.promises.readFile(path.join(gitDir, rebaseDir, 'onto'), 'utf8').catch(() => '');
+      const headName = await fs.promises.readFile(toDirectFsPath(path.join(gitDir, rebaseDir, 'head-name')), 'utf8').catch(() => '');
+      const onto = await fs.promises.readFile(toDirectFsPath(path.join(gitDir, rebaseDir, 'onto')), 'utf8').catch(() => '');
       
       const headNameTrimmed = headName.trim().replace('refs/heads/', '');
       const ontoTrimmed = onto.trim().slice(0, 7);
@@ -906,14 +940,14 @@ const parseWorktreePorcelain = (raw: string): WorktreeListEntry[] => {
 
 const canonicalPath = async (input: string): Promise<string> => {
   const absolutePath = path.resolve(input);
-  const realPath = await fs.promises.realpath(absolutePath).catch(() => absolutePath);
+  const realPath = await fs.promises.realpath(toDirectFsPath(absolutePath)).catch(() => absolutePath);
   const normalized = path.normalize(realPath);
-  return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
+  return IS_WIN ? normalized.toLowerCase() : normalized;
 };
 
 const checkPathExists = async (targetPath: string): Promise<boolean> => {
   try {
-    await fs.promises.stat(targetPath);
+    await fs.promises.stat(toDirectFsPath(targetPath));
     return true;
   } catch {
     return false;
@@ -1026,7 +1060,7 @@ const runGitCommandOrThrow = async (cwd: string, args: string[], fallbackMessage
 const ensureOpenCodeProjectId = async (primaryWorktree: string): Promise<string> => {
   const gitDir = path.join(primaryWorktree, '.git');
   const idFile = path.join(gitDir, 'opencode');
-  const existing = await fs.promises.readFile(idFile, 'utf8').then((value) => value.trim()).catch(() => '');
+  const existing = await fs.promises.readFile(toDirectFsPath(idFile), 'utf8').then((value) => value.trim()).catch(() => '');
   if (existing) {
     return existing;
   }
@@ -1048,8 +1082,8 @@ const ensureOpenCodeProjectId = async (primaryWorktree: string): Promise<string>
     throw new Error('Failed to derive OpenCode project ID');
   }
 
-  await fs.promises.mkdir(gitDir, { recursive: true }).catch(() => undefined);
-  await fs.promises.writeFile(idFile, projectId, 'utf8').catch(() => undefined);
+  await fs.promises.mkdir(toDirectFsPath(gitDir), { recursive: true }).catch(() => undefined);
+  await fs.promises.writeFile(toDirectFsPath(idFile), projectId, 'utf8').catch(() => undefined);
   return projectId;
 };
 
@@ -1074,7 +1108,7 @@ const resolveWorktreeProjectContext = async (directory: string) => {
   const commonDir = path.resolve(sandbox, commonResult.stdout.trim());
   const primaryWorktree = path.dirname(commonDir);
   const projectID = await ensureOpenCodeProjectId(primaryWorktree);
-  const worktreeRoot = path.join(getOpenCodeDataPath(), 'worktree', projectID);
+  const worktreeRoot = buildWorktreeRoot(getOpenCodeDataPath(), projectID);
 
   return { projectID, sandbox, primaryWorktree, worktreeRoot };
 };
@@ -1085,7 +1119,7 @@ const listWorktreeEntries = async (directory: string): Promise<WorktreeListEntry
 };
 
 const resolveWorktreeNameCandidates = (baseName: string): string[] => {
-  const normalizedBase = slugWorktreeName(baseName || '');
+  const normalizedBase = clampWorktreeLeafName(slugWorktreeName(baseName || ''));
   if (!normalizedBase) {
     return Array.from({ length: OPENCODE_WORKTREE_ATTEMPTS }, () => generateOpenCodeRandomName());
   }
@@ -1106,7 +1140,7 @@ const resolveCandidateDirectory = async (
   const candidates = resolveWorktreeNameCandidates(preferredName);
 
   for (const name of candidates) {
-    const directory = path.join(worktreeRoot, name);
+    const directory = worktreeDir(worktreeRoot, name);
     if (await checkPathExists(directory)) {
       continue;
     }
@@ -1245,7 +1279,7 @@ const runWorktreeStartCommand = async (directory: string, command: string): Prom
 const loadProjectStartCommand = async (projectID: string): Promise<string> => {
   const storagePath = path.join(getOpenCodeDataPath(), 'storage', 'project', `${projectID}.json`);
   try {
-    const raw = await fs.promises.readFile(storagePath, 'utf8');
+    const raw = await fs.promises.readFile(toDirectFsPath(storagePath), 'utf8');
     const parsed = JSON.parse(raw) as { commands?: { start?: string } };
     const start = typeof parsed?.commands?.start === 'string' ? parsed.commands.start.trim() : '';
     return start || '';
@@ -1270,7 +1304,7 @@ const updateProjectSandboxes = async (
   }) => void
 ) => {
   const storagePath = getProjectStoragePath(projectID);
-  await fs.promises.mkdir(path.dirname(storagePath), { recursive: true });
+  await fs.promises.mkdir(toDirectFsPath(path.dirname(storagePath)), { recursive: true });
 
   const now = Date.now();
   const base = {
@@ -1281,7 +1315,7 @@ const updateProjectSandboxes = async (
     time: { created: now, updated: now },
   };
 
-  const parsed = await fs.promises.readFile(storagePath, 'utf8').then((raw) => JSON.parse(raw) as typeof base).catch(() => null);
+  const parsed = await fs.promises.readFile(toDirectFsPath(storagePath), 'utf8').then((raw) => JSON.parse(raw) as typeof base).catch(() => null);
   const current = parsed && typeof parsed === 'object' ? { ...base, ...parsed } : base;
   current.id = String(current.id || projectID);
   current.worktree = String(current.worktree || primaryWorktree);
@@ -1298,7 +1332,19 @@ const updateProjectSandboxes = async (
   updater(current);
 
   current.sandboxes = [...new Set(current.sandboxes.map((entry) => String(entry || '').trim()).filter(Boolean))];
-  await fs.promises.writeFile(storagePath, `${JSON.stringify(current, null, 2)}\n`, 'utf8');
+  await fs.promises.writeFile(toDirectFsPath(storagePath), `${JSON.stringify(current, null, 2)}\n`, 'utf8');
+};
+
+const ensureWorktreeGitattributes = async (directory: string): Promise<void> => {
+  const filePath = path.join(directory, '.gitattributes');
+  const targetPath = toDirectFsPath(filePath);
+  const existing = await fs.promises.readFile(targetPath, 'utf8').catch(() => '');
+  if (/^\*\s+text=auto(?:\s|$)/m.test(existing)) {
+    return;
+  }
+
+  const prefix = existing.trim().length > 0 ? `${existing.replace(/\s*$/, '')}\n` : '';
+  await fs.promises.writeFile(targetPath, `${prefix}* text=auto\n`, 'utf8');
 };
 
 const syncProjectSandboxAdd = async (projectID: string, primaryWorktree: string, sandboxPath: string) => {
@@ -1670,7 +1716,7 @@ export async function validateWorktreeCreate(directory: string, input: CreateGit
 export async function previewWorktreeCreate(directory: string, input: CreateGitWorktreePayload = {}): Promise<GitWorktreeInfo> {
   const mode = input?.mode === 'existing' ? 'existing' : 'new';
   const context = await resolveWorktreeProjectContext(directory);
-  await fs.promises.mkdir(context.worktreeRoot, { recursive: true });
+  await fs.promises.mkdir(toDirectFsPath(context.worktreeRoot), { recursive: true });
 
   const preferredName = String(input?.worktreeName || input?.name || '').trim();
   const preferredBranchName = cleanBranchName(String(input?.branchName || '').trim());
@@ -1692,7 +1738,7 @@ export async function previewWorktreeCreate(directory: string, input: CreateGitW
 export async function createWorktree(directory: string, input: CreateGitWorktreePayload = {}): Promise<GitWorktreeInfo> {
   const mode = input?.mode === 'existing' ? 'existing' : 'new';
   const context = await resolveWorktreeProjectContext(directory);
-  await fs.promises.mkdir(context.worktreeRoot, { recursive: true });
+  await fs.promises.mkdir(toDirectFsPath(context.worktreeRoot), { recursive: true });
 
   const preferredName = String(input?.worktreeName || input?.name || '').trim();
   const preferredBranchName = cleanBranchName(String(input?.branchName || '').trim());
@@ -1780,6 +1826,7 @@ export async function createWorktree(directory: string, input: CreateGitWorktree
   }
 
   await runGitCommandOrThrow(context.primaryWorktree, worktreeAddArgs, 'Failed to create git worktree');
+  await ensureWorktreeGitattributes(candidate.directory);
 
   try {
     await syncProjectSandboxAdd(context.projectID, context.primaryWorktree, candidate.directory);
@@ -1867,7 +1914,7 @@ export async function removeWorktree(directory: string, input: RemoveGitWorktree
   if (!matchedEntry?.worktree) {
     const targetExists = await checkPathExists(targetDirectory);
     if (targetExists) {
-      await fs.promises.rm(targetDirectory, { recursive: true, force: true });
+      await fs.promises.rm(toDirectFsPath(targetDirectory), { recursive: true, force: true });
     }
 
     try {

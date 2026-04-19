@@ -563,6 +563,11 @@ const handleLocalApiRequest = async (url: URL, init?: RequestInit) => {
     return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
   }
 
+  if (pathname.startsWith('/api/fs/mounted-drives')) {
+    const data = await sendBridgeMessage('api:fs:mounted-drives');
+    return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }
+
   if (pathname.startsWith('/api/vscode/pick-files')) {
     const data = await sendBridgeMessage('api:files/pick');
     return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });

@@ -114,6 +114,31 @@ const isPathInside = (candidatePath: string, parentPath: string): boolean => {
 
 export const normalizeFsPath = (value: string) => value.replace(/\\/g, '/');
 
+// eslint-disable-next-line no-restricted-syntax
+const IS_WIN = process.platform === 'win32';
+
+const resolveCanonicalWindowsPath = (value: string) => {
+  if (!IS_WIN) {
+    return (value || '').trim();
+  }
+
+  const normalized = normalizeFsPath((value || '').trim());
+  if (!normalized) {
+    return normalized;
+  }
+
+  if (/^[A-Za-z]:$/.test(normalized)) {
+    return `${normalized}/`;
+  }
+
+  if (!/^\/[A-Za-z](?:\/|$)/.test(normalized)) {
+    return normalized;
+  }
+
+  const converted = normalized.replace(/^\/([A-Za-z])(?=\/|$)/, (_, drive: string) => `${drive.toUpperCase()}:`);
+  return /^[A-Za-z]:$/.test(converted) ? `${converted}/` : converted;
+};
+
 const gitCheckIgnoreNames = async (cwd: string, names: string[]): Promise<Set<string>> => {
   if (names.length === 0) {
     return new Set();
@@ -168,7 +193,7 @@ const expandTildePath = (value: string) => {
 };
 
 export const resolveUserPath = (value: string, baseDirectory: string) => {
-  const expanded = expandTildePath(value);
+  const expanded = resolveCanonicalWindowsPath(expandTildePath(value));
   if (!expanded) {
     return expanded;
   }

@@ -1,13 +1,7 @@
 import React from 'react';
 import { execCommand } from '@/lib/execCommands';
+import { normalizePath, pathsEqual } from '@/lib/pathUtils';
 import type { WorktreeMetadata } from '@/types/worktree';
-
-const normalizePath = (value: string): string => {
-  if (!value) return '';
-  const replaced = value.replace(/\\/g, '/');
-  if (replaced === '/') return '/';
-  return replaced.replace(/\/+$/, '');
-};
 
 /**
  * Derive the primary worktree (project) root from the absolute git directory.
@@ -72,7 +66,7 @@ export function useDetectedWorktreeMetadata(
         return;
       }
 
-      const gitDir = normalizePath((gitDirResult.stdout || '').trim());
+      const gitDir = normalizePath((gitDirResult.stdout || '').trim()) ?? '';
       const projectRoot = deriveProjectRoot(gitDir);
 
       if (!projectRoot) {
@@ -81,10 +75,10 @@ export function useDetectedWorktreeMetadata(
 
       // Use the worktree toplevel, not the active sub-directory, so that
       // worktree operations (e.g. `git worktree remove`) receive a valid root path.
-      const worktreePath = normalizePath((toplevelResult.stdout || '').trim());
+      const worktreePath = normalizePath((toplevelResult.stdout || '').trim()) ?? '';
 
       // Sanity-check: secondary worktree path must differ from project root
-      if (!worktreePath || worktreePath === projectRoot) {
+      if (!worktreePath || pathsEqual(worktreePath, projectRoot)) {
         return;
       }
 

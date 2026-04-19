@@ -12,6 +12,7 @@ import { useContextStore } from '@/stores/contextStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { checkIsGitRepository, previewGitWorktree } from '@/lib/gitApi';
 import { generateBranchName } from '@/lib/git/branchNameGenerator';
+import { isSubpath, normalizePath, pathsEqual } from '@/lib/pathUtils';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { getWorktreeSetupCommands } from '@/lib/openchamberConfig';
 import {
@@ -25,10 +26,8 @@ import {
   resolvePendingDraftWorktreeRequest,
 } from '@/lib/worktrees/pendingDraftWorktree';
 
-const normalizePath = (value: string): string => value.replace(/\\/g, '/').replace(/\/+$/, '') || value;
-
 const resolveProjectRef = (directory: string): ProjectRef | null => {
-  const normalized = normalizePath(directory);
+  const normalized = normalizePath(directory) ?? '';
   const projects = useProjectsStore.getState().projects;
   if (projects.length === 0) {
     return null;
@@ -36,18 +35,18 @@ const resolveProjectRef = (directory: string): ProjectRef | null => {
 
   const activeProject = useProjectsStore.getState().getActiveProject();
   if (activeProject?.path) {
-    const activePath = normalizePath(activeProject.path);
-    if (normalized === activePath || normalized.startsWith(`${activePath}/`)) {
+    const activePath = normalizePath(activeProject.path) ?? '';
+    if (pathsEqual(normalized, activePath) || isSubpath(normalized, activePath)) {
       return { id: activeProject.id, path: activeProject.path };
     }
   }
 
   const matches = projects.filter((project) => {
-    const projectPath = normalizePath(project.path);
-    return normalized === projectPath || normalized.startsWith(`${projectPath}/`);
+    const projectPath = normalizePath(project.path) ?? '';
+    return pathsEqual(normalized, projectPath) || isSubpath(normalized, projectPath);
   });
 
-  const match = matches.sort((a, b) => normalizePath(b.path).length - normalizePath(a.path).length)[0];
+  const match = matches.sort((a, b) => (normalizePath(b.path) ?? '').length - (normalizePath(a.path) ?? '').length)[0];
 
   return match ? { id: match.id, path: match.path } : null;
 };

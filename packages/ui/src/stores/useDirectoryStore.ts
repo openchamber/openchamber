@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import { opencodeClient } from '@/lib/opencode/client';
 import { getDesktopHomeDirectory, isVSCodeRuntime } from '@/lib/desktop';
+import { normalizePath, resolveTildePath as resolveSharedTildePath } from '@/lib/pathUtils';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { useFileSearchStore } from '@/stores/useFileSearchStore';
 import { streamDebugEnabled } from '@/stores/utils/streamDebug';
@@ -40,36 +41,10 @@ const invalidateFileSearchCache = (scope?: string | null) => {
   }
 };
 
-const normalizeDirectoryPath = (value: string): string => {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return trimmed;
-  }
-  const normalized = trimmed
-    .replace(/\\/g, '/')
-    .replace(/^([a-z]):/, (_, letter: string) => letter.toUpperCase() + ':');
-  if (normalized.length > 1) {
-    return normalized.replace(/\/+$/, '');
-  }
-  return normalized;
-};
-
-const resolveTildePath = (path: string, homeDir?: string | null): string => {
-  const trimmed = path.trim();
-  if (!trimmed.startsWith('~')) {
-    return trimmed;
-  }
-  if (trimmed === '~') {
-    return homeDir || trimmed;
-  }
-  if (trimmed.startsWith('~/') || trimmed.startsWith('~\\')) {
-    return homeDir ? `${homeDir}${trimmed.slice(1)}` : trimmed;
-  }
-  return trimmed;
-};
+const normalizeDirectoryPath = (value: string): string => normalizePath(value) ?? '';
 
 const resolveDirectoryPath = (path: string, homeDir?: string | null): string => {
-  const expanded = resolveTildePath(path, homeDir);
+  const expanded = resolveSharedTildePath(path, homeDir);
   return normalizeDirectoryPath(expanded);
 };
 
@@ -151,17 +126,8 @@ const normalizeHomeCandidate = (value?: string | null) => {
   if (!trimmed) {
     return null;
   }
-  const normalized = trimmed.replace(/\\/g, '/');
-  if (normalized.length > 1) {
-    const withoutTrailingSlash = normalized.replace(/\/+$/, '');
-    if (withoutTrailingSlash && withoutTrailingSlash.length > 0) {
-      if (withoutTrailingSlash === '/') {
-        return null;
-      }
-      return withoutTrailingSlash;
-    }
-  }
-  if (normalized === '/' || normalized.length === 0) {
+  const normalized = normalizePath(trimmed);
+  if (!normalized || normalized === '/') {
     return null;
   }
   return normalized;

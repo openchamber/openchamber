@@ -574,6 +574,7 @@ export interface SettingsPayload {
   mermaidRenderingMode?: 'svg' | 'ascii';
   fontSize?: number;
   terminalFontSize?: number;
+  terminalShell?: 'default' | 'powershell' | 'cmd' | 'bash' | 'wsl';
   padding?: number;
   cornerRadius?: number;
   inputBarOffset?: number;

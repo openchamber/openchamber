@@ -1,7 +1,8 @@
-import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+
+import { resolveExecutable, spawnOnceSync } from '../SpawnUtils.js';
 
 export const createOpenCodeEnvRuntime = (deps) => {
   const {
@@ -51,15 +52,53 @@ export const createOpenCodeEnvRuntime = (deps) => {
   };
 
   const searchPathFor = (binaryName) => {
-    const current = process.env.PATH || '';
-    const parts = current.split(path.delimiter).filter(Boolean);
-    for (const dir of parts) {
-      const candidate = path.join(dir, binaryName);
-      if (isExecutable(candidate)) {
-        return candidate;
-      }
+    return resolveExecutable(binaryName);
+  };
+
+  const runProbeSync = (command, args, options = {}) => {
+    try {
+      return spawnOnceSync(command, args, {
+        timeout: options.timeout,
+        maxBuffer: options.maxBuffer,
+        env: options.env,
+        cwd: options.cwd,
+      });
+    } catch {
+      return { stdout: '', stderr: '', exitCode: -1, error: null, signal: null };
     }
-    return null;
+  };
+
+  const findExecutableInCommandOutput = (stdout) => {
+    const lines = String(stdout || '')
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    return lines.find((line) => isExecutable(line)) || null;
+  };
+
+  const resolveViaWhere = (binaryName) => {
+    const result = runProbeSync('where', [binaryName], { timeout: 5000 });
+    if (result.exitCode !== 0) {
+      return null;
+    }
+    return findExecutableInCommandOutput(result.stdout);
+  };
+
+  const resolveViaShellCommand = (shellPath, command) => {
+    if (!isExecutable(shellPath)) {
+      return null;
+    }
+
+    const result = runProbeSync(shellPath, ['-lic', command], {
+      timeout: 10000,
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    if (result.exitCode !== 0) {
+      return null;
+    }
+
+    const found = String(result.stdout || '').trim().split(/\s+/).pop() || '';
+    return found && isExecutable(found) ? found : null;
   };
 
   const prependToPath = (dir) => {
@@ -84,36 +123,24 @@ export const createOpenCodeEnvRuntime = (deps) => {
     ];
 
     for (const shellPath of powershellCandidates) {
-      try {
-        const result = spawnSync(shellPath, ['-NoLogo', '-Command', psScript], {
-          encoding: 'utf8',
-          stdio: ['ignore', 'pipe', 'pipe'],
-          maxBuffer: 10 * 1024 * 1024,
-          windowsHide: true,
-        });
-        if (result.status !== 0) {
-          continue;
-        }
-        const parsed = parseResult(result.stdout);
-        if (parsed) {
-          return parsed;
-        }
-      } catch {
+      const result = runProbeSync(shellPath, ['-NoLogo', '-Command', psScript], {
+        maxBuffer: 10 * 1024 * 1024,
+      });
+      if (result.exitCode !== 0) {
+        continue;
+      }
+      const parsed = parseResult(result.stdout);
+      if (parsed) {
+        return parsed;
       }
     }
 
     const comspec = process.env.ComSpec || 'cmd.exe';
-    try {
-      const result = spawnSync(comspec, ['/d', '/s', '/c', 'set'], {
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'pipe'],
-        maxBuffer: 10 * 1024 * 1024,
-        windowsHide: true,
-      });
-      if (result.status === 0 && typeof result.stdout === 'string' && result.stdout.length > 0) {
-        return parseNullSeparatedEnvSnapshot(result.stdout.replace(/\r?\n/g, '\0'));
-      }
-    } catch {
+    const result = runProbeSync(comspec, ['/d', '/s', '/c', 'set'], {
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    if (result.exitCode === 0 && typeof result.stdout === 'string' && result.stdout.length > 0) {
+      return parseNullSeparatedEnvSnapshot(result.stdout.replace(/\r?\n/g, '\0'));
     }
 
     return null;
@@ -137,24 +164,18 @@ export const createOpenCodeEnvRuntime = (deps) => {
         continue;
       }
 
-      try {
-        const result = spawnSync(shellPath, ['-lic', 'env -0'], {
-          encoding: 'utf8',
-          stdio: ['ignore', 'pipe', 'pipe'],
-          maxBuffer: 10 * 1024 * 1024,
-          windowsHide: true,
-        });
+      const result = runProbeSync(shellPath, ['-lic', 'env -0'], {
+        maxBuffer: 10 * 1024 * 1024,
+      });
 
-        if (result.status !== 0) {
-          continue;
-        }
+      if (result.exitCode !== 0) {
+        continue;
+      }
 
-        const parsed = parseNullSeparatedEnvSnapshot(result.stdout || '');
-        if (parsed) {
-          state.cachedLoginShellEnvSnapshot = parsed;
-          return parsed;
-        }
-      } catch {
+      const parsed = parseNullSeparatedEnvSnapshot(result.stdout || '');
+      if (parsed) {
+        state.cachedLoginShellEnvSnapshot = parsed;
+        return parsed;
       }
     }
 
@@ -232,23 +253,9 @@ export const createOpenCodeEnvRuntime = (deps) => {
       }
     }
 
-    try {
-      const result = spawnSync('where', ['wsl'], {
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'pipe'],
-        windowsHide: true,
-      });
-      if (result.status === 0) {
-        const lines = (result.stdout || '')
-          .split(/\r?\n/)
-          .map((line) => line.trim())
-          .filter(Boolean);
-        const found = lines.find((line) => isExecutable(line));
-        if (found) {
-          return found;
-        }
-      }
-    } catch {
+    const found = resolveViaWhere('wsl');
+    if (found) {
+      return found;
     }
 
     const systemRoot = process.env.SystemRoot || 'C:\\Windows';
@@ -279,39 +286,30 @@ export const createOpenCodeEnvRuntime = (deps) => {
       return null;
     }
 
-    try {
-      const result = spawnSync(
-        wslBinary,
-        buildWslExecArgs(['sh', '-lc', 'command -v opencode']),
-        {
-          encoding: 'utf8',
-          stdio: ['ignore', 'pipe', 'pipe'],
-          timeout: 6000,
-          windowsHide: true,
-        }
-      );
+    const result = runProbeSync(
+      wslBinary,
+      buildWslExecArgs(['sh', '-lc', 'command -v opencode']),
+      { timeout: 6000 }
+    );
 
-      if (result.status !== 0) {
-        return null;
-      }
+    if (result.exitCode !== 0) {
+      return null;
+    }
 
-      const lines = (result.stdout || '')
+    const lines = (result.stdout || '')
         .split(/\r?\n/)
         .map((line) => line.trim())
         .filter(Boolean);
-      const found = lines[0] || '';
-      if (!found) {
-        return null;
-      }
-
-      return {
-        wslBinary,
-        opencodePath: found,
-        distro: ENV_CONFIGURED_OPENCODE_WSL_DISTRO,
-      };
-    } catch {
+    const found = lines[0] || '';
+    if (!found) {
       return null;
     }
+
+    return {
+      wslBinary,
+      opencodePath: found,
+      distro: ENV_CONFIGURED_OPENCODE_WSL_DISTRO,
+    };
   };
 
   const applyWslOpencodeResolution = ({ wslBinary, opencodePath, source = 'wsl', distro = null } = {}) => {
@@ -399,25 +397,11 @@ export const createOpenCodeEnvRuntime = (deps) => {
     }
 
     if (process.platform === 'win32') {
-      try {
-        const result = spawnSync('where', ['opencode'], {
-          encoding: 'utf8',
-          stdio: ['ignore', 'pipe', 'pipe'],
-          windowsHide: true,
-        });
-        if (result.status === 0) {
-          const lines = (result.stdout || '')
-            .split(/\r?\n/)
-            .map((line) => line.trim())
-            .filter(Boolean);
-          const found = lines.find((line) => isExecutable(line));
-          if (found) {
-            clearWslOpencodeResolution();
-            state.resolvedOpencodeBinarySource = 'where';
-            return found;
-          }
-        }
-      } catch {
+      const found = resolveViaWhere('opencode');
+      if (found) {
+        clearWslOpencodeResolution();
+        state.resolvedOpencodeBinarySource = 'where';
+        return found;
       }
       const wsl = probeWslForOpencode();
       if (wsl) {
@@ -433,22 +417,11 @@ export const createOpenCodeEnvRuntime = (deps) => {
 
     const shells = [process.env.SHELL, '/bin/zsh', '/bin/bash', '/bin/sh'].filter(Boolean);
     for (const shell of shells) {
-      if (!isExecutable(shell)) continue;
-      try {
-        const result = spawnSync(shell, ['-lic', 'command -v opencode'], {
-          encoding: 'utf8',
-          stdio: ['ignore', 'pipe', 'pipe'],
-          windowsHide: true,
-        });
-        if (result.status === 0) {
-          const found = (result.stdout || '').trim().split(/\s+/).pop() || '';
-          if (found && isExecutable(found)) {
-            clearWslOpencodeResolution();
-            state.resolvedOpencodeBinarySource = 'shell';
-            return found;
-          }
-        }
-      } catch {
+      const found = resolveViaShellCommand(shell, 'command -v opencode');
+      if (found) {
+        clearWslOpencodeResolution();
+        state.resolvedOpencodeBinarySource = 'shell';
+        return found;
       }
     }
 
@@ -479,41 +452,14 @@ export const createOpenCodeEnvRuntime = (deps) => {
     }
 
     if (process.platform === 'win32') {
-      try {
-        const result = spawnSync('where', ['node'], {
-          encoding: 'utf8',
-          stdio: ['ignore', 'pipe', 'pipe'],
-          windowsHide: true,
-        });
-        if (result.status === 0) {
-          const lines = (result.stdout || '')
-            .split(/\r?\n/)
-            .map((line) => line.trim())
-            .filter(Boolean);
-          const found = lines.find((line) => isExecutable(line));
-          if (found) return found;
-        }
-      } catch {
-      }
-      return null;
+      return resolveViaWhere('node');
     }
 
     const shells = [process.env.SHELL, '/bin/zsh', '/bin/bash', '/bin/sh'].filter(Boolean);
     for (const shell of shells) {
-      if (!isExecutable(shell)) continue;
-      try {
-        const result = spawnSync(shell, ['-lic', 'command -v node'], {
-          encoding: 'utf8',
-          stdio: ['ignore', 'pipe', 'pipe'],
-          windowsHide: true,
-        });
-        if (result.status === 0) {
-          const found = (result.stdout || '').trim().split(/\s+/).pop() || '';
-          if (found && isExecutable(found)) {
-            return found;
-          }
-        }
-      } catch {
+      const found = resolveViaShellCommand(shell, 'command -v node');
+      if (found) {
+        return found;
       }
     }
 
@@ -560,41 +506,14 @@ export const createOpenCodeEnvRuntime = (deps) => {
         if (isExecutable(candidate)) return candidate;
       }
 
-      try {
-        const result = spawnSync('where', ['bun'], {
-          encoding: 'utf8',
-          stdio: ['ignore', 'pipe', 'pipe'],
-          windowsHide: true,
-        });
-        if (result.status === 0) {
-          const lines = (result.stdout || '')
-            .split(/\r?\n/)
-            .map((line) => line.trim())
-            .filter(Boolean);
-          const found = lines.find((line) => isExecutable(line));
-          if (found) return found;
-        }
-      } catch {
-      }
-      return null;
+      return resolveViaWhere('bun');
     }
 
     const shells = [process.env.SHELL, '/bin/zsh', '/bin/bash', '/bin/sh'].filter(Boolean);
     for (const shell of shells) {
-      if (!isExecutable(shell)) continue;
-      try {
-        const result = spawnSync(shell, ['-lic', 'command -v bun'], {
-          encoding: 'utf8',
-          stdio: ['ignore', 'pipe', 'pipe'],
-          windowsHide: true,
-        });
-        if (result.status === 0) {
-          const found = (result.stdout || '').trim().split(/\s+/).pop() || '';
-          if (found && isExecutable(found)) {
-            return found;
-          }
-        }
-      } catch {
+      const found = resolveViaShellCommand(shell, 'command -v bun');
+      if (found) {
+        return found;
       }
     }
 

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { Session } from '@opencode-ai/sdk/v2';
 import { opencodeClient } from '@/lib/opencode/client';
+import { normalizePath } from '@/lib/pathUtils';
 import { listGlobalSessionPages } from '@/stores/globalSessions';
 
 type GlobalSessionsStatus = 'idle' | 'loading' | 'ready' | 'error';
@@ -26,21 +27,6 @@ type GlobalSessionsState = {
 const PAGE_SIZE = 200;
 
 let inflightLoad: Promise<LoadResult> | null = null;
-
-const normalizePath = (value?: string | null): string | null => {
-  if (typeof value !== 'string') {
-    return null;
-  }
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return null;
-  }
-  const replaced = trimmed.replace(/\\/g, '/');
-  if (replaced === '/') {
-    return '/';
-  }
-  return replaced.length > 1 ? replaced.replace(/\/+$/, '') : replaced;
-};
 
 export const resolveGlobalSessionDirectory = (session: Session): string | null => {
   const record = session as Session & {

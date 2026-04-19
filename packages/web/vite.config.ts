@@ -3,21 +3,21 @@ import react from '@vitejs/plugin-react';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readFileSync } from 'node:fs';
-import { VitePWA } from 'vite-plugin-pwa';
 import { themeStoragePlugin } from '../../vite-theme-plugin';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageJson = JSON.parse(readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8'));
-const pwaDevEnabled = process.env.OPENCHAMBER_DISABLE_PWA_DEV !== '1';
 const reactScanToggle = (process.env.VITE_ENABLE_REACT_SCAN ?? '').toLowerCase();
 const enableReactScan = reactScanToggle === '1' || reactScanToggle === 'true' || reactScanToggle === 'on' || reactScanToggle === 'yes';
+const reactCompilerToggle = (process.env.OPENCHAMBER_DISABLE_REACT_COMPILER ?? '').toLowerCase();
+const enableReactCompiler = !(reactCompilerToggle === '1' || reactCompilerToggle === 'true' || reactCompilerToggle === 'on' || reactCompilerToggle === 'yes');
 
 export default defineConfig({
   root: path.resolve(__dirname, '.'),
   plugins: [
     react({
       babel: {
-        plugins: ['babel-plugin-react-compiler'],
+        plugins: enableReactCompiler ? ['babel-plugin-react-compiler'] : [],
       },
     }),
     {
@@ -39,25 +39,6 @@ export default defineConfig({
       },
     },
     themeStoragePlugin(),
-    VitePWA({
-      strategies: 'injectManifest',
-      srcDir: 'src',
-      filename: 'sw.ts',
-      registerType: 'autoUpdate',
-      injectRegister: false,
-      manifest: false,
-      injectManifest: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2,ttf,otf,eot}'],
-        // iOS Safari/PWA is much more reliable with a classic (non-module) SW bundle.
-        rollupFormat: 'iife',
-        // We already keep a custom manifest in index.html
-        injectionPoint: undefined,
-      },
-      devOptions: {
-        enabled: pwaDevEnabled,
-        type: 'module',
-      },
-    }),
   ],
   resolve: {
     alias: [

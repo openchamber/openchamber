@@ -1,0 +1,22 @@
+{
+  "extends": "./tsconfig.webview.json",
+  "compilerOptions": {
+    "composite": true,
+    "incremental": true,
+    "tsBuildInfoFile": "./node_modules/.cache/tsc/vscode-webview.tsbuildinfo",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["../ui/dist/types/*"],
+      "@vscode/*": ["./webview/*"],
+      "@openchamber/ui/lib/*": ["../ui/dist/types/lib/*"],
+      "@openchamber/ui/main": ["../ui/dist/types/main.d.ts"],
+      "@openchamber/ui/index.css": ["./webview/types/ui-css-entry.d.ts"],
+      "@openchamber/ui/styles/fonts": ["./webview/types/ui-fonts-entry.d.ts"],
+      "@openchamber/ui/*": ["../ui/dist/types/*"]
+    }
+  },
+  "include": ["webview/**/*"],
+  "references": [
+    { "path": "../ui/tsconfig.build.json" }
+  ]
+}

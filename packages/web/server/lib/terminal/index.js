@@ -29,3 +29,10 @@ export {
   listTerminalOutputReplayChunksSince,
   getLatestTerminalOutputReplayChunkId,
 } from './output-replay-buffer.js';
+
+export {
+  TERMINAL_SHELL_PREFERENCES,
+  createPtySession,
+  getTerminalShellCandidates,
+  normalizeTerminalShellPreference,
+} from './session.js';

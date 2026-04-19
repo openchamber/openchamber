@@ -10,6 +10,7 @@ import { GitHubSettings } from './GitHubSettings';
 import { VoiceSettings } from './VoiceSettings';
 import { TunnelSettings } from './TunnelSettings';
 import { OpenCodeCliSettings } from './OpenCodeCliSettings';
+import { TerminalSettings } from './TerminalSettings';
 import { DesktopNetworkSettings } from './DesktopNetworkSettings';
 import { KeyboardShortcutsSettings } from './KeyboardShortcutsSettings';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
@@ -41,6 +42,11 @@ export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => 
                     <div className="border-t border-border/40 pt-6">
                         <DefaultsSettings />
                     </div>
+                    {!isVSCode && (
+                        <div className="border-t border-border/40 pt-6">
+                            <TerminalSettings />
+                        </div>
+                    )}
                     {!isVSCode && (
                         <div className="border-t border-border/40 pt-6">
                             <OpenCodeCliSettings />
@@ -139,6 +145,11 @@ const SessionsSectionContent: React.FC = () => {
     return (
         <div className="space-y-6">
             <DefaultsSettings />
+            {!isVSCode && (
+                <div className="border-t border-border/40 pt-6">
+                    <TerminalSettings />
+                </div>
+            )}
             {!isVSCode && (
                 <div className="border-t border-border/40 pt-6">
                     <OpenCodeCliSettings />

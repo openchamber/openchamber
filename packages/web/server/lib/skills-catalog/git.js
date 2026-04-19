@@ -1,7 +1,4 @@
-import { execFile } from 'child_process';
-import { promisify } from 'util';
-
-const execFileAsync = promisify(execFile);
+import { spawnOnce } from '../SpawnUtils.js';
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 const DEFAULT_MAX_BUFFER = 4 * 1024 * 1024;
@@ -42,13 +39,26 @@ export async function runGit(args, options = {}) {
   }
 
   try {
-    const { stdout, stderr } = await execFileAsync('git', normalizedArgs, {
+    const result = await spawnOnce('git', normalizedArgs, {
       cwd,
       env,
-      windowsHide: true,
       timeout: timeoutMs,
       maxBuffer,
     });
+
+    const stdout = typeof result.stdout === 'string' ? result.stdout : String(result.stdout || '');
+    const stderr = typeof result.stderr === 'string' ? result.stderr : String(result.stderr || '');
+
+    if (result.exitCode !== 0) {
+      return {
+        ok: false,
+        stdout,
+        stderr,
+        message: stderr || stdout || `Git command failed with exit code ${result.exitCode}`,
+        code: result.exitCode,
+        signal: null,
+      };
+    }
 
     return { ok: true, stdout: stdout || '', stderr: stderr || '' };
   } catch (error) {

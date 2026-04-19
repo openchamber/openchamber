@@ -101,6 +101,29 @@ const normalize = (value: string): string => {
   return replaced === '/' ? '/' : replaced.replace(/\/+$/, '');
 };
 
+const toConfigFilesystemPath = (value: string): string => {
+  const normalized = normalize(value);
+  if (!normalized) {
+    return normalized;
+  }
+
+  const isWindowsRuntime = typeof navigator !== 'undefined' && /Windows/i.test(navigator.userAgent);
+  if (!isWindowsRuntime) {
+    return normalized;
+  }
+
+  if (/^[A-Za-z]:$/.test(normalized)) {
+    return `${normalized}/`;
+  }
+
+  if (!/^\/[A-Za-z](?:\/|$)/.test(normalized)) {
+    return normalized;
+  }
+
+  const converted = normalized.replace(/^\/([A-Za-z])(?=\/|$)/, (_, drive: string) => `${drive.toUpperCase()}:`);
+  return /^[A-Za-z]:$/.test(converted) ? `${converted}/` : converted;
+};
+
 const joinPath = (base: string, segment: string): string => {
   const normalizedBase = normalize(base);
   const cleanSegment = segment.replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+$/, '');
@@ -202,7 +225,7 @@ const resolveHomeDirectory = async (): Promise<string | null> => {
   if (!isVSCodeRuntime()) {
     const desktopHome = await getDesktopHomeDirectory().catch(() => null);
     if (desktopHome && desktopHome.trim().length > 0) {
-      return normalize(desktopHome);
+      return toConfigFilesystemPath(desktopHome);
     }
   }
 
@@ -213,7 +236,7 @@ const resolveHomeDirectory = async (): Promise<string | null> => {
     }
     const payload = await response.json().catch(() => null) as { home?: unknown } | null;
     const home = typeof payload?.home === 'string' ? payload.home.trim() : '';
-    return home ? normalize(home) : null;
+    return home ? toConfigFilesystemPath(home) : null;
   } catch {
     return null;
   }
