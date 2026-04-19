@@ -148,7 +148,8 @@ const extractChangedFiles = (parts: ToolPart[]): ChangedFile[] => {
         if (files.length === sizeBeforeThisPart) {
             const patchText = typeof metadata?.patch === 'string' ? metadata.patch.trim()
                 : typeof metadata?.diff === 'string' ? metadata.diff.trim() : '';
-            if (patchText) {
+            if (patchText && !seen.has('Diff')) {
+                seen.add('Diff');
                 const parsed = parsePatchStats(patchText);
                 files.push({
                     path: 'Diff',
