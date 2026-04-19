@@ -118,6 +118,11 @@ function createMcpConfig(name, mcpConfig, workingDirectory, scope) {
 function updateMcpConfig(name, updates, workingDirectory) {
   const layers = readConfigLayers(workingDirectory);
   const source = getJsonEntrySource(layers, 'mcp', name);
+
+  if (!source.exists) {
+    throw new Error(`MCP server "${name}" not found`);
+  }
+
   const targetPath = source.path || CONFIG_FILE;
   const config = source.config || (fs.existsSync(targetPath) ? readConfigFile(targetPath) : {});
 
@@ -125,7 +130,7 @@ function updateMcpConfig(name, updates, workingDirectory) {
     config.mcp = {};
   }
 
-  const existing = config.mcp[name] ?? {};
+  const existing = config.mcp[name];
   const { name: _ignoredName, ...updateData } = updates;
 
   config.mcp[name] = buildMcpEntry({ ...existing, ...updateData });

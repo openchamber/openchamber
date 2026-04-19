@@ -27,25 +27,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     return authLibrary;
   };
 
-  const normalizePendingDirectory = (value) => {
-    if (typeof value !== 'string') {
-      return null;
-    }
-
-    const trimmed = value.trim();
-    return trimmed || null;
-  };
-
-  const normalizePendingMcpName = (value) => {
-    if (typeof value !== 'string') {
-      return null;
-    }
-
-    const trimmed = value.trim();
-    return trimmed || null;
-  };
-
-  const normalizePendingMcpState = (value) => {
+  const normalizePendingString = (value) => {
     if (typeof value !== 'string') {
       return null;
     }
@@ -101,19 +83,19 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     try {
       pruneExpiredPendingMcpAuthContexts();
 
-      const state = normalizePendingMcpState(req.body?.state);
+      const state = normalizePendingString(req.body?.state);
       if (!state) {
         return res.json({ success: true, context: null });
       }
 
-      const name = normalizePendingMcpName(req.body?.name);
+      const name = normalizePendingString(req.body?.name);
       if (!name) {
         return res.status(400).json({ error: 'MCP server name is required' });
       }
 
       const entry = {
         name,
-        directory: normalizePendingDirectory(req.body?.directory),
+        directory: normalizePendingString(req.body?.directory),
         expiresAt: Date.now() + PENDING_MCP_AUTH_TTL_MS,
       };
       pendingMcpAuthContextByState.set(state, entry);
@@ -135,7 +117,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     try {
       pruneExpiredPendingMcpAuthContexts();
 
-      const state = normalizePendingMcpState(Array.isArray(req.query?.state) ? req.query.state[0] : req.query?.state);
+      const state = normalizePendingString(Array.isArray(req.query?.state) ? req.query.state[0] : req.query?.state);
       if (!state) {
         return res.json(null);
       }
@@ -154,7 +136,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
 
   app.delete('/api/mcp/auth/pending', async (req, res) => {
     try {
-      const state = normalizePendingMcpState(Array.isArray(req.query?.state) ? req.query.state[0] : req.query?.state);
+      const state = normalizePendingString(Array.isArray(req.query?.state) ? req.query.state[0] : req.query?.state);
       if (!state) {
         return res.json({ success: true });
       }

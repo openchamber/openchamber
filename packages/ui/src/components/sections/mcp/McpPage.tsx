@@ -701,10 +701,6 @@ export const McpPage: React.FC = () => {
     setImportJsonText('');
     setImportError(null);
 
-    if (next.name && next.name !== draftName && isNewServer) {
-      setDraftName(next.name);
-    }
-
     toast.success('MCP configuration imported');
   }, [
     importJsonText,
@@ -1157,7 +1153,9 @@ export const McpPage: React.FC = () => {
       const result = await testConnectionMcp(selectedMcpName, currentDirectory);
       const nextStatus = result.status?.status;
 
-      if (nextStatus === 'connected') {
+      if (result.warning) {
+        toast.warning(result.warning);
+      } else if (nextStatus === 'connected') {
         toast.success('Connection test succeeded');
       } else if (nextStatus === 'needs_auth') {
         toast.message('Connection requires authorization');

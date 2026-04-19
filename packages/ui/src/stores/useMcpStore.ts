@@ -56,6 +56,7 @@ type RefreshOptions = {
 type TestConnectionResult = {
   status?: McpStatus;
   error?: string;
+  warning?: string;
 };
 
 interface McpStore {
@@ -66,6 +67,7 @@ interface McpStore {
 
   getStatusForDirectory: (directory?: string | null) => McpStatusMap;
   getDiagnosticForDirectory: (directory?: string | null) => McpRuntimeDiagnosticMap;
+  getErrorForDirectory: (directory?: string | null) => string | null;
   refresh: (options?: RefreshOptions) => Promise<void>;
   connect: (name: string, directory?: string | null) => Promise<void>;
   disconnect: (name: string, directory?: string | null) => Promise<void>;
@@ -90,6 +92,11 @@ export const useMcpStore = create<McpStore>()(
     getDiagnosticForDirectory: (directory) => {
       const key = toKey(directory ?? useDirectoryStore.getState().currentDirectory);
       return get().diagnosticsByDirectory[key] ?? EMPTY_DIAGNOSTICS;
+    },
+
+    getErrorForDirectory: (directory) => {
+      const key = toKey(directory ?? useDirectoryStore.getState().currentDirectory);
+      return get().lastErrorKeys[key] ?? null;
     },
 
     refresh: async (options) => {
@@ -191,6 +198,7 @@ export const useMcpStore = create<McpStore>()(
       const previousStatus = get().getStatusForDirectory(normalized)[name];
       const wasConnected = previousStatus?.status === 'connected';
       let errorMessage: string | undefined;
+      let warningMessage: string | undefined;
 
       try {
         await api.mcp.connect({ name }, { throwOnError: true });
@@ -212,13 +220,19 @@ export const useMcpStore = create<McpStore>()(
       const observedStatus = currentStatus;
 
       if (!wasConnected && currentStatus?.status === 'connected') {
-        await api.mcp.disconnect({ name }, { throwOnError: true });
+        try {
+          await api.mcp.disconnect({ name }, { throwOnError: true });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Disconnect failed';
+          warningMessage = `Connection test succeeded, but cleanup disconnect failed: ${message}`;
+        }
         await get().refresh({ directory: normalized, silent: true });
       }
 
       return {
         status: observedStatus ?? get().getStatusForDirectory(normalized)[name],
         error: errorMessage,
+        warning: warningMessage,
       };
     },
 

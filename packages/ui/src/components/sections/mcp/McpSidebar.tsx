@@ -67,6 +67,7 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
   const mcpStatus = useMcpStore((state) => state.getStatusForDirectory(currentDirectory ?? null));
   const refreshStatus = useMcpStore((state) => state.refresh);
+  const getErrorForDirectory = useMcpStore((state) => state.getErrorForDirectory);
 
   const [deleteTarget, setDeleteTarget] = React.useState<McpServerConfig | null>(null);
   const [isDeleting, setIsDeleting] = React.useState(false);
@@ -95,10 +96,15 @@ export const McpSidebar: React.FC<McpSidebarProps> = ({ onItemSelect }) => {
     Promise.all([
       refreshStatus({ directory: currentDirectory, silent: true }),
       minSpinPromise,
-    ]).finally(() => {
+    ]).then(() => {
+      const error = getErrorForDirectory(currentDirectory);
+      if (error) {
+        toast.error(error);
+      }
+    }).finally(() => {
       setIsRefreshingStatus(false);
     });
-  }, [currentDirectory, isRefreshingStatus, refreshStatus]);
+  }, [currentDirectory, getErrorForDirectory, isRefreshingStatus, refreshStatus]);
 
   const handleCreateNew = () => {
     const baseName = 'new-mcp-server';
