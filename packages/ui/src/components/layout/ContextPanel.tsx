@@ -452,7 +452,7 @@ export const ContextPanel: React.FC = () => {
         layoutMode="scrollable"
         variant="default"
       />
-      <div className="flex items-end gap-1 px-1.5 pb-1.5">
+      <div className="flex items-center gap-1 px-1.5">
         <Button
           type="button"
           variant="ghost"
