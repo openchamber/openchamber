@@ -10,7 +10,7 @@ const OPENCODE_CONFIG_DIR = path.join(os.homedir(), '.config', 'opencode');
 const AGENT_DIR = path.join(OPENCODE_CONFIG_DIR, 'agents');
 const COMMAND_DIR = path.join(OPENCODE_CONFIG_DIR, 'commands');
 const SKILL_DIR = path.join(OPENCODE_CONFIG_DIR, 'skills');
-const CONFIG_FILE = path.join(OPENCODE_CONFIG_DIR, 'opencode.json');
+const CONFIG_FILE = path.join(OPENCODE_CONFIG_DIR, 'config.json');
 const CUSTOM_CONFIG_FILE = process.env.OPENCODE_CONFIG
   ? path.resolve(process.env.OPENCODE_CONFIG)
   : null;
@@ -115,7 +115,11 @@ function getProjectConfigPath(workingDirectory) {
 
 function getConfigPaths(workingDirectory) {
   return {
-    userPath: CONFIG_FILE,
+    userPaths: [
+      path.join(OPENCODE_CONFIG_DIR, 'config.json'),
+      path.join(OPENCODE_CONFIG_DIR, 'opencode.json'),
+      path.join(OPENCODE_CONFIG_DIR, 'opencode.jsonc'),
+    ],
     projectPath: getProjectConfigPath(workingDirectory),
     customPath: CUSTOM_CONFIG_FILE
   };
@@ -163,8 +167,11 @@ function mergeConfigs(base, override) {
 }
 
 function readConfigLayers(workingDirectory) {
-  const { userPath, projectPath, customPath } = getConfigPaths(workingDirectory);
-  const userConfig = readConfigFile(userPath);
+  const { userPaths, projectPath, customPath } = getConfigPaths(workingDirectory);
+  const userConfig = userPaths.reduce(
+    (config, userPath) => mergeConfigs(config, readConfigFile(userPath)),
+    {}
+  );
   const projectConfig = readConfigFile(projectPath);
   const customConfig = readConfigFile(customPath);
   const mergedConfig = mergeConfigs(mergeConfigs(userConfig, projectConfig), customConfig);
@@ -174,7 +181,7 @@ function readConfigLayers(workingDirectory) {
     projectConfig,
     customConfig,
     mergedConfig,
-    paths: { userPath, projectPath, customPath }
+    paths: { userPath: CONFIG_FILE, projectPath, customPath }
   };
 }
 
