@@ -169,11 +169,22 @@ type TauriGlobal = {
   };
 };
 
+type ElectronRuntimeGlobal = {
+  runtime?: string;
+};
+
+const getElectronRuntime = (): ElectronRuntimeGlobal | null => {
+  if (typeof window === 'undefined') return null;
+  return (window as unknown as { __OPENCHAMBER_ELECTRON__?: ElectronRuntimeGlobal }).__OPENCHAMBER_ELECTRON__ ?? null;
+};
+
 export const isTauriShell = (): boolean => {
   if (typeof window === 'undefined') return false;
   const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
   return typeof tauri?.core?.invoke === 'function';
 };
+
+export const isElectronShell = (): boolean => getElectronRuntime()?.runtime === 'electron';
 
 const normalizeOrigin = (raw: string): string | null => {
   const trimmed = raw.trim();
@@ -212,6 +223,8 @@ const isLoopbackHost = (host: string): boolean => {
 
 export const isDesktopLocalOriginActive = (): boolean => {
   if (typeof window === 'undefined') return false;
+  if (!isDesktopShell()) return false;
+
   const local = typeof window.__OPENCHAMBER_LOCAL_ORIGIN__ === 'string' ? window.__OPENCHAMBER_LOCAL_ORIGIN__ : '';
   const localUrl = parseUrl(local);
   const currentUrl = parseUrl(window.location.origin);
@@ -234,17 +247,16 @@ export const isDesktopLocalOriginActive = (): boolean => {
 
   const localOrigin = normalizeOrigin(local);
   const currentOrigin = normalizeOrigin(window.location.origin) || window.location.origin;
-  return Boolean(localOrigin && currentOrigin && localOrigin === currentOrigin);
-};
-
-// Desktop shell detection that doesn't require Tauri IPC availability.
-// (Remote pages can temporarily lose window.__TAURI__ if URL doesn't match remote allowlist.)
-export const isDesktopShell = (): boolean => {
-  if (typeof window === 'undefined') return false;
-  if (typeof window.__OPENCHAMBER_LOCAL_ORIGIN__ === 'string' && window.__OPENCHAMBER_LOCAL_ORIGIN__.length > 0) {
+  if (localOrigin && currentOrigin && localOrigin === currentOrigin) {
     return true;
   }
-  return isTauriShell();
+
+  return Boolean(currentUrl && isLoopbackHost(currentUrl.hostname));
+};
+
+export const isDesktopShell = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  return isTauriShell() || isElectronShell();
 };
 
 export const startDesktopWindowDrag = async (): Promise<boolean> => {
@@ -515,6 +527,27 @@ export const openDesktopPath = async (path: string, app?: string | null): Promis
   } catch (error) {
     console.warn('Failed to open path (tauri)', error);
     return false;
+  }
+};
+
+export const revealDesktopPath = async (path: string): Promise<boolean> => {
+  if (!isTauriShell() || !isDesktopLocalOriginActive()) {
+    return false;
+  }
+
+  const trimmed = path?.trim();
+  if (!trimmed) {
+    return false;
+  }
+
+  try {
+    const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
+    await tauri?.core?.invoke?.('desktop_reveal_path', {
+      path: trimmed,
+    });
+    return true;
+  } catch {
+    return openDesktopPath(trimmed);
   }
 };
 
