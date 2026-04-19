@@ -744,7 +744,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const isMobile = useUIStore((state) => state.isMobile);
     const inputBarOffset = useUIStore((state) => state.inputBarOffset);
     const isKeyboardOpen = useUIStore((state) => state.isKeyboardOpen);
-    const cornerRadius = useUIStore((state) => state.cornerRadius);
     const persistChatDraft = useUIStore((state) => state.persistChatDraft);
     const inputSpellcheckEnabled = useUIStore((state) => state.inputSpellcheckEnabled);
     const isExpandedInput = useUIStore((state) => state.isExpandedInput);
@@ -3683,7 +3682,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     </div>
 
                     {/* Mobile Session Status Bar - above input */}
-                    {isMobile && <MobileSessionStatusBar cornerRadius={cornerRadius} />}
+                    {isMobile && <MobileSessionStatusBar />}
                 </div>
             </div>
         </form>

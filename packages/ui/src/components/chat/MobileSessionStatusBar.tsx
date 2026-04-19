@@ -58,7 +58,6 @@ import { useNotificationStore } from '@/sync/notification-store';
 
 interface MobileSessionStatusBarProps {
   onSessionSwitch?: (sessionId: string) => void;
-  cornerRadius?: number;
 }
 
 interface SessionWithStatus extends Session {
@@ -1161,7 +1160,6 @@ function CollapsedView({
   currentProjectColor,
   onToggle,
   onNewSession,
-  cornerRadius,
   contextUsage,
   childIndicators = [],
 }: {
@@ -1175,7 +1173,6 @@ function CollapsedView({
   currentProjectColor?: string | null;
   onToggle: () => void;
   onNewSession: () => void;
-  cornerRadius?: number;
   contextUsage: SessionContextUsage | null;
   childIndicators?: Array<{ session: Session; isRunning: boolean }>;
 }) {
@@ -1251,7 +1248,6 @@ function ExpandedView({
   getSessionAgentName,
   getSessionTitle,
   needsAttention,
-  cornerRadius,
   contextUsage,
   projects,
   activeProjectId,
@@ -1280,7 +1276,6 @@ function ExpandedView({
   getSessionAgentName: (s: Session) => string;
   getSessionTitle: (s: Session) => string;
   needsAttention: (sessionId: string) => boolean;
-  cornerRadius?: number;
   contextUsage: SessionContextUsage | null;
   projects: ProjectEntry[];
   activeProjectId: string | null;
@@ -1428,7 +1423,6 @@ function ExpandedView({
 
 export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
   onSessionSwitch,
-  cornerRadius,
 }) => {
   const { currentTheme } = useThemeSystem();
   const sessions = useSessions();
@@ -1557,7 +1551,6 @@ export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
         currentProjectColor={currentProjectColor}
         onToggle={() => setIsMobileSessionStatusBarCollapsed(false)}
         onNewSession={handleCreateSession}
-        cornerRadius={cornerRadius}
         contextUsage={contextUsage}
         childIndicators={currentSessionChildIndicators}
       />
@@ -1590,7 +1583,6 @@ export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
       getSessionAgentName={getSessionAgentName}
       getSessionTitle={getSessionTitle}
       needsAttention={needsAttention}
-      cornerRadius={cornerRadius}
       contextUsage={contextUsage}
       projects={projects}
       activeProjectId={activeProjectId}
