@@ -279,6 +279,7 @@ const settingsHelpers = createSettingsHelpers({
 });
 
 const normalizePwaAppName = (...args) => settingsHelpers.normalizePwaAppName(...args);
+const normalizePwaOrientation = (...args) => settingsHelpers.normalizePwaOrientation(...args);
 const sanitizeSettingsUpdate = (...args) => settingsHelpers.sanitizeSettingsUpdate(...args);
 const mergePersistedSettings = (...args) => settingsHelpers.mergePersistedSettings(...args);
 const formatSettingsResponse = (...args) => settingsHelpers.formatSettingsResponse(...args);
@@ -759,6 +760,7 @@ const staticRoutesRuntime = createStaticRoutesRuntime({
   getOpenCodeAuthHeaders,
   readSettingsFromDiskMigrated,
   normalizePwaAppName,
+  normalizePwaOrientation,
 });
 const featureRoutesRuntime = createFeatureRoutesRuntime({
   clientReloadDelayMs: CLIENT_RELOAD_DELAY_MS,

@@ -95,10 +95,32 @@ const MERMAID_RENDERING_OPTIONS: Option<'svg' | 'ascii'>[] = [
 ];
 
 const DEFAULT_PWA_INSTALL_NAME = 'OpenChamber - AI Coding Assistant';
+const PWA_ORIENTATION_OPTIONS: Option<'system' | 'portrait' | 'landscape'>[] = [
+    {
+        id: 'system',
+        label: 'Follow system',
+        description: 'Respect the device rotation setting.',
+    },
+    {
+        id: 'portrait',
+        label: 'Portrait lock',
+        description: 'Install the app locked to portrait.',
+    },
+    {
+        id: 'landscape',
+        label: 'Landscape lock',
+        description: 'Install the app locked to landscape.',
+    },
+];
 
 type PwaInstallNameWindow = Window & {
     __OPENCHAMBER_SET_PWA_INSTALL_NAME__?: (value: string) => string;
+    __OPENCHAMBER_SET_PWA_ORIENTATION__?: (value: 'system' | 'portrait' | 'landscape') => 'system' | 'portrait' | 'landscape';
     __OPENCHAMBER_UPDATE_PWA_MANIFEST__?: () => void;
+};
+
+const normalizePwaOrientation = (value: unknown): 'system' | 'portrait' | 'landscape' => {
+    return value === 'portrait' || value === 'landscape' ? value : 'system';
 };
 
 const USER_MESSAGE_RENDERING_OPTIONS: Option<'markdown' | 'plain'>[] = [
@@ -196,7 +218,7 @@ const normalizeUserMessageRenderingMode = (mode: unknown): 'markdown' | 'plain' 
     return mode === 'markdown' ? 'markdown' : 'plain';
 };
 
-export type VisibleSetting = 'theme' | 'pwaInstallName' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'stickyUserHeader' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'reasoning' | 'showToolFileIcons' | 'expandedTools' | 'queueMode' | 'terminalQuickKeys' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage';
+export type VisibleSetting = 'theme' | 'pwaInstallName' | 'pwaOrientation' | 'timeFormat' | 'weekStart' | 'fontSize' | 'terminalFontSize' | 'spacing' | 'inputBarOffset' | 'mermaidRendering' | 'userMessageRendering' | 'chatRenderMode' | 'messageTransport' | 'activityRenderMode' | 'stickyUserHeader' | 'diffLayout' | 'mobileStatusBar' | 'dotfiles' | 'reasoning' | 'showToolFileIcons' | 'expandedTools' | 'queueMode' | 'terminalQuickKeys' | 'persistDraft' | 'inputSpellcheck' | 'reportUsage';
 
 interface OpenChamberVisualSettingsProps {
     /** Which settings to show. If undefined, shows all. */
@@ -419,7 +441,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
     };
 
     const isVSCode = isVSCodeRuntime();
-    const hasAppearanceSettings = (shouldShow('theme') || shouldShow('pwaInstallName') || shouldShow('timeFormat') || shouldShow('weekStart')) && !isVSCode;
+    const hasAppearanceSettings = (shouldShow('theme') || shouldShow('pwaInstallName') || shouldShow('pwaOrientation') || shouldShow('timeFormat') || shouldShow('weekStart')) && !isVSCode;
     const hasLayoutSettings = shouldShow('fontSize') || shouldShow('terminalFontSize') || shouldShow('spacing') || shouldShow('inputBarOffset');
     const hasNavigationSettings = shouldShow('terminalQuickKeys') && !isMobile;
     const hasBehaviorSettings = shouldShow('mermaidRendering')
@@ -439,7 +461,9 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         || (!isMobile && shouldShow('inputSpellcheck'));
 
     const showPwaInstallNameSetting = shouldShow('pwaInstallName') && isWebRuntime() && browserTab && !isDesktopShell() && !isVSCode;
+    const showPwaOrientationSetting = shouldShow('pwaOrientation') && isWebRuntime() && !isDesktopShell() && !isVSCode;
     const [pwaInstallName, setPwaInstallName] = React.useState('');
+    const [pwaOrientation, setPwaOrientation] = React.useState<'system' | 'portrait' | 'landscape'>('system');
 
     const applyPwaInstallName = React.useCallback(async (value: string) => {
         if (typeof window === 'undefined') {
@@ -462,8 +486,28 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         win.__OPENCHAMBER_UPDATE_PWA_MANIFEST__?.();
     }, []);
 
+    const applyPwaOrientation = React.useCallback(async (value: 'system' | 'portrait' | 'landscape') => {
+        if (typeof window === 'undefined') {
+            return;
+        }
+
+        const win = window as PwaInstallNameWindow;
+        const normalized = normalizePwaOrientation(value);
+
+        await updateDesktopSettings({ pwaOrientation: normalized });
+
+        if (typeof win.__OPENCHAMBER_SET_PWA_ORIENTATION__ === 'function') {
+            const resolved = win.__OPENCHAMBER_SET_PWA_ORIENTATION__(normalized);
+            setPwaOrientation(resolved);
+            return;
+        }
+
+        setPwaOrientation(normalized);
+        win.__OPENCHAMBER_UPDATE_PWA_MANIFEST__?.();
+    }, []);
+
     React.useEffect(() => {
-        if (typeof window === 'undefined' || !showPwaInstallNameSetting) {
+        if (typeof window === 'undefined' || (!showPwaInstallNameSetting && !showPwaOrientationSetting)) {
             return;
         }
 
@@ -487,13 +531,24 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                 const settings = await response.json().catch(() => ({}));
                 const raw = typeof settings?.pwaAppName === 'string' ? settings.pwaAppName : '';
                 const normalized = raw.trim().replace(/\s+/g, ' ').slice(0, 64);
+                const orientation = normalizePwaOrientation(settings?.pwaOrientation);
 
                 if (!cancelled) {
-                    setPwaInstallName(normalized || DEFAULT_PWA_INSTALL_NAME);
+                    if (showPwaInstallNameSetting) {
+                        setPwaInstallName(normalized || DEFAULT_PWA_INSTALL_NAME);
+                    }
+                    if (showPwaOrientationSetting) {
+                        setPwaOrientation(orientation);
+                    }
                 }
             } catch {
                 if (!cancelled) {
-                    setPwaInstallName(DEFAULT_PWA_INSTALL_NAME);
+                    if (showPwaInstallNameSetting) {
+                        setPwaInstallName(DEFAULT_PWA_INSTALL_NAME);
+                    }
+                    if (showPwaOrientationSetting) {
+                        setPwaOrientation('system');
+                    }
                 }
             }
         };
@@ -503,7 +558,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         return () => {
             cancelled = true;
         };
-    }, [showPwaInstallNameSetting]);
+    }, [showPwaInstallNameSetting, showPwaOrientationSetting]);
 
     return (
         <div className="space-y-8">
@@ -678,6 +733,50 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             }}
                                             className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
                                             aria-label="Reset install app name"
+                                            title="Reset"
+                                        >
+                                            <RiRestartLine className="h-3.5 w-3.5" />
+                                        </Button>
+                                    </div>
+                                </div>
+                            )}
+
+                            {showPwaOrientationSetting && (
+                                <div className="py-1.5 space-y-1.5">
+                                    <div className="flex min-w-0 flex-col">
+                                        <span className="typography-ui-label text-foreground">Install Orientation</span>
+                                        <span className="typography-meta text-muted-foreground">Used by the installed web app. Reinstall the PWA after changing this.</span>
+                                    </div>
+                                    <div className="flex w-full max-w-[18rem] items-center gap-2">
+                                        <Select
+                                            value={pwaOrientation}
+                                            onValueChange={(value) => {
+                                                const orientation = normalizePwaOrientation(value);
+                                                setPwaOrientation(orientation);
+                                                void applyPwaOrientation(orientation);
+                                            }}
+                                        >
+                                            <SelectTrigger aria-label="PWA install orientation" className="w-full">
+                                                <SelectValue placeholder="Select orientation" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {PWA_ORIENTATION_OPTIONS.map((option) => (
+                                                    <SelectItem key={option.id} value={option.id}>
+                                                        {option.label}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                        <Button size="sm"
+                                            type="button"
+                                            variant="ghost"
+                                            onClick={() => {
+                                                setPwaOrientation('system');
+                                                void applyPwaOrientation('system');
+                                            }}
+                                            disabled={pwaOrientation === 'system'}
+                                            className="h-7 w-7 px-0 text-muted-foreground hover:text-foreground"
+                                            aria-label="Reset install orientation"
                                             title="Reset"
                                         >
                                             <RiRestartLine className="h-3.5 w-3.5" />

@@ -18,6 +18,7 @@ export const createSettingsHelpers = (dependencies) => {
   } = dependencies;
 
   const PWA_APP_NAME_MAX_LENGTH = 64;
+  const PWA_ORIENTATION_VALUES = new Set(['system', 'portrait', 'landscape']);
 
   const normalizePwaAppName = (value, fallback = '') => {
     if (typeof value !== 'string') {
@@ -28,6 +29,17 @@ export const createSettingsHelpers = (dependencies) => {
       return fallback;
     }
     return normalized.slice(0, PWA_APP_NAME_MAX_LENGTH);
+  };
+
+  const normalizePwaOrientation = (value, fallback = 'system') => {
+    if (typeof value !== 'string') {
+      return fallback;
+    }
+    const normalized = value.trim();
+    if (PWA_ORIENTATION_VALUES.has(normalized)) {
+      return normalized;
+    }
+    return fallback;
   };
 
   const sanitizeSettingsUpdate = (payload) => {
@@ -291,6 +303,9 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.pwaAppName === 'string') {
       result.pwaAppName = normalizePwaAppName(candidate.pwaAppName, undefined);
+    }
+    if (typeof candidate.pwaOrientation === 'string') {
+      result.pwaOrientation = normalizePwaOrientation(candidate.pwaOrientation, undefined);
     }
     if (typeof candidate.toolCallExpansion === 'string') {
       const mode = candidate.toolCallExpansion.trim();
@@ -602,11 +617,13 @@ export const createSettingsHelpers = (dependencies) => {
     const bookmarks = normalizeStringArray(settings.securityScopedBookmarks);
     const hasManagedRemoteTunnelToken = typeof settings?.managedRemoteTunnelToken === 'string' && settings.managedRemoteTunnelToken.trim().length > 0;
     const pwaAppName = normalizePwaAppName(settings?.pwaAppName, '');
+    const pwaOrientation = normalizePwaOrientation(settings?.pwaOrientation, 'system');
 
     return {
       ...sanitized,
       hasManagedRemoteTunnelToken,
       ...(pwaAppName ? { pwaAppName } : {}),
+      pwaOrientation,
       approvedDirectories: approved,
       securityScopedBookmarks: bookmarks,
       pinnedDirectories: normalizeStringArray(settings.pinnedDirectories),
@@ -622,6 +639,7 @@ export const createSettingsHelpers = (dependencies) => {
 
   return {
     normalizePwaAppName,
+    normalizePwaOrientation,
     sanitizeSettingsUpdate,
     mergePersistedSettings,
     formatSettingsResponse,
