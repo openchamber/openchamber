@@ -3,6 +3,8 @@ import { ChooserScreen } from './ChooserScreen';
 import { LocalSetupScreen } from './LocalSetupScreen';
 import { RecoveryScreen } from './RecoveryScreen';
 import type { RecoveryVariant } from './DesktopConnectionRecovery';
+import { useIsAndroidTwa } from '@/hooks/useIsAndroidTwa';
+import { RemoteConnectionForm } from './RemoteConnectionForm';
 
 export type OnboardingScreenMode = 'first-launch' | 'local-setup' | 'recovery';
 
@@ -36,6 +38,7 @@ export function OnboardingScreen({
 }: OnboardingScreenProps) {
   const [showRecoveryRemoteForm, setShowRecoveryRemoteForm] = React.useState(false);
   const [recoveryEnteredLocalSetup, setRecoveryEnteredLocalSetup] = React.useState(false);
+const isAndroidTwa = useIsAndroidTwa();
 
   // Reset transient recovery subflow state when the flow identity changes, so
   // stale local-setup or remote-form views don't bleed across prop updates.
@@ -87,10 +90,18 @@ export function OnboardingScreen({
     );
   }
 
-  // First-launch mode (default)
+// First-launch mode (default)
+if (isAndroidTwa) {
   return (
-    <ChooserScreen
-      onCliAvailable={onCliAvailable}
+    <RemoteConnectionForm
+      onBack={() => {}}
+      showBackButton={false}
     />
   );
+}
+return (
+  <ChooserScreen
+    onCliAvailable={onCliAvailable}
+  />
+);
 }
