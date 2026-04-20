@@ -20,8 +20,8 @@ android {
         versionName "1.0.0"
 
         manifestPlaceholders = [
-            hostName   : localProperties.getProperty('twa.hostName', 'opencode.ai'),
-            defaultUrl : localProperties.getProperty('twa.defaultUrl', 'https://opencode.ai')
+                hostName       : localProperties.getProperty('twa.hostName', ''),
+                defaultUrl     : localProperties.getProperty('twa.defaultUrl', '')
         ]
     }
 

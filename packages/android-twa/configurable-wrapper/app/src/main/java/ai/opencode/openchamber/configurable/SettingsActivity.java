@@ -29,6 +29,8 @@ public class SettingsActivity extends AppCompatActivity {
     private TextView errorText;
     private SharedPreferences prefs;
 
+    public static final String EXTRA_DEFAULT_URL_HINT = "default_url_hint";
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -45,7 +47,12 @@ public class SettingsActivity extends AppCompatActivity {
         if (!savedUrl.isEmpty()) {
             urlInput.setText(savedUrl);
         } else {
-            urlInput.setHint(getString(R.string.url_hint));
+            String hintUrl = getIntent().getStringExtra(EXTRA_DEFAULT_URL_HINT);
+            if (hintUrl != null && !hintUrl.isEmpty()) {
+                urlInput.setHint(hintUrl);
+            } else {
+                urlInput.setHint(getString(R.string.url_hint));
+            }
         }
 
         setupUrlHistory();

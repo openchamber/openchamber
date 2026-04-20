@@ -18,22 +18,19 @@ public class SplashActivity extends AppCompatActivity {
         SplashScreen.installSplashScreen(this);
         super.onCreate(savedInstanceState);
 
-        SharedPreferences prefs = getSharedPreferences(App.PREFS_NAME, MODE_PRIVATE);
-        String savedUrl = prefs.getString(App.KEY_SERVER_URL, null);
+		SharedPreferences prefs = getSharedPreferences(App.PREFS_NAME, MODE_PRIVATE);
+		String savedUrl = prefs.getString(App.KEY_SERVER_URL, null);
 
-        if (savedUrl == null || savedUrl.isEmpty()) {
-            savedUrl = getDefaultUrlFromManifest();
-            if (savedUrl != null && !savedUrl.isEmpty()) {
-                prefs.edit().putString(App.KEY_SERVER_URL, savedUrl).apply();
-            }
-        }
-
-        Intent intent;
-        if (savedUrl == null || savedUrl.isEmpty()) {
-            intent = new Intent(this, SettingsActivity.class);
-        } else {
-            intent = new Intent(this, MainActivity.class);
-        }
+		Intent intent;
+		if (savedUrl == null || savedUrl.isEmpty()) {
+			intent = new Intent(this, SettingsActivity.class);
+			String manifestDefault = getDefaultUrlFromManifest();
+			if (manifestDefault != null && !manifestDefault.isEmpty()) {
+				intent.putExtra(SettingsActivity.EXTRA_DEFAULT_URL_HINT, manifestDefault);
+			}
+		} else {
+			intent = new Intent(this, MainActivity.class);
+		}
 
         startActivity(intent);
         overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out);
