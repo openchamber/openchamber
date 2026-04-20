@@ -36,6 +36,9 @@ lto = "thin"
 codegen-units = 1
 strip = true
 
+[dev-dependencies]
+tempfile = "3"
+
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 objc2-web-kit = "0.3"

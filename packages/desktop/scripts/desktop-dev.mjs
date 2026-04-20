@@ -2,6 +2,7 @@
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { waitForExit, signalChild, stopChildTree } from './lib/process-manager.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -16,65 +17,6 @@ function spawnProcess(command, args, opts = {}) {
     detached: process.platform !== 'win32',
     ...opts,
   });
-}
-
-function waitForExit(child, timeoutMs) {
-  return new Promise((resolve) => {
-    if (!child || child.exitCode !== null || child.signalCode !== null) {
-      resolve();
-      return;
-    }
-
-    const onExit = () => {
-      clearTimeout(timer);
-      resolve();
-    };
-
-    const timer = setTimeout(() => {
-      child.off('exit', onExit);
-      resolve();
-    }, timeoutMs);
-
-    child.once('exit', onExit);
-  });
-}
-
-function signalChild(child, signal) {
-  if (!child || child.exitCode !== null || child.signalCode !== null) {
-    return;
-  }
-
-  try {
-    if (process.platform !== 'win32') {
-      process.kill(-child.pid, signal);
-      return;
-    }
-  } catch {
-  }
-
-  try {
-    child.kill(signal);
-  } catch {
-  }
-}
-
-async function stopChildTree(child) {
-  if (!child || child.exitCode !== null || child.signalCode !== null) {
-    return;
-  }
-
-  signalChild(child, 'SIGINT');
-  await waitForExit(child, 2500);
-
-  if (child.exitCode === null && child.signalCode === null) {
-    signalChild(child, 'SIGTERM');
-    await waitForExit(child, 2500);
-  }
-
-  if (child.exitCode === null && child.signalCode === null) {
-    signalChild(child, 'SIGKILL');
-    await waitForExit(child, 1000);
-  }
 }
 
 async function main() {
