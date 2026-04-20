@@ -16,15 +16,33 @@ const homeDirectory = readArgValue('--openchamber-home');
 const macosMajorRaw = readArgValue('--openchamber-macos-major');
 const macosMajor = Number.parseInt(macosMajorRaw, 10);
 
-if (localOrigin) {
+// Preload is re-executed on every in-window navigation (we run with
+// sandbox:false, per-document). Only expose desktop-shell APIs when the
+// current document is our local UI — on remote hosts the renderer must
+// look like a plain web page so isDesktopShell() returns false and the
+// UI doesn't try to invoke desktop_* IPC (which the main-process origin
+// gate would reject anyway, but that surfaces as a user-visible error).
+const currentOrigin = (() => {
+  try {
+    return typeof location !== 'undefined' ? location.origin : '';
+  } catch {
+    return '';
+  }
+})();
+const isLoopbackOrigin = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i.test(currentOrigin);
+const isLocalPage = currentOrigin === 'null'
+  || isLoopbackOrigin
+  || (localOrigin && currentOrigin === localOrigin);
+
+if (isLocalPage && localOrigin) {
   contextBridge.exposeInMainWorld('__OPENCHAMBER_LOCAL_ORIGIN__', localOrigin);
 }
 
-if (homeDirectory) {
+if (isLocalPage && homeDirectory) {
   contextBridge.exposeInMainWorld('__OPENCHAMBER_HOME__', homeDirectory);
 }
 
-if (Number.isFinite(macosMajor) && macosMajor > 0) {
+if (isLocalPage && Number.isFinite(macosMajor) && macosMajor > 0) {
   contextBridge.exposeInMainWorld('__OPENCHAMBER_MACOS_MAJOR__', macosMajor);
 }
 
@@ -72,31 +90,35 @@ const dispatchNativeEvent = (event, detail) => {
   }
 };
 
-ipcRenderer.on('openchamber:emit', (_evt, payload) => {
-  if (!payload || typeof payload !== 'object') {
-    return;
-  }
+if (isLocalPage) {
+  ipcRenderer.on('openchamber:emit', (_evt, payload) => {
+    if (!payload || typeof payload !== 'object') {
+      return;
+    }
 
-  const event = typeof payload.event === 'string' ? payload.event : '';
-  if (!event) {
-    return;
-  }
+    const event = typeof payload.event === 'string' ? payload.event : '';
+    if (!event) {
+      return;
+    }
 
-  dispatchNativeEvent(event, payload.detail);
-});
+    dispatchNativeEvent(event, payload.detail);
+  });
+}
 
-contextBridge.exposeInMainWorld('__TAURI__', {
-  core: {
-    invoke: (cmd, args) => ipcRenderer.invoke('openchamber:invoke', cmd, args || {}),
-  },
-  dialog: {
-    open: (options) => ipcRenderer.invoke('openchamber:dialog:open', options || {}),
-  },
-  event: {
-    listen: async (event, handler) => addListener(event, handler),
-  },
-});
+if (isLocalPage) {
+  contextBridge.exposeInMainWorld('__TAURI__', {
+    core: {
+      invoke: (cmd, args) => ipcRenderer.invoke('openchamber:invoke', cmd, args || {}),
+    },
+    dialog: {
+      open: (options) => ipcRenderer.invoke('openchamber:dialog:open', options || {}),
+    },
+    event: {
+      listen: async (event, handler) => addListener(event, handler),
+    },
+  });
 
-contextBridge.exposeInMainWorld('__OPENCHAMBER_ELECTRON__', {
-  runtime: 'electron',
-});
+  contextBridge.exposeInMainWorld('__OPENCHAMBER_ELECTRON__', {
+    runtime: 'electron',
+  });
+}
