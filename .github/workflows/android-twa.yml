@@ -102,7 +102,7 @@ jobs:
       - name: Create local.properties
         run: |
           PROP_FILE=packages/android-twa/configurable-wrapper/local.properties
-          echo "keystore.path=../../android.keystore" > "$PROP_FILE"
+          echo "keystore.path=../android.keystore" > "$PROP_FILE"
           echo "keystore.alias=openchamber" >> "$PROP_FILE"
           echo "keystore.password=$KEYSTORE_PASSWORD" >> "$PROP_FILE"
           echo "keystore.keyPassword=$KEY_PASSWORD" >> "$PROP_FILE"
