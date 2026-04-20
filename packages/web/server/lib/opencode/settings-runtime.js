@@ -48,6 +48,14 @@ export const createSettingsRuntime = (deps) => {
 
   let persistSettingsLock = Promise.resolve();
 
+  // Orphan recovery is a one-shot best-effort scan: when orphans can't be
+  // matched on first pass they stay on disk and every subsequent settings
+  // read would re-scan them. In-process (Electron) this runs in the main
+  // event loop, so hitting it 3+ times/second from fs/list, path, etc.
+  // turns into perceptible UI jank for ~10-15 seconds after launch.
+  // Cache the outcome for this process lifetime.
+  let orphanRecoveryDone = false;
+
   const PROJECTS_ROOT_DIR = path.join(path.dirname(SETTINGS_FILE_PATH), 'projects');
   const PROJECT_ICONS_DIR = path.join(path.dirname(SETTINGS_FILE_PATH), 'project-icons');
 
@@ -250,10 +258,13 @@ export const createSettingsRuntime = (deps) => {
       nextProjects.push({ ...project, id: nextId });
     }
 
-    try {
-      await recoverOrphanProjectFiles(nextProjects);
-    } catch (error) {
-      console.warn('[projects] Orphan recovery failed, continuing startup:', error);
+    if (!orphanRecoveryDone) {
+      orphanRecoveryDone = true; // set before await to close races under concurrent settings reads
+      try {
+        await recoverOrphanProjectFiles(nextProjects);
+      } catch (error) {
+        console.warn('[projects] Orphan recovery failed, continuing startup:', error);
+      }
     }
 
     if (!changed) {

@@ -5,10 +5,13 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn, spawnSync } from 'node:child_process';
+import { execFile, spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import updaterPkg from 'electron-updater';
 import { ElectronSshManager } from './ssh-manager.mjs';
+
+const execFileAsync = promisify(execFile);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1238,7 +1241,19 @@ const parseRelevantChangelogNotes = async (fromVersion, toVersion) => {
 
 const buildInstalledAppsCachePath = () => path.join(path.dirname(settingsFilePath()), INSTALLED_APPS_CACHE_FILE);
 
-const resolveAppBundlePath = (appName) => {
+// Async variants. sips + mdfind via spawnSync blocked the Electron main event
+// loop for 2-3s on boot (22 OPEN_IN_APPS × ~200 ms each). Use execFile promises
+// so each child-process wait yields to the loop and the UI stays responsive.
+const pathExists = async (candidate) => {
+  try {
+    await fsp.access(candidate);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const resolveAppBundlePath = async (appName) => {
   if (process.platform !== 'darwin') return null;
   const bundleName = appName.endsWith('.app') ? appName : `${appName}.app`;
   const candidates = [
@@ -1248,52 +1263,64 @@ const resolveAppBundlePath = (appName) => {
     path.join(os.homedir(), 'Applications', bundleName),
   ];
   for (const candidate of candidates) {
-    if (fs.existsSync(candidate)) return candidate;
+    if (await pathExists(candidate)) return candidate;
   }
-  const result = spawnSync('mdfind', ['-name', bundleName], { encoding: 'utf8' });
-  const first = (result.stdout || '').split('\n').map((line) => line.trim()).find(Boolean);
-  return first || null;
+  try {
+    const { stdout } = await execFileAsync('mdfind', ['-name', bundleName], { encoding: 'utf8' });
+    const first = (stdout || '').split('\n').map((line) => line.trim()).find(Boolean);
+    return first || null;
+  } catch {
+    return null;
+  }
 };
 
-const isAppBundleInstalled = (appName) => Boolean(resolveAppBundlePath(appName));
+const isAppBundleInstalled = async (appName) => Boolean(await resolveAppBundlePath(appName));
 
-const iconToDataUrl = (iconPath, appName) => {
-  if (!iconPath || !fs.existsSync(iconPath)) return null;
+const iconToDataUrl = async (iconPath, appName) => {
+  if (!iconPath || !(await pathExists(iconPath))) return null;
   const safeName = String(appName || 'app').replace(/[^a-z0-9]/gi, '_');
   const tempPath = path.join(os.tmpdir(), `openchamber-icon-${safeName}-${Date.now()}.png`);
-  const result = spawnSync('sips', ['-s', 'format', 'png', '-Z', '32', iconPath, '--out', tempPath], { stdio: 'ignore' });
-  if (result.status !== 0 || !fs.existsSync(tempPath)) return null;
   try {
-    const bytes = fs.readFileSync(tempPath);
+    await execFileAsync('sips', ['-s', 'format', 'png', '-Z', '32', iconPath, '--out', tempPath], { stdio: 'ignore' });
+  } catch {
+    return null;
+  }
+  if (!(await pathExists(tempPath))) return null;
+  try {
+    const bytes = await fsp.readFile(tempPath);
     return `data:image/png;base64,${bytes.toString('base64')}`;
   } finally {
-    fs.rmSync(tempPath, { force: true });
+    await fsp.rm(tempPath, { force: true }).catch(() => {});
   }
 };
 
-const resolveAppIconPath = (appPath) => {
-  if (!appPath || !fs.existsSync(appPath)) return null;
+const resolveAppIconPath = async (appPath) => {
+  if (!appPath || !(await pathExists(appPath))) return null;
   const resourcesPath = path.join(appPath, 'Contents', 'Resources');
-  if (!fs.existsSync(resourcesPath)) return null;
-  const entries = fs.readdirSync(resourcesPath);
+  if (!(await pathExists(resourcesPath))) return null;
+  let entries;
+  try {
+    entries = await fsp.readdir(resourcesPath);
+  } catch {
+    return null;
+  }
   const icon = entries.find((entry) => entry.toLowerCase().endsWith('.icns'));
   return icon ? path.join(resourcesPath, icon) : null;
 };
 
-const buildInstalledApps = (apps) => {
+const buildInstalledApps = async (apps) => {
   const seen = new Set();
-  return apps
+  const names = apps
     .map((raw) => String(raw || '').trim())
-    .filter((raw) => raw && !seen.has(raw) && seen.add(raw))
-    .map((name) => {
-      const appPath = resolveAppBundlePath(name);
-      if (!appPath) return null;
-      return {
-        name,
-        iconDataUrl: iconToDataUrl(resolveAppIconPath(appPath), name),
-      };
-    })
-    .filter(Boolean);
+    .filter((raw) => raw && !seen.has(raw) && seen.add(raw));
+  const results = [];
+  for (const name of names) {
+    const appPath = await resolveAppBundlePath(name);
+    if (!appPath) continue;
+    const iconDataUrl = await iconToDataUrl(await resolveAppIconPath(appPath), name);
+    results.push({ name, iconDataUrl });
+  }
+  return results;
 };
 
 const parseSshConfigImports = () => {
@@ -1553,24 +1580,31 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       return null;
     }
 
-    case 'desktop_filter_installed_apps':
+    case 'desktop_filter_installed_apps': {
       if (process.platform !== 'darwin') {
         throw new Error('desktop_filter_installed_apps is only supported on macOS');
       }
-      return Array.isArray(args.apps) ? args.apps.filter((appName) => isAppBundleInstalled(String(appName))) : [];
+      if (!Array.isArray(args.apps)) return [];
+      const results = await Promise.all(
+        args.apps.map(async (appName) => (await isAppBundleInstalled(String(appName))) ? String(appName) : null)
+      );
+      return results.filter(Boolean);
+    }
 
-    case 'desktop_fetch_app_icons':
+    case 'desktop_fetch_app_icons': {
       if (process.platform !== 'darwin') {
         throw new Error('desktop_fetch_app_icons is only supported on macOS');
       }
-      return (Array.isArray(args.apps) ? args.apps : [])
-        .map((name) => {
-          const appPath = resolveAppBundlePath(String(name));
-          if (!appPath) return null;
-          const dataUrl = iconToDataUrl(resolveAppIconPath(appPath), String(name));
-          return dataUrl ? { app: String(name), dataUrl } : null;
-        })
-        .filter(Boolean);
+      const names = Array.isArray(args.apps) ? args.apps : [];
+      const results = [];
+      for (const name of names) {
+        const appPath = await resolveAppBundlePath(String(name));
+        if (!appPath) continue;
+        const dataUrl = await iconToDataUrl(await resolveAppIconPath(appPath), String(name));
+        if (dataUrl) results.push({ app: String(name), dataUrl });
+      }
+      return results;
+    }
 
     case 'desktop_get_installed_apps': {
       if (process.platform !== 'darwin') {
@@ -1580,14 +1614,14 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       const now = Math.floor(Date.now() / 1000);
       let cache = null;
       try {
-        cache = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
+        cache = JSON.parse(await fsp.readFile(cachePath, 'utf8'));
       } catch {
       }
       const cachedApps = Array.isArray(cache?.apps) ? cache.apps : [];
       const hasCache = Boolean(cache);
       const isCacheStale = !cache || (now - Number(cache.updatedAt || 0)) > INSTALLED_APPS_CACHE_TTL_SECS;
       const refresh = async () => {
-        const apps = buildInstalledApps(Array.isArray(args.apps) ? args.apps : []);
+        const apps = await buildInstalledApps(Array.isArray(args.apps) ? args.apps : []);
         await fsp.mkdir(path.dirname(cachePath), { recursive: true });
         await fsp.writeFile(cachePath, JSON.stringify({ updatedAt: now, apps }, null, 2));
         emitToAllWindows('openchamber:installed-apps-updated', apps);
