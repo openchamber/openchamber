@@ -62,8 +62,15 @@ function withContentCache(files: FilesAPI): FilesAPI {
         return syncCacheEntry(path, result, statAfter);
       }
       // File changed during read — discard and re-read once.
+      const retryStatBefore = await files.statFile?.(path).catch(() => null);
       const retry = await files.readFile!(path);
       const retryStat = await files.statFile?.(path).catch(() => null);
+      // Accept retry only if file was stable across the read.
+      if (retryStatBefore && retryStat && retryStatBefore.isFile && retryStat.isFile
+        && retryStatBefore.size === retryStat.size && retryStatBefore.mtimeMs === retryStat.mtimeMs) {
+        return syncCacheEntry(path, retry, retryStat);
+      }
+      // Best-effort: file was still changing, cache what we got. Next hit will re-validate.
       return syncCacheEntry(path, retry, retryStat);
     }
 

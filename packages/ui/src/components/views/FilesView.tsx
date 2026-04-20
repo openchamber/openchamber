@@ -1519,6 +1519,11 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
     void loadSelectedFile(selectedFile);
   }, [loadSelectedFile, loadedFilePath, selectedFile]);
 
+  // Sync isDirty to a ref so the polling interval can read the latest value
+  // without isDirty in its dependency array (avoids interval restart on every edit/save).
+  const isDirtyRef = React.useRef(isDirty);
+  isDirtyRef.current = isDirty;
+
   // Poll open file for external changes.
   // When a change is detected, reset loadedFilePath so the effect above
   // triggers a single reload — no double-load.
@@ -1554,7 +1559,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
             return;
           }
 
-          if (isDirty) {
+          if (isDirtyRef.current) {
             return;
           }
 
@@ -1569,7 +1574,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full' }) => {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [isDirty, loadedFilePath, readFileStat, selectedFile?.path]);
+  }, [loadedFilePath, readFileStat, selectedFile?.path]);
 
   const discardAndContinue = React.useCallback(() => {
     const nextFile = pendingSelectFileRef.current;
