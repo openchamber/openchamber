@@ -87,12 +87,13 @@ const applyDefaultAgentAndModelSelection = (sessionId: string, configState = use
       return;
     }
 
-    const parts = settingsDefaultModel.split('/');
-    if (parts.length !== 2) {
+    const slashIndex = settingsDefaultModel.indexOf('/');
+    if (slashIndex <= 0 || slashIndex === settingsDefaultModel.length - 1) {
       return;
     }
 
-    const [providerId, modelId] = parts;
+    const providerId = settingsDefaultModel.slice(0, slashIndex);
+    const modelId = settingsDefaultModel.slice(slashIndex + 1);
     const modelMetadata = configState.getModelMetadata(providerId, modelId);
     if (!modelMetadata) {
       return;

@@ -426,10 +426,10 @@ export function NewWorktreeDialog({
     const settingsDefaultModel = configState.settingsDefaultModel;
     if (!settingsDefaultModel) return null;
 
-    const parts = settingsDefaultModel.split('/');
-    if (parts.length !== 2) return null;
-    const [providerID, modelID] = parts;
-    if (!providerID || !modelID) return null;
+    const slashIndex = settingsDefaultModel.indexOf('/');
+    if (slashIndex <= 0 || slashIndex === settingsDefaultModel.length - 1) return null;
+    const providerID = settingsDefaultModel.slice(0, slashIndex);
+    const modelID = settingsDefaultModel.slice(slashIndex + 1);
 
     const modelMetadata = configState.getModelMetadata(providerID, modelID);
     if (!modelMetadata) return null;

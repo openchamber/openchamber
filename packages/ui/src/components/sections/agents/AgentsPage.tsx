@@ -733,8 +733,8 @@ export const AgentsPage: React.FC = () => {
               </div>
               <div className="flex min-w-0 flex-1 items-center gap-2 sm:w-fit sm:flex-initial">
                 <ModelSelector
-                  providerId={model ? model.split('/')[0] : ''}
-                  modelId={model ? model.split('/')[1] : ''}
+                  providerId={model && model.indexOf('/') !== -1 ? model.slice(0, model.indexOf('/')) : ''}
+                  modelId={model && model.indexOf('/') !== -1 ? model.slice(model.indexOf('/') + 1) : ''}
                   onChange={(providerId: string, modelId: string) => {
                     if (providerId && modelId) {
                       setModel(`${providerId}/${modelId}`);

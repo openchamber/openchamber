@@ -103,11 +103,11 @@ const parseModelString = (modelString: string): { providerId: string; modelId: s
     if (!modelString || typeof modelString !== 'string') {
         return null;
     }
-    const parts = modelString.split('/');
-    if (parts.length !== 2 || !parts[0] || !parts[1]) {
+    const slashIndex = modelString.indexOf('/');
+    if (slashIndex <= 0 || slashIndex === modelString.length - 1) {
         return null;
     }
-    return { providerId: parts[0], modelId: parts[1] };
+    return { providerId: modelString.slice(0, slashIndex), modelId: modelString.slice(slashIndex + 1) };
 };
 
 const normalizeProviderId = (value: string) => value?.toLowerCase?.() ?? '';

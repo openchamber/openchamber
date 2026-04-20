@@ -13,9 +13,9 @@ const getDisplayModel = (
   storedModel: string | undefined
 ): { providerId: string; modelId: string } => {
   if (storedModel) {
-    const parts = storedModel.split('/');
-    if (parts.length === 2 && parts[0] && parts[1]) {
-      return { providerId: parts[0], modelId: parts[1] };
+    const slashIndex = storedModel.indexOf('/');
+    if (slashIndex > 0 && slashIndex < storedModel.length - 1) {
+      return { providerId: storedModel.slice(0, slashIndex), modelId: storedModel.slice(slashIndex + 1) };
     }
   }
 
