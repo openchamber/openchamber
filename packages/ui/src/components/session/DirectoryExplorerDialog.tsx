@@ -258,7 +258,7 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
 
   const treeSection = (
     <div className="flex-1 min-h-0 rounded-xl border border-border/40 bg-sidebar/70 overflow-hidden flex flex-col">
-      <DirectoryTree
+        <DirectoryTree
         variant="inline"
         currentPath={pendingPath ?? currentDirectory}
         onSelectPath={handleSelectPath}
@@ -266,8 +266,8 @@ export const DirectoryExplorerDialog: React.FC<DirectoryExplorerDialogProps> = (
         className="flex-1 min-h-0 sm:min-h-[280px] sm:max-h-[380px]"
         selectionBehavior="deferred"
         showHidden={showHidden}
-        rootDirectory={isHomeReady ? homeDirectory : null}
-        isRootReady={isHomeReady}
+        rootDirectory="/"
+        isRootReady={true}
       />
     </div>
   );
