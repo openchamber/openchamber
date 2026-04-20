@@ -1,6 +1,7 @@
 import React from 'react';
 import { RiArrowRightSLine, RiCheckLine, RiCloseLine, RiEditLine, RiListCheck3, RiQuestionLine } from '@remixicon/react';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Radio } from '@/components/ui/radio';
 
 import { cn } from '@/lib/utils';
 import type { QuestionRequest } from '@/types/question';
@@ -295,11 +296,19 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question }) => {
                       >
                         <div className="flex items-start gap-2">
                           <div className="mt-0.5 shrink-0">
-                            <Checkbox
-                              checked={selected}
-                              onChange={() => handleToggleOption(option.label)}
-                              disabled={isResponding}
-                            />
+                            {isMultiple ? (
+                              <Checkbox
+                                checked={selected}
+                                onChange={() => handleToggleOption(option.label)}
+                                disabled={isResponding}
+                              />
+                            ) : (
+                              <Radio
+                                checked={selected}
+                                onChange={() => handleToggleOption(option.label)}
+                                disabled={isResponding}
+                              />
+                            )}
                           </div>
 
                           <div className="min-w-0 flex-1">
