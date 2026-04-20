@@ -325,7 +325,7 @@ export const FileMentionAutocomplete = React.forwardRef<FileMentionHandle, FileM
       }
       window.removeEventListener('resize', updateOverflow);
     };
-  }, [files]);
+  }, [files, directories]);
 
   React.useEffect(() => {
     const labelNode = labelRefs.current[selectedIndex];
